@@ -38,10 +38,15 @@ import {
   sessionNeedsRefresh,
   verifySession as verifyEmailSession,
 } from './auth/session.ts';
-import { widgetTokenKey as deriveWidgetTokenKey, verifyWidgetToken } from './auth/widget-token.ts';
+import {
+  widgetTokenKey as deriveWidgetTokenKey,
+  verifyBoardWidgetToken,
+  verifyWidgetToken,
+} from './auth/widget-token.ts';
 import { Identities, type IdentityRecord } from './identities.ts';
 import { loadIdentityLinks } from './identity-links.ts';
 import { clientAddressKey } from './middleware/client-address.ts';
+import { widgetTokenFromProtocols } from './middleware/widget-door.ts';
 import { WebhookReplayGuard } from './recall-webhook-auth.ts';
 import { readCookie } from './share/link-session.ts';
 
@@ -81,11 +86,22 @@ export interface IdentitySetupContext {
    *  allowlisted `x-forwarded-proto`. `isSecureRequest` reads it rather than
    *  the request URL, whose protocol is always plain http. */
   policyFor: (req: Request) => { requestOrigin: string };
+  /** Whether this email's role on this board lets them comment — the owner or
+   *  a member. A board token for anyone else is dead on arrival. */
+  mayCommentOnBoard: (workspaceId: string, email: string) => boolean;
 }
 
 /** Build the roster, the sign-in stores and the request predicates. */
 export function createIdentitySetup(ctx: IdentitySetupContext) {
-  const { dataDir, opts, cookieKey, setTaskStoreAgentRoster, requestAddress, policyFor } = ctx;
+  const {
+    dataDir,
+    opts,
+    cookieKey,
+    setTaskStoreAgentRoster,
+    requestAddress,
+    policyFor,
+    mayCommentOnBoard,
+  } = ctx;
   // --- Email-keyed identity ---------------------------------------------
   // The roster and the challenge store. Both are cheap to construct and
   // neither reads anything at boot beyond `identities.json`, so they exist
@@ -196,17 +212,49 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
   };
 
   /**
-   * The widget popup-token off a request's Authorization header, or null.
+   * The widget popup-token a request presents, or null.
    *
-   * Only `Bearer wt1.…` is ours — any other Authorization value is somebody
-   * else's protocol and must stay invisible here, so presenting one can
-   * never trip the widget-token 401.
+   * Only `Bearer wt1.…` / `Bearer wt2.…` is ours — any other Authorization
+   * value is somebody else's protocol and must stay invisible here, so
+   * presenting one can never trip the widget-token 401. A websocket handshake
+   * cannot carry that header, so there the token is the subprotocol the
+   * widget offers (`widgetTokenFromProtocols`), under the same rule.
    */
   const widgetBearerOf = (req: Request): string | null => {
     const header = req.headers.get('authorization');
-    if (!header) return null;
-    const m = header.match(/^Bearer\s+(wt1\..+)$/i);
-    return m?.[1] ?? null;
+    const m = header?.match(/^Bearer\s+(wt[12]\..+)$/i);
+    if (m?.[1]) return m[1];
+    return widgetTokenFromProtocols(req.headers.get('sec-websocket-protocol'));
+  };
+
+  /**
+   * What a BOARD widget token (`wt2`) grants, or null: the identity it names
+   * and the one board it reaches.
+   *
+   * The same liveness rules a session faces, minus the one that cannot apply.
+   * There is no session id to revoke, so logout ends nothing here; what ends a
+   * board token early is the roster — an identity that is not `active`, or
+   * whose `sessionsValidFrom` watermark has moved past the token's mint time.
+   * `failedClosed` stays for the reason it stays in `sessionIdentityFor`: with
+   * the revocation store broken nothing can be told apart, and a widget door
+   * that kept admitting through that state would be the one hole in it.
+   */
+  const boardWidgetGrantFor = (
+    raw: string,
+    presentedOrigin: string | null,
+  ): { identity: IdentityRecord; workspaceId: string } | null => {
+    if (sessionRevocations.failedClosed()) return null;
+    const claims = verifyBoardWidgetToken(raw, widgetTokenKey());
+    if (!claims) return null;
+    if (presentedOrigin === null || presentedOrigin !== claims.origin) return null;
+    const rec = identities.get(claims.identityId);
+    if (!rec || rec.status !== 'active') return null;
+    if (claims.issuedAt < rec.sessionsValidFrom) return null;
+    // And the holder must still have a role on the board that lets them
+    // comment. Minting checked it once; a member removed since then must not
+    // keep commenting for the rest of the day.
+    if (!rec.email || !mayCommentOnBoard(claims.workspaceId, rec.email)) return null;
+    return { identity: rec, workspaceId: claims.workspaceId };
   };
 
   /**
@@ -236,6 +284,9 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     // so the two gates read the same and a future edit to one is obviously
     // a change to both. Mutation-tested: removing it turns nothing red.
     if (sessionRevocations.failedClosed()) return null;
+    // A board token attributes exactly as a session token does; which board
+    // it may reach is the widget door's question, not attribution's.
+    if (raw.startsWith('wt2.')) return boardWidgetGrantFor(raw, presentedOrigin)?.identity ?? null;
     const claims = verifyWidgetToken(raw, widgetTokenKey());
     if (!claims) return null;
     if (presentedOrigin === null || presentedOrigin !== claims.origin) return null;
@@ -358,6 +409,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     widgetTokenKey,
     widgetBearerOf,
     widgetTokenIdentityFor,
+    boardWidgetGrantFor,
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,

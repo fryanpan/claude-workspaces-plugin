@@ -184,6 +184,13 @@ export type WsCtx = {
    * seen in the doc is a worse review surface, not a safer one.
    */
   readOnly?: boolean;
+  /**
+   * The board widget token and page origin a tailnet widget door socket was
+   * admitted with. Like `shareId`: the token is checked once at the upgrade,
+   * so without this a socket outlived the token's expiry, its watermark and
+   * its identity's archiving. Absent on every other socket.
+   */
+  widgetDoorGrant?: { token: string; origin: string };
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
@@ -3119,6 +3126,10 @@ export class DocStore {
 
   closeSocketsForDeadShares(isLive: (shareId: string) => boolean): string[] {
     return this.fanout.closeSocketsForDeadShares(isLive);
+  }
+
+  closeSocketsForDeadWidgetGrants(isLive: (token: string, origin: string) => boolean): number {
+    return this.fanout.closeSocketsForDeadWidgetGrants(isLive);
   }
 
   /** Re-reconcile a workspace against disk, keeping docIds (and therefore

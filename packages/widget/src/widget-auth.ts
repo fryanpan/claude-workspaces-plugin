@@ -40,7 +40,7 @@ export function httpBase(el: FeedbackWidgetEl): string {
 
 /** The one origin the message listener will take a token from. */
 function serverOrigin(el: FeedbackWidgetEl): string {
-  return new URL(httpBase(el)).origin;
+  return el.signInOrigin || new URL(httpBase(el)).origin;
 }
 
 /**
@@ -67,7 +67,12 @@ export async function askIfSignInRequired(el: FeedbackWidgetEl): Promise<void> {
     const res = await fetch(`${httpBase(el)}/api/auth/session`);
     // The route is never gated and always 200s; anything else here is a
     // proxy page, which is not JSON and lands in the catch.
-    const body = (await res.json()) as { signInToWrite?: unknown; canWrite?: unknown };
+    const body = (await res.json()) as {
+      signInToWrite?: unknown;
+      canWrite?: unknown;
+      signInOrigin?: string;
+    };
+    el.signInOrigin = body.signInOrigin;
     if (body.signInToWrite === true && body.canWrite !== true) requireSignIn(el);
   } catch {}
 }
@@ -92,8 +97,16 @@ function requireSignIn(el: FeedbackWidgetEl): void {
 
 export function loadStoredAuth(el: FeedbackWidgetEl): void {
   try {
-    el.authToken = localStorage.getItem(AUTH_TOKEN_KEY);
-    const raw = localStorage.getItem(AUTH_USER_KEY);
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    // A board token (`wt2`) names one board, base64url, in its fifth segment.
+    // One a page of this origin minted for ANOTHER board is refused on every
+    // call this widget makes, so it is not this widget's to hold.
+    const board = btoa(el.opts.workspaceId)
+      .replace(/=+$/, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+    el.authToken = token?.startsWith('wt2.') && token.split('.')[4] !== board ? null : token;
+    const raw = el.authToken && localStorage.getItem(AUTH_USER_KEY);
     el.authUser = raw ? (JSON.parse(raw) as User) : null;
   } catch {
     el.authToken = null;
@@ -141,8 +154,14 @@ function setAuth(el: FeedbackWidgetEl, token: string, user: User): void {
   // The post this sign-in was for. Rebuilt from the composer, so it goes
   // out under the identity the widget now holds, token and name both. A
   // second refusal re-arms it only after an await, so clearing here is safe.
-  el.retryAfterSignIn?.();
+  // It waits for the doc to sync: on the tailnet door the socket was refused
+  // without a token, so a page nobody has opened has no doc on the server
+  // yet and a post to it 404s. The token opens the socket now rather than
+  // at the end of its backoff, and that socket is what makes the doc.
+  const retry = el.retryAfterSignIn;
   el.retryAfterSignIn = null;
+  el.client?.reconnect();
+  if (retry) el.client ? el.client.onReady(retry) : retry();
 }
 
 /** Local only — the workspace session lives on, sign-out there revokes. */
@@ -159,7 +178,7 @@ function clearAuth(el: FeedbackWidgetEl): void {
 }
 
 function startSignIn(el: FeedbackWidgetEl): void {
-  const url = `${httpBase(el)}/widget-auth?origin=${encodeURIComponent(location.origin)}`;
+  const url = `${serverOrigin(el)}/widget-auth?origin=${encodeURIComponent(location.origin)}&workspace=${encodeURIComponent(el.opts.workspaceId)}`;
   el.authPopup = window.open(url, 'cw-widget-auth', 'popup,width=420,height=560');
   if (!el.authMsgHandler) {
     el.authMsgHandler = (ev: MessageEvent) => {

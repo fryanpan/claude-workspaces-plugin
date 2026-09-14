@@ -60,6 +60,19 @@ import { gzipSync } from 'node:zlib';
  * holds any module it was measured without (`packages/widget/scripts/bundle-guard.ts`),
  * so that regrowth fails on the change that causes it, not on the next one.
  *
+ * It had grown back to 40,945 on main by 2026-09-14, and the tailnet widget
+ * door put it 36 over. The room came from the thread reader again:
+ *
+ *   before        40,996 gz   (132,148 raw)
+ *   after         40,522 gz   (130,281 raw)   438 under
+ *
+ * The widget's copy of `listThreads` lifted nine fields no widget code reads
+ * (a thread's summary and status attribution, a comment's edit trail and
+ * attribution, and four answer and revision records on a review item). The
+ * build cuts those statements (`packages/widget/scripts/strip-unread-fields.ts`)
+ * and refuses a bundle that reads any of the nine, so a widget change that
+ * starts showing one fails the build instead of reading `undefined`.
+ *
  * Raising the ceiling is a decision about what the widget costs the pages it is
  * a guest on, so it takes a paragraph here, not a round-up.
  */

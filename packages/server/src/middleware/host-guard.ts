@@ -234,6 +234,20 @@ export interface TrustedHostOpts {
    * Cloudflare one again.
    */
   loopbackPeer?: boolean;
+  /**
+   * The TAILNET WIDGET DOOR's hostnames — this machine's MagicDNS name, where
+   * an app page on the tailnet loads the widget (middleware/widget-door.ts).
+   *
+   * Read only when the Host did not already classify `local`, so with
+   * access-only OFF — where the tailnet name is local and the whole product —
+   * it grants nothing new. With access-only ON it is the one grant the tailnet
+   * hostname gets: the widget's own routes, each behind a board token.
+   *
+   * A request through the Cloudflare edge never classifies here, whatever its
+   * Host claims: the door is for the private network, and a tunnel visitor
+   * typing the tailnet name must not reach it.
+   */
+  widgetDoorHosts?: readonly string[];
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
@@ -424,6 +438,24 @@ export function isRecallCallbackHost(
 }
 
 /**
+ * Is this Host one of the tailnet widget door's names, reached directly
+ * rather than through the Cloudflare edge?
+ *
+ * Exact match, no suffix matching, same rule as every list here. The
+ * `viaProxy` veto is the same one `isTrustedLocalHost` applies and for the
+ * same reason: cloudflared forwards the visitor's Host verbatim.
+ */
+export function isWidgetDoorHost(host: string | null | undefined, opts: TrustedHostOpts): boolean {
+  if (opts.viaProxy) return false;
+  const h = normalizeHost(host);
+  if (h === '') return false;
+  return (opts.widgetDoorHosts ?? [])
+    .map((c) => normalizeHost(c))
+    .filter((c) => c !== '')
+    .includes(h);
+}
+
+/**
  * What a share hostname grants access to.
  *
  * One field, and that is the whole point. A target used to carry a `docId`
@@ -453,14 +485,16 @@ export type HostDecision =
   | { kind: 'collab' } // Access-fronted collaboration host: JWT + collabScope
   | { kind: 'proxied-local' } // Access-fronted operator host: JWT, then local
   | { kind: 'recall-callback' } // the bot callback host: two routes, nothing else
+  | { kind: 'widget-door' } // the tailnet host under access-only: widget routes, token each
   | { kind: 'deny'; reason: 'unknown_host' }; // anything else: refuse
 
 /**
  * Classify a request's Host.
  *
- * Order matters: our own names win, then the bot callback hostname, then a
- * per-share Access hostname, then the share hostname, then the operator's
- * opt-in collaboration hosts, then the operator's own proxied address.
+ * Order matters: our own names win, then the bot callback hostname, then the
+ * tailnet widget door, then a per-share Access hostname, then the share
+ * hostname, then the operator's opt-in collaboration hosts, then the
+ * operator's own proxied address.
  * Anything else is refused — the tunnel forwards every hostname under its
  * ingress here, so "unrecognised" must mean refuse, never "skip the gate".
  *
@@ -489,6 +523,10 @@ export function classifyHost(
   // configured as the bot callback host can only ever lose surface by being
   // matched here, never gain any.
   if (isRecallCallbackHost(host, opts)) return { kind: 'recall-callback' };
+  // Next narrowest: the widget's own routes, each behind a board token. Below
+  // `local`, so a deployment with access-only off keeps serving its tailnet
+  // name the whole product exactly as before.
+  if (isWidgetDoorHost(host, opts)) return { kind: 'widget-door' };
   const h = normalizeHost(host);
   const target = opts.lookupShare(h);
   if (target) return { kind: 'share', target };

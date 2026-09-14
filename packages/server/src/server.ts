@@ -62,7 +62,7 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { malformedPathSegment } from './path-params.ts';
 import { createPromptStore } from './prompt-store.ts';
-import { publicBaseUrl } from './public-host.ts';
+import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
 import { CalendarConnectionStore, CalendarSyncConsumer } from './recall-calendar.ts';
@@ -267,8 +267,9 @@ export interface ServerHandle {
    *  (dispatch-registry.ts). Exposed for the same reason `agentWatches` is. */
   dispatches: DispatchRegistry;
   shares: Shares | null;
-  /** Hang up every websocket and SSE stream whose share is no longer live.
-   *  Runs on a 60s interval; exposed so tests exercise the real sweep. */
+  /** Hang up every websocket and SSE stream whose share is no longer live,
+   *  and every widget door socket whose board token is dead. Runs on a 60s
+   *  interval; exposed so tests exercise the real sweep. */
   sweepDeadShares: () => void;
   /**
    * The startup pass that moves rows off the removed `parked` state onto
@@ -1681,10 +1682,38 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * request-admission.ts. Composed here because `createIdentitySetup` below
    * takes `policyFor` as an input.
    */
+  /**
+   * The tailnet widget door (middleware/widget-door.ts): its hostnames, and
+   * where a page on one sends the person to sign in. Both derived — the
+   * MagicDNS name is re-read through the same 60s cache every host decision
+   * uses, and the sign-in origin is the operator's own Access-fronted host.
+   * No Access host means no sign-in origin, which leaves the door refusing
+   * every token-bearing route rather than pointing the popup somewhere wrong.
+   */
+  const widgetDoorHosts = (): readonly string[] => {
+    if (opts.widgetDoorHosts) return opts.widgetDoorHosts;
+    const name = tailnetHostname();
+    return name ? [name] : [];
+  };
+  const widgetSignInOrigin = proxiedTrustedHosts[0] ? `https://${proxiedTrustedHosts[0]}` : null;
+
+  /**
+   * May this person hold a board widget token for this board? Its owner (the
+   * operator allowlist), or someone whose role on it lets them comment. Both
+   * `BoardRole`s comment today, so a membership row of either kind — on the
+   * collaboration hostname's shares or through a redeemed link — is the
+   * answer; a role that could not comment would be refused here. Asked when a
+   * token is minted and on every use (`boardWidgetGrantFor`), because a
+   * membership can end inside the token's 24 hours.
+   */
+  const mayCommentOnBoard = (workspaceId: string, email: string): boolean =>
+    collabMemberOf(workspaceId, email) || shareLinkMemberOf(workspaceId, email);
+
   const { policyFor, applyCors } = createOriginPolicy({
     opts,
     proxiedTrustedHosts,
     proxiedTrustedVerifier,
+    widgetDoorHosts,
   });
 
   // --- Email-keyed identity --- see identity-setup.ts. The roster, the
@@ -1706,6 +1735,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetTokenKey,
     widgetBearerOf,
     widgetTokenIdentityFor,
+    boardWidgetGrantFor,
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
@@ -1719,6 +1749,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // predicate here is only ever asked during a request.
     requestAddress: (req) => server.requestIP(req)?.address,
     policyFor,
+    mayCommentOnBoard,
   });
 
   /**
@@ -1753,6 +1784,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeDecodeSegment,
     withReviewUrl,
     recallRelay,
+    widgetDoorHosts,
+    widgetSignInOrigin,
+    widgetBearerOf,
+    boardWidgetGrantFor,
+    docTypeOf: (docId) => docStore.peekMeta(docId)?.type,
     // Forward reference on purpose: `server` is bound below, and the peer
     // address is only ever asked during a request. Same shape, and the same
     // reason, as the identity setup's own `requestAddress` above.
@@ -2115,6 +2151,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     clientKeyFor,
     emailSessionKey,
     widgetTokenKey,
+    widgetDoorHosts,
+    mayCommentOnBoard,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
@@ -2339,7 +2377,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // union is what makes that a compile error rather than a review note.
       const gate = await admit(req, { pathname });
       if (!gate.admitted) return gate.response;
-      const { visitor, visitorShareId, visitorMemberKey, metaFor, roleFor, requireOwner } = gate;
+      const {
+        visitor,
+        visitorShareId,
+        visitorMemberKey,
+        widgetDoorGrant,
+        metaFor,
+        roleFor,
+        requireOwner,
+      } = gate;
 
       // --- REST: email login ---
       // Reachability (the host gate, Access, a share session) and identity
@@ -2362,6 +2408,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const {
         widgetIdentity,
         provenIdentityFor,
+        accessIdentityFor,
         authorFor,
         refuseCategoryAuthor,
         withTaskChips,
@@ -2400,6 +2447,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           widgetIdentity,
           browserProvedNobody,
           provenIdentityFor,
+          accessIdentityFor,
         });
         if (handled) return handled;
       }
@@ -2436,6 +2484,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         visitorShareId,
         visitorMemberKey,
         browserProvedNobody,
+        widgetDoorGrant,
       });
       if (streamed) {
         if (streamed.kind === 'upgraded') return undefined;
@@ -3074,6 +3123,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Exactly what the interval does, named so tests drive the real thing
    *  rather than a re-implementation of it. */
   const sweepDeadShares = (): void => {
+    // A tailnet widget door socket is authorized once at its upgrade too, by
+    // a board token that expires and that the roster can revoke — and no
+    // share is needed for the door, so this half runs without one.
+    docStore.closeSocketsForDeadWidgetGrants(
+      (token, origin) => boardWidgetGrantFor(token, origin) !== null,
+    );
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);
@@ -3088,17 +3143,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore.closeSocketsForShareMembers(ended);
     sse.closeForShareMembers(ended);
   };
-  const shareSweep = shares
-    ? setInterval(() => {
-        try {
-          sweepDeadShares();
-        } catch {
-          // A sweep failure must never take the server down with it.
-        }
-      }, SHARE_SWEEP_MS)
-    : null;
+  // Armed whatever is configured: the widget door's hostname can be discovered
+  // after boot (`tailnetHostname` in public-host.ts re-asks Tailscale), and a door socket
+  // admitted then still needs this sweep. A pass with nothing open costs a
+  // walk over no sockets.
+  const shareSweep = setInterval(() => {
+    try {
+      sweepDeadShares();
+    } catch {
+      // A sweep failure must never take the server down with it.
+    }
+  }, SHARE_SWEEP_MS);
   // Never hold the process (or a test runner) open.
-  shareSweep?.unref?.();
+  shareSweep.unref?.();
 
   // Armed here rather than in bin.ts, because the wake is a property of a
   // running board and not of the production deployment — a staging server
@@ -3180,7 +3237,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sharingGate,
     webhookLog,
     stop: async () => {
-      if (shareSweep) clearInterval(shareSweep);
+      clearInterval(shareSweep);
       // Release before anything else can fail: a lock left behind by a clean
       // shutdown would make the next repair refuse for no reason. It is
       // reclaimed as stale on a crash either way, but only after a pid check
