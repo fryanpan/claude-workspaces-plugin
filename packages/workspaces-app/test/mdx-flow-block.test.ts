@@ -4,7 +4,7 @@ import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { summarizeMdx } from '../src/mdx-preview.ts';
-import { installSheets, styleOf } from './css-harness.ts';
+import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
 
 /**
  * An `.mdx` component in the doc editor: a quiet block with its name, title
@@ -89,17 +89,17 @@ describe('an .mdx block in the editor', () => {
     expect(blocks()[0]?.querySelector('.mdx-view')?.textContent).toBe('Divider');
   });
 
-  it("sets a chart's title at the doc's subheading size", () => {
-    open.push(installSheets('styles.css', 'doc.css'));
-    mount(`### Riders by month\n\n${POST}`);
-    const h3 = styleOf(document.querySelector('.ProseMirror h3') as Element);
-    const title = styleOf(document.querySelector('.mdx-title') as Element);
-    expect([title.fontSize, title.fontWeight, title.fontFamily]).toEqual([
-      h3.fontSize,
-      h3.fontWeight,
-      h3.fontFamily,
-    ]);
-  });
+  for (const vp of [IPAD, PHONE]) {
+    it(`sets a chart's title at the doc's subheading size at ${vp.width}px`, () => {
+      setViewport(vp);
+      open.push(installSheets('styles.css', 'doc.css'));
+      mount(`### Riders by month\n\n${POST}`);
+      const h3 = styleOf(document.querySelector('.ProseMirror h3') as Element);
+      const read = (st: CSSStyleDeclaration) => [st.fontSize, st.fontWeight, st.fontFamily];
+      const heading = read(h3);
+      expect(read(styleOf(document.querySelector('.mdx-title') as Element))).toEqual(heading);
+    });
+  }
 
   it('opens the source on a tap and closes it on the next', () => {
     mount();
@@ -148,6 +148,103 @@ describe('an .mdx block in the editor', () => {
     expect(md()).not.toContain('<LineChart');
     expect(md()).toContain('Ridership \n\n{/* TODO');
     expect(md()).toContain('{/* TODO: the October numbers */}');
+  });
+
+  it('keeps the browser from typing over a selection that runs into a component', () => {
+    const { handle, ydoc } = mount();
+    const md = () => prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
+    const before = md();
+    const into = { from: posOf(handle, 'climbed'), to: posOf(handle, 'ferry riders') };
+    handle.editor.chain().setTextSelection(into).run();
+    const typed = new InputEvent('beforeinput', {
+      inputType: 'insertText',
+      data: 'k',
+      bubbles: true,
+      cancelable: true,
+    });
+    handle.editor.view.dom.dispatchEvent(typed);
+    expect(typed.defaultPrevented).toBe(true);
+    expect(md()).toBe(before);
+
+    // What ProseMirror reads back if the browser edits the DOM anyway: the
+    // paragraph and the whole chart replaced by the paragraph with the
+    // chart's source run into it.
+    const { state } = handle.editor;
+    let chartEnd = -1;
+    state.doc.forEach((n, pos) => {
+      if (n.textContent.startsWith('<LineChart')) chartEnd = pos + n.nodeSize;
+    });
+    const para = state.doc.resolve(into.from).before();
+    const merged = state.schema.nodes.paragraph?.create(
+      null,
+      state.schema.text('Ridership <LineChart title="Harborlight ferry riders" />'),
+    );
+    if (!merged) throw new Error('no paragraph node');
+    handle.editor.view.dispatch(state.tr.replaceWith(para, chartEnd, merged));
+    expect(md()).toBe(before);
+  });
+
+  it('takes typing over a selection that holds a whole component', () => {
+    const { handle, ydoc } = mount();
+    let chart = { from: -1, to: -1 };
+    handle.editor.state.doc.forEach((n, pos) => {
+      if (n.textContent.startsWith('<LineChart')) chart = { from: pos, to: pos + n.nodeSize };
+    });
+    handle.editor
+      .chain()
+      .setTextSelection({ from: posOf(handle, 'climbed'), to: chart.to })
+      .run();
+    const typed = new InputEvent('beforeinput', {
+      inputType: 'insertText',
+      data: 'rose.',
+      bubbles: true,
+      cancelable: true,
+    });
+    handle.editor.view.dom.dispatchEvent(typed);
+    const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
+    expect(md).not.toContain('<LineChart');
+    expect(md).toContain('Ridership rose.');
+  });
+
+  it('refuses a quote, a list or a heading around a component', () => {
+    const { handle, ydoc } = mount();
+    const md = () => prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
+    const before = md();
+    const inChart = posOf(handle, 'Harborlight');
+    const select = () => handle.editor.chain().setTextSelection({ from: inChart, to: inChart + 5 });
+    select().toggleBlockquote().run();
+    expect(md()).toBe(before);
+    select().toggleBulletList().run();
+    expect(md()).toBe(before);
+    select().setHeading({ level: 2 }).run();
+    expect(md()).toBe(before);
+    handle.editor
+      .chain()
+      .setTextSelection({ from: posOf(handle, 'climbed'), to: inChart })
+      .toggleBlockquote()
+      .run();
+    expect(md()).toBe(before);
+
+    // A quote on the prose alone still lands.
+    handle.editor.chain().setTextSelection(posOf(handle, 'climbed')).toggleBlockquote().run();
+    expect(md()).toContain('> Ridership climbed all year.');
+  });
+
+  it('shows the source of a closed component that holds an open comment', async () => {
+    const { handle } = mount();
+    const from = posOf(handle, 'Harborlight ferry riders');
+    const chart = () => blocks()[1];
+    expect(chart()?.classList.contains('is-open')).toBe(false);
+    handle.setThreadRanges([{ id: 't-chart', from, to: from + 11, status: 'open' }], null);
+    await Promise.resolve();
+    expect(chart()?.querySelector('.thread-range')).not.toBeNull();
+    expect(chart()?.classList.contains('is-open')).toBe(true);
+
+    // Closed by the reader, it stays closed.
+    chart()?.querySelector<HTMLElement>('.mdx-view')?.click();
+    handle.setThreadRanges([{ id: 't-chart', from, to: from + 12, status: 'open' }], null);
+    await Promise.resolve();
+    expect(chart()?.classList.contains('is-open')).toBe(false);
   });
 
   it('takes a comment on words in a component', () => {
