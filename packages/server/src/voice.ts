@@ -272,7 +272,7 @@ export class VoiceRouter {
   private instructions: (() => string) | undefined;
   /** Recent text writes, keyed by workspace + verb + target + exact words —
    *  see `once`. Pruned on every write, so it cannot grow without bound. */
-  private recentWrites = new Map<string, { at: number; ack: string }>();
+  private recentWrites = new Map<string, { at: number; outcome: Promise<ActionOutcome> }>();
   private answerCoverage: AnswerCoverage | undefined;
   /**
    * "Did you mean A or B?" — the two the router offered, per speaker, so the
@@ -743,23 +743,35 @@ export class VoiceRouter {
     const seen = this.recentWrites.get(full);
     if (seen !== undefined && now - seen.at <= RETRY_WINDOW_MS) {
       // The board already says it. Answer exactly as the first call did — a
-      // different answer to the same sentence is what invites a third try.
-      return { kind: 'answered', result: { route: 'fast-path-action', ack: seen.ack } };
+      // different answer to the same sentence is what invites a third try. A
+      // repeat that arrives while the first is still writing waits for it, so
+      // it hears what landed (an answer that left parts open says so).
+      return seen.outcome;
     }
     // Reserved BEFORE the await, released if the write fails. Two requests in
     // flight at once — a double-tap on the mic, or a client retry that races
     // the first response rather than following it — both miss a ledger
     // written afterwards, which is the case a naive "record it when it lands"
     // ledger cannot see.
-    this.recentWrites.set(full, { at: now, ack });
-    const wrote = await write();
-    if (wrote === false) {
-      this.recentWrites.delete(full);
-      return { kind: 'defer' };
-    }
-    const said = typeof wrote === 'string' ? wrote : ack;
-    this.recentWrites.set(full, { at: now, ack: said });
-    return { kind: 'answered', result: { route: 'fast-path-action', ack: said } };
+    // Started a microtask later, so the reservation below is in place before
+    // anything in the write can release it.
+    const outcome = Promise.resolve().then(async (): Promise<ActionOutcome> => {
+      let wrote: boolean | string;
+      try {
+        wrote = await write();
+      } catch (err) {
+        this.recentWrites.delete(full);
+        throw err;
+      }
+      if (wrote === false) {
+        this.recentWrites.delete(full);
+        return { kind: 'defer' };
+      }
+      const said = typeof wrote === 'string' ? wrote : ack;
+      return { kind: 'answered', result: { route: 'fast-path-action', ack: said } };
+    });
+    this.recentWrites.set(full, { at: now, outcome });
+    return outcome;
   }
 
   /**

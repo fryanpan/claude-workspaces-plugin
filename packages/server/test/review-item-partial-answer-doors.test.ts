@@ -47,20 +47,29 @@ let base = '';
 let verdict: { open: string[] } | null = null;
 let calls: AnswerCoverageInput[] = [];
 let classification = '';
+let classified = 0;
+/** When set, the check answers only once this settles. */
+let gate: Promise<void> | undefined;
 
 function boot(): void {
   dataDir = mkdtempSync(join(tmpdir(), 'partial-answer-doors-'));
   verdict = null;
   calls = [];
+  classified = 0;
+  gate = undefined;
   handle = createServer({
     port: 0,
     dataDir,
     keepMovingCadenceMs: 0,
     answerCoverage: async (input: AnswerCoverageInput) => {
       calls.push(input);
+      await gate;
       return verdict;
     },
-    voiceComplete: async () => classification,
+    voiceComplete: async () => {
+      classified++;
+      return classification;
+    },
   });
   base = `http://127.0.0.1:${handle.port}`;
 }
@@ -292,15 +301,32 @@ describe('a spoken answer that covers some of an item’s questions', () => {
     classification = JSON.stringify({ kind: 'action', action: 'answer-review', id: docId });
     verdict = { open: OPEN };
     const said = 'run it at 04:00';
-    const body = await jj<{ route: string; ack: string }>(
-      post(`/workspaces/${ws}/voice`, {
-        transcript: said,
-        context: { surface: 'doc', docId },
-        author: PERSON,
-      }),
-    );
-    expect(body.route).toBe('fast-path-action');
-    expect(body.ack).toContain('Still open: "Should archived rows be included?"');
+    // Said twice at once, as a double-tap or a racing retry: one answer is
+    // recorded, and both replies say what is still open.
+    const speak = () =>
+      jj<{ route: string; ack: string }>(
+        post(`/workspaces/${ws}/voice`, {
+          transcript: said,
+          context: { surface: 'doc', docId },
+          author: PERSON,
+        }),
+      );
+    // The check is held until both requests are in, so the second arrives
+    // while the first is still writing.
+    let release = () => {};
+    gate = new Promise((r) => {
+      release = r;
+    });
+    const pending = Promise.all([speak(), speak()]);
+    await waitFor(() => classified >= 2, { describe: 'both utterances classified' });
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    const bodies = await pending;
+    for (const body of bodies) {
+      expect(body.route).toBe('fast-path-action');
+      expect(body.ack).toContain('Still open: "Should archived rows be included?"');
+    }
+    expect(calls).toHaveLength(1);
     const payload = await declaration(ws, docId, threadId);
     expect(payload?.answeredAt).toBeUndefined();
     expect(payload?.partialAnswers?.map((p) => p.text)).toEqual([said]);
