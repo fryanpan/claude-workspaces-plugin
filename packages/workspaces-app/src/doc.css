@@ -85,6 +85,22 @@
   }
 }
 
+/* The linked-item dock (doc/linked-dock.ts) is a bar fixed under the page,
+   outside the doc. Its measured height is --doc-dock-h, and the page gives
+   that height back: the shell ends above the bar, so the doc's last line, the
+   edge strips and the Make Plan / Review floats all sit above it. The fixed
+   controls that ride --kb-bottom ride the bar too — the composer (THE
+   NEW-COMMENT COMPOSER, PLACED) and the phone's comment sheet (Over-doc bottom
+   sheet) carry their own lift; the toast has no section here, so its lift is
+   below. Unset when nothing is docked, which is every page but one a ticket's
+   open ask links. */
+#shell {
+  height: calc(100dvh - var(--doc-dock-h, 0px));
+}
+#toast {
+  bottom: calc(var(--kb-bottom, 0px) + 24px + var(--safe-bottom) + var(--doc-dock-h, 0px));
+}
+
 /* ================= ATTACHMENT-SET SIDEBAR + DROPDOWN ================= */
 
 #set-pane {
@@ -2804,17 +2820,18 @@ button.lz-speaker:hover .lz-speaker-pill {
        so a plain `bottom: 0` puts the textarea being typed into, and the
        Reply button under it, behind the keyboard. Cap the height against the
        same variable or the sheet grows off the top of the screen instead. */
-    bottom: var(--kb-bottom, 0px);
+    bottom: calc(var(--kb-bottom, 0px) + var(--doc-dock-h, 0px));
     width: auto;
     max-width: 100%;
-    max-height: min(82vh, calc(100vh - var(--kb-bottom, 0px) - 56px));
+    max-height: min(82vh, calc(100vh - var(--kb-bottom, 0px) - var(--doc-dock-h, 0px) - 56px));
     z-index: 950;
     /* The keyboard inset comes back out of the slide-away, for the reason
        spelled out on `.thread-view` below: the sheet's bottom edge is lifted
        by `--kb-bottom`, so `translateY(100%)` leaves that much of a CLOSED
        sheet on screen — the panel that rode up with the keyboard whenever the
-       comment box opened. */
-    transform: translateY(calc(100% + var(--kb-bottom, 0px)));
+       comment box opened. The linked-item dock's lift comes out for the same
+       reason, or a closed sheet would stand over the bar. */
+    transform: translateY(calc(100% + var(--kb-bottom, 0px) + var(--doc-dock-h, 0px)));
     transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
     border-left: none;
     border-top: 1px solid var(--border);
@@ -2893,6 +2910,12 @@ button.lz-speaker:hover .lz-speaker-pill {
    sentence is scrolled to just above it (`keyboardClearDelta`), which is what
    makes the quote redundant rather than merely small. */
 
+/* The bottom sheet rides the linked-item dock as well as the keyboard, so a
+   docked ask never sits over the box being typed into. The margin placement
+   below sets `bottom: auto` and is unaffected. */
+#composer {
+  bottom: calc(var(--kb-bottom, 0px) + 12px + var(--safe-bottom) + var(--doc-dock-h, 0px));
+}
 #composer.composer--margin {
   right: auto;
   bottom: auto;
