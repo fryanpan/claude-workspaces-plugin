@@ -262,7 +262,11 @@ with `--cc`.
 
 `.githooks/pre-push` runs a regex scanner (denylist + registry project names)
 on every push, and a Haiku scanner only on pushes to fryanpan-owned remotes
-(`SCRUB_HAIKU_FORCE=1` forces it elsewhere). One config source resolving
+(`SCRUB_HAIKU_FORCE=1` forces it elsewhere). The Haiku key's daily spend cap
+is shared with other repos on the machine (`SCRUB_HAIKU_DAILY_USD`, ledger
+`SCRUB_HAIKU_SPEND_LOG`); a cap hit or an unreadable ledger makes no call and
+blocks like any other could-not-run case — `scrub-haiku.py --spend-report`
+says who spent it. One config source resolving
 without the other FAILS the push (exit 2 — broken install); neither resolving
 skips cleanly (`SCRUB_REQUIRE_SOURCES=1` makes even that hard). The scanner
 takes paths / `--diff-range` / `--staged` and ignores stdin (piping scans
