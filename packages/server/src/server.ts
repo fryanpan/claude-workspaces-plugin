@@ -3168,6 +3168,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   stallNudger.start();
   taskScheduler.start(opts.schedulerTickMs ?? undefined);
 
+  // Done-when lines already marked for the owner before their review items
+  // existed get one each. Idempotent by construction — a line with an open
+  // item gets nothing — so every start runs it and a second start files none.
+  try {
+    const owner = taskStore.syncOwnerItemsEverywhere();
+    if (owner.filed + owner.withdrawn > 0) {
+      console.log(
+        `[tasks] owner done-when lines: filed ${owner.filed} review item(s), withdrew ${owner.withdrawn}`,
+      );
+    }
+  } catch (err) {
+    console.error('[tasks] owner done-when review items failed:', err);
+  }
+
   // Rows still carrying the removed `parked` state come onto the new spelling
   // for it here — triage, plus a comment holding the date and the reason. See
   // park-migration.ts for why the comment is written before the fields are

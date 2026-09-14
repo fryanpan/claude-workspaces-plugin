@@ -60,7 +60,9 @@ export type AnswerTaskReviewResult =
   | {
       ok: false;
       error: 'not-found' | 'unknown-review-item' | 'unknown-option' | 'not-a-decision';
-    };
+    }
+  /** An agent answering an item filed for a done-when owner line. */
+  | { ok: false; error: 'not-a-person'; message: string };
 
 export type RequestInfoOnReviewResult =
   | { ok: true; task: Task; item: TaskReviewItem }
