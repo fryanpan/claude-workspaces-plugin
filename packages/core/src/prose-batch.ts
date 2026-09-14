@@ -27,6 +27,12 @@
  *   bullets are bullets the agent can no longer find.
  */
 import * as Y from 'yjs';
+import {
+  holdsNoWords,
+  insertionIndexBeforeBlanks,
+  restoreNestedNotes,
+  takeNestedNotes,
+} from './prose-batch-structure.ts';
 import { getProseFragment, headingLevelOf, precedingBlock } from './prose-fragment.ts';
 import {
   BLOCK_AUTHOR_ATTR,
@@ -182,7 +188,9 @@ function insertBlocksMerging(
   const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
   const leading = splitLeadingListItems(markdown);
   let rest = markdown;
-  let at = index;
+  // In front of the editor's trailing blank line, never behind it
+  // (`prose-batch-structure.ts`).
+  let at = insertionIndexBeforeBlanks(siblings, index);
   if (leading) {
     // Grow the list ENDING AT the insertion point rather than splicing a
     // second one after it: appending keeps the new points in the order they
@@ -424,7 +432,9 @@ export function applyBlockEdits(
             outcomes.push({ op: edit.op, status: 'failed', error: 'empty' });
             break;
           }
-          if (readBlockAuthor(el) !== opts.author) {
+          // A block with no words has nothing to protect and nothing a
+          // proposal could strike, so it applies directly whoever owns it.
+          if (readBlockAuthor(el) !== opts.author && !holdsNoWords(el)) {
             // Not ours (or no longer ours): propose it, in this transaction,
             // so a reader sees the batch land whole or not at all.
             const res = proposeEdit(fragment, el, replacement, opts);
@@ -444,12 +454,14 @@ export function applyBlockEdits(
             );
             break;
           }
+          const nested = takeNestedNotes(el);
           const written = writeReplacement(fragment, el, replacement, 'replace');
           if (typeof written === 'string') {
             outcomes.push({ op: edit.op, status: 'failed', error: written });
             break;
           }
           for (const made of written) claimSubtree(made, opts.author);
+          restoreNestedNotes(fragment, written, nested);
           outcomes.push({ op: edit.op, status: 'applied' });
           break;
         }

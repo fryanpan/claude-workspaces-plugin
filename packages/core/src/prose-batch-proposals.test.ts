@@ -144,6 +144,15 @@ describe('a replace of a block the caller does not own', () => {
         const owned = findBlockById(getProseFragment(direct), blockId);
         expect(owned).toBeTruthy();
         claimSubtree(owned as Y.XmlElement, AGENT);
+        // A DIRECT replace hands a bullet's sub-points to the new bullet
+        // (`prose-batch-structure.ts`); a proposal strikes the whole block, so
+        // accepting it takes them. The twin drops them first so the rest of
+        // the two states can still be compared byte for byte.
+        for (const child of (owned as Y.XmlElement).toArray()) {
+          if (child instanceof Y.XmlElement && child.nodeName === 'bulletList') {
+            (owned as Y.XmlElement).delete((owned as Y.XmlElement).toArray().indexOf(child), 1);
+          }
+        }
         expect(
           apply(direct, [{ op: 'replace_block', blockId, markdown: replacement }]).applied,
         ).toBe(1);

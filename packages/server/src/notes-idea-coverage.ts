@@ -159,6 +159,21 @@ export function contentWords(text: string): string[] {
   return [...out];
 }
 
+/** A word that turns a statement into its opposite. `contentWords` drops
+ *  every one of these as a stopword. */
+const NEGATION =
+  /\b(?:not|no|never|none|nothing|nobody|neither|nor|cannot|without)\b|n['\u2019]t\b/gi;
+
+/**
+ * Whether `text` says the opposite of what its content words say: an odd
+ * number of negations. Two notes that share every content word and differ
+ * here are opposite facts, not one fact twice — "the crane is safe" and "the
+ * crane is not safe".
+ */
+export function negates(text: string): boolean {
+  return (text.match(NEGATION)?.length ?? 0) % 2 === 1;
+}
+
 /**
  * Speech cut into sentences.
  *

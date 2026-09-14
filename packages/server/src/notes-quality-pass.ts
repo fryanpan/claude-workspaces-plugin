@@ -99,12 +99,24 @@ export function readSectionMarkdown(
   };
   const openLevel = levelOf(all[start]!) ?? 2;
   const out: string[] = [];
+  // A BLOCK INSIDE ONE ALREADY WRITTEN OUT IS NOT WRITTEN AGAIN. The walk
+  // returns a list, its items, and every list nested in them, and a list
+  // serializes all of it — so each nested bullet used to come out twice, and
+  // a meeting that grouped its notes was reported, and filed, as repeating
+  // them (2026-09-14: a replayed meeting read 8 repeated bullets of 23 in
+  // notes that held 15 bullets and no repeat).
+  const emitted = new Set<unknown>();
+  const insideEmitted = (el: Y.XmlElement): boolean => {
+    for (let p = el.parent; p !== null; p = p.parent) if (emitted.has(p)) return true;
+    return false;
+  };
   for (let i = start; i < all.length; i++) {
     const el = all[i]!;
     const level = levelOf(el);
     if (i > start && level !== undefined && level <= openLevel) break;
     const id = prose.readBlockId(el);
     if (i > start && id !== undefined && skip.has(id)) continue;
+    if (insideEmitted(el)) continue;
     // A LIST HOLDING ANY SKIPPED ITEM IS DROPPED, AND ITS SURVIVORS CARRY
     // THEIR OWN MARKERS. The walk returns a list AND the items inside it, and
     // only the list serializes its children with the `- ` a bullet check
@@ -119,6 +131,7 @@ export function readSectionMarkdown(
       el.parent instanceof Y.XmlElement &&
       isList(el.parent) &&
       childBlockIds(el.parent).some((child) => skip.has(child));
+    emitted.add(el);
     out.push(
       orphaned ? `- ${prose.serializeBlockToMarkdown(el)}` : prose.serializeBlockToMarkdown(el),
     );

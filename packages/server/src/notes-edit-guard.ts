@@ -35,7 +35,9 @@
  * against the bullet it names: if the replacement does not carry what that
  * bullet said — the same content-word share `notes-idea-coverage.ts` judges
  * an idea by, and the same threshold — it is not a revision, and it is turned
- * into an INSERT under the bullet's own heading. Both notes then stand.
+ * into an INSERT under the bullet's own heading. Both notes then stand —
+ * unless another bullet already says what the old one said (`saidElsewhere`):
+ * then no idea leaves the doc, and the replace applies as written.
  *
  * TURNED INTO, NOT REFUSED, and that is the whole reason this rule can exist
  * at all. Refusing the edit would drop the note about the speech this tick
@@ -96,7 +98,7 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
-import { IDEA_CARRIED_SHARE, contentWords } from './notes-idea-coverage.ts';
+import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
 
 /** What the guard decided, for the caller to apply and to log. */
 export interface NotesEditGuardResult {
@@ -130,6 +132,9 @@ export interface NotesEditGuardContext {
  */
 const MIN_REVISION_CONTENT_WORDS = 4;
 
+/** How much of a note another one must carry to count as saying it. */
+const RESTATED_SHARE = 0.8;
+
 /**
  * Does `now` still carry what `was` said?
  *
@@ -150,6 +155,46 @@ function keepsItsWords(was: string, now: string): boolean {
   const has = new Set(contentWords(now));
   const hits = had.filter((w) => has.has(w)).length;
   return hits >= Math.max(2, Math.ceil(had.length * IDEA_CARRIED_SHARE));
+}
+
+/**
+ * Whether a different bullet in the section already says what `was` says.
+ *
+ * WHY A REPLACE OF SUCH A NOTE IS APPLIED AFTER ALL (2026-09-14). The rule
+ * exists so an idea does not leave the doc, and an idea another bullet still
+ * carries does not. Converting that replace anyway keeps a note beside its
+ * own restatement, which is the duplicate the reader complained of. (A
+ * restatement written in the SAME batch needs nothing here: the insert moves
+ * the note, `notes-edit-dedupe.ts`.)
+ */
+function saidElsewhere(
+  was: prose.OutlineEntry,
+  outline: readonly prose.OutlineEntry[],
+  section: ReadonlySet<string> | undefined,
+): boolean {
+  return outline.some(
+    (e) =>
+      e.id !== was.id &&
+      e.kind === 'listItem' &&
+      section?.has(e.id) === true &&
+      restates(e.text, was.text),
+  );
+}
+
+/**
+ * Whether `other` says all of what `note` says — nearly every content word of
+ * it, not the two-in-five share that makes a revision. Stricter because the
+ * answer lets a note leave: two bullets about the same dialog share most of
+ * their words and still carry different points.
+ */
+function restates(other: string, note: string): boolean {
+  const had = contentWords(note);
+  if (had.length === 0) return false;
+  // The opposite statement shares every content word and keeps none of the
+  // note's meaning.
+  if (negates(other) !== negates(note)) return false;
+  const has = new Set(contentWords(other));
+  return had.filter((w) => has.has(w)).length / had.length >= RESTATED_SHARE;
 }
 
 /** Any letter or digit at all — what tells a note from a list marker. */
@@ -290,7 +335,8 @@ export function guardNotesEdits(
       was.kind === 'listItem' &&
       was.author !== undefined &&
       headingId !== undefined &&
-      !keepsItsWords(was.text, edit.markdown)
+      !keepsItsWords(was.text, edit.markdown) &&
+      !saidElsewhere(was, outline ?? [], section?.blocks)
     ) {
       // Under the bullet's OWN heading when it has one inside this section,
       // so a note about a topic stays with its topic; under the meeting's
@@ -299,7 +345,13 @@ export function guardNotesEdits(
         was.underHeadingId !== undefined && section?.headings.has(was.underHeadingId) === true
           ? was.underHeadingId
           : headingId;
-      out.push({ op: 'insert_under_heading', headingId: under, markdown: edit.markdown });
+      // A replace names the list item it lands in, so its markdown may carry
+      // no marker; an insert has no item to land in, and would open a bare
+      // paragraph in the middle of the notes.
+      const markdown = /^\s*(?:[-*+]|\d+[.)])\s/.test(edit.markdown)
+        ? edit.markdown
+        : `- ${edit.markdown.trim()}`;
+      out.push({ op: 'insert_under_heading', headingId: under, markdown });
       kept.push(
         `replace_block on ${edit.blockId} wrote a note the bullet did not say — ` +
           'added it instead, so both stand',
