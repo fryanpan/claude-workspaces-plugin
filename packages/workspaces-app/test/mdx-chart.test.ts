@@ -183,6 +183,25 @@ describe('a chart block on the doc page', () => {
     expect(texts(svg, '.mdx-axis-unit')).toEqual(['crossings']);
   });
 
+  it('draws single-line self-closing tags with spaces inside every brace', () => {
+    mount(
+      `Before.\n\n<LineChart title="Riverbend's crossings" series={ [ { label: "A", values: [ { x: 0, y: 1 }, { x: 1, y: 3 }, ] }, { label: "B", dashed: true, values: [ { x: 0, y: 2 }, { x: 1, y: 2 } ] }, ] } band={ { from: 1, to: 2, label: "Target" } } xTickLabels={ { 0: "Mon", 1: "Tue" } } zeroBaseline={ false } />\n\n<Chart type="bar" orientation="horizontal" data={ [ { label: "North", value: 3 }, { label: "South", value: 5 }, ] } highlightIndex={ 1 } />\n\nAfter.\n`,
+    );
+    const [line, bars] = views();
+    const svg = line?.querySelector('svg.mdx-chart[data-chart="line"]');
+    expect(svg?.querySelectorAll('.mdx-series polyline')).toHaveLength(2);
+    expect(texts(svg, '.mdx-x-axis text')).toEqual(['Mon', 'Tue']);
+    expect(texts(svg, '.mdx-band text')).toEqual(['Target']);
+    expect(texts(line, '.mdx-legend-item')).toEqual(['A', 'B']);
+    const bar = bars?.querySelector('svg.mdx-chart[data-chart="bar"]');
+    expect(texts(bar, '.mdx-bar-label')).toEqual(['North', 'South']);
+    expect(
+      [...(bar?.querySelectorAll('rect.mdx-bar') ?? [])].map((r) =>
+        r.getAttribute('data-highlight'),
+      ),
+    ).toEqual([null, 'true']);
+  });
+
   it('includes zero on the y axis by default', () => {
     mount(`${LINE.replace('  zeroBaseline={false}\n', '')}\n`);
     expect(texts(views()[0], '.mdx-grid text')).toContain('0');
