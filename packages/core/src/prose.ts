@@ -20,6 +20,8 @@
  *                        for every block an edit did not touch.
  *   `prose-mdx.ts`       where an `.mdx` component, expression or import run
  *                        ends, so the parser holds each as one block.
+ *   `prose-mdx-retype.ts` re-types an `.mdx` doc's paragraphs that the MDX
+ *                        grammar reads as blocks, keeping their bytes.
  *
  * This file exports exactly what it exported when it was one 2,847-line
  * module, which is why the re-exports below are written out by name rather
@@ -63,6 +65,7 @@ export { serializeKeepingSource, serializeKeepingSourceLayout } from './prose-ke
 export type { SourceLayout } from './prose-keep-source.ts';
 export { isMdxPath, MDX_FLOW_LANGUAGE, mdxFlowEnd } from './prose-mdx.ts';
 export type { MarkdownParseOptions } from './prose-mdx.ts';
+export { retypeMdxParagraphs } from './prose-mdx-retype.ts';
 export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';
 export type { NestBlocksError, NestBlocksOptions, NestBlocksResult } from './prose-nest.ts';
 export {

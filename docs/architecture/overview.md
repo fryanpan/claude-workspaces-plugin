@@ -957,6 +957,12 @@ ending `.mdx` it finds each JSX component, `{…}` expression and import run,
 and the parser stores it as a code block whose language is `mdx-flow` and
 whose text is the exact source lines. A component is then one block the
 writer serializes byte for byte, not a paragraph that an edit could reflow.
+`prose-mdx-retype.ts` sits beside it and does not move the picture. A doc
+parsed before that grammar holds its components as paragraphs, and once a
+flush had written one onto a single line, the doc and its file serialized
+alike, so the attach never re-read it. The attach now re-types each such
+paragraph in place into the block the grammar makes, with the same text, so
+the file does not change.
 The editor draws that block through two client modules beside
 `mermaid-code-block.ts`, and they do not move the picture either.
 `mdx-flow-block.ts` is the node view and the plugin that makes the block
