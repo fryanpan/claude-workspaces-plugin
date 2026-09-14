@@ -373,6 +373,7 @@ export class DocEditOps {
       anchorRel: anchor.endRel,
       markdown,
       placement: opts?.placement,
+      parse: { mdx: prose.isMdxPath(doc.meta.sourceUrl) },
     });
   }
 
@@ -407,6 +408,7 @@ export class DocEditOps {
       anchorRel: thread.anchor.endRel,
       markdown,
       placement: opts?.placement,
+      parse: { mdx: prose.isMdxPath(doc.meta.sourceUrl) },
     });
   }
 

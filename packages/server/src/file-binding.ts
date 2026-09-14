@@ -619,6 +619,13 @@ export class FileBindings {
       try {
         const md = readFile();
         binding.diskSource = md;
+        // An `.mdx` doc read as paragraphs before its components were blocks.
+        // Once a flush had joined a component onto one line on disk, doc and
+        // file serialized alike and every branch below read them as in sync,
+        // so re-type in the doc first. Same bytes, so no branch is changed.
+        if (prose.isMdxPath(abs)) {
+          doc.ydoc.transact(() => prose.retypeMdxParagraphs(fragment), 'file-watch');
+        }
         const currentSerialized = prose.serializeFragmentToMarkdown(fragment);
         const prior = existing?.lastWritten;
         if (md !== currentSerialized) {

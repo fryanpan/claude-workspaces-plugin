@@ -41,6 +41,7 @@ import {
   readBlockId,
 } from './prose-identity.ts';
 import { parseMarkdownBlocks } from './prose-markdown.ts';
+import type { MarkdownParseOptions } from './prose-mdx.ts';
 import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
 import { addressableBlocks, claimSubtree, findBlockById, newBlockId } from './prose-outline.ts';
 import { blockText, markBlockProposal, offerWhole } from './suggest-blocks.ts';
@@ -91,6 +92,8 @@ export interface ApplyBlockEditsOptions {
   /** Who a proposal is attributed to when an edit cannot apply directly. */
   suggestionAuthor: SuggestionAuthor;
   transactionOrigin?: unknown;
+  /** How every edit's markdown parses: `{ mdx: true }` for an `.mdx` doc. */
+  parse?: MarkdownParseOptions;
 }
 
 /** Give an id to anything in `fragment` that has none. Called from INSIDE
@@ -183,6 +186,7 @@ function insertBlocksMerging(
   parent: Y.XmlFragment | Y.XmlElement,
   index: number,
   markdown: string,
+  parse: MarkdownParseOptions = {},
 ): Y.XmlElement[] {
   const created: Y.XmlElement[] = [];
   const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
@@ -218,14 +222,9 @@ function insertBlocksMerging(
     }
   }
   if (rest.trim().length === 0) return created;
-  const blocks = parseMarkdownBlocks(rest);
+  const blocks = parseMarkdownBlocks(rest, parse);
   if (blocks.length === 0) return created;
-  parent.insert(at, blocks);
-  // Reading the freshly inserted elements is safe — they are integrated now.
-  const after = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
-  for (const el of after.slice(at, at + blocks.length)) {
-    if (el instanceof Y.XmlElement) created.push(el);
-  }
+  created.push(...insertParsed(parent, at, blocks));
   return created;
 }
 
@@ -279,6 +278,7 @@ function writeReplacement(
   el: Y.XmlElement,
   markdown: string,
   mode: 'replace' | 'after',
+  parse: MarkdownParseOptions = {},
 ): Y.XmlElement[] | 'unknown-block' | 'parse-failed' {
   const parent = (el.parent as Y.XmlFragment | Y.XmlElement | null) ?? fragment;
   const idx = (parent.toArray() as unknown[]).indexOf(el);
@@ -299,7 +299,7 @@ function writeReplacement(
     }
     return created;
   }
-  const blocks = parseMarkdownBlocks(markdown);
+  const blocks = parseMarkdownBlocks(markdown, parse);
   if (blocks.length === 0) return 'parse-failed';
   if (mode === 'replace') parent.delete(idx, 1);
   return insertParsed(parent, at, blocks);
@@ -321,14 +321,14 @@ function proposeEdit(
   fragment: Y.XmlFragment,
   el: Y.XmlElement,
   replacement: string | null,
-  opts: Pick<ApplyBlockEditsOptions, 'author' | 'suggestionAuthor'>,
+  opts: Pick<ApplyBlockEditsOptions, 'author' | 'suggestionAuthor' | 'parse'>,
 ): { suggestionId: string } | { error: BlockEditError; reason?: string } {
   const struck = blockText(el);
   if (struck === null) return { error: 'suggest-failed', reason: ALREADY_PROPOSED };
   if (struck.length === 0) return { error: 'no-range' };
   let offered: Y.XmlElement[] = [];
   if (replacement !== null) {
-    const written = writeReplacement(fragment, el, replacement, 'after');
+    const written = writeReplacement(fragment, el, replacement, 'after', opts.parse);
     if (typeof written === 'string') return { error: written };
     if (!offerWhole(written)) return { error: 'suggest-failed', reason: TEXTLESS_BLOCK };
     offered = written;
@@ -404,7 +404,7 @@ export function applyBlockEdits(
             }
             at = sectionEndIndex(fragment, heading);
           }
-          const created = insertBlocksMerging(fragment, at, edit.markdown);
+          const created = insertBlocksMerging(fragment, at, edit.markdown, opts.parse);
           if (created.length === 0) {
             outcomes.push({ op: edit.op, status: 'failed', error: 'parse-failed' });
             break;
@@ -455,7 +455,7 @@ export function applyBlockEdits(
             break;
           }
           const nested = takeNestedNotes(el);
-          const written = writeReplacement(fragment, el, replacement, 'replace');
+          const written = writeReplacement(fragment, el, replacement, 'replace', opts.parse);
           if (typeof written === 'string') {
             outcomes.push({ op: edit.op, status: 'failed', error: written });
             break;
