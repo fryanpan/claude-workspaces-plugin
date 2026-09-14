@@ -3173,9 +3173,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // item gets nothing — so every start runs it and a second start files none.
   try {
     const owner = taskStore.syncOwnerItemsEverywhere();
-    if (owner.filed + owner.withdrawn > 0) {
+    if (owner.filed + owner.withdrawn + owner.revised > 0) {
       console.log(
-        `[tasks] owner done-when lines: filed ${owner.filed} review item(s), withdrew ${owner.withdrawn}`,
+        `[tasks] owner done-when lines: filed ${owner.filed} review item(s), withdrew ${owner.withdrawn}, revised ${owner.revised}`,
       );
     }
   } catch (err) {

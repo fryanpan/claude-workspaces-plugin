@@ -111,6 +111,17 @@ describe('an owner line is a review item on the queue', () => {
       lines: [{ id: lineId, verdict: 'owner' }],
     });
     expect(await ownerItemsOn(taskId)).toHaveLength(1);
+
+    // New proof on the same line: the one item now carries it.
+    await post(`/workspaces/${ws}/tasks/${taskId}/done-when/report`, {
+      author: AGENT,
+      lines: [{ id: lineId, verdict: 'owner', proof: [{ text: 'retaken at 430' }] }],
+    });
+    const after = await ownerItemsOn(taskId);
+    expect(after).toHaveLength(1);
+    expect(after[0]?.reviewItemId).toBe(rows[0]?.reviewItemId);
+    const revised = (await detail(taskId)).reviews?.find((r) => r.id === rows[0]?.reviewItemId);
+    expect(revised?.review.detail).toContain('retaken at 430');
   });
 
   it('meets the line on Looks right, which closes a task whose last line it was', async () => {

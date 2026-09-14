@@ -48,6 +48,12 @@ export interface OwnerItemDeps {
     reviewItemId: string,
     opts: { actor: Actor; reason: string },
   ): { ok: boolean };
+  reviseReviewItem(
+    taskId: string,
+    reviewItemId: string,
+    patch: { headline: string; detail: string },
+    opts: { actor: Actor },
+  ): { ok: boolean };
   ownerCheck(
     taskId: string,
     lineId: string,
@@ -67,7 +73,10 @@ function clip(text: string, max: number): string {
 }
 
 /** The item for one owner line: the existing decision card with two options. */
-export function ownerCheckReview(task: Task, line: DoneWhenLine): unknown {
+export function ownerCheckReview(
+  task: Task,
+  line: DoneWhenLine,
+): { shape: 'decision'; headline: string; detail: string; options: unknown[] } {
   const proof = (line.proof ?? []).slice(0, 3).map((p) => {
     const label = p.text.replace(/[[\]]/g, '');
     return p.url && /^https?:\/\//.test(p.url) ? `[${label}](${p.url})` : label;
@@ -110,24 +119,40 @@ export function linkedLineOf(task: Task, reviewItemId: string): DoneWhenLine | u
 
 /**
  * Bring the row's owner items in line with its owner lines: one open item per
- * owner line, none for a line that is no longer the owner's. Returns what it
- * did, so the boot pass can say so.
+ * owner line, carrying the line's current words and proof, and none for a
+ * line that is no longer the owner's. Returns what it did, so the boot pass
+ * can say so.
  */
 export function syncOwnerItems(
   taskId: string,
   deps: OwnerItemDeps,
-): { filed: number; withdrawn: number } {
+): { filed: number; withdrawn: number; revised: number } {
   const task = deps.getTask(taskId);
-  if (!task) return { filed: 0, withdrawn: 0 };
+  if (!task) return { filed: 0, withdrawn: 0, revised: 0 };
   let filed = 0;
   let withdrawn = 0;
+  let revised = 0;
   const lines = task.doneWhen ?? [];
   const linked = (task.reviews ?? []).filter((r) => r.doneWhenLineId !== undefined);
 
   for (const item of linked) {
     if (!isOpen(item)) continue;
     const line = lines.find((l) => l.id === item.doneWhenLineId);
-    if (line?.verdict === 'owner' && task.status !== 'done') continue;
+    if (line?.verdict === 'owner' && task.status !== 'done') {
+      // Same line, new words or new proof: the open item says what the line
+      // says NOW, as a revision, so a question already asked on it stays.
+      const { headline, detail } = ownerCheckReview(task, line);
+      if (item.review.headline !== headline || item.review.detail !== detail) {
+        const res = deps.reviseReviewItem(
+          task.id,
+          item.id,
+          { headline, detail },
+          { actor: { id: SERVER_ID, name: item.createdBy || OWNER_CHECK_FILER, kind: 'agent' } },
+        );
+        if (res.ok) revised++;
+      }
+      continue;
+    }
     const res = deps.withdrawReviewItem(task.id, item.id, {
       actor: { id: SERVER_ID, name: item.createdBy || OWNER_CHECK_FILER, kind: 'agent' },
       reason: !line
@@ -139,7 +164,7 @@ export function syncOwnerItems(
     if (res.ok) withdrawn++;
   }
 
-  if (task.status === 'done') return { filed, withdrawn };
+  if (task.status === 'done') return { filed, withdrawn, revised };
   for (const line of lines) {
     if (line.verdict !== 'owner') continue;
     if (linked.some((r) => r.doneWhenLineId === line.id && isOpen(r))) continue;
@@ -149,7 +174,7 @@ export function syncOwnerItems(
     });
     if (res.ok) filed++;
   }
-  return { filed, withdrawn };
+  return { filed, withdrawn, revised };
 }
 
 /** Why this actor may not answer this item, or undefined when they may. Only

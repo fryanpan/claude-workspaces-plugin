@@ -2557,14 +2557,15 @@ export class TaskStore {
 
   /** The boot pass: owner lines written before their items existed get one.
    *  Idempotent — a line that already has an open item gets nothing. */
-  syncOwnerItemsEverywhere(): { filed: number; withdrawn: number } {
-    const total = { filed: 0, withdrawn: 0 };
+  syncOwnerItemsEverywhere(): { filed: number; withdrawn: number; revised: number } {
+    const total = { filed: 0, withdrawn: 0, revised: 0 };
     for (const workspace of this.listWorkspaces()) {
       for (const task of this.listTasks(workspace.id)) {
         if (!task.doneWhen?.length && !task.reviews?.some((r) => r.doneWhenLineId)) continue;
         const res = syncOwnerItems(task.id, this.ownerItemDeps);
         total.filed += res.filed;
         total.withdrawn += res.withdrawn;
+        total.revised += res.revised;
       }
     }
     return total;
@@ -2575,6 +2576,8 @@ export class TaskStore {
     addReviewItem: (taskId, review, opts) => this.reviewItems.addReviewItem(taskId, review, opts),
     withdrawReviewItem: (taskId, reviewItemId, opts) =>
       this.reviewItems.withdrawReviewItem(taskId, reviewItemId, opts),
+    reviseReviewItem: (taskId, reviewItemId, patch, opts) =>
+      this.reviewItems.reviseReviewItem(taskId, reviewItemId, patch, opts),
     ownerCheck: (taskId, lineId, verdict, actor) =>
       this.doneWhen.ownerCheck(taskId, lineId, verdict, actor),
     appendNote: (taskId, input) => this.appendNote(taskId, input),

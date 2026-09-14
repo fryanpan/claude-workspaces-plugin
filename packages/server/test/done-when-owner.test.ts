@@ -20,7 +20,7 @@ import {
 const PERSON = { id: 'known-reader', name: 'Reader', kind: 'known' };
 const AGENT = { id: 'agent-otter', name: 'Otter', kind: 'agent' };
 
-function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in_progress') {
+function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in-progress') {
   const task = {
     id: 't-1',
     title: 'A task',
@@ -28,7 +28,13 @@ function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in_progress') 
     doneWhen: lines,
     reviews: [],
   } as unknown as Task;
-  const calls = { add: 0, withdraw: [] as string[], check: [] as string[], notes: [] as string[] };
+  const calls = {
+    add: 0,
+    withdraw: [] as string[],
+    revise: [] as string[],
+    check: [] as string[],
+    notes: [] as string[],
+  };
   let n = 0;
   const deps: OwnerItemDeps = {
     getTask: () => task,
@@ -56,6 +62,12 @@ function fixture(lines: DoneWhenLine[], status: Task['status'] = 'in_progress') 
       if (line) line.verdict = verdict;
       return { ok: true };
     },
+    reviseReviewItem: (_t, id, patch) => {
+      calls.revise.push(id);
+      const item = task.reviews?.find((r) => r.id === id);
+      if (item) item.review = { ...item.review, ...patch };
+      return { ok: true };
+    },
     appendNote: (_t, input) => calls.notes.push(input.text),
   };
   return { task, deps, calls };
@@ -68,8 +80,8 @@ describe('syncOwnerItems', () => {
       { id: 'd-2', text: 'tests pass', verdict: 'met' },
       { id: 'd-3', text: 'unchecked' },
     ]);
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 1, withdrawn: 0 });
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 0 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 1, withdrawn: 0, revised: 0 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 0, revised: 0 });
     expect(calls.add).toBe(1);
     expect(task.reviews?.[0]?.doneWhenLineId).toBe('d-1');
     expect(task.reviews?.[0]?.createdBy).toBe('Otter');
@@ -86,12 +98,26 @@ describe('syncOwnerItems', () => {
     syncOwnerItems('t-1', deps);
     const line = task.doneWhen?.[0] as DoneWhenLine;
     line.verdict = 'not-met';
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 1 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 1, revised: 0 });
     line.verdict = 'owner';
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 1, withdrawn: 0 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 1, withdrawn: 0, revised: 0 });
     task.doneWhen = [];
-    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 1 });
+    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 1, revised: 0 });
     expect(calls.withdraw).toEqual(['r-1', 'r-2']);
+  });
+
+  it('revises the open item when its line gains new words or proof, and leaves it alone otherwise', () => {
+    const { task, deps, calls } = fixture([{ id: 'd-1', text: 'reads well', verdict: 'owner' }]);
+    syncOwnerItems('t-1', deps);
+    expect(syncOwnerItems('t-1', deps).revised).toBe(0);
+    const line = task.doneWhen?.[0] as DoneWhenLine;
+    line.text = 'reads well at 430 wide';
+    line.proof = [{ text: 'new shot', url: 'https://example.com/b.png' }];
+    expect(syncOwnerItems('t-1', deps)).toEqual({ filed: 0, withdrawn: 0, revised: 1 });
+    expect(calls.revise).toEqual(['r-1']);
+    expect(task.reviews?.[0]?.review.headline).toContain('reads well at 430 wide');
+    expect(task.reviews?.[0]?.review.detail).toContain('new shot');
+    expect(syncOwnerItems('t-1', deps).revised).toBe(0);
   });
 
   it('files nothing on a done task', () => {
