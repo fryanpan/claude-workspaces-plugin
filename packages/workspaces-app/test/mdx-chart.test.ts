@@ -216,6 +216,18 @@ describe('a chart block on the doc page', () => {
     });
   }
 
+  it("keeps a negative bar's value clear of its label", () => {
+    mount('<Chart data={[{ label: "Up", value: 5 }, { label: "Down", value: -4 }]} />\n');
+    const svg = views()[0]?.querySelector('svg.mdx-chart');
+    const value = svg?.querySelectorAll('.mdx-bar-value')[1];
+    const label = svg?.querySelectorAll('.mdx-bar-label')[1];
+    expect(value?.textContent).toBe('-4');
+    // Baselines at least one 12px line apart.
+    expect(
+      Number(label?.getAttribute('y')) - Number(value?.getAttribute('y')),
+    ).toBeGreaterThanOrEqual(14);
+  });
+
   it('shows a component that is not a chart as before, and an unreadable chart by name', () => {
     mount(
       '<Callout type="note">\n  Last sailing at 21:30.\n</Callout>\n\n<LineChart series={rows} />\n',

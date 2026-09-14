@@ -377,7 +377,8 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
 
   const h = w < 520 ? 220 : 260;
   const top = 20;
-  const bottom = 24;
+  // A value under a negative bar sits below the plot, clear of the day labels.
+  const bottom = lo < 0 ? 40 : 24;
   const ph = h - top - bottom;
   const slot = (w - 8) / chart.bars.length;
   const sy = (v: number) => top + ph - ((v - lo) / (hi - lo)) * ph;
