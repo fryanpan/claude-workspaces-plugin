@@ -487,10 +487,11 @@ export function createReviewGate(ctx: ReviewGateContext) {
     if (linkReason !== undefined) {
       verdict = { ok: false, reason: linkReason };
     } else {
-      // What the reader has already been asked on this row, down BOTH
-      // channels. Gathered at judging time rather than at filing time, so a
-      // revision is judged against the answers that exist now — including one
-      // given while the first version of this item sat held. Inside this
+      // What the reader still has open on this row, down BOTH channels —
+      // never an answered ask (see `prior-asks.ts`). Gathered at judging time
+      // rather than at filing time, so a revision is judged against what is
+      // open now: a question answered while this item sat held stops
+      // counting against it. Inside this
       // branch because a held link means no judge call, so no prompt to fill.
       const priorAsks = priorAsksFor(
         priorAskRowFor(target.address),
