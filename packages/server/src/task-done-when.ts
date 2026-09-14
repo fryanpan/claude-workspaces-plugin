@@ -1,3 +1,4 @@
+import { isReviewItemHeld, readTaskReviewItem, reviewWithdrawn } from '@claude-workspaces/core';
 /**
  * The done-when verbs: the list somebody writes, the report a builder files
  * against it, and the owner's word on a line only a person can judge.
@@ -63,13 +64,22 @@ export type DoneWhenError =
   | 'bad-verdict'
   | 'unknown-line'
   | 'proof-required'
+  | 'link-required'
   | 'not-a-person'
   | 'not-yours'
   | 'task-done'
   | 'no-lines';
 
 export type DoneWhenResult =
-  | { ok: true; task: Task; lines: DoneWhenLine[]; closed: boolean }
+  | {
+      ok: true;
+      task: Task;
+      lines: DoneWhenLine[];
+      closed: boolean;
+      /** Owner items this write filed or revised, not yet judged — set by
+       *  `TaskStore`, which keeps the items in step with the lines. */
+      ownerItemsToJudge?: string[];
+    }
   | { ok: false; error: DoneWhenError; message: string };
 
 /** What a caller may send as one line when it WRITES the list. `id` present
@@ -206,6 +216,15 @@ function closingNote(closedBy: readonly DoneWhenLine[]): string {
   return `${head} The last ones open were ${closedBy.map((l) => `"${l.text}"`).join(', ')}.`;
 }
 
+/** Is the open review item for this owner line being held by the gate? */
+function ownerItemHeld(task: Task, lineId: string): boolean {
+  return (task.reviews ?? []).some((raw) => {
+    if (raw.doneWhenLineId !== lineId || reviewWithdrawn(raw.review)) return false;
+    const item = readTaskReviewItem(raw);
+    return item !== undefined && isReviewItemHeld(item);
+  });
+}
+
 /** The done-when verbs. One per `TaskStore`, holding no state of its own. */
 export class TaskDoneWhenStore {
   constructor(private readonly p: DoneWhenPersistence) {}
@@ -317,10 +336,16 @@ export class TaskDoneWhenStore {
       // person's judgement both gone in one call. `not-met` and `unchecked`
       // are still reportable — a builder that later finds the line broken
       // should say so rather than leave it waiting on somebody.
+      //
+      // Except while the gate is HOLDING the line's item. A held check never
+      // reached the person, and the commonest hold is "an agent could read
+      // this itself" — so the builder's own report, with proof, is the fix
+      // the hold asks for, and refusing it would leave the line nowhere.
       if (
         line.verdict === 'owner' &&
         entry.verdict === 'met' &&
-        classifyActor(actor) !== 'person'
+        classifyActor(actor) !== 'person' &&
+        !ownerItemHeld(task, line.id)
       ) {
         return {
           ok: false,
@@ -329,6 +354,17 @@ export class TaskDoneWhenStore {
         };
       }
       const proof = readProof(entry.proof);
+      // A line handed to the owner carries a link, because the link is what
+      // the reader opens: the first owner items reached the queue with none,
+      // and the owner's answer was "Where's the mock?" (2026-09-14). Read off
+      // the proof this report leaves on the line — new proof replaces the old.
+      if (entry.verdict === 'owner' && !(proof ?? line.proof ?? []).some((p) => p.url)) {
+        return {
+          ok: false,
+          error: 'link-required',
+          message: `"${line.text}" is handed to the owner with no link — attach proof with a url they can open (the mock, the page, the screenshot), or check it yourself and report it`,
+        };
+      }
       if (entry.verdict === 'met' && proof === undefined && (line.proof ?? []).length === 0) {
         return {
           ok: false,

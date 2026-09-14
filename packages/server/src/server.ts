@@ -77,6 +77,7 @@ import {
   readDocArchiveManifest,
 } from './review-archive.ts';
 import { createReviewGate } from './review-gate.ts';
+import { gateOwnerItems } from './review-items/done-when-owner.ts';
 import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
@@ -3174,6 +3175,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // Done-when lines already marked for the owner before their review items
   // existed get one each. Idempotent by construction — a line with an open
   // item gets nothing — so every start runs it and a second start files none.
+  // What it filed or revised goes through the quality gate like any filing,
+  // fired without awaiting: a board must come up while a judge is slow.
   try {
     const owner = taskStore.syncOwnerItemsEverywhere();
     if (owner.filed + owner.withdrawn + owner.revised > 0) {
@@ -3181,6 +3184,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         `[tasks] owner done-when lines: filed ${owner.filed} review item(s), withdrew ${owner.withdrawn}, revised ${owner.revised}`,
       );
     }
+    void (async () => {
+      for (const { taskId, reviewItemIds } of owner.toJudge) {
+        await gateOwnerItems(taskId, reviewItemIds, undefined, {
+          getTask: (id) => taskStore.getTask(id),
+          judgeReviewItem,
+          announceTaskReview,
+        });
+      }
+    })().catch((err) => console.error('[tasks] judging owner done-when items failed:', err));
   } catch (err) {
     console.error('[tasks] owner done-when review items failed:', err);
   }

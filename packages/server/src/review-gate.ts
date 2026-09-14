@@ -296,8 +296,16 @@ export function createReviewGate(ctx: ReviewGateContext) {
    *  refuses. */
   function reviseCallFor(address: ReviewGateAddress): string {
     switch (address.kind) {
-      case 'task':
+      case 'task': {
+        // A done-when check is the server's template over a line, so the
+        // builder's next REPORT is what changes its words — a revision of the
+        // item would be written over by the next sync.
+        const lineId = ownerLineOf(address);
+        if (lineId !== undefined) {
+          return `report_done_when(taskId="${address.taskId}", lines=[{id: "${lineId}", verdict: "met" or "owner", proof: [{text, url}]}])`;
+        }
         return `revise_review_item(taskId="${address.taskId}", reviewItemId="${address.reviewItemId}")`;
+      }
       case 'decision':
         return `revise_review_item(taskId="${address.taskId}")`;
       default:
@@ -322,6 +330,13 @@ export function createReviewGate(ctx: ReviewGateContext) {
     return `Admitted to the queue after ${REVIEW_GATE_MAX_HOLDS} holds; the standing concern is unchanged — ${first}.`;
   }
 
+  /** The done-when line a ticket item checks, when it is an owner check. */
+  function ownerLineOf(address: ReviewGateAddress): string | undefined {
+    if (address.kind !== 'task') return undefined;
+    return taskStore.getTask(address.taskId)?.reviews?.find((r) => r.id === address.reviewItemId)
+      ?.doneWhenLineId;
+  }
+
   /** What a filing route says when the gate held the item. Points at the
    *  fix rather than only at the verdict: the filer's next act is one call. */
   function heldMessage(
@@ -341,7 +356,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
       // The draft, when the judge wrote one. A hold that names the words is
       // one edit away from passing; a hold that names a category is a guess.
       (add ? `Add this sentence: “${add}” ` : '') +
-      `It is on the ${address.kind === 'thread' ? 'thread' : 'ticket'}; revise it with ${reviseCallFor(address)}. ` +
+      (ownerLineOf(address) !== undefined
+        ? `It is the done-when check you handed over; check the line yourself and report it met with what you read, or report it again with what the reader needs: ${reviseCallFor(address)}. `
+        : `It is on the ${address.kind === 'thread' ? 'thread' : 'ticket'}; revise it with ${reviseCallFor(address)}. `) +
       (last
         ? 'This is the last hold: the next revision goes to the reader either way.'
         : 'Every revision is judged again, and the item reaches the queue when it passes.') +
@@ -391,6 +408,8 @@ export function createReviewGate(ctx: ReviewGateContext) {
     /** Whatever the surface must do once a verdict is durable — refresh the
      *  projection, broadcast, both. Called only on a write that landed. */
     settled: (row: T) => void;
+    /** The item hands over a done-when line — see `ReviewJudgeItem.ownerCheck`. */
+    ownerCheck?: boolean;
   }
 
   type GateOutcome<T> =
@@ -529,6 +548,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
             ...(words.secrets !== undefined ? { secrets: words.secrets } : {}),
             ...(heldFor.length > 0 ? { priorHolds: heldFor } : {}),
             ...(priorAsks.length > 0 ? { priorAsks } : {}),
+            ...(target.ownerCheck ? { ownerCheck: true } : {}),
           },
         });
       } catch (err) {
@@ -686,6 +706,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
           return res.ok ? { ok: true, row: res.item } : { ok: false };
         },
         settled: () => taskProjection.refreshTask(task),
+        ...(ownerLineOf({ kind: 'task', taskId: task.id, reviewItemId: item.id }) !== undefined
+          ? { ownerCheck: true }
+          : {}),
       },
       item,
       author,
