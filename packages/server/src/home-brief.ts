@@ -299,6 +299,16 @@ function answeredShape(input: BriefInput, row: BriefEventRow): AnsweredReview {
   return input.reviewOf?.(row.taskId, row.reviewItemId) ?? { shape: 'decision' };
 }
 
+/**
+ * The questions an answer left open (`answer-coverage.ts`). The row is still
+ * `decision.answered`, but the item stays on the reader's queue, so the brief
+ * must not count it as answered.
+ */
+function openPartsOf(row: BriefEventRow): string[] {
+  if (row.event !== 'decision.answered' || !Array.isArray(row.openParts)) return [];
+  return row.openParts.filter((p): p is string => typeof p === 'string' && p !== '');
+}
+
 function actorName(actor: unknown): string | undefined {
   if (typeof actor === 'string') return actor;
   if (actor && typeof actor === 'object' && 'name' in actor) {
@@ -363,6 +373,7 @@ export function deterministicBrief(input: BriefInput): string {
   const created: string[] = [];
   const answered: string[] = [];
   const reviewed: string[] = [];
+  const partlyAnswered: string[] = [];
   const handedOver: string[] = [];
   let valuesHandedOver = 0;
   const reopened: string[] = [];
@@ -377,6 +388,10 @@ export function deterministicBrief(input: BriefInput): string {
         else if (row.to === 'in-progress') started.push(linked(input, row));
         break;
       case 'decision.answered': {
+        if (openPartsOf(row).length > 0) {
+          partlyAnswered.push(linked(input, row));
+          break;
+        }
         const asked = answeredShape(input, row);
         if (asked.shape === 'secret') {
           handedOver.push(linked(input, row));
@@ -421,6 +436,10 @@ export function deterministicBrief(input: BriefInput): string {
     if (reviewed.length > 0)
       lines.push(
         `**Reviewed:** ${reviewed.length} ${plural(reviewed.length, 'review was', 'reviews were')} answered — ${listOf(reviewed)}.`,
+      );
+    if (partlyAnswered.length > 0)
+      lines.push(
+        `**Answered in part:** ${listOf(partlyAnswered)} — the rest is still on your queue.`,
       );
     if (handedOver.length > 0)
       lines.push(
@@ -539,13 +558,19 @@ export function buildBriefPrompt(
       const who = actorName(row.actor);
       // The model reads the event name as the claim, so an answer to an item
       // that decided nothing is not handed over as `decision.answered`.
-      const asked = row.event === 'decision.answered' ? answeredShape(input, row).shape : null;
+      const open = openPartsOf(row);
+      const asked =
+        row.event === 'decision.answered' && open.length === 0
+          ? answeredShape(input, row).shape
+          : null;
       const what =
-        asked === 'secret'
-          ? 'secret.handed_over'
-          : asked === 'review'
-            ? 'review.answered'
-            : String(row.event);
+        open.length > 0
+          ? `review.partly_answered · still open: ${open.map((q) => `"${q}"`).join('; ')}`
+          : asked === 'secret'
+            ? 'secret.handed_over'
+            : asked === 'review'
+              ? 'review.answered'
+              : String(row.event);
       const task = typeof row.taskId === 'string' ? linked(input, row) : '';
       const extra =
         row.event === 'task.transitioned'
@@ -589,7 +614,8 @@ export function buildBriefPrompt(
     'state the outcome, treat the polarity as undeterminable and say only that an answer was recorded.',
     'A secret.handed_over event means the reader handed over values for an agent to use, and',
     'review.answered means they replied to a review; neither is a decision, so never count one as',
-    'a decision.',
+    "a decision. review.partly_answered means they answered only some of an item's questions: the item",
+    'is still open for the ones it names, so never report it as answered, decided or done.',
     '',
     "The reader's standing instructions for this brief:",
     instructions,

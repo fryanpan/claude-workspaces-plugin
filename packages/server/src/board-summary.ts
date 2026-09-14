@@ -70,8 +70,16 @@ export function boardSummaryPrompt(args: {
     const title = typeof r.taskId === 'string' ? args.titleOf(r.taskId) : undefined;
     const text = typeof r.text === 'string' ? r.text.slice(0, NOTE_MAX_CHARS) : '';
     const to = typeof r.to === 'string' ? ` → ${r.to}` : '';
+    // An answer that left questions open keeps its item open, so it is not
+    // written as the answer that closed it.
+    const partly = Array.isArray(r.openParts) && r.openParts.length > 0;
     lines.push(
-      [r.event as string, title ? `"${title}"` : '', to, text ? `: ${text}` : '']
+      [
+        partly ? 'decision.partly_answered' : (r.event as string),
+        title ? `"${title}"` : '',
+        to,
+        text ? `: ${text}` : '',
+      ]
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim(),

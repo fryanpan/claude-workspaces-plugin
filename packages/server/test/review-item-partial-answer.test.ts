@@ -154,6 +154,14 @@ describe('an answer that covers only some of an item’s questions', () => {
     const partialRow = answeredRows(ws).at(-1);
     expect(partialRow?.openParts).toEqual(verdict.open);
     expect(decisionAnsweredLine(partialRow ?? {})).toContain('Who gets the failure alert?');
+    // Home's catch-up does not report the open item as answered.
+    const home = () =>
+      jj<{ brief: { markdown: string } }>(
+        fetch(`${base}/workspaces/${ws}/home?user=Reader&format=json`),
+      );
+    const partlyBrief = (await home()).brief.markdown;
+    expect(partlyBrief).toContain('**Answered in part:** [Ship the nightly export]');
+    expect(partlyBrief).not.toContain('**Reviewed:**');
 
     // The rest is answered: judged together with the first answer, and closed.
     verdict = { open: [] };
