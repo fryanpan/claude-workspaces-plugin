@@ -44,7 +44,7 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
-import { contentWords } from './notes-idea-coverage.ts';
+import { contentWords, negates } from './notes-idea-coverage.ts';
 import { topicKey } from './notes-quality.ts';
 
 export interface NotesDedupeContext {
@@ -131,12 +131,15 @@ export function sameTopic(a: string, b: string): boolean {
 }
 
 /** Whether two notes say the same thing: the same words once normalised, or
- *  at least three content words with nearly all of them shared. */
+ *  at least three content words with nearly all of them shared — and never
+ *  when one says the opposite of the other. */
 export function sameNote(a: string, b: string): boolean {
   const ka = noteKey(a);
   const kb = noteKey(b);
   if (ka.length === 0 || kb.length === 0) return false;
   if (ka === kb) return true;
+  // Read off the lines as written: the key has already split `don't`.
+  if (negates(a) !== negates(b)) return false;
   const wa = new Set(contentWords(ka));
   const wb = new Set(contentWords(kb));
   if (wa.size < 3 || wb.size < 3) return false;
@@ -251,8 +254,12 @@ export function dedupeNotesEdits(
     );
 
   const out: prose.BlockEdit[] = [];
-  /** A new heading this batch opened, by topic, so a repeat can join it. */
-  const opened = new Map<string, prose.BlockEdit & { markdown: string }>();
+  /** The new headings this batch opened, so a repeat can join its first. */
+  const opened: Array<{
+    made: prose.BlockEdit & { markdown: string };
+    text: string;
+    level: number;
+  }> = [];
 
   const keepLines = (lines: readonly string[], destination: string | undefined): string[] => {
     const kept: string[] = [];
@@ -358,12 +365,16 @@ export function dedupeNotesEdits(
         continue;
       }
       const opening = `new:${key}`;
-      const again = opened.get(key);
+      const heading = seg.heading;
+      const again = opened.find(
+        (o) => o.level === heading.level && sameTopic(o.text, heading.text),
+      );
       const lines = keepLines(seg.lines, opening);
       if (atEnd) target = opening;
       if (again) {
         notes.push('merged a topic heading this batch opened twice');
-        if (hasWords(lines)) again.markdown = `${again.markdown}\n${lines.join('\n').trim()}`;
+        if (hasWords(lines))
+          again.made.markdown = `${again.made.markdown}\n${lines.join('\n').trim()}`;
         continue;
       }
       // A topic whose every note was already in the section is not opened
@@ -379,7 +390,7 @@ export function dedupeNotesEdits(
           `${'#'.repeat(seg.heading.level)} ${seg.heading.text}\n\n${lines.join('\n').trim()}`.trim(),
       };
       if (key.length > 0) {
-        opened.set(key, made);
+        opened.push({ made, text: heading.text, level: heading.level });
         openedHere = true;
       }
       out.push(made);

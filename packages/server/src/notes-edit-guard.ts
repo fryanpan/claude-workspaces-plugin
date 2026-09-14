@@ -98,7 +98,7 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
-import { IDEA_CARRIED_SHARE, contentWords } from './notes-idea-coverage.ts';
+import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
 
 /** What the guard decided, for the caller to apply and to log. */
 export interface NotesEditGuardResult {
@@ -190,6 +190,9 @@ function saidElsewhere(
 function restates(other: string, note: string): boolean {
   const had = contentWords(note);
   if (had.length === 0) return false;
+  // The opposite statement shares every content word and keeps none of the
+  // note's meaning.
+  if (negates(other) !== negates(note)) return false;
   const has = new Set(contentWords(other));
   return had.filter((w) => has.has(w)).length / had.length >= RESTATED_SHARE;
 }

@@ -94,9 +94,15 @@ describe('a topic heading the section already has', () => {
         tick === 1
           ? addNotes(input, '- Slipway work is booked')
           : [
-              { op: 'insert_at_end', markdown: '### Slipway\n\n- Cradle needs a new winch' },
+              {
+                op: 'insert_at_end',
+                markdown: '### Slipway repairs\n\n- Cradle needs a new winch',
+              },
               { op: 'insert_at_end', markdown: '### Crew rota\n\n- Rota changes every Monday' },
-              { op: 'insert_at_end', markdown: '### Slipway\n\n- Paint arrives on Friday' },
+              {
+                op: 'insert_at_end',
+                markdown: '### Initial slipway repairs\n\n- Paint arrives on Friday',
+              },
             ],
     });
     await h.speak('slipway work is booked');
@@ -104,6 +110,7 @@ describe('a topic heading the section already has', () => {
     const notes = h.notes();
     expect(count(notes, '### Slipway')).toBe(1);
     expect(notes).toContain('Cradle needs a new winch');
+    expect(notes).not.toContain('Initial slipway');
     expect(notes.indexOf('Paint arrives on Friday')).toBeLessThan(notes.indexOf('### Crew rota'));
   });
 });
@@ -135,6 +142,19 @@ describe('a note the section already carries', () => {
         'Does the crane inspection slip again (unconfirmed)',
       ),
     ).toBe(true);
+    // The opposite fact is not a restatement, however many words it shares.
+    expect(
+      sameNote(
+        'Crane is safe for the Monday inspection',
+        "Crane isn't safe for the Monday inspection",
+      ),
+    ).toBe(false);
+    expect(
+      sameNote(
+        'Crane is safe for the Monday inspection',
+        'Crane is not safe for the Monday inspection',
+      ),
+    ).toBe(false);
     // The control: two notes about one crane are not one note.
     expect(
       sameNote('Crane inspection slips a week', 'Crane inspection needs a second engineer'),
