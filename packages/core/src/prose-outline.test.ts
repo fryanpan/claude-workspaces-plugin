@@ -474,12 +474,12 @@ describe('applyBlockEdits while a browser holds the doc open', () => {
     expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'bulletList']);
   });
 
-  it('still refuses to join lists of different types across the paragraph', () => {
+  it('still refuses to join lists of different types, and opens the new one before the paragraph', () => {
     const doc = docOf('## Notes\n\n- one\n');
     browserTrailingNode(doc);
     const headingId = readOutline(doc)[0]?.id as string;
     apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '1. first\n' }]);
-    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph', 'orderedList']);
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'orderedList', 'paragraph']);
   });
 
   it('opens a list when the section holds only the browser paragraph', () => {
@@ -488,7 +488,9 @@ describe('applyBlockEdits while a browser holds the doc open', () => {
     fragment.push([new Y.XmlElement('paragraph')]);
     const headingId = readOutline(doc)[0]?.id as string;
     apply(doc, [{ op: 'insert_under_heading', headingId, markdown: '- one\n' }]);
-    expect(topKinds(doc)).toEqual(['heading', 'paragraph', 'bulletList']);
-    expect(readOutline(doc).map((e) => e.text)).toEqual(['Notes', '', 'one']);
+    // In FRONT of the browser's paragraph: behind it, the paragraph is
+    // stranded mid-section and the editor adds another at the end.
+    expect(topKinds(doc)).toEqual(['heading', 'bulletList', 'paragraph']);
+    expect(readOutline(doc).map((e) => e.text)).toEqual(['Notes', 'one', '']);
   });
 });
