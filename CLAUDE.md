@@ -266,8 +266,8 @@ with `--cc`.
 `.githooks/pre-push` runs a regex scanner (denylist + registry project names)
 on every push, and a Haiku scanner only on pushes to fryanpan-owned remotes
 (`SCRUB_HAIKU_FORCE=1` forces it elsewhere). Haiku reads only the lines a
-free local pass flags as carrying a word the repository has not already
-published, with two lines of context; a push with none makes no call, and a
+free local pass flags as carrying a word, number or key the repository has
+not already published, with two lines of context; a push with none makes no call, and a
 name built from already-public words is never judged
 (`SCRUB_HAIKU_RULES=off` sends the whole push). The Haiku key's daily spend cap
 is shared with other repos on the machine (`SCRUB_HAIKU_DAILY_USD`, ledger

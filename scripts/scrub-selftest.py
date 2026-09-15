@@ -1372,6 +1372,20 @@ def check_rules_pass() -> None:
         expect(f"rules pass: ...and sent to Haiku ({kind})",
                0 if f"+{line}" in chosen.text else 1, 0, chosen.text)
 
+    # Haiku judges more than names. A number, an amount, a reading or a key on
+    # a line of published words is still new, and is sent for the same reason.
+    for kind, line, mark in (
+        ("phone number", "Every sailing waits 000 000 0000.", "# "),
+        ("account number", "Every sailing waits 00000000.", "# "),
+        ("amount", "Every sailing waits $0.00.", "$ "),
+        ("reading", "Every sailing waits 0 mg/dL.", "reading "),
+        ("key", "Every sailing waits EXAMPLE_KEY_00000000000000.", "key "),
+    ):
+        chosen = scrub_names.select(rules_patch("notes.md", [ordinary, line, ordinary]), public)
+        expect(f"rules pass: a line of published words with a {kind} on it is sent",
+               0 if f"+{line}" in chosen.text and any(t.startswith(mark) for t in chosen.triggers) else 1,
+               0, f"triggers {sorted(chosen.triggers)!r}")
+
     chosen = scrub_names.select(rules_patch("notes.md", [ordinary] * 3), public)
     expect("rules pass: a diff of already-published words sends nothing",
            0 if chosen.text == "" and chosen.read >= 3 and chosen.flagged == 0 else 1, 0,

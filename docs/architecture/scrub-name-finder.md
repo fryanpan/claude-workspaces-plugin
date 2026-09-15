@@ -55,7 +55,14 @@ per 30 new commits on main.
   "ask", "thanks", "with" or "by"; before "said" or "prefers"; as the value
   of an `author`, `name` or `speaker` field; or as an owner ("Saltmarsh's").
   So "with Carol" is flagged even if "carol" is everywhere;
-- an email address or an `@handle`.
+- an email address or an `@handle`;
+- a number, amount or key: a run of six or more digits (a phone or account
+  number; an ISO date is left out), an amount with a currency sign or
+  currency word, a reading with a medical unit such as mg/dL, or an opaque
+  string of 20 or more characters that mixes letters and digits, or 16 or
+  more hex digits. Haiku judges these as well as names, and `tokens()` drops
+  digits, so without this rule a salary or a key written among ordinary words
+  would never be sent.
 
 Words split out of camelCase count as words. Hex runs and long encoded blobs
 are skipped. A single non-Latin character counts as a word, because one Han
@@ -159,7 +166,7 @@ rules. Cost is a multiple of today's full scan.
 | finder | recall | lines flagged | cost × today | install | cold start | speed |
 |---|---|---|---|---|---|---|
 | today: Haiku reads everything | — | 100% | 1.00 | none | none | — |
-| **shipped rules** (stdlib) | **98.81%** | **5.0%** (3.3% sent) | **0.23** | none | 3–13 s first push, then ms | 25 ms per push |
+| **shipped rules** (stdlib) | **98.81%** | **5.2%** (3.4% sent) | **0.23** | none | 3–13 s first push, then ms | 25 ms per push |
 | research rules, novelty only | 95.53% | 1.4% | 0.13 | none | — | — |
 | research rules, best mix (name lists + word frequencies) | 98.71% | 7.3% | 0.21 | 107 MB of lists | — | — |
 | spaCy sm, person/org/product/place/work | 55.30% | 12.2% | 0.28 | ~40 MB + deps | 7.8 s | 856 lines/s |
@@ -172,14 +179,16 @@ rules. Cost is a multiple of today's full scan.
 | GLiNER at 0.2 | 95.62% | 35.5% | 0.48 | | | |
 | GLiNER at 0.2 + rules | 99.58% | 38.1% | 0.52 | | | |
 
-With the shipped rules, 98.2% of pushes still make a call, because nearly
+With the shipped rules, 99.2% of pushes still make a call, because nearly
 every commit adds some identifier the repository has not used five times.
 The saving comes from sending less, not from skipping calls.
 
 ### Stage 2: what Haiku decides on what it is sent
 
 The 24 recall cases, through the real key. Each arm used its own throwaway
-ledger, so the machine's shared cap was not touched.
+ledger, so the machine's shared cap was not touched. The rules-on sweep ran
+before the number and key marks were added; with them, four negative cases
+send up to 0.7KB more and nothing else changes.
 
 | path | runs | positives blocked | negatives blocked | spend |
 |---|---|---|---|---|
@@ -203,18 +212,18 @@ On the corpus, with each commit treated as a push:
 
 | | today | rules pass |
 |---|---|---|
-| pushes that call Haiku | 100% | 98.2% |
-| tokens in per push | 33,373 | 6,946 |
-| $ per push | 0.0381 | 0.0086 |
-| $ per day at 80 pushes | 3.04 | 0.69 |
+| pushes that call Haiku | 100% | 99.2% |
+| tokens in per push | 33,373 | 7,085 |
+| $ per push | 0.0381 | 0.0088 |
+| $ per day at 80 pushes | 3.04 | 0.70 |
 
 Three merged PRs from main, each sent with the real key:
 
 | PR size | patch chars | chars sent | calls | $ today | $ with rules |
 |---|---|---|---|---|---|
-| small | 4,985 | 1,122 | 1 | 0.0051 | 0.0032 |
-| medium | 35,543 | 2,010 | 1 | 0.0190 | 0.0036 |
-| large | 229,670 | 18,999 | 1 (was 8) | 0.1060 | 0.0095 |
+| small | 4,985 | 1,122 | 1 | 0.0051 | 0.0035 |
+| medium | 35,543 | 2,010 | 1 | 0.0190 | 0.0040 |
+| large | 229,670 | 19,176 | 1 (was 8) | 0.1060 | 0.0102 |
 
 A call's floor is the 2,400-token prompt, about $0.003, which is now most of
 what a small push costs.
@@ -231,7 +240,7 @@ what a small push costs.
 - **spaCy and Presidio** catch about half the names alone. Most of the names
   they miss live in code and identifiers, which is where this repository's
   names appear. Combined with rules they reach 98.91–98.95%, 0.1 points above
-  the shipped rules, while flagging 13.4–16.9% of lines against 5.0%. They
+  the shipped rules, while flagging 13.4–16.9% of lines against 5.2%. They
   also need a model install on every machine.
 - **Name lists and word frequencies** raised the research rules to 98.7%, but
   they are 107 MB of third-party data that cannot be vendored into a public

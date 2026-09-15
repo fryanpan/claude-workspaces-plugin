@@ -15,9 +15,10 @@ Usage:
   scrub-haiku.py --spend-report        # today's spend on the key, every repo; no scan
   ... --public-base REV                # words in REV count as already public
 
-**Only lines that may hold a name are sent.** A free local pass
+**Only lines that may hold a leak are sent.** A free local pass
 (scrub_names.py) reads the whole push first and picks the lines carrying a
-word the repository has not already published, with two lines either side.
+word, email, long number, amount, reading or key the repository has not
+already published, with two lines either side.
 Only those go to Haiku; a push with none makes no call and books nothing.
 `--push-tip` finds the public base itself. The other modes know nothing is
 public unless `--public-base` says so, and then every line with a word on it
@@ -1019,11 +1020,11 @@ def excerpt(diff: str, base: "str | None") -> str:
     chosen = scrub_names.select(diff, scrub_names.public_vocabulary(base),
                                 scrub_git.IDENTITY_PLACEHOLDER)
     if not chosen.text:
-        print(f"[scrub-haiku] rules pass: none of {chosen.read} lines carries a word "
+        print(f"[scrub-haiku] rules pass: none of {chosen.read} lines carries anything "
               "this repository has not published. No call.", file=sys.stderr)
         return ""
-    print(f"[scrub-haiku] rules pass: {chosen.flagged} of {chosen.read} lines carry a new "
-          f"word; sending {chosen.sent} with context ({len(chosen.text):,} of "
+    print(f"[scrub-haiku] rules pass: {chosen.flagged} of {chosen.read} lines carry something "
+          f"new; sending {chosen.sent} with context ({len(chosen.text):,} of "
           f"{len(diff):,} chars).", file=sys.stderr)
     return chosen.text
 

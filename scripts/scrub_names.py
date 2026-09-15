@@ -6,7 +6,7 @@ repository has already published a thousand times, and none of them can
 publish a name that is not already public. So a push is first read locally,
 for nothing, and only the lines that carry something NEW — a word the
 repository has not published, a capitalised pair it has never written, an
-email or handle it has never shown — travel to Haiku, each with a few lines
+email, handle, long number, amount or key it has never shown — travel to Haiku, each with a few lines
 either side so the model can tell a person from a function.
 
 **What this costs in recall, stated once and plainly.** A name made only of
@@ -65,6 +65,31 @@ _CUE_AFTER = re.compile(
     re.IGNORECASE,
 )
 _OWNER = re.compile(r"\b([A-Z][a-z]+)['’]s\b")
+# Haiku judges more than names: account and phone numbers, amounts, health
+# readings and keys. Those are digits and opaque strings, which tokens() drops,
+# so they are counted as marks of their own and a new one is sent like a new
+# word. An ISO date is left out: this repository writes a new one every day.
+_OPAQUE = re.compile(r"(?<![\w-])(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{20,}(?![\w-])"
+                     r"|(?<![0-9A-Za-z])[0-9a-fA-F]{16,}(?![0-9A-Za-z])")
+_NUMBER = re.compile(r"(?<!\w)(?<!\d\.)\+?\(?\d[\d ().-]{4,}\d(?!\w|\.\d)")
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MONEY = re.compile(r"[$€£]\s?\d[\d,]*(?:\.\d+)?"
+                    r"|\b\d[\d,]*(?:\.\d+)?\s?(?:USD|EUR|GBP|dollars)\b", re.IGNORECASE)
+_READING = re.compile(r"\b\d+(?:\.\d+)?\s?(?:mg/dl|mmol/l|mmhg|bpm|mcg|mg|iu)\b", re.IGNORECASE)
+
+
+def _marks(text: str) -> List[str]:
+    """Emails, handles, and the digit and opaque shapes a leak can take."""
+    out = [m.group(0).lower() for m in _EMAIL.finditer(text)]
+    out += ["@" + m.group(1).lower() for m in _HANDLE.finditer(text)]
+    out += ["key " + m.group(0).lower() for m in _OPAQUE.finditer(text)]
+    for m in _NUMBER.finditer(text):
+        digits = re.sub(r"\D", "", m.group(0))
+        if len(digits) >= 6 and not _ISO_DATE.match(m.group(0)):
+            out.append("# " + digits)
+    out += ["$ " + m.group(0).lower() for m in _MONEY.finditer(text)]
+    out += ["reading " + m.group(0).lower() for m in _READING.finditer(text)]
+    return out
 
 
 def _cued(text: str) -> List[str]:
@@ -123,7 +148,8 @@ class Vocabulary:
     Words case-folded; capitalised words in exactly that case, which is what
     separates "carol singers" from "Carol"; capitalised pairs, which flag a full
     name made of two words the repository already uses; words in a name's
-    place (`_CUE_BEFORE`); and emails and handles.
+    place (`_CUE_BEFORE`); and marks: emails, handles, long numbers, amounts,
+    readings and opaque keys.
     """
 
     def __init__(self) -> None:
@@ -131,7 +157,7 @@ class Vocabulary:
         self.case: Counter = Counter()
         self.pairs: Counter = Counter()
         self.cued: Counter = Counter()
-        self.marks: Counter = Counter()  # emails and @handles, case-folded
+        self.marks: Counter = Counter()  # _marks(): emails, handles, numbers, keys
 
     def learn(self, text: str) -> None:
         for t in tokens(text):
@@ -141,10 +167,7 @@ class Vocabulary:
         for a, b in _TITLE_PAIR.findall(text):
             self.pairs[f"{a} {b}".lower()] += 1
         self.cued.update(_cued(text))
-        for m in _EMAIL.finditer(text):
-            self.marks[m.group(0).lower()] += 1
-        for m in _HANDLE.finditer(text):
-            self.marks["@" + m.group(1).lower()] += 1
+        self.marks.update(_marks(text))
 
     def __len__(self) -> int:
         return len(self.lower)
@@ -166,12 +189,9 @@ def triggers(text: str, vocab: Vocabulary) -> Set[str]:
     for cued in _cued(text):
         if vocab.cued[cued] < RARE_BELOW:
             hits.add(cued.replace("'s ", ""))
-    for m in _EMAIL.finditer(text):
-        if vocab.marks[m.group(0).lower()] < RARE_BELOW:
-            hits.add(m.group(0).lower())
-    for m in _HANDLE.finditer(text):
-        if vocab.marks["@" + m.group(1).lower()] < RARE_BELOW:
-            hits.add("@" + m.group(1).lower())
+    for mark in _marks(text):
+        if vocab.marks[mark] < RARE_BELOW:
+            hits.add(mark)
     return hits
 
 
@@ -399,7 +419,7 @@ def rules_off() -> bool:
 # not descend from it (a push to an older branch) rebuilds from the tree.
 
 # Bump when tokens() or the tables change: an old file then rebuilds.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 _TABLES = ("lower", "case", "pairs", "cued", "marks")
 
 
