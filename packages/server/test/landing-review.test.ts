@@ -98,7 +98,7 @@ describe('the bar', () => {
   it('gives a board the same colour on every render and escapes its name', () => {
     const colourOf = (html: string) => html.match(/style="--c:(#[0-9a-f]{6})"/)?.[1];
     const first = colourOf(bar([item('w-river', 'Riverbend')]));
-    expect(BOARD_BLOCK_COLOURS).toContain(first);
+    expect(BOARD_BLOCK_COLOURS).toContain(first ?? '');
     expect(colourOf(bar([item('w-river', 'Riverbend'), item('w-kiln', 'Kiln')]))).toBe(first);
     const html = bar([item('w-x', '<b>Kiln</b>')]);
     expect(html).not.toContain('<b>Kiln</b>');
