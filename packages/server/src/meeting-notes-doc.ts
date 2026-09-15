@@ -118,7 +118,6 @@ import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import { resolveSchemeLinks } from './notes-scheme-links.ts';
 import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
-import { homeNotesEdits } from './notes-section-home.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
 import {
   reattributeNotesSection,
@@ -544,18 +543,6 @@ function noteGuardKept(docId: string, meetingId: string, why: string): void {
 }
 
 /**
- * One line per note this write aimed outside the meeting's own section.
- *
- * `console.warn`, and never collapsed: a tick addressing the doc's own body
- * is the failure that put a whole meeting's notes under somebody's agenda,
- * and the count per meeting is what says whether the prompt is the problem
- * (`notes-section-home.ts`).
- */
-function noteSectionRehome(docId: string, meetingId: string, why: string): void {
-  console.warn(`[meeting-notes] ${docId} meeting ${meetingId}: re-homed ${why}`);
-}
-
-/**
  * One line per tick whose words were recovered from a failed address.
  *
  * IT SAYS HOW MANY LANDED, not only how many were tried, because the repair
@@ -716,19 +703,10 @@ export function applyNotesUpdate(
   for (const why of guarded.kept) {
     noteGuardKept(update.docId, update.meetingId, why);
   }
-  // EVERY NOTE UNDER THIS MEETING'S OWN HEADING (`notes-section-home.ts`).
-  // AFTER the guard, because RULE 2 turns a replace into an insert under the
-  // bullet's own heading and that bullet can be outside the section; BEFORE
-  // the dedupe, because the dedupe decides whether a note is a restatement or
-  // a move from where it is about to LAND, and judging that against an
-  // address this step is about to change would answer for a landing place the
-  // note never reaches.
-  const homed = homeNotesEdits(guarded.edits, { notesHeadingId, outline: full });
-  for (const why of homed.rehomed) noteSectionRehome(update.docId, update.meetingId, why);
   // EACH TOPIC HEADING ONCE, EACH NOTE ONCE (2026-09-14). After the guard, so
   // a replace it turned into an insert is judged against the note it was
   // meant to replace (`notes-edit-dedupe.ts`).
-  const deduped = dedupeNotesEdits(homed.edits, {
+  const deduped = dedupeNotesEdits(guarded.edits, {
     notesHeadingId,
     outline: full,
     speech: update.tick.turns.map((t) => t.text),
