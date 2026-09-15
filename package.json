@@ -50,6 +50,8 @@
     "identity:link": "bun run scripts/link-identity.ts",
     "review:migrate": "bun run packages/server/src/migrate-review-queue.ts",
     "meeting:replay": "bun run scripts/replay-meeting-audio.ts",
+    "meeting:rerun": "bun run scripts/rerun-meeting.ts",
+    "meeting:synthetic": "bun run scripts/synthetic-meeting.ts",
     "notes:eval": "bun run scripts/notes-eval.ts",
     "notes:latency": "bun run scripts/notes-latency-check.ts --fail-over 10000",
     "notes:eval:fixtures": "bun run scripts/notes-eval-fixtures.ts",
