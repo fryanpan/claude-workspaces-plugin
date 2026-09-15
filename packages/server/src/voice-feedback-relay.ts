@@ -14,7 +14,8 @@
  * note is written once a thought is finished, not rewritten mid-sentence; the
  * page shows the words themselves until then (`heard.pending`). `cadenceMs`
  * is a ceiling for talk that never pauses. A tap on another element (`pin`) or
- * an earlier note (`reopen`) is a pause too. One tick at a time.
+ * an earlier note (`reopen`) is a pause too: the words said before it go to
+ * the old note, and the ones after wait for the new. One tick at a time.
  *
  * WHO MAY OPEN ONE. The upgrade refuses share visitors outright, because a
  * session spends a transcription engine and the model on the owner's keys;
@@ -29,10 +30,10 @@ import {
   type VoiceTarget,
   parseVoiceClientMessage,
 } from '@claude-workspaces/core';
-import type { EngineTurn, TranscriptionEngine, TranscriptionSession } from './transcribe.ts';
+import type { EngineTurn, TranscriptionEngine } from './transcribe.ts';
+import type { LiveComment, Session, VoiceTimers, VoiceWs } from './voice-feedback-session.ts';
 import {
   VoiceLog,
-  type WavWriter,
   clipPath,
   describeTarget,
   openNextSegment,
@@ -49,17 +50,7 @@ import {
 } from './voice-feedback-tidy.ts';
 import { VoiceTurns } from './voice-feedback-turns.ts';
 
-/** The slice of a Bun `ServerWebSocket` this module needs. */
-export interface VoiceWs {
-  data: { docId: string; workspaceId?: string; readOnly?: boolean };
-  send(payload: string): void;
-  close(code?: number, reason?: string): void;
-}
-
-export interface VoiceTimers {
-  set(fn: () => void, ms: number): unknown;
-  clear(handle: unknown): void;
-}
+export type { VoiceTimers, VoiceWs } from './voice-feedback-session.ts';
 
 export interface VoiceFeedbackDeps {
   engines: readonly TranscriptionEngine[];
@@ -80,49 +71,6 @@ export const VOICE_CADENCE_MS = 30_000;
 export const VOICE_PAUSE_MS = 1_400;
 /** PCM16 mono at the meeting rate: bytes per millisecond of audio. */
 const BYTES_PER_MS = (MEETING_SAMPLE_RATE * 2) / 1000;
-
-interface LiveComment {
-  key: string;
-  text: string;
-  target: number | null;
-  raw: string;
-  startMs: number;
-  endMs: number;
-  fixed: boolean;
-  final: boolean;
-  /** Tapped to add to, and no tick has grown it since. */
-  chosen?: boolean;
-  /** The thread the page posted it as, once the page says. */
-  threadId?: string;
-}
-
-interface Session {
-  ws: VoiceWs;
-  engine: TranscriptionSession | null;
-  wav: WavWriter;
-  log: VoiceLog;
-  segment: number;
-  targets: VoiceTarget[];
-  turns: VoiceTurns;
-  comments: Map<string, LiveComment>;
-  open: LiveComment | null;
-  pinned: number | null | undefined;
-  seq: number;
-  /** Audio position (ms) where the words not yet ticked begin. */
-  cursorMs: number;
-  timer: unknown;
-  /** When the oldest word no tick has taken was heard; null when none waits. */
-  since: number | null;
-  /** The tick in flight, if any — one at a time. */
-  inflight: Promise<void> | null;
-  /** Taps waiting on the words before them to be folded, in order. */
-  switching: Promise<void>;
-  /** The one ending: a Stop and a close that race share it. */
-  ending: Promise<void> | null;
-  closed: boolean;
-  usd: number;
-  ticks: number;
-}
 
 export class VoiceFeedbackRelay {
   private readonly sessions = new WeakMap<VoiceWs, Session>();
@@ -246,9 +194,11 @@ export class VoiceFeedbackRelay {
   }
 
   private onTurn(s: Session, t: EngineTurn): void {
-    if (s.turns.update(t)) s.log.heardAt(this.audioMs(s), t.text.trim());
-    this.heard(s);
-    if (s.turns.untaken().length > 0) this.schedule(s);
+    const { settled, grew } = s.turns.update(t);
+    if (settled) s.log.heardAt(this.audioMs(s), t.text.trim());
+    // A frame repeated with no new word is not talk: it must not hold the pause off.
+    if (grew) this.heard(s);
+    if ((grew || s.timer === null) && s.turns.untaken().length > 0) this.schedule(s);
   }
 
   private heard(s: Session): void {
@@ -269,37 +219,43 @@ export class VoiceFeedbackRelay {
 
   private tick(s: Session): Promise<void> {
     if (s.inflight) return s.inflight;
-    const words = s.turns.take();
+    return this.run(s, s.turns.take(), this.audioMs(s));
+  }
+
+  private run(s: Session, words: string, endMs: number): Promise<void> {
     s.since = null;
-    if (!words) {
-      s.turns.done();
-      return Promise.resolve();
-    }
-    s.inflight = this.runTick(s, words).finally(() => {
+    if (!words) return Promise.resolve();
+    s.inflight = this.runTick(s, words, endMs).finally(() => {
       s.inflight = null;
-      s.turns.done();
-      if (s.closed) return;
-      this.heard(s);
-      if (s.turns.untaken().length > 0) this.schedule(s);
+      s.turns.done(words);
+      this.next(s);
     });
     return s.inflight;
   }
 
-  /** A tap that changes which note the next words are for. Every word already
-   *  said goes into the note it was said about first, without the pause. */
+  private next(s: Session): void {
+    if (s.closed) return;
+    this.heard(s);
+    if (s.turns.untaken().length > 0) this.schedule(s);
+  }
+
+  /** A tap that changes which note the next words are for. The words said up
+   *  to it are taken now and go to the note they were about, without the
+   *  pause, however long a tidy call already out takes to come back. */
   private switchTo(s: Session, apply: () => void): void {
+    const words = s.turns.take();
+    const endMs = this.audioMs(s);
     s.switching = s.switching
       .then(async () => {
         if (s.inflight) await s.inflight;
-        await this.tick(s);
+        await this.run(s, words, endMs);
         if (!s.closed) apply();
       })
       .catch((err) => this.deps.log?.(`[voice-feedback] switch failed: ${String(err)}`));
   }
 
-  private async runTick(s: Session, words: string): Promise<void> {
+  private async runTick(s: Session, words: string, endMs: number): Promise<void> {
     const startMs = s.cursorMs;
-    const endMs = this.audioMs(s);
     s.cursorMs = endMs;
     const input: TidyInput = {
       targets: s.targets,

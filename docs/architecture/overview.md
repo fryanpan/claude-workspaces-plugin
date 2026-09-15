@@ -461,7 +461,8 @@ On the server, `routes/upgrade-stream.ts` hands that socket to
 Haiku tidy (`voice-feedback-tidy.ts`) that decides which words become which
 comment on which catalog element. The tidy runs at a pause in the talk, with a
 ceiling for talk that never pauses; `voice-feedback-turns.ts` tracks which
-heard words a note holds yet. `voice-feedback-store.ts` keeps each
+heard words a note holds yet, and `voice-feedback-session.ts` holds the
+relay's per-recording state types. `voice-feedback-store.ts` keeps each
 recording's WAV and a timestamped raw transcript beside the doc
 (`routes/doc-voice-feedback.ts` serves both). No new write path: a spoken
 comment is the thread POST the typed composer already makes, carrying a

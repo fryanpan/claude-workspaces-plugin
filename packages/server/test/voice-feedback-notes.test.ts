@@ -86,6 +86,8 @@ describe('talk becomes a finished note', () => {
   let replies: string[];
   let frames: Frame[];
   let ws: VoiceWs;
+  /** While set, a tidy call waits for it: a slow model. */
+  let slow: Promise<void> | null;
 
   const of = (type: string) => frames.filter((f) => f.type === type);
   const notes = (key: string) => of('comment').filter((f) => f.key === key);
@@ -102,6 +104,7 @@ describe('talk becomes a finished note', () => {
   ) => {
     const tidy: TidyComplete = async ({ user }) => {
       prompts.push(user);
+      if (slow) await slow;
       return { text: replies.shift() ?? '{"comments":[]}' };
     };
     relay = new VoiceFeedbackRelay({
@@ -134,6 +137,7 @@ describe('talk becomes a finished note', () => {
     prompts = [];
     replies = [];
     frames = [];
+    slow = null;
   });
   afterEach(async () => {
     await relay?.dispose();
@@ -213,10 +217,36 @@ describe('talk becomes a finished note', () => {
     expect(v2).toMatchObject({ target: 3, raw: 'footer text is faint', final: false });
   });
 
+  it('words said after a tap go to its note, however long the tidy call already out takes', async () => {
+    await start();
+    let answer = () => {};
+    slow = new Promise<void>((r) => {
+      answer = r;
+    });
+    replies.push(reply({ text: 'The header is too tall.', element: 'e0' }));
+    speak(6);
+    clock.advance(VOICE_PAUSE_MS);
+    await until(() => prompts.length === 1, 'the header tick is out');
+    send({ type: 'pin', target: 3 });
+    speak(4); // "make it shorter", after the tap, while the model is still thinking
+    slow = null;
+    answer();
+    await until(() => notes('v1').at(-1)?.final === true, 'v1 settled by the pin');
+    expect(prompts, 'the words after the tap did not ride the old note').toHaveLength(1);
+
+    replies.push(reply({ text: 'Make it shorter.', element: 'e0' }));
+    clock.advance(VOICE_PAUSE_MS);
+    const v2 = await until(() => notes('v2')[0], 'v2');
+    expect(prompts[1]).toContain('<pinned>e3</pinned>');
+    expect(prompts[1]).toContain('<new_words>make it shorter</new_words>');
+    expect(v2).toMatchObject({ target: 3, raw: 'make it shorter' });
+  });
+
   it('a tap on an earlier note opens it again, and the next words add to it', async () => {
     await start();
     await firstNote();
     send({ type: 'pin', target: 3 });
+    await until(() => notes('v1').at(-1)?.final === true, 'v1 settled by the pin');
     replies.push(reply({ text: 'Make it shorter.', element: 'e3' }));
     speak(4);
     clock.advance(VOICE_PAUSE_MS);
@@ -257,6 +287,27 @@ describe('talk becomes a finished note', () => {
     clock.advance(VOICE_PAUSE_MS);
     await until(() => prompts.length === 4, 'the next tick');
     expect(prompts[3]).toContain('<open element="e0" fixed><said>');
+  });
+
+  it('a frame the engine repeats with no new word does not hold the note back', async () => {
+    let onTurn: TranscriptionOpenOpts['onTurn'] = () => {};
+    const engine: TranscriptionEngine = {
+      name: 'repeats',
+      open: async (opts) => {
+        onTurn = opts.onTurn;
+        return { send: () => {}, close: async () => {} };
+      },
+    };
+    await start(SCRIPT, engine);
+    const frame = { turn: 0, text: 'the header is too tall', final: false };
+    onTurn({ ...frame, settledText: 'the header is' });
+    clock.advance(500);
+    for (let k = 0; k < 4; k++) {
+      onTurn({ ...frame, settledText: 'the header is too tall' });
+      clock.advance(300);
+    }
+    expect(prompts, 'at the pause after the last new word').toHaveLength(1);
+    expect(prompts[0]).toContain('<new_words>the header is too tall</new_words>');
   });
 
   it('talk that never pauses still lands at the ceiling', async () => {
