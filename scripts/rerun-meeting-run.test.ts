@@ -11,7 +11,7 @@
  * compose and for the spoken-ask capture on every tick; a cap that watched
  * only the composer let a run reach about twice the ceiling it was given.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NotesMethod } from '../packages/core/src/notes-method.ts';
 import type { NotesComposeInput, NotesComposer } from '../packages/server/src/meeting-notes.ts';
 import type {
@@ -21,7 +21,7 @@ import type {
 import type { NotesComposeMeasure } from '../packages/server/src/notes-timing.ts';
 import type { ReplayInput, ReplayTarget } from './replay-meeting-lib.ts';
 import type { RerunArgs } from './rerun-meeting-args.ts';
-import { bySegment, streamsOf } from './rerun-meeting-feed.ts';
+import { bySegment, scheduleEdit, streamsOf } from './rerun-meeting-feed.ts';
 import {
   audioLengthMs,
   billedTotals,
@@ -390,5 +390,45 @@ describe('runFolderName', () => {
     expect(early < later).toBe(true);
     expect(early).not.toContain(':');
     expect(early.startsWith('rerun-')).toBe(true);
+  });
+});
+
+describe('an edit that lands in the last seconds of the recording', () => {
+  it('is tracked as a request, so the stop frame cannot overtake it', async () => {
+    // The race this closes: the timer fires while the last chunks are still
+    // going out, `stop` is sent, and the at-stop compose reads a document the
+    // edit has not reached — with the log line arriving afterwards to say it
+    // was applied.
+    vi.useFakeTimers();
+    try {
+      const applied: Array<Promise<void>> = [];
+      let finish: (() => void) | undefined;
+      const post = (): Promise<unknown> =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      const feed = {
+        base: 'http://x',
+        ws: 'w',
+        docId: 'd',
+        log: () => {},
+      } as unknown as Parameters<typeof scheduleEdit>[0];
+      scheduleEdit(feed, { atMs: 1_000, find: 'a', replace: 'b' }, applied, post);
+      expect(applied).toHaveLength(0);
+      vi.advanceTimersByTime(1_000);
+      expect(applied).toHaveLength(1);
+
+      let settled = false;
+      void applied[0]?.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false); // still in flight — stopping here loses it
+      finish?.();
+      await applied[0];
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

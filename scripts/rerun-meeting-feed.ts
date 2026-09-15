@@ -213,7 +213,13 @@ export async function feedMeeting(f: FeedArgs): Promise<string> {
     `meeting ${meetingId} is recording (${mode}); feeding ${f.target.inputs.length} segment(s) at audio rate`,
   );
 
-  const timers = f.doc.edits.map((edit) => scheduleEdit(f, edit));
+  // Every edit's REQUEST, not just its timer. An edit scheduled near the end
+  // of the recording fires while the last chunks are still going out, and the
+  // stop frame used to overtake it: the at-stop compose and the report then
+  // read a document the edit had not reached, nondeterministically, with the
+  // log line arriving afterwards to say it had been applied.
+  const applied: Array<Promise<void>> = [];
+  const timers = f.doc.edits.map((edit) => scheduleEdit(f, edit, applied));
 
   try {
     // ONE SEGMENT AT A TIME, BUT ITS STREAMS TOGETHER. The two files of a
@@ -248,6 +254,7 @@ export async function feedMeeting(f: FeedArgs): Promise<string> {
     for (const t of timers) clearTimeout(t);
   }
 
+  await Promise.all(applied);
   socket.send(JSON.stringify({ type: 'stop' }));
   await until(() => (seen.stopped ? true : undefined), STOP_TIMEOUT_MS, 'the stopped frame');
   socket.close();
@@ -260,21 +267,27 @@ export async function feedMeeting(f: FeedArgs): Promise<string> {
  * Over the same `find_and_replace` route any other edit takes, because an edit
  * that reached the doc by a private path would not be the thing under test.
  */
-function scheduleEdit(f: FeedArgs, edit: DocSpec['edits'][number]): ReturnType<typeof setTimeout> {
+export function scheduleEdit(
+  f: FeedArgs,
+  edit: DocSpec['edits'][number],
+  applied: Array<Promise<void>>,
+  post: (url: string, body: unknown) => Promise<unknown> = postJson,
+): ReturnType<typeof setTimeout> {
   return setTimeout(() => {
-    void postJson(
-      `${f.base}/workspaces/${f.ws}/docs/${encodeURIComponent(f.docId)}/find_and_replace`,
-      {
+    applied.push(
+      post(`${f.base}/workspaces/${f.ws}/docs/${encodeURIComponent(f.docId)}/find_and_replace`, {
         find: edit.find,
         replace: edit.replace,
         author: AUTHOR,
-      },
-    ).then(
-      () => f.log(`edit at ${edit.atMs}ms applied: ${JSON.stringify(edit.find)}`),
-      (err: unknown) =>
-        f.log(
-          `edit at ${edit.atMs}ms did not apply: ${err instanceof Error ? err.message : String(err)}`,
-        ),
+      }).then(
+        () => f.log(`edit at ${edit.atMs}ms applied: ${JSON.stringify(edit.find)}`),
+        // A refused or failed edit is reported and does not fail the run: the
+        // report says the document it measured, and the log says why.
+        (err: unknown) =>
+          f.log(
+            `edit at ${edit.atMs}ms did not apply: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+      ),
     );
   }, edit.atMs);
 }

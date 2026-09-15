@@ -20,7 +20,6 @@ import { readFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { haikuMeetingNamer } from '../packages/server/src/meeting-namer.ts';
 import type { NotesComposer } from '../packages/server/src/meeting-notes.ts';
 import { createHaikuTaskCaptureExtractor } from '../packages/server/src/meeting-task-capture.ts';
 import { createNotesMethodComposer } from '../packages/server/src/notes-method-composer.ts';
@@ -164,7 +163,12 @@ async function main(argv: string[]): Promise<number> {
     taskExtractor: createHaikuTaskCaptureExtractor({
       instructions: () => promptStore.read('meeting-capture'),
     }),
-    titleNamer: haikuMeetingNamer(),
+    // NO TITLE NAMER, DELIBERATELY. It bills Haiku through a seam that
+    // reports no usage, so the meter cannot see it and `--spend-usd` would be
+    // a ceiling with a hole in it. None of the seven measures is about the
+    // meeting's title, so the honest trade is to leave the namer off rather
+    // than to bill outside the number the operator named.
+    titleNamer: null,
     log,
   });
   await Bun.write(join(outcome.runDir, 'run.log'), `${lines.join('\n')}\n`);
