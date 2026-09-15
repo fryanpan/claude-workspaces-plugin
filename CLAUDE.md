@@ -86,6 +86,11 @@ that way and add new subsystem docs to the list here.
 - **Mocks are interactive.** The reader reaches every state by acting on the
   page — tapping, typing, moving — never by reading a strip of captioned
   scenes.
+- **One mock per surface, changed in place.** Each round edits the file the
+  existing mock serves from (a reload shows it), keeps the elements the
+  reader's comments point at, and answers on the reader's thread there. Never
+  a new mock doc, a new link or a new review item per round (Bryan,
+  2026-09-14: "there should be one collaboration surface").
 
 ## The gates — `bun run verify` before you push
 
