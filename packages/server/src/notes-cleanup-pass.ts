@@ -377,8 +377,22 @@ export async function runNotesCleanupPass(
   // just wrote. The prompt necessarily saw the older doc — that is the
   // document the model answered about — but nothing is written on the
   // strength of it.
-  const now = readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS });
-  // EACH NOTE ONCE, AND THIS READ IS THE WHOLE DOC RATHER THAN THE WINDOW.
+  // THE WHOLE DOC, NOT THE WINDOW — FOR THE GATE AS WELL AS THE DEDUPE.
+  //
+  // {@link CLEANUP_OUTLINE_BLOCKS} is a budget on the PROMPT, and reusing it
+  // to decide what an edit may touch is a category error that only shows on a
+  // long section: `sectionIds` reads its body ids off this outline, so a
+  // bullet the window dropped is not in the section as far as the gate is
+  // concerned, however plainly it sits under the heading. Nothing used to
+  // address one — the model cannot name a block it was never shown — but the
+  // dedupe below can, and a MOVE is the shape that bites: it deletes the
+  // earlier copy and inserts the note under its topic, so a delete refused
+  // for being "outside the section" leaves the insert standing and rebuilds
+  // the duplicate this whole path exists to prevent. Headings were never
+  // windowed (`readOutline` drops body entries only), so it is only ever the
+  // body ids and the ownership marks that were short.
+  const now = readNotesOutline(docStore, docId);
+  // EACH NOTE ONCE.
   //
   // The outline the model answered about is capped at
   // {@link CLEANUP_OUTLINE_BLOCKS} body blocks, counted from the END of the
@@ -391,13 +405,14 @@ export async function runNotesCleanupPass(
   // outside them, and the pass wrote it a second time.
   //
   // `dedupeNotesEdits` is the same check the live tick path runs
-  // (`meeting-notes-doc.ts`), and it is asked against the UNWINDOWED outline,
-  // which is what makes it an answer rather than the same blind spot again.
-  // Before the gate, so the delete a move emits is judged by
-  // `confineToSection` like any other edit and the gate stays the last word.
+  // (`meeting-notes-doc.ts`), and it is asked against the outline above rather
+  // than the one the model saw, which is what makes it an answer rather than
+  // the same blind spot again. Before the gate, so the delete a move emits is
+  // judged by `confineToSection` like any other edit and the gate stays the
+  // last word.
   const deduped = dedupeNotesEdits(edits, {
     notesHeadingId: headingId,
-    outline: readNotesOutline(docStore, docId),
+    outline: now,
     speech: turns.map((t) => t.text),
     authorId: NOTES_AUTHOR_ID,
     commented: () => commentedBlockIds(doc.ydoc),
@@ -436,10 +451,13 @@ export async function runNotesCleanupPass(
   // This is what a READER is left holding, and a marker survives being
   // commented on. Filtering both the same way let a section whose every
   // guess carried a thread report zero still marked.
-  const unconfirmedLeft = unconfirmedNotes(
-    readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS }),
-    { headingId, author: NOTES_AUTHOR_ID },
-  ).length;
+  // AND THE WHOLE DOC AGAIN, for the same reason the gate reads it: a marker
+  // the window dropped is one a reader is still left holding, and counting it
+  // off the prompt's budget reported a long section as settled.
+  const unconfirmedLeft = unconfirmedNotes(readNotesOutline(docStore, docId), {
+    headingId,
+    author: NOTES_AUTHOR_ID,
+  }).length;
   const result =
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }

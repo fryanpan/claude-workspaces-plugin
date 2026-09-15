@@ -51,9 +51,14 @@ const EARLY_NOTE = 'The harbour run moves to the half hour from April';
 /** Long enough that the section alone clears the cap with room to spare. */
 const PAST_THE_WINDOW = CLEANUP_OUTLINE_BLOCKS + 120;
 
+/** The second topic, opened at the END of the section, well inside the window. */
+const LATE_TOPIC = 'Crew rota';
+
 /** A doc whose notes section holds `bullets` bullets, the first of them the
- *  note this meeting opened with. */
-function notesOf(bullets: number): string {
+ *  note this meeting opened with. `secondTopic` gives the section a later
+ *  heading, which is what turns a restatement into a MOVE rather than a
+ *  straight drop. */
+function notesOf(bullets: number, secondTopic = false): string {
   const lines = [
     '# Riverbend ferry review',
     '',
@@ -66,6 +71,9 @@ function notesOf(bullets: number): string {
     `- ${EARLY_NOTE}`,
   ];
   for (let i = 1; i < bullets; i++) lines.push(`- Filler point ${i} from the Saltmarsh run`);
+  if (secondTopic) {
+    lines.push('', `### ${LATE_TOPIC}`, '', '- Kestrel Lane keeps the winter crew');
+  }
   return lines.join('\n');
 }
 
@@ -99,14 +107,16 @@ const bodyBlocks = (outline: readonly prose.OutlineEntry[]): number =>
 /** How many times the note stands in the document. */
 const copiesOf = (markdown: string): number => markdown.split(EARLY_NOTE).length - 1;
 
-async function runOver(bullets: number) {
-  const { store, markdownNow } = docStoreFrom(notesOf(bullets), ['Meeting notes']);
+async function runOver(bullets: number, opts: { into?: string } = {}) {
+  const { store, markdownNow } = docStoreFrom(notesOf(bullets, opts.into !== undefined), [
+    'Meeting notes',
+  ]);
   const dataDir = freshDir();
   writeTranscript(dataDir, [
     { turn: 0, text: `Right, from April ${EARLY_NOTE.toLowerCase()}.` },
     { turn: 1, text: 'And the Kestrel Lane crew stays as it is over the winter.' },
   ]);
-  const composer = directiveFollowingComposer(idOf(store, 'Ferry timetable'));
+  const composer = directiveFollowingComposer(idOf(store, opts.into ?? 'Ferry timetable'));
   const before = copiesOf(markdownNow());
   const result = await runNotesCleanupPass(
     depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')),
@@ -122,6 +132,7 @@ async function runOver(bullets: number) {
     shownBody: bodyBlocks(shown),
     docBody: bodyBlocks(prose.readOutline(doc.ydoc)),
     sawTheNote: shown.some((e) => e.text.includes(EARLY_NOTE)),
+    markdown: markdownNow(),
   };
 }
 
@@ -142,6 +153,25 @@ describe('a meeting whose notes run past the outline window', () => {
     expect(run.before).toBe(1);
     expect(run.after).toBe(1);
     expect(run.result.line).toContain('1 notes the section already carried');
+  });
+
+  it('moves its opening note under the topic it belongs to, rather than copying it', async () => {
+    // The harder shape, and the one a gate reading the same window would get
+    // half right. The restated note goes under a LATER topic heading, so the
+    // dedupe reads it as the note-taker moving its own bullet: the new copy
+    // lands and the old one is deleted. The delete names a block the window
+    // dropped, so a gate scoped to the window refuses it — and the insert it
+    // was paired with survives, which rebuilds the duplicate.
+    const run = await runOver(PAST_THE_WINDOW, { into: LATE_TOPIC });
+    expect(run.docBody).toBeGreaterThan(CLEANUP_OUTLINE_BLOCKS);
+    expect(run.sawTheNote).toBe(false);
+    expect(run.result.ok).toBe(true);
+    expect(run.after).toBe(1);
+    // And it ends up under the topic the model filed it under, not the one it
+    // opened the meeting in.
+    const late = run.markdown.indexOf(`### ${LATE_TOPIC}`);
+    expect(late).toBeGreaterThan(-1);
+    expect(run.markdown.indexOf(EARLY_NOTE)).toBeGreaterThan(late);
   });
 
   it('proposes nothing at all when the same notes fit inside the window', async () => {

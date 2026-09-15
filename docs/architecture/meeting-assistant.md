@@ -2367,7 +2367,21 @@ UNWINDOWED outline, which is what keeps it from sharing the blind spot it
 exists to close. It runs before `confineToSection`, so the delete a move
 emits is gated like any other edit and the gate stays the last word; what it
 drops comes back as `alreadyWritten`, separate from `refused` because the two
-are refused by different rules. `notes-cleanup-long-meeting.test.ts` drives
+are refused by different rules.
+
+**And the GATE reads the whole doc too, which is the half that is easy to
+miss.** `CLEANUP_OUTLINE_BLOCKS` is a budget on the prompt; using it to decide
+what an edit may touch is a category error that only shows on a long section,
+because `sectionIds` reads its body ids off that outline and a bullet the
+window dropped is then not in the section as far as the gate is concerned.
+Nothing used to address one — the model cannot name a block it was never
+shown — but the dedupe can, and a MOVE is the shape that bites: it deletes the
+earlier copy and inserts the note under its topic, so a delete refused for
+being "outside the section" leaves the insert standing and rebuilds the
+duplicate. Headings were never windowed (`readOutline` drops body entries
+only), so it was only ever the body ids and the ownership marks that were
+short. The `unconfirmedLeft` count reads the whole doc for the same reason: a
+marker the window dropped is one a reader is still left holding. `notes-cleanup-long-meeting.test.ts` drives
 it, with the window measured rather than assumed and a short-section control
 that proves the composer duplicates nothing it can see.
 
