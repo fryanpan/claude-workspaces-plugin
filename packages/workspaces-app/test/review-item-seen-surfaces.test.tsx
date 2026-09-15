@@ -257,6 +257,17 @@ describe('the queue card in the cross-board walk', () => {
     });
   });
 
+  it("measures a row from another board against that board, not the page's", async () => {
+    // The cross-board walk draws every board's open items into one queue, and
+    // the card is the same card. The row carries its own board, and the
+    // beacon has to be addressed there: sent to the page's board instead, the
+    // server would answer "no such item" and the view would go unrecorded.
+    const elsewhere = 'w-harb';
+    showWalkCard([threadItem({ workspaceId: elsewhere })]);
+    await waitForBeacons(1);
+    expect(beacons()[0].path).toBe(`/workspaces/${elsewhere}/review-items/viewed`);
+  });
+
   it("names a ticket's own decision by the id every surface derives for it", async () => {
     const decision = task({ assignee: 'human', needs: 'decision', title: 'Rebuild now?' });
     showWalkCard([], [decision]);
