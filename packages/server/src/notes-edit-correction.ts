@@ -163,6 +163,9 @@ export interface CorrectionScope {
   /** This meeting's section, as `sectionIds` walks it. */
   section: ReadonlySet<string>;
   speech: readonly string[];
+  /** The heading the insert lands under: only a note under it can answer, so a
+   *  correction never takes over a note in another topic. */
+  headingId: string;
   /** Blocks somebody has commented on: never the note a correction replaces. */
   commented?: ReadonlySet<string> | undefined;
 }
@@ -172,8 +175,8 @@ export interface CorrectionScope {
  *
  * Only a single bullet line is judged — a batch opening a topic with several
  * notes is writing notes, not taking one back — and only the note-taker's own
- * notes answer, with nothing nested under them, because the edit this becomes
- * replaces the whole item.
+ * notes under the insert's own heading answer, with nothing nested under them,
+ * because the edit this becomes replaces the whole item where it stands.
  */
 export function correctedNote(
   markdown: string,
@@ -187,6 +190,7 @@ export function correctedNote(
       e.kind === 'listItem' &&
       e.author !== undefined &&
       section.has(e.id) &&
+      e.underHeadingId === scope.headingId &&
       scope.commented?.has(e.id) !== true &&
       (outline[i + 1]?.depth ?? 0) <= (e.depth ?? 0) &&
       correctsIt(ownWords(e, outline, section), markdown, scope.speech, { named: 'after-cue' }),

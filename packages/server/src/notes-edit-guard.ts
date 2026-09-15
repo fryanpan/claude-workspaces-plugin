@@ -356,6 +356,7 @@ export function guardNotesEdits(
         outline: outline ?? [],
         section: section.blocks,
         speech: ctx.speech ?? [],
+        headingId: edit.headingId,
         commented: ctx.commented?.(),
       });
       if (corrected !== undefined && !targeted.has(corrected.id)) {

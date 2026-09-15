@@ -142,7 +142,10 @@ const BACKCHANNEL =
  */
 export function stem(word: string): string {
   const w = word.toLowerCase();
-  const base = unsuffixed(w);
+  let base = unsuffixed(w);
+  // "status" and "statuses", "menu" and "menus": a singular can end in "us"
+  // or "is" and a plural can too, so the one "s" either keeps goes from both.
+  if (base.length > 3 && /[iu]s$/.test(base)) base = base.slice(0, -1);
   const bare = base.length > 3 && base.endsWith('e') ? base.slice(0, -1) : base;
   // Consonant letters only: "1000" is not "100" with a doubled zero.
   return bare.length > 3 && /([b-df-hj-np-tv-z])\1$/.test(bare) ? bare.slice(0, -1) : bare;
@@ -163,8 +166,7 @@ function unsuffixed(w: string): string {
   // Everywhere else the "e" belongs to the word: "ranges" loses only its "s",
   // and the "e" goes with every other form's in `stem`.
   if (/(?:s|x|z|ch|sh)es$/.test(w) && cut(2) !== null) return cut(2) as string;
-  // Not "ss", and not the "us" and "is" of a singular ("status", "basis").
-  if (/[^sui]s$/.test(w)) return cut(1) ?? w;
+  if (w.endsWith('s') && !w.endsWith('ss')) return cut(1) ?? w;
   return w;
 }
 

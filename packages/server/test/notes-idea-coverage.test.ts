@@ -83,6 +83,9 @@ describe('whether the notes carry an idea', () => {
       ['copy', 'copies', 'copied', 'copying'],
       ['use', 'uses', 'used', 'using'],
       ['status', 'statuses'],
+      ['focus', 'focuses', 'focused'],
+      ['menu', 'menus'],
+      ['taxi', 'taxis'],
       ['box', 'boxes', 'boxed'],
     ]) {
       expect(

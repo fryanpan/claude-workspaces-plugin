@@ -127,6 +127,18 @@ describe('a correction written as a new bullet beside the note', () => {
     expect(after).toContain(fix);
   });
 
+  test('is added when it lands under another topic', () => {
+    const m = meeting();
+    const correction = 'Track incoming requests instead of hour estimates';
+    const after = write(
+      m,
+      { op: 'insert_under_heading', headingId: idOf(m, 'Pier inbox'), markdown: `- ${correction}` },
+      [TAKE_BACK],
+    );
+    expect(after).toContain(ESTIMATE);
+    expect(after).toContain(correction);
+  });
+
   test('is added when the speech takes nothing back', () => {
     const m = meeting();
     const correction = 'Track incoming requests instead of hour estimates';
@@ -169,7 +181,12 @@ describe('correctedNote', () => {
   const m = meeting();
   const outline = prose.readOutline(m.ydoc);
   const heading = outline.find((e) => e.text === 'Meeting notes')?.id as string;
-  const scope = { outline, section: sectionIds(outline, heading).blocks, speech: [TAKE_BACK] };
+  const scope = {
+    outline,
+    section: sectionIds(outline, heading).blocks,
+    speech: [TAKE_BACK],
+    headingId: idOf(m, 'Hull patch'),
+  };
   const correction = '- Track incoming requests instead of hour estimates';
   const estimateId = idOf(m, ESTIMATE);
 
