@@ -100,6 +100,8 @@ Write each entry so a reader can check it alone:
 - Write one outcome in one entry. Do not join two outcomes with "and".
 - Do not write the steps you will do. Write the result the steps must give.
 
+**Mark a line only a person can judge when you write it:** `{text, needs: 'owner'}`. Use it for how something looks or reads to them, or for a device only they have. The line asks nobody while you build. The person is not flagged for work that is not ready. `needs` stays on a line whose `id` you keep; `needs: null` clears it.
+
 **Report what you found with `report_done_when`.** Give one entry for each line you checked: `{id, verdict, proof?}`.
 
 | Verdict | Use it when |
@@ -107,11 +109,13 @@ Write each entry so a reader can check it alone:
 | `met` | You checked the line. It holds. |
 | `not-met` | You checked the line. It does not hold. |
 | `unchecked` | You could not check the line. Say why in a proof. |
-| `owner` | Only a person can judge the line. |
+| `owner` | Only a person can judge the line, and it is ready for them. |
 
 `met` needs one proof or more. The board refuses a `met` with no proof, and it names the line. A proof is `{text, url?}`: what you ran or read, and where a reader sees it.
 
 **The board closes the task for you.** When you report the last open line as `met`, the board moves the task to done. It also records which line closed the task. Do not call `task_transition` after that.
+
+**`owner` means ready.** Report a `needs: 'owner'` line as `owner`, with a proof whose `url` they can open, once the thing is built and there is something to check. If the person already answered it elsewhere, report it `met` with that answer as proof instead of asking again. If every line you can meet is met and you have not said it is ready, the board reminds you once, on the channel.
 
 **A line you report as `owner` goes to the person who owns the task.** The board files a review item for that line on their queue; Looks right meets it, and any other answer sends it back as not met with their words on the task. Do not file a second item for the same line. Do not wait for a tool to answer. Take other work.
 

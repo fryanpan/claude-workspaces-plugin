@@ -14,6 +14,7 @@
  * else keeps the doc-shaped path.
  */
 import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
+import { doneWhenReadyLine } from './done-when-ready-line.ts';
 import {
   type HeldRowPayload,
   type StalledRowPayload,
@@ -180,6 +181,11 @@ export interface BoardEventPayload {
    *  See nudge-line.ts. */
   heldItems?: HeldRowPayload[];
   reviewItemId?: string;
+  /** `workspace.done_when_ready`: the line waiting on the builder's ready. */
+  lineId?: string;
+  line?: string;
+  url?: string;
+  forAssignee?: string;
   headline?: string;
   overdue?: boolean;
   heldMs?: number;
@@ -302,6 +308,11 @@ async function emitBoardChannelMessage(
     // ids and the reason because the next act is one revise call.
     case 'workspace.review_item_held':
       body = reviewItemHeldLine(p);
+      break;
+    // A line written as needing a person, with the rest met: the builder is
+    // the one who says it is ready, so the line names the call that does.
+    case 'workspace.done_when_ready':
+      body = doneWhenReadyLine(p);
       break;
     case 'agent.attached':
     case 'agent.detached':

@@ -14109,6 +14109,18 @@ function decisionAnsweredLine(p) {
   return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${openPartsClause(p.openParts)}${walk}`;
 }
 
+// packages/mcp/src/done-when-ready-line.ts
+function truncate3(s, n) {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+function doneWhenReadyLine(p) {
+  const task = p.title ? `"${truncate3(p.title, 60)}" (${p.taskId ?? "?"})` : p.taskId ?? "a task";
+  const line = p.line ? `"${truncate3(p.line, 120)}"` : "a line";
+  const behalf = p.forAssignee ? ` (for ${p.forAssignee}, who is not listening)` : "";
+  const link = p.url ? ` ${p.url}` : "";
+  return `[workspace.done_when_ready] every done-when line on ${task} that you can meet is met; ${line} needs a person and nobody has asked them yet${behalf}.${link} When it is ready for them, call report_done_when(taskId: "${p.taskId ?? "?"}", lines: [{ id: "${p.lineId ?? "?"}", verdict: "owner", proof: [{ text, url }] }]) — that files their review item. Until then they see nothing.`;
+}
+
 // packages/mcp/src/nudge-line.ts
 function capClause(cap, now2, style) {
   if (cap === undefined || typeof cap.value !== "number")
@@ -14125,7 +14137,7 @@ function capClause(cap, now2, style) {
   }
   return style === "ready" ? ` (cap ${cap.value}${setter})` : ` of ${cap.value}${setter ? `${setter.replace(/, was (\d+)$/, " (was $1)")},` : ""}`;
 }
-function truncate3(s, n) {
+function truncate4(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 function humanDuration2(ms) {
@@ -14139,7 +14151,7 @@ function humanDuration2(ms) {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 function namedTask(p) {
-  const title = p.title ? `"${truncate3(p.title, 60)}"` : null;
+  const title = p.title ? `"${truncate4(p.title, 60)}"` : null;
   if (title && p.taskId)
     return `${title} (${p.taskId})`;
   return title ?? p.taskId ?? null;
@@ -14171,7 +14183,7 @@ function denominatorClause(p) {
 }
 function freedList(rows, total) {
   const named = rows.map((r) => {
-    const title = r.title ? `"${truncate3(r.title, 60)}"` : null;
+    const title = r.title ? `"${truncate4(r.title, 60)}"` : null;
     if (title && r.id)
       return `${title} (${r.id})`;
     return title ?? r.id ?? null;
@@ -14210,19 +14222,19 @@ function readyIdleLine(p) {
 }
 function reviewAnsweredLine(p) {
   const about = namedTask(p);
-  const item = p.headline ? `your review item "${truncate3(p.headline, 100)}"` : "your review item";
+  const item = p.headline ? `your review item "${truncate4(p.headline, 100)}"` : "your review item";
   const subject = about ? `${item} on ${about}` : p.headline ? item : "a review item you raised";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? "; walk its links as the propagation checklist" : "";
   return `[workspace.review_answered] ${subject} has an answer${fromMockNote(p.via)}${openPartsClause(p.openParts)} — read it and act on it now${walk}.`;
 }
 var STALL_ROWS_SHOWN = 5;
 function stalledRowClause(row) {
-  const named = row.title ? `"${truncate3(row.title, 50)}" (${row.id})` : row.id ?? "a task";
+  const named = row.title ? `"${truncate4(row.title, 50)}" (${row.id})` : row.id ?? "a task";
   return row.quietMs === undefined ? named : `${named} quiet ${humanDuration2(row.quietMs)}`;
 }
 function declaredWaitClause(wait, now2) {
-  const named = wait.title ? `"${truncate3(wait.title, 50)}" (${wait.id})` : wait.id ?? "a task";
-  const what = wait.what ? ` on ${truncate3(wait.what, 80)}` : "";
+  const named = wait.title ? `"${truncate4(wait.title, 50)}" (${wait.id})` : wait.id ?? "a task";
+  const what = wait.what ? ` on ${truncate4(wait.what, 80)}` : "";
   const held = now2 !== undefined && wait.since !== undefined ? `, ${humanDuration2(now2 - wait.since)} so far` : "";
   return `${named}${what}${held}`;
 }
@@ -14325,13 +14337,13 @@ function judgeReasonClauseLocal(reason) {
   return reason.trim().replace(/\.+$/, "").trimEnd();
 }
 function heldRowClause(row) {
-  const ask = row.headline ? `"${truncate3(row.headline, 50)}"` : row.reviewItemId ?? "an item";
-  const on = row.title ? ` on "${truncate3(row.title, 40)}"` : "";
+  const ask = row.headline ? `"${truncate4(row.headline, 50)}"` : row.reviewItemId ?? "an item";
+  const on = row.title ? ` on "${truncate4(row.title, 40)}"` : "";
   const id = row.id ? ` (${row.id})` : "";
   const by = row.filedBy ? ` filed by ${row.filedBy}` : "";
   const age = row.heldMs === undefined ? "" : ` held ${humanDuration2(row.heldMs)}`;
   const how = row.revise ? `, revise with ${row.revise}` : "";
-  const why = row.reason ? ` — ${truncate3(judgeReasonClauseLocal(row.reason), 120)}` : "";
+  const why = row.reason ? ` — ${truncate4(judgeReasonClauseLocal(row.reason), 120)}` : "";
   return `${ask}${on}${id}${by}${age}${why}${how}`;
 }
 function heldRowsClause(rows) {
@@ -14340,8 +14352,8 @@ function heldRowsClause(rows) {
   return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
 }
 function askedBackRowClause(row) {
-  const ask = row.headline ? `"${truncate3(row.headline, 50)}"` : row.reviewItemId ?? "an item";
-  const on = row.title ? ` on "${truncate3(row.title, 40)}"` : "";
+  const ask = row.headline ? `"${truncate4(row.headline, 50)}"` : row.reviewItemId ?? "an item";
+  const on = row.title ? ` on "${truncate4(row.title, 40)}"` : "";
   const id = row.id ? ` (${row.id})` : "";
   const who = row.askedBy ?? "a person";
   const age = row.askedMs === undefined ? "" : ` ${humanDuration2(row.askedMs)} ago`;
@@ -14366,8 +14378,8 @@ function ungatedRowsClause(rows) {
   return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
 }
 function reviewItemHeldLine(p) {
-  const ask = p.headline ? `"${truncate3(p.headline, 60)}"` : "a review item you filed";
-  const on = p.title ? ` on "${truncate3(p.title, 40)}"` : "";
+  const ask = p.headline ? `"${truncate4(p.headline, 60)}"` : "a review item you filed";
+  const on = p.title ? ` on "${truncate4(p.title, 40)}"` : "";
   const ids = p.taskId ? p.reviewItemId ? ` (taskId ${p.taskId}, reviewItemId ${p.reviewItemId})` : "" : p.docId && p.threadId && p.commentId ? ` (docId ${p.docId}, threadId ${p.threadId}, commentId ${p.commentId})` : "";
   const why = p.reason ? ` — ${judgeReasonClauseLocal(p.reason)}` : "";
   const stood = p.overdue === true ? ` It has been held${p.heldMs === undefined ? "" : ` for ${humanDuration2(p.heldMs)}`} and the reader still cannot see it.` : "";
@@ -14425,7 +14437,7 @@ function isSelfAuthoredEvent(event, payload, selfId) {
 }
 
 // packages/mcp/src/voice-line.ts
-function truncate4(s, n) {
+function truncate5(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 function where(p) {
@@ -14439,7 +14451,7 @@ function voiceRequestLine(p) {
     return null;
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
   const said = `[voice.request]${by}${where(p)}: "${p.transcript ?? ""}"`;
-  const told = truncate4(p.ack ?? "", 120);
+  const told = truncate5(p.ack ?? "", 120);
   if (p.route === "fast-path-action") {
     return `${said} — the fast path ALREADY applied this to the board on the speaker's behalf; ` + `they were told: "${told}". Do NOT redo it — reconcile your own picture of the board ` + "with what changed, and pick up only whatever the utterance asked for beyond it.";
   }
@@ -14472,10 +14484,10 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   let body;
   switch (event) {
     case "task.created":
-      body = `[task.created] "${truncate5(p.task?.title ?? p.taskId ?? "", 60)}" → ${p.goal ?? "?"}${p.assignee ? ` (assignee ${p.assignee})` : ""}`;
+      body = `[task.created] "${truncate6(p.task?.title ?? p.taskId ?? "", 60)}" → ${p.goal ?? "?"}${p.assignee ? ` (assignee ${p.assignee})` : ""}`;
       break;
     case "task.transitioned":
-      body = `[task.transitioned] ${p.taskId}: ${p.from} → ${p.to}${by}${p.note ? ` — ${truncate5(p.note, 80)}` : ""}`;
+      body = `[task.transitioned] ${p.taskId}: ${p.from} → ${p.to}${by}${p.note ? ` — ${truncate6(p.note, 80)}` : ""}`;
       break;
     case "task.assigned":
       body = `[task.assigned] ${p.taskId}: ${p.from} → ${p.to}${by}`;
@@ -14484,10 +14496,10 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = `[task.regrouped] ${p.taskId}: ${p.fromGoal} → ${p.toGoal}${by}`;
       break;
     case "task.retitled":
-      body = `[task.retitled] "${truncate5(p.titleFrom ?? "", 60)}" → "${truncate5(p.titleTo ?? "", 60)}"${by}${p.reason ? ` — ${truncate5(p.reason, 80)}` : ""}`;
+      body = `[task.retitled] "${truncate6(p.titleFrom ?? "", 60)}" → "${truncate6(p.titleTo ?? "", 60)}"${by}${p.reason ? ` — ${truncate6(p.reason, 80)}` : ""}`;
       break;
     case "task.body_edited":
-      body = p.titleFrom && p.titleTo ? `[task.body_edited] reshaped "${truncate5(p.titleFrom, 60)}" → "${truncate5(p.titleTo, 60)}"${by}${p.reason ? ` — ${truncate5(p.reason, 80)}` : ""}` : `[task.body_edited] ${p.taskId}${by}${p.reason ? ` — ${truncate5(p.reason, 80)}` : ""}`;
+      body = p.titleFrom && p.titleTo ? `[task.body_edited] reshaped "${truncate6(p.titleFrom, 60)}" → "${truncate6(p.titleTo, 60)}"${by}${p.reason ? ` — ${truncate6(p.reason, 80)}` : ""}` : `[task.body_edited] ${p.taskId}${by}${p.reason ? ` — ${truncate6(p.reason, 80)}` : ""}`;
       break;
     case "task.scheduled_run":
       body = scheduledRunLine(p);
@@ -14520,6 +14532,9 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       break;
     case "workspace.review_item_held":
       body = reviewItemHeldLine(p);
+      break;
+    case "workspace.done_when_ready":
+      body = doneWhenReadyLine(p);
       break;
     case "agent.attached":
     case "agent.detached":
@@ -14589,7 +14604,7 @@ async function emitChannelMessage(deps, event, rawPayload) {
     const author2 = p.suggestion?.author?.name ?? "";
     const snippet2 = p.suggestion?.snippet ?? "";
     const kind = p.suggestion?.kind ?? "";
-    const header2 = snippet2 ? `"${truncate5(snippet2, 60)}"` : sid;
+    const header2 = snippet2 ? `"${truncate6(snippet2, 60)}"` : sid;
     const body2 = `[suggestion ${action2}] ${author2 ? `${author2}: ` : ""}${kind} ${header2}`.trim();
     await deps.notify({
       method: "notifications/claude/channel",
@@ -14617,8 +14632,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const fromMock = fromMockNote(statusChange ? p.via : (p.comment ?? p.thread?.comments?.at(-1))?.via);
   const sentAt = new Date(p.comment?.ts ?? nowMs(deps)).toISOString();
   const action = event.startsWith("thread.") ? event.slice("thread.".length) : event;
-  const header = snippet ? `on "${truncate5(snippet, 60)}"` : "";
-  const onItem = reviewItemId ? ` on review item ${reviewItemId}${snippet ? ` "${truncate5(snippet, 60)}"` : ""} —` : "";
+  const header = snippet ? `on "${truncate6(snippet, 60)}"` : "";
+  const onItem = reviewItemId ? ` on review item ${reviewItemId}${snippet ? ` "${truncate6(snippet, 60)}"` : ""} —` : "";
   const body = text ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ""}${text}${openPartsClause(p.openParts)}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
   await deps.notify({
     method: "notifications/claude/channel",
@@ -14637,7 +14652,7 @@ async function emitChannelMessage(deps, event, rawPayload) {
     }
   });
 }
-function truncate5(s, n) {
+function truncate6(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
@@ -16673,7 +16688,7 @@ var TOOL_LIST = {
                 },
                 doneWhen: {
                   type: "array",
-                  description: "What must be true before this task is done. Write the list when you file the task. One outcome per entry: [{text}]. This is a FIELD: the board counts it, shows it, and refuses a move to done while an entry is open. Criteria written into the body do none of that. Report each entry through report_done_when. Write each entry so a reader can check it alone: name what is measured, and where they read it. At most 50.",
+                  description: 'What must be true before this task is done. Write the list when you file the task. One outcome per entry: [{text}]. This is a FIELD: the board counts it, shows it, and refuses a move to done while an entry is open. Criteria written into the body do none of that. Report each entry through report_done_when. Write each entry so a reader can check it alone: name what is measured, and where they read it. A line only a person can judge (how it looks or reads to them, a device only they have) takes `needs: "owner"`: it files nothing and asks nobody while you build, and when it is ready for them you report it `owner` with a link, which files their review item. At most 50.',
                   items: { type: "object" }
                 }
               },
@@ -16977,7 +16992,7 @@ var TOOL_LIST = {
           },
           doneWhen: {
             type: "array",
-            description: "What must be true before this task is done, one outcome per entry. The criteria live in this field, not in the body. Send the WHOLE list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed.",
+            description: "What must be true before this task is done, one outcome per entry. The criteria live in this field, not in the body. Send the WHOLE list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed. `needs: 'owner'` marks a line only a person can judge; it stays on a line whose `id` you keep, and `needs: null` clears it.",
             items: { type: "object" }
           },
           reason: {
@@ -16990,7 +17005,7 @@ var TOOL_LIST = {
     },
     {
       name: "report_done_when",
-      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
+      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. `owner` is also how you say a line written with `needs: 'owner'` is READY for its person — until you report it, they are not asked. If they already answered it elsewhere, report it `met` with that answer as proof instead. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
       inputSchema: {
         type: "object",
         properties: {
@@ -20045,7 +20060,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.235";
+var PLUGIN_VERSION = "0.1.236";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

@@ -623,7 +623,7 @@ export interface CreateTaskOpts {
   /** What has to be true before the row is finished. Ids are minted here, so
    *  a caller sends words only. Omitted means the row has no lines, which is
    *  the state every task had before the field. */
-  doneWhen?: Array<{ text: string }>;
+  doneWhen?: Array<{ text: string; needs?: 'owner' | null }>;
   goal?: string;
   order?: number;
   after?: string[];

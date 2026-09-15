@@ -45,6 +45,7 @@ import { lastBoardActivityAt } from './board-activity.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
 import { changedFilesInWorktree } from './git-diff.ts';
+import { taskDeepLink } from './home-brief.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
 import type { ReviewItemRow } from './keep-moving.ts';
 import { createLeadPresenceMonitor } from './lead-presence.ts';
@@ -57,6 +58,7 @@ import {
   isBoardActivity,
 } from './ready-nudge.ts';
 import { REVIEW_GATE_RELEASE_MS, type ReviewGateAddress } from './review-gate.ts';
+import { DoneWhenReadyNudger } from './review-items/done-when-ready.ts';
 import { isReviewItemOnQueue, pendingQuestionOf } from './review-items/queries.ts';
 import type { SseBus } from './sse.ts';
 import { STALL_ESCALATION_ACTOR, StallEscalations } from './stall-escalation.ts';
@@ -177,6 +179,9 @@ export interface StallWiringContext {
    *  a passed one does. A function for the same reason as `reviseCallFor`.
    *  Returns whether it released the item. */
   releaseUnrevisedHold: (item: HeldItemInput) => boolean;
+  /** The server's public base, so a done-when ready nudge carries a link the
+   *  agent can hand on. Absent → the link is the board-relative path. */
+  externalBaseUrl?: () => string;
 
   /** Idle time before the ready-work wake fires (ms). */
   readyNudgeIdleMs?: number;
@@ -1074,10 +1079,25 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       return n;
     },
   });
+  // A line written as needing a person, with everything else met and the
+  // builder yet to say it is ready (`review-items/done-when-ready.ts`). On the
+  // stall tick because it is the same question — why is this task not
+  // closing — and the reminder goes to the task's agent, never to the person.
+  const doneWhenReady = new DoneWhenReadyNudger({
+    workspaces: () => taskStore.listWorkspaces(),
+    tasks: (workspaceId) => taskStore.listTasks(workspaceId),
+    ownerIdOf: (task) => taskStore.ownerIdOf(task),
+    canReach: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+    send: (workspaceId, agentId, frame) =>
+      sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+    taskUrl: (workspaceId, taskId) =>
+      `${ctx.externalBaseUrl?.() ?? ''}${taskDeepLink(workspaceId, taskId)}`,
+  });
   const stallNudger = new StallNudger({
     snapshot: () => {
       const snapshots = taskStore.listWorkspaces().map(stallSnapshot);
       keepMoving.observe(snapshots, Date.now());
+      doneWhenReady.tick(Date.now());
       return snapshots;
     },
     // Addressed, never broadcast, and `agentsOn` rather than `count` for the

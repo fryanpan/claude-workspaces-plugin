@@ -1626,7 +1626,7 @@ export const TOOL_LIST: ListToolsResult = {
                 doneWhen: {
                   type: 'array',
                   description:
-                    'What must be true before this task is done. Write the list when you file the task. One outcome per entry: [{text}]. This is a FIELD: the board counts it, shows it, and refuses a move to done while an entry is open. Criteria written into the body do none of that. Report each entry through report_done_when. Write each entry so a reader can check it alone: name what is measured, and where they read it. At most 50.',
+                    'What must be true before this task is done. Write the list when you file the task. One outcome per entry: [{text}]. This is a FIELD: the board counts it, shows it, and refuses a move to done while an entry is open. Criteria written into the body do none of that. Report each entry through report_done_when. Write each entry so a reader can check it alone: name what is measured, and where they read it. A line only a person can judge (how it looks or reads to them, a device only they have) takes `needs: "owner"`: it files nothing and asks nobody while you build, and when it is ready for them you report it `owner` with a link, which files their review item. At most 50.',
                   items: { type: 'object' },
                 },
               },
@@ -1973,7 +1973,7 @@ export const TOOL_LIST: ListToolsResult = {
           doneWhen: {
             type: 'array',
             description:
-              "What must be true before this task is done, one outcome per entry. The criteria live in this field, not in the body. Send the WHOLE list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed.",
+              "What must be true before this task is done, one outcome per entry. The criteria live in this field, not in the body. Send the WHOLE list, replacing what is there: [{id?, text}]. Omit it to leave the list alone; send [] to clear it. Keep a line's `id` to keep its verdict and its proof — editing the words of a line you already proved is not a retraction. A line you leave out is removed. `needs: 'owner'` marks a line only a person can judge; it stays on a line whose `id` you keep, and `needs: null` clears it.",
             items: { type: 'object' },
           },
           reason: {
@@ -1988,7 +1988,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'report_done_when',
       description:
-        "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
+        "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. `owner` is also how you say a line written with `needs: 'owner'` is READY for its person — until you report it, they are not asked. If they already answered it elsewhere, report it `met` with that answer as proof instead. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
       inputSchema: {
         type: 'object',
         properties: {
