@@ -15,6 +15,13 @@
  * ways, ignoring size or allowing for what fit the time he had, without
  * having to know which filter was on when he answered.
  *
+ * Whether an answer was "in order" has two readings, and the report gives
+ * both. The strict one asks that nothing at all was ranked above it. The other
+ * allows one: a single open item above reads as a row the reader saw and
+ * passed over, not as a detour. Two or more open items above is the case
+ * neither reading should hide, so the report also counts those answers and
+ * says how far down the list they were taken from.
+ *
  * Wait is `answeredAt − visibleAt`. An item the quality judge held was not in
  * front of anybody while held, so its clock starts at the verdict that let it
  * through (`judge.at`). A later revision re-judges the item and moves
@@ -139,6 +146,18 @@ export interface BoardWait {
   inOrder: number;
   /** Share answered with nothing of the same size or smaller ranked above. */
   inOrderWithinSize: number;
+  /**
+   * Share answered with no more than one open item ranked above. One item
+   * above reads as a skip: the reader saw the top of the list and passed over
+   * a single row. Two or more is the case the strict share cannot tell apart.
+   */
+  inOrderOrOneSkipped: number;
+  /** How many answers had two or more open items ranked above them. */
+  multipleHigher: number;
+  /** Middle rank of those answers, 1-based; 0 when there are none. */
+  medianRankWhenMultiple: number;
+  /** Lowest rank any answer was taken from; 0 when there are none. */
+  deepestRank: number;
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -159,6 +178,8 @@ export function reviewWait(records: AnswerRecord[], nameOf: (id: string) => stri
   for (const [workspaceId, list] of byBoard) {
     const waits = list.map((r) => Math.max(0, r.answeredAt - r.visibleAt)).sort((a, b) => a - b);
     const share = (n: number) => Math.round((n / list.length) * 1000) / 1000;
+    const deep = list.filter((r) => r.higherOpen.hard >= 2);
+    const deepRanks = deep.map((r) => r.rankAtAnswer).sort((a, b) => a - b);
     out.push({
       workspaceId,
       name: nameOf(workspaceId),
@@ -167,6 +188,10 @@ export function reviewWait(records: AnswerRecord[], nameOf: (id: string) => stri
       p90WaitMs: percentile(waits, 0.9),
       inOrder: share(list.filter((r) => r.higherOpen.hard === 0).length),
       inOrderWithinSize: share(list.filter((r) => r.higherOpen[r.size] === 0).length),
+      inOrderOrOneSkipped: share(list.filter((r) => r.higherOpen.hard <= 1).length),
+      multipleHigher: deep.length,
+      medianRankWhenMultiple: percentile(deepRanks, 0.5),
+      deepestRank: deepRanks[deepRanks.length - 1] ?? 0,
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));

@@ -109,19 +109,24 @@ describe('the ledger', () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  const rec = (over: Partial<AnswerRecord>): AnswerRecord => ({
-    workspaceId: 'w-river',
-    key: 'k',
-    askedAt: 0,
-    visibleAt: 0,
-    answeredAt: 1000,
-    size: 'easy',
-    minutes: 1,
-    rankAtAnswer: 1,
-    higherOpen: { easy: 0, medium: 0, hard: 0 },
-    projectRank: 1,
-    ...over,
-  });
+  // A real record's rank is its `higherOpen.hard` plus one (measureAnswer),
+  // so derive it here rather than letting a case set the two out of step.
+  const rec = (over: Partial<AnswerRecord>): AnswerRecord => {
+    const higherOpen = over.higherOpen ?? { easy: 0, medium: 0, hard: 0 };
+    return {
+      workspaceId: 'w-river',
+      key: 'k',
+      askedAt: 0,
+      visibleAt: 0,
+      answeredAt: 1000,
+      size: 'easy',
+      minutes: 1,
+      projectRank: 1,
+      ...over,
+      higherOpen,
+      rankAtAnswer: over.rankAtAnswer ?? higherOpen.hard + 1,
+    };
+  };
 
   it('appends, reads from a time, and skips a torn line', () => {
     const dir = mkdtempSync(join(tmpdir(), 'answer-ledger-'));
@@ -165,6 +170,10 @@ describe('the ledger', () => {
         p90WaitMs: 50,
         inOrder: 0,
         inOrderWithinSize: 0,
+        inOrderOrOneSkipped: 1,
+        multipleHigher: 0,
+        medianRankWhenMultiple: 0,
+        deepestRank: 0,
       },
       {
         workspaceId: 'w-river',
@@ -174,7 +183,39 @@ describe('the ledger', () => {
         p90WaitMs: 300,
         inOrder: 0.667,
         inOrderWithinSize: 1,
+        inOrderOrOneSkipped: 0.667,
+        multipleHigher: 1,
+        medianRankWhenMultiple: 4,
+        deepestRank: 4,
       },
     ]);
+  });
+
+  it('counts one item above as in order relaxed, and two as passed over', () => {
+    const [board] = reviewWait(
+      [
+        rec({ higherOpen: { easy: 0, medium: 0, hard: 0 } }),
+        rec({ higherOpen: { easy: 1, medium: 1, hard: 1 } }),
+        // Exactly two above: the first answer the relaxed reading must still
+        // count as passed over, and the one a higher threshold would lose.
+        rec({ higherOpen: { easy: 1, medium: 2, hard: 2 } }),
+        rec({ higherOpen: { easy: 2, medium: 4, hard: 6 } }),
+      ],
+      () => 'Riverbend',
+    );
+    // Strict counts one of the four; allowing a single skip counts two.
+    expect(board?.inOrder).toBe(0.25);
+    expect(board?.inOrderOrOneSkipped).toBe(0.5);
+    // The two answers taken from further down are named, not averaged away.
+    expect(board?.multipleHigher).toBe(2);
+    expect(board?.medianRankWhenMultiple).toBe(3);
+    expect(board?.deepestRank).toBe(7);
+  });
+
+  it('reports no depth at all when every answer came from the top', () => {
+    const [board] = reviewWait([rec({}), rec({})], () => 'Riverbend');
+    expect(board?.multipleHigher).toBe(0);
+    expect(board?.medianRankWhenMultiple).toBe(0);
+    expect(board?.deepestRank).toBe(0);
   });
 });

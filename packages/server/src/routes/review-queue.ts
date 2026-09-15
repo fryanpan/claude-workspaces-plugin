@@ -4,7 +4,9 @@
  *   GET /api/review-queue        every open item on every live board, top
  *                                project first, each with its size
  *   GET /api/review-wait?since=  per-board wait and in-order share, read off
- *                                the answer ledger (Team Lead's numbers)
+ *                                the answer ledger (Team Lead's numbers),
+ *                                with every answer record it was summed from
+ *                                so the same data can be cut another way
  *   GET /api/review-size         the signed-in person's size choice
  *   PUT /api/review-size         change it: `{ size: "easy"|"medium"|"hard" }`
  *   GET /review                  the page that walks the queue
@@ -86,6 +88,11 @@ export async function handleReviewQueueRoutes(
 
   const since = parseSince(url.searchParams.get('since'));
   if (since === null) return j(400, { error: 'since must be epoch milliseconds' });
-  const boards = reviewWait(crossReview.ledger.read(since), (id) => ctx.boardName(id) ?? id);
-  return j(200, { since, boards });
+  // The records go out beside the summary. Any question about ordering that
+  // this summary does not answer — a different threshold, a per-day cut, the
+  // shape of the whole distribution — is answerable from them without the
+  // route having to guess the question first (Bryan, 2026-09-15).
+  const answers = crossReview.ledger.read(since);
+  const boards = reviewWait(answers, (id) => ctx.boardName(id) ?? id);
+  return j(200, { since, boards, answers });
 }

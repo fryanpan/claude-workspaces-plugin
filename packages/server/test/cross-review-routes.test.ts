@@ -120,6 +120,20 @@ describe('the cross-board review queue', () => {
     expect(row).toMatchObject({ name: 'Harborlight', answered: 1, inOrder: 0 });
   });
 
+  it('serves the records the summary was summed from, counts and all', async () => {
+    const body = await jj<{ boards: BoardWait[]; answers: AnswerRecord[] }>(
+      await fetch(`${base}/api/review-wait`),
+    );
+    // One record per answer the summary counted, so a reader can re-cut it.
+    expect(body.answers.length).toBe(body.boards.reduce((n, b) => n + b.answered, 0));
+    const record = body.answers.find((r) => r.workspaceId === harbor);
+    // How many were above, not merely whether any were.
+    expect(typeof record?.higherOpen.hard).toBe('number');
+    expect(typeof record?.higherOpen.medium).toBe('number');
+    expect(typeof record?.higherOpen.easy).toBe('number');
+    expect(record?.rankAtAnswer).toBe((record?.higherOpen.hard ?? -1) + 1);
+  });
+
   it('records a declared doc-thread answer too, in order at the top', async () => {
     const file = join(dataDir, 'tide-notes.md');
     writeFileSync(file, '# Tide notes\n\nthe buoy reading lags by ten minutes\n');
