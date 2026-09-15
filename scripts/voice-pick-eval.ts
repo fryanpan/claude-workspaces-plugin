@@ -187,6 +187,7 @@ for (let r = 0; r < runs; r++) {
       open: c.open
         ? {
             text: c.open.text,
+            raw: c.open.text,
             target: c.open.at === null ? null : idx(c.open.at),
             fixed: c.open.fixed === true,
           }

@@ -98,7 +98,7 @@ async function replay(
     usd += tidyDollars(reply.usage);
     const open = req.user.includes('<open>none</open>')
       ? null
-      : { text: '', target: null, fixed: false };
+      : { text: '', raw: '', target: null, fixed: false };
     for (const c of parseTidyReply(reply.text, { targets, open, words: '' }) ?? []) {
       if (c.continues && model.length > 0) model[model.length - 1] = c.text;
       else model.push(c.text);

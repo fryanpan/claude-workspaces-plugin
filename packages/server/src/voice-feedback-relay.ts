@@ -4,15 +4,17 @@
  * The page streams the meeting path's PCM over its own socket; this relays it
  * to the same transcription engines a meeting uses, keeps the audio and every
  * settled word beside the mock (`voice-feedback-store.ts`), and on a tick
- * hands the new words to the tidier (`voice-feedback-tidy.ts`), which says
- * whether they grow the open comment or start a new one, and which element
- * each is about. The page posts what comes back as ordinary threads, under
- * its own identity — the socket never writes a comment.
+ * hands the new words, with everything already said for the open note, to
+ * the tidier (`voice-feedback-tidy.ts`), which says whether they grow that
+ * note or start a new one, and which element each is about. The page posts
+ * what comes back as ordinary threads, under its own identity — the socket
+ * never writes a comment.
  *
- * WHEN A TICK RUNS. Words land within `cadenceMs` of the first one heard, and
- * sooner at a pause: an engine that settles a turn has heard the speaker
- * stop, and `pauseMs` after that is a tick. One tick at a time; words heard
- * during a tick wait for the next.
+ * WHEN A TICK RUNS. At a pause — `pauseMs` after the last word heard — so a
+ * note is written once a thought is finished, not rewritten mid-sentence; the
+ * page shows the words themselves until then (`heard.pending`). `cadenceMs`
+ * is a ceiling for talk that never pauses. A tap on another element (`pin`) or
+ * an earlier note (`reopen`) is a pause too. One tick at a time.
  *
  * WHO MAY OPEN ONE. The upgrade refuses share visitors outright, because a
  * session spends a transcription engine and the model on the owner's keys;
@@ -28,18 +30,24 @@ import {
   parseVoiceClientMessage,
 } from '@claude-workspaces/core';
 import type { EngineTurn, TranscriptionEngine, TranscriptionSession } from './transcribe.ts';
-import { VoiceLog, type WavWriter, openNextSegment, stamp } from './voice-feedback-store.ts';
+import {
+  VoiceLog,
+  type WavWriter,
+  clipPath,
+  describeTarget,
+  openNextSegment,
+  stamp,
+} from './voice-feedback-store.ts';
 import {
   type TidyComment,
   type TidyComplete,
   type TidyInput,
   apportionTick,
   buildTidyPrompt,
-  normWord,
   parseTidyReply,
   tidyDollars,
-  unusedWords,
 } from './voice-feedback-tidy.ts';
+import { VoiceTurns } from './voice-feedback-turns.ts';
 
 /** The slice of a Bun `ServerWebSocket` this module needs. */
 export interface VoiceWs {
@@ -57,9 +65,9 @@ export interface VoiceFeedbackDeps {
   engines: readonly TranscriptionEngine[];
   tidy: TidyComplete | null;
   dataDir: string;
-  /** Longest a heard word waits to become a comment. */
+  /** Longest a heard word waits to become a note when the talk never pauses. */
   cadenceMs?: number;
-  /** How long after a settled turn the tick runs. */
+  /** How long the speaker is quiet before what they said becomes a note. */
   pauseMs?: number;
   timers?: VoiceTimers;
   /** Wall clock, for the log's section heading. */
@@ -67,18 +75,11 @@ export interface VoiceFeedbackDeps {
   log?: (line: string) => void;
 }
 
-export const VOICE_CADENCE_MS = 8_000;
-export const VOICE_PAUSE_MS = 600;
+export const VOICE_CADENCE_MS = 30_000;
+/** The pause the owner approved on the mock: long enough to be a breath, not a comma. */
+export const VOICE_PAUSE_MS = 1_400;
 /** PCM16 mono at the meeting rate: bytes per millisecond of audio. */
 const BYTES_PER_MS = (MEETING_SAMPLE_RATE * 2) / 1000;
-
-interface Turn {
-  text: string;
-  final: boolean;
-  settled: string;
-  /** Normalised words of this turn already handed to a tick. */
-  used: string[];
-}
 
 interface LiveComment {
   key: string;
@@ -89,6 +90,8 @@ interface LiveComment {
   endMs: number;
   fixed: boolean;
   final: boolean;
+  /** Tapped to add to, and no tick has grown it since. */
+  chosen?: boolean;
   /** The thread the page posted it as, once the page says. */
   threadId?: string;
 }
@@ -100,7 +103,7 @@ interface Session {
   log: VoiceLog;
   segment: number;
   targets: VoiceTarget[];
-  turns: Map<number, Turn>;
+  turns: VoiceTurns;
   comments: Map<string, LiveComment>;
   open: LiveComment | null;
   pinned: number | null | undefined;
@@ -108,9 +111,12 @@ interface Session {
   /** Audio position (ms) where the words not yet ticked begin. */
   cursorMs: number;
   timer: unknown;
-  due: number;
+  /** When the oldest word no tick has taken was heard; null when none waits. */
+  since: number | null;
   /** The tick in flight, if any — one at a time. */
   inflight: Promise<void> | null;
+  /** Taps waiting on the words before them to be folded, in order. */
+  switching: Promise<void>;
   /** The one ending: a Stop and a close that race share it. */
   ending: Promise<void> | null;
   closed: boolean;
@@ -194,15 +200,16 @@ export class VoiceFeedbackRelay {
       log: new VoiceLog(dataDir, docId),
       segment,
       targets,
-      turns: new Map(),
+      turns: new VoiceTurns(),
       comments: new Map(),
       open: null,
       pinned: undefined,
       seq: 0,
       cursorMs: 0,
       timer: null,
-      due: 0,
+      since: null,
       inflight: null,
+      switching: Promise.resolve(),
       ending: null,
       closed: false,
       usd: 0,
@@ -239,69 +246,55 @@ export class VoiceFeedbackRelay {
   }
 
   private onTurn(s: Session, t: EngineTurn): void {
-    const prev = s.turns.get(t.turn);
-    const turn: Turn = {
-      text: t.text,
-      final: t.final,
-      settled: t.final ? t.text : (t.settledText ?? ''),
-      used: prev?.used ?? [],
-    };
-    s.turns.set(t.turn, turn);
-    if (t.final && t.text.trim() && !prev?.final) {
-      s.log.heardAt(this.audioMs(s), t.text.trim());
-    }
-    const tail = [...s.turns.values()]
-      .map((x) => x.text)
-      .join(' ')
-      .slice(-240);
-    this.send(s.ws, { type: 'heard', text: tail });
-    if (this.pending(s).length > 0) {
-      this.schedule(s, t.final ? this.pauseMs : this.cadenceMs);
-    }
+    if (s.turns.update(t)) s.log.heardAt(this.audioMs(s), t.text.trim());
+    this.heard(s);
+    if (s.turns.untaken().length > 0) this.schedule(s);
   }
 
-  /** Words settled by the engine that no tick has taken yet, in order. */
-  private pending(s: Session): string[] {
-    const out: string[] = [];
-    for (const turn of s.turns.values()) {
-      out.push(...unusedWords(turn.settled.split(/\s+/).filter(Boolean), turn.used));
-    }
-    return out;
+  private heard(s: Session): void {
+    this.send(s.ws, { type: 'heard', text: s.turns.tail(), pending: s.turns.waiting() });
   }
 
-  /** Run a tick in `ms`, unless one is already due sooner. The cadence is
-   *  counted from the FIRST waiting word, so steady talk cannot push it. */
-  private schedule(s: Session, ms: number): void {
-    const due = (this.deps.now ?? Date.now)() + ms;
-    if (s.timer !== null && s.due <= due) return;
+  /** A tick once the speaker has been quiet `pauseMs` (each word restarts it), or at the ceiling. */
+  private schedule(s: Session): void {
+    const now = (this.deps.now ?? Date.now)();
+    s.since ??= now;
+    const ms = Math.max(0, Math.min(this.pauseMs, s.since + this.cadenceMs - now));
     if (s.timer !== null) this.timers.clear(s.timer);
-    s.due = due;
     s.timer = this.timers.set(() => {
       s.timer = null;
       void this.tick(s);
     }, ms);
   }
 
-  private take(s: Session): string {
-    const words: string[] = [];
-    for (const turn of s.turns.values()) {
-      const all = turn.settled.split(/\s+/).filter(Boolean);
-      const fresh = unusedWords(all, turn.used);
-      words.push(...fresh);
-      turn.used = all.map(normWord);
-    }
-    return words.join(' ');
-  }
-
   private tick(s: Session): Promise<void> {
     if (s.inflight) return s.inflight;
-    const words = this.take(s);
-    if (!words) return Promise.resolve();
+    const words = s.turns.take();
+    s.since = null;
+    if (!words) {
+      s.turns.done();
+      return Promise.resolve();
+    }
     s.inflight = this.runTick(s, words).finally(() => {
       s.inflight = null;
-      if (!s.closed && this.pending(s).length > 0) this.schedule(s, this.pauseMs);
+      s.turns.done();
+      if (s.closed) return;
+      this.heard(s);
+      if (s.turns.untaken().length > 0) this.schedule(s);
     });
     return s.inflight;
+  }
+
+  /** A tap that changes which note the next words are for. Every word already
+   *  said goes into the note it was said about first, without the pause. */
+  private switchTo(s: Session, apply: () => void): void {
+    s.switching = s.switching
+      .then(async () => {
+        if (s.inflight) await s.inflight;
+        await this.tick(s);
+        if (!s.closed) apply();
+      })
+      .catch((err) => this.deps.log?.(`[voice-feedback] switch failed: ${String(err)}`));
   }
 
   private async runTick(s: Session, words: string): Promise<void> {
@@ -310,7 +303,15 @@ export class VoiceFeedbackRelay {
     s.cursorMs = endMs;
     const input: TidyInput = {
       targets: s.targets,
-      open: s.open ? { text: s.open.text, target: s.open.target, fixed: s.open.fixed } : null,
+      open: s.open
+        ? {
+            text: s.open.text,
+            raw: s.open.raw,
+            target: s.open.target,
+            fixed: s.open.fixed,
+            ...(s.open.chosen ? { chosen: true } : {}),
+          }
+        : null,
       ...(s.pinned !== undefined ? { pinned: s.pinned } : {}),
       words,
     };
@@ -325,9 +326,9 @@ export class VoiceFeedbackRelay {
       }
     }
     s.ticks++;
-    // No model, or no answer: the words still land, as said, where the
-    // person last pointed. Losing them is the one outcome this must not have.
-    // A continued comment's text is rewritten whole, so the words join it.
+    if (s.open) s.open.chosen = false;
+    // No model, or no answer: the words still land, as said, where the person
+    // last pointed — losing them is the one outcome this must not have.
     const grows = s.open !== null && s.pinned === undefined;
     comments ??= [
       {
@@ -379,25 +380,12 @@ export class VoiceFeedbackRelay {
     c.final = true;
     if (s.open === c) s.open = null;
     this.emit(s, c);
-    const where = c.target === null ? 'the page' : this.describe(s, c.target);
+    const where = describeTarget(s.targets, c.target);
     const thread = c.threadId ? ` (thread ${c.threadId})` : '';
     s.log.comment(
       c.endMs,
       `- ${stamp(c.startMs)}–${stamp(c.endMs)} Comment ${c.key}${thread} on ${where}: ${c.text}\n`,
     );
-  }
-
-  private describe(s: Session, i: number): string {
-    const t = s.targets.find((x) => x.i === i);
-    if (!t) return `element ${i}`;
-    return `${t.tag}${t.text ? ` “${t.text.slice(0, 40)}”` : t.hint ? ` ${t.hint}` : ''}`;
-  }
-
-  private clip(s: Session, c: LiveComment): string {
-    const ws = encodeURIComponent(s.ws.data.workspaceId ?? '');
-    const doc = encodeURIComponent(s.ws.data.docId);
-    const sec = (ms: number) => (Math.round(ms / 100) / 10).toFixed(1);
-    return `/workspaces/${ws}/docs/${doc}/voice-feedback/seg-${s.segment}.wav#t=${sec(c.startMs)},${sec(c.endMs)}`;
   }
 
   private emit(s: Session, c: LiveComment): void {
@@ -407,7 +395,7 @@ export class VoiceFeedbackRelay {
       text: c.text,
       target: c.target,
       raw: c.raw,
-      clip: this.clip(s, c),
+      clip: clipPath(s.ws.data, s.segment, c.startMs, c.endMs),
       final: c.final,
     };
     this.send(s.ws, frame);
@@ -420,8 +408,13 @@ export class VoiceFeedbackRelay {
         return;
       case 'pin':
         // The next words go to the tapped element: whatever was open is done.
-        if (s.open) this.settle(s, s.open);
-        s.pinned = msg.target;
+        this.switchTo(s, () => {
+          if (s.open) this.settle(s, s.open);
+          s.pinned = msg.target;
+        });
+        return;
+      case 'reopen':
+        this.switchTo(s, () => this.reopen(s, msg.key));
         return;
       case 'move': {
         const c = s.comments.get(msg.key);
@@ -432,9 +425,8 @@ export class VoiceFeedbackRelay {
         return;
       }
       case 'posted': {
-        // A comment is posted on its first words and logged when it settles,
-        // so its thread rides on that line; only a comment that settled before
-        // the post came back gets a line of its own.
+        // Its thread rides on the line logged when it settles; only a comment
+        // that settled before the post came back gets a line of its own.
         const c = s.comments.get(msg.key);
         if (c && !c.final) {
           c.threadId = msg.threadId;
@@ -449,6 +441,18 @@ export class VoiceFeedbackRelay {
     }
   }
 
+  /** An earlier note of this recording opens again, for the next words. */
+  private reopen(s: Session, key: string): void {
+    const c = s.comments.get(key);
+    if (!c || c === s.open) return;
+    if (s.open) this.settle(s, s.open);
+    s.pinned = undefined;
+    // The person chose it by tapping it, so it stays on its element.
+    Object.assign(c, { final: false, fixed: true, chosen: true });
+    s.open = c;
+    this.emit(s, c);
+  }
+
   /**
    * End a session. With `flush`, the engine's last turn and one more tick run
    * first, so the sentence being said when Stop was pressed still becomes a
@@ -460,6 +464,8 @@ export class VoiceFeedbackRelay {
   }
 
   private async end(s: Session, flush: boolean): Promise<void> {
+    // A tap made before the end still lands where it was meant.
+    await s.switching;
     if (!flush) {
       // A tidy call already under way still becomes a settled, logged comment.
       if (s.timer !== null) this.timers.clear(s.timer);

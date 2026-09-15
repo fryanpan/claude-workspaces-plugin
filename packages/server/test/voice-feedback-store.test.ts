@@ -10,7 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   appendVoiceLog,
+  clipPath,
   deleteVoiceFeedback,
+  describeTarget,
   nextSegment,
   openNextSegment,
   openWav,
@@ -115,6 +117,20 @@ describe('voice feedback store', () => {
     const log = readFileSync(voiceLogPath(dataDir, DOC), 'utf8');
     expect(log.match(/^# Voice feedback/gm)).toHaveLength(1);
     expect(log).toContain('## Recording 1\n- [00:03] the header is too tall\n');
+  });
+
+  it('names an element for the log, and the clip of a stretch of a recording', () => {
+    const targets = [
+      { i: 0, tag: 'button', text: 'Save' },
+      { i: 1, tag: 'div', text: '', hint: '#goal' },
+    ];
+    expect(describeTarget(targets, 0)).toBe('button “Save”');
+    expect(describeTarget(targets, 1)).toBe('div #goal');
+    expect(describeTarget(targets, 7)).toBe('element 7');
+    expect(describeTarget(targets, null)).toBe('the page');
+    expect(clipPath({ docId: 'a b', workspaceId: 'riverbend' }, 3, 12_440, 31_000)).toBe(
+      '/workspaces/riverbend/docs/a%20b/voice-feedback/seg-3.wav#t=12.4,31.0',
+    );
   });
 
   it('stamps milliseconds as [mm:ss]', () => {

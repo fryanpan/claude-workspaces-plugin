@@ -27,6 +27,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import type { VoiceTarget } from '@claude-workspaces/core';
 
 export const VOICE_LOG_SUFFIX = '.voice-feedback.md';
 export const VOICE_AUDIO_SUFFIX = '.voice-feedback';
@@ -61,6 +62,27 @@ export function nextSegment(dataDir: string, docId: string): number {
 export function stamp(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   return `[${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}]`;
+}
+
+/** How the log names an element: its tag and its words, or its hint. */
+export function describeTarget(targets: readonly VoiceTarget[], i: number | null): string {
+  if (i === null) return 'the page';
+  const t = targets.find((x) => x.i === i);
+  if (!t) return `element ${i}`;
+  return `${t.tag}${t.text ? ` “${t.text.slice(0, 40)}”` : t.hint ? ` ${t.hint}` : ''}`;
+}
+
+/** The same-origin URL of one stretch of a recording, as a note's clip names it. */
+export function clipPath(
+  data: { docId: string; workspaceId?: string },
+  segment: number,
+  startMs: number,
+  endMs: number,
+): string {
+  const ws = encodeURIComponent(data.workspaceId ?? '');
+  const doc = encodeURIComponent(data.docId);
+  const sec = (ms: number) => (Math.round(ms / 100) / 10).toFixed(1);
+  return `/workspaces/${ws}/docs/${doc}/voice-feedback/seg-${segment}.wav#t=${sec(startMs)},${sec(endMs)}`;
 }
 
 /** Append to the log, creating it with its heading the first time. */
