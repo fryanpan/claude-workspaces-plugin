@@ -53,6 +53,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { enterLane } from './verify-lane-lock.ts';
 
 // `import.meta.url`, not `import.meta.dir`: the colocated test runs under
 // vitest, where `import.meta.dir` is undefined and module load throws.
@@ -404,7 +405,7 @@ function flagValue(argv: string[], name: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const base = flagValue(argv, '--base') ?? 'origin/main';
 
@@ -451,6 +452,18 @@ function main(): void {
     }
   }
 
+  // THE LANE. An expensive run takes a machine-wide lock and waits for any
+  // run already in it, because two overlapping runs change the verdict rather
+  // than just the clock — see scripts/verify-lane-lock.ts. Taken here, after
+  // the argument errors above have had their chance to exit: a run about to
+  // die on an unknown member id should not first queue behind seven minutes
+  // of somebody else's suite to do it. `finish` releases the lane however
+  // this run ends, a failing member included.
+  const finish = await enterLane(
+    REPO_ROOT,
+    members.map((m) => m.id),
+  );
+
   console.log(`Running ${members.length} gate(s) — the set .github/workflows/ci.yml runs.\n`);
   const results = runMembers(
     members,
@@ -470,7 +483,7 @@ function main(): void {
   );
 
   printSummary(results, members.length);
-  process.exit(overallExit(results));
+  finish(overallExit(results));
 }
 
-if (import.meta.main) main();
+if (import.meta.main) await main();
