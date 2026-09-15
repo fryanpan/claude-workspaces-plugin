@@ -35,10 +35,12 @@
  */
 import { isSecretServiceName } from '@claude-workspaces/core';
 import {
-  SECRET_ACCOUNT,
   SECRET_COMMAND_LINE_BUDGET,
-  SECRET_VALUE_MAX_CHARS,
   secretAddCommandLine,
+} from '@claude-workspaces/core/secret-line';
+import {
+  SECRET_ACCOUNT,
+  SECRET_VALUE_MAX_CHARS,
   storedSecretService,
 } from '@claude-workspaces/core/secret-name';
 
@@ -52,9 +54,9 @@ import {
  * namespace exists — it is the reason a review item cannot name, and
  * overwrite, an entry this server reads its own configuration from.
  */
+export { SECRET_COMMAND_LINE_BUDGET } from '@claude-workspaces/core/secret-line';
 export {
   SECRET_ACCOUNT,
-  SECRET_COMMAND_LINE_BUDGET,
   SECRET_SERVICE_PREFIX,
   SECRET_VALUE_MAX_CHARS,
   secretReadCommand,
@@ -186,7 +188,7 @@ async function spawnCommand(file: string, args: string[], stdin: string): Promis
  * reported as a failed save (2026-09-14). Interactive mode takes the whole
  * command on stdin instead: `security`'s argument list is just `-i`, and the
  * value is on one line of its standard input, which no other process on the
- * machine can list. Its own cap is measured in `core/secret-name.ts`, and
+ * machine can list. Its own cap is measured in `core/secret-line.ts`, and
  * `secretValueFits` keeps every line well inside it.
  *
  * THE READ-BACK IS NOT BELT AND BRACES. The prompt path exited 0 having

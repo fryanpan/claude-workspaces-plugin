@@ -18,7 +18,8 @@
  * all — see `ReviewSecretBlock` for where that absence is spelled out.
  */
 import type { ReviewSecretField } from '@claude-workspaces/core';
-import { SECRET_VALUE_MAX_CHARS, secretValueFitsStore } from '@claude-workspaces/core/secret-name';
+import { secretValueFitsStore } from '@claude-workspaces/core/secret-line';
+import { SECRET_VALUE_MAX_CHARS } from '@claude-workspaces/core/secret-name';
 import { Fragment } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { SecretsGate } from './board-review-model.ts';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { secretValueFitsStore } from '@claude-workspaces/core/secret-name';
+import { secretValueFitsStore } from '@claude-workspaces/core/secret-line';
 import {
   SECRET_ACCOUNT,
   SECRET_COMMAND_LINE_BUDGET,
