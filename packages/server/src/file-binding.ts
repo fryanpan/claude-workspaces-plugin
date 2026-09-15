@@ -25,8 +25,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -248,6 +250,145 @@ export function decideReconcile(args: {
 }
 
 /**
+ * What an incoming copy of the file does to the doc's blocks: how many it
+ * takes away, how many it brings, and the NET loss.
+ *
+ * Three numbers, because two different decisions ride on this and they do not
+ * share a trigger. Measured over a seven-block doc with three headings:
+ *
+ * | the file came back with…      | removed | added | net | headings gone |
+ * | ----------------------------- | ------- | ----- | --- | ------------- |
+ * | one paragraph reworded        |       1 |     1 |   0 |             0 |
+ * | three paragraphs reworded     |       3 |     3 |   0 |             0 |
+ * | the notes section DELETED     |       3 |     0 |   3 |             1 |
+ * | the notes section SWAPPED     |       3 |     3 |   0 |             1 |
+ * | every block reworded          |       7 |     7 |   0 |             3 |
+ *
+ * `net` is the honest signal for "the file got shorter", and it is zero for an
+ * ordinary reword — which is why it and not `removed` decides whether to raise
+ * a `syncError`, a thing a person is asked to act on and which would be a
+ * regression in noise if it fired on every external save.
+ *
+ * `removed` alone cannot decide the other question. Read down that column and
+ * the shapes cross: an ordinary three-paragraph reword removes as many blocks
+ * as a whole section being swapped out, so no threshold on it separates the
+ * loss this module exists to catch from a person editing prose.
+ *
+ * `removedHeadings` does separate them, which is why it is here. A section
+ * leaving takes its heading with it whether or not anything arrives in its
+ * place, and rewording paragraphs under a heading does not touch the heading.
+ * It is the SWAPPED row — same size in, same size out, `net` zero, the loudest
+ * possible loss — that a net-only rule would have missed entirely.
+ *
+ * The last row is a false positive and is meant to be: a revision that renamed
+ * every heading rewrote the whole document, and that is exactly when keeping
+ * the doc's own copy is worth one small file. What escapes both triggers is a
+ * same-size paragraph swapped under an untouched heading — which is bytes for
+ * bytes what an ordinary reword is, so nothing on the file could tell them
+ * apart.
+ *
+ * The comparison is deliberately blind to WHO shortened the file. A person
+ * deleting a section in their editor and a cloud-sync provider handing back
+ * the revision it held before the meeting produce the same bytes, and the
+ * server cannot tell them apart — nothing on the file says which. So this
+ * does not decide a winner (disk still wins at rest, as the sync contract
+ * says); it decides whether the doc's own copy is worth keeping before it
+ * goes.
+ *
+ * Multiset, not set: a doc holding the same bullet twice that comes back
+ * holding it once has lost one, and a `Set` would say it lost nothing.
+ *
+ * Pure + exported so the rule is unit-tested without a filesystem, the same
+ * way `decideReconcile` is.
+ */
+export interface BlockDelta {
+  /** Live blocks whose markdown the incoming copy does not hold. */
+  removed: number;
+  /** Incoming blocks the live doc did not hold. */
+  added: number;
+  /** `removed - added`, floored at zero: the file is this many blocks shorter
+   *  in content it and the doc do not share. */
+  net: number;
+  /** How many of the removed blocks were HEADINGS — a section that left. */
+  removedHeadings: number;
+}
+
+/**
+ * A serialized block that is a heading.
+ *
+ * Reading the markdown rather than the node because `blockDelta` is pure over
+ * strings, and the serializer makes this unambiguous: a heading is the only
+ * block it ever emits starting `#`. A fenced block is wrapped in backticks
+ * before its first line is reached, a list in `-` or a number, a blockquote in
+ * `>`, and a paragraph whose text began `# ` would have parsed as a heading.
+ */
+const HEADING_MD = /^#{1,6}\s/;
+
+/**
+ * Whether the doc's own copy is worth keeping before an incoming file wins.
+ *
+ * A section left (its heading went with it), or the file simply came back
+ * shorter. Both triggers, one predicate, so the force-pull path and the poll
+ * path cannot drift apart on what counts as worth keeping.
+ */
+function worthKeeping(delta: BlockDelta): boolean {
+  return delta.removedHeadings > 0 || delta.net > 0;
+}
+
+export function blockDelta(live: readonly string[], incoming: readonly string[]): BlockDelta {
+  const spare = new Map<string, number>();
+  for (const block of incoming) spare.set(block, (spare.get(block) ?? 0) + 1);
+  let removed = 0;
+  let removedHeadings = 0;
+  for (const block of live) {
+    const left = spare.get(block) ?? 0;
+    if (left === 0) {
+      removed++;
+      if (HEADING_MD.test(block)) removedHeadings++;
+    } else spare.set(block, left - 1);
+  }
+  let added = 0;
+  for (const left of spare.values()) added += left;
+  return { removed, added, net: Math.max(0, removed - added), removedHeadings };
+}
+
+/**
+ * One block's markdown each, for the comparison above.
+ *
+ * A block that will not serialize gets a value nothing else can equal, so it
+ * counts as removed rather than as matched — this decides whether to keep a
+ * BACKUP, and an unreadable block is exactly the one worth erring towards
+ * keeping.
+ */
+function blockTexts(blocks: readonly Y.XmlElement[]): string[] {
+  return blocks.map((block, i) => {
+    try {
+      return prose.serializeBlockToMarkdown(block);
+    } catch {
+      // Unique per block and unreachable by any serializer, so an
+      // unreadable block matches nothing — not even another one.
+      return `\u0000unreadable-${i}`;
+    }
+  });
+}
+
+/**
+ * The same, for blocks straight out of `parseMarkdownBlocks`.
+ *
+ * They belong to no document yet, and reading a Yjs type before it is in one
+ * is an error — every block would have come back "unreadable" and the count
+ * would have been the doc's own block count, which is right only by accident.
+ * A scratch `Y.Doc` is the cheapest place to put them; the caller has already
+ * paid for the parse and uses these blocks for nothing else.
+ */
+function incomingBlockTexts(blocks: Y.XmlElement[]): string[] {
+  const scratch = new Y.Doc();
+  const fragment = prose.getProseFragment(scratch);
+  fragment.push(blocks);
+  return blockTexts(fragment.toArray() as Y.XmlElement[]);
+}
+
+/**
  * The one log line for an attach whose file is not on disk (`isDataless`):
  * the doc, the errno and what happens next. No stack, because nothing here is
  * a fault to debug, and no path, because a path under a cloud-sync folder can
@@ -294,6 +435,17 @@ const FILE_POLL_ACTIVE_MS = 60_000;
  * tick, so the old 500ms guarantee is unchanged there.
  */
 const IDLE_SWEEP_BUDGET = 128;
+
+/**
+ * How many copies of ONE doc's own content to keep in `clobber-backups/`.
+ *
+ * Generous on purpose: the file this exists to preserve is the one a person
+ * comes looking for days later, and rotating it out to save a few kilobytes
+ * would be the loss this whole change is about. It is a ceiling against a
+ * pathological binding, not a tidy-up — an ordinary doc never reaches it,
+ * because the same content is never kept twice in a row.
+ */
+const LIVE_BACKUP_CAP = 20;
 
 /**
  * How many distinct activation tags to keep. Everything past the cap folds
@@ -406,6 +558,16 @@ export class FileBindings {
   /** When we last wrote each doc's bound file ourselves, in epoch ms. Read
    *  by the live-copy rule; see the write-back that sets it. */
   private readonly writeBackAt = new Map<string, number>();
+
+  /** The doc content most recently snapshotted into `clobber-backups/` for
+   *  each doc, so a reconcile that removes the same block twice keeps one
+   *  file rather than two. See `keepLiveCopy`.
+   *
+   *  A whole serialized doc per entry, so `discard` drops it with the
+   *  binding — otherwise a long-running server holds a copy of every doc it
+   *  ever backed up, and a doc rebound under the same id would have its first
+   *  real backup suppressed by a match against content nothing keeps. */
+  private readonly lastLiveBackup = new Map<string, string>();
 
   /** When we last wrote this doc's file ourselves, if we ever have. */
   lastWriteBackAt(docId: string): number | undefined {
@@ -1587,9 +1749,20 @@ export class FileBindings {
       return { ok: true };
     }
     const opts = parseOptsFor(binding.path);
-    if (prose.parseMarkdownBlocks(md, opts).length === 0) return { ok: false, error: 'missing' };
+    const diskBlocks = prose.parseMarkdownBlocks(md, opts);
+    if (diskBlocks.length === 0) return { ok: false, error: 'missing' };
     binding.diskSource = md;
     const fragment = prose.getProseFragment(doc.ydoc);
+    // A force-pull is the bluntest disk-wins path there is: it cleared the
+    // pending write-back above, so anything the doc holds that the file has
+    // never seen is about to exist nowhere. The caller asked for disk and
+    // still gets it — but not silently, and not without a copy. See
+    // `recordBlocksDropped`.
+    const liveBefore = prose.serializeFragmentToMarkdown(fragment);
+    const delta = blockDelta(
+      blockTexts(fragment.toArray() as Y.XmlElement[]),
+      incomingBlockTexts(diskBlocks),
+    );
     doc.ydoc.transact(() => {
       // Block-level diff, not delete-all + push: blocks the rewrite didn't
       // touch keep their Y.XmlText identity, so their thread anchors keep
@@ -1604,7 +1777,12 @@ export class FileBindings {
     prose.normalizeHeadingLevels(doc.ydoc);
     // Serializer-space, not raw disk bytes — see attachFile (RC1).
     binding.lastWritten = prose.serializeFragmentToMarkdown(fragment);
-    binding.lastSyncError = undefined;
+    // Cleared FIRST, not in an `else`: a reparse that swapped one section for
+    // another of the same size keeps a copy (a heading left) and raises
+    // nothing (the file is no shorter), and an earlier error left standing
+    // through that would outlive what it described.
+    if (delta.net === 0) binding.lastSyncError = undefined;
+    if (worthKeeping(delta)) this.recordBlocksDropped(doc, binding, liveBefore, delta);
     return { ok: true };
   }
 
@@ -1769,6 +1947,15 @@ export class FileBindings {
     // pending sids so the drop can be recorded below (syncError pattern; a
     // snippet-match re-anchor sweep for suggestions is out of scope for v1).
     const sidsBefore = new Set(suggestOps.scanSuggestions(fragment).keys());
+    // Whatever this apply is about to take OUT of the doc, before it is gone.
+    // `apply` means the live doc equals our last write, which is why it is
+    // safe to let disk win — but it says nothing about the file having moved
+    // FORWARD. A shortened copy is applied by the same arm as an edited one,
+    // and the words it drops were only ever in the `.ydoc`.
+    const delta = blockDelta(
+      blockTexts(fragment.toArray() as Y.XmlElement[]),
+      incomingBlockTexts(blocks),
+    );
     doc.ydoc.transact(() => {
       prose.applyMarkdownToFragment(fragment, md, opts);
     }, 'file-watch');
@@ -1796,9 +1983,16 @@ export class FileBindings {
       console.warn(
         `[doc-store] ${doc.docId}: external edit to ${binding.path} dropped suggestion(s) ${droppedSids.join(', ')}`,
       );
-    } else {
+    } else if (delta.net === 0) {
       binding.lastSyncError = undefined;
     }
+    // Recorded LAST, so it is the message a reader gets when an apply both
+    // shortened the doc and disturbed a suggestion: losing whole blocks is
+    // the worse of the two, and `lastSyncError` holds one message. The apply
+    // itself STANDS — disk is the source of truth at rest and this does not
+    // relitigate that. What changes is that the words it removed are still
+    // somewhere, and somebody is told.
+    if (worthKeeping(delta)) this.recordBlocksDropped(doc, binding, currentSerialized, delta);
     console.log(
       `[doc-store] ${doc.docId}: applied external edit from ${binding.path} (${blocks.length} blocks)`,
     );
@@ -2077,6 +2271,118 @@ export class FileBindings {
   }
 
   /**
+   * A disk-wins replacement REMOVED blocks from the doc: keep the doc's own
+   * copy, say where it went, and announce it.
+   *
+   * The counterpart of `recordConflictReassert`, for the arm that reaches the
+   * opposite verdict. When the live doc wins, the external version is backed
+   * up so the loser is recoverable; when DISK wins, nothing was — the doc's
+   * copy went straight into the transact and the only trace of the words was
+   * the `.ydoc` that had just been overwritten. That is how a meeting's notes
+   * can leave the doc and the file together with nothing kept anywhere: the
+   * file goes backwards (a cloud-sync provider handing back the revision it
+   * held, a materialization that answers short, an editor saving a stale
+   * buffer), the arbitration correctly reads a clean doc and an externally
+   * changed file, and the section is gone.
+   *
+   * This does not change who wins — see `blockDelta` for why the
+   * server cannot tell a regression from a person's deletion. It makes the
+   * loss recoverable and visible, which is what "the file is the source of
+   * truth at rest" owes the side that loses.
+   *
+   * Never throws: the backup is best-effort and the reconcile has already
+   * happened by the time this runs.
+   */
+  private recordBlocksDropped(
+    doc: LiveDoc,
+    binding: FileBinding,
+    liveBefore: string,
+    delta: BlockDelta,
+  ): void {
+    // The COPY is taken when a SECTION left or the file came back shorter
+    // (`worthKeeping`). An ordinary reword moves neither, so editing prose in
+    // another editor still leaves nothing behind — which is what the existing
+    // clean-apply control asserts.
+    const backupPath = this.keepLiveCopy(doc.docId, liveBefore);
+    // The ALARM is raised only when the file actually came back shorter. It
+    // reaches `get_doc`, every edit-tool response and every watching session,
+    // so a section SWAP keeps the copy and stays quiet: nothing is missing
+    // from the file for a person to go and restore.
+    if (delta.net === 0) {
+      console.warn(
+        `[doc-store] ${doc.docId}: external change to ${binding.path} replaced ` +
+          `${delta.removed} block(s) the doc held` +
+          (backupPath ? `; the doc's copy was kept at ${backupPath}` : ''),
+      );
+      return;
+    }
+    const blocks = `${delta.net} block${delta.net === 1 ? '' : 's'}`;
+    this.recordSyncError(
+      doc,
+      binding,
+      `the bound file no longer holds ${blocks} the doc did; disk won and those blocks are gone from the doc. ` +
+        (backupPath
+          ? `The doc's copy was saved to ${backupPath} — restore it over the file and reparse_from_disk to bring the blocks back.`
+          : "Backup of the doc's copy FAILED — those blocks survive only in an earlier .ydoc snapshot."),
+      backupPath,
+    );
+    console.warn(
+      `[doc-store] ${doc.docId}: ${binding.path} came back short; ${blocks} dropped from the doc` +
+        (backupPath ? ` (the doc's copy was backed up to ${backupPath})` : ''),
+    );
+  }
+
+  /**
+   * Snapshot the doc's own content before a disk-wins replacement, bounded.
+   *
+   * Two bounds, because this fires on a section leaving as well as on a
+   * shortened file:
+   *
+   *   - **Nothing is reached on a quiet poll.** A reconcile runs only on a
+   *     stat that actually changed, so the ceiling is "one small file per
+   *     external save that took a section or shortened the file", not per
+   *     tick. The write path is
+   *     untaxed either way — this is on the READ side.
+   *   - **The same content is never kept twice in a row**, and a doc keeps at
+   *     most {@link LIVE_BACKUP_CAP} of them; past that the oldest goes. That
+   *     is the rotation `backupReplacedContent` already runs for
+   *     `set_doc_content`, and these are transient recovery copies of content
+   *     the `.ydoc` history also holds — the one class CLAUDE.md names as
+   *     correctly hard-deleted.
+   *
+   * De-duplication is off the binding rather than the directory, so the
+   * common case costs no syscall at all. A restart forgets it, which costs
+   * one extra file.
+   */
+  private keepLiveCopy(docId: string, content: string): string | null {
+    if (this.lastLiveBackup.get(docId) === content) return null;
+    const path = this.backupExternalVersion(docId, content, 'live');
+    if (path === null) return null;
+    this.lastLiveBackup.set(docId, content);
+    this.rotateLiveCopies(docId);
+    return path;
+  }
+
+  /** Drop the oldest live copies of one doc past the cap. Best-effort: a
+   *  directory that will not list is a rotation skipped, never a throw into
+   *  a reconcile that has already happened. */
+  private rotateLiveCopies(docId: string): void {
+    try {
+      const dir = join(this.p.dataDir(), 'clobber-backups');
+      const prefix = `${docId.replace(/[^A-Za-z0-9._-]/g, '_')}-live-`;
+      // The names carry a millisecond stamp, so lexical order IS age order.
+      const mine = readdirSync(dir)
+        .filter((name) => name.startsWith(prefix) && name.endsWith('.md'))
+        .sort();
+      for (const stale of mine.slice(0, Math.max(0, mine.length - LIVE_BACKUP_CAP))) {
+        rmSync(join(dir, stale), { force: true });
+      }
+    } catch (err) {
+      console.error(`[doc-store] live-copy rotation failed for ${docId}:`, err);
+    }
+  }
+
+  /**
    * Record a sync failure on a binding AND announce it on the doc's event
    * channels as a `doc.sync_error` broadcast.
    *
@@ -2122,9 +2428,22 @@ export class FileBindings {
       const dir = join(this.p.dataDir(), 'clobber-backups');
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const safeId = docId.replace(/[^A-Za-z0-9._-]/g, '_');
-      const file = join(dir, `${safeId}-${label}-${Date.now()}.md`);
-      writeFileSync(file, content);
-      return file;
+      const stem = join(dir, `${safeId}-${label}-${Date.now()}`);
+      // `wx` rather than a plain write: the stamp is milliseconds, and two
+      // drops inside one millisecond would otherwise have the second silently
+      // overwrite the first — one recovery copy destroying another, which is
+      // the loss this whole path exists to prevent. The suffix keeps lexical
+      // order equal to age order, which the rotation below relies on.
+      for (let n = 0; n < 100; n++) {
+        const file = n === 0 ? `${stem}.md` : `${stem}-${String(n).padStart(2, '0')}.md`;
+        try {
+          writeFileSync(file, content, { flag: 'wx' });
+          return file;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        }
+      }
+      throw new Error('100 backups in one millisecond');
     } catch (err) {
       console.error(`[doc-store] clobber backup failed for ${docId}:`, err);
       return null;
@@ -2366,6 +2685,9 @@ export class FileBindings {
    * A no-op for a doc that was never bound.
    */
   discard(docId: string): void {
+    // Dropped whether or not the doc was bound: the de-dup entry outlives the
+    // binding otherwise, and it is a whole document's markdown.
+    this.lastLiveBackup.delete(docId);
     const binding = this.bindings.get(docId);
     if (!binding) return;
     if (binding.writeTimer) clearTimeout(binding.writeTimer);
