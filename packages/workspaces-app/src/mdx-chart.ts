@@ -153,6 +153,9 @@ const MUTED_BAR = '#adb5bd';
 /** Rough width of a 12px sans glyph; no layout is read, so jsdom draws alike. */
 const CH = 6.6;
 const MAX_TIPS = 400;
+/** A horizontal bar chart's narrowest plot, and narrowest row-label column. */
+const MIN_PLOT_W = 40;
+const MIN_LABEL_W = 24;
 
 export const seriesColor = (i: number): string => SERIES[i % SERIES.length] ?? '#2a78d6';
 
@@ -357,13 +360,21 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
   if (chart.orientation === 'horizontal') {
     const row = 30;
     const h = chart.bars.length * row + 8;
-    const labelW = Math.min(
-      Math.round(w * 0.38),
-      Math.ceil(Math.max(...chart.bars.map((b) => b.label.length)) * CH) + 12,
-    );
-    // A negative value sits left of its bar, so it takes a gutter there too.
+    // A value sits beside its bar's far end: left of a negative bar, right of
+    // any other, so each side keeps a gutter only when some bar needs it (the
+    // right keeps a hair so an all-negative chart's bars stop short of the edge).
     const leftValueW = lo < 0 ? valueW : 0;
-    const pw = Math.max(40, w - labelW - leftValueW - valueW);
+    const rightValueW = values.some((v) => v >= 0) ? valueW : 4;
+    // Row labels give way before the plot does, so no bar runs past the edge.
+    const labelW = Math.max(
+      MIN_LABEL_W,
+      Math.min(
+        Math.round(w * 0.38),
+        Math.ceil(Math.max(...chart.bars.map((b) => b.label.length)) * CH) + 12,
+        w - leftValueW - rightValueW - MIN_PLOT_W,
+      ),
+    );
+    const pw = Math.max(MIN_PLOT_W, w - labelW - leftValueW - rightValueW);
     const sx = (v: number) => labelW + leftValueW + ((v - lo) / (hi - lo)) * pw;
     const svg = frame(w, h, 'bar');
     chart.bars.forEach((b, i) => {

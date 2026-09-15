@@ -268,6 +268,26 @@ describe('a chart block on the doc page', () => {
     expect(num(downValue, 'x') - 2 * 7).toBeGreaterThan(num(downLabel, 'x'));
   });
 
+  it('keeps every bar of a narrow all-negative horizontal chart inside it, using its width', () => {
+    const src =
+      '<Chart orientation="horizontal" unit="crossings" data={[{ label: "Saltmarsh landing", value: -12000 }, { label: "Kiln wharf", value: -300 }]} />';
+    for (const width of [240, 300, 430]) {
+      const host = document.createElement('div');
+      renderMdxSummary(host, summarizeMdx(src), width);
+      const bars = [...host.querySelectorAll('rect.mdx-bar')].map((r) => {
+        const x = Number(r.getAttribute('x'));
+        return { left: x, right: x + Number(r.getAttribute('width')) };
+      });
+      expect(bars).toHaveLength(2);
+      for (const bar of bars) {
+        expect(bar.left).toBeGreaterThanOrEqual(0);
+        expect(bar.right).toBeLessThanOrEqual(width);
+      }
+      // No value sits right of an all-negative chart, so its bars reach the edge.
+      expect(Math.max(...bars.map((b) => b.right))).toBeGreaterThan(width - 8);
+    }
+  });
+
   it('draws a visible dot for each series that has only one point', () => {
     mount(
       '<LineChart series={[{ label: "Riverbend", values: [{ x: 1, y: 3 }] }, { label: "Kiln", values: [{ x: 2, y: 5 }] }]} />\n',
