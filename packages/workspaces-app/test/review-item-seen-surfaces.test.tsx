@@ -1,4 +1,4 @@
-import { threadReviewItemId } from '@claude-workspaces/core';
+import { hashToColor, threadReviewItemId } from '@claude-workspaces/core';
 import type { Comment, Thread, User } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DetailHandlers } from '../src/board/board-detail-render.ts';
@@ -39,6 +39,26 @@ import { renderTaskDetail } from './support/task-detail.ts';
 
 const WS = 'w-tide';
 const NOW = 1_700_000_000_000;
+
+/**
+ * Who this browser is, seeded into the storage the app resolves its author
+ * from — and then asserted on every body below.
+ *
+ * The beacon has to name an actor: the server refuses one that does not, and
+ * a row nobody caused is not a measurement. The first version of the watcher
+ * sent ids alone and every beacon from a real browser came back 400, while
+ * the server's own tests — which handed `author` in by hand — stayed green.
+ * So the author is asserted HERE, where the body is the one the client
+ * actually builds, and never supplied by the test.
+ */
+const READER_NAME = 'Riverbend Reader';
+const READER_ANON = 'tideline';
+const reader: User = {
+  id: `anon-${READER_ANON}`,
+  kind: 'known',
+  name: READER_NAME,
+  color: hashToColor(READER_NAME),
+};
 
 /**
  * Reports everything observed as on screen — one microtask later, and only
@@ -104,6 +124,8 @@ const beacons = (): SeenPost[] => posts.filter((p) => p.path.endsWith('/review-i
 beforeEach(() => {
   resetReviewItemSeen();
   posts = [];
+  localStorage.setItem('feedback-user-name', READER_NAME);
+  localStorage.setItem('feedback-anon-id', READER_ANON);
   document.body.innerHTML = '';
   (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver =
     EagerObserver as unknown as typeof IntersectionObserver;
@@ -231,6 +253,7 @@ describe('the queue card in the cross-board walk', () => {
     expect(beacon.body).toEqual({
       reviewItemId: threadReviewItemId('d-tideline', 'th-1', 'c-1'),
       taskId: 't-ledger',
+      author: reader,
     });
   });
 
@@ -241,6 +264,7 @@ describe('the queue card in the cross-board walk', () => {
     expect(beacons()[0].body).toEqual({
       reviewItemId: LEGACY_REVIEW_ITEM_ID,
       taskId: decision.id,
+      author: reader,
     });
   });
 });
@@ -259,6 +283,7 @@ describe('the item on its task page', () => {
     expect(beacons()[0].body).toEqual({
       reviewItemId: LEGACY_REVIEW_ITEM_ID,
       taskId: decision.id,
+      author: reader,
     });
   });
 
@@ -330,6 +355,7 @@ describe('the item on a doc page', () => {
     expect(beacons()[0].path).toBe(`/workspaces/${WS}/review-items/viewed`);
     expect(beacons()[0].body).toEqual({
       reviewItemId: threadReviewItemId('d-tideline', 'th-1', 'c-1'),
+      author: reader,
     });
   });
 });

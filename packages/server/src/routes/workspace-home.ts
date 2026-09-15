@@ -1,6 +1,7 @@
 import { parseThreadReviewItemId } from '@claude-workspaces/core';
 import { matchRest, restIs } from '../middleware/workspace-scope.ts';
 import { reviewItemViewedEvent } from '../review-items/analytics.ts';
+import { legacyDecisionItem } from '../review-items/derive.ts';
 import { taskIdOfBodyDoc } from '../task-row.ts';
 /**
  * The Home queue: where a review item lives, what is waiting on a person, and the instructions above it.
@@ -170,6 +171,16 @@ export async function handleWorkspaceHome(
       const claimed = typeof body?.taskId === 'string' ? body.taskId : '';
       const task = claimed === '' ? undefined : taskStore.getTask(claimed);
       if (!task || task.workspaceId !== workspaceId) {
+        return j(404, { error: 'unknown-review-item' });
+      }
+      // And the ticket has to actually DERIVE the item. Naming a task on the
+      // right board is not naming an item: an ordinary ticket — one that
+      // never asked for a decision — would otherwise take a viewed row for an
+      // ask that does not exist on it, from a stale tab or a hand-written
+      // POST. `legacyDecisionItem` is the same derivation the queue and the
+      // board projection read, so nothing here can disagree with what a
+      // reader was actually shown.
+      if (!legacyDecisionItem(task)) {
         return j(404, { error: 'unknown-review-item' });
       }
       taskId = task.id;

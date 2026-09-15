@@ -29,7 +29,7 @@ import {
   reviewItemViewedEvent,
 } from '../src/review-items/analytics.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { type Task, eventsLogPath } from '../src/tasks.ts';
+import { LEGACY_REVIEW_ITEM_ID, type Task, eventsLogPath } from '../src/tasks.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = { id: 'agent-ledger-keeper', name: 'Ledger Keeper', kind: 'known', color: '#888888' };
@@ -249,6 +249,47 @@ describe('what a viewed and an answered item write to the board log', () => {
     const noId = await post(`/workspaces/${wsId}/review-items/viewed`, { author: PERSON });
     expect(noId.status).toBe(400);
     expect(rowsOf('review_item.viewed')).toHaveLength(before);
+  });
+
+  it('refuses the legacy id on a ticket that is asking nobody for a decision', async () => {
+    // The legacy id is derived by EVERY decision ticket, so it names an item
+    // only together with a task — and a task that never asked for a decision
+    // derives no such item. A stale tab, or a hand-written POST, must not be
+    // able to bank reading time against an ask that does not exist.
+    const ordinary = await seedTask('Sweep the old read path');
+    const before = rowsOf('review_item.viewed').length;
+    const res = await post(`/workspaces/${wsId}/review-items/viewed`, {
+      reviewItemId: LEGACY_REVIEW_ITEM_ID,
+      taskId: ordinary.id,
+      author: PERSON,
+    });
+    expect(res.status).toBe(404);
+    expect(rowsOf('review_item.viewed')).toHaveLength(before);
+
+    // Positive control: the same request against a ticket that IS waiting on
+    // a decision is the shape this route exists for, and it records a row.
+    const { task: deciding } = await jj<{ task: Task }>(
+      await post(`/workspaces/${wsId}/tasks`, {
+        title: 'Hold the old path open another week?',
+        // A decision-shaped body: the create door refuses `needs: 'decision'`
+        // without one, and that gate is not the one under test here.
+        body: 'Should the old read path stay open another week? At stake: one reader still uses it, and closing it early costs them a rewrite. Blocked until answered: the freeze.',
+        options: [{ label: 'Hold it' }, { label: 'Close it' }],
+        assignee: PERSON.name,
+        needs: 'decision',
+        author: AGENT,
+      }),
+    );
+    const ok = await post(`/workspaces/${wsId}/review-items/viewed`, {
+      reviewItemId: LEGACY_REVIEW_ITEM_ID,
+      taskId: deciding.id,
+      author: PERSON,
+    });
+    expect(ok.status).toBe(200);
+    const written = rowsOf('review_item.viewed').slice(before);
+    expect(written).toHaveLength(1);
+    expect(written[0].reviewItemId).toBe(LEGACY_REVIEW_ITEM_ID);
+    expect(written[0].taskId).toBe(deciding.id);
   });
 
   it('records the answer under the same ids, on the same clock', async () => {

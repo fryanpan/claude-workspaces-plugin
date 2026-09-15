@@ -1,3 +1,4 @@
+import { type User, resolveUser } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 import { asBackgroundWrite } from './signin/write-gate.ts';
 
@@ -131,6 +132,53 @@ export interface ReviewItemSeenWatcher {
 }
 
 /**
+ * Who this browser is, for a write nobody asked for.
+ *
+ * The row is "somebody read this ask", so it needs an actor, and the server
+ * refuses a beacon that names none — which is how the first version of this
+ * file recorded nothing at all on a trusted-local board: it sent ids only, and
+ * every beacon came back 400 while the tests, which supplied an author by
+ * hand, stayed green.
+ *
+ * Read from the SAME storage every other client write resolves its author
+ * from, rather than threaded down from a boot. Two reasons, and the second is
+ * the one that matters:
+ *
+ *  - There is no one boot to thread it from. Three surfaces show an item, the
+ *    ledger is one page-wide thing, and a watcher built on first paint has no
+ *    access to whatever the app's entry point awaited.
+ *  - A page that forgot to hand its user over would send nothing and record
+ *    nothing, silently — which is the exact failure this function exists to
+ *    close, reintroduced as a wiring step somebody must remember.
+ *
+ * It cannot write down the WRONG person either: a request carrying a verified
+ * session is attributed to that session by `authorFor` on the server, which
+ * outranks anything a body claims. This identity is what the server falls back
+ * on when nothing is proven — and then it is the same identity the reader's
+ * comments and answers on the same page carry, which is what makes viewed and
+ * answered subtractable.
+ */
+function beaconAuthor(): User {
+  return resolveUser(null, {
+    get: (k) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    },
+    set: (k, v) => {
+      try {
+        localStorage.setItem(k, v);
+      } catch {
+        // A browser with storage denied still gets an identity for this page
+        // load; it is just not the same one next time.
+      }
+    },
+  });
+}
+
+/**
  * Default beacon: one POST per item, and nothing depends on the answer.
  *
  * `asBackgroundWrite` for the reason the reading tracker uses it — nobody
@@ -141,6 +189,7 @@ export interface ReviewItemSeenWatcher {
  */
 function postSeen(target: ReviewItemSeenTarget): void {
   try {
+    const author = beaconAuthor();
     asBackgroundWrite(() => {
       void fetch(api('review-items/viewed', target.workspaceId), {
         method: 'POST',
@@ -148,6 +197,7 @@ function postSeen(target: ReviewItemSeenTarget): void {
         body: JSON.stringify({
           reviewItemId: target.reviewItemId,
           ...(target.taskId ? { taskId: target.taskId } : {}),
+          author,
         }),
         keepalive: true,
       });
