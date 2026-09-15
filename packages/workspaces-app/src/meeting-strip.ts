@@ -1885,9 +1885,18 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // `null`, so a Record press the browser then refused — a denied
     // microphone, a prompt dismissed, a mis-tap — took the LAST meeting's
     // offer off the screen for good, over a recording that never started.
-    // Nothing above this line has written to the doc or the wire, so a start
-    // that ends in `blocked` above now leaves the page exactly as it found
-    // it. See `meeting-tidy-offer-false-start.test.ts`.
+    // Nothing above this line has written to the doc or the wire, so what a
+    // blocked start now leaves alone is THE OFFER.
+    //
+    // AND ONLY THE OFFER — the reset block at the top of this function still
+    // runs on a false start. `names`, `seen` and `lastMeetingId` are cleared
+    // before the microphone is ever asked for, so a refused press still costs
+    // the last meeting's rename target: `postName` is addressed to
+    // `lastMeetingId`, and after a blocked start there is none. That is the
+    // same fault in a second place, and moving that block is work nothing
+    // here tests — deliberately not done with this fix rather than
+    // overlooked. See `meeting-tidy-offer-false-start.test.ts`, which asserts
+    // the offer and says nothing about the cast.
     opts.onMeetingChange?.(null);
     // What is RUNNING, which is what the record and the wire have to name — a
     // meeting that asked for two streams and got one is a one-stream meeting.
