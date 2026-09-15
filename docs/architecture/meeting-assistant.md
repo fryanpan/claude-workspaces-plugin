@@ -2350,6 +2350,27 @@ transcript label saying which of the two it is reading. A transcript over
 120k characters is REFUSED rather than trimmed, so the pass is never silently
 worse on the meetings where it is hardest to tell.
 
+**A long meeting's own notes fall out of the prompt, so the gate is not the
+only thing between the model and a duplicate.** The outline the pass shows the
+model is `CLEANUP_OUTLINE_BLOCKS` (400) body blocks counted from the END of
+the doc. A meeting whose notes run past that has its EARLIEST bullets missing
+from the prompt entirely — and the directive asks the model to add "an idea
+this meeting carried that no note mentions". A model doing exactly as it is
+told therefore restates a note the section already carries, and
+`confineToSection` cannot refuse it: an insert under a heading the pass owns
+names no block, so there is no membership, comment or ownership to weigh.
+Measured 2026-09-15 on a 521-body-block doc: 400 entries shown, the section's
+opening bullet outside them, and the pass wrote it a second time. The answer
+is the live tick path's own check — `dedupeNotesEdits`
+(`notes-edit-dedupe.ts`) — run on this path too, and asked against the
+UNWINDOWED outline, which is what keeps it from sharing the blind spot it
+exists to close. It runs before `confineToSection`, so the delete a move
+emits is gated like any other edit and the gate stays the last word; what it
+drops comes back as `alreadyWritten`, separate from `refused` because the two
+are refused by different rules. `notes-cleanup-long-meeting.test.ts` drives
+it, with the window measured rather than assumed and a short-section control
+that proves the composer duplicates nothing it can see.
+
 **A person's line is never rewritten — and it may still be argued with.**
 Bryan's rule (2026-09-10): *"do not rewrite human text. But if you spot an
 improvement, use the suggest and edit tool to suggest an edit."* Those are

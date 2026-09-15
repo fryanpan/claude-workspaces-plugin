@@ -38,6 +38,12 @@
  * - **A bullet somebody has commented on is not rewritten.** Rewriting one
  *   re-creates its text and breaks every thread anchored inside it; the pass
  *   adds beside it instead. See `commentedBlockIds`.
+ * - **A note the section already carries is not written again.** The outline
+ *   the model answers about is a WINDOW on the end of the doc, so over a long
+ *   meeting its own earliest bullets are missing from the prompt entirely and
+ *   a pass following the directive faithfully restates one. `dedupeNotesEdits`
+ *   — the live tick path's own check, asked here against the unwindowed
+ *   outline — is what makes that a dropped edit rather than a second copy.
  *
  * IT MUST NEVER THROW. It is reached from a route a person pressed a button
  * for; a compose that fails, a doc that has gone, a transcript that will not
@@ -60,6 +66,7 @@ import {
   applyNotesBlockEdits,
   readNotesOutline,
 } from './notes-doc-access.ts';
+import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
 import { unconfirmedDirective, unconfirmedNotes } from './notes-unconfirmed.ts';
 
@@ -110,6 +117,16 @@ export interface NotesCleanupResult {
    * of guessing.
    */
   refusals: string[];
+  /**
+   * Notes the model proposed that the section already carries, dropped before
+   * the gate ever saw them.
+   *
+   * SEPARATE FROM `refused`, because they are refused by a different rule and
+   * a reader chasing one must not find the other. `refused` is a block the
+   * pass may not TOUCH; this is a note whose words are already in the
+   * document, which the pass would have been free to write.
+   */
+  alreadyWritten: number;
   applied: number;
   /** Edits that reached somebody's line as a redline to accept or reject,
    *  rather than as a rewrite of it. */
@@ -233,6 +250,7 @@ const refusal = (reason: NotesCleanupRefusal, line: string): NotesCleanupResult 
   proposed: 0,
   refused: 0,
   refusals: [],
+  alreadyWritten: 0,
   applied: 0,
   suggested: 0,
   failed: 0,
@@ -360,7 +378,31 @@ export async function runNotesCleanupPass(
   // document the model answered about — but nothing is written on the
   // strength of it.
   const now = readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS });
-  const { kept, refused, reasons } = confineToSection(edits, {
+  // EACH NOTE ONCE, AND THIS READ IS THE WHOLE DOC RATHER THAN THE WINDOW.
+  //
+  // The outline the model answered about is capped at
+  // {@link CLEANUP_OUTLINE_BLOCKS} body blocks, counted from the END of the
+  // doc. Over a meeting whose notes run past that cap, its own earlier bullets
+  // are not in the prompt at all — so a pass doing exactly what the directive
+  // asks ("ADD what is missing: an idea this meeting carried that no note
+  // mentions") writes a note the section already carries, and no wording can
+  // stop it: the model cannot leave alone what it was never shown. Measured
+  // 2026-09-15 on a 521-body-block doc — 400 entries shown, the first bullet
+  // outside them, and the pass wrote it a second time.
+  //
+  // `dedupeNotesEdits` is the same check the live tick path runs
+  // (`meeting-notes-doc.ts`), and it is asked against the UNWINDOWED outline,
+  // which is what makes it an answer rather than the same blind spot again.
+  // Before the gate, so the delete a move emits is judged by
+  // `confineToSection` like any other edit and the gate stays the last word.
+  const deduped = dedupeNotesEdits(edits, {
+    notesHeadingId: headingId,
+    outline: readNotesOutline(docStore, docId),
+    speech: turns.map((t) => t.text),
+    authorId: NOTES_AUTHOR_ID,
+    commented: () => commentedBlockIds(doc.ydoc),
+  });
+  const { kept, refused, reasons } = confineToSection(deduped.edits, {
     ...sectionIds(now, headingId),
     ...ownership(now),
     headingId,
@@ -408,6 +450,7 @@ export async function runNotesCleanupPass(
     proposed: edits.length,
     refused,
     refusals: reasons,
+    alreadyWritten: deduped.alreadyWritten,
     applied: result.applied,
     suggested: result.suggested,
     failed: result.failed,
@@ -420,6 +463,9 @@ export async function runNotesCleanupPass(
     line:
       `notes cleanup ${docId}/${meetingId}: ${turns.length} turns read, ` +
       `${edits.length} edits proposed, ${refused} refused, ${touched} blocks touched` +
+      (deduped.alreadyWritten > 0
+        ? `, ${deduped.alreadyWritten} notes the section already carried`
+        : '') +
       // EVERY REFUSAL NAMED, on the same line as its count. A count with no
       // reasons is what left "16 refused, 0 blocks touched" unexplainable —
       // see `NotesCleanupResult.refusals`.

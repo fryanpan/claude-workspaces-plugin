@@ -676,7 +676,14 @@ returned edits a cleanup is allowed to make. One route calls it
 is that gate, split out because it answers a different question: not "run a
 pass" but "for a block the model has named, may this pass touch it at all" —
 section membership, comment anchors, and whose material it is. Pure, or a
-read of the doc; it composes nothing.
+read of the doc; it composes nothing. `notes-cleanup-prompt.ts` is the third
+piece and the only one that is not code: the restraint directive and the
+transcript label, split off so that rewording the pass's instructions touches
+no module that decides anything. It exports two strings, imports nothing and
+changes nothing in the picture. The pass also reaches sideways into
+`notes-edit-dedupe.ts` — the tick path's "each note once" check — so a tidy-up
+over a meeting longer than its own outline window cannot write a note the
+section already carries.
 
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below
