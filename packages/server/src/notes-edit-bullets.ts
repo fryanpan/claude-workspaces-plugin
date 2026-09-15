@@ -37,7 +37,8 @@ export function bulletProseLines(markdown: string): { markdown: string; bulleted
   // with nothing after it, closes it: a ``` line inside a ~~~ block is code.
   let fence: string | undefined;
   let bulleted = 0;
-  const lines = markdown.split('\n').map((line) => {
+  const source = markdown.split('\n');
+  const lines = source.map((line, i) => {
     const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
     if (marker) {
       const run = marker[1]!;
@@ -49,6 +50,10 @@ export function bulletProseLines(markdown: string): { markdown: string; bulleted
       return line;
     }
     if (fence !== undefined || proseNote(line) === undefined) return line;
+    // A line underlined with `===` or `---` is a heading's text, not a note,
+    // and the underline is the heading's too.
+    const underline = /^ {0,3}(?:=+|-+)\s*$/;
+    if (underline.test(source[i + 1] ?? '') || underline.test(line)) return line;
     bulleted++;
     return `- ${line}`;
   });

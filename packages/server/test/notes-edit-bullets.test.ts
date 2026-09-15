@@ -38,6 +38,11 @@ describe('bulletProseLines', () => {
     expect(bulletProseLines(md)).toEqual({ markdown: md, bulleted: 0 });
   });
 
+  test('the text line of an underlined heading stays a heading', () => {
+    const md = ['Riverbend ferry', '---', '', 'Harborlight kiln', '==='].join('\n');
+    expect(bulletProseLines(md)).toEqual({ markdown: md, bulleted: 0 });
+  });
+
   test('a fence closes only on its own marker, so code quoting the other one stays code', () => {
     const md = ['~~~', '```js', 'kiln budget line', '~~~', 'After the code'].join('\n');
     expect(bulletProseLines(md).markdown).toBe(
