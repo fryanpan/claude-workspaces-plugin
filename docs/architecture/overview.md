@@ -87,6 +87,27 @@ flowchart TB
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, and a bundled copy of `mcp`. | Version bumped in three places; see CLAUDE.md. |
 
+**A traced request is named by its route, and the table of routes is
+checked.** Both sides send Sentry events, and neither may send a raw path: a
+span or transaction name goes through `routePatternForSpan`
+(`core/src/route-templates.ts`), which matches the path against every route
+this server has as a whole-path template and collapses every segment it
+cannot place to `:id`. The degrade is safe by construction, so the risk is not
+a leak but a NAME: a route missing from the table arrives as `/:id/:id/:id`
+alongside unrelated ones, and Sentry's N+1 detector reads two different calls
+as one call twice. `packages/server/test/span-route-names.test.ts` walks
+`ROUTE_TABLE` and fails on any fixed-length route the table cannot name, so
+the list stays whole without anyone remembering to extend it. The scrub floors
+either side of it — key-targeted, then id-shaped — stay in
+`core/src/trace-privacy.ts`, which re-exports the function.
+
+**Two callers wanting the same thing share one read.** The board shell mounts
+`<meeting-banner>` in each pane, so the calendar read is
+`workspaces-app/src/calendar-events-source.ts` rather than the element: it
+hands a second caller the request already in flight and forgets it the moment
+that round settles, which is a shared read and not a cache with a lifetime.
+`link-titles.ts` holds the same shape for its lookup POST, keyed per URL.
+
 **The MCP connector can run inside the server.** `server/src/connector/` hosts
 the same `connector-session.ts` the stdio child builds, one per agent,
 working directory and default board, behind `/mcp` (Streamable HTTP, loopback only). It is the
