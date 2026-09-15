@@ -367,7 +367,7 @@ describe('a heading between them is not a wall to a move, and is not a thing to 
     expect(result.applied).toBe(1);
     expect(markdownNow()).toContain(`- ${OURS}\n  - ${THEIRS}`);
     // And the list the bullet left is gone rather than left behind empty.
-    expect(markdownNow()).not.toContain(`### Crew roster\n\n-`);
+    expect(markdownNow()).not.toContain('### Crew roster\n\n-');
   });
 
   it('refuses a nest that names a heading, with the reason, instead of failing it', async () => {
