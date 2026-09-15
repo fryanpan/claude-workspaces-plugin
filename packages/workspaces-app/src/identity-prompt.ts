@@ -40,6 +40,18 @@ export interface EnsureIdentityOptions {
  *  never answers must fall through to the local identity, not hang boot. */
 const SESSION_LOOKUP_MS = 4000;
 
+/** The identity answer out of a session read already in flight — one the
+ *  page shares with the write gate — under the same bound as the default. */
+export function sessionAnswerOf(body: Promise<unknown>): Promise<SessionAnswer> {
+  const timeout = new Promise<SessionAnswer>((resolve) =>
+    setTimeout(() => resolve({ authenticated: false }), SESSION_LOOKUP_MS),
+  );
+  const lookup = body.then((raw) =>
+    raw && typeof raw === 'object' ? (raw as SessionAnswer) : { authenticated: false },
+  );
+  return Promise.race([lookup, timeout]);
+}
+
 async function defaultFetchSession(): Promise<SessionAnswer> {
   const timeout = new Promise<SessionAnswer>((resolve) =>
     setTimeout(() => resolve({ authenticated: false }), SESSION_LOOKUP_MS),

@@ -273,6 +273,10 @@ export interface FakeServer {
   /** Answer any request whose path STARTS WITH `path` with this JSON body.
    *  Later routes win over earlier ones, so a test can override a default. */
   on(path: string, body: unknown, status?: number): void;
+  /** Keep every request whose path starts with `path` unanswered until the
+   *  returned release is called — a slow route, without a clock. Requests
+   *  still land in `calls` and the timeline when they are MADE. */
+  hold(path: string): () => void;
   /** Every request the app made, in order. */
   readonly calls: ServerCall[];
   /** Drop the routes and the log; the dispatcher itself stays installed. */
@@ -287,6 +291,7 @@ interface Route {
 
 let routes: Route[] = [];
 let calls: ServerCall[] = [];
+let holds: { path: string; released: Promise<void> }[] = [];
 
 /**
  * Install ONE fetch dispatcher on the global, for the life of the module.
@@ -310,6 +315,7 @@ export function installFakeServer(): FakeServer {
     }
     calls.push({ url, method: init?.method ?? 'GET', body: parsed });
     timeline.push(`${init?.method ?? 'GET'} ${path}`);
+    for (const hold of holds) if (path.startsWith(hold.path)) await hold.released;
     let match: Route | undefined;
     for (const route of routes) if (path.startsWith(route.path)) match = route;
     const status = match?.status ?? 200;
@@ -323,12 +329,21 @@ export function installFakeServer(): FakeServer {
     on(path: string, body: unknown, status = 200): void {
       routes.push({ path, status, body });
     },
+    hold(path: string): () => void {
+      let release = (): void => {};
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      holds.push({ path, released });
+      return release;
+    },
     get calls(): ServerCall[] {
       return calls;
     },
     reset(): void {
       routes = [];
       calls = [];
+      holds = [];
       timeline = [];
     },
   };
