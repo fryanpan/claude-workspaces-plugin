@@ -27,6 +27,9 @@ import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { maybeCompress, maybeNotModified } from './compress.ts';
+import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
+import { hostedSessionFactory } from './connector/session-factory.ts';
+import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { parseDocKey } from './doc-key.ts';
@@ -50,6 +53,7 @@ import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
 import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
 import { MountStore } from './mount-store.ts';
+import { parseMuxCursor } from './mux-cursor.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
 import { writeNotesMethod } from './notes-method-store.ts';
 import { fileOnMeetingDoc } from './notes-quality-review.ts';
@@ -62,6 +66,7 @@ import {
 } from './park-migration.ts';
 import { parkNoteText } from './park-note.ts';
 import { malformedPathSegment } from './path-params.ts';
+import { readReleasedPluginVersion } from './plugin-release.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
@@ -96,6 +101,7 @@ import {
   handleDocPromoteRoute,
   handleDocResourceRoutes,
 } from './routes/docs.ts';
+import { handleMcpConnectorRoute } from './routes/mcp-connector.ts';
 import {
   type MeetingCalendarRoutesContext,
   handleMeetingCalendarRoutes,
@@ -150,6 +156,7 @@ import { SharingGate } from './share/sharing-gate.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
+import { channelForWatchKey, openAgentMuxStream } from './sse-mux.ts';
 import { HTTP_IDLE_TIMEOUT_SEC, SseBus } from './sse.ts';
 import { createStallWiring } from './stall-wiring.ts';
 import { TaskProjection, taskBodyDocId } from './task-projection.ts';
@@ -257,6 +264,9 @@ export interface ServerHandle {
   /** Per-agent durable watch sets (agent-watches.ts). Exposed so tests can
    *  read the store the route wrote, not only the route's answer. */
   agentWatches: AgentWatches;
+  /** The hosted MCP connector behind `/mcp` (connector/host.ts). Exposed so
+   *  tests can read its tables and run its sweep. */
+  connector: ConnectorHost;
   /** The chat-audit log — the daily audit's published counts AND the rows the
    *  Stop-hook note route writes live. Exposed for the same reason
    *  `agentWatches` is: the count a board shows is a store read, and a test
@@ -2057,6 +2067,30 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   };
   const { handleArchiveRoutes } = createArchiveRoutes(archiveRoutesCtx);
 
+  /**
+   * The hosted MCP connector — see connector/host.ts. Each agent it hosts
+   * reads its event stream in-process, through the same function
+   * `/events/agent/<id>` answers with, and calls REST over loopback like the
+   * stdio child did, so every REST gate sees what it always saw.
+   */
+  const connectorHost = createConnectorHost({
+    createSession: hostedSessionFactory({
+      baseUrl: () => `http://127.0.0.1:${server.port}`,
+      openAgentEvents: (agentId, lastEventId) =>
+        openAgentMuxStream({
+          bus: sse,
+          agentId,
+          keys: () => agentWatches.list(agentId, watchKeyExists).watches.map((w) => w.key),
+          channelFor: (key) => channelForWatchKey(key, canonicalDocId),
+          cursors: parseMuxCursor(lastEventId ?? undefined),
+          onWatchSetChanged: (cb) => agentWatches.onChange(agentId, cb),
+        }),
+      log: (...args) => console.error('[connector]', ...args),
+    }),
+    fallbackPluginVersion: () => readReleasedPluginVersion() ?? '0.0.0',
+    log: (...args) => console.error(...args),
+  });
+
   /** What the two agent-id-keyed routes read instead of this closure's
    *  scope — the watch set, the roster and the store a merge moves. */
   const agentIdentityRoutesCtx: AgentIdentityRoutesContext = {
@@ -2686,6 +2720,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         });
         if (handled) return handled;
       }
+      // --- MCP: the hosted connector, loopback agents only --- see
+      // ./routes/mcp-connector.ts. One exact path nothing else answers, so
+      // its position shadows nothing; it sits beside the agent-id routes
+      // because it is the door those agents come through.
+      {
+        const handled = await handleMcpConnectorRoute(
+          { host: connectorHost, j, requestAddress: (r) => server.requestIP(r)?.address },
+          { req, pathname, visitor },
+        );
+        if (handled) return handled;
+      }
       // --- REST: durable agent watches, and the agent merge --- see
       // ./routes/agent-identity.ts. Same chain position as before the
       // split: after the promote route, before the builder dispatches.
@@ -3000,6 +3045,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     websocket: socketHandlers,
   });
 
+  // Every agent the previous process was hosting is subscribed again HERE:
+  // after the port is bound (so a server that loses the port race and is
+  // thrown away subscribes nobody) and before this function returns, so no
+  // request — and no broadcast a request causes — can run first. Each
+  // subscription registers on the bus synchronously; see
+  // connector/session-factory.ts. What the snapshot holds: connector/snapshot.ts.
+  connectorHost.restore(loadConnectorSnapshot(dataDir));
+
   // The effort re-scoring pass starts HERE, after the port is bound, not
   // where it is defined. `createServer` THROWS when the port is taken, and
   // `bin.ts` answers by constructing a whole new server on the next port —
@@ -3249,6 +3302,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     });
 
   return {
+    connector: connectorHost,
     port: server.port ?? port,
     docStore,
     tasks: taskStore,
@@ -3311,6 +3365,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // below are still live — after `docStore.flush()` that write would have
       // nowhere left to land.
       server.stop(true);
+      // Who the connector was hosting, for the next process to subscribe
+      // before its first request; then its subscriptions come down with the
+      // sockets that carried them.
+      try {
+        saveConnectorSnapshot(dataDir, connectorHost.snapshot());
+      } catch (err) {
+        console.error('[connector] could not save the identity snapshot:', err);
+      }
+      connectorHost.stop();
       // AFTER the sockets, never before: the force-close above fired every
       // stream's close handler synchronously, and each one arms a held
       // departure. Stopping earlier would leave exactly those timers behind

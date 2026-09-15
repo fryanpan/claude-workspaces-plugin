@@ -157,22 +157,18 @@ export interface AgentCallerCheck {
 }
 
 /**
- * The one policy both routes run.
+ * The three refusals every agent-only door makes before it looks at who the
+ * caller claims to be: through the edge, from off this machine, or from a
+ * page. Null when none applies.
  *
- * Written once so the two cannot drift: a gate added to the stream and
- * forgotten on the REST route would leave the same feed readable through the
- * other door, and the watch set is how you learn which keys the stream will
- * carry.
+ * Shared by `authorizeAgentCaller` and the `/mcp` endpoint, which carries the
+ * same feeds and the same REST verbs — so a check added to one door cannot be
+ * forgotten on the other.
  */
-export function authorizeAgentCaller({
-  agentId,
-  req,
-  address,
-  key,
-  requireToken,
-}: AgentCallerCheck): AgentCallerVerdict {
-  // Shape refusals first, so a caller that could never be an agent learns
-  // nothing about the token grammar from a value it could not have signed.
+export function refuseNonLocalAgentCaller(
+  req: Request,
+  address: string | null | undefined,
+): Extract<AgentCallerVerdict, { ok: false }> | null {
   if (req.headers.has('cf-ray')) {
     return {
       ok: false,
@@ -206,6 +202,28 @@ export function authorizeAgentCaller({
       },
     };
   }
+  return null;
+}
+
+/**
+ * The one policy both routes run.
+ *
+ * Written once so the two cannot drift: a gate added to the stream and
+ * forgotten on the REST route would leave the same feed readable through the
+ * other door, and the watch set is how you learn which keys the stream will
+ * carry.
+ */
+export function authorizeAgentCaller({
+  agentId,
+  req,
+  address,
+  key,
+  requireToken,
+}: AgentCallerCheck): AgentCallerVerdict {
+  // Shape refusals first, so a caller that could never be an agent learns
+  // nothing about the token grammar from a value it could not have signed.
+  const notLocal = refuseNonLocalAgentCaller(req, address);
+  if (notLocal) return notLocal;
   const bearer = agentBearerOf(req.headers);
   if (bearer !== undefined) {
     const claims = verifyAgentToken(bearer, key);
