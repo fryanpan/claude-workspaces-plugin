@@ -234,6 +234,49 @@ describe('a meeting whose notes landed outside the heading it opened', () => {
     expect(after).toContain('  - Kestrel Lane keeps the winter crew');
   });
 
+  it('does not restate a note it already wrote out there', async () => {
+    // THE OTHER HALF OF WIDENING THE GATE. Admitting an insert under a
+    // heading the section does not reach, while still judging repeats by
+    // section membership, would let the pass write a second copy of every
+    // note it had already made — on precisely the document this change is
+    // for. The dedupe counts the pass's own notes wherever they landed
+    // (`NotesDedupeContext.ownedElsewhere`).
+    const doc = [
+      '# Riverbend ferry review',
+      '',
+      '## Meeting notes',
+      '',
+      '## Ferry timetable',
+      '',
+      '- The harbour run moves to the half hour from April',
+    ].join('\n');
+    const { store, markdownNow } = docStoreFrom(doc, ['Ferry timetable']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [
+      { turn: 0, text: 'The harbour run moves to the half hour from April.' },
+    ]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'insert_under_heading',
+            headingId: idOf(store, 'Ferry timetable'),
+            markdown: '- The harbour run moves to the half hour from April',
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.alreadyWritten).toBe(1);
+    expect(result.touched).toBe(0);
+    // THE DOCUMENT: one copy, not two.
+    const after = markdownNow();
+    expect(after.split('The harbour run moves to the half hour from April')).toHaveLength(2);
+  });
+
   it('still refuses to touch the person’s line above it, except as an offer', async () => {
     // The widening is about the note-taker's own work being out of place, not
     // about the rest of the document becoming fair game. Their paragraph is

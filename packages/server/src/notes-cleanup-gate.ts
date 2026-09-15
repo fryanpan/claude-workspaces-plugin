@@ -76,6 +76,11 @@ export function cleanupWriteSet(
   const addressed = boundByAuthorship(edits, scope);
   const deduped = dedupeNotesEdits(addressed.kept, {
     notesHeadingId: scope.headingId,
+    // The pass's own notes wherever they landed, not only the ones the
+    // section reaches — see `NotesDedupeContext.ownedElsewhere`. Without it a
+    // gate bounded by authorship would admit an insert restating a note the
+    // doc already carries under another heading.
+    ownedElsewhere: scope.owned,
     ...dedupe,
   });
   const written = boundByAuthorship(deduped.edits, scope);

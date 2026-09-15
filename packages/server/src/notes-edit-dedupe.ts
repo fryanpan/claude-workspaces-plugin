@@ -65,6 +65,25 @@ export interface NotesDedupeContext {
    * still reused, because a note added under one changes nothing it holds.
    */
   prior?: ReadonlySet<string>;
+  /**
+   * Notes of this author's that sit OUTSIDE the section, and still count as
+   * already written.
+   *
+   * The tidy-up is bounded by authorship rather than by location now
+   * (`notes-cleanup-scope.ts`), so it may insert under a heading the section
+   * does not reach — and on the very document that change exists for, its own
+   * notes are exactly where the section is not. Judging repeats by section
+   * membership alone would let it restate every one of them, which is the
+   * duplicate this check exists to prevent.
+   *
+   * ONLY THIS AUTHOR'S, which is why the caller passes a set rather than this
+   * reading the whole outline. A person's line and an earlier meeting's
+   * minutes are not this meeting's notes, and the same words said twice are
+   * two notes — the reasoning `prior` is built on.
+   *
+   * Absent for a tick, which judges exactly as it always did.
+   */
+  ownedElsewhere?: ReadonlySet<string>;
 }
 
 export interface NotesDedupeResult {
@@ -240,12 +259,14 @@ export function dedupeNotesEdits(
     if (e.id === headingId) continue;
     if (topicKey(e.text).length > 0) topics.push({ id: e.id, level: e.level ?? 1, text: e.text });
   }
-  /** The section's notes as they stand, with what a move needs to know. */
+  /** Where a note already counts as written: this meeting's section, plus
+   *  any note of its own that landed outside it. */
+  const alreadyThere = (id: string): boolean =>
+    section.blocks.has(id) || ctx.ownedElsewhere?.has(id) === true;
+  /** The notes as they stand, with what a move needs to know. */
   const existing = outline
     .map((e, i) => ({ e, next: outline[i + 1] }))
-    .filter(
-      ({ e }) => e.kind === 'listItem' && section.blocks.has(e.id) && ctx.prior?.has(e.id) !== true,
-    )
+    .filter(({ e }) => e.kind === 'listItem' && alreadyThere(e.id) && ctx.prior?.has(e.id) !== true)
     .map(({ e, next }) => ({
       entry: e,
       leaf: !(next?.kind === 'listItem' && (next.depth ?? 0) > (e.depth ?? 0)),
@@ -313,7 +334,7 @@ export function dedupeNotesEdits(
           twin.entry.underHeadingId !== destination &&
           ctx.commented?.().has(twin.entry.id) !== true;
         if (!movable) {
-          notes.push(`dropped a note the section already carries (${twin.entry.id})`);
+          notes.push(`dropped a note the doc already carries (${twin.entry.id})`);
           alreadyWritten++;
           continue;
         }
