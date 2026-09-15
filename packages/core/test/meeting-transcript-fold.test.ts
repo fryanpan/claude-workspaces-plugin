@@ -53,6 +53,62 @@ describe('which short rows fold', () => {
     expect(rows[1]?.text).toBe('So we publish two timetables.');
   });
 
+  it('keeps stored order when the record does not clock every turn', () => {
+    // A record read back over the wire carries whatever the server that wrote
+    // it stored, and an older one stored no clock on some turns. Sorting such
+    // a record by `ts ?? 0` would hoist every unclocked turn to the front and
+    // rewrite the conversation; stored order is the only order it has.
+    const rows = foldTranscriptRows([
+      { turn: 0, text: 'The gauge reads two hours late.', speaker: 'A', ts: 3_000 },
+      { turn: 1, text: 'Only in the spring, though.', speaker: 'B' },
+      { turn: 2, text: 'So we recalibrate it in March.', speaker: 'A', ts: 5_000 },
+    ]);
+    expect(rows.map((r) => r.text)).toEqual([
+      'The gauge reads two hours late.',
+      'Only in the spring, though.',
+      'So we recalibrate it in March.',
+    ]);
+    // The clock each row claims is its own turn's, or none at all.
+    expect(rows.map((r) => r.ts)).toEqual([3_000, undefined, 5_000]);
+  });
+
+  it('folds the vocalizations a transcriber spells several ways', () => {
+    // The commonest acknowledgement in a real meeting, and the one the
+    // stoplist did not know until 2026-09-15: every spelling of it has to
+    // fold, or the rule that is meant to carry the texts repeating only two
+    // to four times carries none of them.
+    const said = ['Mm hmm.', 'Mm-hmm.', 'Uh huh.', 'Uh-huh.', 'Mm.', 'Mmm.', 'Hm.', 'Yup.', 'Huh.'];
+    const rows = foldTranscriptRows(
+      turns(
+        ['A', 'The tide gauge reads two hours late.'],
+        ...said.map((t): [string, string] => ['B', t]),
+      ),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.answers.map((a) => a.text)).toEqual(said);
+  });
+
+  it('keeps agreement that could be an answer on a row of its own', () => {
+    // Where the line is drawn: a vocalization carries no subject in any
+    // register, while "Correct." can be the whole answer to a question and
+    // "Got it." can be somebody accepting a job. Widening the stoplist to
+    // those would delete the answer along with the noise.
+    const rows = foldTranscriptRows(
+      turns(
+        ['A', 'The gauge reads two hours late every spring.'],
+        ['B', 'Correct.'],
+        ['B', 'Got it.'],
+        ['B', 'Cool.'],
+      ),
+    );
+    expect(rows.map((r) => r.text)).toEqual([
+      'The gauge reads two hours late every spring.',
+      'Correct.',
+      'Got it.',
+      'Cool.',
+    ]);
+  });
+
   it('keeps a short row that carries a content word: a quantity, a name', () => {
     const rows = foldTranscriptRows(
       turns(

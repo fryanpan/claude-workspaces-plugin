@@ -42,9 +42,20 @@ const STOPWORDS = new Set(
  * Only matched at the START of a sentence and only when what follows adds no
  * content words of its own, so "Okay, the export dialog drops the range" is
  * an idea and "Okay, right, yeah" is not.
+ *
+ * THE SECOND GROUP IS VOCALIZATION, added 2026-09-15 when the transcript fold
+ * showed what the first group missed: "Mm hmm" and "Uh huh" left an
+ * unrecognised "hmm"/"huh" behind and read as content, so the commonest
+ * acknowledgement in a real meeting was the one this list did not know. They
+ * are safe to add where "got it", "cool" and "correct" are not: a vocalization
+ * carries no subject in any register, while agreement can be the answer to a
+ * question — and an answer is a row of its own. Each is listed in every
+ * spelling a transcriber uses, because the match is anchored and `\b` will not
+ * find "mm" inside "mmm"; the hyphenated forms need no entry of their own,
+ * since openers come off one at a time and a hyphen is not a letter.
  */
 export const BACKCHANNEL_OPENER =
-  /^(?:okay|ok|right|yeah|yep|yes|no|uh|um|er|ah|oh|sure|thanks|thank you|hi|hello|hey|good morning|good afternoon|alright|exactly|mhm|hmm)\b/i;
+  /^(?:okay|ok|right|yeah|yep|yup|yes|no|uh|um|er|ah|oh|sure|thanks|thank you|hi|hello|hey|good morning|good afternoon|alright|exactly|mhm|hmm|hm|mmm|mm|huh|aha)\b/i;
 
 /**
  * Is this whole utterance acknowledgement and nothing else?
