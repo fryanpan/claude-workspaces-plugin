@@ -12,7 +12,11 @@
  *
  * WHAT IT DOES, per edit, before the guard reads the batch: a top-level line
  * of plain prose becomes a bullet. Headings, list items, indented lines,
- * blank lines, fenced code, tables, quotes and rules are left as written.
+ * blank lines, fenced code, tables, quotes, rules and raw HTML are left as
+ * written. HTML is a BLOCK, not a line: only its opening line starts with
+ * `<`, so a rule that judged each line on its own bulleted the text inside
+ * `<div>` … `</div>` and changed what the browser rendered. Like CommonMark,
+ * the block runs to the next blank line.
  * Each prose line becomes its own bullet. The instructions say one point per
  * note, and `**Question:** …` on the line after a bullet would otherwise be
  * folded into that bullet as a lazy continuation.
@@ -36,6 +40,9 @@ export function bulletProseLines(markdown: string): { markdown: string; bulleted
   // The fence that is open, if any. Only the same marker, at least as long and
   // with nothing after it, closes it: a ``` line inside a ~~~ block is code.
   let fence: string | undefined;
+  // Inside a raw HTML block, which runs from its opening line to the next
+  // blank one. Its inner lines are not prose, however they read.
+  let html = false;
   let bulleted = 0;
   const source = markdown.split('\n');
   const lines = source.map((line, i) => {
@@ -49,6 +56,16 @@ export function bulletProseLines(markdown: string): { markdown: string; bulleted
         fence = undefined;
       }
       return line;
+    }
+    if (fence === undefined) {
+      if (html) {
+        if (line.trim() === '') html = false;
+        return line;
+      }
+      if (/^ {0,3}</.test(line)) {
+        html = true;
+        return line;
+      }
     }
     if (fence !== undefined || proseNote(line) === undefined) return line;
     // A line underlined with `===` or `---` is a heading's text, not a note,

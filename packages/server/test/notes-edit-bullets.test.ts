@@ -50,6 +50,25 @@ describe('bulletProseLines', () => {
     );
   });
 
+  test('a raw HTML block keeps the text inside it, and prose after the blank line is a note', () => {
+    const md = [
+      '<div class="ferry">',
+      'Riverbend runs at seven',
+      '</div>',
+      '',
+      'The kiln quote is 42k',
+    ].join('\n');
+    expect(bulletProseLines(md).markdown).toBe(
+      [
+        '<div class="ferry">',
+        'Riverbend runs at seven',
+        '</div>',
+        '',
+        '- The kiln quote is 42k',
+      ].join('\n'),
+    );
+  });
+
   test('a fence marker four spaces in is code, and does not close the fence', () => {
     const md = ['```', '    ```', 'kiln budget line', '```', 'After the code'].join('\n');
     expect(bulletProseLines(md).markdown).toBe(
