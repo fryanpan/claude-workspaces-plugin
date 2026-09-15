@@ -47,9 +47,21 @@ interface RecordTurn {
   ts?: number;
 }
 
+/**
+ * One stretch where a capture was not listening, as the record carries it.
+ *
+ * `to` is null while the outage is still open — a meeting that ended with a
+ * stream still down — and absent on a record that stored neither end.
+ */
+interface RecordGap {
+  from?: number;
+  to?: number | null;
+}
+
 interface MeetingRecord {
   speakers?: Record<string, string>;
   transcript?: RecordTurn[];
+  gaps?: RecordGap[];
 }
 
 /** The doc's latest meeting, record and all. Null when it has never held one. */
@@ -221,12 +233,20 @@ export async function loadDocTranscript(
   const nameOf = (label: string | undefined): string =>
     label === undefined ? 'Speaker 1' : speakerDisplayName(label, names);
   const lines: TranscriptLine[] = [];
+  // A fold may not reach across a hole in the record. The moment a capture
+  // died and the moment it came back are both places where the next thing
+  // said is not an answer to the last thing shown — and the record carries
+  // those moments, so this surface has to honour them exactly as the file
+  // does, or the two disagree about what was said back to what.
+  const barriers: number[] = [];
+  for (const gap of latest.record.gaps ?? []) {
+    if (typeof gap.from === 'number') barriers.push(gap.from);
+    if (typeof gap.to === 'number') barriers.push(gap.to);
+  }
   // THE SAME FOLD THE FILE GETS, off the same decision function. This page
   // built its own row list until 2026-09-15, which made it the second place
-  // that decided what a row is — and the one a person actually watches. No
-  // barriers are passed: a gap is a line of the FILE's grammar and this
-  // record carries none, so the fold sees an unbroken run.
-  for (const row of foldTranscriptRows(turns)) {
+  // that decided what a row is — and the one a person actually watches.
+  for (const row of foldTranscriptRows(turns, { barriers })) {
     const clock = row.ts === undefined ? '' : `[${clockOf(row.ts)}] `;
     lines.push({
       text: `${clock}${nameOf(row.speaker)}: ${oneLine(row.text)}`,

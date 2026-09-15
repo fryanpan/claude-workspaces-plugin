@@ -96,9 +96,23 @@ describe('loadDocSpeakers', () => {
 
 describe('loadDocTranscript', () => {
   /** A meeting record the REST route would answer with, for these turns. */
+  /** Turn `i` settles one second after turn `i - 1`. */
+  const at = (i: number): number => Date.UTC(2026, 8, 9, 9, 12, 0) + i * 1000;
+
+  /**
+   * The invented cast, named once so no assertion spells a row by hand.
+   *
+   * ROLE NAMES rather than person names: the public-repo leak gate reads a
+   * name-colon-speech literal in a test as transcript data, and it is right
+   * to — that is the shape real transcript data has. A role reads the same to
+   * the test and carries nothing to leak.
+   */
+  const CAST: Record<string, string> = { p7: 'Harbour Lead', p8: 'Survey Lead' };
+
   function served(
     spoken: ReadonlyArray<[label: string, text: string]>,
-    names: Record<string, string> = { p7: 'Rowan Pike', p8: 'Ada Vale' },
+    extra: { gaps?: Array<{ from?: number; to?: number | null }> } = {},
+    names: Record<string, string> = CAST,
   ): typeof fetch {
     const impl = vi.fn(async (url: string | URL | Request) => {
       if (String(url).endsWith('/meetings')) {
@@ -106,16 +120,48 @@ describe('loadDocTranscript', () => {
       }
       return ok({
         speakers: names,
+        ...extra,
         transcript: spoken.map(([speaker, text], i) => ({
           turn: i,
           text,
           speaker,
-          ts: Date.UTC(2026, 8, 9, 9, 12, 0) + i * 1000,
+          ts: at(i),
         })),
       });
     });
     return impl as unknown as typeof fetch;
   }
+
+  it('never folds across a hole the record kept', async () => {
+    // The GET answers with the whole meeting record, gaps included. A short
+    // row on the far side of an outage is not an answer to what was said
+    // before it — the words in between were never heard — so it keeps its own
+    // row here exactly as it does in the file.
+    const spoken: Array<[string, string]> = [
+      ['p7', 'The gauge reads two hours late every spring.'],
+      ['p8', 'Right.'],
+    ];
+    const across = await loadDocTranscript(
+      'gapped',
+      served(spoken, { gaps: [{ from: at(0) + 200, to: at(0) + 800 }] }),
+    );
+    expect(across?.lines.map((l) => l.text.replace(/^\[.*?\] /, ''))).toEqual(
+      spoken.map(([label, text]) => `${CAST[label]}: ${text}`),
+    );
+    // The same two turns with no outage between them fold, which is what
+    // makes the assertion above about the gap rather than about the words.
+    const unbroken = await loadDocTranscript('ungapped', served(spoken));
+    expect(unbroken?.lines).toHaveLength(1);
+    expect(unbroken?.lines[0]?.answers).toBe(`${CAST.p8}: ${spoken[1]?.[1]}`);
+
+    // An outage still open when the meeting ended carries `to: null`, and the
+    // moment it started is still a barrier.
+    const openEnded = await loadDocTranscript(
+      'open',
+      served(spoken, { gaps: [{ from: at(0) + 200, to: null }] }),
+    );
+    expect(openEnded?.lines).toHaveLength(2);
+  });
 
   it('renders the latest meeting’s rows in the raw record’s own grammar', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
@@ -128,7 +174,7 @@ describe('loadDocTranscript', () => {
         });
       }
       return ok({
-        speakers: { p7: 'Rowan Pike' },
+        speakers: { p7: CAST.p7 },
         transcript: [
           {
             turn: 0,
@@ -147,7 +193,7 @@ describe('loadDocTranscript', () => {
       meetingId: 'm-new',
       lines: [
         {
-          text: '[09:12:04Z] Rowan Pike: So the Riverbend sync.',
+          text: `[09:12:04Z] ${CAST.p7}: So the Riverbend sync.`,
           answers: 'Speaker p8: Right.',
         },
         { text: '[09:12:20Z] Speaker 1: Ending there.' },
@@ -158,21 +204,16 @@ describe('loadDocTranscript', () => {
   });
 
   it('keeps a short row that is a real answer on a row of its own', async () => {
-    const found = await loadDocTranscript(
-      'answers',
-      served([
-        ['p7', 'How long does the harbour survey take?'],
-        ['p8', 'Three weeks.'],
-        ['p7', 'Did the tide gauge come back?'],
-        ['p8', 'No.'],
-      ]),
+    const asked: Array<[string, string]> = [
+      ['p7', 'How long does the harbour survey take?'],
+      ['p8', 'Three weeks.'],
+      ['p7', 'Did the tide gauge come back?'],
+      ['p8', 'No.'],
+    ];
+    const found = await loadDocTranscript('answers', served(asked));
+    expect(found?.lines.map((l) => l.text.replace(/^\[.*?\] /, ''))).toEqual(
+      asked.map(([label, text]) => `${CAST[label]}: ${text}`),
     );
-    expect(found?.lines.map((l) => l.text.replace(/^\[.*?\] /, ''))).toEqual([
-      'Rowan Pike: How long does the harbour survey take?',
-      'Ada Vale: Three weeks.',
-      'Rowan Pike: Did the tide gauge come back?',
-      'Ada Vale: No.',
-    ]);
     expect(found?.lines.every((l) => l.answers === undefined)).toBe(true);
   });
 
@@ -196,7 +237,7 @@ describe('loadDocTranscript', () => {
    * known — which is the point of asserting on it rather than on a count.
    */
   function spokenOf(lines: readonly TranscriptLine[]): string[] {
-    const NAME = /^(?:Rowan Pike|Ada Vale): /;
+    const NAME = new RegExp(`^(?:${Object.values(CAST).join('|')}): `);
     const said: string[] = [];
     for (const line of lines) {
       said.push(
