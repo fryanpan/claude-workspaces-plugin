@@ -89,9 +89,9 @@ describe('connector snapshot', () => {
 describe('in-process event fetch', () => {
   it('cancels the event stream when the caller aborts, as a socket would', async () => {
     let cancelled = false;
-    let opened: { agentId: string; lastEventId: string | null } | null = null;
+    const opened: { agentId: string; lastEventId: string | null }[] = [];
     const fetchEvents = inProcessEventsFetch((agentId, lastEventId) => {
-      opened = { agentId, lastEventId };
+      opened.push({ agentId, lastEventId });
       const body = new ReadableStream<Uint8Array>({
         start(c) {
           c.enqueue(new TextEncoder().encode(':ok\n\n'));
@@ -107,7 +107,7 @@ describe('in-process event fetch', () => {
       signal: controller.signal,
       headers: { 'Last-Event-ID': 'plan=4' },
     });
-    expect(opened).toEqual({ agentId: 'agent-riverbend-alpha', lastEventId: 'plan=4' });
+    expect(opened).toEqual([{ agentId: 'agent-riverbend-alpha', lastEventId: 'plan=4' }]);
     const reader = (res.body as ReadableStream<Uint8Array>).getReader();
     expect(new TextDecoder().decode((await reader.read()).value)).toBe(':ok\n\n');
     controller.abort();
