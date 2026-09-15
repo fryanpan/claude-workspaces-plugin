@@ -2320,6 +2320,28 @@ on success would take the new offer down with it, and failing would put an
 error about the old meeting on it. A button left up would be worse than
 either — pressed, it tidies the PREVIOUS meeting in the middle of this one.
 
+**A recording that never started takes nothing away.** The withdrawal rides
+`onMeetingChange(null)`, and the strip used to send that from the first line
+of the Record press — before it had asked for a microphone. So a press the
+browser refused, or a prompt the person dismissed, retired the last meeting's
+offer permanently over a recording that never began. It is announced from the
+point the capture actually opened instead: everything above that line is state
+the strip keeps to itself, so a start that ends in `blocked` leaves the page
+exactly as it found it.
+
+**A pass that changed nothing says so, and keeps the offer.** `ok` answers
+whether the pass RAN, which is a different question from whether the document
+moved, and reading the first as the second is what closed the dialog over
+unchanged notes on 2026-09-15 — sixteen edits proposed, sixteen refused for
+naming blocks outside the section, nothing written and nothing said. The route
+sums every kind of change one pass can make — blocks touched, blank lines
+removed, repeated topics folded — into `changed`, and on `changed: false` the
+dialog stays up and names which of the two nothings it was: edits that could
+not be made, or notes with nothing to improve. Both are states a person can
+answer, so both leave him the button. Driven end to end in
+`notes-cleanup-nothing-changed.test.ts` (the real gate refusing real edits)
+and `meeting-cleanup-offer.test.ts` (the dialog, on that reply).
+
 **It is the composer again, not a new subsystem.** Same `NotesComposer`, same
 prompt store, same `applyBlockEdits`, same authorship rules. What differs is
 what it is handed: the entire transcript instead of a tick's turns, a

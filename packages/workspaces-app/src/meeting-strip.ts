@@ -1822,9 +1822,6 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // reconnect is called off, and the backoff starts from the top.
     cancelReconnect();
     liveMeetingId = null;
-    // A meeting is beginning and nothing knows its id yet. Whatever is keyed
-    // to the last one is about people this meeting has not heard from.
-    opts.onMeetingChange?.(null);
     standingNote = '';
     // A new recording answers whatever the last one's ending said.
     endedNote = '';
@@ -1879,6 +1876,19 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       return;
     }
     capture = started;
+    // A MEETING IS BEGINNING — announced HERE, and not from the top of this
+    // function, because until the microphone actually opened there was no
+    // meeting to announce. Whatever is keyed to the last one is now about
+    // people this meeting has not heard from.
+    //
+    // WHAT IT COST TO SAY IT EARLY. The tidy-up offer withdraws on this
+    // `null`, so a Record press the browser then refused — a denied
+    // microphone, a prompt dismissed, a mis-tap — took the LAST meeting's
+    // offer off the screen for good, over a recording that never started.
+    // Nothing above this line has written to the doc or the wire, so a start
+    // that ends in `blocked` above now leaves the page exactly as it found
+    // it. See `meeting-tidy-offer-false-start.test.ts`.
+    opts.onMeetingChange?.(null);
     // What is RUNNING, which is what the record and the wire have to name — a
     // meeting that asked for two streams and got one is a one-stream meeting.
     liveSource = started.source;
