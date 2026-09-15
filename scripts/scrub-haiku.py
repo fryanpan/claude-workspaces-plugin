@@ -13,6 +13,16 @@ Usage:
   scrub-haiku.py --diff-range A..B    # scan diff in range
   scrub-haiku.py                       # read diff from stdin
   scrub-haiku.py --spend-report        # today's spend on the key, every repo; no scan
+  ... --public-base REV                # words in REV count as already public
+
+**Only lines that may hold a name are sent.** A free local pass
+(scrub_names.py) reads the whole push first and picks the lines carrying a
+word the repository has not already published, with two lines either side.
+Only those go to Haiku; a push with none makes no call and books nothing.
+`--push-tip` finds the public base itself. The other modes know nothing is
+public unless `--public-base` says so, and then every line with a word on it
+is sent. `SCRUB_HAIKU_RULES=off` sends the whole push as before. What the
+pass misses, measured: docs/architecture/scrub-name-finder.md.
 
 `--push-tip` is the mode the pre-push hook uses. It asks about the COMMITS a
 push would publish rather than comparing two trees, because a tree comparison
@@ -56,6 +66,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scrub_git  # noqa: E402
+import scrub_names  # noqa: E402
 
 MODEL = "claude-haiku-4-5-20251001"
 # Overridable so the self-test can drive every failure case against a stub on
@@ -995,6 +1006,28 @@ def _scan_piece(diff_content: str, scan_range: str = "stdin") -> "int | Unavaila
     )
 
 
+def excerpt(diff: str, base: "str | None") -> str:
+    """The part of `diff` worth a call: flagged lines and their context.
+
+    "" means the rules pass found nothing new, and then no call is made and
+    nothing is booked. It runs over the WHOLE push, before the cost ceiling
+    below trims anything, so a long push is no longer read only to 320KB.
+    """
+    if scrub_names.rules_off():
+        print("[scrub-haiku] SCRUB_HAIKU_RULES=off — sending the whole push.", file=sys.stderr)
+        return diff
+    chosen = scrub_names.select(diff, scrub_names.public_vocabulary(base),
+                                scrub_git.IDENTITY_PLACEHOLDER)
+    if not chosen.text:
+        print(f"[scrub-haiku] rules pass: none of {chosen.read} lines carries a word "
+              "this repository has not published. No call.", file=sys.stderr)
+        return ""
+    print(f"[scrub-haiku] rules pass: {chosen.flagged} of {chosen.read} lines carry a new "
+          f"word; sending {chosen.sent} with context ({len(chosen.text):,} of "
+          f"{len(diff):,} chars).", file=sys.stderr)
+    return chosen.text
+
+
 def get_diff(range_spec: str) -> str:
     try:
         r = subprocess.run(
@@ -1028,9 +1061,18 @@ def main() -> int:
         print(f"[scrub-haiku] {e}", file=sys.stderr)
         return 2
 
+    base = None
+    if "--public-base" in args:
+        idx = args.index("--public-base")
+        if idx + 1 >= len(args):
+            print("[scrub-haiku] --public-base needs a value", file=sys.stderr)
+            return 2
+        base = args[idx + 1]
+
     if rev_args is not None:
         diff = scrub_git.push_patch(rev_args)
         scan_range = "push " + args[args.index("--push-tip") + 1][:12]
+        base = base or scrub_names.public_base(rev_args)
     elif "--diff-range" in args:
         idx = args.index("--diff-range")
         if idx + 1 >= len(args):
@@ -1043,6 +1085,10 @@ def main() -> int:
         scan_range = "stdin"
 
     if not diff.strip():
+        return 0
+
+    diff = excerpt(diff, base)
+    if not diff:
         return 0
 
     if len(diff) > MAX_DIFF_CHARS:

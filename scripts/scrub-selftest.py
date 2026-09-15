@@ -38,6 +38,7 @@ HAIKU = os.path.join(HERE, "scrub-haiku.py")
 
 sys.path.insert(0, HERE)
 import scrub_git  # noqa: E402
+import scrub_names  # noqa: E402
 
 # `scrub-haiku.py` is not an importable module name, and the prompt it builds
 # is the surface this suite asserts on — the Haiku call itself is never made
@@ -752,7 +753,7 @@ def spawn_haiku(url: str, policy: str | None, *, ledger: str, with_key: bool = T
     for key in ("SCRUB_SKIP", "SCRUB_SKIP_HAIKU",
                 "SCRUB_HAIKU_API_KEY", "ANTHROPIC_API_KEY",
                 "SCRUB_HAIKU_UNAVAILABLE", "SCRUB_HAIKU_DAILY_USD",
-                "SCRUB_HAIKU_BUDGET_BLOCK"):
+                "SCRUB_HAIKU_BUDGET_BLOCK", "SCRUB_HAIKU_RULES"):
         env.pop(key, None)
     # Nothing has ever stored a password under this service name, so the
     # real entry is neither read nor reachable from any case here.
@@ -1123,7 +1124,10 @@ def check_haiku_spend() -> None:
                    f"exit {r.returncode}\n{r.stderr}")
 
         # A push read in pieces is one call per piece, CHUNK_JOBS at a time,
-        # and so one entry per piece — whole lines, none interleaved.
+        # and so one entry per piece — whole lines, none interleaved. The
+        # rules pass is off for it: its rows repeat the same words, which the
+        # pass would send twice and then leave behind, and pieces are the
+        # subject here.
         big = "".join(
             f"diff --git a/table{n}.md b/table{n}.md\n--- a/table{n}.md\n+++ b/table{n}.md\n"
             f"@@ -0,0 +1,700 @@\n"
@@ -1133,7 +1137,8 @@ def check_haiku_spend() -> None:
         pieces = len(haiku.split_patch(big))
         many = ledger("pieces.jsonl")
         r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all",
-                                                    ledger=many, stdin=big))
+                                                    ledger=many, stdin=big,
+                                                    SCRUB_HAIKU_RULES="off"))
         entries = read_ledger(many)
         expect("haiku spend: a push in pieces books one whole entry per piece",
                0 if pieces >= CHUNK_FLOOR and r.returncode == 0 and calls == pieces
@@ -1224,7 +1229,8 @@ def check_haiku_spend() -> None:
                r.returncode, 1, r.stderr)
 
         r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all",
-                                                    ledger=at_cap, stdin=big))
+                                                    ledger=at_cap, stdin=big,
+                                                    SCRUB_HAIKU_RULES="off"))
         expect("haiku spend: a push in pieces makes no call for any piece once capped",
                0 if calls == 0 and r.returncode == 1 else 1, 0, f"{calls} call(s)\n{r.stderr}")
 
@@ -1320,6 +1326,171 @@ def check_haiku_spend() -> None:
 
 # A push big enough to be read in pieces, or the pieces case proves nothing.
 CHUNK_FLOOR = 2
+
+
+# --- The rules pass in front of Haiku ----------------------------------------
+#
+# `scrub_names.py` decides which lines of a push Haiku reads. A line it passes
+# over is never judged, so every case here is a presence the pass must keep:
+# a name it must flag, a neighbour it must carry along, a planted recall case
+# it must still send. The one absence asserted — a push with nothing new makes
+# no call — is asserted at the stub, where a call would land.
+
+# Ordinary prose for a public tree to be made of, written RARE_BELOW times so
+# that its words count as published rather than rare. Every word a case below
+# adds is either from here, or is the name the case is about.
+RULES_PUBLIC_TEXT = (
+    "The ferry timetable moved. Every sailing now leaves from the north pier,\n"
+    "and the late sailing waits for the last train. Update the board when the\n"
+    "timetable changes, and note the pier on each row of notes.md.\n"
+    "Row one of the ferry timetable. Row two of the ferry timetable.\n"
+    "Row three of the ferry timetable. Every sailing waits. The north pier.\n"
+) * scrub_names.RARE_BELOW
+
+
+def rules_patch(path: str, added: list[str]) -> str:
+    return (
+        f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+        f"@@ -0,0 +1,{len(added)} @@\n" + "".join(f"+{line}\n" for line in added)
+    )
+
+
+def check_rules_pass() -> None:
+    """Only lines that may hold a name go to Haiku, and a push with none makes no call."""
+    public = scrub_names.Vocabulary()
+    public.learn(RULES_PUBLIC_TEXT)
+    ordinary = "Update the board when the timetable changes."
+
+    for kind, line, word in (
+        ("person", "Thanks to Jane Roe for checking the pier.", "roe"),
+        ("organisation", "The timetable now comes from Harborlight Labs.", "harborlight"),
+        ("project", "Moved the sailing rows over to riverbend-sync.", "riverbend"),
+    ):
+        chosen = scrub_names.select(rules_patch("notes.md", [ordinary, line, ordinary]), public)
+        expect(f"rules pass: a line naming a fictional {kind} is flagged",
+               0 if word in chosen.triggers else 1, 0, f"triggers {sorted(chosen.triggers)!r}")
+        expect(f"rules pass: ...and sent to Haiku ({kind})",
+               0 if f"+{line}" in chosen.text else 1, 0, chosen.text)
+
+    chosen = scrub_names.select(rules_patch("notes.md", [ordinary] * 3), public)
+    expect("rules pass: a diff of already-published words sends nothing",
+           0 if chosen.text == "" and chosen.read >= 3 and chosen.flagged == 0 else 1, 0,
+           f"read {chosen.read}, flagged {chosen.flagged}, text {chosen.text!r}")
+
+    # Context: two lines either side travel, the third does not, and no
+    # neighbour is borrowed from the next file.
+    around = [f"Row {n} of the ferry timetable." for n in ("one", "two", "three")]
+    far = ["Every sailing waits.", "The north pier."]
+    body = far[:1] + around + ["Jane Roe moved the late sailing."] + around[::-1] + far[1:]
+    patch = rules_patch("notes.md", body) + rules_patch("timetable.md", ["The north pier."])
+    chosen = scrub_names.select(patch, public)
+    expect("rules pass: the two lines before and after a flagged line travel with it",
+           0 if all(f"+{x}" in chosen.text for x in around[1:] + around[::-1][:2]) else 1, 0,
+           chosen.text)
+    expect("rules pass: ...the third does not, nor does the next file",
+           0 if "+Row one" not in chosen.text and "Every sailing" not in chosen.text
+           and "timetable.md" not in chosen.text else 1, 0, chosen.text)
+    expect("rules pass: ...and the excerpt still says which file and hunk it is from",
+           0 if chosen.text.startswith("diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@")
+           else 1, 0, chosen.text)
+
+    # The name a push publishes as a commit identity is new unless push_patch
+    # already swapped it for the placeholder.
+    header = ("commit 0123456789abcdef0123456789abcdef01234567\n"
+              "Author: {who}\nDate:   Mon Jan 1 00:00:00 2099 +0000\n\n    Update the board.\n")
+    unknown = scrub_names.select(header.format(who="Jane Roe <roe@example.invalid>"),
+                                 public, scrub_git.IDENTITY_PLACEHOLDER)
+    known = scrub_names.select(header.format(who=scrub_git.IDENTITY_PLACEHOLDER),
+                               public, scrub_git.IDENTITY_PLACEHOLDER)
+    expect("rules pass: an author identity the remote has not published is sent",
+           0 if "Author: Jane Roe" in unknown.text else 1, 0, unknown.text)
+    expect("rules pass: ...and one it has (the placeholder) is not",
+           0 if known.text == "" else 1, 0, known.text)
+
+    # Every planted recall case still reaches Haiku. The vocabulary is what
+    # the case's own neighbourhood publishes: the fragment's words and the
+    # file it sits in, read from this checkout.
+    recall_spec = importlib.util.spec_from_file_location("scrub_recall", os.path.join(HERE, "scrub-recall.py"))
+    recall = importlib.util.module_from_spec(recall_spec)
+    recall_spec.loader.exec_module(recall)
+    spec = json.load(open(recall.CASES))
+    planted = [c for c in spec["positives"] if c["kind"] == "planted"]
+    for case in planted:
+        fragment = spec["fragments"][case["fragment"]]
+        vocab = scrub_names.Vocabulary()
+        vocab.learn("\n".join(x.replace("{name}", "") for x in fragment["lines"]))
+        target = os.path.join(os.path.dirname(HERE), fragment["path"])
+        if os.path.exists(target):
+            with open(target, encoding="utf-8", errors="replace") as f:
+                vocab.learn(f.read())
+        name = recall.fabricate_name(case["fragment"])
+        chosen = scrub_names.select(recall.plant(fragment, name), vocab)
+        sent = [x for x in chosen.text.split("\n") if name in x]
+        expect(f"rules pass: recall case {case['id']} still sends its planted name",
+               0 if sent and len(sent) == sum(name in x for x in fragment_lines(fragment, name)) else 1, 0,
+               f"{len(sent)} line(s) sent")
+    expect("rules pass: the recall cases above include planted positives",
+           0 if len(planted) >= 5 else 1, 0, f"{len(planted)} planted")
+
+    # End to end, at the stub: nothing new means no call and nothing booked;
+    # one name means one call. `--public-base` names the fixture's commit.
+    server, stub = start_haiku_stub()
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        repo = os.path.join(tmp.name, "saltmarsh-rules-repo")
+        os.makedirs(repo)
+        clean = clean_git_env()
+
+        def g(*args: str) -> str:
+            return subprocess.run(["git", *IDENT, *args], cwd=repo, check=True,
+                                  capture_output=True, text=True, env=clean).stdout.strip()
+
+        g("init", "-q")
+        with open(os.path.join(repo, "notes.md"), "w") as f:
+            f.write(RULES_PUBLIC_TEXT)
+        g("add", "-A")
+        g("commit", "-qm", "timetable")
+        ledger = os.path.join(tmp.name, "spend.jsonl")
+
+        def pushed(lines: list[str]):
+            before = HaikuStub.calls
+            r = spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=ledger, cwd=repo,
+                            stdin=rules_patch("notes.md", lines), argv=("--public-base", "HEAD"))
+            return r, HaikuStub.calls - before
+
+        r, calls = pushed(["Update the board when the timetable changes."] * 2)
+        expect("rules pass: a push with no flagged line makes no API call",
+               0 if r.returncode == 0 and calls == 0 else 1, 0, f"exit {r.returncode}, {calls} call(s)\n{r.stderr}")
+        expect("rules pass: ...and books nothing",
+               0 if not os.path.exists(ledger) else 1, 0, str(read_ledger(ledger)))
+        r, calls = pushed(["Update the board when the timetable changes.",
+                           "Jane Roe moved the late sailing."])
+        expect("rules pass: a push with a flagged line makes the call",
+               0 if r.returncode == 0 and calls == 1 and len(read_ledger(ledger)) == 1 else 1, 0,
+               f"exit {r.returncode}, {calls} call(s)\n{r.stderr}")
+
+        # The hook's mode finds the public base itself: the newest commit
+        # just outside the push that a remote-tracking ref already holds.
+        first = g("rev-parse", "HEAD")
+        g("update-ref", "refs/remotes/origin/main", first)
+        with open(os.path.join(repo, "notes.md"), "a") as f:
+            f.write("The pier reopened.\n")
+        g("commit", "-qam", "pier")
+        probe = subprocess.run(
+            [sys.executable, "-c", "import sys, scrub_names; print(scrub_names.public_base(sys.argv[1:]))",
+             "HEAD", "--not", "--remotes=origin"],
+            cwd=repo, capture_output=True, text=True, env={**clean, "PYTHONPATH": HERE},
+        )
+        expect("rules pass: --push-tip reads its vocabulary at the commit the remote already has",
+               0 if probe.stdout.strip() == first else 1, 0, f"{probe.stdout}{probe.stderr}")
+    finally:
+        server.shutdown()
+        server.server_close()
+        tmp.cleanup()
+
+
+def fragment_lines(fragment: dict, name: str) -> list[str]:
+    return [x.replace("{name}", name) for x in fragment["lines"]]
 
 
 def check_push_range(registry: str, denylist: str) -> None:
@@ -1945,6 +2116,7 @@ def main() -> int:
         check_maintainer_names(tmp)
     check_haiku_unavailable()
     check_haiku_spend()
+    check_rules_pass()
     with tempfile.TemporaryDirectory() as tmp:
         registry = os.path.join(tmp, "registry.yaml")
         denylist = os.path.join(tmp, "denylist.txt")
