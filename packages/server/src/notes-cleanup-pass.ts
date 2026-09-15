@@ -197,6 +197,13 @@ export interface NotesCleanupResult {
    * the marker surviving. `unconfirmedLeft` above zero is the pass failing to
    * settle a guess, and the number is here so the next failure is visible
    * rather than found by a reader (`notes-unconfirmed.ts`).
+   *
+   * THEY ARE NOT THE SAME SET, AND THE SECOND IS THE LARGER ONE. `unconfirmed`
+   * counts what the pass was ASKED about, which leaves out a bullet somebody
+   * has commented on — the pass may not rewrite one. `unconfirmedLeft` counts
+   * what a reader is left holding, and a marker survives being commented on,
+   * so it may exceed `unconfirmed` and may be non-zero when `unconfirmed` is
+   * zero.
    */
   unconfirmed: number;
   unconfirmedLeft: number;
@@ -446,9 +453,15 @@ export async function runNotesCleanupPass(
   // READ AFTER THE WRITE AND THE TIDY, off the doc rather than off what the
   // model said it would do: an edit the gate dropped or the applier failed
   // settled nothing, and a count taken from the batch would say it had.
+  // NO `commented` FILTER HERE, unlike the ask above, and the difference is
+  // the whole point of the two numbers. `marked` is what the pass may be
+  // ASKED to settle, and a bullet somebody is discussing is out of its reach.
+  // This is what a READER is left holding, and a marker survives being
+  // commented on. Filtering both the same way let a section whose every
+  // guess carried a thread report zero still marked.
   const unconfirmedLeft = unconfirmedNotes(
     readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS }),
-    { headingId, author: NOTES_AUTHOR_ID, commented: commentedBlockIds(doc.ydoc) },
+    { headingId, author: NOTES_AUTHOR_ID },
   ).length;
   const result =
     written !== null && 'applied' in written
@@ -480,7 +493,7 @@ export async function runNotesCleanupPass(
       (result.failed > 0 ? `, ${result.failed} failed` : '') +
       (tidied.blanks > 0 ? `, ${tidied.blanks} blank lines removed` : '') +
       (tidied.merged > 0 ? `, ${tidied.merged} repeated topics merged` : '') +
-      (marked.length > 0
+      (marked.length > 0 || unconfirmedLeft > 0
         ? `, ${marked.length} marked unconfirmed and ${unconfirmedLeft} still marked`
         : ''),
   };

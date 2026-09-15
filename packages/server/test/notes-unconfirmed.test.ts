@@ -14,7 +14,8 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { prose } from '@claude-workspaces/core';
+import { type prose, prose as proseNs } from '@claude-workspaces/core';
+import * as Y from 'yjs';
 import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import { unconfirmedDirective, unconfirmedNotes } from '../src/notes-unconfirmed.ts';
@@ -167,5 +168,55 @@ describe('a pass counts the guesses it left behind', () => {
     expect(prompt).toContain(idOf(store, 'Kestrel Lane'));
     // And not the ones outside the section.
     expect(prompt).not.toContain(idOf(store, 'pontoon survey'));
+  });
+});
+
+/** Anchor a thread over `needle` exactly as the editor does. */
+function commentOn(ydoc: Y.Doc, needle: string): void {
+  const walk = proseNs.walkProse(proseNs.getProseFragment(ydoc));
+  const at = walk.plainText.indexOf(needle);
+  if (at < 0) throw new Error(`no text matching ${needle}`);
+  const seg = walk.segments.find((s) => at >= s.docOffset && at < s.docOffset + s.length);
+  if (!seg) throw new Error('the bullet has no text segment');
+  const thread = new Y.Map<unknown>();
+  thread.set('anchor', {
+    kind: 'text-range',
+    startRel: Y.encodeRelativePosition(
+      Y.createRelativePositionFromTypeIndex(seg.node, at - seg.docOffset),
+    ),
+    endRel: Y.encodeRelativePosition(
+      Y.createRelativePositionFromTypeIndex(seg.node, at - seg.docOffset + needle.length),
+    ),
+    snippet: { text: needle },
+  });
+  (ydoc.getMap('threads') as Y.Map<Y.Map<unknown>>).set('t1', thread);
+}
+
+describe('a commented guess is not asked about and is still counted', () => {
+  it('survives the pass, and the pass says so', async () => {
+    const { store, ydoc, markdownNow } = docStoreFrom(MARKED_NOTES, ['Meeting notes']);
+    // Somebody is already discussing the crane booking, so the pass may not
+    // rewrite it — but the marker is still on the page.
+    commentOn(ydoc, 'crane booking');
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 1, text: 'the yard confirmed the crane booking for May' }]);
+    const composer = stubComposer([
+      {
+        op: 'replace_block',
+        blockId: idOf(store, 'Kestrel Lane'),
+        markdown: '- Kestrel Lane keeps the winter crew',
+      },
+    ]);
+    const result = await runNotesCleanupPass(
+      depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')),
+      { docId: DOC, meetingId: MEETING },
+    );
+    // Asked about one — the uncommented one.
+    expect(result.unconfirmed).toBe(1);
+    expect(composer.seen[0]?.extraPrompt ?? '').not.toContain(idOf(store, 'crane booking'));
+    // And the commented one is still marked, which the count and the line say.
+    expect(result.unconfirmedLeft).toBe(1);
+    expect(result.line).toContain('1 still marked');
+    expect(markdownNow()).toContain('The crane booking may slip to May (unconfirmed)');
   });
 });
