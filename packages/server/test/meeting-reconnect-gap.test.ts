@@ -16,11 +16,13 @@
  *
  * All fixtures are synthetic; the repo is public.
  */
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { type MeetingGap, MeetingStore, listMeetings, meetingIndexPath } from '../src/meetings.ts';
+import type { TranscriptionEngine } from '../src/transcribe.ts';
 
 const dirs: string[] = [];
 function dataDir(): string {
@@ -152,5 +154,97 @@ describe('a reconnect records the stretch it lost', () => {
     expect(stillOpen[0]?.stream).toBe('system');
     expect(stillOpen[0]?.reason).toBe('ended');
     expect(gaps.filter((g) => g.reason === 'reconnect').length).toBe(2);
+  });
+});
+
+/**
+ * The instant the outage STARTS at, when the meeting ends the slow way.
+ *
+ * `MeetingStore.stop()` stamps the clock at the moment it is called, and the
+ * relay calls it last: the engine session is closed and the notes are flushed
+ * first, both awaited, so the meeting's own record can be stamped seconds
+ * after the socket it was recording went away. Every one of those seconds is
+ * audio the browser has already lost — it has nowhere to send it — and a gap
+ * measured from the stamp claims they were recorded. With a bounded hold
+ * replaying the tail, a teardown as long as the hold erases the gap entirely.
+ *
+ * So the relay carries the instant the socket closed down to the record.
+ */
+describe('the outage starts when the socket closed', () => {
+  /** How long the engine and notes take to flush after the socket is gone. */
+  const TEARDOWN_MS = 5_000;
+
+  /** Give an awaited handshake or teardown continuation a chance to run. */
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  function client(docId: string): MeetingClient {
+    return { data: { docId }, send() {} };
+  }
+
+  it('measures from the close, not from the end of teardown', async () => {
+    const dir = dataDir();
+    // Timing IS the behaviour here, so the clock is injected and advanced by
+    // the teardown itself rather than read off the machine.
+    let clock = STARTED;
+    const nowSpy = spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const release: { fire: (() => void) | null } = { fire: null };
+      const slowEngine: TranscriptionEngine = {
+        name: 'mock',
+        open: () =>
+          Promise.resolve({
+            send: () => {},
+            close: () =>
+              new Promise<void>((resolve) => {
+                release.fire = () => {
+                  clock += TEARDOWN_MS;
+                  resolve();
+                };
+              }),
+          }),
+      };
+      const relay = new MeetingRelay({
+        store: new MeetingStore(dir),
+        engines: [slowEngine],
+        notes: null,
+        broadcast: () => {},
+        log: () => {},
+      });
+      const first = client('d2');
+      relay.onOpen(first);
+      relay.onText(
+        first,
+        JSON.stringify({ type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' }),
+      );
+      await settle();
+      const meetingId = listMeetings(dir, 'd2')[0]?.meetingId;
+      expect(meetingId).toBeDefined();
+
+      clock = DROPPED;
+      relay.onClose(first, 1006);
+      await settle();
+      expect(release.fire).not.toBeNull();
+      release.fire?.();
+      await settle();
+
+      clock = RESUMED;
+      const second = client('d2');
+      relay.onOpen(second);
+      relay.onText(
+        second,
+        JSON.stringify({
+          type: 'start',
+          sampleRate: 16_000,
+          encoding: 'pcm_s16le',
+          resume: meetingId,
+        }),
+      );
+      await settle();
+
+      const gaps = listMeetings(dir, 'd2').find((m) => m.meetingId === meetingId)?.gaps ?? [];
+      expect(gaps).toEqual([{ stream: 'mic', from: DROPPED, to: RESUMED, reason: 'reconnect' }]);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

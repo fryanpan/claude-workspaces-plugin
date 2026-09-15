@@ -162,7 +162,13 @@ true` when the server took it.
   continuation block owns exactly the outage that OPENED it — bounded below by
   the resume before this one, because a meeting that reconnects five times
   holds five reconnect gaps by the end and every one of them opens before the
-  latest resume.
+  latest resume. **That `endedAt` is the socket's close instant, not the
+  clock at the end of teardown**: `onClose` stamps it and carries it through
+  `stop` into the record, because closing the engine session and flushing the
+  notes are both awaited first and the browser has had nowhere to send audio
+  since the close. Measured from the stamp instead, a five-second teardown
+  understates every gap by five seconds — and with the hold replaying the
+  tail, a teardown as long as the cap erases the gap altogether.
 - **The backoff is 1s, 2s, 4s, 8s, then 15s, giving up after two minutes**
   (`meeting-reconnect.ts`, which holds the policy and nothing else). An
   `already_recording` refusal DURING a resume is retried rather than reported:

@@ -409,8 +409,14 @@ export interface ActiveMeeting {
    *
    * `reason` is set only when the SERVER ended it rather than a person, and
    * is written into the index line so the record says why.
+   *
+   * `endedAt` is the instant the meeting actually stopped being heard, for a
+   * caller that knows one the clock no longer does — a socket that closed
+   * before the engine and the notes were flushed. Everything after that
+   * instant is teardown, and a reconnect measuring its outage from the stamp
+   * would claim those seconds were recorded. Defaults to now.
    */
-  stop(reason?: MeetingStopReason): MeetingRecord;
+  stop(reason?: MeetingStopReason, endedAt?: number): MeetingRecord;
 }
 
 /**
@@ -870,12 +876,12 @@ export class MeetingStore {
         }
         sink.write(chunk);
       },
-      stop(reason?: MeetingStopReason): MeetingRecord {
+      stop(reason?: MeetingStopReason, endedAt?: number): MeetingRecord {
         const record: MeetingRecord = {
           meetingId,
           docId,
           startedAt,
-          endedAt: Date.now(),
+          endedAt: endedAt ?? Date.now(),
           engine,
           sampleRate,
           mode,

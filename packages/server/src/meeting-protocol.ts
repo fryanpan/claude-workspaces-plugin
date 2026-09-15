@@ -231,8 +231,12 @@ interface Conn {
    * the socket is still there to be answered. Held as its own field rather
    * than as a fifth state so the decision survives the await: the state is
    * what the connection IS, this is what it has been asked to become.
+   *
+   * `closedAt` rides along for the same reason it rides through `stop`: a
+   * socket that went mid-handshake stopped being heard then, not when the
+   * handshake it was waiting on finally settled.
    */
-  pendingStop: { reply: boolean } | null;
+  pendingStop: { reply: boolean; closedAt?: number } | null;
   /**
    * Cancels this meeting's silence deadline, or null when none is armed.
    *
@@ -715,7 +719,11 @@ export class MeetingRelay {
         // engine's error does: one line, no payload, nothing forgeable.
         (reason ? ` detail=${engineErrorForLog(reason)}` : ''),
     );
-    this.track(this.stop(ws, conn, false, undefined, cause));
+    // The close is the instant this meeting stopped being heard. Closing the
+    // engine session and flushing the notes are both awaited below it, so the
+    // clock `stop()` reads by default can be seconds later — seconds a
+    // reconnect would then count as recorded. See `MeetingRecord.endedAt`.
+    this.track(this.stop(ws, conn, false, undefined, cause, Date.now()));
   }
 
   private track(work: Promise<void>): void {
@@ -1147,7 +1155,7 @@ export class MeetingRelay {
     const asked = conn.pendingStop;
     if (asked) {
       conn.pendingStop = null;
-      await this.stop(ws, conn, asked.reply);
+      await this.stop(ws, conn, asked.reply, undefined, undefined, asked.closedAt);
       return;
     }
     this.send(ws, {
@@ -1177,10 +1185,11 @@ export class MeetingRelay {
     reply: boolean,
     reason?: MeetingStopReason,
     cause?: MeetingCloseCause,
+    closedAt?: number,
   ): Promise<void> {
     if (conn.state === 'opening') {
       // The handshake is still out; `start` finishes the job when it lands.
-      conn.pendingStop = { reply };
+      conn.pendingStop = { reply, ...(closedAt !== undefined ? { closedAt } : {}) };
       return;
     }
     if (conn.state !== 'live') return;
@@ -1217,7 +1226,7 @@ export class MeetingRelay {
     }
     conn.state = 'idle';
     if (!meeting) return;
-    const record = meeting.stop(reason);
+    const record = meeting.stop(reason, closedAt);
     this.log(
       `[meeting] ended doc=${meeting.docId} meeting=${record.meetingId} ` +
         // The same vocabulary the `socket closed` line uses, so one grep
