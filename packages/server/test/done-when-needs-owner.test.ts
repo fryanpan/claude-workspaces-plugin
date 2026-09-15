@@ -161,15 +161,25 @@ describe('a line written as needing a person', () => {
     expect(((await r.json()) as { message?: string }).message).toContain('the pin reads right');
   });
 
-  it('is not the builder’s to meet: it reports it owner when ready, which files exactly one item with the link', async () => {
+  it('may still be met by its builder with proof — an answer the person gave elsewhere — and files no item', async () => {
     await fresh();
     const { taskId, person } = await twoLineTask();
     const met = await report(taskId, [
-      { id: person, verdict: 'met', proof: [{ text: 'I looked', url: SHOT }] },
+      {
+        id: person,
+        verdict: 'met',
+        proof: [{ text: 'Answered "Build it" on the plan item', url: SHOT }],
+      },
     ]);
-    expect(met.status).toBe(400);
-    expect(met.body.error).toBe('not-yours');
-    expect(met.body.message).toContain('report it owner');
+    expect(met.status).toBe(200);
+    expect((await detail(taskId)).doneWhen?.[1]?.verdict).toBe('met');
+    expect((await detail(taskId)).reviews ?? []).toHaveLength(0);
+    expect(await onQueue(taskId)).toHaveLength(0);
+  });
+
+  it('reported owner when ready, files exactly one item with the link', async () => {
+    await fresh();
+    const { taskId, person } = await twoLineTask();
     expect(await onQueue(taskId)).toHaveLength(0);
 
     const ready = await report(taskId, [

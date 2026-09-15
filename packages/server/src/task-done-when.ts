@@ -253,21 +253,6 @@ export class TaskDoneWhenStore {
           message: `"${line.text}" is waiting on the owner — you marked it theirs, so their Looks right is what meets it`,
         };
       }
-      // A line WRITTEN as needing a person is theirs from the start, so the
-      // same rule holds before it is handed over: the builder's move is to
-      // report it `owner` once there is something to check, not to meet it.
-      if (
-        line.needs === 'owner' &&
-        line.verdict !== 'owner' &&
-        entry.verdict === 'met' &&
-        classifyActor(actor) !== 'person'
-      ) {
-        return {
-          ok: false,
-          error: 'not-yours',
-          message: `"${line.text}" needs a person — when it is ready for them, report it owner with a link to open`,
-        };
-      }
       const { proof, unresolved } = readDoneWhenProof(entry.proof, baseUrl);
       if (unresolved !== undefined) {
         return {
