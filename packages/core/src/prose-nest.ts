@@ -143,13 +143,25 @@ function everyListItemIsOurs(el: Y.XmlElement, author: string): boolean {
  * EN2001a: seventeen of the run's twenty-four failed edits, and ten of them
  * the SAME regroup re-issued tick after tick.
  *
- * WHAT IT WILL NOT CROSS. A heading (the next topic is not this one's to
- * regroup), a list of the other kind, and any block that is not the
- * note-taker's own — a person's paragraph in the middle of the notes stops
- * the reach, which leaves their writing where they put it and the topic a
- * little flatter than asked. A blank unclaimed paragraph is the browser's
+ * WHAT IT WILL NOT CROSS, WITHOUT `moveOthers`. A heading (the next topic is
+ * not this one's to regroup), a list of the other kind, and any block that is
+ * not the note-taker's own — a person's paragraph in the middle of the notes
+ * stops the reach, which leaves their writing where they put it and the topic
+ * a little flatter than asked. A blank unclaimed paragraph is the browser's
  * trailing node and is stepped over, exactly as `precedingBlock` steps over
  * it.
+ *
+ * WITH `moveOthers`, NOTHING STOPS IT — the heading included; the lists of
+ * the lead's own kind, wherever they sit, are all gatherable. The reach
+ * decides where a NAMED id may be FOUND, never what travels: only ids in the
+ * caller's `blockIds` are moved, so widening it gathers nobody's bullet that
+ * was not asked for by id, and a list of the other kind is crossed without
+ * being gathered from exactly as before. A heading wall here
+ * meant the tidy-up's own gate admitted a regroup whose member sat under
+ * another topic and the move then found nothing — the pass answering "1
+ * proposed, 0 refused, 1 failed" over exactly the out-of-section note the
+ * authorship boundary exists to reach. Measured on that document before the
+ * wall came down.
  *
  * Returned in document order, so the members gathered from them stay in the
  * order the meeting said them.
@@ -164,11 +176,11 @@ function reachableLists(list: Y.XmlElement, author: string, moveOthers = false):
   const crossable = (el: Y.XmlElement | Y.XmlText | undefined): boolean => {
     if (isUnclaimedBlankParagraph(el)) return true;
     if (!(el instanceof Y.XmlElement)) return false;
-    if (el.nodeName === 'heading') return false;
-    // A HEADING IS STILL THE WALL. `moveOthers` drops the authorship half of
-    // the reach and nothing else: the next topic is not this one's to
-    // regroup whoever wrote it.
+    // THE PRIVILEGED MOVE CROSSES EVERYTHING BUT A LIST OF THE OTHER KIND —
+    // see the header. It reaches past a heading because the block it is sent
+    // for is routinely under one; it still carries only the ids it was given.
     if (moveOthers) return true;
+    if (el.nodeName === 'heading') return false;
     // A LIST IS JUDGED BY ITS ITEMS, AT EVERY DEPTH — see
     // {@link everyListItemIsOurs}. An empty list is not evidence of anything
     // and is not crossed.

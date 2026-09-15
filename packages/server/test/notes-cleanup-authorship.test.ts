@@ -312,3 +312,87 @@ describe('a meeting whose notes landed outside the heading it opened', () => {
     expect(markdownNow()).toBe(before);
   });
 });
+
+/**
+ * A topic heading between the lead and the bullet, which is the shape the
+ * whole change is for: a person's note that landed under somebody else's
+ * heading, which the tidy-up is supposed to be able to bring in.
+ */
+const TWO_TOPICS = [
+  '# Riverbend ferry review',
+  '',
+  'My own line about the slipway, which nobody may rewrite.',
+  '',
+  '## Meeting notes',
+  '',
+  '### Ferry timetable',
+  '',
+  `- ${OURS}`,
+  '',
+  '### Crew roster',
+  '',
+  `- ${THEIRS}`,
+].join('\n');
+
+describe('a heading between them is not a wall to a move, and is not a thing to move', () => {
+  it('brings their bullet in from under another topic’s heading', async () => {
+    const { store, markdownNow } = docStoreFrom(TWO_TOPICS, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the winter crew.' }]);
+    // CONTROL: they really are under different headings to begin with — the
+    // bullet sits below the second `###`, not beside the lead.
+    expect(markdownNow()).toContain(`### Crew roster\n\n- ${THEIRS}`);
+
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'Kestrel Lane')],
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+
+    // NOT `failed`. The gate kept this edit either way; what changed is
+    // whether the move could then be made. A kept edit that fails is the
+    // worst of both — the log says nothing a reader can act on.
+    expect(result.failed).toBe(0);
+    expect(result.refused).toBe(0);
+    expect(result.applied).toBe(1);
+    expect(markdownNow()).toContain(`- ${OURS}\n  - ${THEIRS}`);
+    // And the list the bullet left is gone rather than left behind empty.
+    expect(markdownNow()).not.toContain(`### Crew roster\n\n-`);
+  });
+
+  it('refuses a nest that names a heading, with the reason, instead of failing it', async () => {
+    const { store, markdownNow } = docStoreFrom(TWO_TOPICS, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the winter crew.' }]);
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'Crew roster'),
+            blockIds: [idOf(store, 'harbour run')],
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.refusals[0]).toContain('a heading is not moved under a bullet');
+    expect(markdownNow()).toBe(before);
+  });
+});

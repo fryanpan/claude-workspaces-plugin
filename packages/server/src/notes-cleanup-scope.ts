@@ -292,24 +292,40 @@ export function boundByAuthorship(
   // Striking a line out is only ever the pass's own to propose.
   const rewritable = (id: string): boolean => mine(id) && uncommented(id);
   /**
-   * Why a block is out of reach, asked in the order the rules are asked.
+   * What a `nest_blocks` may name: a block of this document that is neither
+   * the meeting's own heading nor ANY heading.
    *
-   * `countComments` is what keeps the answer TRUE OF THE OP THAT ASKED. The
-   * comment clause belongs to the ops that consult `uncommented`; a
-   * `nest_blocks` never does — nesting re-creates no text, so a thread rides
-   * along and a comment is explicitly no bar to it. Asking one predicate for
-   * every op named a comment as the reason a nest was dropped when the real
-   * reason was ownership, which is misleading exactly where somebody is
-   * reading the log to find out why. False for a nest, true for the rest.
+   * THE HEADING CLAUSE IS NOT TIDINESS. `nestBlocksUnderLead` moves list
+   * items and nothing else — a heading named as the lead comes back
+   * `not-a-list-item`, and one named as a member is stepped over — so a gate
+   * that asked only "is it in the document" kept an edit the write path could
+   * never make, and the pass reported it FAILED rather than refused, with no
+   * reason a reader could act on. Refusing it here is the difference between
+   * a log that says what the model got wrong and one that says only that
+   * something did.
    */
-  const blockRule = (id: string, countComments = true): string =>
+  const nestable = (id: string): boolean => addressable(id) && !scope.headings.has(id);
+  /** Why a block is out of reach, asked in the order the rules are asked. */
+  const blockRule = (id: string): string =>
     !scope.blocks.has(id)
       ? 'the block is not in the document'
       : id === scope.headingId
         ? "the block is the meeting's own section heading"
-        : countComments && scope.commented?.has(id) === true
+        : scope.commented?.has(id) === true
           ? 'somebody has commented on the block'
           : 'the document does not record the block as the note-taker’s own';
+  /**
+   * The same question for a nest, which asks neither ownership nor comments —
+   * so answering it from `blockRule` named a comment, or a missing mark, as
+   * the reason a move was dropped when neither was ever consulted. That is
+   * misleading exactly where somebody is reading the log to find out why.
+   */
+  const nestRule = (id: string): string =>
+    !scope.blocks.has(id)
+      ? 'the block is not in the document'
+      : id === scope.headingId
+        ? "the block is the meeting's own section heading"
+        : 'the block is a heading, and a heading is not moved under a bullet';
   for (const edit of edits) {
     switch (edit.op) {
       case 'insert_under_heading':
@@ -334,16 +350,16 @@ export function boundByAuthorship(
         else reasons.push(why(edit.op, edit.blockId, blockRule(edit.blockId)));
         break;
       // STRUCTURE IS FREE. A nest moves blocks and rewrites none of them, so
-      // it asks only that every id it names is a block of this document and
-      // is not the meeting's own section heading. Ownership is not asked, and
-      // neither is a comment: the move keeps the block's words, so the
-      // snippet sweep re-anchors the thread onto them (see the header).
+      // it asks only that every id it names is a list block of this document
+      // — see {@link nestable} for why a heading is not one. Ownership is not
+      // asked, and neither is a comment: the move keeps the block's words, so
+      // the snippet sweep re-anchors the thread onto them (see the header).
       case 'nest_blocks':
-        if (addressable(edit.leadBlockId) && edit.blockIds.every(addressable)) kept.push(edit);
+        if (nestable(edit.leadBlockId) && edit.blockIds.every(nestable)) kept.push(edit);
         else {
           const bad =
-            [edit.leadBlockId, ...edit.blockIds].find((id) => !addressable(id)) ?? edit.leadBlockId;
-          reasons.push(why(edit.op, bad, blockRule(bad, false)));
+            [edit.leadBlockId, ...edit.blockIds].find((id) => !nestable(id)) ?? edit.leadBlockId;
+          reasons.push(why(edit.op, bad, nestRule(bad)));
         }
         break;
       // A cleanup has a section already; writing at the end of the doc is the
