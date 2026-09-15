@@ -13669,6 +13669,202 @@ class StdioServerTransport {
   }
 }
 
+// packages/core/src/env-names.ts
+var ENV_RENAMES = [
+  ["FEEDBACK_BASE_URL", "CW_BASE_URL"],
+  ["FEEDBACK_AGENT_NAME", "CW_AGENT_NAME"],
+  ["FEEDBACK_AUTHOR", "CW_AUTHOR"],
+  ["LIVE_FEEDBACK_SUMMARY_API_KEY", "CW_SUMMARY_API_KEY"]
+];
+var LEGACY_OF = new Map(ENV_RENAMES.map(([legacy, current]) => [current, legacy]));
+function present(v) {
+  return v !== undefined && v.trim() !== "";
+}
+function readRenamedEnv(env, current) {
+  const direct = env[current];
+  if (present(direct))
+    return direct;
+  const legacy = LEGACY_OF.get(current);
+  if (legacy !== undefined) {
+    const old = env[legacy];
+    if (present(old))
+      return old;
+  }
+  return direct;
+}
+
+// packages/core/src/identity.ts
+var KNOWN_USERS = {
+  bryan: { name: "Bryan", color: "#2e7dd7" },
+  agent: { name: "Agent", color: "#e36f1e" }
+};
+function hashToColor(input) {
+  let h = 0;
+  for (let i = 0;i < input.length; i++) {
+    h = h * 31 + input.charCodeAt(i) >>> 0;
+  }
+  const hue = h % 360;
+  return hslToHex(hue, 55, 55);
+}
+function hslToHex(h, s, l) {
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs(hp % 2 - 1));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (hp < 1)
+    [r, g, b] = [c, x, 0];
+  else if (hp < 2)
+    [r, g, b] = [x, c, 0];
+  else if (hp < 3)
+    [r, g, b] = [0, c, x];
+  else if (hp < 4)
+    [r, g, b] = [0, x, c];
+  else if (hp < 5)
+    [r, g, b] = [x, 0, c];
+  else
+    [r, g, b] = [c, 0, x];
+  const m = l - c / 2;
+  const to = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+function knownUserForName(nameOrKey) {
+  const key = nameOrKey.toLowerCase();
+  const meta2 = KNOWN_USERS[key];
+  if (!meta2)
+    return null;
+  return { id: `known-${key}`, kind: "known", name: meta2.name, color: meta2.color };
+}
+function agentSlug(name) {
+  const trimmed = name.trim();
+  const slug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (slug)
+    return slug;
+  let h = 0;
+  for (let i = 0;i < trimmed.length; i++)
+    h = h * 31 + trimmed.charCodeAt(i) >>> 0;
+  return h.toString(36);
+}
+function agentIdForName(name) {
+  const known = knownUserForName(name.trim());
+  if (known)
+    return known.id;
+  return `agent-${agentSlug(name)}`;
+}
+
+// packages/mcp/src/author.ts
+function resolveAgentAuthor(env) {
+  const name = readRenamedEnv(env, "CW_AGENT_NAME")?.trim() || readRenamedEnv(env, "CW_AUTHOR")?.trim() || "agent";
+  const known = knownUserForName(name);
+  if (known)
+    return known;
+  return { name, color: hashToColor(name), id: agentIdForName(name), kind: "known" };
+}
+
+// packages/mcp/src/connector-instructions.ts
+var CONNECTOR_INSTRUCTIONS = [
+  "Every markdown attachment is backed by a .md file on disk. The file is the",
+  "source of truth at rest; the live editor is the source of truth at runtime;",
+  "the plugin keeps them in sync bidirectionally (~1s debounced).",
+  "",
+  "CREATE: call attach_markdown(docId, path) to bring a .md under review.",
+  "The server reads the file, parses it into the live editor, sets up the",
+  "fs.watch + write-back, and returns a reviewUrl you can hand to a human.",
+  "",
+  "EDIT: never use Write/Edit/str_replace on the .md while it is under review",
+  "— direct filesystem edits race against the live doc’s own ~1s flush, and if",
+  "the server has pending state your edit can be silently overwritten by the next",
+  "write-back. Route edits through the MCP tools below: find_and_replace for",
+  "prose changes, rewrite_thread_region / insert_after_thread / insert_blocks_after_thread",
+  "for comment-anchored edits, and set_doc_content(docId, markdown) for a",
+  "COMPREHENSIVE REWRITE of the whole doc (do NOT Write the file + reparse,",
+  "and do NOT delete_doc + Write + re-create — both race the flush and both",
+  "have destroyed content in the field). NEVER use set_doc_content on a doc a",
+  "human is reviewing or editing: a scoped request (a comment, one section)",
+  "gets a scoped edit — find_and_replace (table rows match in pipe syntax),",
+  "rewrite_thread_region, edit_at_anchor — and a whole-doc rewrite built from",
+  "an earlier read destroys their concurrent edits. The server refuses such a",
+  "write with 409 stale-write naming the human-edit time; re-read with",
+  "get_doc, re-apply your change onto the CURRENT content, and only retry",
+  "with confirmOverwriteHumanEdits: true if a full rewrite is truly needed.",
+  "External edits (VS Code, git pull)",
+  "flow back into the live doc via the file poll when the server is idle; if you",
+  "wrote to a bound file externally and need to be sure it landed, call",
+  "reparse_from_disk(docId) to force-pull from disk. If an edit response or",
+  "get_doc carries a `syncError`, read it — it names the conflict and where",
+  "the overwritten version was backed up.",
+  "",
+  "DIFF REVIEW / FOLDER BROWSE: when the human wants to review your code",
+  'changes ("review this diff", a branch, work in progress), call',
+  "create_diff_review(repo, base) — one attachment per changed file,",
+  "PR-style unified diff with line comments. Omit base to BROWSE a folder",
+  "instead (no diff): everything is navigable from the all-files sidebar,",
+  "files open lazily, markdown editable — works on plain folders and",
+  "fresh repos too (attach_folder is an alias for this). Default mode diffs",
+  "base against the LIVE working tree: keep editing the code and the reviewer",
+  "sees your changes re-render within ~1s, with their comments riding along",
+  "(threads orphan into the outdated-comments flow if their line disappears).",
+  "ALWAYS pass groups: [{title, paths[]}] — organize the changed files by",
+  "INTENT (the way you would split a branch into reviewable commits); you",
+  "know the semantics of your change far better than the heuristic fallback.",
+  "First group = read first; a directory path claims every file under it;",
+  'unlisted files land in "Other". Pass target only to pin a review to a',
+  "finished range. Re-run the tool after touching files that were not in",
+  "the diff before (idempotent; refreshes the file list; keeps your groups",
+  "unless you pass new ones). Share the returned entryUrl with the human",
+  "(bare URL on its own line); the file tree navigates the rest. Thread",
+  "events arrive per file via the auto-watch; resolve threads as you address",
+  "them; refresh_attachment_set(setId) to re-sync membership and diffs as",
+  "files move (threads survive); archive_attachment_set(setId, reason) when",
+  "the review is done.",
+  "",
+  "SUGGEST: pass suggest: true on find_and_replace or rewrite_thread_region to",
+  "PROPOSE a change instead of applying it — the match is marked pending and",
+  "attributed to this agent; disk and every other reader stay on the accepted",
+  "state until a human (or accept_suggestion) accepts it. Returns { suggestionId }.",
+  "Use for judgment calls a reviewer should approve; use the plain edit for",
+  "mechanical fixes. list_suggestions(docId) / accept_suggestion(docId, sid) /",
+  "reject_suggestion(docId, sid) / resolve_all_suggestions(docId, action, authorId?)",
+  "manage proposals from any author. suggestion.created/accepted/rejected events",
+  "arrive on the same watch_doc channel as thread events.",
+  "",
+  "OBSERVE: call watch_doc(docId) once per doc to receive thread events as",
+  '<channel source="claude-workspaces" doc_id="..." thread_id="..." event="..." author="..." sent_at="...">body</channel>',
+  "messages. Treat each as an explicit ask from the reviewer; read, decide if it",
+  "is in your domain, act via an edit tool. unwatch_doc when you're done.",
+  "Watches are remembered on the server under this agent name (CW_AGENT_NAME)",
+  "and re-wired when the session respawns; list_watched_docs says whether the",
+  "current set was restored from the server or is session-only.",
+  "",
+  "CLEANUP: attachments are usually short-lived — bound for a ~30-minute",
+  "feedback pass, then obsolete. When you no longer need one, call",
+  "delete_doc(docId) to remove it (the bound source .md is left on disk; only",
+  "the review session goes away). It refuses if the doc still has open threads",
+  "(someone's waiting on that feedback) — resolve them first or pass force:true.",
+  "Don't leave stale docs piling up in list_docs.",
+  "",
+  "BEFORE YOU EDIT A .md FILE: call list_docs first. If a doc has sourceUrl",
+  "matching the path, route through the MCP. If not, normal file edits are fine.",
+  "",
+  "WORKSPACE BOARD: a board workspace is a goal + a task board + linked docs.",
+  "create_workspace mints one; attach_doc links existing docs/attachments to it;",
+  "create_tasks (ALWAYS a list — one idea is a one-item list) and",
+  "spin_off_task add work (omit `goal` and the task lands UNPLACED in",
+  "Backlog awaiting triage — the create says so and hands you the goal",
+  "bands, and placing it with set_task_goal IS the triage:",
+  "pick the goal AND the exact position). task_transition is the",
+  "single gate for status changes — blockers come back in the result.",
+  "attach_agent registers you as the workspace agent (heartbeat every few",
+  "minutes to stay live; lead-addressed deliveries only reach live agents).",
+  "Workspace events (task.*, decision.answered, workspace.goals_changed)",
+  "arrive on the same channel as thread events once you create/attach.",
+  "import_tasks_markdown moves an existing hand-maintained markdown tracker",
+  "onto the board (dry-run first — review the mapping before apply:true)."
+].join(" ");
+
 // packages/mcp/src/agent-token.ts
 function agentTokenPath(agentId) {
   return `/api/agents/${encodeURIComponent(agentId)}/token`;
@@ -13815,101 +14011,6 @@ async function claimNoticeFor(deps, taskId) {
     } catch {}
   }
   return;
-}
-
-// packages/core/src/env-names.ts
-var ENV_RENAMES = [
-  ["FEEDBACK_BASE_URL", "CW_BASE_URL"],
-  ["FEEDBACK_AGENT_NAME", "CW_AGENT_NAME"],
-  ["FEEDBACK_AUTHOR", "CW_AUTHOR"],
-  ["LIVE_FEEDBACK_SUMMARY_API_KEY", "CW_SUMMARY_API_KEY"]
-];
-var LEGACY_OF = new Map(ENV_RENAMES.map(([legacy, current]) => [current, legacy]));
-function present(v) {
-  return v !== undefined && v.trim() !== "";
-}
-function readRenamedEnv(env, current) {
-  const direct = env[current];
-  if (present(direct))
-    return direct;
-  const legacy = LEGACY_OF.get(current);
-  if (legacy !== undefined) {
-    const old = env[legacy];
-    if (present(old))
-      return old;
-  }
-  return direct;
-}
-
-// packages/core/src/identity.ts
-var KNOWN_USERS = {
-  bryan: { name: "Bryan", color: "#2e7dd7" },
-  agent: { name: "Agent", color: "#e36f1e" }
-};
-function hashToColor(input) {
-  let h = 0;
-  for (let i = 0;i < input.length; i++) {
-    h = h * 31 + input.charCodeAt(i) >>> 0;
-  }
-  const hue = h % 360;
-  return hslToHex(hue, 55, 55);
-}
-function hslToHex(h, s, l) {
-  s /= 100;
-  l /= 100;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const hp = h / 60;
-  const x = c * (1 - Math.abs(hp % 2 - 1));
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  if (hp < 1)
-    [r, g, b] = [c, x, 0];
-  else if (hp < 2)
-    [r, g, b] = [x, c, 0];
-  else if (hp < 3)
-    [r, g, b] = [0, c, x];
-  else if (hp < 4)
-    [r, g, b] = [0, x, c];
-  else if (hp < 5)
-    [r, g, b] = [x, 0, c];
-  else
-    [r, g, b] = [c, 0, x];
-  const m = l - c / 2;
-  const to = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
-  return `#${to(r)}${to(g)}${to(b)}`;
-}
-function knownUserForName(nameOrKey) {
-  const key = nameOrKey.toLowerCase();
-  const meta2 = KNOWN_USERS[key];
-  if (!meta2)
-    return null;
-  return { id: `known-${key}`, kind: "known", name: meta2.name, color: meta2.color };
-}
-function agentSlug(name) {
-  const trimmed = name.trim();
-  const slug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  if (slug)
-    return slug;
-  let h = 0;
-  for (let i = 0;i < trimmed.length; i++)
-    h = h * 31 + trimmed.charCodeAt(i) >>> 0;
-  return h.toString(36);
-}
-function agentIdForName(name) {
-  const known = knownUserForName(name.trim());
-  if (known)
-    return known.id;
-  return `agent-${agentSlug(name)}`;
-}
-
-// packages/mcp/src/author.ts
-function resolveAgentAuthor(env) {
-  const name = readRenamedEnv(env, "CW_AGENT_NAME")?.trim() || readRenamedEnv(env, "CW_AUTHOR")?.trim() || "agent";
-  const known = knownUserForName(name);
-  if (known)
-    return known;
-  return { name, color: hashToColor(name), id: agentIdForName(name), kind: "known" };
 }
 
 // packages/mcp/src/deprecated-aliases.ts
@@ -17718,6 +17819,8 @@ async function handleDocsTool(name, a, ctx) {
     ok: ok2,
     err: err2,
     AUTHOR,
+    CWD,
+    DEFAULT_WORKSPACE_ID,
     STATUS_TEXT_MAX,
     suggestionAuthor,
     resolveBaseUrl: resolveBaseUrl2,
@@ -17787,7 +17890,7 @@ async function handleDocsTool(name, a, ctx) {
         path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
       } else {
         const given = typeof a.workspaceId === "string" ? a.workspaceId.trim() : "";
-        const ws = given !== "" ? given : (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? "").trim();
+        const ws = given !== "" ? given : DEFAULT_WORKSPACE_ID;
         if (ws === "") {
           return err2("post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on");
         }
@@ -17845,7 +17948,7 @@ async function handleDocsTool(name, a, ctx) {
         docId,
         type: "markdown",
         sourceUrl: path,
-        owner: process.cwd(),
+        owner: CWD,
         ...title ? { title } : {},
         ...setId ? { setId } : {},
         ...producedBy ? { producedBy } : {}
@@ -17878,7 +17981,7 @@ async function handleDocsTool(name, a, ctx) {
       const res = await http("POST", `${board()}/docs`, {
         docId,
         type: "mockup",
-        owner: process.cwd(),
+        owner: CWD,
         ...sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {},
         ...title ? { title } : {}
       });
@@ -17889,7 +17992,7 @@ async function handleDocsTool(name, a, ctx) {
       const { folderPath, setId, title, include, exclude, maxFiles, subscribe, producedBy } = a;
       const res = await http("POST", "/workspaces", {
         folderPath,
-        owner: process.cwd(),
+        owner: CWD,
         ...setId ? { workspaceId: setId } : {},
         hubWorkspaceId: boardId(),
         ...title ? { title } : {},
@@ -17920,7 +18023,7 @@ async function handleDocsTool(name, a, ctx) {
         repo,
         base,
         ...target ? { target } : {},
-        owner: process.cwd(),
+        owner: CWD,
         ...reviewId ? { reviewId } : {},
         ...title ? { title } : {},
         ...exclude ? { exclude } : {},
@@ -19807,14 +19910,142 @@ async function emitRestoreNotice(deps, state) {
   });
 }
 
+// packages/mcp/src/connector-session.ts
+var STATUS_TEXT_MAX = 4000;
+function createConnectorSession(deps) {
+  const AUTHOR = deps.author;
+  const IDENTITY_IS_SHARED = isSharedIdentity(AUTHOR.id);
+  const log = deps.log;
+  const suggestionAuthor = () => ({ id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color });
+  const agentTokens = createAgentTokenStore({
+    agentId: AUTHOR.id,
+    resolveBaseUrl: deps.resolveBaseUrl,
+    fetch: deps.fetch,
+    log,
+    identityIsShared: IDENTITY_IS_SHARED
+  });
+  const http = createHttp(deps.resolveBaseUrl, deps.fetch, (path) => agentTokens.headersFor(path));
+  const deferredEmits = createDeferredEmitter();
+  const { markAttached: markAttached2, sendDueHeartbeats: sendDueHeartbeats2, claimNoticeFor: claimNoticeFor2 } = createAttachments({
+    http,
+    author: AUTHOR,
+    keepalive: createAttachmentKeepalive()
+  });
+  const shouldForwardFrame = createFrameDedup();
+  const channel = createChannelMessages({ notify: deps.notify, http, authorId: AUTHOR.id });
+  const handleFrame2 = createFrameHandler({
+    notify: deps.notify,
+    emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
+    http,
+    shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
+    defer: (fn) => deferredEmits.emitOutsideToolCall(fn)
+  });
+  const watchers = new Map;
+  const timers = {
+    set: (fn, ms) => setTimeout(fn, ms),
+    clear: (h) => clearTimeout(h)
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const { startSseLoop: startSseLoop2 } = createSseLoops({
+    watchers,
+    resolveBaseUrl: deps.resolveBaseUrl,
+    fetch: deps.fetch,
+    handleFrame: handleFrame2,
+    resetDedup: () => shouldForwardFrame.reset(),
+    log,
+    sleep,
+    timers
+  });
+  const muxLoop = createMuxLoop({
+    watchers,
+    agentId: AUTHOR.id,
+    resolveBaseUrl: deps.resolveBaseUrl,
+    fetch: deps.eventsFetch ?? deps.fetch,
+    handleFrame: handleFrame2,
+    resetDedup: () => shouldForwardFrame.reset(),
+    log,
+    sleep,
+    timers,
+    ...deps.eventsNeedToken === false ? {} : { authHeaders: () => agentTokens.headers(), forgetToken: () => agentTokens.forget() }
+  });
+  const registry2 = createWatchRegistry({
+    watchers,
+    http,
+    author: AUTHOR,
+    startSseLoop: startSseLoop2,
+    mux: muxLoop,
+    identityIsShared: IDENTITY_IS_SHARED,
+    log
+  });
+  const restore = createWatchRestore({
+    http,
+    registry: registry2,
+    watchers,
+    author: AUTHOR,
+    get pluginVersion() {
+      return deps.pluginVersion();
+    },
+    processId: deps.processId,
+    markAttached: markAttached2,
+    notify: deps.notify,
+    emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
+    shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
+    deferredEmits,
+    identityIsShared: IDENTITY_IS_SHARED
+  });
+  const toolContext = () => ({
+    http,
+    ok,
+    err,
+    AUTHOR,
+    CWD: deps.cwd,
+    DEFAULT_WORKSPACE_ID: deps.defaultWorkspaceId(),
+    PLUGIN_VERSION: deps.pluginVersion(),
+    PROCESS_ID: deps.processId,
+    markAttached: markAttached2,
+    STATUS_TEXT_MAX,
+    suggestionAuthor,
+    resolveBaseUrl: deps.resolveBaseUrl,
+    watchers,
+    watchDoc: registry2.watchDoc,
+    watchWorkspace: registry2.watchWorkspace,
+    unwatchDoc: registry2.unwatchDoc,
+    refreshCoverage: registry2.refreshCoverage,
+    watchPersistenceMode: registry2.watchPersistenceMode,
+    streamMode: registry2.streamMode,
+    claimNoticeFor: claimNoticeFor2,
+    restoreState: restore.state(),
+    lastPersistError: registry2.lastPersistError(),
+    IDENTITY_IS_SHARED,
+    SHARED_IDENTITY_REASON
+  });
+  const callTool = createCallToolHandler({
+    deferredEmits,
+    ensureWatchesRestored: () => restore.ensureWatchesRestored(),
+    sendDueHeartbeats: () => sendDueHeartbeats2(),
+    watchDoc: (docId) => registry2.watchDoc(docId),
+    toolContext,
+    handlers: [handleDocsTool, handleTaskTool, handleWorkspaceTool],
+    err
+  });
+  return {
+    author: AUTHOR,
+    listTools: () => TOOL_LIST,
+    callTool,
+    ensureWatchesRestored: () => restore.ensureWatchesRestored(),
+    openEvents: () => IDENTITY_IS_SHARED ? Promise.resolve(false) : muxLoop.ensureOpen(),
+    stop: () => {
+      muxLoop.stop();
+      for (const w of watchers.values())
+        w.controller.abort();
+    }
+  };
+}
+
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var STATUS_TEXT_MAX = 4000;
-function suggestionAuthor() {
-  return { id: AUTHOR.id, name: AUTHOR.name, color: AUTHOR.color };
-}
-var PLUGIN_VERSION = "0.1.233";
+var PLUGIN_VERSION = "0.1.234";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
@@ -19824,226 +20055,24 @@ var server = new Server({
     tools: {},
     experimental: { "claude/channel": {} }
   },
-  instructions: [
-    "Every markdown attachment is backed by a .md file on disk. The file is the",
-    "source of truth at rest; the live editor is the source of truth at runtime;",
-    "the plugin keeps them in sync bidirectionally (~1s debounced).",
-    "",
-    "CREATE: call attach_markdown(docId, path) to bring a .md under review.",
-    "The server reads the file, parses it into the live editor, sets up the",
-    "fs.watch + write-back, and returns a reviewUrl you can hand to a human.",
-    "",
-    "EDIT: never use Write/Edit/str_replace on the .md while it is under review",
-    "— direct filesystem edits race against the live doc’s own ~1s flush, and if",
-    "the server has pending state your edit can be silently overwritten by the next",
-    "write-back. Route edits through the MCP tools below: find_and_replace for",
-    "prose changes, rewrite_thread_region / insert_after_thread / insert_blocks_after_thread",
-    "for comment-anchored edits, and set_doc_content(docId, markdown) for a",
-    "COMPREHENSIVE REWRITE of the whole doc (do NOT Write the file + reparse,",
-    "and do NOT delete_doc + Write + re-create — both race the flush and both",
-    "have destroyed content in the field). NEVER use set_doc_content on a doc a",
-    "human is reviewing or editing: a scoped request (a comment, one section)",
-    "gets a scoped edit — find_and_replace (table rows match in pipe syntax),",
-    "rewrite_thread_region, edit_at_anchor — and a whole-doc rewrite built from",
-    "an earlier read destroys their concurrent edits. The server refuses such a",
-    "write with 409 stale-write naming the human-edit time; re-read with",
-    "get_doc, re-apply your change onto the CURRENT content, and only retry",
-    "with confirmOverwriteHumanEdits: true if a full rewrite is truly needed.",
-    "External edits (VS Code, git pull)",
-    "flow back into the live doc via the file poll when the server is idle; if you",
-    "wrote to a bound file externally and need to be sure it landed, call",
-    "reparse_from_disk(docId) to force-pull from disk. If an edit response or",
-    "get_doc carries a `syncError`, read it — it names the conflict and where",
-    "the overwritten version was backed up.",
-    "",
-    "DIFF REVIEW / FOLDER BROWSE: when the human wants to review your code",
-    'changes ("review this diff", a branch, work in progress), call',
-    "create_diff_review(repo, base) — one attachment per changed file,",
-    "PR-style unified diff with line comments. Omit base to BROWSE a folder",
-    "instead (no diff): everything is navigable from the all-files sidebar,",
-    "files open lazily, markdown editable — works on plain folders and",
-    "fresh repos too (attach_folder is an alias for this). Default mode diffs",
-    "base against the LIVE working tree: keep editing the code and the reviewer",
-    "sees your changes re-render within ~1s, with their comments riding along",
-    "(threads orphan into the outdated-comments flow if their line disappears).",
-    "ALWAYS pass groups: [{title, paths[]}] — organize the changed files by",
-    "INTENT (the way you would split a branch into reviewable commits); you",
-    "know the semantics of your change far better than the heuristic fallback.",
-    "First group = read first; a directory path claims every file under it;",
-    'unlisted files land in "Other". Pass target only to pin a review to a',
-    "finished range. Re-run the tool after touching files that were not in",
-    "the diff before (idempotent; refreshes the file list; keeps your groups",
-    "unless you pass new ones). Share the returned entryUrl with the human",
-    "(bare URL on its own line); the file tree navigates the rest. Thread",
-    "events arrive per file via the auto-watch; resolve threads as you address",
-    "them; refresh_attachment_set(setId) to re-sync membership and diffs as",
-    "files move (threads survive); archive_attachment_set(setId, reason) when",
-    "the review is done.",
-    "",
-    "SUGGEST: pass suggest: true on find_and_replace or rewrite_thread_region to",
-    "PROPOSE a change instead of applying it — the match is marked pending and",
-    "attributed to this agent; disk and every other reader stay on the accepted",
-    "state until a human (or accept_suggestion) accepts it. Returns { suggestionId }.",
-    "Use for judgment calls a reviewer should approve; use the plain edit for",
-    "mechanical fixes. list_suggestions(docId) / accept_suggestion(docId, sid) /",
-    "reject_suggestion(docId, sid) / resolve_all_suggestions(docId, action, authorId?)",
-    "manage proposals from any author. suggestion.created/accepted/rejected events",
-    "arrive on the same watch_doc channel as thread events.",
-    "",
-    "OBSERVE: call watch_doc(docId) once per doc to receive thread events as",
-    '<channel source="claude-workspaces" doc_id="..." thread_id="..." event="..." author="..." sent_at="...">body</channel>',
-    "messages. Treat each as an explicit ask from the reviewer; read, decide if it",
-    "is in your domain, act via an edit tool. unwatch_doc when you're done.",
-    "Watches are remembered on the server under this agent name (CW_AGENT_NAME)",
-    "and re-wired when the session respawns; list_watched_docs says whether the",
-    "current set was restored from the server or is session-only.",
-    "",
-    "CLEANUP: attachments are usually short-lived — bound for a ~30-minute",
-    "feedback pass, then obsolete. When you no longer need one, call",
-    "delete_doc(docId) to remove it (the bound source .md is left on disk; only",
-    "the review session goes away). It refuses if the doc still has open threads",
-    "(someone's waiting on that feedback) — resolve them first or pass force:true.",
-    "Don't leave stale docs piling up in list_docs.",
-    "",
-    "BEFORE YOU EDIT A .md FILE: call list_docs first. If a doc has sourceUrl",
-    "matching the path, route through the MCP. If not, normal file edits are fine.",
-    "",
-    "WORKSPACE BOARD: a board workspace is a goal + a task board + linked docs.",
-    "create_workspace mints one; attach_doc links existing docs/attachments to it;",
-    "create_tasks (ALWAYS a list — one idea is a one-item list) and",
-    "spin_off_task add work (omit `goal` and the task lands UNPLACED in",
-    "Backlog awaiting triage — the create says so and hands you the goal",
-    "bands, and placing it with set_task_goal IS the triage:",
-    "pick the goal AND the exact position). task_transition is the",
-    "single gate for status changes — blockers come back in the result.",
-    "attach_agent registers you as the workspace agent (heartbeat every few",
-    "minutes to stay live; lead-addressed deliveries only reach live agents).",
-    "Workspace events (task.*, decision.answered, workspace.goals_changed)",
-    "arrive on the same channel as thread events once you create/attach.",
-    "import_tasks_markdown moves an existing hand-maintained markdown tracker",
-    "onto the board (dry-run first — review the mapping before apply:true)."
-  ].join(" ")
+  instructions: CONNECTOR_INSTRUCTIONS
 });
-server.setRequestHandler(ListToolsRequestSchema, async () => TOOL_LIST);
-var deferredEmits = createDeferredEmitter();
-function toolContext() {
-  return {
-    http,
-    ok,
-    err,
-    AUTHOR,
-    PLUGIN_VERSION,
-    PROCESS_ID,
-    markAttached: markAttached2,
-    STATUS_TEXT_MAX,
-    suggestionAuthor,
-    resolveBaseUrl: resolveBaseUrl2,
-    watchers,
-    watchDoc: watchDoc2,
-    watchWorkspace: watchWorkspace2,
-    unwatchDoc: unwatchDoc2,
-    refreshCoverage: refreshCoverage2,
-    watchPersistenceMode: watchPersistenceMode2,
-    streamMode: registry2.streamMode,
-    claimNoticeFor: claimNoticeFor2,
-    restoreState: restore.state(),
-    lastPersistError: registry2.lastPersistError(),
-    IDENTITY_IS_SHARED,
-    SHARED_IDENTITY_REASON
-  };
-}
-server.setRequestHandler(CallToolRequestSchema, createCallToolHandler({
-  deferredEmits,
-  ensureWatchesRestored: () => ensureWatchesRestored2(),
-  sendDueHeartbeats: () => sendDueHeartbeats2(),
-  watchDoc: (docId) => watchDoc2(docId),
-  toolContext,
-  handlers: [handleDocsTool, handleTaskTool, handleWorkspaceTool],
-  err
-}));
-var watchers = new Map;
-var IDENTITY_IS_SHARED = isSharedIdentity(AUTHOR.id);
-var agentTokens = createAgentTokenStore({
-  agentId: AUTHOR.id,
-  resolveBaseUrl: resolveBaseUrl2,
-  fetch: (url, init) => fetch(url, init),
-  log: (...args) => console.error(...args),
-  identityIsShared: IDENTITY_IS_SHARED
-});
-var { markAttached: markAttached2, sendDueHeartbeats: sendDueHeartbeats2, claimNoticeFor: claimNoticeFor2 } = createAttachments({
-  http: (method, path, body) => http(method, path, body),
+var session = createConnectorSession({
   author: AUTHOR,
-  keepalive: createAttachmentKeepalive()
-});
-var shouldForwardFrame = createFrameDedup();
-var channel = createChannelMessages({
+  cwd: process.cwd(),
+  defaultWorkspaceId: () => (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? "").trim(),
+  pluginVersion: () => PLUGIN_VERSION,
+  processId: PROCESS_ID,
   notify: (n) => server.notification(n),
-  http: (method, path, body) => http(method, path, body),
-  authorId: AUTHOR.id
-});
-var handleFrame2 = createFrameHandler({
-  notify: (n) => server.notification(n),
-  emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
-  http: (method, path, body) => http(method, path, body),
-  shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
-  defer: (fn) => deferredEmits.emitOutsideToolCall(fn)
-});
-var loopTimers = {
-  set: (fn, ms) => setTimeout(fn, ms),
-  clear: (h) => clearTimeout(h)
-};
-var { startSseLoop: startSseLoop2 } = createSseLoops({
-  watchers,
   resolveBaseUrl: resolveBaseUrl2,
   fetch: (url, init) => fetch(url, init),
-  handleFrame: (raw) => handleFrame2(raw),
-  resetDedup: () => shouldForwardFrame.reset(),
-  log: (...args) => console.error(...args),
-  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  timers: loopTimers
-});
-var muxLoop = createMuxLoop({
-  watchers,
-  agentId: AUTHOR.id,
-  resolveBaseUrl: resolveBaseUrl2,
-  fetch: (url, init) => fetch(url, init),
-  handleFrame: (raw) => handleFrame2(raw),
-  resetDedup: () => shouldForwardFrame.reset(),
-  log: (...args) => console.error(...args),
-  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  timers: loopTimers,
-  authHeaders: () => agentTokens.headers(),
-  forgetToken: () => agentTokens.forget()
-});
-var registry2 = createWatchRegistry({
-  watchers,
-  http: (method, path, body) => http(method, path, body),
-  author: AUTHOR,
-  startSseLoop: startSseLoop2,
-  mux: muxLoop,
-  identityIsShared: IDENTITY_IS_SHARED,
   log: (...args) => console.error(...args)
 });
-var { watchDoc: watchDoc2, watchWorkspace: watchWorkspace2, unwatchDoc: unwatchDoc2, refreshCoverage: refreshCoverage2, watchPersistenceMode: watchPersistenceMode2 } = registry2;
-var restore = createWatchRestore({
-  http: (method, path, body) => http(method, path, body),
-  registry: registry2,
-  watchers,
-  author: AUTHOR,
-  pluginVersion: PLUGIN_VERSION,
-  processId: PROCESS_ID,
-  markAttached: markAttached2,
-  notify: (n) => server.notification(n),
-  emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),
-  shouldForward: (event, payload) => shouldForwardFrame.shouldForward(event, payload),
-  deferredEmits,
-  identityIsShared: IDENTITY_IS_SHARED
-});
-var { ensureWatchesRestored: ensureWatchesRestored2 } = restore;
-var http = createHttp(resolveBaseUrl2, (url, init) => fetch(url, init), (path) => agentTokens.headersFor(path));
+server.setRequestHandler(ListToolsRequestSchema, async () => session.listTools());
+server.setRequestHandler(CallToolRequestSchema, (req) => session.callTool(req));
 var transport = new StdioServerTransport;
 server.oninitialized = () => {
-  ensureWatchesRestored2();
+  session.ensureWatchesRestored();
 };
 await server.connect(transport);
 var bannerBase;

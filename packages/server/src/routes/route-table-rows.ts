@@ -150,6 +150,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/review', 'GET'],
   ]),
 
+  ...family('routes/mcp-connector.ts', [['loopback-only', '/mcp', 'GET POST DELETE']]),
+
   ...family('routes/agent-identity.ts', [
     ['loopback-only', '/api/agents/:agentId/token', 'GET'],
     ['loopback-only', '/api/agents/:agentId/watches', 'GET POST'],

@@ -37,6 +37,12 @@ export interface DocsToolContext {
   err: (message: string) => CallToolResult;
   /** This process's identity, sent on everything it authors. */
   AUTHOR: AgentAuthor;
+  /** The session's working directory, sent as `owner` on every bind. A field
+   *  rather than `process.cwd()`: the shared server hosts sessions from many
+   *  directories in one process. */
+  CWD: string;
+  /** The board a bare `post_status` lands on (`CW_WORKSPACE_ID`), or empty. */
+  DEFAULT_WORKSPACE_ID: string;
   /** `post_status`'s ceiling — the server's own `NOTE_TEXT_MAX`. */
   STATUS_TEXT_MAX: number;
   /** The {id,name,color} subset a `suggest: true` route call wants. */
@@ -81,6 +87,8 @@ export async function handleDocsTool(
     ok,
     err,
     AUTHOR,
+    CWD,
+    DEFAULT_WORKSPACE_ID,
     STATUS_TEXT_MAX,
     suggestionAuthor,
     resolveBaseUrl,
@@ -197,10 +205,7 @@ export async function handleDocsTool(
         path = `${board()}/tasks/${encodeURIComponent(taskId)}/notes`;
       } else {
         const given = typeof a.workspaceId === 'string' ? a.workspaceId.trim() : '';
-        const ws =
-          given !== ''
-            ? given
-            : (process.env.CW_WORKSPACE_ID ?? process.env.FEEDBACK_WORKSPACE_ID ?? '').trim();
+        const ws = given !== '' ? given : DEFAULT_WORKSPACE_ID;
         if (ws === '') {
           return err(
             'post_status needs a board: pass workspaceId, or launch the session with CW_WORKSPACE_ID set — a note is addressed under the board whose task it lands on',
@@ -294,7 +299,7 @@ export async function handleDocsTool(
         docId,
         type: 'markdown',
         sourceUrl: path,
-        owner: process.cwd(),
+        owner: CWD,
         ...(title ? { title } : {}),
         ...(setId ? { setId } : {}),
         ...(producedBy ? { producedBy } : {}),
@@ -352,7 +357,7 @@ export async function handleDocsTool(
       const res = await http('POST', `${board()}/docs`, {
         docId,
         type: 'mockup',
-        owner: process.cwd(),
+        owner: CWD,
         ...(sourceHtmlPath ? { sourceUrl: sourceHtmlPath } : {}),
         ...(title ? { title } : {}),
       });
@@ -373,7 +378,7 @@ export async function handleDocsTool(
       };
       const res = (await http('POST', '/workspaces', {
         folderPath,
-        owner: process.cwd(),
+        owner: CWD,
         // The SET's own id, re-used to refresh an existing attachment set.
         // It used to be spelled `workspaceId` here, which is the word every
         // other tool uses for the BOARD — two meanings on one name, on the
@@ -426,7 +431,7 @@ export async function handleDocsTool(
         repo,
         base,
         ...(target ? { target } : {}),
-        owner: process.cwd(),
+        owner: CWD,
         ...(reviewId ? { reviewId } : {}),
         ...(title ? { title } : {}),
         ...(exclude ? { exclude } : {}),

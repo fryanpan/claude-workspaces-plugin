@@ -51,7 +51,7 @@ flowchart TB
   plug["plugin<br/>skills · hooks · bundled mcp"]
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
-    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options"]
+    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options<br/>connector/ (hosted MCP at /mcp)"]
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
@@ -83,9 +83,20 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The stdio MCP server agents talk to — a **client** of the server's REST and SSE. | No business logic the server does not also enforce. |
+| `mcp` | The stdio MCP server agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server also hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, and a bundled copy of `mcp`. | Version bumped in three places; see CLAUDE.md. |
+
+**The MCP connector can run inside the server.** `server/src/connector/` hosts
+the same `connector-session.ts` the stdio child builds, one per agent,
+working directory and default board, behind `/mcp` (Streamable HTTP, loopback only). It is the
+one place `server` imports from `packages/mcp/src`, and the direction is
+deliberate: the connector is the mcp package's code, and the server only
+supplies its two seams — REST over a loopback socket, so every route gate
+sees what it saw from the child, and the event stream opened in-process, so
+an agent the previous process was hosting is subscribed again before the
+first request after a restart. The plugin still launches the stdio child;
+switching `.mcp.json` to `/mcp` is a separate change.
 
 **Model prompts are a subsystem, not a scatter of literals.** Every set of
 words this server sends to a model is one row of `prompt-catalog.ts`, and
