@@ -140,6 +140,10 @@ export interface NotesEditGuardContext {
   /** Blocks somebody has commented on. An insert never replaces one of them
    *  as a correction (`correctedNote`). */
   commented?: (() => ReadonlySet<string>) | undefined;
+  /** The note-taker's own author id. Absent, no insert is read as a correction:
+   *  a replace of a block another author wrote reaches a person as a
+   *  suggestion, and the correction would never land. */
+  authorId?: string | undefined;
 }
 
 /**
@@ -348,7 +352,11 @@ export function guardNotesEdits(
   // written as an insert never takes one of them over.
   const targeted = new Set(worded.flatMap((e) => ('blockId' in e ? [e.blockId] : [])));
   for (const edit of worded) {
-    if (edit.op === 'insert_under_heading' && section?.headings.has(edit.headingId) === true) {
+    if (
+      edit.op === 'insert_under_heading' &&
+      ctx.authorId !== undefined &&
+      section?.headings.has(edit.headingId) === true
+    ) {
       // A CORRECTION WRITTEN BESIDE THE NOTE IT WITHDRAWS replaces that note
       // (`notes-edit-correction.ts`), exactly as it would had the model sent
       // the replace itself.
@@ -357,6 +365,7 @@ export function guardNotesEdits(
         section: section.blocks,
         speech: ctx.speech ?? [],
         headingId: edit.headingId,
+        authorId: ctx.authorId,
         commented: ctx.commented?.(),
       });
       if (corrected !== undefined && !targeted.has(corrected.id)) {

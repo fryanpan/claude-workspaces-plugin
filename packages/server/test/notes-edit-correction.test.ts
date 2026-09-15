@@ -19,7 +19,7 @@ import {
 } from '../src/meeting-notes-doc.ts';
 import type { NotesUpdate } from '../src/meeting-notes.ts';
 import { sectionIds } from '../src/notes-cleanup-scope.ts';
-import type { NotesDocStore } from '../src/notes-doc-access.ts';
+import { NOTES_AUTHOR_ID, type NotesDocStore } from '../src/notes-doc-access.ts';
 import { correctedNote } from '../src/notes-edit-correction.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
 
@@ -186,12 +186,17 @@ describe('correctedNote', () => {
     section: sectionIds(outline, heading).blocks,
     speech: [TAKE_BACK],
     headingId: idOf(m, 'Hull patch'),
+    authorId: NOTES_AUTHOR_ID,
   };
   const correction = '- Track incoming requests instead of hour estimates';
   const estimateId = idOf(m, ESTIMATE);
 
   test('names the note a single-bullet correction withdraws', () => {
     expect(correctedNote(correction, scope)?.id).toBe(estimateId);
+  });
+
+  test('names nothing another author wrote', () => {
+    expect(correctedNote(correction, { ...scope, authorId: 'agent:someone-else' })).toBe(undefined);
   });
 
   test('names nothing a person has commented on', () => {

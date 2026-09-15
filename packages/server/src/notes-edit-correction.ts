@@ -166,6 +166,9 @@ export interface CorrectionScope {
   /** The heading the insert lands under: only a note under it can answer, so a
    *  correction never takes over a note in another topic. */
   headingId: string;
+  /** The note-taker's author id: a note another author wrote never answers,
+   *  because a replace of it becomes a suggestion, not the correction. */
+  authorId: string;
   /** Blocks somebody has commented on: never the note a correction replaces. */
   commented?: ReadonlySet<string> | undefined;
 }
@@ -188,7 +191,7 @@ export function correctedNote(
   const answers = outline.filter(
     (e, i) =>
       e.kind === 'listItem' &&
-      e.author !== undefined &&
+      e.author === scope.authorId &&
       section.has(e.id) &&
       e.underHeadingId === scope.headingId &&
       scope.commented?.has(e.id) !== true &&
