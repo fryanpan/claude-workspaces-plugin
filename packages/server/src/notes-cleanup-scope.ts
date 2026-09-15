@@ -4,12 +4,18 @@
  * SPLIT OUT OF `notes-cleanup-pass.ts` because it answers a different
  * question. That module runs one pass — read the transcript, ask the
  * composer, write what comes back. This one decides, for a block the model
- * has named, whether the pass is allowed to touch it at all: is it inside
- * this meeting's section, is it somebody's, does a comment point into it.
- * Every export here is pure or reads the doc; none of them composes anything.
+ * has named, whether the pass is allowed to touch it at all: whose words
+ * would change, and does a comment point into it. Every export here is pure
+ * or reads the doc; none of them composes anything.
+ *
+ * THE BOUNDARY IS AUTHORSHIP, NOT LOCATION (Bryan, 2026-09-15). Moving and
+ * renesting is free anywhere in the document, a person's blocks included;
+ * changing the WORDS of somebody's line comes back as a suggestion, and the
+ * pass revises its own outright. {@link boundByAuthorship} is that rule and
+ * carries the story of what the section test cost.
  *
  * THE RULE THE WHOLE FILE TURNS ON. There are two ownership questions in the
- * write path, not one — `confineToSection` decides which edits are proposed,
+ * write path, not one — `boundByAuthorship` decides which edits are proposed,
  * and `prose.applyBlockEdits` then decides whether each lands as a rewrite or
  * as a redline. They agree here because they are asked the SAME question: does
  * the document record this block as the note-taker's own? Nothing in this file
@@ -117,7 +123,7 @@ export function commentedBlockIds(ydoc: Y.Doc): Set<string> {
  * `owned` is the ids carrying the note-taker's `cwAuthor` mark. Every other
  * block in the section — a person's line, another agent's, and a line whose
  * author the document no longer records — is out of reach of a rewrite and
- * within reach of an OFFER, which is `confineToSection`'s job.
+ * within reach of an OFFER, which is `boundByAuthorship`'s job.
  *
  * AN UNRECORDED AUTHOR IS NOT A LICENCE, and this is the half that was got
  * wrong twice. `cwAuthor` records the AGENT that wrote a block; nothing
@@ -144,57 +150,103 @@ export function commentedBlockIds(ydoc: Y.Doc): Set<string> {
  * adds what the meeting shows is missing, and every improvement to a line
  * already there reaches the reader as a redline they answer.
  *
- * This asks nothing about the SECTION or about comments. `confineToSection`
- * asks those separately and every one of them has to say yes.
+ * This asks nothing about comments, and nothing about where a block sits.
+ * `boundByAuthorship` asks those separately and every one of them has to say
+ * yes.
  */
 export function claimable(scope: { owned: Set<string> }): (id: string) => boolean {
   return (id: string): boolean => scope.owned.has(id);
 }
 
 /**
+ * Every block the document holds, and every heading in it.
+ *
+ * WHAT THIS REPLACED, AND WHY. The gate below used to be handed
+ * {@link sectionIds} — the meeting's own heading and the blocks under it —
+ * so an edit naming anything else was dropped for being "outside the
+ * section". That is a LOCATION test, and location is not a thing the
+ * note-taker controls: a person moves a bullet, the meeting's notes land
+ * under a heading somebody else opened, the doc goes through a markdown round
+ * trip, and the section the pass believes it owns stops containing its own
+ * work. A tidy-up whose every edit is then refused reports nothing wrong with
+ * itself. The boundary that matters is AUTHORSHIP — whose words are being
+ * changed — and it is asked per edit below.
+ *
+ * Headings are kept apart from blocks for the same reason `sectionIds` keeps
+ * them apart: an `insert_under_heading` has to name a heading, and answering
+ * that question from the block set would let a bullet pass as a destination.
+ */
+export function docIds(outline: readonly prose.OutlineEntry[]): {
+  blocks: Set<string>;
+  headings: Set<string>;
+} {
+  const blocks = new Set<string>();
+  const headings = new Set<string>();
+  for (const entry of outline) {
+    blocks.add(entry.id);
+    if (entry.kind === 'heading') headings.add(entry.id);
+  }
+  return { blocks, headings };
+}
+
+/**
  * Sort the model's edits into the ones that reach the document and the ones
  * that are dropped before it.
  *
+ * TWO BOUNDARIES, AND NEITHER OF THEM IS LOCATION (Bryan, 2026-09-15).
+ *
+ * - **Structure is free.** Moving a block, renesting it, reordering it under
+ *   a lead — allowed anywhere in the document, including blocks a person
+ *   wrote. A move keeps every word, mark, id and authorship attribute of what
+ *   it moves (`prose-nest.ts`), so nobody's writing changes; where a bullet
+ *   sits is the pass's job to get right.
+ * - **Words are not.** A `replace_block` reaches the document whoever owns
+ *   the block, and `applyBlockEdits` then decides what it BECOMES from the
+ *   block's own `cwAuthor` — the pass's own line is rewritten, anybody
+ *   else's comes back as a redline SUGGESTION, byte-identical until they
+ *   answer it (Bryan, 2026-09-10: *"do not rewrite human text. But if you
+ *   spot an improvement, use the suggest and edit tool to suggest an edit"*).
+ *
+ * WHAT THE OLD RULE COST. Every edit used to be tested for membership of the
+ * meeting's own section first, and on 2026-09-15 a tidy-up over a real
+ * meeting proposed sixteen edits and had all sixteen refused, because the
+ * meeting's notes had not landed inside the section the pass believed it
+ * owned. The pass reported "16 proposed, 16 refused, 0 blocks touched" and
+ * nothing about the notes was wrong. Location is not the note-taker's to
+ * control; authorship is what the rule was always trying to protect.
+ *
  * KEPT IS NOT THE SAME AS REWRITTEN, and this gate deliberately does not
- * decide which. A `replace_block` naming a block inside the section is kept
- * whether or not {@link claimable} calls it the pass's own; what happens to it
- * then is `applyBlockEdits`' answer, read off the block's own `cwAuthor` — the
- * pass's own block is rewritten, and anybody else's becomes a redline
- * SUGGESTION on their words, byte-identical until they accept it (Bryan,
- * 2026-09-10: *"the rule was do not rewrite human text. But if you spot an
- * improvement, use the suggest and edit tool to suggest an edit"*).
+ * decide which. {@link claimable} still answers "is this the pass's own", and
+ * it still decides the two ops that cannot be offered — see below — but for a
+ * replace it decides nothing here: the write path reads the block's mark and
+ * files a rewrite or a redline off that.
  *
  * NOTHING HERE EVER MAKES A BLOCK THE PASS'S OWN, which is what lets the two
  * modules be two halves of one rule rather than two rules that must be kept
  * in step. An earlier version stamped the note-taker's mark on the blocks the
  * gate had decided to rewrite so the write path would agree with it, and had
  * to carry a set of exceptions — the blocks it must NOT stamp — to stop that
- * move turning somebody's redline into a silent rewrite. The stamping existed
- * only for the marks-gone rewrite mode {@link claimable} no longer has, and
- * both it and its exception list are gone: a cleanup that changes no words now
- * writes no attribute either.
+ * move turning somebody's redline into a silent rewrite. Both are gone: a
+ * cleanup that changes no words now writes no attribute either.
  *
- * ONLY A REPLACE IS OFFERED THAT WAY. A `delete_block` on somebody's line
- * proposes striking the whole of it and a `nest_blocks` proposes moving it
- * under something else; neither is an improvement to their writing, and
- * `applyBlockEdits` cannot express the second as a suggestion at all. Both
- * are dropped, which is also what the prompt asks for.
+ * WHAT IS STILL REFUSED, AND WHY EACH ONE SURVIVED THE CHANGE:
  *
- * `commented` is the set a thread points into; see `commentedBlockIds`. A
- * commented block is out of reach BOTH ways — the pass adds beside it — which
- * is a stricter rule than the anchor argument alone requires (a suggestion
- * re-creates no text), and it is deliberate: at the end of a meeting a bullet
- * somebody is already discussing is the last one to reopen.
+ * - **A `delete_block` on a line that is not the pass's own.** Striking a
+ *   line out proposes nothing a reader can answer — `applyBlockEdits` files a
+ *   redline that strikes the whole of it — and a tidy-up that can delete
+ *   somebody's note is the one failure the notes cannot come back from.
+ * - **The meeting's own section heading, either way.** Replacing it changes
+ *   the block id the section is addressed at, and deleting it orphans every
+ *   note under it.
+ * - **`insert_at_end`.** A cleanup has a section already; writing at the end
+ *   of the doc is the one way to grow a second one.
+ * - **A commented block, for a replace or a delete.** Rewriting one
+ *   re-creates its text and orphans every thread anchored inside it; at the
+ *   end of a meeting a bullet somebody is discussing is the last one to
+ *   reopen. A `nest_blocks` is explicitly still allowed on one — nesting
+ *   re-creates no text, so the anchor rides along.
  *
- * EVERY REFUSAL SAYS WHY (2026-09-15). This used to answer with a COUNT, and
- * on the run that prompted this change the count was the whole record: "16
- * edits proposed, 16 refused, 0 blocks touched", over a meeting whose notes
- * had all landed outside its section. A reader could not tell that from a
- * pass that had simply proposed sixteen bad edits, and the number that would
- * have said so — sixteen edits naming blocks outside the section — was
- * computed here and thrown away. `reasons` carries one line per dropped edit,
- * naming the op, the block and the rule; `refused` stays the count, because
- * the counters above it are what the route reports.
+ * `commented` is the set a thread points into; see {@link commentedBlockIds}.
  */
 
 /** One dropped edit's reason, in the words the log prints. */
@@ -202,29 +254,37 @@ function why(op: prose.BlockEditOp, id: string, rule: string): string {
   return `${op} ${id}: ${rule}`;
 }
 
-export function confineToSection(
+/**
+ * What the gate is asked about, as the caller builds it.
+ *
+ * `blocks` and `headings` are the WHOLE DOCUMENT's now ({@link docIds}), not
+ * a section's. `headingId` is still the meeting's own section heading —
+ * kept because it is the one block the pass may not touch, not because it
+ * bounds anything.
+ */
+export interface NotesEditScope {
+  blocks: Set<string>;
+  headings: Set<string>;
+  owned: Set<string>;
+  headingId: string;
+  commented?: Set<string>;
+}
+
+export function boundByAuthorship(
   edits: readonly prose.BlockEdit[],
-  scope: {
-    blocks: Set<string>;
-    headings: Set<string>;
-    owned: Set<string>;
-    headingId: string;
-    commented?: Set<string>;
-  },
+  scope: NotesEditScope,
 ): { kept: prose.BlockEdit[]; refused: number; reasons: string[] } {
   const kept: prose.BlockEdit[] = [];
   const reasons: string[] = [];
   const ours = claimable(scope);
-  // Inside this meeting's own notes, and not the section heading itself —
-  // deleting that orphans every note under it, and rewriting it moves the
-  // address the notes are found at.
-  const inSection = (id: string): boolean => scope.blocks.has(id) && id !== scope.headingId;
-  const mine = (id: string): boolean => inSection(id) && ours(id);
+  // In the document at all, and not the section heading itself.
+  const addressable = (id: string): boolean => scope.blocks.has(id) && id !== scope.headingId;
+  const mine = (id: string): boolean => addressable(id) && ours(id);
   const uncommented = (id: string): boolean => scope.commented?.has(id) !== true;
   // A better wording reaches the document whoever the line belongs to —
   // ownership decides whether it lands as a rewrite or as a redline, and that
   // is `applyBlockEdits`' call rather than this one.
-  const worthSaying = (id: string): boolean => inSection(id) && uncommented(id);
+  const worthSaying = (id: string): boolean => addressable(id) && uncommented(id);
   // Striking a line out is only ever the pass's own to propose.
   const rewritable = (id: string): boolean => mine(id) && uncommented(id);
   /**
@@ -240,7 +300,7 @@ export function confineToSection(
    */
   const blockRule = (id: string, countComments = true): string =>
     !scope.blocks.has(id)
-      ? "the block is outside this meeting's notes section"
+      ? 'the block is not in the document'
       : id === scope.headingId
         ? "the block is the meeting's own section heading"
         : countComments && scope.commented?.has(id) === true
@@ -256,8 +316,8 @@ export function confineToSection(
               edit.op,
               edit.headingId,
               scope.blocks.has(edit.headingId)
-                ? 'the block is not a heading inside this meeting’s notes section'
-                : "the heading is outside this meeting's notes section",
+                ? 'the block named is not a heading'
+                : 'the heading is not in the document',
             ),
           );
         break;
@@ -269,13 +329,15 @@ export function confineToSection(
         if (rewritable(edit.blockId)) kept.push(edit);
         else reasons.push(why(edit.op, edit.blockId, blockRule(edit.blockId)));
         break;
-      // Nesting keeps every block's own text, so a comment inside one rides
-      // along — which is why this asks `mine` and not `rewritable`.
+      // STRUCTURE IS FREE. A nest moves blocks and rewrites none of them, so
+      // it asks only that every id it names is a block of this document and
+      // is not the meeting's own section heading. Ownership is not asked, and
+      // a comment rides along with the block it is anchored in.
       case 'nest_blocks':
-        if (mine(edit.leadBlockId) && edit.blockIds.every(mine)) kept.push(edit);
+        if (addressable(edit.leadBlockId) && edit.blockIds.every(addressable)) kept.push(edit);
         else {
           const bad =
-            [edit.leadBlockId, ...edit.blockIds].find((id) => !mine(id)) ?? edit.leadBlockId;
+            [edit.leadBlockId, ...edit.blockIds].find((id) => !addressable(id)) ?? edit.leadBlockId;
           reasons.push(why(edit.op, bad, blockRule(bad, false)));
         }
         break;

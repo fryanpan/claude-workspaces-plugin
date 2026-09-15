@@ -34,6 +34,13 @@
  * lines, so the suggestion path underneath it never fired and the feature
  * Bryan asked for did not exist. The restraint that matters is on their
  * WORDS, and the doc enforces that whatever the prompt says.
+ *
+ * WHICH IS ALSO WHY THE MOVE CLAUSE CHANGED (2026-09-15). This used to read
+ * "never move or nest one", which is a restraint on STRUCTURE — and structure
+ * is the pass's job. A move keeps a line's words character for character, so
+ * it takes nothing from whoever wrote it; the gate allows it now
+ * (`notes-cleanup-scope.ts`) and a prompt that still forbade it would simply
+ * mean the allowance never fired, exactly as the prohibition above did.
  */
 export const CLEANUP_DIRECTIVE = [
   'FINAL PASS OVER THE WHOLE MEETING. The recording has stopped and a person',
@@ -57,10 +64,13 @@ export const CLEANUP_DIRECTIVE = [
   '- REORGANISE only where the notes are actually hard to read: a point filed',
   '  under the wrong heading, a topic left as a wall of bullets past the',
   '  regrouping bar. Bullets that read fine where they are stay where they',
-  '  are.',
-  '- Lines marked "theirs" are not yours: a person wrote them, or the document',
-  '  no longer records who did. Never delete one, never move or nest one, and',
-  '  do not repeat what they say.',
+  '  are. Moving a bullet is always allowed, whoever wrote it: it keeps every',
+  '  word it had.',
+  '- Lines marked "theirs" are not yours to REWORD: a person wrote them, or',
+  '  the document no longer records who did. Never delete one, and do not',
+  '  repeat what they say. You MAY move one — putting a line under the',
+  '  heading it belongs to, or nesting it under the point it elaborates,',
+  "  changes nobody's words and is part of making the notes readable.",
   '- YOU MAY STILL OFFER AN IMPROVEMENT ON A LINE MARKED "theirs", and you',
   '  cannot rewrite one by accident: name it in a replace_block with your',
   '  better wording and it reaches them as a SUGGESTION on their own line,',

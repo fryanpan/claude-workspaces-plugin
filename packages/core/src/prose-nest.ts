@@ -56,6 +56,22 @@ export interface NestBlocksOptions {
   blockIds: readonly string[];
   /** Only blocks still marked as this author's may be moved. */
   author: string;
+  /**
+   * Let the move reach blocks this author does NOT own — a person's bullet
+   * included.
+   *
+   * OFF BY DEFAULT, AND THE DEFAULT IS THE LIVE NOTE-TAKER'S. A tick regroups
+   * while a person is typing beside it, and a bullet that walks out from
+   * under somebody's cursor mid-sentence is the reason every path here asks
+   * whose a block is. What changes with this on is the BOUNDARY, not the
+   * safety: a move rewrites nobody's words — the block keeps its text
+   * character for character, its marks, its id and its `cwAuthor` (a clone
+   * carries every attribute), so a person's line moved is still a person's
+   * line. The end-of-meeting tidy-up sets it, because "structure is free,
+   * words are not" is the rule Bryan asked that pass to hold
+   * (`notes-cleanup-scope.ts`).
+   */
+  moveOthers?: boolean;
 }
 
 function isList(el: unknown): el is Y.XmlElement {
@@ -138,7 +154,7 @@ function everyListItemIsOurs(el: Y.XmlElement, author: string): boolean {
  * Returned in document order, so the members gathered from them stay in the
  * order the meeting said them.
  */
-function reachableLists(list: Y.XmlElement, author: string): Y.XmlElement[] {
+function reachableLists(list: Y.XmlElement, author: string, moveOthers = false): Y.XmlElement[] {
   const parent = (list.parent as Y.XmlFragment | Y.XmlElement | null) ?? null;
   if (parent === null) return [list];
   const siblings = parent.toArray() as (Y.XmlElement | Y.XmlText)[];
@@ -149,6 +165,10 @@ function reachableLists(list: Y.XmlElement, author: string): Y.XmlElement[] {
     if (isUnclaimedBlankParagraph(el)) return true;
     if (!(el instanceof Y.XmlElement)) return false;
     if (el.nodeName === 'heading') return false;
+    // A HEADING IS STILL THE WALL. `moveOthers` drops the authorship half of
+    // the reach and nothing else: the next topic is not this one's to
+    // regroup whoever wrote it.
+    if (moveOthers) return true;
     // A LIST IS JUDGED BY ITS ITEMS, AT EVERY DEPTH — see
     // {@link everyListItemIsOurs}. An empty list is not evidence of anything
     // and is not crossed.
@@ -203,7 +223,9 @@ export function nestBlocksUnderLead(
   const lead = findBlockById(fragment, opts.leadBlockId);
   if (!lead) return { moved: 0, error: 'unknown-block' };
   if (lead.nodeName !== 'listItem') return { moved: 0, error: 'not-a-list-item' };
-  if (readBlockAuthor(lead) !== opts.author) return { moved: 0, error: 'not-yours' };
+  if (opts.moveOthers !== true && readBlockAuthor(lead) !== opts.author) {
+    return { moved: 0, error: 'not-yours' };
+  }
   const list = lead.parent;
   if (!isList(list)) return { moved: 0, error: 'not-a-sibling' };
 
@@ -216,7 +238,7 @@ export function nestBlocksUnderLead(
   // for cannot be made from what the model is shown.
   const wanted = new Set(opts.blockIds);
   const members: Array<{ el: Y.XmlElement; from: Y.XmlElement }> = [];
-  for (const from of reachableLists(list, opts.author)) {
+  for (const from of reachableLists(list, opts.author, opts.moveOthers === true)) {
     for (const el of from.toArray() as unknown[]) {
       if (!(el instanceof Y.XmlElement)) continue;
       if (el === lead || el.nodeName !== 'listItem') continue;
@@ -224,8 +246,8 @@ export function nestBlocksUnderLead(
       // AND EVERYTHING UNDER IT, because the move is a clone of the whole
       // subtree: a bullet of ours carrying a person's reply beneath it takes
       // their words along with it. Same rule as the reach, same predicate.
-      if (readBlockAuthor(el) !== opts.author) continue;
-      if (!everyListItemIsOurs(el, opts.author)) continue;
+      if (opts.moveOthers !== true && readBlockAuthor(el) !== opts.author) continue;
+      if (opts.moveOthers !== true && !everyListItemIsOurs(el, opts.author)) continue;
       members.push({ el, from });
     }
   }
@@ -275,17 +297,20 @@ export function nestBlocksUnderLead(
  *
  * NO SUGGESTION PATH, unlike a replace of somebody else's block. A move
  * proposes no words, so there is nothing for a person to read a redline of; a
- * lead that is not the note-taker's own is simply refused.
+ * lead that is not the note-taker's own is simply refused — unless the caller
+ * passed `moveOthers`, which is the tidy-up saying structure is free.
  */
 export function nestBlocksOutcome(
   fragment: Y.XmlFragment,
   edit: { leadBlockId: string; blockIds: readonly string[] },
   author: string,
+  moveOthers = false,
 ): { op: 'nest_blocks'; status: 'applied' | 'failed'; error?: NestBlocksError } {
   const res = nestBlocksUnderLead(fragment, {
     leadBlockId: edit.leadBlockId,
     blockIds: edit.blockIds,
     author,
+    moveOthers,
   });
   return res.error === undefined
     ? { op: 'nest_blocks', status: 'applied' }

@@ -79,6 +79,9 @@ export function docStoreFrom(
     get: (docId) => (docId === DOC ? doc : undefined),
     readOutline: (docId, opts) =>
       docId === DOC ? { blocks: prose.readOutline(ydoc, opts) } : null,
+    // `who.moveOthers` is forwarded, not dropped — the tidy-up's "structure
+    // is free" half. A fixture that swallowed it would report every nest of a
+    // person's bullet as failed while the server applied it.
     applyBlockEdits: (docId, edits, who) => {
       if (docId !== DOC) return { ok: false, error: 'not-found' };
       return {
@@ -86,6 +89,7 @@ export function docStoreFrom(
         ...prose.applyBlockEdits(ydoc, edits, {
           author: who.author,
           suggestionAuthor: { id: who.author, name: who.authorName ?? who.author, color: '#777' },
+          ...(who.moveOthers === true ? { moveOthers: true } : {}),
         }),
       };
     },

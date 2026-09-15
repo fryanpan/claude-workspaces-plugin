@@ -29,11 +29,25 @@ export type BlockEditsResult =
   | ({ ok: true } & prose.ApplyBlockEditsResult)
   | { ok: false; error: 'not-found' | 'unsupported' };
 
+/**
+ * What a batch may do beyond naming its author.
+ *
+ * A CAPABILITY, NOT AN IDENTITY, which is why it is its own interface even
+ * though it rides on the same object: `moveOthers` lets `nest_blocks` move a
+ * block this author does not own. A move keeps every word, mark, id and
+ * authorship attribute of what it moves, so it rewrites nobody; the
+ * end-of-meeting tidy-up passes it and the live note-taker does not. See
+ * `prose-nest.ts`.
+ */
+export interface BlockEditsPowers {
+  moveOthers?: boolean;
+}
+
 /** Who a batch's writes belong to. `author` is the id stamped on the blocks;
  *  the name and colour are only used when an edit cannot apply directly and
  *  becomes a suggestion, which is why they are optional and defaulted the
  *  same way `parseSuggestionAuthor` defaults a missing colour. */
-export interface BlockEditsAuthor {
+export interface BlockEditsAuthor extends BlockEditsPowers {
   author: string;
   authorName?: string;
   authorColor?: string;
@@ -73,6 +87,7 @@ export function applyDocBlockEdits(
     transactionOrigin: 'agent',
     // An `.mdx` doc reads a component in the markdown as a block, as its file does.
     parse: { mdx: prose.isMdxPath(doc.meta.sourceUrl) },
+    ...(who.moveOthers === true ? { moveOthers: true } : {}),
   });
   return { ok: true, ...res };
 }

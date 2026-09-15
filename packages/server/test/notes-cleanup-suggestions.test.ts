@@ -110,9 +110,14 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
     expect(markdownNow()).toBe(before);
   });
 
-  it('is never deleted and never nested, and neither is offered as a redline', async () => {
+  it('is never deleted, and the delete is not offered as a redline either', async () => {
     // A strikethrough of somebody's whole note is not an improvement to it,
-    // and `applyBlockEdits` cannot express a move as a suggestion at all.
+    // and `applyBlockEdits` would file it as a redline striking their line,
+    // so the gate drops it before the write path ever sees it.
+    //
+    // THE NEST IS NO LONGER PAIRED WITH IT. Moving their bullet changes none
+    // of their words and is allowed now (Bryan, 2026-09-15) —
+    // `notes-cleanup-authorship.test.ts` is where it lands on a document.
     const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
@@ -120,20 +125,13 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
     const result = await runNotesCleanupPass(
       depsFor(
         store,
-        stubComposer([
-          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
-          {
-            op: 'nest_blocks',
-            leadBlockId: idOf(store, 'harbour run'),
-            blockIds: [idOf(store, 'Kestrel Lane')],
-          },
-        ]),
+        stubComposer([{ op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') }]),
         dataDir,
         idOf(store, 'Meeting notes'),
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.refused).toBe(2);
+    expect(result.refused).toBe(1);
     expect(result.suggested).toBe(0);
     expect(result.touched).toBe(0);
     expect(suggestOps.listSuggestions(ydoc)).toHaveLength(0);

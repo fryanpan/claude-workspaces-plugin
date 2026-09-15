@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
-import { commentedBlockIds, confineToSection } from '../src/notes-cleanup-scope.ts';
+import { boundByAuthorship, commentedBlockIds } from '../src/notes-cleanup-scope.ts';
 import {
   DOC,
   MEETING,
@@ -89,7 +89,7 @@ describe('a bullet somebody has commented on', () => {
       headingId: 'h1',
       commented: new Set(['b1']),
     };
-    const { kept, refused } = confineToSection(
+    const { kept, refused } = boundByAuthorship(
       [
         { op: 'replace_block', blockId: 'b1', markdown: '- rewritten' },
         { op: 'delete_block', blockId: 'b1' },
@@ -102,7 +102,7 @@ describe('a bullet somebody has commented on', () => {
     expect(refused).toBe(2);
     // Nesting keeps each block's own text, so it rides along with the anchor.
     expect(
-      confineToSection([{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }], scope).kept,
+      boundByAuthorship([{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }], scope).kept,
     ).toHaveLength(1);
   });
 

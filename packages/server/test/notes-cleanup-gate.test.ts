@@ -5,14 +5,22 @@
  * the section already carries under a different topic as the note-taker
  * MOVING its own bullet, so it emits a `delete_block` on the earlier copy
  * beside the insert that replaces it. Handed the model's answer before the
- * gate saw it, it did that for an insert aimed at a heading OUTSIDE the
- * meeting's section: the gate then refused the insert, kept the delete — a
- * perfectly ordinary delete of the pass's own uncommented bullet — and the
- * section's only copy of the note was gone. The run logged "1 refused, 1
- * blocks touched", which reads like restraint.
+ * gate saw it, it did that for an insert the gate was going to refuse: the
+ * gate then refused the insert, kept the delete — a perfectly ordinary delete
+ * of the pass's own uncommented bullet — and the section's only copy of the
+ * note was gone. The run logged "1 refused, 1 blocks touched", which reads
+ * like restraint.
+ *
+ * THE REFUSAL THAT DRIVES THE CASE CHANGED, AND THE INVARIANT DID NOT. It
+ * used to be "the destination heading is outside the meeting's section";
+ * since the gate became a boundary on authorship rather than on location
+ * (`boundByAuthorship`), that is no longer a refusal at all. An insert naming
+ * a block that is not a heading still is, and it reaches the dedupe as a
+ * destination exactly the same way — which is the point: the invariant is
+ * about the ORDER of the two passes, not about which rule refused.
  *
  * Both cases below drive the whole pass, because the bug lives in the
- * composition and not in either half: `confineToSection` and
+ * composition and not in either half: `boundByAuthorship` and
  * `dedupeNotesEdits` each did exactly what they are for.
  *
  * All notes and all speech are invented and every name is fictional. The repo
@@ -55,12 +63,13 @@ const NOTES = [
 
 const copies = (markdown: string): number => markdown.split(NOTE).length - 1;
 
-describe('an edit aimed outside the meeting section', () => {
+describe('an edit the gate will refuse', () => {
   it('takes no note with it when it is refused', async () => {
     const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: `We said ${NOTE.toLowerCase()}.` }]);
-    const outside = idOf(store, 'Other business');
+    // A destination the gate will refuse: a BULLET, not a heading.
+    const outside = idOf(store, 'A line that lives outside');
     const before = markdownNow();
     expect(copies(before)).toBe(1);
     const result = await runNotesCleanupPass(
@@ -72,7 +81,7 @@ describe('an edit aimed outside the meeting section', () => {
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    // The edit is refused, as it always was...
+    // The edit is refused...
     expect(result.ok).toBe(true);
     expect(result.refused).toBe(1);
     // ...and refusing it leaves the document exactly as it was. The note the

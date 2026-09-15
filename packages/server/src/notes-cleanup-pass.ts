@@ -16,7 +16,7 @@
  * empty edit list is a documented success, and this module counts what it
  * touched so the number can be measured rather than asserted.
  *
- * WHAT NO WORDING OF A PROMPT CAN UNDO (`confineToSection`):
+ * WHAT NO WORDING OF A PROMPT CAN UNDO (`boundByAuthorship`):
  *
  * - **The pass rewrites its own work and nothing else — and it may still
  *   argue with the rest.** A `replace_block` naming a block the doc does not
@@ -29,9 +29,15 @@
  *   they wrote. A block whose author the document no longer records is not
  *   the pass's either, however the mark came to be missing; see `claimable`
  *   for why that is the safe way round and not the timid one.
- * - **Nothing outside this meeting's own section moves.** The section is the
- *   heading the meeting opened plus its blocks; an edit naming anything else
- *   — an earlier meeting's notes, the doc's own body — is dropped.
+ * - **The meeting's own section heading is not an editable block.**
+ *   Replacing it moves the address the notes are found at; deleting it
+ *   orphans every note under it. Everything else in the document is
+ *   addressable, because the boundary is authorship and not location: a
+ *   tidy-up whose notes landed under somebody else's heading is still a
+ *   tidy-up of its own notes.
+ * - **Structure is free and words are not.** Moving and renesting reaches
+ *   any block in the document, a person's included — a move rewrites nothing
+ *   — while a better WORDING of their line arrives as a suggestion.
  * - **No second section is opened.** `insert_at_end` is refused outright: a
  *   cleanup has a section already, and the one way to grow a duplicate
  *   "Meeting notes" heading is to write at the end of the doc.
@@ -55,7 +61,7 @@ import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-note
 import { listMeetings, readTranscript } from './meetings.ts';
 import { cleanupWriteSet } from './notes-cleanup-gate.ts';
 import { CLEANUP_DIRECTIVE, CLEANUP_TRANSCRIPT_LABEL } from './notes-cleanup-prompt.ts';
-import { claimable, commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
+import { claimable, commentedBlockIds, docIds, sectionIds } from './notes-cleanup-scope.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -96,10 +102,11 @@ export interface NotesCleanupResult {
   reason?: NotesCleanupRefusal;
   /** Edits the model returned. */
   proposed: number;
-  /** Edits `confineToSection` dropped — outside the section, aimed at the
-   *  section heading, at a commented bullet, or proposing to delete or move
-   *  somebody else's line. An edit it turned into an offer is NOT one of
-   *  these: it was kept, and comes back under `suggested`. */
+  /** Edits `boundByAuthorship` dropped — aimed at the meeting's own section
+   *  heading, at a block that is not in the document, at a commented bullet,
+   *  or proposing to delete somebody else's line. An edit it turned into an
+   *  offer is NOT one of these: it was kept, and comes back under
+   *  `suggested`. */
   refused: number;
   /**
    * One line per refused edit, naming the op, the block and the rule.
@@ -307,16 +314,18 @@ export async function runNotesCleanupPass(
   const shown = ownership(outline);
   const ours = claimable(shown);
   // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER, drawn
-  // from one predicate. `claimed` is the pass's own work inside this meeting's
-  // section — the lines it may rewrite outright — and `humanNotes` is every
-  // other line with words in it: somebody else's, or one whose author the doc
-  // no longer records, and the model may offer on either but rewrite neither.
-  // Headings are left out of the list — it is about lines, and the outline
-  // already says which heading each line sits under.
-  const shownSection = sectionIds(outline, headingId);
-  const claimed = new Set(
-    outline.filter((e) => ours(e.id) && shownSection.blocks.has(e.id)).map((e) => e.id),
-  );
+  // from one predicate. `claimed` is the pass's own work — the lines it may
+  // rewrite outright — and `humanNotes` is every other line with words in it:
+  // somebody else's, or one whose author the doc no longer records, and the
+  // model may offer on either but rewrite neither. Headings are left out of
+  // the list — it is about lines, and the outline already says which heading
+  // each line sits under.
+  //
+  // NOT FILTERED BY SECTION ANY MORE, because the gate no longer is
+  // (`boundByAuthorship`). A note of the pass's own that landed outside the
+  // meeting's heading is still its own, and saying otherwise is how a tidy-up
+  // offers redlines on its own bullets.
+  const claimed = new Set(outline.filter((e) => ours(e.id)).map((e) => e.id));
   const humanNotes = outline
     .filter(
       (e) =>
@@ -396,7 +405,10 @@ export async function runNotesCleanupPass(
   const { kept, refused, reasons, alreadyWritten } = cleanupWriteSet(
     edits,
     {
-      ...sectionIds(now, headingId),
+      // THE WHOLE DOCUMENT'S IDS, NOT THE SECTION'S — see `docIds`. The
+      // boundary is authorship; `headingId` is still passed because the
+      // meeting's own section heading is the one block the pass may not touch.
+      ...docIds(now),
       ...ownership(now),
       headingId,
       commented: commentedBlockIds(doc.ydoc),
@@ -411,12 +423,16 @@ export async function runNotesCleanupPass(
   // NOTHING HAPPENS BETWEEN THE GATE AND THE WRITE, and that is the point.
   // The pass stamps no authorship on anything: `applyBlockEdits` reads each
   // block's own mark — one this pass never wrote — and rewrites its own work
-  // while filing a redline on anybody else's. See `confineToSection`.
+  // while filing a redline on anybody else's. See `boundByAuthorship`.
   //
   // A store that refuses the whole batch — the doc has gone, or is not prose —
   // reports no counts at all. Reading that as zeros is the honest answer: it
   // changed nothing, which is what the numbers below say.
-  const written = kept.length === 0 ? null : applyNotesBlockEdits(docStore, docId, kept);
+  // `moveOthers` is the structural half of the boundary: a `nest_blocks` may
+  // move a block the note-taker does not own, because a move changes nobody's
+  // words. The live tick does not pass it — see `prose-nest.ts`.
+  const written =
+    kept.length === 0 ? null : applyNotesBlockEdits(docStore, docId, kept, { moveOthers: true });
   // AND THE PASS LEAVES THE SECTION TIDY, whatever it proposed. This is the
   // last read of these notes anybody has asked for, and the three shapes it
   // repairs — a blank line under the heading, the same topic heading twice in
