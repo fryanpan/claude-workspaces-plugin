@@ -21,7 +21,7 @@ import type {
 import type { NotesComposeMeasure } from '../packages/server/src/notes-timing.ts';
 import type { ReplayInput, ReplayTarget } from './replay-meeting-lib.ts';
 import type { RerunArgs } from './rerun-meeting-args.ts';
-import { bySegment, scheduleEdit, streamsOf } from './rerun-meeting-feed.ts';
+import { bySegment, checkStreams, scheduleEdit, streamsOf } from './rerun-meeting-feed.ts';
 import {
   audioLengthMs,
   billedTotals,
@@ -390,6 +390,25 @@ describe('runFolderName', () => {
     expect(early < later).toBe(true);
     expect(early).not.toContain(':');
     expect(early.startsWith('rerun-')).toBe(true);
+  });
+});
+
+describe('a recording on a stream the capture cannot open', () => {
+  const on = (stream: string): ReplayTarget => target([{ n: 1, streams: [stream] }]);
+
+  it('is refused by name, rather than replayed as microphone audio', () => {
+    // The resolver takes any `segment-N-<stream>.pcm`. An unknown name used to
+    // be dropped from `streamsOf` and then fed anyway — untagged — so its
+    // words arrived under the microphone's source and the report described a
+    // meeting whose sides were not the ones on disk.
+    expect(() => checkStreams(on('screen'))).toThrow(
+      /cannot open: screen \(segment-1-screen.pcm\)/,
+    );
+  });
+
+  it('lets the two the capture does open through', () => {
+    expect(() => checkStreams(on('mic'))).not.toThrow();
+    expect(() => checkStreams(on('system'))).not.toThrow();
   });
 });
 

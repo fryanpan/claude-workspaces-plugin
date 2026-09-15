@@ -11,6 +11,7 @@
  * here would make the run measure something nobody experiences.
  */
 
+import { basename } from 'node:path';
 import {
   type MeetingStreamId,
   sourceForStreams,
@@ -23,7 +24,7 @@ import type {
   TranscriptionSession,
 } from '../packages/server/src/transcribe.ts';
 import { type ReplayInput, type ReplayTarget, replayAudio } from './replay-meeting-lib.ts';
-import type { DocSpec, RerunArgs } from './rerun-meeting-args.ts';
+import { type DocSpec, type RerunArgs, UsageError } from './rerun-meeting-args.ts';
 import type { TidyCounts } from './rerun-meeting-report.ts';
 import { SpendCapReached } from './rerun-meeting-spend.ts';
 
@@ -344,6 +345,26 @@ export function bySegment(inputs: readonly ReplayInput[]): Array<[number, Replay
     else byN.set(input.segment, [input]);
   }
   return [...byN.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+/**
+ * Every file this recording holds names a stream the capture knows.
+ *
+ * The resolver accepts any `segment-N-<stream>.pcm`, and a name that is
+ * neither `mic` nor `system` used to be dropped by `streamsOf` and then
+ * replayed anyway — untagged, or tagged as byte 0 — so its words arrived
+ * under the microphone's source and the report described a meeting whose
+ * sides were not the ones on disk. Refused here instead, where it is still a
+ * recording to fix rather than a transcript to disbelieve.
+ */
+export function checkStreams(target: ReplayTarget): void {
+  const unknown = target.inputs.filter((i) => i.stream !== 'mic' && i.stream !== 'system');
+  if (unknown.length === 0) return;
+  throw new UsageError(
+    `this recording holds ${unknown.length} file(s) on a stream this harness cannot open: ` +
+      `${unknown.map((i) => `${i.stream} (${basename(i.path)})`).join(', ')}. ` +
+      'The capture knows mic and system; replay one of those with --segment, or rename the file.',
+  );
 }
 
 /** The stream ids this recording holds, in the order the capture opens them.

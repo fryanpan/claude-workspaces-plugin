@@ -73,6 +73,7 @@ import {
 import {
   STOP_TIMEOUT_MS,
   bySegment,
+  checkStreams,
   feedMeeting,
   runTidy,
   seedContent,
@@ -264,6 +265,7 @@ export async function runRerun(
   // this recording, which is a command line to fix rather than a crash.
   if (!budget.ok) throw new UsageError(budget.line);
   checkDocEdits(doc.edits, audioMs);
+  checkStreams(target);
 
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-rerun-data-'));
   const runDir = makeRunDir(args.out, Date.now());
