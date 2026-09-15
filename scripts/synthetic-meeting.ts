@@ -232,9 +232,20 @@ export function writeMeetingFiles(dir: string, script: readonly Line[], pcm: Buf
   );
   writeFileSync(join(dir, 'mock-script.json'), `${JSON.stringify(mockScript(script), null, 2)}\n`);
   writeFileSync(join(dir, 'prep-outline.md'), PREP_OUTLINE);
+  // ONLY THE EDITS THIS RECORDING REACHES. A `--lines 4` run is forty seconds
+  // long and the second edit is scheduled at sixty-two: written out anyway it
+  // describes a change the replay stops its timer on, so the fixture would
+  // promise an edited document and quietly deliver an unedited one. The rerun
+  // refuses such a pair outright (`checkDocEdits`), which would make the short
+  // fixture unusable rather than merely wrong.
+  const playMs = (pcm.byteLength / (MEETING_SAMPLE_RATE * 2)) * 1000;
   writeFileSync(
     join(dir, 'prep-outline-edits.json'),
-    `${JSON.stringify({ markdown: PREP_OUTLINE, edits: PREP_EDITS }, null, 2)}\n`,
+    `${JSON.stringify(
+      { markdown: PREP_OUTLINE, edits: PREP_EDITS.filter((e) => e.atMs < playMs) },
+      null,
+      2,
+    )}\n`,
   );
 }
 

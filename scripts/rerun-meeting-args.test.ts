@@ -15,6 +15,7 @@ import {
   CAPTURE_OVERHEAD,
   UsageError,
   budgetCheck,
+  checkDocEdits,
   loadDocSpec,
   parseRerunArgs,
   pcmDurationMs,
@@ -141,6 +142,30 @@ describe('the pre-flight budget', () => {
 
   it('reads a length off the bytes at the meeting sample rate', () => {
     expect(pcmDurationMs(32_000, 16_000)).toBe(1000);
+  });
+});
+
+describe('an edit that lands after the audio ends', () => {
+  it('is refused before the meeting opens, naming when it would have arrived', () => {
+    // The replay stops its timers when the last chunk is sent, so an edit
+    // scheduled past the end never happens — and a report written from that
+    // document would describe a starting outline nobody edited.
+    expect(() => checkDocEdits([{ atMs: 62_000, find: 'a', replace: 'b' }], 40_000)).toThrow(
+      /refusing to start: --doc schedules 1 edit\(s\) at 62.0s, but the recording is 40.0s/,
+    );
+  });
+
+  it('lets an edit inside the recording through', () => {
+    expect(() =>
+      checkDocEdits(
+        [
+          { atMs: 0, find: 'a', replace: 'b' },
+          { atMs: 39_999, find: 'c', replace: 'd' },
+        ],
+        40_000,
+      ),
+    ).not.toThrow();
+    expect(() => checkDocEdits([], 0)).not.toThrow();
   });
 });
 

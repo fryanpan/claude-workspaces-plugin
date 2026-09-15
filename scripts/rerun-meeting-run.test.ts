@@ -133,9 +133,30 @@ describe('the spend meter', () => {
     expect(onward.some((m) => m.usage !== undefined)).toBe(true);
   });
 
-  it('bills nothing for a call whose model it never named', async () => {
-    // An unreported model must not be silently counted as free spend that
-    // advances the cap — the report names it instead.
+  it('refuses the next compose when a call billed under a model it cannot price', async () => {
+    // `dollars()` answers 0 for a model this build has never heard of, so a
+    // run on a new model family would hold its total at zero while the vendor
+    // billed. The ceiling fails CLOSED: the call in flight is paid for, and
+    // the next one is refused.
+    const unpriced: NotesComposer = {
+      name: 'stub',
+      async compose(input) {
+        input.measure?.({ model: 'claude-experimental-9' });
+        input.measure?.({ usage: DOLLAR_OF_OPUS });
+        return [];
+      },
+    };
+    const spends: number[] = [];
+    const meter = createSpendMeter(1000, (usd: number) => spends.push(usd));
+    const composer = meter.composer(unpriced);
+    await expect(composer.compose(tick())).resolves.toEqual([]);
+    await expect(composer.compose(tick())).rejects.toThrow(/claude-experimental-9 has no price/);
+    // Nothing was booked against the ceiling, because nothing could be.
+    expect(spends).toEqual([]);
+    expect(meter.calls).toBe(0);
+  });
+
+  it('refuses just as hard when the call never named a model at all', async () => {
     const unnamed: NotesComposer = {
       name: 'stub',
       async compose(input) {
@@ -143,13 +164,21 @@ describe('the spend meter', () => {
         return [];
       },
     };
-    const spends: number[] = [];
-    const meter = createSpendMeter(0.001, (usd: number) => spends.push(usd));
+    const meter = createSpendMeter(1000, () => {});
     const composer = meter.composer(unnamed);
     await expect(composer.compose(tick())).resolves.toEqual([]);
-    await expect(composer.compose(tick())).resolves.toEqual([]);
-    expect(spends).toEqual([]);
+    await expect(composer.compose(tick())).rejects.toThrow(SpendCapReached);
     expect(meter.calls).toBe(0);
+  });
+
+  it('keeps going for a model it does know, at a ceiling far above it', async () => {
+    // The control: the refusal above is about the PRICE LIST, not about
+    // measuring at all.
+    const meter = createSpendMeter(1000, () => {});
+    const composer = meter.composer(billingComposer(1));
+    await expect(composer.compose(tick())).resolves.toEqual([]);
+    await expect(composer.compose(tick())).resolves.toEqual([]);
+    expect(meter.calls).toBe(2);
   });
 });
 

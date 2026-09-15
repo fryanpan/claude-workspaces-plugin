@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resolveReplayTarget } from './replay-meeting-lib.ts';
+import { checkDocEdits } from './rerun-meeting-args.ts';
 import { SYNTHETIC_SCRIPT, writeMeetingFiles } from './synthetic-meeting.ts';
 
 let dir: string;
@@ -48,17 +49,30 @@ describe('writeMeetingFiles', () => {
   });
 
   it('writes the prep outline and its mid-run edits as the harness reads them', () => {
-    writeMeetingFiles(dir, SYNTHETIC_SCRIPT, Buffer.alloc(32_000));
+    // Long enough for both edits to land: they are scheduled at 30s and 62s.
+    writeMeetingFiles(dir, SYNTHETIC_SCRIPT, Buffer.alloc(16_000 * 2 * 90));
     expect(read('prep-outline.md')).toContain('Harbour survey planning');
     const edits = JSON.parse(read('prep-outline-edits.json')) as {
       markdown: string;
       edits: Array<{ atMs: number; find: string }>;
     };
     expect(edits.markdown).toBe(read('prep-outline.md'));
-    // Every edit has to land inside the recording, or it never arrives.
+    expect(edits.edits.length).toBeGreaterThan(1);
     for (const edit of edits.edits) {
       expect(edits.markdown).toContain(edit.find);
       expect(edit.atMs).toBeGreaterThan(0);
     }
+  });
+
+  it('leaves out the edits a shortened recording never reaches', () => {
+    // `--lines 4` makes about forty seconds of audio, and the second edit is
+    // scheduled at sixty-two: written out anyway, the fixture would promise a
+    // change the replay stops its timer on, and the rerun refuses the pair.
+    writeMeetingFiles(dir, SYNTHETIC_SCRIPT.slice(0, 4), Buffer.alloc(16_000 * 2 * 40));
+    const edits = JSON.parse(read('prep-outline-edits.json')) as {
+      edits: Array<{ atMs: number; find: string; replace: string }>;
+    };
+    expect(edits.edits.map((e) => e.atMs)).toEqual([30_000]);
+    expect(() => checkDocEdits(edits.edits, 40_000)).not.toThrow();
   });
 });

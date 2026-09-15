@@ -67,6 +67,7 @@ import {
   type RerunArgs,
   UsageError,
   budgetCheck,
+  checkDocEdits,
   pcmDurationMs,
 } from './rerun-meeting-args.ts';
 import {
@@ -262,6 +263,7 @@ export async function runRerun(
   // A UsageError, not an Error: the operator named too small a ceiling for
   // this recording, which is a command line to fix rather than a crash.
   if (!budget.ok) throw new UsageError(budget.line);
+  checkDocEdits(doc.edits, audioMs);
 
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-rerun-data-'));
   const runDir = makeRunDir(args.out, Date.now());

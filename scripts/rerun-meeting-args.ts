@@ -241,6 +241,24 @@ export function budgetCheck(audioMs: number, method: NotesMethod, maxUsd: number
     : { ok: true, estimateUsd, line: shape };
 }
 
+/**
+ * Every mid-run edit has to land while the audio is still playing.
+ *
+ * An edit scheduled past the end is not a late edit — it is no edit at all:
+ * the run stops its timers when the last chunk is sent, so the document the
+ * report describes never carried the change, and nothing said so. Caught
+ * before the meeting opens, where it is still a command line to fix.
+ */
+export function checkDocEdits(edits: readonly DocEdit[], audioMs: number): void {
+  const late = edits.filter((e) => e.atMs >= audioMs);
+  if (late.length === 0) return;
+  throw new UsageError(
+    `refusing to start: --doc schedules ${late.length} edit(s) at ` +
+      `${late.map((e) => `${(e.atMs / 1000).toFixed(1)}s`).join(', ')}, but the recording is ` +
+      `${(audioMs / 1000).toFixed(1)}s long — they would never be applied.`,
+  );
+}
+
 /** How long a PCM file plays for, at the sample rate its meeting recorded. */
 export function pcmDurationMs(bytes: number, sampleRate: number): number {
   return (bytes / (sampleRate * 2)) * 1000;

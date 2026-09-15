@@ -17,7 +17,7 @@
  * the total is what refuses the next compose.
  */
 
-import { dollars } from '../packages/core/src/model-cost.ts';
+import { dollars, isPricedModel } from '../packages/core/src/model-cost.ts';
 import type { NotesComposer } from '../packages/server/src/meeting-notes.ts';
 import type {
   NotesCallMeasure,
@@ -53,11 +53,18 @@ export function createSpendMeter(
 ): SpendMeter {
   let total = 0;
   let calls = 0;
+  // The model of a call that billed and could not be priced. Once one exists
+  // the ceiling is no longer a ceiling — `dollars` answers 0 for a model this
+  // build has never heard of, so the total would sit still while the vendor's
+  // meter ran. Refusing the next compose is the same policy the ceiling
+  // itself takes, and it fails CLOSED rather than free.
+  let unpriceable: string | undefined;
   const book = (usage: unknown, model: string | undefined): void => {
-    // A call whose model was never reported prices at nothing and is left out
-    // of the count: a model this build has no price for must not advance the
-    // cap as though it were free.
-    if (!usage || model === undefined) return;
+    if (!usage) return;
+    if (model === undefined || !isPricedModel(model)) {
+      unpriceable ??= model ?? 'a call that never named its model';
+      return;
+    }
     total += dollars(usage as Parameters<typeof dollars>[0], model);
     calls++;
     onSpend(total, calls);
@@ -77,6 +84,13 @@ export function createSpendMeter(
         // that has not awaited anything yet — the pipeline's own error
         // handling sits around the await.
         async compose(input) {
+          if (unpriceable !== undefined) {
+            throw new SpendCapReached(
+              `refusing the next compose: ${unpriceable} has no price in this build, so ` +
+                `$${maxUsd.toFixed(2)} cannot be a ceiling — $${total.toFixed(4)} booked so far ` +
+                'counts only the calls that could be priced.',
+            );
+          }
           if (total >= maxUsd) {
             throw new SpendCapReached(
               `spend cap reached: $${total.toFixed(4)} of $${maxUsd.toFixed(2)}`,
