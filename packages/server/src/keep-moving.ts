@@ -57,7 +57,7 @@ export interface TaskRow {
    * Read by `evaluateStalls` and by nothing in this module: it is not a
    * bucket and it must never become one. A bucket is a claim about what the
    * board knows; this is a claim by an agent that the board cannot check, so
-   * it may quieten a wake (`stall-nudge.ts`'s `clockRows`) and may not change
+   * it may quieten a wake (`stall-nudge.ts`'s `withoutStandingWaits`) and may not change
    * what the keep-moving verdict counts. Carried here only because the gate
    * is handed tasks and a parallel map would be a second thing to disagree.
    */

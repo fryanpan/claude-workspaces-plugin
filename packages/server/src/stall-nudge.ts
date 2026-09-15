@@ -350,9 +350,9 @@ export interface StallNudgeFrame {
   checkIn?: readonly StalledRow[];
   /**
    * What the named rows were DECLARED to be waiting on, for things the board
-   * cannot see (`task-wait.ts`). Never a wake by itself — it is an annotation
-   * on rows this frame already carries, which is what lets the wake explain a
-   * silence instead of repeating it. Absent when none.
+   * cannot see (`task-wait.ts`). Never a wake by itself, and a standing
+   * wait's row is not on `rows`: it rides along as awareness when something
+   * else woke the board (`withoutStandingWaits`). Absent when none.
    *
    * A lapsed entry is the important one: it says a declaration the lead wrote
    * has run out, which is why the row is loud again.
@@ -548,6 +548,42 @@ function parseStamp(stamp: string): {
 }
 
 /**
+ * The board as the wake reads it: every STALLED row carrying a declared wait
+ * that has not lapsed is taken off `stalled`, and its id handed back.
+ *
+ * A standing wait is not a finding. It used to be one: the row stayed on
+ * `stalled`, so a board whose only quiet rows were waiting woke its lead once,
+ * and every wake that fired for some OTHER reason — an unfiled ask crossing a
+ * window, a lapsed wait on another row — listed the waiting rows under
+ * "stopped moving" and addressed the frame to the first of them. Measured on
+ * the live board, 2026-09-14: a wake every half hour for five hours naming two
+ * waiting rows as the stall, while the row actually driving it sat further
+ * down the frame as an unfiled ask. The lead read the waits as the cause.
+ *
+ * So the rows leave the finding and stay on the frame only as `declaredWaits`,
+ * which rides along when something else wakes the board and never arms it.
+ * Past `until` the gate marks the wait lapsed, the row is back on `stalled`
+ * carrying all the silence it accumulated, and it is news on that tick.
+ *
+ * `unfiled` is left alone on purpose — see `clockRows` for why a sentence
+ * about waiting on something else cannot excuse a question filed nowhere.
+ */
+function withoutStandingWaits(board: StallSnapshot): {
+  board: StallSnapshot;
+  waited: ReadonlySet<string>;
+} {
+  const standing = new Set(
+    (board.declaredWaits ?? []).filter((wait) => wait.lapsed !== true).map((wait) => wait.id),
+  );
+  const waited = new Set(board.stalled.filter((row) => standing.has(row.id)).map((row) => row.id));
+  if (waited.size === 0) return { board, waited };
+  return {
+    board: { ...board, stalled: board.stalled.filter((row) => !waited.has(row.id)) },
+    waited,
+  };
+}
+
+/**
  * One HOLD, not one item: the same review item revised, passed and held
  * again is a new hold with a new `heldAt`, and its filer is owed a fresh
  * nudge even when no tick happened to see the item pass in between.
@@ -646,8 +682,13 @@ export class StallNudger {
     }
     const now = this.now();
     const live = new Set<string>();
-    for (const board of boards) {
-      live.add(board.workspaceId);
+    for (const snapshot of boards) {
+      live.add(snapshot.workspaceId);
+      // Both readers below see the board with its declared waits taken off
+      // `stalled` — see `withoutStandingWaits`. The snapshot itself is left
+      // whole, because the keep-moving measurement reads it too.
+      const { board, waited } = withoutStandingWaits(snapshot);
+      this.forgetWhileWaiting(board.workspaceId, waited);
       this.considerBoard(board, now);
       // After the wake, so a row told for the first time on this very tick is
       // measured from now and cannot escalate in the same pass. Isolated: a
@@ -692,6 +733,22 @@ export class StallNudger {
    *  pruning above — a map that grows forever is invisible otherwise. */
   armedCount(): number {
     return this.armed.size;
+  }
+
+  /**
+   * Drop a waited row from the board's memory of what the lead was told.
+   *
+   * This is what makes the lapse loud on the very tick it happens. A row the
+   * lead heard about before its wait was declared would otherwise still be
+   * remembered when a short wait ran out, and come back as an old row under
+   * the same bucket — news only if the board's bucket happened to climb, which
+   * another quieter row can prevent. Forgotten, it is a new finding again.
+   */
+  private forgetWhileWaiting(workspaceId: string, waited: ReadonlySet<string>): void {
+    if (waited.size === 0) return;
+    const rows = this.told.get(workspaceId);
+    if (!rows) return;
+    for (const id of waited) rows.delete(id);
   }
 
   private escalate(board: StallSnapshot, now: number): void {
@@ -821,8 +878,9 @@ export class StallNudger {
       ...(askedBack.length > 0 ? { askedBack } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
-      // Rides along with the rows it explains. Never a reason for the frame —
-      // `changeOn` above has already decided that on the findings themselves.
+      // Awareness only. Never a reason for the frame — `changeOn` above has
+      // already decided that on the findings themselves — and a standing
+      // wait's row is on none of the lists above (`withoutStandingWaits`).
       ...(board.declaredWaits && board.declaredWaits.length > 0
         ? { declaredWaits: board.declaredWaits }
         : {}),
@@ -972,13 +1030,12 @@ export class StallNudger {
    *    Home queue. Disjoint from the named lists today (`stall-gate.ts` sorts
    *    a row into exactly one), and listed here anyway so a later classifier
    *    change cannot quietly put the clock back.
-   *  - a STALLED row carrying a DECLARED wait that has not lapsed — an agent
-   *    saying what the row waits on when the board cannot see the thing
-   *    (`task-wait.ts`). The three above are waits the board can verify; this
-   *    one it cannot, which is why it is the only one that expires. Past
-   *    `until` the row comes back onto the clock carrying its whole
-   *    accumulated silence, so the escalation is deferred rather than
-   *    cancelled, and the frame says the declaration lapsed.
+   *
+   * A stalled row carrying a DECLARED wait never reaches this method: it is
+   * not a finding at all while the wait stands (`withoutStandingWaits`), so
+   * it is neither named nor on the clock. Past `until` it is back on
+   * `stalled` carrying its whole accumulated silence, so the escalation is
+   * deferred rather than cancelled, and the frame says the declaration lapsed.
    *
    * ── Why a declared wait does NOT quieten an unfiled row ─────────────────
    *
@@ -986,8 +1043,8 @@ export class StallNudger {
    * they read. Its remedy is the lead's and available right now — file the
    * ask — so a sentence about waiting on something else cannot excuse it,
    * and letting it would make the one finding that catches a protocol
-   * violation the easiest of all to silence. The filter below therefore
-   * intersects the declarations with the STALLED ids and nothing wider.
+   * violation the easiest of all to silence. `withoutStandingWaits`
+   * therefore takes waited rows off `stalled` and nothing wider.
    *
    * ── What counts as the SAME wait ────────────────────────────────────────
    *
@@ -1011,14 +1068,10 @@ export class StallNudger {
     askedBack: readonly AskedBackRow[],
   ): readonly StalledRow[] {
     const rows = [...board.stalled, ...board.unfiled];
-    const stalledIds = new Set(board.stalled.map((row) => row.id));
     const waits = new Set<string>([
       ...held.map((item) => item.id),
       ...askedBack.map((item) => item.id),
       ...(board.waiting ?? []).map((row) => row.id),
-      ...(board.declaredWaits ?? [])
-        .filter((wait) => wait.lapsed !== true && stalledIds.has(wait.id))
-        .map((wait) => wait.id),
     ]);
     if (waits.size === 0) return rows;
     return rows.filter((row) => !waits.has(row.id));

@@ -45,7 +45,11 @@ about work the lead can move. A ticket whose review item is held, or whose
 reader asked a question back, is quiet for a reason that belongs to its filer,
 so it is named once and then stops driving that clock (`clockRows` in
 `stall-nudge.ts`) until the wait's identity changes — the item held again, a
-second question, or the wait cleared. A task past the parallelism cap is not
+second question, or the wait cleared. A task with a standing `declare_wait`
+is not a finding at all (`withoutStandingWaits`): it wakes nobody, is never
+listed as stopped, and rides along on a wake that fired for something else
+only as a declared wait. The tick after the wait lapses it is a finding again,
+carrying all its silence. A task past the parallelism cap is not
 judged at all, so it never enters the clock in the first place.
 
 ## The rebuild, in order
