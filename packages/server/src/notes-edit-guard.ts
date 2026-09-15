@@ -206,13 +206,30 @@ function ownWords(
 const TAKES_BACK =
   /\b(instead|rather than|no longer|any ?more|scratch that|on second thought|stop|stopp(?:ed|ing)|drop|forget)\b/i;
 
+/** How a note says a thing was withdrawn: the speaker's cues, and the verbs
+ *  the note-taker writes for them ("stop showing" is written "remove"). */
+const WITHDRAWS = new RegExp(
+  `${TAKES_BACK.source}|\\b(remov(?:e|ed|ing)|hid(?:e|ing)|scrap(?:ped)?|replac(?:e|ed|ing))\\b`,
+  'i',
+);
+
 /**
  * Whether this replace is the speaker CORRECTING the note, which the tick
- * heard them do: the replacement names at least two of the words only that
- * note had — its subject — and one sentence of the speech takes something
- * back and names that subject. One word of it is enough in the speech, because
- * the note-taker paraphrases what it hears: "hour guesses" said is "hour
- * estimates" written.
+ * heard them do. Three things, all lexical:
+ *
+ * 1. the replacement names at least two of the words only that note had — its
+ *    subject;
+ * 2. one clause of the replacement withdraws that subject: a withdrawing word
+ *    and a subject word in the same clause, so "hour estimates stay; the run
+ *    stops" withdraws the run, not the estimates;
+ * 3. one sentence of the speech takes something back and shares two words with
+ *    the replacement beyond the cue, so the correction is one the tick heard.
+ *
+ * The speech is matched against the REPLACEMENT, not the note, because the
+ * note-taker paraphrases both ways: the speaker withdrew "hour guesses", the
+ * old note said "time estimates", and the correction said "stop showing time
+ * estimates, count requests instead". Speech and note share no word there;
+ * speech and correction share "showing", "count" and "requests".
  *
  * WHY A CORRECTION IS APPLIED AS A REPLACE (2026-09-14). A correction shares
  * the subject and little else — "the hour guesses are far off" becomes "stop
@@ -224,14 +241,19 @@ const TAKES_BACK =
  */
 function correctsIt(own: readonly string[], now: string, speech: readonly string[]): boolean {
   const has = new Set(contentWords(now));
-  const subject = own.filter((w) => has.has(w));
-  if (subject.length < 2) return false;
+  const subject = new Set(own.filter((w) => has.has(w)));
+  if (subject.size < 2) return false;
+  const withdrawn = now
+    .split(/[;:.,!?]|\s[-–—]\s/)
+    .some((clause) => WITHDRAWS.test(clause) && contentWords(clause).some((w) => subject.has(w)));
+  if (!withdrawn) return false;
+  const reported = [...has].filter((w) => !WITHDRAWS.test(w));
   return speech
     .flatMap((s) => sentencesOf(s))
     .some((sentence) => {
       if (!TAKES_BACK.test(sentence)) return false;
       const said = new Set(contentWords(sentence));
-      return subject.some((w) => said.has(w));
+      return reported.filter((w) => said.has(w)).length >= 2;
     });
 }
 

@@ -47,7 +47,11 @@ function update(edits: prose.BlockEdit[], speech: string[], meetingId = 'm-harbo
 }
 
 /** A meeting that has written its section: a topic and three notes. */
-function meeting(): { store: NotesDocStore; memory: NotesHeadingMemory; ydoc: Y.Doc } {
+function meeting(hours = HOURS): {
+  store: NotesDocStore;
+  memory: NotesHeadingMemory;
+  ydoc: Y.Doc;
+} {
   const ydoc = new Y.Doc();
   prose.applyMarkdownToFragment(prose.getProseFragment(ydoc), '# Harbour huddle\n');
   const store = oneDocStore('d-harbour', { ydoc, meta: { type: 'markdown' as DocType } });
@@ -58,7 +62,7 @@ function meeting(): { store: NotesDocStore; memory: NotesHeadingMemory; ydoc: Y.
       [
         {
           op: 'insert_at_end',
-          markdown: `## Meeting notes\n\n### Pier inbox\n\n- ${MAIN}\n- ${TOTAL}\n- ${HOURS}`,
+          markdown: `## Meeting notes\n\n### Pier inbox\n\n- ${MAIN}\n- ${TOTAL}\n- ${hours}`,
         },
       ],
       ['The pier inbox hides which requests are urgent until I open each one.'],
@@ -123,6 +127,32 @@ describe('a replace the speaker said as a correction', () => {
     expect(after.filter((t) => /hour/i.test(t))).toEqual([CORRECTED]);
     expect(after).toContain(MAIN);
     expect(after).toContain(TOTAL);
+  });
+
+  test('leaves one note when the note, the speech and the correction each name the subject differently', () => {
+    const timeNote =
+      'Time estimates on the hull patch were far off, three hours against forty minutes';
+    const corrected = 'Stop showing time estimates; count requests instead';
+    const after = replace(meeting(timeNote), timeNote, `- ${corrected}`, [
+      "And actually, let's stop showing hour guesses altogether and just count the requests instead.",
+    ]);
+    expect(after.filter((t) => /estimate/i.test(t))).toEqual([corrected]);
+  });
+
+  test('leaves one note when the correction writes the take-back as a removal', () => {
+    const removed = 'Remove hour estimates; count requests instead';
+    const after = replace(meeting(), HOURS, `- ${removed}`, [
+      "And actually, let's stop showing hour guesses altogether and just count the requests instead.",
+    ]);
+    expect(after.filter((t) => /hour/i.test(t))).toEqual([removed]);
+  });
+
+  test('keeps both when the speech takes back something the correction does not report', () => {
+    const after = replace(meeting(), HOURS, `- ${CORRECTED}`, [
+      "Let's drop the Sunday ferry instead.",
+    ]);
+    expect(after).toContain(HOURS);
+    expect(after).toContain(CORRECTED);
   });
 
   test('keeps both when the speech takes nothing back', () => {
