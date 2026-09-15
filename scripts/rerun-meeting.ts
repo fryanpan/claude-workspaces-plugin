@@ -38,7 +38,7 @@ import {
 import { resolveReplayTarget } from './replay-meeting-lib.ts';
 import { USAGE, UsageError, loadDocSpec, parseRerunArgs } from './rerun-meeting-args.ts';
 import type { RerunArgs } from './rerun-meeting-args.ts';
-import { runRerun } from './rerun-meeting-run.ts';
+import { methodReader, runRerun } from './rerun-meeting-run.ts';
 
 /**
  * The engine the server opens.
@@ -80,34 +80,47 @@ function engineFor(args: RerunArgs): TranscriptionEngine {
  * The shipped note-taker, built the way `server-deps.ts` builds it.
  *
  * `createNotesMethodComposer` is the one that is three: it reads the doc's
- * method at the top of every compose. The run writes that preference file, so
- * `--method` picks the note-taker through the same read the product makes
- * rather than by wiring a different object here.
+ * method at the top of every compose, THROUGH `methodFor`. So `methodFor` is
+ * wired to `readNotesMethod` over the run's own data dir, exactly as
+ * `server-deps.ts` wires it — the run writes the preference file and the
+ * composer reads it, which is what makes `--method` pick the note-taker
+ * through the product's own seam. A `methodFor` that answered a constant
+ * would run the original composer for all three methods, and a comparison
+ * between them would be a comparison of nothing.
  *
  * THE INSTRUCTIONS ARE THE SHIPPED DEFAULTS. The prompt store is opened over
  * a throwaway directory, so a rerun measures the prompt in this checkout
  * rather than whatever a machine happens to have tuned — which is what makes
  * two runs on two branches comparable.
  */
-function composerFor(): NotesComposer {
+function composerFor(log: (line: string) => void): (dataDir: string) => NotesComposer {
   const promptStore = createPromptStore({
     dataDir: mkdtempSync(join(tmpdir(), 'cw-rerun-prompts-')),
   });
-  const composer = createNotesMethodComposer({
-    // The run's own preference file decides; this is only the seam's shape.
-    // It answers the default here because the composer re-reads per tick
-    // through the store the run writes, not through this closure.
-    methodFor: () => 'original',
-    composerOpts: { instructions: () => promptStore.read('meeting-notes') },
-    onError: (m) => console.error(`[rerun] ${m}`),
-  });
-  if (!composer) {
+  // SAID ONCE, IN THE RUN LOG. `--method` only reaches the note-taker through
+  // this read, and when it did not the report still said "ledger-opus" at the
+  // top while the original composer wrote every bullet. Logging the answer the
+  // composer actually got is what makes that visible in the artefact rather
+  // than only in the code.
+  const build = (dataDir: string): NotesComposer | null =>
+    createNotesMethodComposer({
+      methodFor: methodReader(dataDir, log),
+      composerOpts: { instructions: () => promptStore.read('meeting-notes') },
+      onError: (m) => console.error(`[rerun] ${m}`),
+    });
+  // Asked once here, BEFORE the server exists, so a machine with no key is
+  // told so instead of holding a whole meeting that writes nothing.
+  if (!build(mkdtempSync(join(tmpdir(), 'cw-rerun-probe-')))) {
     throw new UsageError(
       'no note-taker could be built: this machine has no key for it. A rerun without a real ' +
         'composer would be `check:meeting-smoke` with extra steps.',
     );
   }
-  return composer;
+  return (dataDir: string): NotesComposer => {
+    const composer = build(dataDir);
+    if (!composer) throw new UsageError('the note-taker could not be built');
+    return composer;
+  };
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -126,7 +139,7 @@ async function main(argv: string[]): Promise<number> {
   };
 
   const outcome = await runRerun(args, target, doc, {
-    composer: composerFor(),
+    composer: composerFor(log),
     transcription,
     taskExtractor: createHaikuTaskCaptureExtractor({
       instructions: () => promptStore.read('meeting-capture'),

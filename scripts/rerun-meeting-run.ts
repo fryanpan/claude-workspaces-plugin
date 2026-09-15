@@ -50,12 +50,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { NotesMethod } from '../packages/core/src/notes-method.ts';
 import type { MeetingNamer } from '../packages/server/src/meeting-namer.ts';
 import type { NotesComposer, NotesMeetingSummary } from '../packages/server/src/meeting-notes.ts';
 import type { TaskCaptureExtractor } from '../packages/server/src/meeting-task-capture.ts';
 import { meetingDirPath } from '../packages/server/src/meetings.ts';
 import { createNotesHeadingFileStore } from '../packages/server/src/notes-heading-store.ts';
-import { writeNotesMethod } from '../packages/server/src/notes-method-store.ts';
+import { readNotesMethod, writeNotesMethod } from '../packages/server/src/notes-method-store.ts';
 import { readSectionMarkdown } from '../packages/server/src/notes-quality-pass.ts';
 import { readNotesQuality } from '../packages/server/src/notes-quality-store.ts';
 import { type ServerHandle, createServer } from '../packages/server/src/server.ts';
@@ -77,12 +78,20 @@ import {
   until,
 } from './rerun-meeting-feed.ts';
 import { type RerunReport, buildRerunReport, renderRerunReport } from './rerun-meeting-report.ts';
-import { SpendCapReached, meteredComposer } from './rerun-meeting-spend.ts';
+import { SpendCapReached, createSpendMeter } from './rerun-meeting-spend.ts';
 
 export interface RerunDeps {
-  /** The note-taker, already built for the chosen method — this module never
-   *  constructs one, so a test drives the whole path for nothing. */
-  composer: NotesComposer;
+  /**
+   * The note-taker, built against the run's own data dir.
+   *
+   * A FACTORY AND NOT AN OBJECT because the shipped composer picks its method
+   * per tick by reading `notes-method.json` out of the data dir, and the data
+   * dir does not exist until this function makes one. Handed a finished
+   * composer, the harness would have had to name the method at construction —
+   * which is exactly how `--method ledger-opus` silently ran the original
+   * note-taker in the first draft of this file.
+   */
+  composer: (dataDir: string) => NotesComposer;
   /** The engine the SERVER opens. `mock` costs nothing; a live one bills for
    *  the audio's length on top of the note-taker. */
   transcription: TranscriptionEngine;
@@ -92,6 +101,34 @@ export interface RerunDeps {
   /** Names the meeting from its notes. Absent leaves the default title. */
   titleNamer?: MeetingNamer | null;
   log: (line: string) => void;
+}
+
+/**
+ * What the shipped composer should be told the doc's method is, per tick.
+ *
+ * THE SEAM `--method` TRAVELS THROUGH, and the one place it can go wrong
+ * quietly. `createNotesMethodComposer` picks its note-taker at the top of
+ * every compose by calling this and nothing else, so a reader that answered a
+ * constant would run the original composer for all three methods while the
+ * report's heading still named the one that was asked for — a comparison of
+ * nothing, printed as a comparison. `server-deps.ts` wires exactly this read;
+ * this is the same one over the run's own data dir, plus a line in the log
+ * saying which note-taker actually composed.
+ */
+export function methodReader(
+  dataDir: string,
+  log: (line: string) => void,
+  read: (dir: string, docId: string) => NotesMethod = readNotesMethod,
+): (docId: string) => NotesMethod {
+  let announced: NotesMethod | undefined;
+  return (docId: string): NotesMethod => {
+    const method = read(dataDir, docId);
+    if (method !== announced) {
+      announced = method;
+      log(`note-taker in force: ${method}`);
+    }
+    return method;
+  };
 }
 
 /** `rerun-YYYYMMDDTHHMMSSZ`, so two runs of the same audio sit side by side. */
@@ -156,16 +193,25 @@ export async function runRerun(
     capped: null,
   };
 
+  // ONE METER OVER BOTH BILLED PASSES — see `rerun-meeting-spend.ts`. The
+  // capture pass bills per tick as well, and a cap that watched the composer
+  // alone would let a run reach about twice the ceiling it was given.
+  const meter = createSpendMeter(args.spendUsd, (usd, calls) =>
+    onSpend(state, args.spendUsd, deps, usd, calls),
+  );
+  const taskExtractor =
+    deps.taskExtractor === undefined || deps.taskExtractor === null
+      ? deps.taskExtractor
+      : meter.extractor(deps.taskExtractor);
+
   const server: ServerHandle = createServer({
     port: args.port,
     dataDir,
     requireSignInToWrite: false,
     transcription: deps.transcription,
     meetingNotes: {
-      composer: meteredComposer(deps.composer, args.spendUsd, (usd, calls) =>
-        onSpend(state, args.spendUsd, deps, usd, calls),
-      ),
-      ...(deps.taskExtractor !== undefined ? { taskExtractor: deps.taskExtractor } : {}),
+      composer: meter.composer(deps.composer(dataDir)),
+      ...(taskExtractor !== undefined ? { taskExtractor } : {}),
       ...(deps.titleNamer !== undefined ? { titleNamer: deps.titleNamer } : {}),
       onFirstNote: (first) => {
         state.firstNoteMs = first.afterMs;
