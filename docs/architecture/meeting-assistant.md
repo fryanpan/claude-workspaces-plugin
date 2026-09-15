@@ -2350,6 +2350,55 @@ transcript label saying which of the two it is reading. A transcript over
 120k characters is REFUSED rather than trimmed, so the pass is never silently
 worse on the meetings where it is hardest to tell.
 
+**A long meeting's own notes fall out of the prompt, so the gate is not the
+only thing between the model and a duplicate.** The outline the pass shows the
+model is `CLEANUP_OUTLINE_BLOCKS` (400) body blocks counted from the END of
+the doc. A meeting whose notes run past that has its EARLIEST bullets missing
+from the prompt entirely — and the directive asks the model to add "an idea
+this meeting carried that no note mentions". A model doing exactly as it is
+told therefore restates a note the section already carries, and
+`confineToSection` cannot refuse it: an insert under a heading the pass owns
+names no block, so there is no membership, comment or ownership to weigh.
+Measured 2026-09-15 on a 521-body-block doc: 400 entries shown, the section's
+opening bullet outside them, and the pass wrote it a second time. The answer
+is the live tick path's own check — `dedupeNotesEdits`
+(`notes-edit-dedupe.ts`) — run on this path too, and asked against the
+UNWINDOWED outline, which is what keeps it from sharing the blind spot it
+exists to close. What it drops comes back as `alreadyWritten`, separate
+from `refused` because the two are refused by different rules.
+
+**The gate runs on either side of the dedupe, and that order is the whole of
+it.** The dedupe REWRITES a batch: a note the section already carries under a
+different topic is read as the note-taker moving its own bullet, so it emits a
+`delete_block` on the earlier copy beside the insert that replaces it. Handed
+the model's answer before the gate saw it, it did that for an insert aimed at
+a heading OUTSIDE the section — the gate then refused the insert, for exactly
+the reason it exists, and kept the delete, because in isolation there is
+nothing wrong with deleting the pass's own uncommented bullet inside its own
+section. The section's only copy of the note was gone and the run logged "1
+refused, 1 blocks touched", which reads like restraint. So the model's edits
+are gated first, and the batch the dedupe returns is gated again: a refused
+edit cannot produce an authorised side effect. `notes-cleanup-gate.ts` is that
+composition, and `notes-cleanup-gate.test.ts` drives both halves — the refused
+insert that now takes nothing with it, and the control that an in-section move
+still happens.
+
+**And the GATE reads the whole doc too, which is the half that is easy to
+miss.** `CLEANUP_OUTLINE_BLOCKS` is a budget on the prompt; using it to decide
+what an edit may touch is a category error that only shows on a long section,
+because `sectionIds` reads its body ids off that outline and a bullet the
+window dropped is then not in the section as far as the gate is concerned.
+Nothing used to address one — the model cannot name a block it was never
+shown — but the dedupe can, and a MOVE is the shape that bites: it deletes the
+earlier copy and inserts the note under its topic, so a delete refused for
+being "outside the section" leaves the insert standing and rebuilds the
+duplicate. Headings were never windowed (`readOutline` drops body entries
+only), so it was only ever the body ids and the ownership marks that were
+short. The `unconfirmedLeft` count reads the whole doc for the same reason: a
+marker the window dropped is one a reader is still left holding. `notes-cleanup-long-meeting.test.ts` drives
+it, with the window measured rather than assumed and a short-section control
+that proves the composer duplicates nothing it can see.
+
 **A person's line is never rewritten — and it may still be argued with.**
 Bryan's rule (2026-09-10): *"do not rewrite human text. But if you spot an
 improvement, use the suggest and edit tool to suggest an edit."* Those are
