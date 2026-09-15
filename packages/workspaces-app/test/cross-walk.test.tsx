@@ -16,6 +16,7 @@ import {
   mountWalkthroughIsland,
   walkthroughData,
 } from '../src/board/walkthrough-island.tsx';
+import { CHOOSE_DIFFICULTY_FLAG_KEY, chooseDifficultyOn } from '../src/review-sizes.ts';
 import {
   type CrossEntry,
   type CrossReviewRow,
@@ -26,6 +27,8 @@ import {
   crossEntry,
   crossItemHref,
   hiddenNote,
+  startKey,
+  walkChrome,
 } from '../src/reviews/cross-walk-model.ts';
 
 const NOW = 1_700_000_000_000;
@@ -118,6 +121,25 @@ describe('a cross-board row as a card', () => {
     const [ticket, doc] = entries([ticketRow(), docRow({ docType: 'mockup' })]);
     expect(crossItemHref(ticket!)).toBe('/workspaces/w-river?task=t-1');
     expect(crossItemHref(doc!)).toBe('/workspaces/w-harbor/mockups/tide-notes?thread=th-9');
+  });
+});
+
+describe('the walk opens where Home pointed', () => {
+  const queue = () =>
+    entries([
+      ticketRow({ key: 'r1' }),
+      ticketRow({ key: 'r2', taskId: 't-2' }),
+      docRow({ key: 'h1' }),
+      docRow({ key: 'h2', threadId: 'th-10' }),
+    ]);
+
+  it('opens on the named project’s first item, else the top of the queue', () => {
+    expect(startKey(queue(), 'w-harbor')).toBe('h1');
+    expect(startKey(queue(), 'w-river')).toBe('r1');
+    expect(startKey(queue(), null)).toBe('r1');
+    // A project with nothing waiting any more: the top.
+    expect(startKey(queue(), 'w-kiln')).toBe('r1');
+    expect(startKey([], 'w-harbor')).toBeNull();
   });
 });
 
@@ -250,6 +272,28 @@ describe('the walkthrough in cross-board chrome', () => {
     const body = root.querySelector('.board-walk-body');
     expect(body?.classList.contains('board-walk-body-clamp')).toBe(false);
     expect(body?.textContent).toContain('word1799 closing-line-of-the-draft');
+  });
+
+  it('shows no size bar and no time while choose-difficulty is off, as it is by default', () => {
+    const list = entries([ticketRow({ size: 'easy' }), docRow({ size: 'hard' })]);
+    const flags = new Map<string, string>();
+    const storage = { getItem: (k: string) => flags.get(k) ?? null, setItem: () => {} };
+    const onPick = vi.fn();
+    const chrome = (level: 'easy' | 'hard') =>
+      walkChrome(list[0] ?? null, list, { on: chooseDifficultyOn(storage), level, onPick });
+    show({ queue: asQueue(list), chrome: chrome('hard') });
+    expect(root.querySelector('.board-walk-heading')?.textContent).toBe('Workspace: Riverbend');
+    expect(root.querySelector('[data-size]')).toBeNull();
+    expect(root.textContent).not.toMatch(/Easy|Medium|< ?\d+ min|estimat/);
+    expect(chrome('easy').doneNote).toBeUndefined();
+
+    // Positive control: the same page with the flag on draws the bar, still without minutes.
+    flags.set(CHOOSE_DIFFICULTY_FLAG_KEY, 'on');
+    show({ queue: asQueue(list), chrome: chrome('easy') });
+    const stops = [...root.querySelectorAll<HTMLElement>('.board-walk-topline [data-size]')];
+    expect(stops.map((b) => b.textContent)).toEqual(['Easy', 'Medium', 'Hard']);
+    expect(root.textContent).not.toMatch(/< ?\d+ min|estimat/);
+    expect(chrome('easy').doneNote).toBe('1 harder item not shown');
   });
 
   it('ends on how many harder items were held back', () => {

@@ -1,7 +1,9 @@
 /**
- * "Choose what you have time for": the fill bar on the all-workspaces page,
- * in the cross-board review, and on a board's Home — one control, one stored
- * choice.
+ * "Choose what you have time for": the fill bar in the cross-board review —
+ * one control, one stored choice. **Off by default** (the owner, 2026-09-14:
+ * it went unused, and its time estimates were far off), behind
+ * `chooseDifficultyOn`; with it off the walk shows every item and no size or
+ * time anywhere.
  *
  * Cumulative and single-choice: Easy shows easy items, Medium easy and
  * medium, Hard everything. Every stop up to the chosen one is filled in one
@@ -17,16 +19,18 @@
  * opens on. localStorage is only a cache: it paints the bar before the server
  * answers, and it is all there is for somebody not signed in.
  */
-import { type ReviewSize, parseReviewSize, sizeAllowed } from '@claude-workspaces/core';
+import { type ReviewSize, parseReviewSize } from '@claude-workspaces/core';
 import type { BootStorage } from './boot-env.ts';
 
 export const SIZE_PREF_KEY = 'cw.reviewSize';
 export const DEFAULT_REVIEW_SIZE: ReviewSize = 'hard';
 
-export const REVIEW_SIZE_LABELS: Readonly<Record<ReviewSize, { label: string; hint: string }>> = {
-  easy: { label: 'Easy', hint: '< 1 min' },
-  medium: { label: 'Medium', hint: '< 5 min' },
-  hard: { label: 'Hard', hint: 'any' },
+/** The stops' words. No minutes: the estimates were far off, so the flow
+ *  names a size and never a time. */
+export const REVIEW_SIZE_LABELS: Readonly<Record<ReviewSize, string>> = {
+  easy: 'Easy',
+  medium: 'Medium',
+  hard: 'Hard',
 };
 
 /** The stored choice, or Hard. A blocked storage reads as no choice. */
@@ -46,35 +50,17 @@ export function writeSizePref(storage: BootStorage, size: ReviewSize): void {
   }
 }
 
-/** Paint `level` onto a bar: that stop active, it and every smaller one filled. */
-export function paintFillBar(bar: ParentNode, level: ReviewSize): void {
-  for (const b of bar.querySelectorAll<HTMLElement>('[data-size]')) {
-    const size = parseReviewSize(b.dataset.size);
-    if (!size) continue;
-    const on = size === level;
-    b.classList.toggle('board-tab-active', on);
-    b.classList.toggle('filled', sizeAllowed(size, level));
-    b.setAttribute('aria-checked', String(on));
+/** The browser flag that brings choose-difficulty back: `on` under this key. */
+export const CHOOSE_DIFFICULTY_FLAG_KEY = 'cw.flag.chooseDifficulty';
+
+/** Whether this browser turned choose-difficulty on. Absent, anything but
+ *  `on`, or a blocked storage is off. */
+export function chooseDifficultyOn(storage: BootStorage): boolean {
+  try {
+    return storage.getItem(CHOOSE_DIFFICULTY_FLAG_KEY) === 'on';
+  } catch {
+    return false;
   }
-}
-
-/** Route a click inside a bar to `onPick`, when it landed on a stop. */
-export function onFillBarPick(bar: HTMLElement, onPick: (size: ReviewSize) => void): () => void {
-  const handler = (ev: Event) => {
-    const t = (ev.target as Element | null)?.closest?.('[data-size]') as HTMLElement | null;
-    const size = t ? parseReviewSize(t.dataset.size) : null;
-    if (size) onPick(size);
-  };
-  bar.addEventListener('click', handler);
-  return () => bar.removeEventListener('click', handler);
-}
-
-/** Total minutes of the items a level lets through. */
-export function totalMinutes(
-  items: ReadonlyArray<{ size: ReviewSize; minutes: number }>,
-  level: ReviewSize,
-): number {
-  return items.reduce((n, i) => (sizeAllowed(i.size, level) ? n + i.minutes : n), 0);
 }
 
 /** Where the signed-in person's choice lives. */

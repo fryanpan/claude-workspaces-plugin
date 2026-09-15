@@ -189,7 +189,7 @@ describe('attachments stay reachable without leaking back onto /', () => {
   });
 });
 
-describe('the landing page offers every waiting item across boards, sized', () => {
+describe('the landing page counts every waiting item across boards, by project', () => {
   let waitingId: string;
 
   async function makeDecision(wsId: string, title: string): Promise<void> {
@@ -209,31 +209,28 @@ describe('the landing page offers every waiting item across boards, sized', () =
     );
   }
 
-  /** The sizes the page hands its script, one [size, minutes] per item. */
-  const sizesOf = (html: string): Array<[string, number]> => {
-    const m = html.match(/<script type="application\/json" id="review-sizes">([^<]*)<\/script>/);
-    return m?.[1] ? (JSON.parse(m[1]) as Array<[string, number]>) : [];
-  };
+  /** The bar's project groups as the page renders them. */
+  const groupsOf = (html: string): Array<{ href: string; name: string; count: number }> =>
+    [
+      ...html.matchAll(/<a class="qgrp" href="([^"]+)"[^>]*aria-label="([^"]*), (\d+) waiting">/g),
+    ].map((m) => ({ href: m[1] ?? '', name: m[2] ?? '', count: Number(m[3]) }));
+  const waitingTotal = (html: string) => groupsOf(html).reduce((n, g) => n + g.count, 0);
 
-  it('sizes every item into one bar, starting on Hard, with one way in and no counts', async () => {
+  it('groups the waiting items by project, with one way in and no time', async () => {
     waitingId = await makeWorkspace('Waiting board');
     await makeDecision(waitingId, 'Pick a door');
     await makeDecision(waitingId, 'Pick another door');
 
     const html = await landing();
-    const sizes = sizesOf(html);
-    expect(sizes.length).toBeGreaterThanOrEqual(2);
-    const total = sizes.reduce((n, [, m]) => n + m, 0);
     expect(html).toContain('Review Items for You');
-    expect(html).toContain('Choose what you have time for:');
-    expect(html).toContain(
-      `Total estimated time: <span class="est-n" id="est">${total}</span> min`,
-    );
-    expect(html).toContain('class="board-tab filled board-tab-active" data-size="hard"');
+    const group = groupsOf(html).find((g) => g.name === 'Waiting board');
+    expect(group?.count).toBe(2);
+    expect(group?.href).toBe(`/review?from=${encodeURIComponent(waitingId)}`);
     expect(html).toContain('class="allgo" href="/review">Start review ›</a>');
-    // The removed counts: no per-row chip, no "N waiting" sentence.
-    expect(html).not.toContain('for you</a>');
-    expect(html).not.toContain('waiting on you');
+    // The removed size bar and estimate.
+    expect(html).not.toContain('Choose what you have time for');
+    expect(html).not.toContain('Total estimated time');
+    expect(html).not.toContain('data-size=');
     expect(html.split('class="allbar"').length - 1).toBe(1);
   });
 
@@ -241,7 +238,7 @@ describe('the landing page offers every waiting item across boards, sized', () =
     const html = await landing();
     expect(html).toContain('Prioritized Projects');
     expect(html).toMatch(/<span class="rank">1<\/span>/);
-    const before = sizesOf(html).length;
+    const before = waitingTotal(html);
 
     await fetch(`${base}/workspaces/${encodeURIComponent(waitingId)}/retired`, {
       method: 'PUT',
@@ -249,7 +246,8 @@ describe('the landing page offers every waiting item across boards, sized', () =
       body: JSON.stringify({ retired: true, author: AGENT, reason: 'superseded in test' }),
     });
     const retired = await landing();
-    expect(sizesOf(retired).length).toBe(before - 2);
+    expect(waitingTotal(retired)).toBe(before - 2);
+    expect(groupsOf(retired).some((g) => g.name === 'Waiting board')).toBe(false);
     // Still readable in its fold.
     expect(retired).toContain('Waiting board');
 
@@ -258,6 +256,6 @@ describe('the landing page offers every waiting item across boards, sized', () =
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ retired: false, author: AGENT }),
     });
-    expect(sizesOf(await landing()).length).toBe(before);
+    expect(waitingTotal(await landing())).toBe(before);
   });
 });

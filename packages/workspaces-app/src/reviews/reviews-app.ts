@@ -1,7 +1,8 @@
 /**
  * The cross-board review (`/review`): every open review item on every board,
  * one card at a time, top project first — the "Start review" of the
- * all-workspaces page.
+ * all-workspaces page. A project's group on that page opens the walk at the
+ * project's first item (`?from=<workspaceId>`).
  *
  * The card is the board's walkthrough island, fed a different queue and
  * different chrome. Answers go through the board's own review controller, and
@@ -20,7 +21,7 @@ import { NAV_COLLAPSE_HTML, navRailItemsHtml, wireNavCollapse } from '../board/b
 import { mountWalkthroughIsland, walkthroughData } from '../board/walkthrough-island.tsx';
 import { browserStorage } from '../boot-env.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
-import { createSizeChoice, httpSizePref } from '../review-sizes.ts';
+import { chooseDifficultyOn, createSizeChoice, httpSizePref } from '../review-sizes.ts';
 import { fetchWriteAccess, installWriteGateNotice } from '../signin/write-gate.ts';
 import {
   type CrossEntry,
@@ -31,7 +32,8 @@ import {
   asQueue,
   crossEntry,
   crossItemHref,
-  hiddenNote,
+  startKey,
+  walkChrome,
 } from './cross-walk-model.ts';
 
 async function fetchQueue(): Promise<CrossEntry[] | null> {
@@ -66,10 +68,16 @@ async function boot(): Promise<void> {
   const author = { id: user.id, name: user.name, kind: user.kind, color: user.color };
 
   let entries: CrossEntry[] = (await fetchQueue()) ?? [];
-  // The account's choice arrives after the cache has painted; it re-aims the
-  // walk exactly as a tap on the bar would.
-  const choice = createSizeChoice(browserStorage, httpSizePref(), (size) => applySize(size));
-  let level: ReviewSize = choice.level();
+  // Choose-difficulty is off unless this browser turned it on; off, the walk
+  // shows everything and never asks the account for a size. On, the account's
+  // choice arrives after the cache has painted and re-aims the walk exactly as
+  // a tap on the bar would.
+  const sizing = chooseDifficultyOn(browserStorage);
+  const choice = sizing
+    ? createSizeChoice(browserStorage, httpSizePref(), (size) => applySize(size))
+    : null;
+  let level: ReviewSize = choice?.level() ?? 'hard';
+  const from = new URLSearchParams(location.search).get('from');
   // The aim, as the board's walk keeps it: a key, and the index it was at, so
   // the card that replaces an answered one is the one that slid into its place.
   const walk: {
@@ -78,7 +86,7 @@ async function boot(): Promise<void> {
     walkProgress: { cleared: number; last: ReviewItem | null };
   } = {
     walkIndex: 0,
-    walkKey: allowedEntries(entries, level)[0]?.item.key ?? null,
+    walkKey: startKey(allowedEntries(entries, level), from),
     walkProgress: { cleared: 0, last: null },
   };
 
@@ -104,7 +112,7 @@ async function boot(): Promise<void> {
   });
 
   const pickSize = (size: ReviewSize): void => {
-    if (size === level) return;
+    if (size === level || !choice) return;
     choice.pick(size);
     applySize(size);
   };
@@ -186,14 +194,7 @@ async function boot(): Promise<void> {
       progress: walk.walkProgress,
       now: Date.now(),
       secretsGate: 'open',
-      chrome: {
-        backLabel: '‹ Back to Workspaces',
-        heading: current ? `Workspace: ${current.project}` : 'Workspaces',
-        size: { level, onPick: pickSize },
-        doneNote: hiddenNote(entries, level) ?? undefined,
-        doneLabel: 'Back to Workspaces',
-        tally: false,
-      },
+      chrome: walkChrome(current, entries, { on: sizing, level, onPick: pickSize }),
       handlers: {
         // No ticket-decision rows reach this page: a legacy decision rides as
         // its `r-legacy` review row, which answers through `onReply`.

@@ -1068,8 +1068,11 @@ board the item lives on. When an answer lands, `review-answer-ledger.ts`
 records where it stood in the order last shown and how long it waited, which
 is what `/api/review-wait` reads back per board. The landing page's bar and
 project list are `landing-review.ts`, with each project's one-line summary
-from `board-summary.ts`. The size a person picks is kept per signed-in identity
-by `review-size-prefs.ts` (the browser's copy is only a cache), and the project
+from `board-summary.ts`; the bar counts waiting items per project and needs no
+script, so the app's `landing-review-bar.ts` is gone. Choose-difficulty is off
+unless a browser turns it on (`review-sizes.ts`); when on, the size a person
+picks is kept per signed-in identity by `review-size-prefs.ts` (the browser's
+copy is only a cache), and the project
 order comes from a hand-edited `review-plan.json` naming the plan board —
 there is no route that sets it.
 
