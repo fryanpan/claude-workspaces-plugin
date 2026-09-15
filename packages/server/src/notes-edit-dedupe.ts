@@ -327,7 +327,17 @@ export function dedupeNotesEdits(
       }
       const twin = existing.find(({ entry }) => sameNote(entry.text, line));
       if (twin && !taken.has(twin.entry.id)) {
+        // A MOVE IS ONLY EVER WITHIN THIS MEETING'S OWN SECTION. A twin
+        // found through `ownedElsewhere` can be DROPPED — the note is
+        // already written, so today's minutes lose nothing — but never
+        // deleted and re-inserted here. Two recordings on one doc both mark
+        // their bullets `meeting-notes`, so without this clause the wider
+        // set let one meeting's tidy-up lift a bullet out of the other's
+        // live section and re-file it under its own topic. The move exists
+        // for a bullet of ours under the WRONG TOPIC of our own section,
+        // which is the only place the destination means anything.
         const movable =
+          section.blocks.has(twin.entry.id) &&
           twin.entry.author === ctx.authorId &&
           twin.leaf &&
           destination !== undefined &&

@@ -396,3 +396,92 @@ describe('a heading between them is not a wall to a move, and is not a thing to 
     expect(markdownNow()).toBe(before);
   });
 });
+
+describe('the wider set of its own notes drops a repeat; it never moves one', () => {
+  /**
+   * TWO RECORDINGS ON ONE DOC, which is the only way a block outside this
+   * meeting's section still carries the note-taker's mark: a recording
+   * STARTING releases every claim in the doc (`releaseNotesAuthorship`), so a
+   * finished meeting's minutes are unmarked and invisible to this set. A
+   * concurrent one's are not.
+   */
+  const OTHER_SECTION = [
+    '# Riverbend ferry review',
+    '',
+    'My own line about the slipway, which nobody may rewrite.',
+    '',
+    '## Meeting notes',
+    '',
+    '### Timetable',
+    '',
+    `- ${OURS}`,
+    '',
+    '## The other recording',
+    '',
+    '### Crew',
+    '',
+    `- ${THEIRS}`,
+  ].join('\n');
+
+  it('leaves the other section’s bullet exactly where it is', async () => {
+    const { store, markdownNow } = docStoreFrom(OTHER_SECTION, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    // CONTROL: the other section's bullet carries the note-taker's mark, so
+    // the wider set really does reach it — an unmarked one would prove
+    // nothing about the clause under test.
+    expect(
+      prose.readOutline(store.get(DOC)?.ydoc as never).find((b) => b.text === THEIRS)?.author,
+    ).toBeDefined();
+
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'insert_under_heading',
+            headingId: idOf(store, 'Timetable'),
+            markdown: `- ${THEIRS}`,
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+
+    // The note is already in the document, so it is DROPPED — not deleted
+    // from where it sits and re-filed under this meeting's topic.
+    expect(result.alreadyWritten).toBe(1);
+    expect(markdownNow()).toContain(`### Crew\n\n- ${THEIRS}`);
+    expect(markdownNow().split(THEIRS).length - 1).toBe(1);
+  });
+});
+
+describe('a nest names bullets, and says so when it does not', () => {
+  it('refuses one naming a paragraph, with the reason, instead of failing it', async () => {
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the slipway.' }]);
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'slipway')],
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.refusals[0]).toContain('only bullets are moved under a bullet');
+    expect(markdownNow()).toBe(before);
+  });
+});

@@ -175,18 +175,25 @@ export function claimable(scope: { owned: Set<string> }): (id: string) => boolea
  * Headings are kept apart from blocks for the same reason `sectionIds` keeps
  * them apart: an `insert_under_heading` has to name a heading, and answering
  * that question from the block set would let a bullet pass as a destination.
+ * `listItems` is the third set for the mirror of that question: a
+ * `nest_blocks` moves list items and nothing else, so a paragraph or a table
+ * named as one is refused HERE with a reason rather than kept and failed in
+ * the write path.
  */
 export function docIds(outline: readonly prose.OutlineEntry[]): {
   blocks: Set<string>;
   headings: Set<string>;
+  listItems: Set<string>;
 } {
   const blocks = new Set<string>();
   const headings = new Set<string>();
+  const listItems = new Set<string>();
   for (const entry of outline) {
     blocks.add(entry.id);
     if (entry.kind === 'heading') headings.add(entry.id);
+    if (entry.kind === 'listItem') listItems.add(entry.id);
   }
-  return { blocks, headings };
+  return { blocks, headings, listItems };
 }
 
 /**
@@ -268,6 +275,8 @@ function why(op: prose.BlockEditOp, id: string, rule: string): string {
  */
 export interface NotesEditScope {
   blocks: Set<string>;
+  /** Which of `blocks` are list items — the only kind a nest may name. */
+  listItems: Set<string>;
   headings: Set<string>;
   owned: Set<string>;
   headingId: string;
@@ -292,19 +301,20 @@ export function boundByAuthorship(
   // Striking a line out is only ever the pass's own to propose.
   const rewritable = (id: string): boolean => mine(id) && uncommented(id);
   /**
-   * What a `nest_blocks` may name: a block of this document that is neither
-   * the meeting's own heading nor ANY heading.
+   * What a `nest_blocks` may name: a LIST ITEM of this document that is not
+   * the meeting's own section heading.
    *
-   * THE HEADING CLAUSE IS NOT TIDINESS. `nestBlocksUnderLead` moves list
-   * items and nothing else — a heading named as the lead comes back
-   * `not-a-list-item`, and one named as a member is stepped over — so a gate
+   * THE LIST-ITEM CLAUSE IS NOT TIDINESS. `nestBlocksUnderLead` moves list
+   * items and nothing else — anything else named as the lead comes back
+   * `not-a-list-item`, and named as a member it is stepped over — so a gate
    * that asked only "is it in the document" kept an edit the write path could
    * never make, and the pass reported it FAILED rather than refused, with no
-   * reason a reader could act on. Refusing it here is the difference between
-   * a log that says what the model got wrong and one that says only that
-   * something did.
+   * reason a reader could act on. A heading is the case the model reaches for
+   * most (it is the topic it is thinking about), a paragraph note of its own
+   * the next most. Refusing them here is the difference between a log that
+   * says what the model got wrong and one that says only that something did.
    */
-  const nestable = (id: string): boolean => addressable(id) && !scope.headings.has(id);
+  const nestable = (id: string): boolean => addressable(id) && scope.listItems.has(id);
   /** Why a block is out of reach, asked in the order the rules are asked. */
   const blockRule = (id: string): string =>
     !scope.blocks.has(id)
@@ -325,7 +335,9 @@ export function boundByAuthorship(
       ? 'the block is not in the document'
       : id === scope.headingId
         ? "the block is the meeting's own section heading"
-        : 'the block is a heading, and a heading is not moved under a bullet';
+        : scope.headings.has(id)
+          ? 'the block is a heading, and a heading is not moved under a bullet'
+          : 'the block is not a bullet, and only bullets are moved under a bullet';
   for (const edit of edits) {
     switch (edit.op) {
       case 'insert_under_heading':
