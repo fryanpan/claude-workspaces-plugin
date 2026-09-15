@@ -73,6 +73,15 @@ function duplicateIds(fragment: Y.XmlFragment): string[] {
   return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
 }
 
+/** Every block id in the doc, in document order, with the text each block's
+ *  own words start with — a list item reads as its paragraph. */
+function idsInOrder(fragment: Y.XmlFragment): Array<[string | undefined, string]> {
+  return prose
+    .addressableBlocks(fragment)
+    .filter((el) => el.nodeName !== 'bulletList')
+    .map((el) => [prose.readBlockId(el), prose.outlineTextOf(el)]);
+}
+
 type Run = { insert?: string; attributes?: Record<string, unknown> };
 
 /** The runs of the list item whose words include `word`, with only the two
@@ -162,10 +171,15 @@ describe('moving a section in the editor', () => {
         end = pos + node.nodeSize - 1;
       }
     });
+    const before = idsInOrder(fragment).find(([, text]) => text === 'dock opens')?.[0];
     handle.editor.commands.setTextSelection(end);
     handle.editor.commands.keyboardShortcut('Enter');
     handle.editor.commands.insertContent('new bullet');
     expect(duplicateIds(fragment)).toEqual([]);
+    // The bullet that was there keeps the address; the new one has none yet.
+    const after = idsInOrder(fragment);
+    expect(after.find(([, text]) => text === 'dock opens')?.[0]).toBe(before);
+    expect(after.find(([, text]) => text === 'new bullet')?.[0]).toBeUndefined();
   });
 
   it('Enter at the end of a paragraph gives the new paragraph no copy of the id', () => {
@@ -193,8 +207,14 @@ describe('moving a section in the editor', () => {
 
   it('a drag-move of a section keeps a pending replace pending, its two texts apart', () => {
     const { fragment, view } = mountDoc();
+    const before = idsInOrder(fragment);
     dragTo(view, sectionRange(view.state.doc, 'Riverbend'), docEnd(view.state.doc), true);
     expect(duplicateIds(fragment)).toEqual([]);
+    // Nothing collided, so every block keeps the id it had and none is cleared
+    // or added: same ids, same blocks, moved section now after Kiln.
+    const after = idsInOrder(fragment);
+    expect(new Map(after)).toEqual(new Map(before));
+    expect(after.map(([, text]) => text)[0]).toBe('Kiln');
     expect(itemRuns(fragment, 'ferry')).toEqual([
       ['take the ', 'plain'],
       ['ferry', 'del'],
@@ -202,9 +222,46 @@ describe('moving a section in the editor', () => {
     ]);
   });
 
-  it('a copy-drag of a section leaves no two blocks holding one id', () => {
+  it('a copy-drag of a section leaves the ids on the original and none on the copy', () => {
     const { fragment, view } = mountDoc();
-    dragTo(view, sectionRange(view.state.doc, 'Riverbend'), docEnd(view.state.doc), false);
+    const before = idsInOrder(fragment);
+    const section = before.slice(
+      0,
+      before.findIndex(([, text]) => text === 'Kiln'),
+    );
+    // Dropped at the very top, so the copy comes first in document order: the
+    // original keeps its ids because it is outside what the drop wrote, not
+    // because a lookup meets it first.
+    dragTo(view, sectionRange(view.state.doc, 'Riverbend'), 0, false);
     expect(duplicateIds(fragment)).toEqual([]);
+    const after = idsInOrder(fragment);
+    const copy = after.slice(0, section.length);
+    expect(copy.map(([, text]) => text)).toEqual(section.map(([, text]) => text));
+    expect(copy.map(([id]) => id)).toEqual(section.map(() => undefined));
+    expect(after.slice(section.length, 2 * section.length)).toEqual(section);
+  });
+
+  it('the narrowed backstop still strips a mark typing or a plain-text paste inherits inside a span', () => {
+    const { fragment, view } = mountDoc();
+    let inside = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (inside < 0 && node.isText && node.text === 'bridge') inside = pos + 3;
+      return inside < 0;
+    });
+    // Typing, the way the default input path does: tr.insertText takes the
+    // caret's marks.
+    view.dispatch(view.state.tr.insertText('X', inside, inside));
+    // Between the "g" and the "e" of what is now "bri" X "dge".
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, inside + 3)));
+    view.pasteText('Y');
+    expect(itemRuns(fragment, 'ferry')).toEqual([
+      ['take the ', 'plain'],
+      ['ferry', 'del'],
+      ['bri', 'ins'],
+      ['X', 'plain'],
+      ['dg', 'ins'],
+      ['Y', 'plain'],
+      ['e', 'ins'],
+    ]);
   });
 });
