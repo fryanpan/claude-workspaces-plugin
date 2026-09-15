@@ -289,8 +289,10 @@ KEYCHAIN_SERVICE = os.environ.get("SCRUB_HAIKU_KEYCHAIN_SERVICE") or "scrub-haik
 #   budget             today's spend on the key, summed over every repo that
 #                      writes the shared ledger, is at or over the cap. It
 #                      lifts at 00:00 UTC — exhausted's twin, one level down.
-#   ledger-unreadable  the ledger exists and cannot be read, so the budget
-#                      check could not look. Somebody's to fix today.
+#   ledger-unreadable  the ledger exists and cannot be read, or it cannot be
+#                      appended to, so the budget check could not look — a
+#                      cap that cannot book a call cannot count it. Somebody's
+#                      to fix today.
 #
 # WHICH OF THEM BLOCKS A PUSH IS A PROJECT DECISION, and it is recorded here so
 # that the answer is a line in the gate rather than something you learn by
@@ -608,6 +610,25 @@ def record_spend(scan_range: str, diff_chars: int, usage: dict, verdict: str,
     return None
 
 
+def ledger_appendable(path: Optional[str] = None) -> Optional[str]:
+    """None when an entry could be appended now; otherwise what stops it.
+
+    Opened exactly as `record_spend` opens it, so a parent that cannot be
+    created, a folder that cannot be written or a bad path fails here, before
+    the call, rather than after the money is spent. It creates the file empty
+    when absent, which reads as $0 exactly as an absent file does.
+    """
+    path = path or spend_log_path()
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        os.close(os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600))
+    except OSError as e:
+        return f"{path}: {e.strerror or e}"
+    return None
+
+
 def check_budget() -> Optional[Unavailable]:
     """None when a call may go out; otherwise why it may not."""
     cap = daily_cap()
@@ -621,6 +642,18 @@ def check_budget() -> Optional[Unavailable]:
             "ledger is not a ledger reading $0.",
             f"Fix the file's permissions or move it aside, or point "
             f"{SPEND_LOG_ENV} at a readable path.",
+        )
+    # A ledger this call could not be booked to would read the same total next
+    # time, so every later call would pass the cap uncounted.
+    unwritable = ledger_appendable()
+    if unwritable is not None:
+        return Unavailable(
+            LEDGER,
+            f"The budget check could not look: the spend ledger cannot be "
+            f"written ({unwritable}). Nothing was called, because a call the "
+            "ledger cannot book is a call the cap cannot count.",
+            f"Fix the folder's permissions or free the disk, or point "
+            f"{SPEND_LOG_ENV} at a writable path.",
         )
     if spend.total >= cap:
         skipped = f" ({spend.malformed} unreadable line(s) skipped)" if spend.malformed else ""
@@ -979,12 +1012,14 @@ def _scan_piece(diff_content: str, scan_range: str = "stdin") -> "int | Unavaila
     if isinstance(usage, dict):
         failed = record_spend(scan_range, len(diff_content), usage, verdict)
         if failed is not None:
-            # The verdict stands — this scan did run — but the cap cannot see
-            # what it cost, so say so where the push's output is read.
+            # The verdict stands — this scan did run and the money is spent —
+            # but the cap cannot see what it cost, so say so where the push's
+            # output is read. The pre-check stops the next call if it still fails.
             print(
-                f"[scrub-haiku] WARNING: this scan's cost could not be written to "
-                f"the shared spend ledger ({failed}). The daily cap will not "
-                "count it.",
+                f"[scrub-haiku] SPEND NOT BOOKED: this scan's cost could not be "
+                f"written to the shared spend ledger ({failed}). The daily cap "
+                "does not count it, and the next scan will not call until the "
+                "ledger can be written.",
                 file=sys.stderr,
             )
 

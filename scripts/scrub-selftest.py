@@ -715,10 +715,15 @@ class HaikuStub(BaseHTTPRequestHandler):
 
     calls = 0
     calls_lock = threading.Lock()
+    # A file made read-only while a call is in flight: the ledger the scanner
+    # checked before calling, which it then cannot append to.
+    seal_during_call: str | None = None
 
     def do_POST(self) -> None:  # noqa: N802  (BaseHTTPRequestHandler's spelling)
         with HaikuStub.calls_lock:
             HaikuStub.calls += 1
+        if HaikuStub.seal_during_call:
+            os.chmod(HaikuStub.seal_during_call, 0o444)
         # Drained, never parsed, never logged: the request carries the
         # placeholder key in a header and there is no reason to look at it.
         self.rfile.read(int(self.headers.get("content-length") or 0))
@@ -1161,22 +1166,47 @@ def check_haiku_spend() -> None:
         unmetered = ledger("unmetered.jsonl")
         r = spawn_haiku(f"{stub}/clean", "block-all", ledger=unmetered)
         expect("haiku spend: a reply without usage books nothing and still passes",
-               0 if r.returncode == 0 and not os.path.exists(unmetered) else 1, 0, r.stderr)
+               0 if r.returncode == 0 and read_ledger(unmetered) == [] else 1, 0, r.stderr)
 
-        # A ledger that reads as absent but cannot be written: the scan did
-        # run, so its verdict stands, and the lost entry is said out loud.
-        if os.geteuid() != 0:  # root writes into a mode-555 folder
+        if os.geteuid() != 0:  # root writes into a mode-555 folder and a mode-444 file
+            # A ledger that cannot be created: the call it could not book is a
+            # call the cap could not count, so no call is made at all.
             sealed = ledger("sealed-folder")
             os.mkdir(sealed)
             os.chmod(sealed, 0o555)
             try:
-                r = spawn_haiku(f"{stub}/clean-usage", "block-all",
-                                ledger=os.path.join(sealed, "spend.jsonl"))
+                r, calls = calls_during(lambda: spawn_haiku(
+                    f"{stub}/clean-usage", "block-all", ledger=os.path.join(sealed, "spend.jsonl")))
             finally:
                 os.chmod(sealed, 0o755)
-            expect("haiku spend: an unwritable ledger keeps a clean verdict and warns that the cap cannot count it",
-                   0 if r.returncode == 0 and "could not be written" in r.stderr else 1, 0,
+            expect("haiku spend: a ledger whose folder cannot be written — no call, push blocked",
+                   0 if calls == 0 and r.returncode == 1 else 1, 0,
+                   f"{calls} call(s), exit {r.returncode}\n{r.stderr}")
+            expect("haiku spend: ...and the banner says the budget check could not look",
+                   0 if "SCAN DID NOT RUN — the budget check could not look" in r.stderr
+                   and "cannot be written" in r.stderr else 1, 0, r.stderr)
+
+            # A ledger that becomes unwritable while the call is out: the money
+            # is spent and the verdict stands, the lost entry is said loudly,
+            # and the next scan's check refuses to call.
+            lost = ledger("lost.jsonl")
+            HaikuStub.seal_during_call = lost
+            try:
+                open(lost, "w").close()
+                r = spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=lost)
+            finally:
+                HaikuStub.seal_during_call = None
+            expect("haiku spend: an append that fails after the call keeps the clean verdict and says the spend was not booked",
+                   0 if r.returncode == 0 and "SPEND NOT BOOKED" in r.stderr else 1, 0,
                    f"exit {r.returncode}\n{r.stderr}")
+            try:
+                r, calls = calls_during(lambda: spawn_haiku(f"{stub}/clean-usage", "block-all", ledger=lost))
+            finally:
+                os.chmod(lost, 0o644)
+            expect("haiku spend: ...and the next scan makes no call and blocks",
+                   0 if calls == 0 and r.returncode == 1
+                   and "the budget check could not look" in r.stderr else 1, 0,
+                   f"{calls} call(s), exit {r.returncode}\n{r.stderr}")
 
         # --- 5. The cap: today's total, every repo, checked before a call -----
         banner = "SCAN DID NOT RUN — daily budget reached"

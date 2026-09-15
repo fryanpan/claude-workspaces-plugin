@@ -271,7 +271,7 @@ not already published, with two lines of context; a push with none makes no call
 name built from already-public words is never judged
 (`SCRUB_HAIKU_RULES=off` sends the whole push). The Haiku key's daily spend cap
 is shared with other repos on the machine (`SCRUB_HAIKU_DAILY_USD`, ledger
-`SCRUB_HAIKU_SPEND_LOG`); a cap hit or an unreadable ledger makes no call and
+`SCRUB_HAIKU_SPEND_LOG`); a cap hit or a ledger it cannot read or append to makes no call and
 blocks like any other could-not-run case — `scrub-haiku.py --spend-report`
 says who spent it. One config source resolving
 without the other FAILS the push (exit 2 — broken install); neither resolving
