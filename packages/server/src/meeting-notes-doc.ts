@@ -690,6 +690,7 @@ export function applyNotesUpdate(
     notesHeadingId,
     outline: full,
     speech: update.tick.turns.map((t) => t.text),
+    commented: () => commentedBlockIds(doc.ydoc),
   });
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);

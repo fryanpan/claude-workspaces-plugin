@@ -44,7 +44,9 @@
  * in every note under it and keeping it keeps nothing of THIS note. And a
  * replace the speaker said as a correction — "instead", "stop", naming the
  * note's subject — applies as written too (`correctsIt`): the reader wants
- * the correction, not the withdrawn note beside it.
+ * the correction, not the withdrawn note beside it. For the same reason a
+ * correction the model wrote as a new bullet beside that note becomes the
+ * replace it should have been (`correctedNote`, `notes-edit-correction.ts`).
  *
  * TURNED INTO, NOT REFUSED, and that is the whole reason this rule can exist
  * at all. Refusing the edit would drop the note about the speech this tick
@@ -105,7 +107,8 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
-import { IDEA_CARRIED_SHARE, contentWords, negates, sentencesOf } from './notes-idea-coverage.ts';
+import { correctedNote, correctsIt, ownWords } from './notes-edit-correction.ts';
+import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
 
 /** What the guard decided, for the caller to apply and to log. */
 export interface NotesEditGuardResult {
@@ -134,6 +137,9 @@ export interface NotesEditGuardContext {
   /** The words the tick composed from. Absent, no replace reads as a
    *  correction, and RULE 2 judges on the notes alone. */
   speech?: readonly string[] | undefined;
+  /** Blocks somebody has commented on. An insert never replaces one of them
+   *  as a correction (`correctedNote`). */
+  commented?: (() => ReadonlySet<string>) | undefined;
 }
 
 /**
@@ -183,79 +189,6 @@ function keepsItsWords(was: string, now: string, own: readonly string[]): boolea
  * one word, and one dropped synonym would turn a revision into a duplicate.
  */
 const MIN_OWN_WORDS = 3;
-
-/** The content words of `was` that no other block of the section carries. */
-function ownWords(
-  was: prose.OutlineEntry,
-  outline: readonly prose.OutlineEntry[],
-  section: ReadonlySet<string> | undefined,
-): string[] {
-  const shared = new Set(
-    outline
-      .filter((e) => e.id !== was.id && section?.has(e.id) === true)
-      .flatMap((e) => contentWords(e.text)),
-  );
-  return contentWords(was.text).filter((w) => !shared.has(w));
-}
-
-/**
- * What a speaker says when they take back what they said before. Lexical and
- * short, like the decision cues: a phrase missing here leaves two notes, the
- * visible direction, and a loose one lets a new idea overwrite an old one.
- */
-const TAKES_BACK =
-  /\b(instead|rather than|no longer|any ?more|scratch that|on second thought|stop|stopp(?:ed|ing)|drop|forget)\b/i;
-
-/** How a note says a thing was withdrawn: the speaker's cues, and the verbs
- *  the note-taker writes for them ("stop showing" is written "remove"). */
-const WITHDRAWS = new RegExp(
-  `${TAKES_BACK.source}|\\b(remov(?:e|ed|ing)|hid(?:e|ing)|scrap(?:ped)?|replac(?:e|ed|ing))\\b`,
-  'i',
-);
-
-/**
- * Whether this replace is the speaker CORRECTING the note, which the tick
- * heard them do. Three things, all lexical:
- *
- * 1. the replacement names at least two of the words only that note had — its
- *    subject;
- * 2. one clause of the replacement withdraws that subject: a withdrawing word
- *    and a subject word in the same clause, so "hour estimates stay; the run
- *    stops" withdraws the run, not the estimates;
- * 3. one sentence of the speech takes something back and shares two words with
- *    the replacement beyond the cue, so the correction is one the tick heard.
- *
- * The speech is matched against the REPLACEMENT, not the note, because the
- * note-taker paraphrases both ways: the speaker withdrew "hour guesses", the
- * old note said "time estimates", and the correction said "stop showing time
- * estimates, count requests instead". Speech and note share no word there;
- * speech and correction share "showing", "count" and "requests".
- *
- * WHY A CORRECTION IS APPLIED AS A REPLACE (2026-09-14). A correction shares
- * the subject and little else — "the hour guesses are far off" becomes "stop
- * showing hour guesses, count requests instead" — so the word share reads it
- * as a different note and keeps both, and the reader is left the note the
- * speaker withdrew beside the one that withdrew it. Speech is the arbiter
- * because the notes cannot tell a correction from a new idea about the same
- * subject; the speaker's own "instead" can.
- */
-function correctsIt(own: readonly string[], now: string, speech: readonly string[]): boolean {
-  const has = new Set(contentWords(now));
-  const subject = new Set(own.filter((w) => has.has(w)));
-  if (subject.size < 2) return false;
-  const withdrawn = now
-    .split(/[;:.,!?]|\s[-–—]\s/)
-    .some((clause) => WITHDRAWS.test(clause) && contentWords(clause).some((w) => subject.has(w)));
-  if (!withdrawn) return false;
-  const reported = [...has].filter((w) => !WITHDRAWS.test(w));
-  return speech
-    .flatMap((s) => sentencesOf(s))
-    .some((sentence) => {
-      if (!TAKES_BACK.test(sentence)) return false;
-      const said = new Set(contentWords(sentence));
-      return reported.filter((w) => said.has(w)).length >= 2;
-    });
-}
 
 /**
  * Whether a different bullet in the section already says what `was` says.
@@ -411,7 +344,30 @@ export function guardNotesEdits(
     }
     worded.push({ ...edit, markdown });
   }
+  // Blocks some edit of this batch already rewrites or removes: a correction
+  // written as an insert never takes one of them over.
+  const targeted = new Set(worded.flatMap((e) => ('blockId' in e ? [e.blockId] : [])));
   for (const edit of worded) {
+    if (edit.op === 'insert_under_heading' && section?.headings.has(edit.headingId) === true) {
+      // A CORRECTION WRITTEN BESIDE THE NOTE IT WITHDRAWS replaces that note
+      // (`notes-edit-correction.ts`), exactly as it would had the model sent
+      // the replace itself.
+      const corrected = correctedNote(edit.markdown, {
+        outline: outline ?? [],
+        section: section.blocks,
+        speech: ctx.speech ?? [],
+        commented: ctx.commented?.(),
+      });
+      if (corrected !== undefined && !targeted.has(corrected.id)) {
+        targeted.add(corrected.id);
+        out.push({ op: 'replace_block', blockId: corrected.id, markdown: edit.markdown });
+        kept.push(
+          `insert_under_heading withdrew ${corrected.id}, which the speaker took back — ` +
+            'replaced it instead, so the correction stands alone',
+        );
+        continue;
+      }
+    }
     if (edit.op !== 'replace_block' && edit.op !== 'delete_block') {
       out.push(edit);
       continue;
