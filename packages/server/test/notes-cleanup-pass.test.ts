@@ -15,12 +15,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  CLEANUP_DIRECTIVE,
-  CLEANUP_TRANSCRIPT_LABEL,
-  MAX_CLEANUP_TRANSCRIPT_CHARS,
-  runNotesCleanupPass,
-} from '../src/notes-cleanup-pass.ts';
+import { MAX_CLEANUP_TRANSCRIPT_CHARS, runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
+import { CLEANUP_DIRECTIVE, CLEANUP_TRANSCRIPT_LABEL } from '../src/notes-cleanup-prompt.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import {
   DOC,
