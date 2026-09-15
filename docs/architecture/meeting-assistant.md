@@ -907,6 +907,19 @@ with headings"*):
 - **Link what it names**: a board task or doc the tick's speech named arrives
   in the prompt with its URL (below), and the note cites it inline.
 
+**Every note is a bullet, whatever the model answered**
+(`notes-edit-bullets.ts`). A three-voice huddle on 2026-09-14 ended as three
+bullets and twelve paragraphs. The model wrote a `**Question:**` line with no
+marker. The outline then showed that note as a `para`, and the model wrote
+every later note the same way. So before the guard reads a batch, each
+top-level prose line in an insert becomes a bullet, and so does a replace of
+one of the note-taker's own paragraphs. The quality checks and the regroup
+scan also count a note written as a paragraph (`proseNote` in
+`notes-quality.ts`). Before, those paragraphs escaped the note count and the
+repeat count, and the flat run never reached the bar that asks for a topic
+heading. The at-stop idea coverage always read paragraph text, so it was never
+part of that gap.
+
 A person's line is protected by the DOC rather than by any of this. The
 outline tells the model which blocks are its own and which are not, and the
 instructions ask it to leave the rest alone — but the guarantee sits
@@ -1135,6 +1148,12 @@ coverage. It is a summary and not a tick log on purpose — a line per tick is
 hundreds per meeting for a number nobody reads while the meeting is fine.
 `turnsComposed` may run one ahead of `turnsSettled`, because the final pass
 carries a sentence that by definition never settled.
+
+**And the first note gets a line of its own** when it lands:
+`[meeting-notes] <doc> meeting <id> wrote its first note <ms>ms after the
+meeting started`. It holds ids and a duration only. The tick timings start at
+the first pause, so until this line a slow first note looked the same as a
+quick one.
 
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw
@@ -1559,6 +1578,15 @@ invented for this would have been lost on the first flush.
   correction made a week after the meeting works exactly like one made
   during it — which is why the menu is mounted whatever the doc, rather than
   alongside the strip.
+
+**A tag keeps its turns only if its block already had them.** The outline shows
+each tag's full href, turns included, and a model writing a new note about a
+voice copies the tag it can see. The stamping pass kept every claim a tag
+arrived with, so in the huddle every note about one voice carried that voice's
+first turn. A late reattribution of that one turn would then have moved all of
+them. `normalizeSpeakerTags` now takes `claimsFrom`: the text the edited block
+held before (nothing, for an insert). A claim that text does not carry is
+stamped with this tick's turns, as a bare tag would be.
 
 ### A late correction lands on the mentions it can prove
 
