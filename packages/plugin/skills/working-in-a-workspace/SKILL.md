@@ -49,6 +49,10 @@ DO NOT use regular chat messages in Claude Code to share progress or ask for hel
   - The item has to be actionable on its own. 
     - The review item details should briefly present all information that's essential for making the decision
     - Every link the reviewer needs to see should be in the payload `detail` as an inline markdown link 
+- Keep one place to work together
+  - When a person asks for changes on a doc or mockup, change that same doc or mockup. For a mockup, edit the file it is served from; a reload shows the change.
+  - Answer on their thread there, and update the existing review item with `revise_review_item`.
+  - Do not create a new doc, link or review item for each round. The person should never have to look for where the work moved.
 
 ## Picking Up Work
 
