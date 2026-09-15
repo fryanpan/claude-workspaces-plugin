@@ -36,6 +36,7 @@ import {
   type ReviewPayload,
   type TaskReviewItem,
   type User,
+  hashToColor,
   readReviewPayload,
 } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
@@ -66,6 +67,12 @@ export interface NotesQualityBoard {
   ): boolean;
 }
 
+/**
+ * An author on the actor axis: a person's `User` shape, or an agent's, which
+ * `actor-identity.ts` reads by `kind: 'agent'`.
+ */
+export type ThreadAuthor = Omit<User, 'kind'> & { kind: User['kind'] | 'agent' };
+
 /** What {@link fileOnMeetingDoc} reaches in the doc store. `DocStore` satisfies it. */
 export interface NotesQualityThreads {
   get(docId: string): unknown;
@@ -73,7 +80,7 @@ export interface NotesQualityThreads {
   postComment(
     docId: string,
     threadId: null,
-    author: User,
+    author: ThreadAuthor,
     text: string,
     anchor: Anchor,
     opts: { generate: boolean; review: ReviewPayload },
@@ -100,8 +107,15 @@ export function fileOnMeetingDoc(
 ): boolean {
   const payload = readReviewPayload(review);
   if (!payload || !threads.get(docId)) return false;
-  // `kind: 'agent'` so the queue reads it as an ask waiting on a person.
-  const author = { ...actor, kind: 'agent' } as unknown as User;
+  // `kind: 'agent'` so the queue reads it as an ask waiting on a person, and a
+  // color stable for the name because every thread renderer paints the
+  // author's accent from it.
+  const author: ThreadAuthor = {
+    id: actor.id,
+    name: actor.name,
+    kind: 'agent',
+    color: hashToColor(actor.name),
+  };
   const before = threads.listThreads(docId).length;
   threads
     .postComment(

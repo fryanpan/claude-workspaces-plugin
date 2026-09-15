@@ -173,6 +173,13 @@ describe('a bad meeting on a doc no row links', () => {
       { describe: 'the quality item on the queue' },
     );
     expect(JSON.stringify(rows[0])).toContain('came out badly');
+    // Filed by the assistant, with the accent color every thread renderer
+    // paints its author from.
+    const thread = handle.docStore.listThreads(docId).find((t) => t.id === rows[0]?.threadId);
+    expect(thread?.comments[0]?.author).toMatchObject({
+      kind: 'agent',
+      color: expect.stringMatching(/^#[0-9a-f]{6}$/),
+    });
     // Still no row invented to hang it on.
     expect(handle.tasks.backlinksFor({ kind: 'doc', docId })).toEqual([]);
   });
