@@ -12,12 +12,14 @@
  * WHICH STREAM. Only one. Two connections with the same agent and working
  * directory are the same agent — a respawn overlapping its predecessor, or
  * Claude Code opening a second session while it re-initializes — and a push
- * written to both is a push the agent reads twice. The one that gets it is the
- * live stream whose SESSION was initialized most recently. Not the oldest:
- * during a respawn the old process is still connected for a moment and is
- * about to be gone. And not the stream that connected most recently: an old
- * session whose stream blips and reconnects must not take pushes back from
- * the session that replaced it.
+ * written to both is a push the agent reads twice. The host names the target
+ * (`targetOrder`): the session initialized most recently, even in the moment
+ * between its initialize and its GET, when a push waits here for it rather
+ * than going to the stream that is still open. Not the oldest: during a
+ * respawn the old process is still connected for a moment and is about to be
+ * gone, and a push handed to it then is lost with it. And not the stream that
+ * connected most recently: an old session whose stream blips and reconnects
+ * must not take pushes back from the session that replaced it.
  *
  * NOTHING DOUBLED, NOTHING DROPPED. Every frame carries `id: <epoch>-<seq>`.
  * A stream that attaches with a `Last-Event-ID` from this epoch gets what
@@ -47,6 +49,8 @@ export interface OutboxOptions {
   /** The reconnect delay the client is told to use, in ms. */
   retryMs: number;
   now: () => number;
+  /** The order of the session pushes belong to now, or null to hold them. */
+  targetOrder: () => number | null;
   /** Builds the notice written when frames aged out before a stream came back. */
   gapNotice: () => unknown;
 }
@@ -57,6 +61,8 @@ export interface Outbox {
   push(message: unknown): string;
   /** Add a stream and bring it up to date. Returns the function that removes it. */
   attach(stream: OutboxStream, lastEventId: string | null): () => void;
+  /** Write what is held and undelivered to the target, if it has a stream. */
+  flush(): void;
   /** Frames held right now. */
   size(): number;
   /** Whether any stream is attached. */
@@ -95,11 +101,10 @@ export function createOutbox(opts: OutboxOptions): Outbox {
     }
   };
 
-  /** The newest-initialized live stream, or undefined. */
+  /** The target session's live stream, or undefined while it has none. */
   const target = (): OutboxStream | undefined => {
-    let best: OutboxStream | undefined;
-    for (const s of streams) if (!best || s.order > best.order) best = s;
-    return best;
+    const order = opts.targetOrder();
+    return order === null ? undefined : streams.find((s) => s.order === order);
   };
 
   /** Write to a stream, dropping it if it has gone. */
@@ -124,14 +129,27 @@ export function createOutbox(opts: OutboxOptions): Outbox {
     return Math.min(n, seq);
   };
 
+  const flush = (): void => {
+    const t = target();
+    if (!t) return;
+    prune();
+    if (delivered < pruned) {
+      if (!writeTo(t, sseFrame(null, opts.gapNotice()))) return;
+      delivered = pruned;
+    }
+    for (const h of held) {
+      if (h.seq <= delivered) continue;
+      if (!writeTo(t, h.text)) return;
+      delivered = h.seq;
+    }
+  };
+
   return {
     push(message) {
       prune();
       seq += 1;
-      const text = sseFrame(idOf(seq), message);
-      held.push({ seq, at: opts.now(), text });
-      const t = target();
-      if (t && writeTo(t, text)) delivered = seq;
+      held.push({ seq, at: opts.now(), text: sseFrame(idOf(seq), message) });
+      flush();
       return idOf(seq);
     },
 
@@ -166,6 +184,7 @@ export function createOutbox(opts: OutboxOptions): Outbox {
       return detach;
     },
 
+    flush,
     size: () => held.length,
     hasStream: () => streams.length > 0,
   };

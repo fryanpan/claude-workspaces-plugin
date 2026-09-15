@@ -10,9 +10,13 @@
  * Code session is a new session on the same identity, so it finds its
  * subscription already open and nothing broadcast in between is lost.
  *
- * WHO GETS A PUSH. The outbox writes each push to one stream: the live stream
- * of the session initialized most recently. See outbox.ts for why neither the
- * oldest nor the most recently connected is right.
+ * WHO GETS A PUSH. The outbox writes each push to one stream: that of the
+ * session initialized most recently, holding the push while that session has
+ * yet to open its GET. A session stops being the target when its stream ends,
+ * or when STREAM_GRACE_MS passes without it opening one — a process that
+ * initialized and exited must not hold its predecessor's pushes until the
+ * sweep. See outbox.ts for why neither the oldest nor the most recently
+ * connected is right.
  *
  * A SESSION ID WE HAVE NEVER SEEN. After a restart every id a client holds is
  * unknown here. Claude Code reconnects its GET stream with the old id and does
@@ -96,6 +100,8 @@ export const OUTBOX_MAX_FRAMES = 200;
 /** What a client is told to wait before reconnecting: long enough to outlast
  *  a restart, so its two GET retries are not spent while the port is closed. */
 export const STREAM_RETRY_MS = 15_000;
+/** How long a new session holds pushes before its first GET arrives. */
+export const STREAM_GRACE_MS = 30_000;
 /** A session with no stream and no request for this long is gone. */
 export const SESSION_IDLE_MS = 30 * 60_000;
 /** An identity with no session for this long stops its subscription. */
@@ -121,6 +127,11 @@ interface HostedSession {
   /** When it was initialized, as a counter. Larger is newer. */
   order: number;
   lastSeen: number;
+  /** When it was opened, by the clock. */
+  openedAt: number;
+  /** Whether a GET stream is attached, and whether one ever was. */
+  streaming: boolean;
+  everStreamed: boolean;
   /** Ends the live GET stream, if there is one. */
   closeStream: (() => void) | null;
 }
@@ -158,6 +169,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
       maxFrames: OUTBOX_MAX_FRAMES,
       retryMs: STREAM_RETRY_MS,
       now,
+      targetOrder: () => targetOrderOf(entry),
       gapNotice,
     });
     const entry = {
@@ -181,6 +193,19 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     return entry;
   }
 
+  /** The newest session that has a stream or may still open its first. */
+  function targetOrderOf(entry: HostedIdentity): number | null {
+    let best: number | null = null;
+    const t = now();
+    for (const sid of entry.sessions) {
+      const s = sessions.get(sid);
+      if (!s) continue;
+      const candidate = s.streaming || (!s.everStreamed && t - s.openedAt < STREAM_GRACE_MS);
+      if (candidate && (best === null || s.order > best)) best = s.order;
+    }
+    return best;
+  }
+
   /** Register a session under the identity its headers name. */
   function openSession(
     headers: IdentityHeaders,
@@ -195,6 +220,9 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
       key: resolved.identity.key,
       order: initCounter,
       lastSeen: now(),
+      openedAt: now(),
+      streaming: false,
+      everStreamed: false,
       closeStream: null,
     };
     sessions.set(sid, session);
@@ -209,6 +237,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     if (entry) {
       entry.sessions.delete(session.id);
       entry.lastSeen = now();
+      entry.outbox.flush();
     }
   }
 
@@ -233,6 +262,8 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
             }),
           );
         }
+        session.streaming = true;
+        session.everStreamed = true;
         const detach = entry.outbox.attach(
           { order: session.order, write: (t) => out.write(t) },
           lastEventId,
@@ -240,6 +271,9 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
         const keepalive = setInterval(() => {
           try {
             out.write(':ka\n\n');
+            // A target that lapsed (its grace ran out, its stream ended) hands
+            // what it was holding to whoever is next.
+            entry.outbox.flush();
           } catch {
             cleanup?.();
           }
@@ -249,6 +283,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
           if (done) return;
           done = true;
           detach();
+          session.streaming = false;
           clearInterval(keepalive);
           if (session.closeStream === close) session.closeStream = null;
           session.lastSeen = now();

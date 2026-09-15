@@ -130,6 +130,7 @@ describe('outbox', () => {
       maxFrames: 10,
       retryMs: 15_000,
       now: () => clock,
+      targetOrder: () => 1,
       gapNotice: () => ({ gap: true }),
     });
     box.push({ n: 1 });

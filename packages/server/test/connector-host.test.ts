@@ -25,6 +25,7 @@ import {
   type HostedSessionSpec,
   IDENTITY_IDLE_MS,
   SESSION_IDLE_MS,
+  STREAM_GRACE_MS,
   createConnectorHost,
 } from '../src/connector/host.ts';
 import { SUPPORTED_PROTOCOL_VERSIONS } from '../src/connector/protocol.ts';
@@ -204,6 +205,60 @@ describe('/mcp push routing', () => {
     } finally {
       oldFeed.stop();
       freshFeed.stop();
+    }
+  });
+
+  it('holds a push made between the new session initializing and opening its stream for the new one', async () => {
+    const { send, push } = build();
+    const old = await initialize(send, ALPHA);
+    const oldFeed = listen(await openStream(send, old, ALPHA));
+    const fresh = await initialize(send, ALPHA);
+    await push('Riverbend Alpha', 'before the new stream');
+    await provenAlive(oldFeed);
+    const freshFeed = listen(await openStream(send, fresh, ALPHA));
+    try {
+      await waitFor(() => freshFeed.channelTexts().includes('before the new stream'));
+      await provenAlive(freshFeed);
+      expect(freshFeed.channelTexts()).toEqual(['before the new stream']);
+      expect(oldFeed.channelTexts()).toEqual([]);
+    } finally {
+      oldFeed.stop();
+      freshFeed.stop();
+    }
+  });
+
+  it('hands held pushes back to the old stream when the new session never opens one', async () => {
+    let clock = 1_000;
+    const { send, push } = build({ now: () => clock });
+    const old = await initialize(send, ALPHA);
+    const oldFeed = listen(await openStream(send, old, ALPHA));
+    try {
+      await initialize(send, ALPHA);
+      await push('Riverbend Alpha', 'waiting on the new one');
+      await provenAlive(oldFeed);
+      expect(oldFeed.channelTexts()).toEqual([]);
+      clock += STREAM_GRACE_MS + 1;
+      // No further push: the keepalive tick is what hands it over.
+      await waitFor(() => oldFeed.channelTexts().includes('waiting on the new one'));
+    } finally {
+      oldFeed.stop();
+    }
+  });
+
+  it("sends pushes back to the old stream once the new session's stream ends", async () => {
+    const { host, send, push } = build();
+    const old = await initialize(send, ALPHA);
+    const oldFeed = listen(await openStream(send, old, ALPHA));
+    const fresh = await initialize(send, ALPHA);
+    const freshFeed = listen(await openStream(send, fresh, ALPHA));
+    try {
+      await waitFor(() => host.counts().streams === 2);
+      freshFeed.stop();
+      await waitFor(() => host.counts().streams === 1, { describe: 'the new stream to end' });
+      await push('Riverbend Alpha', 'after the new one left');
+      await waitFor(() => oldFeed.channelTexts().includes('after the new one left'));
+    } finally {
+      oldFeed.stop();
     }
   });
 });
