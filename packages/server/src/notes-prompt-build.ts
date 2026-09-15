@@ -459,9 +459,11 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
  *
  * Either way it is the engine's raw text: no punctuation, no sentence
  * casing, sometimes cut mid-word. Saying so is what stops the note-taker
- * rendering a fragment as a finished point — the instructions already ask it
- * to end a note it is unsure of with `(unconfirmed)`, and this is that case
- * named on the wire.
+ * rendering a fragment as a finished point. It used to be the wire half of a
+ * prompt rule that asked for an unsure note to end `(unconfirmed)`; that rule
+ * is gone (see `notes-prompt-store.ts`), and this label matters MORE without
+ * it. The instruction now is to write the smaller point you are sure of, and
+ * a note-taker can only do that if it is told which words are unfinished.
  */
 const PARTIAL_SUFFIX = ' [unfinished — the recording stopped mid-sentence]';
 const STILL_SPEAKING_SUFFIX = ' [unfinished — they are still saying it]';
