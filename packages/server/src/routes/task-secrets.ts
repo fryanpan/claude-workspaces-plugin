@@ -1,4 +1,5 @@
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
 import { SECRET_VALUE_MAX_CHARS, isStorableSecretValue, secretValueFits } from '../secret-store.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -20,7 +21,7 @@ export async function handleTaskSecrets(
   rq: TaskRouteRequest,
 ): Promise<Response | undefined> {
   const { taskStore, taskProjection, j, safeJson, secretWriter } = ctx;
-  const { req, scope, authorFor, requireOwner } = rq;
+  const { req, scope, authorFor, roleFor, requireOwner } = rq;
   /**
    * The same reading of `review.ownerOnly` the rest of the family uses, and
    * deliberately a second call to the same function rather than a shared
@@ -196,6 +197,20 @@ export async function handleTaskSecrets(
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, { actor: author });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     taskProjection.refreshTask(res.task);
+    // MEASUREMENT: a secret ask is a review item, shown on the same queue and
+    // therefore already carrying a `viewed` row. The measurement is ids only
+    // whatever the item asked for, which is why this door needs no special
+    // case — the constructor has no field the values could reach.
+    taskStore.emit(
+      reviewItemAnsweredEvent({
+        workspaceId: res.task.workspaceId,
+        reviewItemId,
+        taskId,
+        actorId: author.id,
+        isOwner: roleFor(res.task.workspaceId) === 'owner',
+        ts: Date.now(),
+      }),
+    );
     return j(200, { taskId, reviewItemId, item: res.item, saved: declared.map((d) => d.service) });
   }
   return undefined;

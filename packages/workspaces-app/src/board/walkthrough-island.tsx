@@ -50,6 +50,7 @@ import { signal } from '@preact/signals';
 import { Fragment, render } from 'preact';
 import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
+import { currentWorkspaceId } from '../doc-path.ts';
 import {
   attachMarkdownComposer,
   focusMarkdownComposer,
@@ -67,11 +68,13 @@ import {
   reviewHeadline,
   reviewItemAnchorTarget,
   reviewItemBadge,
+  reviewItemMeasurementTarget,
   reviewItemOwner,
   reviewRowTitle,
   revisedPhrase,
 } from './board-review-model.ts';
 import { requireText } from './board-review-render.ts';
+import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { markPhrase, unmarkPhrase } from './review-item-phrase.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
 import { useSelectionPill } from './selection-pill.ts';
@@ -872,13 +875,19 @@ function WalkCard(props: {
     />
   );
   const answering = asking ? 'board-walk-answering hidden' : 'board-walk-answering';
+  // MEASUREMENT, invisible: the card reports itself seen once it is actually
+  // on screen. On the CARD, not the stage — the stage is the layout box and
+  // is there whether or not this item is the one drawn in it. The row's own
+  // board, because the cross-board walk draws items from every board into
+  // this same component and the page it is on is not the answer there.
+  const seenRef = useReviewItemSeen(reviewItemMeasurementTarget(item, currentWorkspaceId() ?? ''));
 
   return (
     // The stage (approved mock `.demo-doc-layout`): the card, and a margin
     // column that holds the thread a pill opens — beside the card at
     // ≥1101px, where height is the scarce axis, stacked below it at ≤1100px.
     <div class={draft !== null ? 'board-walk-stage board-walk-stage-open' : 'board-walk-stage'}>
-      <div class={`board-walk-card board-walk-${item.kind}`}>
+      <div ref={seenRef} class={`board-walk-card board-walk-${item.kind}`}>
         {/* First thing on the card, above the new item: what you just finished.
           It belongs here rather than in a toast because this is read on a
           phone, where a toast is gone before the thumb has come back down. */}

@@ -16,6 +16,7 @@
  * (TaskActor) and `task` (a full Task) — and `voice.request` carries the
  * one field the §3.3 enumeration never granted: the utterance itself.
  */
+import { isReviewItemMeasurementEvent } from '../review-items/analytics.ts';
 import { projectTask } from '../task-projection.ts';
 import type { Task } from '../tasks.ts';
 
@@ -46,6 +47,21 @@ const BOARD_EVENT = /^(task|decision|review_item|workspace|agent|triage|voice)\.
  * ts, and the display actor.
  */
 const VOICE_PRIVATE_FIELDS = ['transcript', 'ack', 'context'] as const;
+
+/**
+ * Dropped from a visitor's copy of the two review-item MEASUREMENT rows.
+ *
+ * Those rows carry `actorId` as a bare string rather than the `TaskActor`
+ * every other board event carries, because a subtraction has no use for a
+ * name — so `displayActor` below never sees them and the id would ride
+ * through untouched. These ids derive from an email address, which is the
+ * exact disclosure this module was written to close on `review_item.*` the
+ * first time.
+ *
+ * `isOwner` and the two item ids stay: a member of this board can already see
+ * the item and who its owner is.
+ */
+const MEASUREMENT_PRIVATE_FIELDS = ['actorId'] as const;
 
 /** `{id, name, kind}` → `{name, kind}` — the §3.3 display-only actor. */
 function displayActor(actor: unknown): unknown {
@@ -88,6 +104,9 @@ export function redactBoardEventForVisitor<T extends { event: string }>(payload:
   if (isTaskShape(p.task)) out.task = projectTask(p.task);
   if (payload.event.startsWith('voice.')) {
     for (const key of VOICE_PRIVATE_FIELDS) delete out[key];
+  }
+  if (isReviewItemMeasurementEvent(payload.event)) {
+    for (const key of MEASUREMENT_PRIVATE_FIELDS) delete out[key];
   }
   return out as unknown as T;
 }

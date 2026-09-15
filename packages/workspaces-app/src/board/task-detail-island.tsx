@@ -61,7 +61,11 @@ import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-m
 import { currentWorkspaceId, docHref } from '../doc-path.ts';
 import { SPACE_HOLD_PAGE_ATTR } from '../voice-capture.ts';
 import { ageShort } from './activity-model.ts';
-import { type PanelReviewItem, renderTaskLinks } from './board-detail-render.ts';
+import {
+  type PanelReviewItem,
+  panelItemMeasurementTarget,
+  renderTaskLinks,
+} from './board-detail-render.ts';
 import {
   BODY_LIVE_CLASS,
   type DetailHandlers,
@@ -94,6 +98,7 @@ import {
 import { panelReviewQueue } from './board-review-render.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { DoneWhenList } from './done-when-list.tsx';
+import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { markPhrase } from './review-item-phrase.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
 import { ScheduleEditor } from './schedule-editor.tsx';
@@ -331,8 +336,17 @@ function ReviewCard(props: {
   if (busy) classes.push('is-busy');
   if (!shown) classes.push('hidden');
 
+  // Measurement only — nothing about it is visible. An unshown card carries
+  // `hidden`, so it takes up no box and reports no intersection: the panel
+  // builds every item's card at once, and only the one the reader is actually
+  // looking at is SHOWN.
+  const seenRef = useReviewItemSeen(
+    panelItemMeasurementTarget(task.id, item, handlers.workspaceId || (currentWorkspaceId() ?? '')),
+  );
+
   return (
     <div
+      ref={seenRef}
       class={classes.join(' ')}
       data-review-item-id={item.id}
       // Routing data, and what the focus-scroll guard reads to tell whether

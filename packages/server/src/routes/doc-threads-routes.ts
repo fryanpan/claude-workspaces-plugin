@@ -42,6 +42,8 @@ import { classifyActor } from '../actor-identity.ts';
 import { threadOpenParts } from '../answer-coverage.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
+import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
+import { taskIdOfBodyDoc } from '../task-row.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import {
@@ -191,11 +193,16 @@ export async function handleDocThreadRoutes(
     heldFields,
     parseRevisedRange,
   } = ctx;
-  const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, withTaskChips } = rq;
+  const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, roleFor, withTaskChips } =
+    rq;
   // Set only by a mock page's host, on the writes it relays out of the
   // sandboxed frame. Recorded on what each write leaves behind so an agent
   // can tell a comment typed in the board from one a mock page could have sent.
   const via = writeViaOf(req);
+  /** The ticket this doc IS the body of, or null when it is an ordinary doc.
+   *  A review item on an ordinary doc's thread genuinely has no row, and the
+   *  measurement rows leave `taskId` off rather than empty. */
+  const rowOfDoc = taskIdOfBodyDoc(docId);
   const viaOpt = via ? { via } : {};
 
   /**
@@ -313,6 +320,21 @@ export async function handleDocThreadRoutes(
               actorId: user.id,
               ...(foldedOpen.length > 0 ? { openParts: foldedOpen } : {}),
             });
+            // MEASUREMENT: the ids-only twin of the `viewed` row this reader's
+            // browser wrote when the item came on screen. Emitted here for
+            // the same reason the nudge above is — an answer on a comment
+            // moves no task row, so nothing else in the server records that
+            // this item was answered at all.
+            taskStore.emit(
+              reviewItemAnsweredEvent({
+                workspaceId: foldedHome,
+                reviewItemId: threadReviewItemId(docId, threadId, pending.id),
+                ...(rowOfDoc !== null ? { taskId: rowOfDoc } : {}),
+                actorId: user.id,
+                isOwner: roleFor(foldedHome) === 'owner',
+                ts: Date.now(),
+              }),
+            );
           }
         }
         // A refusal here is the loser of that race, never a reason to
@@ -426,6 +448,17 @@ export async function handleDocThreadRoutes(
           actorId: user.id,
           ...(openParts.length > 0 ? { openParts } : {}),
         });
+        // MEASUREMENT, for the same reason and in the same place as the nudge.
+        taskStore.emit(
+          reviewItemAnsweredEvent({
+            workspaceId: answerHome,
+            reviewItemId: threadReviewItemId(docId, threadId, commentId),
+            ...(rowOfDoc !== null ? { taskId: rowOfDoc } : {}),
+            actorId: user.id,
+            isOwner: roleFor(answerHome) === 'owner',
+            ts: Date.now(),
+          }),
+        );
       }
       return j(200, { thread: res.thread, ...(openParts.length > 0 ? { openParts } : {}) });
     }

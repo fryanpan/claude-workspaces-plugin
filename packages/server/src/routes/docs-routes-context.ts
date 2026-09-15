@@ -28,6 +28,7 @@ import type { createLeadPresenceMonitor } from '../lead-presence.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
+import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadReviewGate } from '../review-gate-types.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -249,6 +250,17 @@ export interface DocRouteRequest {
    * `requireOwner` (`request-admission.ts`).
    */
   requireOwner: (workspaceId: string) => Response | null;
+  /**
+   * What this caller may DO on a board: `owner` or `member`, the admission
+   * gate's own verdict (`roleFor` there). Held beside `requireOwner` — which
+   * is this same answer turned into a refusal — because the answer itself is
+   * what a review item's `review_item.answered` row records, and a second
+   * reading of "is this the owner" is the drift `requireOwner` exists to
+   * prevent. An owner reaching their own board through the share hostname
+   * reads `owner` here and `visitor !== null` beside it, which is exactly the
+   * case a `!visitor` shortcut would get wrong.
+   */
+  roleFor: (workspaceId: string) => BoardRole;
   /** The doc meta a REST reply carries — redacted when the caller is a share
    *  visitor, which is why it is per-request rather than per-server. */
   metaFor: <T extends DocMeta>(meta: T) => Record<string, unknown>;

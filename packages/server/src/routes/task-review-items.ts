@@ -15,6 +15,7 @@ import { ticketOpenParts } from '../answer-coverage.ts';
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
+import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
 import {
   SECRET_ANSWER_DENIAL,
   SECRET_FILING_DENIAL,
@@ -44,7 +45,7 @@ export async function handleTaskReviewItems(
     judgeTaskDecision,
     answerCoverage,
   } = ctx;
-  const { req, scope, visitor, authorFor, refuseCategoryAuthor, requireOwner } = rq;
+  const { req, scope, visitor, authorFor, refuseCategoryAuthor, roleFor, requireOwner } = rq;
 
   /**
    * OWNER-ONLY ITEMS. An ask whose answer the owner's own machine then acts
@@ -217,6 +218,20 @@ export async function handleTaskReviewItems(
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     taskProjection.refreshTask(res.task);
+    // MEASUREMENT, beside `decision.answered` rather than instead of it: one
+    // ids-only row per landed answer, so the minutes between this reader
+    // being SHOWN the item and answering it are a subtraction over one log.
+    // See `review-items/analytics.ts`.
+    taskStore.emit(
+      reviewItemAnsweredEvent({
+        workspaceId,
+        reviewItemId,
+        taskId,
+        actorId: author.id,
+        isOwner: roleFor(workspaceId) === 'owner',
+        ts: Date.now(),
+      }),
+    );
     const stillOpen =
       res.item.answer === undefined ? res.item.partialAnswers?.at(-1)?.open : undefined;
     return j(200, { ...res, ...(stillOpen ? { openParts: stillOpen } : {}) });

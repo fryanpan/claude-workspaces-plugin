@@ -1,5 +1,7 @@
 import { parseThreadReviewItemId } from '@claude-workspaces/core';
-import { matchRest } from '../middleware/workspace-scope.ts';
+import { matchRest, restIs } from '../middleware/workspace-scope.ts';
+import { reviewItemViewedEvent } from '../review-items/analytics.ts';
+import { taskIdOfBodyDoc } from '../task-row.ts';
 /**
  * The Home queue: where a review item lives, what is waiting on a person, and the instructions above it.
  *
@@ -113,6 +115,82 @@ export async function handleWorkspaceHome(
       taskId: found.taskId,
       workspaceId: found.workspaceId,
     });
+  }
+  /**
+   * "I have SEEN this" — the browser's beacon, and the only door
+   * `review_item.viewed` is written through.
+   *
+   * WHY IT SITS HERE. This is the Home family, which is where a review item
+   * is addressed by its bare id already: the resolve route above decodes the
+   * same two id families, against the same two stores, and a second copy of
+   * that resolution somewhere else is the drift this repo keeps paying for.
+   *
+   * WHY THE ID IS IN THE BODY rather than the path. `review-items/<id>/…`
+   * would need its own arm in `shareScopeAllows`'s member dispatch — a switch
+   * in the file that decides what a share visitor may reach. A named verb at
+   * the collection is the shape that file already has a table row for
+   * (`goals/add` sits exactly where a band id goes for the same reason), so
+   * the widening is one table entry a reviewer can read rather than a new
+   * branch in the guard.
+   *
+   * NOTHING IS TAKEN FROM THE BODY BUT IDS TO LOOK UP. `taskId` is the
+   * server's answer, never the caller's: a ticket item's task comes off
+   * `findReviewItem`, a doc-thread item's off its own docId. `isOwner` is
+   * `roleFor` — the admission gate's verdict — so a body claiming to be the
+   * owner claims nothing. An id that resolves to no live item is a 404, which
+   * is what stops the log filling with rows for items that never existed.
+   */
+  if (restIs(scope, 'review-items/viewed') && scope && req.method === 'POST') {
+    const { workspaceId } = scope;
+    const body = await safeJson(req);
+    const author = authorFor(body?.author);
+    if (!author) return j(400, { error: 'author required' });
+    const reviewItemId = typeof body?.reviewItemId === 'string' ? body.reviewItemId : '';
+    if (reviewItemId === '') return j(400, { error: 'reviewItemId required' });
+    // The task the item hangs on, as the SERVER reads it. `undefined` means
+    // the item hangs on a doc that is not a ticket body, which is a real
+    // shape rather than a failure — an ask declared on an ordinary review
+    // doc's thread has no row.
+    let taskId: string | undefined;
+    const threadAddress = parseThreadReviewItemId(reviewItemId);
+    if (threadAddress) {
+      const { docId, threadId, commentId } = threadAddress;
+      // A decodable id is a claim, not a fact — the same sentence the resolve
+      // route above carries, and the same check behind it.
+      const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
+      if (!comment?.review) return j(404, { error: 'unknown-review-item' });
+      if (resolveWorkspaceForDoc(docId) !== workspaceId) {
+        return j(404, { error: 'unknown-review-item' });
+      }
+      taskId = taskIdOfBodyDoc(docId) ?? undefined;
+    } else if (reviewItemId === LEGACY_REVIEW_ITEM_ID) {
+      // Every legacy-decision ticket derives this one id, so alone it
+      // addresses nothing. The caller names the row, and the row is checked
+      // against the board in the path before it is believed.
+      const claimed = typeof body?.taskId === 'string' ? body.taskId : '';
+      const task = claimed === '' ? undefined : taskStore.getTask(claimed);
+      if (!task || task.workspaceId !== workspaceId) {
+        return j(404, { error: 'unknown-review-item' });
+      }
+      taskId = task.id;
+    } else {
+      const found = taskStore.findReviewItem(reviewItemId);
+      if (!found || found.workspaceId !== workspaceId) {
+        return j(404, { error: 'unknown-review-item' });
+      }
+      taskId = found.taskId;
+    }
+    taskStore.emit(
+      reviewItemViewedEvent({
+        workspaceId,
+        reviewItemId,
+        ...(taskId !== undefined ? { taskId } : {}),
+        actorId: author.id,
+        isOwner: roleFor(workspaceId) === 'owner',
+        ts: Date.now(),
+      }),
+    );
+    return j(200, { ok: true });
   }
   const wsReviewMatch = pathname.match(/^\/workspaces\/([^/]+)\/review-items$/);
   if (wsReviewMatch && scope && req.method === 'GET') {

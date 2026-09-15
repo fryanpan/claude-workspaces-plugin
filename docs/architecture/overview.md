@@ -1093,6 +1093,21 @@ copy is only a cache), and the project
 order comes from a hand-edited `review-plan.json` naming the plan board —
 there is no route that sets it.
 
+**How long an item waited to be READ** is two rows on the board's own event
+log, and nothing else: `review_item.viewed` when somebody's client first puts
+an item on screen, `review_item.answered` when an answer lands on it. Both are
+built in `server/src/review-items/analytics.ts` and nowhere else, so
+"ids and timestamps only, never the ask and never the answer" is a property of
+one function rather than a rule six emit sites remember; they land in
+`<dataDir>/workspaces/<ws>.events.jsonl` beside every other board event, and
+`workspace-next.ts` strips them from the Activity feed the way it strips ticks.
+The browser half is `workspaces-app/src/review-item-seen.ts` — one
+`IntersectionObserver` and one per-page ledger shared by the three surfaces
+that show an item (the walk card, the task panel's card, a doc thread's card),
+so meeting the same ask twice in one page load is one row. Neither adds a
+subsystem: the server module joins the review-item family under `routes/`, and
+the client module is chrome-free measurement with no UI of its own.
+
 ## Subsystem docs
 
 - [meeting-assistant.md](meeting-assistant.md) — live transcription and notes on a pause-or-cadence clock.

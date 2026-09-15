@@ -1479,8 +1479,75 @@ export interface ReviewItemWithdrawnEvent {
   ts: number;
 }
 
+/**
+ * A review item was SHOWN to somebody — the first time their client actually
+ * put it on screen in this client session.
+ *
+ * It exists because an answer is one instant. Weekly Review measures a
+ * person's hands-on time off these logs, and without a "saw it" row the
+ * minutes spent READING an ask before answering it count as zero. This row
+ * and `review_item.answered` sit in the same `events.jsonl`, on the same
+ * clock, keyed by the same `reviewItemId`, so the reading time is a
+ * subtraction rather than an estimate.
+ *
+ * IDS AND TIMESTAMPS ONLY, and that is a contract rather than an oversight:
+ * the pair is written to be measured, never to be read back as content. The
+ * ask's words are already on `review_item.added`, which is the row that
+ * carries them; duplicating them here would put the same sentence in a second
+ * place for no reader. `reviewItemAnalyticsEvent` is the one constructor, so
+ * a caller cannot widen the field set by spreading an item into it.
+ *
+ * `actorId` rather than a `TaskActor`: the name adds nothing to a
+ * subtraction, and this row is written far more often than any other
+ * review-item event. A visitor's copy drops even the id
+ * (`redactBoardEventForVisitor`).
+ */
+export interface ReviewItemViewedEvent {
+  type: 'review_item.viewed';
+  workspaceId: string;
+  /** The item's universal id — minted on a ticket row, derived on a
+   *  doc-thread one (`threadReviewItemId`). One vocabulary either way. */
+  reviewItemId: string;
+  /** The ticket the item hangs on, when it hangs on one. A review item
+   *  declared on an ordinary doc's thread has no task, and the field is
+   *  absent rather than empty. */
+  taskId?: string;
+  /** Who saw it. */
+  actorId: string;
+  /** Whether that person holds the board's `owner` role — resolved by the
+   *  admission gate, never read off the request body. */
+  isOwner: boolean;
+  ts: number;
+}
+
+/**
+ * The same row for the other end of the same span: an answer LANDED on a
+ * review item.
+ *
+ * Deliberately not `decision.answered`, which stays exactly as it is. That
+ * event carries the verbatim answer and the item's headline because the board
+ * needs them (§3.6), and it fires only for TICKET-borne items — an answer on
+ * a doc thread moves no task row, so it emits nothing at all today. Neither
+ * property is fixable in place without changing what the board's own feed
+ * says. So the measurement gets its own row: ids only, on every surface an
+ * item can be answered from, beside the richer event rather than instead of
+ * it.
+ */
+export interface ReviewItemAnsweredEvent {
+  type: 'review_item.answered';
+  workspaceId: string;
+  reviewItemId: string;
+  taskId?: string;
+  /** Who answered. */
+  actorId: string;
+  isOwner: boolean;
+  ts: number;
+}
+
 export type TaskStoreEvent =
   | ReviewItemAddedEvent
+  | ReviewItemViewedEvent
+  | ReviewItemAnsweredEvent
   | ReviewItemRevisedEvent
   | ReviewItemWithdrawnEvent
   | TaskCreatedEvent

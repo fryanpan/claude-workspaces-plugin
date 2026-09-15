@@ -42,9 +42,19 @@ import type { BoardWorkspace, Task } from './tasks.ts';
  * turn from any agent holding a row, so counting it would suppress the wake for
  * exactly as long as a builder keeps talking without moving anything, which is
  * the state the wake exists to catch.
+ *
+ * Neither does READING. `review_item.viewed` is a measurement row: a person's
+ * browser put an ask on screen, and the board is in exactly the state it was
+ * in a moment earlier. Counting it would suppress the ready-work wake for as
+ * long as somebody has the board open with unanswered items on it — which is
+ * precisely the situation the wake exists to end. Its twin
+ * `review_item.answered` is deliberately NOT excluded: an answer is the board
+ * moving, and `decision.answered` beside it already counts.
  */
 export function isBoardActivity(type: string): boolean {
-  return !type.startsWith('agent.') && type !== 'task.noted';
+  return (
+    !type.startsWith('agent.') && type !== 'task.noted' && type !== 'review_item.viewed'
+  );
 }
 
 /**

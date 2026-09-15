@@ -8,7 +8,8 @@ import { answerAsksBack } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { SECRET_ANSWER_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
-import { legacyDecisionItem } from '../tasks.ts';
+import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
+import { LEGACY_REVIEW_ITEM_ID, legacyDecisionItem } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -17,7 +18,7 @@ export async function handleTaskAnswers(
   rq: TaskRouteRequest,
 ): Promise<Response | undefined> {
   const { taskStore, j, safeJson, askBackOnItem } = ctx;
-  const { req, scope, visitor, authorFor, requireOwner } = rq;
+  const { req, scope, visitor, authorFor, roleFor, requireOwner } = rq;
 
   /**
    * The TICKET'S OWN decision can be owner-only too — it is the same ask,
@@ -105,6 +106,21 @@ export async function handleTaskAnswers(
       ...(optionId !== undefined ? { optionId } : {}),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
+    // MEASUREMENT, beside `decision.answered` rather than instead of it. The
+    // ticket's own decision is shown on the queue as a row like any other, so
+    // it writes a `viewed` row like any other, and this is the other end of
+    // that span. `LEGACY_REVIEW_ITEM_ID` is the id the queue and the browser
+    // both address it by. See `review-items/analytics.ts`.
+    taskStore.emit(
+      reviewItemAnsweredEvent({
+        workspaceId: scope?.workspaceId ?? res.task.workspaceId,
+        reviewItemId: LEGACY_REVIEW_ITEM_ID,
+        taskId,
+        actorId: author.id,
+        isOwner: roleFor(scope?.workspaceId ?? res.task.workspaceId) === 'owner',
+        ts: Date.now(),
+      }),
+    );
     return j(200, res);
   }
   // Undo. Answering is a single click with no confirmation, so there has

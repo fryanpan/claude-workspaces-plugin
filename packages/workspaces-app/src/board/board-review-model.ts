@@ -871,6 +871,45 @@ export function reviewItemAnchorTarget(
   };
 }
 
+/**
+ * WHICH ITEM this card is, for the measurement beacon — `null` when the row
+ * is not an item at all.
+ *
+ * Wider than `reviewItemAnchorTarget` beside it, and the difference is the
+ * point of having both. That one answers "where does a question about this
+ * get WRITTEN", so it refuses a row with nothing to anchor onto. This one
+ * answers "which ask is the reader looking at", which a doc-thread row and a
+ * ticket's own decision both have a perfectly good answer to.
+ *
+ * `null` is reserved for the one row that genuinely has no item: an inferred
+ * `unreplied` row is an open question somebody asked in a thread, not a
+ * declared item, and carries no `reviewItemId` to measure against. Those are
+ * left unmeasured rather than given a made-up id.
+ *
+ * `workspaceId` is the row's own when it carries one — the cross-board walk
+ * draws items from every board at once, so the page it is on is the wrong
+ * answer there — and the caller's board otherwise.
+ */
+export function reviewItemMeasurementTarget(
+  item: ReviewItem,
+  workspaceId: string,
+): { workspaceId: string; reviewItemId: string; taskId?: string } | null {
+  const t = item.thread;
+  if (t?.reviewItemId) {
+    return {
+      workspaceId: t.workspaceId ?? workspaceId,
+      reviewItemId: t.reviewItemId,
+      ...(t.taskId ? { taskId: t.taskId } : {}),
+    };
+  }
+  // A ticket's own decision: every legacy-decision ticket derives the same id,
+  // so the ticket travels with it or the row addresses nothing.
+  if (item.decision) {
+    return { workspaceId, reviewItemId: LEGACY_REVIEW_ITEM_ID, taskId: item.decision.task.id };
+  }
+  return null;
+}
+
 /** Who a question on this item goes to — the item's asker, or for a
  *  ticket's own decision the ticket's filer — named in the box's hint and
  *  the toast. Undefined when nothing recorded one. */

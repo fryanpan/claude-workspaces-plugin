@@ -8,6 +8,7 @@ import {
   restoreScrollTops,
 } from './composer-keep.ts';
 import { type ThreadCardHost, renderThreadCard } from './doc/thread-card.ts';
+import { reviewItemSeen } from './review-item-seen.ts';
 import {
   morphThread,
   prefersReducedMotion,
@@ -177,6 +178,10 @@ export class ThreadPanel {
         this.lastRenderKey = this.computeKey();
       }
     }
+    // A fold changes what is SHOWN without moving anything into or out of the
+    // viewport, so the review-item beacon has nothing new to observe and has
+    // to be told. Invisible, and a no-op on a page holding no review item.
+    reviewItemSeen().recheck();
     // Announced on every call, not only on a change: a caller re-asserting
     // the current selection is asking for the surface to match it, and the
     // decoration is recomputed from live ranges that may have moved since.
