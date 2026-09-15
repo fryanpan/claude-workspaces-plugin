@@ -135,7 +135,14 @@ true` when the server took it.
   handshake, so the replay is never truncated at the far end nor marks the
   ledger untrusted. The hold is a ring trimmed by age on every push, flushed
   on the resuming socket's `open` — BEFORE `ready`, so the server's in-order
-  pre-handshake buffer keeps the replayed frames ahead of any live one.
+  pre-handshake buffer keeps the replayed frames ahead of any live one. It is
+  READ rather than emptied there, and only a `ready` empties it: the resuming
+  socket can still die during its handshake, and an `already_recording`
+  refusal mid-resume is RETRIED rather than reported (the bullet below), so a
+  hold emptied on `open` would leave the retry with nothing to replay. Frames
+  spoken between `open` and `ready` are banked as well as sent for the same
+  reason. The cost is that a server which recorded them and then died before
+  answering hears a second or two twice; the alternative is hearing it never.
 - **The resuming `start` frame carries `heldMs`**, and the server subtracts it
   from the outage before writing the gap. So a reconnect inside the cap
   records NO gap — nothing was lost — and one past it records only the head
@@ -151,7 +158,11 @@ true` when the server took it.
   with `gapReason: 'reconnect'`. A `bot` source writes none (there is no local
   capture to lose). `flushRawSegments` sorts a reconnect gap into the leg it
   belongs to rather than treating it as a gap CARRIED across the resume,
-  which is what a `stream_state` gap still open at the drop is.
+  which is what a `stream_state` gap still open at the drop is. Each
+  continuation block owns exactly the outage that OPENED it — bounded below by
+  the resume before this one, because a meeting that reconnects five times
+  holds five reconnect gaps by the end and every one of them opens before the
+  latest resume.
 - **The backoff is 1s, 2s, 4s, 8s, then 15s, giving up after two minutes**
   (`meeting-reconnect.ts`, which holds the policy and nothing else). An
   `already_recording` refusal DURING a resume is retried rather than reported:

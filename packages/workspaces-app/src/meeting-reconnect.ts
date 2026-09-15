@@ -143,12 +143,12 @@ export const RESUME_FAILED_NOTE =
  */
 export const AUDIO_HOLD_MS = 8_000;
 
-/** What a hold hands back when it is emptied. */
+/** What a hold hands back when it is read. */
 export interface HeldAudio {
   /** Every frame still inside the cap, oldest first. */
   frames: readonly ArrayBufferView[];
   /**
-   * From the oldest frame still held to the moment it was taken.
+   * From the oldest frame still held to the moment it was read.
    *
    * The server subtracts it from the outage to work out what was actually
    * lost, so it has to be the span the frames COVER rather than the cap or
@@ -170,9 +170,20 @@ export interface HeldAudio {
 export interface AudioHold {
   /** Bank one frame. Anything older than the cap is dropped. */
   push(frame: ArrayBufferView, at: number): void;
-  /** Everything still inside the cap, and the hold is emptied. */
-  take(at: number): HeldAudio;
-  /** Forget it all — a new recording, or a resume nobody took. */
+  /**
+   * Everything still inside the cap, WITHOUT emptying the hold.
+   *
+   * A replay goes out on the new socket's `open`, and that socket can still
+   * die before the server answers `ready` — a handshake the server refuses
+   * with `already_recording` while the dropped socket's teardown holds the
+   * doc, or simply another drop. Emptying here would mean the retry after
+   * that has nothing left to replay, which loses exactly the audio the hold
+   * exists to keep. So the hold is read and kept, and only a `ready` empties
+   * it (`clear`).
+   */
+  peek(at: number): HeldAudio;
+  /** Forget it all — a resume that landed, a new recording, or one nobody
+   *  took. */
   clear(): void;
 }
 
@@ -192,13 +203,11 @@ export function createAudioHold(opts: { capMs?: number } = {}): AudioHold {
       frames.push({ frame, at });
       expire(at);
     },
-    take(at) {
+    peek(at) {
       expire(at);
-      const held = frames;
-      frames = [];
-      const oldest = held[0]?.at;
+      const oldest = frames[0]?.at;
       return {
-        frames: held.map((f) => f.frame),
+        frames: frames.map((f) => f.frame),
         heldMs: oldest === undefined ? 0 : Math.max(0, at - oldest),
       };
     },

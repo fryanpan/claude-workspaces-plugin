@@ -3160,6 +3160,66 @@ describe('the words spoken while the socket was down', () => {
     expect(audio(h.sockets[1])).toEqual([2, 3]);
   });
 
+  it('replays them again when the resuming socket dies before `ready`', async () => {
+    // THE RACE THE DOC ALREADY NAMES: a resume can be refused with
+    // `already_recording` while the dropped socket's teardown still holds the
+    // doc, and that refusal is retried. A hold emptied on `open` would have
+    // nothing left for the retry, which loses exactly the words it exists to
+    // keep — so the hold is read and kept until a `ready` confirms.
+    const { h, feed } = await recording();
+    h.sockets[0]?.onclose?.();
+    h.clock.at += 1_000;
+    feed(7);
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    expect(audio(h.sockets[1])).toEqual([7]);
+
+    // That socket never answers; it dies mid-handshake.
+    h.sockets[1]?.onclose?.();
+    h.clock.at += 1_000;
+    h.fireRetry();
+    h.sockets[2]?.onopen?.();
+    expect(audio(h.sockets[2])).toEqual([7]);
+  });
+
+  it('carries the words said DURING a handshake that never finished', async () => {
+    // Between `open` and `ready` the frames go out live, so a socket that
+    // dies in that window takes them with it. They are banked as well as
+    // sent, so the next attempt can say them again.
+    const { h, feed } = await recording();
+    h.sockets[0]?.onclose?.();
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    feed(8);
+    expect(audio(h.sockets[1])).toEqual([8]);
+
+    h.sockets[1]?.onclose?.();
+    h.clock.at += 1_000;
+    h.fireRetry();
+    h.sockets[2]?.onopen?.();
+    expect(audio(h.sockets[2])).toEqual([8]);
+  });
+
+  it('empties the hold once the resume is confirmed', async () => {
+    // The other side of keeping it: a `ready` means the server has the audio,
+    // so a LATER outage must not replay the previous one's words on top of
+    // its own.
+    const { h, feed } = await recording();
+    h.sockets[0]?.onclose?.();
+    h.clock.at += 1_000;
+    feed(9);
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    h.sockets[1]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+
+    h.sockets[1]?.onclose?.();
+    h.clock.at += 1_000;
+    feed(10);
+    h.fireRetry();
+    h.sockets[2]?.onopen?.();
+    expect(audio(h.sockets[2])).toEqual([10]);
+  });
+
   it('drops the excess of an outage longer than the cap', async () => {
     const { h, feed } = await recording();
     h.sockets[0]?.onclose?.();

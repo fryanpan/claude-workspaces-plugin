@@ -666,8 +666,20 @@ export function flushRawSegments(args: {
       // `came back after` line could answer, and a lone recovery bullet would
       // point at a loss no reader can find. It belongs to this block, stated
       // in full, and it sorts to the head of it because that is when it began.
+      //
+      // AND ONLY THIS LEG'S. A meeting that reconnects five times holds five
+      // reconnect gaps by the end, every one of them opening before the
+      // LATEST resume — so `from < resumedAt` alone reprinted the first
+      // outage in the second block, both of them in the third, and so on.
+      // The boundary is the resume before this one (the meeting's start for
+      // the first continuation), and the gap this block owns is the one that
+      // opened after it.
+      const prevBoundary =
+        (record.resumedAt ?? []).filter((t) => t < resumedAt).pop() ?? record.startedAt;
       const legGaps = all.filter(
-        (g) => g.from >= resumedAt || (g.reason === RECONNECT_GAP_REASON && g.from < resumedAt),
+        (g) =>
+          g.from >= resumedAt ||
+          (g.reason === RECONNECT_GAP_REASON && g.from >= prevBoundary && g.from < resumedAt),
       );
       // And the recoveries that block could not know about — a capture that
       // was already down when the socket dropped and came back after it. That

@@ -1663,6 +1663,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // handshake that just finished: the server answering now has heard
         // nothing about it.
         serverHasMeeting = true;
+        // The handshake landed, so whatever this connection replayed and
+        // banked during it is the server's problem now.
+        audioHold.clear();
         announceStreamState();
         if (msg.meetingId) liveMeetingId = msg.meetingId;
         // The meeting now has a name, so anything keyed to one can hold
@@ -1873,6 +1876,17 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
           audioHold.push(pcm, now());
           return;
         }
+        // OPEN BUT NOT YET ANSWERED. The frame goes out, and it is ALSO
+        // banked: a handshake that never finishes — the server refusing a
+        // resume with `already_recording` while the old socket's teardown
+        // still holds the doc, or another drop — takes everything sent on
+        // this connection with it, and the retry has to be able to say it
+        // again. The hold is emptied on `ready`, so the duplicate only ever
+        // exists inside a handshake nobody completed. Worst case if the
+        // server did record these and then died before answering: a couple
+        // of seconds said twice, which is the better side of the trade
+        // against a couple of seconds lost.
+        if (!serverHasMeeting) audioHold.push(pcm, now());
         socket?.send(pcm);
         // Counted only when it actually goes out, so this ordinal is the same
         // ordinal the server's ledger gives the chunk it receives.
@@ -1959,7 +1973,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // server subtracts it from the gap it would otherwise record as lost.
       // A first start takes nothing and empties the hold: audio banked
       // against a meeting nobody is resuming belongs to no recording.
-      const held = resume !== undefined ? audioHold.take(now()) : { frames: [], heldMs: 0 };
+      // READ AND KEPT, not taken: this socket can still die before `ready`,
+      // and the retry after that needs the same frames. The hold is emptied
+      // where the resume is confirmed instead.
+      const held = resume !== undefined ? audioHold.peek(now()) : { frames: [], heldMs: 0 };
       if (resume === undefined) audioHold.clear();
       // A read that failed while everything was down gets its retry here.
       reconcileNotesMethod();
