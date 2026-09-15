@@ -33,14 +33,22 @@ import { proseNote } from './notes-quality.ts';
  * many lines that changed.
  */
 export function bulletProseLines(markdown: string): { markdown: string; bulleted: number } {
-  let fenced = false;
+  // The fence that is open, if any. Only the same marker, at least as long and
+  // with nothing after it, closes it: a ``` line inside a ~~~ block is code.
+  let fence: string | undefined;
   let bulleted = 0;
   const lines = markdown.split('\n').map((line) => {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fenced = !fenced;
+    const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (marker) {
+      const run = marker[1]!;
+      const rest = marker[2] ?? '';
+      if (fence === undefined) fence = run;
+      else if (run[0] === fence[0] && run.length >= fence.length && rest.trim() === '') {
+        fence = undefined;
+      }
       return line;
     }
-    if (fenced || proseNote(line) === undefined) return line;
+    if (fence !== undefined || proseNote(line) === undefined) return line;
     bulleted++;
     return `- ${line}`;
   });

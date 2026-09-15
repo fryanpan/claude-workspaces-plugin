@@ -386,6 +386,21 @@ describe('normalizeSpeakerTags — stamping this tick', () => {
     expect(out.markdown).toBe('- [@Devi](speaker:B?t=10) and it moved.');
   });
 
+  it('keeps a claim only as many times as the replaced note carried it', () => {
+    const out = normalizeSpeakerTags(
+      '- [@Devi](speaker:B?t=3) wants the gate moved, and [@Devi](speaker:B?t=3) will ask.',
+      {
+        names: { B: 'Devi' },
+        known,
+        turnsByLabel: { B: [10] },
+        claimsFrom: '[@Devi](speaker:B?t=3) wants the gate moved.',
+      },
+    );
+    expect(out.markdown).toBe(
+      '- [@Devi](speaker:B?t=3) wants the gate moved, and [@Devi](speaker:B?t=10) will ask.',
+    );
+  });
+
   it('leaves that mention out of the correction that follows', () => {
     // The consequence of the rule above, end to end: turn 10 moves B to C,
     // and the mention whose provenance was unreadable stays with B because

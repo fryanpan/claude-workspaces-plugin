@@ -37,6 +37,13 @@ describe('bulletProseLines', () => {
     ].join('\n');
     expect(bulletProseLines(md)).toEqual({ markdown: md, bulleted: 0 });
   });
+
+  test('a fence closes only on its own marker, so code quoting the other one stays code', () => {
+    const md = ['~~~', '```js', 'kiln budget line', '~~~', 'After the code'].join('\n');
+    expect(bulletProseLines(md).markdown).toBe(
+      ['~~~', '```js', 'kiln budget line', '~~~', '- After the code'].join('\n'),
+    );
+  });
 });
 
 describe('bulletNotesEdits', () => {

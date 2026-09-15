@@ -564,14 +564,17 @@ export function normalizeSpeakerTags(
   opts: NormalizeSpeakerTagsOptions,
 ): NormalizeSpeakerTagsResult {
   const protectedLines = protectedLineSet(opts.protect);
-  const ownClaims =
-    opts.claimsFrom === undefined
-      ? undefined
-      : new Set(
-          findSpeakerTags(opts.claimsFrom)
-            .filter((tag) => tag.claimsTurns)
-            .map((tag) => claimKey(tag.label, tag.turns)),
-        );
+  // How many times the block already carried each claim. A mention consumes
+  // one, so a copy of a claim the block holds once is still a new mention.
+  let ownClaims: Map<string, number> | undefined;
+  if (opts.claimsFrom !== undefined) {
+    ownClaims = new Map();
+    for (const tag of findSpeakerTags(opts.claimsFrom)) {
+      if (!tag.claimsTurns) continue;
+      const key = claimKey(tag.label, tag.turns);
+      ownClaims.set(key, (ownClaims.get(key) ?? 0) + 1);
+    }
+  }
   const unknown: string[] = [];
   let renamed = 0;
   let stamped = 0;
@@ -591,9 +594,7 @@ export function normalizeSpeakerTags(
       // was corrupted keeps its empty handle instead of being handed one
       // from a tick it never came from.
       // A claim copied from another block is not this block's (`claimsFrom`).
-      const claims =
-        tag.claimsTurns &&
-        (ownClaims === undefined || ownClaims.has(claimKey(tag.label, tag.turns)));
+      const claims = tag.claimsTurns && (ownClaims === undefined || takeClaim(ownClaims, tag));
       const turns = claims ? tag.turns : (opts.turnsByLabel?.[tag.label] ?? []);
       const want = renderSpeakerTag(tag.label, opts.names, {
         turns,
@@ -615,6 +616,18 @@ export function normalizeSpeakerTags(
     { skip: (line) => isProtected(line, protectedLines) },
   );
   return { markdown: next, renamed, stamped, unknown };
+}
+
+/** Whether the block still holds this tag's claim, using one up if it does. */
+function takeClaim(
+  held: Map<string, number>,
+  tag: { label: string; turns: readonly number[] },
+): boolean {
+  const key = claimKey(tag.label, tag.turns);
+  const left = held.get(key) ?? 0;
+  if (left === 0) return false;
+  held.set(key, left - 1);
+  return true;
 }
 
 /** One voice's claim to a set of turns, as a comparable key. */
