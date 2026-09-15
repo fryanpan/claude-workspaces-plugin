@@ -2364,10 +2364,24 @@ opening bullet outside them, and the pass wrote it a second time. The answer
 is the live tick path's own check — `dedupeNotesEdits`
 (`notes-edit-dedupe.ts`) — run on this path too, and asked against the
 UNWINDOWED outline, which is what keeps it from sharing the blind spot it
-exists to close. It runs before `confineToSection`, so the delete a move
-emits is gated like any other edit and the gate stays the last word; what it
-drops comes back as `alreadyWritten`, separate from `refused` because the two
-are refused by different rules.
+exists to close. What it drops comes back as `alreadyWritten`, separate
+from `refused` because the two are refused by different rules.
+
+**The gate runs on either side of the dedupe, and that order is the whole of
+it.** The dedupe REWRITES a batch: a note the section already carries under a
+different topic is read as the note-taker moving its own bullet, so it emits a
+`delete_block` on the earlier copy beside the insert that replaces it. Handed
+the model's answer before the gate saw it, it did that for an insert aimed at
+a heading OUTSIDE the section — the gate then refused the insert, for exactly
+the reason it exists, and kept the delete, because in isolation there is
+nothing wrong with deleting the pass's own uncommented bullet inside its own
+section. The section's only copy of the note was gone and the run logged "1
+refused, 1 blocks touched", which reads like restraint. So the model's edits
+are gated first, and the batch the dedupe returns is gated again: a refused
+edit cannot produce an authorised side effect. `notes-cleanup-gate.ts` is that
+composition, and `notes-cleanup-gate.test.ts` drives both halves — the refused
+insert that now takes nothing with it, and the control that an in-section move
+still happens.
 
 **And the GATE reads the whole doc too, which is the half that is easy to
 miss.** `CLEANUP_OUTLINE_BLOCKS` is a budget on the prompt; using it to decide

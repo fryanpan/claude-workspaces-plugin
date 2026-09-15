@@ -53,20 +53,15 @@
 import { prose, speakerDisplayName } from '@claude-workspaces/core';
 import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-notes.ts';
 import { listMeetings, readTranscript } from './meetings.ts';
+import { cleanupWriteSet } from './notes-cleanup-gate.ts';
 import { CLEANUP_DIRECTIVE, CLEANUP_TRANSCRIPT_LABEL } from './notes-cleanup-prompt.ts';
-import {
-  claimable,
-  commentedBlockIds,
-  confineToSection,
-  sectionIds,
-} from './notes-cleanup-scope.ts';
+import { claimable, commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
   applyNotesBlockEdits,
   readNotesOutline,
 } from './notes-doc-access.ts';
-import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
 import { unconfirmedDirective, unconfirmedNotes } from './notes-unconfirmed.ts';
 
@@ -392,37 +387,27 @@ export async function runNotesCleanupPass(
   // windowed (`readOutline` drops body entries only), so it is only ever the
   // body ids and the ownership marks that were short.
   const now = readNotesOutline(docStore, docId);
-  // EACH NOTE ONCE.
-  //
-  // The outline the model answered about is capped at
-  // {@link CLEANUP_OUTLINE_BLOCKS} body blocks, counted from the END of the
-  // doc. Over a meeting whose notes run past that cap, its own earlier bullets
-  // are not in the prompt at all — so a pass doing exactly what the directive
-  // asks ("ADD what is missing: an idea this meeting carried that no note
-  // mentions") writes a note the section already carries, and no wording can
-  // stop it: the model cannot leave alone what it was never shown. Measured
-  // 2026-09-15 on a 521-body-block doc — 400 entries shown, the first bullet
-  // outside them, and the pass wrote it a second time.
-  //
-  // `dedupeNotesEdits` is the same check the live tick path runs
-  // (`meeting-notes-doc.ts`), and it is asked against the outline above rather
-  // than the one the model saw, which is what makes it an answer rather than
-  // the same blind spot again. Before the gate, so the delete a move emits is
-  // judged by `confineToSection` like any other edit and the gate stays the
-  // last word.
-  const deduped = dedupeNotesEdits(edits, {
-    notesHeadingId: headingId,
-    outline: now,
-    speech: turns.map((t) => t.text),
-    authorId: NOTES_AUTHOR_ID,
-    commented: () => commentedBlockIds(doc.ydoc),
-  });
-  const { kept, refused, reasons } = confineToSection(deduped.edits, {
-    ...sectionIds(now, headingId),
-    ...ownership(now),
-    headingId,
-    commented: commentedBlockIds(doc.ydoc),
-  });
+  // EACH NOTE ONCE, AND A REFUSED EDIT CHANGES NOTHING. The gate, the
+  // dedupe and the gate again are one answer, composed in `cleanupWriteSet`
+  // (`notes-cleanup-gate.ts`) because the ORDER is the load-bearing part: the
+  // dedupe rewrites a batch, so handed an edit the gate would refuse it can
+  // emit an authorised delete beside the refused insert and take the section's
+  // only copy of a note with it.
+  const { kept, refused, reasons, alreadyWritten } = cleanupWriteSet(
+    edits,
+    {
+      ...sectionIds(now, headingId),
+      ...ownership(now),
+      headingId,
+      commented: commentedBlockIds(doc.ydoc),
+    },
+    {
+      outline: now,
+      speech: turns.map((t) => t.text),
+      authorId: NOTES_AUTHOR_ID,
+      commented: () => commentedBlockIds(doc.ydoc),
+    },
+  );
   // NOTHING HAPPENS BETWEEN THE GATE AND THE WRITE, and that is the point.
   // The pass stamps no authorship on anything: `applyBlockEdits` reads each
   // block's own mark — one this pass never wrote — and rewrites its own work
@@ -468,7 +453,7 @@ export async function runNotesCleanupPass(
     proposed: edits.length,
     refused,
     refusals: reasons,
-    alreadyWritten: deduped.alreadyWritten,
+    alreadyWritten,
     applied: result.applied,
     suggested: result.suggested,
     failed: result.failed,
@@ -481,9 +466,7 @@ export async function runNotesCleanupPass(
     line:
       `notes cleanup ${docId}/${meetingId}: ${turns.length} turns read, ` +
       `${edits.length} edits proposed, ${refused} refused, ${touched} blocks touched` +
-      (deduped.alreadyWritten > 0
-        ? `, ${deduped.alreadyWritten} notes the section already carried`
-        : '') +
+      (alreadyWritten > 0 ? `, ${alreadyWritten} notes the section already carried` : '') +
       // EVERY REFUSAL NAMED, on the same line as its count. A count with no
       // reasons is what left "16 refused, 0 blocks touched" unexplainable —
       // see `NotesCleanupResult.refusals`.

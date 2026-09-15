@@ -680,10 +680,13 @@ read of the doc; it composes nothing. `notes-cleanup-prompt.ts` is the third
 piece and the only one that is not code: the restraint directive and the
 transcript label, split off so that rewording the pass's instructions touches
 no module that decides anything. It exports two strings, imports nothing and
-changes nothing in the picture. The pass also reaches sideways into
-`notes-edit-dedupe.ts` — the tick path's "each note once" check — so a tidy-up
-over a meeting longer than its own outline window cannot write a note the
-section already carries.
+changes nothing in the picture. `notes-cleanup-gate.ts` is the fourth: it
+composes the other gate with `notes-edit-dedupe.ts` — the tick path's "each
+note once" check — into the one order that is safe, gating the model's answer
+BEFORE the dedupe may rewrite it and again after. It exists because the dedupe
+invents edits, so an insert the gate would refuse could otherwise emit an
+authorised delete beside it and take the section's only copy of a note with
+it. One caller, the pass; nothing else imports it.
 
 `meeting-stream-set.ts` joins that services tier inside the `meeting-*`
 family and moves nothing in the picture: it is the fan-out one level below
