@@ -17,6 +17,7 @@ import {
   createIdeaLedger,
   extractIdeas,
   ideaCarried,
+  stem,
 } from '../src/notes-idea-coverage.ts';
 
 const turn = (n: number, text: string): NotesTurn => ({ turn: n, text, speaker: 'Devi' });
@@ -93,6 +94,21 @@ describe('whether the notes carry an idea', () => {
         forms.join('/'),
       ).toEqual(forms.map(() => contentWords(forms[0] as string).join(' ')));
     }
+  });
+
+  it('gives a word whose own letters end in -ed or -ee one stem', () => {
+    // "need" is not "ne" + "-ed", and "agreed" is "agree" + "-d".
+    for (const forms of [
+      ['need', 'needs', 'needed'],
+      ['seed', 'seeds', 'seeded'],
+      ['speed', 'speeds'],
+      ['hundred', 'hundreds'],
+      ['agree', 'agrees', 'agreed'],
+    ]) {
+      expect(forms.map(stem), forms.join('/')).toEqual(forms.map(() => stem(forms[0] as string)));
+    }
+    expect(stem('seed')).not.toBe(stem('see'));
+    expect(stem('feed')).not.toBe(stem('fee'));
   });
 
   it('keeps the double letter a word has of its own', () => {

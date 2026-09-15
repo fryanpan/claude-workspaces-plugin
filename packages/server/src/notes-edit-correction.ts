@@ -57,6 +57,12 @@ const CUE_STEMS = new Set(
 /** A markdown line that is one bullet and its words. */
 const ONE_BULLET = /^\s*(?:[-*+]|\d+[.)])\s+\S/;
 
+/**
+ * A markdown line that is one top-level paragraph: not indented (code), not a
+ * heading, quote, table row, fence or rule.
+ */
+const ONE_PARAGRAPH = /^(?![#>|]|```|~~~|(?:[-*_]\s*){3,}$)\S/;
+
 /** The content words of `was` that no other block of the section carries. */
 export function ownWords(
   was: prose.OutlineEntry,
@@ -182,8 +188,11 @@ export interface CorrectionScope {
 /**
  * The one note an inserted bullet corrects, when there is exactly one.
  *
- * Only a single bullet line is judged — a batch opening a topic with several
- * notes is writing notes, not taking one back — and only the note-taker's own
+ * Only a single bullet or paragraph line is judged — a batch opening a topic
+ * with several notes is writing notes, not taking one back. The paragraph is
+ * a replay's shape (2026-09-14): the model wrote the take-back as a bare
+ * "**Decision:** stop tracking estimated hours; track incoming requests
+ * instead" under the note it withdrew. And only the note-taker's own
  * notes under the insert's own heading answer, with nothing nested under them,
  * because the edit this becomes replaces the whole item where it stands.
  */
@@ -192,7 +201,8 @@ export function correctedNote(
   scope: CorrectionScope,
 ): prose.OutlineEntry | undefined {
   const lines = markdown.split('\n').filter((l) => l.trim().length > 0);
-  if (lines.length !== 1 || !ONE_BULLET.test(lines[0] ?? '')) return undefined;
+  const line = lines[0] ?? '';
+  if (lines.length !== 1 || !(ONE_BULLET.test(line) || ONE_PARAGRAPH.test(line))) return undefined;
   const { outline, section } = scope;
   const answers = outline.filter(
     (e, i) =>

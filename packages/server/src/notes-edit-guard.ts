@@ -348,9 +348,36 @@ export function guardNotesEdits(
     }
     worded.push({ ...edit, markdown });
   }
-  // Blocks some edit of this batch already rewrites or removes: a correction
-  // written as an insert never takes one of them over.
-  const targeted = new Set(worded.flatMap((e) => ('blockId' in e ? [e.blockId] : [])));
+  // RULE 2, and every clause of this condition is load-bearing. Only a LIST
+  // ITEM is a note; only a block the note-taker still owns is one an edit may
+  // rewrite at all (anything else reaches a person as a suggestion, which
+  // destroys nothing); and only a replacement that drops the bullet's own
+  // words is an overwrite rather than a revision. Answers the note such a
+  // replace would overwrite, which the loop below adds beside it instead.
+  const overwrites = (edit: prose.BlockEdit): prose.OutlineEntry | undefined => {
+    if (edit.op !== 'replace_block' || headingId === undefined || edit.blockId === headingId)
+      return undefined;
+    const was = section?.blocks.has(edit.blockId)
+      ? outline?.find((e) => e.id === edit.blockId)
+      : undefined;
+    if (was === undefined || was.kind !== 'listItem' || was.author === undefined) return undefined;
+    const own = ownWords(was, outline ?? [], section?.blocks);
+    return !keepsItsWords(was.text, edit.markdown, own) &&
+      !saidElsewhere(was, outline ?? [], section?.blocks) &&
+      !correctsIt(own, edit.markdown, ctx.speech ?? [])
+      ? was
+      : undefined;
+  };
+  // Blocks some edit of this batch will actually rewrite or remove: a
+  // correction written as an insert never takes one of them over. A replace
+  // RULE 2 turns into an insert rewrites nothing, so it holds no block.
+  const targeted = new Set(
+    worded.flatMap((e) =>
+      'blockId' in e && e.blockId !== ctx.notesHeadingId && overwrites(e) === undefined
+        ? [e.blockId]
+        : [],
+    ),
+  );
   for (const edit of worded) {
     if (
       edit.op === 'insert_under_heading' &&
@@ -386,27 +413,8 @@ export function guardNotesEdits(
       refused.push(`${edit.op} on the meeting's own notes heading (${edit.blockId})`);
       continue;
     }
-    const was =
-      edit.op === 'replace_block' && outline !== undefined && section?.blocks.has(edit.blockId)
-        ? outline.find((e) => e.id === edit.blockId)
-        : undefined;
-    // RULE 2, and every clause of this condition is load-bearing. Only a
-    // LIST ITEM is a note; only a block the note-taker still owns is one an
-    // edit may rewrite at all (anything else reaches a person as a
-    // suggestion, which destroys nothing); and only a replacement that drops
-    // the bullet's own words is an overwrite rather than a revision.
-    const own =
-      was !== undefined ? ownWords(was, outline ?? [], section?.blocks) : ([] as string[]);
-    if (
-      edit.op === 'replace_block' &&
-      was !== undefined &&
-      was.kind === 'listItem' &&
-      was.author !== undefined &&
-      headingId !== undefined &&
-      !keepsItsWords(was.text, edit.markdown, own) &&
-      !saidElsewhere(was, outline ?? [], section?.blocks) &&
-      !correctsIt(own, edit.markdown, ctx.speech ?? [])
-    ) {
+    const was = overwrites(edit);
+    if (was !== undefined && headingId !== undefined && edit.op === 'replace_block') {
       // Under the bullet's OWN heading when it has one inside this section,
       // so a note about a topic stays with its topic; under the meeting's
       // heading otherwise.

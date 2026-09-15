@@ -146,7 +146,9 @@ export function stem(word: string): string {
   // "status" and "statuses", "menu" and "menus": a singular can end in "us"
   // or "is" and a plural can too, so the one "s" either keeps goes from both.
   if (base.length > 3 && /[iu]s$/.test(base)) base = base.slice(0, -1);
-  return base.length > 3 && base.endsWith('e') ? base.slice(0, -1) : base;
+  // Both "e"s of "agree", so "agreed" (which "-ed" leaves "agre") meets it.
+  while (base.length > 3 && base.endsWith('e')) base = base.slice(0, -1);
+  return base;
 }
 
 /** `w` with one inflectional suffix taken off, leaving at least three letters. */
@@ -164,13 +166,22 @@ function unsuffixed(w: string): string {
   // words reach the same stem through "-ed" and the final "e" going.
   if (w.endsWith('ed')) {
     const root = cut(2);
-    return root !== null ? undoubled(root) : (cut(1) ?? w);
+    if (root !== null) return undoubled(root);
+    // "need", "seed", "feed": a four-letter "-eed" word is its own root, so
+    // it meets "needs" and "needed" rather than losing its "d" to "nee".
+    return /^[^e]eed$/.test(w) ? w : (cut(1) ?? w);
   }
   // "-es" is only a two-letter plural after a sibilant ("batches", "boxes").
   // Everywhere else the "e" belongs to the word: "ranges" loses only its "s",
   // and the "e" goes with every other form's in `stem`.
   if (/(?:s|x|z|ch|sh)es$/.test(w) && cut(2) !== null) return cut(2) as string;
-  if (w.endsWith('s') && !w.endsWith('ss')) return cut(1) ?? w;
+  // A plural is its singular's stem, whatever that singular ends in:
+  // "hundreds" meets "hundred" and "speeds" meets "speed" only when the "s"
+  // coming off hands the rest back through the rules above.
+  if (w.endsWith('s') && !w.endsWith('ss')) {
+    const singular = cut(1);
+    return singular === null ? w : unsuffixed(singular);
+  }
   return w;
 }
 

@@ -111,6 +111,46 @@ describe('a correction written as a new bullet beside the note', () => {
     expect(after).toContain(URGENT);
   });
 
+  test('replaces the note when the correction is one paragraph', () => {
+    // A replay's shape: the take-back written as a bare labelled paragraph.
+    const m = meeting();
+    const correction =
+      '**Decision:** Stop tracking estimated hours on board; track incoming requests instead';
+    const after = write(
+      m,
+      { op: 'insert_under_heading', headingId: idOf(m, 'Hull patch'), markdown: correction },
+      [TAKE_BACK],
+    );
+    expect(after.filter((t) => /estimate|forty/i.test(t))).toEqual([correction]);
+    expect(after).toContain(CHECKLIST);
+  });
+
+  test('replaces the note when the same batch rewrites it into a new note', () => {
+    // RULE 2 turns the replace into an insert, so it overwrites nothing and
+    // the correction beside it still takes the note over.
+    const m = meeting();
+    const correction = 'Track incoming requests instead of hour estimates';
+    const added = 'Kiln crew wants a second welder on the dock';
+    applyNotesUpdate(
+      m.store,
+      update(
+        [
+          { op: 'replace_block', blockId: idOf(m, ESTIMATE), markdown: `- ${added}` },
+          {
+            op: 'insert_under_heading',
+            headingId: idOf(m, 'Hull patch'),
+            markdown: `- ${correction}`,
+          },
+        ],
+        [TAKE_BACK, 'The Kiln crew wants a second welder on the dock.'],
+      ),
+      m.memory,
+    );
+    const after = bullets(m.ydoc);
+    expect(after.filter((t) => /estimate|forty/i.test(t))).toEqual([correction]);
+    expect(after).toContain(added);
+  });
+
   test('is added when what it withdraws is not what the note said', () => {
     // The note's subject is named — before the cue — and the emailing after
     // it is what goes.
@@ -295,18 +335,41 @@ describe('correctedNote', () => {
     authorId: NOTES_AUTHOR_ID,
   };
   const correction = '- Track incoming requests instead of hour estimates';
+  const paragraph = 'Track incoming requests instead of hour estimates';
   const estimateId = idOf(m, ESTIMATE);
 
-  test('names the note a single-bullet correction withdraws', () => {
+  test('names the note a single-bullet or one-paragraph correction withdraws', () => {
     expect(correctedNote(correction, scope)?.id).toBe(estimateId);
+    expect(correctedNote(paragraph, scope)?.id).toBe(estimateId);
   });
 
   test('names nothing another author wrote', () => {
-    expect(correctedNote(correction, { ...scope, authorId: 'agent:someone-else' })).toBe(undefined);
+    for (const shape of [correction, paragraph])
+      expect(correctedNote(shape, { ...scope, authorId: 'agent:someone-else' })).toBe(undefined);
   });
 
   test('names nothing a person has commented on', () => {
-    expect(correctedNote(correction, { ...scope, commented: new Set([estimateId]) })).toBe(
+    for (const shape of [correction, paragraph])
+      expect(correctedNote(shape, { ...scope, commented: new Set([estimateId]) })).toBe(undefined);
+  });
+
+  test('names nothing under another heading', () => {
+    for (const shape of [correction, paragraph])
+      expect(correctedNote(shape, { ...scope, headingId: idOf(m, 'Pier inbox') })).toBe(undefined);
+  });
+
+  test('judges no heading, quote, table row or indented block', () => {
+    for (const shape of [
+      `### ${paragraph}`,
+      `> ${paragraph}`,
+      `| ${paragraph} |`,
+      `    ${paragraph}`,
+    ])
+      expect(correctedNote(shape, scope), shape).toBe(undefined);
+  });
+
+  test('judges no paragraph with another block after it', () => {
+    expect(correctedNote(`${paragraph}\n\nWelding checklist goes out Monday`, scope)).toBe(
       undefined,
     );
   });
