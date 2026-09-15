@@ -41,6 +41,10 @@ export interface SpendMeter {
 /**
  * A ceiling, and the two wrappers that spend against it.
  *
+ * `onUnpriceable` fires once, the first time a call bills under a model this
+ * build cannot price — the ceiling has stopped meaning anything at that
+ * moment, and the run's own stop is the only honest answer.
+ *
  * Refusing the NEXT compose rather than interrupting one in flight is
  * deliberate: a compose already sent has been paid for, and throwing its reply
  * away would cost the money and lose the note too. The capture pass is never
@@ -50,6 +54,7 @@ export interface SpendMeter {
 export function createSpendMeter(
   maxUsd: number,
   onSpend: (usd: number, calls: number) => void,
+  onUnpriceable: (model: string) => void = () => {},
 ): SpendMeter {
   let total = 0;
   let calls = 0;
@@ -62,7 +67,14 @@ export function createSpendMeter(
   const book = (usage: unknown, model: string | undefined): void => {
     if (!usage) return;
     if (model === undefined || !isPricedModel(model)) {
-      unpriceable ??= model ?? 'a call that never named its model';
+      if (unpriceable !== undefined) return;
+      unpriceable = model ?? 'a call that never named its model';
+      // SAY IT TO THE RUN, not only to the next compose. The pipeline catches
+      // a failed compose and carries on ticking, so a refusal that lived only
+      // in `compose` would let the capture pass keep billing for the rest of
+      // the recording under a ceiling that can no longer be enforced. This is
+      // the same callback the ceiling itself stops the meeting through.
+      onUnpriceable(unpriceable);
       return;
     }
     total += dollars(usage as Parameters<typeof dollars>[0], model);

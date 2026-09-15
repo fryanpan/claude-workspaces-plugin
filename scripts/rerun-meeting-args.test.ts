@@ -212,6 +212,9 @@ describe('the starting document', () => {
     const noMarkdown = join(dir, 'no-markdown.json');
     writeFileSync(noMarkdown, JSON.stringify({ edits: [] }));
     expect(() => loadDocSpec(noMarkdown)).toThrow(/string markdown field/);
+    const notAList = join(dir, 'edits-not-a-list.json');
+    writeFileSync(notAList, JSON.stringify({ markdown: '#', edits: { atMs: 1 } }));
+    expect(() => loadDocSpec(notAList)).toThrow(/edits must be an array/);
     const badEdit = join(dir, 'bad-edit.json');
     writeFileSync(badEdit, JSON.stringify({ markdown: '#', edits: [{ find: 'a', replace: 'b' }] }));
     expect(() => loadDocSpec(badEdit)).toThrow(/non-negative atMs/);

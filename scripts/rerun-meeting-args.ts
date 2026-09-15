@@ -296,6 +296,12 @@ export function loadDocSpec(arg: string, read: (p: string) => string = readFileS
     throw new UsageError(`--doc ${arg} must hold a string markdown field`);
   }
   const edits: DocEdit[] = [];
+  // A present-but-not-a-list `edits` is a typo in the fixture, not an absence:
+  // dropped silently it would run the whole paid recording against an outline
+  // nobody edits and report that as the shape under test.
+  if (row.edits !== undefined && !Array.isArray(row.edits)) {
+    throw new UsageError(`--doc ${arg}: edits must be an array`);
+  }
   for (const entry of Array.isArray(row.edits) ? row.edits : []) {
     const e = entry as { atMs?: unknown; find?: unknown; replace?: unknown };
     if (typeof e.atMs !== 'number' || !Number.isFinite(e.atMs) || e.atMs < 0) {

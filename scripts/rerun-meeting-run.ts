@@ -281,8 +281,10 @@ export async function runRerun(
   // ONE METER OVER BOTH BILLED PASSES — see `rerun-meeting-spend.ts`. The
   // capture pass bills per tick as well, and a cap that watched the composer
   // alone would let a run reach about twice the ceiling it was given.
-  const meter = createSpendMeter(args.spendUsd, (usd, calls) =>
-    onSpend(state, args.spendUsd, deps, usd, calls),
+  const meter = createSpendMeter(
+    args.spendUsd,
+    (usd, calls) => onSpend(state, args.spendUsd, deps, usd, calls),
+    (model) => onUnpriceable(state, deps, model),
   );
   const taskExtractor =
     deps.taskExtractor === undefined || deps.taskExtractor === null
@@ -408,6 +410,18 @@ function onSpend(
   if (usd < maxUsd || state.capped !== null) return;
   state.capped = new SpendCapReached(
     `spend cap reached: $${usd.toFixed(4)} of $${maxUsd.toFixed(2)} — stopping the meeting`,
+  );
+  deps.log(state.capped.message);
+}
+
+/** A call this build cannot price ends the meeting, because from here on the
+ *  ceiling the operator named is unenforceable and the recording would go on
+ *  billing under it. */
+function onUnpriceable(state: RunState, deps: RerunDeps, model: string): void {
+  if (state.capped !== null) return;
+  state.capped = new SpendCapReached(
+    `${model} has no price in this build — stopping the meeting, because --spend-usd cannot cap ` +
+      'a run whose calls cannot be priced.',
   );
   deps.log(state.capped.message);
 }

@@ -156,6 +156,42 @@ describe('the spend meter', () => {
     expect(meter.calls).toBe(0);
   });
 
+  it('tells the run to stop the moment a call cannot be priced', async () => {
+    // Refusing the next compose is not enough on its own: the pipeline catches
+    // a failed compose and keeps ticking, so the capture pass would bill for
+    // the rest of the recording under a ceiling nothing can enforce.
+    const unpriced: NotesComposer = {
+      name: 'stub',
+      async compose(input) {
+        input.measure?.({ model: 'claude-experimental-9', usage: DOLLAR_OF_OPUS });
+        return [];
+      },
+    };
+    const stopped: string[] = [];
+    const meter = createSpendMeter(
+      1000,
+      () => {},
+      (model) => stopped.push(model),
+    );
+    const composer = meter.composer(unpriced);
+    await composer.compose(tick());
+    expect(stopped).toEqual(['claude-experimental-9']);
+    // Once only: a run is stopped, not stopped again on every later tick.
+    await expect(composer.compose(tick())).rejects.toThrow(SpendCapReached);
+    expect(stopped).toEqual(['claude-experimental-9']);
+  });
+
+  it('says nothing to the run while every call can be priced', async () => {
+    const stopped: string[] = [];
+    const meter = createSpendMeter(
+      1000,
+      () => {},
+      (model) => stopped.push(model),
+    );
+    await meter.composer(billingComposer(1)).compose(tick());
+    expect(stopped).toEqual([]);
+  });
+
   it('refuses just as hard when the call never named a model at all', async () => {
     const unnamed: NotesComposer = {
       name: 'stub',
