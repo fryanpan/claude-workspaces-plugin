@@ -30,9 +30,7 @@
     },
     {
       "tick": 5,
-      "ideas": [
-        "Nobody uses the late Friday sailing"
-      ]
+      "ideas": ["Nobody uses the late Friday sailing"]
     },
     {
       "tick": 6,
@@ -50,16 +48,11 @@
     },
     {
       "tick": 8,
-      "ideas": [
-        "Next topic is the Harborlight kiln budget"
-      ]
+      "ideas": ["Next topic is the Harborlight kiln budget"]
     },
     {
       "tick": 9,
-      "ideas": [
-        "The kiln quote is forty two thousand",
-        "The quote is eight thousand over plan"
-      ]
+      "ideas": ["The kiln quote is forty two thousand", "The quote is eight thousand over plan"]
     },
     {
       "tick": 10,
@@ -77,10 +70,7 @@
     },
     {
       "tick": 12,
-      "ideas": [
-        "The gap can be covered in four months",
-        "A will ask finance to split the payment"
-      ]
+      "ideas": ["The gap can be covered in four months", "A will ask finance to split the payment"]
     },
     {
       "tick": 13,

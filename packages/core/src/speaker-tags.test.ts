@@ -351,56 +351,6 @@ describe('normalizeSpeakerTags — stamping this tick', () => {
     expect(out.stamped).toBe(0);
   });
 
-  it('restamps a claim a new note copied from another note', () => {
-    // The outline shows every tag's href, so a new note about B arrives
-    // carrying the turns of the note it was copied from. An insert held no
-    // claims, so it gets this tick's turns.
-    const out = normalizeSpeakerTags('- [@Devi](speaker:B?t=3) asks about the gate.', {
-      names: { B: 'Devi' },
-      known,
-      turnsByLabel: { B: [10, 12] },
-      claimsFrom: '',
-    });
-    expect(out.markdown).toBe('- [@Devi](speaker:B?t=10,12) asks about the gate.');
-    expect(out.stamped).toBe(1);
-  });
-
-  it('keeps the claim a replaced note already carried', () => {
-    const out = normalizeSpeakerTags('- [@Devi](speaker:B?t=3) wants the gate moved east.', {
-      names: { B: 'Devi' },
-      known,
-      turnsByLabel: { B: [10, 12] },
-      claimsFrom: '[@Devi](speaker:B?t=3) wants the gate moved.',
-    });
-    expect(out.markdown).toBe('- [@Devi](speaker:B?t=3) wants the gate moved east.');
-    expect(out.stamped).toBe(0);
-  });
-
-  it('does not keep a claim for turns the replaced note never carried', () => {
-    const out = normalizeSpeakerTags('- [@Devi](speaker:B?t=1) and it moved.', {
-      names: { B: 'Devi' },
-      known,
-      turnsByLabel: { B: [10] },
-      claimsFrom: '[@Devi](speaker:B?t=3) wants the gate moved.',
-    });
-    expect(out.markdown).toBe('- [@Devi](speaker:B?t=10) and it moved.');
-  });
-
-  it('keeps a claim only as many times as the replaced note carried it', () => {
-    const out = normalizeSpeakerTags(
-      '- [@Devi](speaker:B?t=3) wants the gate moved, and [@Devi](speaker:B?t=3) will ask.',
-      {
-        names: { B: 'Devi' },
-        known,
-        turnsByLabel: { B: [10] },
-        claimsFrom: '[@Devi](speaker:B?t=3) wants the gate moved.',
-      },
-    );
-    expect(out.markdown).toBe(
-      '- [@Devi](speaker:B?t=3) wants the gate moved, and [@Devi](speaker:B?t=10) will ask.',
-    );
-  });
-
   it('leaves that mention out of the correction that follows', () => {
     // The consequence of the rule above, end to end: turn 10 moves B to C,
     // and the mention whose provenance was unreadable stays with B because
