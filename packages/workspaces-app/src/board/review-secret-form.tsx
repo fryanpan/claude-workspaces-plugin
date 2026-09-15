@@ -18,6 +18,7 @@
  * all — see `ReviewSecretBlock` for where that absence is spelled out.
  */
 import type { ReviewSecretField } from '@claude-workspaces/core';
+import { secretValueFitsStore } from '@claude-workspaces/core/secret-line';
 import { SECRET_VALUE_MAX_CHARS } from '@claude-workspaces/core/secret-name';
 import { Fragment } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -229,9 +230,10 @@ function SecretFieldsForm(props: {
    * the DOM so a repaint cannot leave a stale complaint under a filled field.
    * Never the value, and never its length.
    */
-  const [problem, setProblem] = useState<{ service: string; why: 'empty' | 'too-long' } | null>(
-    null,
-  );
+  const [problem, setProblem] = useState<{
+    service: string;
+    why: 'empty' | 'too-many-chars' | 'too-long';
+  } | null>(null);
   /**
    * Which values are showing. Empty by default — masked is the resting state
    * — and per field, because revealing one to check a paste should not put
@@ -272,11 +274,19 @@ function SecretFieldsForm(props: {
     // (2026-09-14); the server now refuses a value past the ceiling before it
     // writes anything, and this says so on the card, next to the box to fix,
     // rather than a round trip away in a toast.
-    const long = values.find((v) => v.value.length > SECRET_VALUE_MAX_CHARS);
+    //
+    // Two limits, the same two the server holds: the character count, and
+    // the store's command line — which a value of wide characters can
+    // outgrow well inside the count, because each one takes up to four
+    // bytes before it is encoded. Only the first has a number worth telling.
+    const long = values.find((v) => !secretValueFitsStore(v.service, v.value));
     if (long) {
-      setProblem({ service: long.service, why: 'too-long' });
+      setProblem({
+        service: long.service,
+        why: long.value.length > SECRET_VALUE_MAX_CHARS ? 'too-many-chars' : 'too-long',
+      });
       inputs(form)
-        .find((el) => el.value.length > SECRET_VALUE_MAX_CHARS)
+        .find((el) => el.name === `secret:${long.service}`)
         ?.focus();
       return;
     }
@@ -332,7 +342,9 @@ function SecretFieldsForm(props: {
             {fields.find((f) => f.service === problem.service)?.label ?? 'One field'}
             {problem.why === 'empty'
               ? ' is still empty.'
-              : ` is too long to save — at most ${SECRET_VALUE_MAX_CHARS} characters.`}
+              : problem.why === 'too-many-chars'
+                ? ` is too long to save — at most ${SECRET_VALUE_MAX_CHARS} characters.`
+                : ' is too long to save.'}
           </output>
         ) : null}
         <button type="submit" class="board-btn board-btn-ink board-walk-cred-send" disabled={busy}>

@@ -57,11 +57,10 @@ export function storedSecretService(service: string): string {
  * Here rather than beside the writer because the card has to say it BEFORE a
  * request is sent, and the board cannot import the server. The number itself
  * is chosen from the store: `security -i` cuts a command line at 4,095
- * characters and stores the part that fit, and the server's
- * `secretValueFits` (`packages/server/src/secret-store.ts`) holds every line
- * to three quarters of that. A value this long, of ASCII text, under the
- * longest name an item may declare, stays inside it — `secret-store.test.ts`
- * builds that line and checks. A real API key is around a hundred.
+ * characters and stores the part that fit, and `SECRET_COMMAND_LINE_BUDGET`
+ * (`secret-line.ts`) holds every line to three quarters of that. A value
+ * this long, of ASCII text, under the longest name an item may declare, stays
+ * inside it — `secret-store.test.ts` builds that line and checks. A real API key is around a hundred.
  */
 export const SECRET_VALUE_MAX_CHARS = 2000;
 

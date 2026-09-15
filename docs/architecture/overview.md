@@ -913,7 +913,11 @@ name to read back. Neither package can import the other, and the two used to
 be hand-written copies of one prefix — one in code, one in prose — so a rename
 could leave every agent reading an entry that does not exist. It changes no
 boundary the diagram draws; it holds names and one command string, and no
-value passes through it.
+value passes through it. `secret-line.ts` sits beside it: the command line a
+value is stored with, its budget, and whether a value fits — measured by the
+server's writer and by the board's secret form before it sends. Apart from
+`secret-name.ts` only so the MCP bundle, which never measures a line, does
+not carry the budget.
 
 `mock-swap-noise.ts` joins that third tier for the same reason and an unusual
 pair of readers: the widget's mockup swap raises a flag there while it inserts

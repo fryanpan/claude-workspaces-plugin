@@ -35,6 +35,10 @@
  */
 import { isSecretServiceName } from '@claude-workspaces/core';
 import {
+  SECRET_COMMAND_LINE_BUDGET,
+  secretAddCommandLine,
+} from '@claude-workspaces/core/secret-line';
+import {
   SECRET_ACCOUNT,
   SECRET_VALUE_MAX_CHARS,
   storedSecretService,
@@ -50,6 +54,7 @@ import {
  * namespace exists — it is the reason a review item cannot name, and
  * overwrite, an entry this server reads its own configuration from.
  */
+export { SECRET_COMMAND_LINE_BUDGET } from '@claude-workspaces/core/secret-line';
 export {
   SECRET_ACCOUNT,
   SECRET_SERVICE_PREFIX,
@@ -62,25 +67,6 @@ export {
  *  returns in milliseconds; a wait past this is a locked keychain or a
  *  consent dialog, and a request must not hang on one. */
 const SECRET_COMMAND_TIMEOUT_MS = 10_000;
-
-/**
- * The longest line `security -i` reads as one command, measured.
- *
- * Interactive mode reads its commands from stdin a line at a time, and cuts a
- * line at this many characters: measured on macOS 26.2 by storing values of
- * one repeated letter under a throwaway name, a command line of 4,095
- * characters stored whole, and every longer one stored exactly the part that
- * fit — then ran the remainder as a command of its own ("unknown command").
- * A cut line does not fail; it stores a shorter value.
- */
-const SECURITY_INTERACTIVE_LINE_MAX = 4095;
-
-/**
- * The longest command line this module will send: three quarters of the
- * measured cap, so a later `security` with a slightly smaller buffer still
- * refuses here rather than cutting there.
- */
-export const SECRET_COMMAND_LINE_BUDGET = Math.floor((SECURITY_INTERACTIVE_LINE_MAX * 3) / 4);
 
 export interface SecretRunResult {
   code: number;
@@ -153,12 +139,6 @@ export function encodeSecretValue(value: string): string {
  *  produces anything else; this is what holds that true if it ever did. */
 const BASE64_ONLY = /^[A-Za-z0-9+/]+={0,2}$/;
 
-/** The one line `security -i` is handed. The value is the only thing in it
- *  that came from a reader, and it arrives here already encoded. */
-function addCommandLine(storedService: string, encoded: string): string {
-  return `add-generic-password -U -a ${SECRET_ACCOUNT} -s ${storedService} -w "${encoded}"`;
-}
-
 /**
  * Will this value go to the store whole?
  *
@@ -167,10 +147,12 @@ function addCommandLine(storedService: string, encoded: string): string {
  * character count is the one a person is told, and the command line is the
  * one `security` cuts — a value within the first can still break the second
  * if its characters are wide, and it is refused rather than stored short.
+ * The card asks the same question first, through `secretValueFitsStore` in
+ * core, which reads this line's length off the encoded length alone.
  */
 export function secretValueFits(service: string, value: string): boolean {
   if (value.length > SECRET_VALUE_MAX_CHARS) return false;
-  const line = addCommandLine(storedSecretService(service), encodeSecretValue(value));
+  const line = secretAddCommandLine(service, encodeSecretValue(value));
   return line.length <= SECRET_COMMAND_LINE_BUDGET;
 }
 
@@ -206,7 +188,7 @@ async function spawnCommand(file: string, args: string[], stdin: string): Promis
  * reported as a failed save (2026-09-14). Interactive mode takes the whole
  * command on stdin instead: `security`'s argument list is just `-i`, and the
  * value is on one line of its standard input, which no other process on the
- * machine can list. Its own cap is `SECURITY_INTERACTIVE_LINE_MAX`, and
+ * machine can list. Its own cap is measured in `core/secret-line.ts`, and
  * `secretValueFits` keeps every line well inside it.
  *
  * THE READ-BACK IS NOT BELT AND BRACES. The prompt path exited 0 having
@@ -238,7 +220,7 @@ export async function storeSecret(
   const stored = storedSecretService(service);
   const encoded = encodeSecretValue(value);
   if (!BASE64_ONLY.test(encoded)) return { ok: false, error: 'bad-value' };
-  const wrote = await run('security', ['-i'], `${addCommandLine(stored, encoded)}\n`);
+  const wrote = await run('security', ['-i'], `${secretAddCommandLine(service, encoded)}\n`);
   if (wrote.code !== 0) return { ok: false, error: 'write-failed' };
 
   const readBack = await run(
