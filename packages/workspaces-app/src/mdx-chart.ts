@@ -241,8 +241,10 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
   const yTicks = niceTicks(y0, y1);
   y0 = Math.min(y0, yTicks[0] ?? y0);
   y1 = Math.max(y1, yTicks[yTicks.length - 1] ?? y1);
-  const x0 = Math.min(...xs);
-  const x1 = Math.max(...xs) === x0 ? x0 + 1 : Math.max(...xs);
+  // Points that share one x sit mid-plot, not against the y axis.
+  const xLo = Math.min(...xs);
+  const xHi = Math.max(...xs);
+  const [x0, x1] = xLo === xHi ? [xLo - 1, xHi + 1] : [xLo, xHi];
 
   const unitCaption = chart.unit && !isSymbolUnit(chart.unit) ? chart.unit : undefined;
   const yLabels = yTicks.map((v) => fmt(v, chart.yTickFormat, chart.unit));

@@ -307,6 +307,11 @@ describe('a chart block on the doc page', () => {
     mount('<LineChart title="Kiln" data={[{ x: 4, y: 9 }]} />\n');
     expect(views()[1]?.querySelectorAll('svg.mdx-chart circle.mdx-marker')).toHaveLength(1);
     expect(views()[1]?.querySelector('.mdx-name')).toBeNull();
+    // ...in the middle of the plot, not against its y axis.
+    const axis = views()[1]?.querySelector('.mdx-x-axis line');
+    const cx = Number(views()[1]?.querySelector('circle.mdx-marker')?.getAttribute('cx'));
+    const mid = (Number(axis?.getAttribute('x1')) + Number(axis?.getAttribute('x2'))) / 2;
+    expect(Math.abs(cx - mid)).toBeLessThan(1);
     // A series with a line to draw keeps its line and gets no dot.
     mount(`${LINE}\n`);
     expect(views()[2]?.querySelectorAll('circle.mdx-marker')).toHaveLength(0);
