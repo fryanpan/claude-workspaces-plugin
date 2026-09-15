@@ -247,6 +247,92 @@ describe('a chart block on the doc page', () => {
     ).toBeGreaterThanOrEqual(14);
   });
 
+  it("puts a negative horizontal bar's value beside its negative end, clear of its label", () => {
+    mount(
+      '<Chart orientation="horizontal" data={[{ label: "Riverbend", value: 6 }, { label: "Saltmarsh", value: -4 }]} />\n',
+    );
+    const svg = views()[0]?.querySelector('svg.mdx-chart[data-chart="bar"]');
+    const num = (e: Element | undefined, a: string) => Number(e?.getAttribute(a));
+    const [upBar, downBar] = [...(svg?.querySelectorAll('rect.mdx-bar') ?? [])];
+    const [upValue, downValue] = [...(svg?.querySelectorAll('.mdx-bar-value') ?? [])];
+    const downLabel = svg?.querySelectorAll('.mdx-bar-label')[1];
+    expect(downValue?.textContent).toBe('-4');
+    // The positive value starts past its bar's right end...
+    expect(upValue?.getAttribute('text-anchor') ?? 'start').toBe('start');
+    expect(num(upValue, 'x')).toBeGreaterThan(num(upBar, 'x') + num(upBar, 'width'));
+    // ...and the negative one ends before its bar's left end, where the bar stops.
+    expect(downValue?.getAttribute('text-anchor')).toBe('end');
+    expect(num(downValue, 'x')).toBeLessThan(num(downBar, 'x'));
+    expect(num(downValue, 'x')).toBeGreaterThan(num(downBar, 'x') - 12);
+    // Its two glyphs (about 7px each) still end right of the row's label.
+    expect(num(downValue, 'x') - 2 * 7).toBeGreaterThan(num(downLabel, 'x'));
+  });
+
+  it('keeps every bar of a narrow horizontal chart inside it, and an all-negative one uses its width', () => {
+    const row = (label: string, value: number) => `{ label: "${label}", value: ${value} }`;
+    const chart = (unit: string, ...rows: string[]) =>
+      `<Chart orientation="horizontal" unit="${unit}" data={[${rows.join(', ')}]} />`;
+    const allNegative = chart('crossings', row('Saltmarsh landing', -12000), row('Kiln wharf', -3));
+    // Value labels too long for a gutter on each side of a 240px chart.
+    const mixed = chart(
+      'passenger crossings',
+      row('Saltmarsh landing', -12000),
+      row('Riverbend pier', 18000),
+    );
+    for (const [src, width] of [240, 300, 430].flatMap((w) => [
+      [allNegative, w] as const,
+      [mixed, w] as const,
+    ])) {
+      const host = document.createElement('div');
+      renderMdxSummary(host, summarizeMdx(src), width);
+      const bars = [...host.querySelectorAll('rect.mdx-bar')].map((r) => {
+        const x = Number(r.getAttribute('x'));
+        return { left: x, right: x + Number(r.getAttribute('width')) };
+      });
+      expect(bars).toHaveLength(2);
+      for (const bar of bars) {
+        expect(bar.left).toBeGreaterThanOrEqual(0);
+        expect(bar.right).toBeLessThanOrEqual(width);
+      }
+      // ...and the bars still span enough room to tell a long one from a short one.
+      const span = Math.max(...bars.map((b) => b.right)) - Math.min(...bars.map((b) => b.left));
+      expect(span).toBeGreaterThanOrEqual(40);
+      // No value sits right of an all-negative chart, so its bars reach the edge.
+      if (src === allNegative) {
+        expect(Math.max(...bars.map((b) => b.right))).toBeGreaterThan(width - 8);
+      }
+    }
+  });
+
+  it('draws a visible dot for each series that has only one point', () => {
+    mount(
+      '<LineChart series={[{ label: "Riverbend", values: [{ x: 1, y: 3 }] }, { label: "Kiln", values: [{ x: 2, y: 5 }] }]} />\n',
+    );
+    const svg = views()[0]?.querySelector('svg.mdx-chart[data-chart="line"]');
+    const groups = [...(svg?.querySelectorAll('.mdx-series') ?? [])];
+    expect(groups).toHaveLength(2);
+    for (const g of groups) {
+      const marker = g.querySelector('circle.mdx-marker');
+      expect(marker).not.toBeNull();
+      expect(Number(marker?.getAttribute('r'))).toBeGreaterThan(0);
+      expect(marker?.getAttribute('fill')).toBe(
+        g.querySelector('polyline')?.getAttribute('stroke'),
+      );
+    }
+    // A chart of one series with one point draws that dot too, not just its name.
+    mount('<LineChart title="Kiln" data={[{ x: 4, y: 9 }]} />\n');
+    expect(views()[1]?.querySelectorAll('svg.mdx-chart circle.mdx-marker')).toHaveLength(1);
+    expect(views()[1]?.querySelector('.mdx-name')).toBeNull();
+    // ...in the middle of the plot, not against its y axis.
+    const axis = views()[1]?.querySelector('.mdx-x-axis line');
+    const cx = Number(views()[1]?.querySelector('circle.mdx-marker')?.getAttribute('cx'));
+    const mid = (Number(axis?.getAttribute('x1')) + Number(axis?.getAttribute('x2'))) / 2;
+    expect(Math.abs(cx - mid)).toBeLessThan(1);
+    // A series with a line to draw keeps its line and gets no dot.
+    mount(`${LINE}\n`);
+    expect(views()[2]?.querySelectorAll('circle.mdx-marker')).toHaveLength(0);
+  });
+
   it('shows a component that is not a chart as before, and an unreadable chart by name', () => {
     mount(
       '<Callout type="note">\n  Last sailing at 21:30.\n</Callout>\n\n<LineChart series={rows} />\n',

@@ -67,7 +67,8 @@ export function chartOf(props: Map<string, unknown>): MdxChart | undefined {
   }
   const single = pointsOf(data);
   const series = seriesOf(props.get('series')) ?? (single && [{ points: single, dashed: false }]);
-  if (!series || series.reduce((n, s) => n + s.points.length, 0) < 2) return undefined;
+  // Every series has a point, and a lone point draws as a dot, so any series draws.
+  if (!series) return undefined;
   const chart: LineChart = {
     type: 'line',
     series,
@@ -152,6 +153,9 @@ const MUTED_BAR = '#adb5bd';
 /** Rough width of a 12px sans glyph; no layout is read, so jsdom draws alike. */
 const CH = 6.6;
 const MAX_TIPS = 400;
+/** A horizontal bar chart's narrowest plot, and narrowest row-label column. */
+const MIN_PLOT_W = 40;
+const MIN_LABEL_W = 24;
 
 export const seriesColor = (i: number): string => SERIES[i % SERIES.length] ?? '#2a78d6';
 
@@ -237,8 +241,10 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
   const yTicks = niceTicks(y0, y1);
   y0 = Math.min(y0, yTicks[0] ?? y0);
   y1 = Math.max(y1, yTicks[yTicks.length - 1] ?? y1);
-  const x0 = Math.min(...xs);
-  const x1 = Math.max(...xs) === x0 ? x0 + 1 : Math.max(...xs);
+  // Points that share one x sit mid-plot, not against the y axis.
+  const xLo = Math.min(...xs);
+  const xHi = Math.max(...xs);
+  const [x0, x1] = xLo === xHi ? [xLo - 1, xHi + 1] : [xLo, xHi];
 
   const unitCaption = chart.unit && !isSymbolUnit(chart.unit) ? chart.unit : undefined;
   const yLabels = yTicks.map((v) => fmt(v, chart.yTickFormat, chart.unit));
@@ -301,6 +307,15 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
       g,
     );
     if (s.dashed) line.setAttribute('stroke-dasharray', '6 4');
+    // One point draws no line, so it shows as a dot in the series' colour.
+    if (pts.length === 1 && pts[0]) {
+      const p = pts[0];
+      el(
+        'circle',
+        { cx: sx(p.x), cy: sy(p.y), r: 4, fill: seriesColor(i), class: 'mdx-marker' },
+        g,
+      );
+    }
     for (const p of pts) {
       if (tips++ >= MAX_TIPS) break;
       const hit = el('circle', { cx: sx(p.x), cy: sy(p.y), r: 8, class: 'mdx-hit' }, g);
@@ -347,12 +362,26 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
   if (chart.orientation === 'horizontal') {
     const row = 30;
     const h = chart.bars.length * row + 8;
-    const labelW = Math.min(
-      Math.round(w * 0.38),
-      Math.ceil(Math.max(...chart.bars.map((b) => b.label.length)) * CH) + 12,
+    // A value sits beside its bar's far end: left of a negative bar, right of
+    // any other, so each side keeps a gutter only when some bar needs it (the
+    // right keeps a hair so an all-negative chart's bars stop short of the edge).
+    const wantLeft = lo < 0 ? valueW : 0;
+    const wantRight = values.some((v) => v >= 0) ? valueW : 4;
+    // Too narrow for both gutters whole, they shrink alike; then row labels
+    // give way. The plot keeps its floor, so no bar runs past the edge.
+    const fit = Math.min(1, (w - MIN_LABEL_W - MIN_PLOT_W) / (wantLeft + wantRight));
+    const leftValueW = wantLeft * fit;
+    const rightValueW = wantRight * fit;
+    const labelW = Math.max(
+      MIN_LABEL_W,
+      Math.min(
+        Math.round(w * 0.38),
+        Math.ceil(Math.max(...chart.bars.map((b) => b.label.length)) * CH) + 12,
+        w - leftValueW - rightValueW - MIN_PLOT_W,
+      ),
     );
-    const pw = Math.max(40, w - labelW - valueW);
-    const sx = (v: number) => labelW + ((v - lo) / (hi - lo)) * pw;
+    const pw = w - labelW - leftValueW - rightValueW;
+    const sx = (v: number) => labelW + leftValueW + ((v - lo) / (hi - lo)) * pw;
     const svg = frame(w, h, 'bar');
     chart.bars.forEach((b, i) => {
       const g = el('g', { class: 'mdx-bar-row' }, svg);
@@ -367,8 +396,9 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
       const z = sx(Math.max(0, b.value));
       mark(g, i, { x: a, y: y + 5, width: Math.max(1, z - a), height: row - 10 });
       text(g, valueLabels[i] ?? '', {
-        x: z + 6,
+        x: b.value < 0 ? a - 6 : z + 6,
         y: y + row / 2 + 4,
+        'text-anchor': b.value < 0 ? 'end' : 'start',
         class: i === chart.highlightIndex ? 'mdx-bar-value is-highlight' : 'mdx-bar-value',
       });
     });
