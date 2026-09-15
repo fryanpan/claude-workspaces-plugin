@@ -30,7 +30,7 @@ import {
   runFolderName,
 } from './rerun-meeting-run.ts';
 import { SpendCapReached, createSpendMeter } from './rerun-meeting-spend.ts';
-import { engineFor } from './rerun-meeting.ts';
+import { engineFor, requireCapture } from './rerun-meeting.ts';
 
 /** Opus bills $25 per million output tokens, so this is one dollar of it. */
 const DOLLAR_OF_OPUS = {
@@ -449,5 +449,19 @@ describe('an edit that lands in the last seconds of the recording', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('the spoken-ask capture pass', () => {
+  it('has to exist, because the estimate and the ceiling both count it', () => {
+    // `createHaikuTaskCaptureExtractor` answers null with no key, or with
+    // CW_MEETING_TASKS off. Passed through, it turns off one of the two
+    // billed passes while the run still pays for the whole recording.
+    expect(() => requireCapture(null)).toThrow(/capture pass could not be built/);
+  });
+
+  it('is handed straight back when it is there', () => {
+    const extractor = { name: 'stub', extract: async () => [] } as unknown as TaskCaptureExtractor;
+    expect(requireCapture(extractor)).toBe(extractor);
   });
 });

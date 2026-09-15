@@ -21,7 +21,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NotesComposer } from '../packages/server/src/meeting-notes.ts';
-import { createHaikuTaskCaptureExtractor } from '../packages/server/src/meeting-task-capture.ts';
+import {
+  type TaskCaptureExtractor,
+  createHaikuTaskCaptureExtractor,
+} from '../packages/server/src/meeting-task-capture.ts';
 import { createNotesMethodComposer } from '../packages/server/src/notes-method-composer.ts';
 import { createPromptStore } from '../packages/server/src/prompt-store.ts';
 import {
@@ -142,6 +145,24 @@ function composerFor(log: (line: string) => void): (dataDir: string) => NotesCom
   };
 }
 
+/**
+ * The capture pass has to be there, for the same reason the composer does.
+ *
+ * `createHaikuTaskCaptureExtractor` answers `null` when the key is missing or
+ * `CW_MEETING_TASKS=0`, and a null extractor silently turns one of the two
+ * billed passes off. The run would still be paced, still bill for the whole
+ * recording, and still report against an estimate that counted capture — a
+ * report of a pipeline nobody asked to measure.
+ */
+export function requireCapture(extractor: TaskCaptureExtractor | null): TaskCaptureExtractor {
+  if (extractor) return extractor;
+  throw new UsageError(
+    'refusing to start: the spoken-ask capture pass could not be built — this machine has no ' +
+      'key for it, or CW_MEETING_TASKS is off. It is one of the two passes a live meeting bills ' +
+      'for, and the budget estimate counts it, so a run without it measures a different pipeline.',
+  );
+}
+
 async function main(argv: string[]): Promise<number> {
   const args = parseRerunArgs(argv);
   const target = resolveReplayTarget(args.target, args.segment);
@@ -160,9 +181,11 @@ async function main(argv: string[]): Promise<number> {
   const outcome = await runRerun(args, target, doc, {
     composer: composerFor(log),
     transcription,
-    taskExtractor: createHaikuTaskCaptureExtractor({
-      instructions: () => promptStore.read('meeting-capture'),
-    }),
+    taskExtractor: requireCapture(
+      createHaikuTaskCaptureExtractor({
+        instructions: () => promptStore.read('meeting-capture'),
+      }),
+    ),
     // NO TITLE NAMER, DELIBERATELY. It bills Haiku through a seam that
     // reports no usage, so the meter cannot see it and `--spend-usd` would be
     // a ceiling with a hole in it. None of the seven measures is about the
