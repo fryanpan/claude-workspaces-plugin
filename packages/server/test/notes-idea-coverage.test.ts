@@ -70,6 +70,39 @@ describe('whether the notes carry an idea', () => {
   it('sees through a plural and a tense', () => {
     expect(contentWords('dialogs picking ranges')).toEqual(contentWords('dialog picked range'));
   });
+
+  it('gives every regular inflection of a word one stem', () => {
+    // A word ending in "e" keeps it bare and in "-s", and loses it before
+    // "-ed" and "-ing" — "estimates" and "estimated" read as two words once.
+    for (const forms of [
+      ['estimate', 'estimates', 'estimated', 'estimating'],
+      ['hide', 'hides', 'hiding'],
+      ['code', 'codes', 'coded', 'coding'],
+      ['stop', 'stops', 'stopped', 'stopping'],
+      ['pass', 'passes', 'passed', 'passing'],
+      ['copy', 'copies', 'copied', 'copying'],
+      ['use', 'uses', 'used', 'using'],
+      ['status', 'statuses'],
+      ['box', 'boxes', 'boxed'],
+    ]) {
+      expect(
+        forms.map((w) => contentWords(w).join(' ')),
+        forms.join('/'),
+      ).toEqual(forms.map(() => contentWords(forms[0] as string).join(' ')));
+    }
+  });
+
+  it('keeps different words apart', () => {
+    for (const [a, b] of [
+      ['estimate', 'estate'],
+      ['hour', 'house'],
+      ['range', 'ranger'],
+      ['100', '1000'],
+      ['request', 'requester'],
+    ]) {
+      expect(contentWords(a as string), `${a} vs ${b}`).not.toEqual(contentWords(b as string));
+    }
+  });
 });
 
 describe('the ledger retries once and then counts the idea lost', () => {
