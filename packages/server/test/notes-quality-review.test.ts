@@ -12,14 +12,15 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { checkReviewPayload } from '@claude-workspaces/core';
-import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
+import { checkReviewPayload, readReviewPayload } from '@claude-workspaces/core';
+import type { Anchor, Ref, ReviewPayload, TaskReviewItem, User } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { buildNotesQualityReport } from '../src/notes-quality-report.ts';
 import {
   type NotesQualityBoard,
   buildNotesQualityReview,
   fileNotesQualityReview,
+  fileOnMeetingDoc,
   rowForMeetingDoc,
 } from '../src/notes-quality-review.ts';
 
@@ -152,6 +153,121 @@ describe('filing', () => {
       report: badReport(),
     });
     expect(filing).toEqual({ filed: false, reason: 'refused', message: 'nope' });
+  });
+});
+
+describe('a bad meeting on a doc no row links', () => {
+  /** A doc store that records the threads posted on it. */
+  function threads(docs: string[]) {
+    const posted: Array<{
+      docId: string;
+      author: User;
+      text: string;
+      anchor: Anchor;
+      review: ReviewPayload;
+    }> = [];
+    return {
+      posted,
+      get: (docId: string) => (docs.includes(docId) ? {} : undefined),
+      postComment: async (
+        docId: string,
+        _threadId: null,
+        author: User,
+        text: string,
+        anchor: Anchor,
+        opts: { review: ReviewPayload },
+      ) => {
+        posted.push({ docId, author, text, anchor, review: opts.review });
+        return {};
+      },
+      listThreads: (docId: string) => posted.filter((p) => p.docId === docId),
+    };
+  }
+
+  it('files the item on the doc itself, as a question about the whole doc', () => {
+    const store = threads(['d-harbour']);
+    const b: NotesQualityBoard = {
+      ...board([]),
+      fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(store, docId, review, actor),
+    };
+    const filing = fileNotesQualityReview(b, ACTOR, {
+      workspaceId: 'w-1',
+      docId: 'd-harbour',
+      docTitle: 'Harbour season',
+      report: badReport(),
+    });
+    expect(filing).toEqual({ filed: true, docId: 'd-harbour' });
+    expect(store.posted).toHaveLength(1);
+    const [post] = store.posted;
+    expect(post?.anchor).toEqual({ kind: 'subject' });
+    // The payload a `create_thread` with this review would store.
+    expect(post?.review).toEqual(
+      readReviewPayload(
+        buildNotesQualityReview({
+          workspaceId: 'w-1',
+          docId: 'd-harbour',
+          docTitle: 'Harbour season',
+          report: badReport(),
+        }),
+      ) as ReviewPayload,
+    );
+    expect(post?.text).toBe(post?.review.headline as string);
+    expect(post?.text).toContain('Harbour season');
+    // Filed by the assistant, so the queue reads it as waiting on a person.
+    expect(post?.author).toMatchObject({ id: ACTOR.id, kind: 'agent' });
+  });
+
+  it('reports a doc that could not take the thread rather than claiming it filed', () => {
+    const store = threads([]);
+    const b: NotesQualityBoard = {
+      ...board([]),
+      fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(store, docId, review, actor),
+    };
+    const filing = fileNotesQualityReview(b, ACTOR, {
+      workspaceId: 'w-1',
+      docId: 'd-gone',
+      report: badReport(),
+    });
+    expect(filing).toMatchObject({ filed: false, reason: 'refused' });
+    expect(store.posted).toEqual([]);
+  });
+
+  it('reports a thread write that threw as not filed', () => {
+    const store = {
+      get: () => ({}),
+      listThreads: () => [],
+      postComment: async () => {
+        throw new Error('the harbour doc is read-only');
+      },
+    };
+    const b: NotesQualityBoard = {
+      ...board([]),
+      fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(store, docId, review, actor),
+    };
+    const filing = fileNotesQualityReview(b, ACTOR, {
+      workspaceId: 'w-1',
+      docId: 'd-harbour',
+      report: badReport(),
+    });
+    expect(filing).toMatchObject({ filed: false, reason: 'refused' });
+  });
+
+  it('still prefers a linked row over the doc', () => {
+    const onDoc: string[] = [];
+    const b: NotesQualityBoard = {
+      ...board([task({ id: 't-season' })]),
+      fileOnDoc: (docId) => {
+        onDoc.push(docId);
+        return true;
+      },
+    };
+    const filing = fileNotesQualityReview(b, ACTOR, {
+      workspaceId: 'w-1',
+      docId: 'd-harbour',
+      report: badReport(),
+    });
+    expect(filing).toMatchObject({ filed: true, taskId: 't-season' });
+    expect(onDoc).toEqual([]);
   });
 });
 

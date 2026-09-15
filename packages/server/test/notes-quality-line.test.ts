@@ -173,6 +173,34 @@ describe('the end-of-meeting line', () => {
     expect(board.filed).toEqual([]);
   });
 
+  it('says a bad meeting on a doc no row links was filed on the doc', async () => {
+    const onDoc: string[] = [];
+    const board = {
+      ...recordingBoard([]),
+      fileOnDoc: (docId: string) => {
+        onDoc.push(docId);
+        return true;
+      },
+    };
+    const repeat = '- Saltmarsh keeps the winter crew until April';
+    const harness = createNotesTickHarness({
+      meetingId: 'm-unlinked',
+      workspaceId: 'w-1',
+      qualityBoard: board,
+      compose: (input, tick) => (tick === 1 ? addNotes(input, repeat) : []),
+    });
+    const lines = await captureLog(async () => {
+      await harness.speak('Saltmarsh keeps the winter crew until April.');
+      pasteRepeats(harness, repeat);
+      await harness.end();
+    });
+    const line = summaryLine(lines, 'm-unlinked');
+    expect(line).toContain('BAD');
+    expect(line).toContain('filed on the doc');
+    expect(line).not.toContain('NOT filed');
+    expect(onDoc).toEqual(['d-meeting']);
+  });
+
   it('reads only what it wrote when it continued the last recording’s section', async () => {
     // Two recordings on one doc: the second continues the first's section
     // (2026-09-11) and must not be charged with the first's repeats. What

@@ -39,6 +39,13 @@
  * unless another bullet already says what the old one said (`saidElsewhere`):
  * then no idea leaves the doc, and the replace applies as written.
  *
+ * The share is taken twice: of all the bullet's words, and of the words no
+ * other block in the section has (`ownWords`), because a topic's vocabulary is
+ * in every note under it and keeping it keeps nothing of THIS note. And a
+ * replace the speaker said as a correction — "instead", "stop", naming the
+ * note's subject — applies as written too (`correctsIt`): the reader wants
+ * the correction, not the withdrawn note beside it.
+ *
  * TURNED INTO, NOT REFUSED, and that is the whole reason this rule can exist
  * at all. Refusing the edit would drop the note about the speech this tick
  * actually heard, which trades fourteen lost notes for fourteen different
@@ -98,7 +105,7 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
-import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
+import { IDEA_CARRIED_SHARE, contentWords, negates, sentencesOf } from './notes-idea-coverage.ts';
 
 /** What the guard decided, for the caller to apply and to log. */
 export interface NotesEditGuardResult {
@@ -124,6 +131,9 @@ export interface NotesEditGuardContext {
    * which is how this guard behaved before the rule existed.
    */
   outline?: readonly prose.OutlineEntry[] | undefined;
+  /** The words the tick composed from. Absent, no replace reads as a
+   *  correction, and RULE 2 judges on the notes alone. */
+  speech?: readonly string[] | undefined;
 }
 
 /**
@@ -144,7 +154,7 @@ const RESTATED_SHARE = 0.8;
  * that keeps the nouns and the numbers reads as a revision and a bullet about
  * something else does not.
  */
-function keepsItsWords(was: string, now: string): boolean {
+function keepsItsWords(was: string, now: string, own: readonly string[]): boolean {
   const had = contentWords(was);
   // A SHORT NOTE IS NOT JUDGED AT ALL. Three content words leave no room for
   // a share: "rough note" reworded to "sharper note" keeps one of two and
@@ -153,8 +163,98 @@ function keepsItsWords(was: string, now: string): boolean {
   // something in them to lose, and a note this short loses little.
   if (had.length < MIN_REVISION_CONTENT_WORDS) return true;
   const has = new Set(contentWords(now));
-  const hits = had.filter((w) => has.has(w)).length;
-  return hits >= Math.max(2, Math.ceil(had.length * IDEA_CARRIED_SHARE));
+  const carried = (words: readonly string[]): boolean =>
+    words.filter((w) => has.has(w)).length >=
+    Math.max(2, Math.ceil(words.length * IDEA_CARRIED_SHARE));
+  if (!carried(had)) return false;
+  // AND THE WORDS ONLY THIS NOTE HAS (2026-09-14). A share of ALL the words
+  // counts the topic's own vocabulary, which every note under the topic
+  // carries. The note-taker revised its newest bullet tick after tick, each
+  // rewrite keeping the topic's name and a verb and dropping the rest, and four
+  // rewrites later the meeting's main problem had left the doc with every one
+  // of them judged a revision. What made that note a different note from its
+  // neighbours is what a revision has to keep.
+  return own.length < MIN_OWN_WORDS || carried(own);
+}
+
+/**
+ * The fewest words a note must have that no other block in its section has
+ * before those words are judged on their own. Under three, a share of them is
+ * one word, and one dropped synonym would turn a revision into a duplicate.
+ */
+const MIN_OWN_WORDS = 3;
+
+/** The content words of `was` that no other block of the section carries. */
+function ownWords(
+  was: prose.OutlineEntry,
+  outline: readonly prose.OutlineEntry[],
+  section: ReadonlySet<string> | undefined,
+): string[] {
+  const shared = new Set(
+    outline
+      .filter((e) => e.id !== was.id && section?.has(e.id) === true)
+      .flatMap((e) => contentWords(e.text)),
+  );
+  return contentWords(was.text).filter((w) => !shared.has(w));
+}
+
+/**
+ * What a speaker says when they take back what they said before. Lexical and
+ * short, like the decision cues: a phrase missing here leaves two notes, the
+ * visible direction, and a loose one lets a new idea overwrite an old one.
+ */
+const TAKES_BACK =
+  /\b(instead|rather than|no longer|any ?more|scratch that|on second thought|stop|stopp(?:ed|ing)|drop|forget)\b/i;
+
+/** How a note says a thing was withdrawn: the speaker's cues, and the verbs
+ *  the note-taker writes for them ("stop showing" is written "remove"). */
+const WITHDRAWS = new RegExp(
+  `${TAKES_BACK.source}|\\b(remov(?:e|ed|ing)|hid(?:e|ing)|scrap(?:ped)?|replac(?:e|ed|ing))\\b`,
+  'i',
+);
+
+/**
+ * Whether this replace is the speaker CORRECTING the note, which the tick
+ * heard them do. Three things, all lexical:
+ *
+ * 1. the replacement names at least two of the words only that note had — its
+ *    subject;
+ * 2. one clause of the replacement withdraws that subject: a withdrawing word
+ *    and a subject word in the same clause, so "hour estimates stay; the run
+ *    stops" withdraws the run, not the estimates;
+ * 3. one sentence of the speech takes something back and shares two words with
+ *    the replacement beyond the cue, so the correction is one the tick heard.
+ *
+ * The speech is matched against the REPLACEMENT, not the note, because the
+ * note-taker paraphrases both ways: the speaker withdrew "hour guesses", the
+ * old note said "time estimates", and the correction said "stop showing time
+ * estimates, count requests instead". Speech and note share no word there;
+ * speech and correction share "showing", "count" and "requests".
+ *
+ * WHY A CORRECTION IS APPLIED AS A REPLACE (2026-09-14). A correction shares
+ * the subject and little else — "the hour guesses are far off" becomes "stop
+ * showing hour guesses, count requests instead" — so the word share reads it
+ * as a different note and keeps both, and the reader is left the note the
+ * speaker withdrew beside the one that withdrew it. Speech is the arbiter
+ * because the notes cannot tell a correction from a new idea about the same
+ * subject; the speaker's own "instead" can.
+ */
+function correctsIt(own: readonly string[], now: string, speech: readonly string[]): boolean {
+  const has = new Set(contentWords(now));
+  const subject = new Set(own.filter((w) => has.has(w)));
+  if (subject.size < 2) return false;
+  const withdrawn = now
+    .split(/[;:.,!?]|\s[-–—]\s/)
+    .some((clause) => WITHDRAWS.test(clause) && contentWords(clause).some((w) => subject.has(w)));
+  if (!withdrawn) return false;
+  const reported = [...has].filter((w) => !WITHDRAWS.test(w));
+  return speech
+    .flatMap((s) => sentencesOf(s))
+    .some((sentence) => {
+      if (!TAKES_BACK.test(sentence)) return false;
+      const said = new Set(contentWords(sentence));
+      return reported.filter((w) => said.has(w)).length >= 2;
+    });
 }
 
 /**
@@ -329,14 +429,17 @@ export function guardNotesEdits(
     // edit may rewrite at all (anything else reaches a person as a
     // suggestion, which destroys nothing); and only a replacement that drops
     // the bullet's own words is an overwrite rather than a revision.
+    const own =
+      was !== undefined ? ownWords(was, outline ?? [], section?.blocks) : ([] as string[]);
     if (
       edit.op === 'replace_block' &&
       was !== undefined &&
       was.kind === 'listItem' &&
       was.author !== undefined &&
       headingId !== undefined &&
-      !keepsItsWords(was.text, edit.markdown) &&
-      !saidElsewhere(was, outline ?? [], section?.blocks)
+      !keepsItsWords(was.text, edit.markdown, own) &&
+      !saidElsewhere(was, outline ?? [], section?.blocks) &&
+      !correctsIt(own, edit.markdown, ctx.speech ?? [])
     ) {
       // Under the bullet's OWN heading when it has one inside this section,
       // so a note about a topic stays with its topic; under the meeting's

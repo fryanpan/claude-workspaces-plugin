@@ -15,19 +15,30 @@
  * `addReviewItem`, an actor of the server's own, one item — because a second
  * way of filing the same kind of ask is a second thing to keep true.
  *
- * A DOC THAT BELONGS TO NO ROW GETS NOTHING FILED, and says so. Meetings are
+ * A DOC THAT BELONGS TO NO ROW GETS THE ITEM ON THE DOC ITSELF. Meetings are
  * held on docs that nobody has linked to a task, and inventing a row to hang
- * an item on would put a ticket on the board that nobody asked for. Those
- * meetings still get the end-of-meeting log line and still leave a record for
- * the daily rollup; what they do not get is an interruption. The caller is
- * told which happened so it can say so in the log.
+ * an item on would put a ticket on the board that nobody asked for. They used
+ * to get nothing at all — a meeting flagged BAD and "NOT filed (no-row)" in a
+ * log nobody reads (2026-09-14), which is the silence this module exists to
+ * end. So the item goes on a thread about the whole doc: the Home queue reads
+ * a doc thread's declared item exactly as it reads a row's, and the reader
+ * lands on the notes it is about. Only a board with no way to reach threads
+ * still answers `no-row`.
  *
  * ONE ITEM PER MEETING, and no memory is needed for that: a meeting stops
  * once. The repeat this must not become is one item per TICK, and it cannot,
  * because nothing calls it until the stop.
  */
 
-import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
+import {
+  type Anchor,
+  type Ref,
+  type ReviewPayload,
+  type TaskReviewItem,
+  type User,
+  hashToColor,
+  readReviewPayload,
+} from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { taskDeepLink } from './home-brief.ts';
 import { docLookupUrl } from './meeting-lookup.ts';
@@ -44,6 +55,82 @@ export interface NotesQualityBoard {
   ):
     | { ok: true; task: Task; item: TaskReviewItem; advice?: string }
     | { ok: false; error: string; message?: string };
+  /**
+   * File the item on the meeting doc as a thread about the whole doc, for a
+   * doc no row links. `false` when the doc could not take it. Absent, such a
+   * meeting is reported `no-row`. {@link fileOnMeetingDoc} is the server's.
+   */
+  fileOnDoc?(
+    docId: string,
+    review: Record<string, unknown>,
+    actor: { id: string; name: string; kind?: string },
+  ): boolean;
+}
+
+/**
+ * An author on the actor axis: a person's `User` shape, or an agent's, which
+ * `actor-identity.ts` reads by `kind: 'agent'`.
+ */
+export type ThreadAuthor = Omit<User, 'kind'> & { kind: User['kind'] | 'agent' };
+
+/** What {@link fileOnMeetingDoc} reaches in the doc store. `DocStore` satisfies it. */
+export interface NotesQualityThreads {
+  get(docId: string): unknown;
+  listThreads(docId: string): readonly unknown[];
+  postComment(
+    docId: string,
+    threadId: null,
+    author: ThreadAuthor,
+    text: string,
+    anchor: Anchor,
+    opts: { generate: boolean; review: ReviewPayload },
+  ): Promise<unknown>;
+}
+
+/**
+ * Post the item as a subject thread on the doc — the same anchor and the same
+ * payload reader a `create_thread` with a review takes, so the queue cannot
+ * tell it from one an agent filed.
+ *
+ * SYNCHRONOUS ANSWER, because the stop's one log line is built right after
+ * it — and read off the doc, not assumed. A new thread is written before
+ * `postComment` first awaits anything, so a thread that exists is on the doc
+ * by the time the call returns, and one that was never written (a missing
+ * doc, a throw, a decline) leaves the count where it was: `false`, which the
+ * line reports as not filed.
+ */
+export function fileOnMeetingDoc(
+  threads: NotesQualityThreads,
+  docId: string,
+  review: Record<string, unknown>,
+  actor: { id: string; name: string; kind?: string },
+): boolean {
+  const payload = readReviewPayload(review);
+  if (!payload || !threads.get(docId)) return false;
+  // `kind: 'agent'` so the queue reads it as an ask waiting on a person, and a
+  // color stable for the name because every thread renderer paints the
+  // author's accent from it.
+  const author: ThreadAuthor = {
+    id: actor.id,
+    name: actor.name,
+    kind: 'agent',
+    color: hashToColor(actor.name),
+  };
+  const before = threads.listThreads(docId).length;
+  threads
+    .postComment(
+      docId,
+      null,
+      author,
+      payload.headline,
+      { kind: 'subject' },
+      {
+        generate: false,
+        review: payload,
+      },
+    )
+    .catch((err) => console.error(`[meeting-notes] quality item on ${docId} failed:`, err));
+  return threads.listThreads(docId).length > before;
 }
 
 /**
@@ -148,6 +235,7 @@ export function buildNotesQualityReview(input: {
 /** What happened when a reading was filed. */
 export type NotesQualityFiling =
   | { filed: true; taskId: string; itemId: string }
+  | { filed: true; docId: string }
   | { filed: false; reason: 'healthy' | 'no-row' | 'no-board' | 'refused'; message?: string };
 
 /**
@@ -167,18 +255,20 @@ export function fileNotesQualityReview(
 ): NotesQualityFiling {
   if (input.report.flags.length === 0) return { filed: false, reason: 'healthy' };
   if (input.workspaceId === undefined) return { filed: false, reason: 'no-board' };
+  const review = buildNotesQualityReview({
+    workspaceId: input.workspaceId,
+    docId: input.docId,
+    ...(input.docTitle !== undefined ? { docTitle: input.docTitle } : {}),
+    report: input.report,
+  });
   const row = rowForMeetingDoc(board, input.docId);
-  if (!row) return { filed: false, reason: 'no-row' };
-  const res = board.addReviewItem(
-    row.id,
-    buildNotesQualityReview({
-      workspaceId: input.workspaceId,
-      docId: input.docId,
-      ...(input.docTitle !== undefined ? { docTitle: input.docTitle } : {}),
-      report: input.report,
-    }),
-    { actor },
-  );
+  if (!row) {
+    if (!board.fileOnDoc) return { filed: false, reason: 'no-row' };
+    return board.fileOnDoc(input.docId, review, actor)
+      ? { filed: true, docId: input.docId }
+      : { filed: false, reason: 'refused', message: 'the doc took no thread' };
+  }
+  const res = board.addReviewItem(row.id, review, { actor });
   if (!res.ok) {
     return { filed: false, reason: 'refused', message: res.message ?? res.error };
   }

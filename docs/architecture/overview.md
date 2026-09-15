@@ -664,7 +664,8 @@ their filename), `notes-quality-store.ts` and `notes-tick-timing.ts` read and
 write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a
-bad one on the task the doc belongs to. Nothing under `routes/` is added: the
+bad one on the task the doc belongs to, or on the doc itself when no task
+links it. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
 

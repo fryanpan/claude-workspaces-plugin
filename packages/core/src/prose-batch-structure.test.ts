@@ -224,6 +224,46 @@ describe('a block with no words in it', () => {
     expect(md(doc)).toBe('## Meeting notes\n\nAgenda first\n\n- Slipway opens in May');
   });
 
+  // A line break outlines as blank text and serializes to nothing, so a
+  // paragraph holding only breaks is a blank line to every reader, and its id
+  // still answered `no-range` (2026-09-14).
+  function withBreakOnly(): { doc: Y.Doc; blankId: string } {
+    const doc = docOf('## Meeting notes\n\n- Slipway opens in May\n');
+    const para = new Y.XmlElement('paragraph');
+    para.insert(0, [new Y.XmlElement('hardBreak'), new Y.XmlElement('hardBreak')]);
+    getProseFragment(doc).insert(1, [para]);
+    const blank = readOutline(doc).find((e) => e.kind === 'block' && e.text.trim() === '');
+    if (!blank) throw new Error('no blank block in the outline');
+    return { doc, blankId: blank.id };
+  }
+
+  it('is deleted by its outline id when it holds only line breaks', () => {
+    const { doc, blankId } = withBreakOnly();
+    const res = apply(doc, [{ op: 'delete_block', blockId: blankId }], 'agent:tidy');
+    expect(res.outcomes[0]).toMatchObject({ status: 'applied' });
+    expect(shape(doc)).toEqual(['heading', 'bulletList']);
+  });
+
+  it('is replaced by its outline id when it holds only line breaks', () => {
+    const { doc, blankId } = withBreakOnly();
+    const res = apply(
+      doc,
+      [{ op: 'replace_block', blockId: blankId, markdown: 'Agenda first' }],
+      'agent:tidy',
+    );
+    expect(res.outcomes[0]).toMatchObject({ status: 'applied' });
+    expect(md(doc)).toBe('## Meeting notes\n\nAgenda first\n\n- Slipway opens in May');
+  });
+
+  it('a paragraph with words and a line break still reaches its owner as a proposal', () => {
+    const doc = docOf('## Meeting notes\n\n- Slipway opens in May\n');
+    const para = new Y.XmlElement('paragraph');
+    para.insert(0, [new Y.XmlText('Their own line'), new Y.XmlElement('hardBreak')]);
+    getProseFragment(doc).insert(1, [para]);
+    const res = apply(doc, [{ op: 'delete_block', blockId: idOf(doc, 'Their own') }], 'agent:tidy');
+    expect(res.outcomes[0]).toMatchObject({ status: 'suggested' });
+  });
+
   it('a block that has words still reaches its owner as a proposal', () => {
     const doc = docOf('## Meeting notes\n\nTheir own paragraph\n');
     const res = apply(doc, [{ op: 'delete_block', blockId: idOf(doc, 'Their own') }], 'agent:tidy');
