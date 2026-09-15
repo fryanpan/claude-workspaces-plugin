@@ -21,11 +21,16 @@ import type { BootHistory, BootLocation, BootStorage, BootWindow } from '../boot
 import { renderConnectionBanner, watchConnection } from '../connection-state.ts';
 import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
-import { ensureUserIdentity } from '../identity-prompt.ts';
+import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
 import { pageSentry } from '../sentry-page.ts';
 import { createPromptsApi } from '../settings/prompts-api.ts';
-import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from '../signin/write-gate.ts';
+import {
+  fetchWriteAccess,
+  installWriteGateNotice,
+  readSessionBody,
+  showSignInBar,
+} from '../signin/write-gate.ts';
 import { installStaleClientNotice } from '../stale-client.ts';
 import {
   type BoardState,
@@ -109,6 +114,10 @@ export interface BoardBootEnv {
 // how long it waits should not have to know which module holds the timer.
 export { WALK_HANDOFF_DEADLINE_MS } from './board-deep-links.ts';
 
+/** How long the feedback launcher waits for the task list before it loads
+ *  anyway — a board whose projection never lands still gets its launcher. */
+export const FEEDBACK_WIDGET_DEADLINE_MS = 4000;
+
 /**
  * The board's whole boot sequence, as a function of its environment.
  *
@@ -121,10 +130,19 @@ export { WALK_HANDOFF_DEADLINE_MS } from './board-deep-links.ts';
  */
 export async function bootBoard(env: BoardBootEnv): Promise<void> {
   const { document, location, history, localStorage, window, connect } = env;
-  // First, before any await: the widget arrived independently of the board
-  // when it was a script tag, so a board boot that fails later must not take
-  // the feedback launcher with it.
-  if (document.querySelector('claude-feedback-widget')) void env.loadWidget?.();
+  // The feedback launcher comes up once the task list is in, or at a deadline
+  // armed here, before any await: it arrived independently of the board when
+  // it was a script tag, so a board boot that fails later must not take it
+  // with it. It waits because it is a second chunk, a second session read and
+  // a second socket, and before this they all ran ahead of the board's own.
+  const widgetHost = document.querySelector('claude-feedback-widget') !== null;
+  let widgetRequested = false;
+  const loadWidgetOnce = (): void => {
+    if (!widgetHost || widgetRequested) return;
+    widgetRequested = true;
+    void env.loadWidget?.();
+  };
+  if (widgetHost) setTimeout(loadWidgetOnce, FEEDBACK_WIDGET_DEADLINE_MS);
 
   function workspaceIdFromPath(): string {
     const m = location.pathname.match(/\/workspaces\/([^/?#]+)/);
@@ -158,7 +176,10 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   installWriteGateNotice();
   const root = document.getElementById('board-root');
   const workspaceId = workspaceIdFromPath();
-  if (!root || !workspaceId) return;
+  if (!root || !workspaceId) {
+    loadWidgetOnce();
+    return;
+  }
   // The one page that may ask for location, once per device (device-context.ts).
   void syncDeviceContext(browserDeviceEnv(localStorage), { mayAsk: true });
 
@@ -169,9 +190,48 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // its accessory bar with no scroll left to reach it.
   wireKeyboardInset();
 
+  // ── Realtime: the ws:<id> board doc, opened before anything is awaited ──
+  //
+  // The task list waits on this socket and on nothing else the preamble below
+  // reads, so it starts first. It used to open after three serial round trips
+  // — the write answer, the identity lookup on the same route, then the
+  // workspace record — and on a link a round trip away those were most of the
+  // wait: through a 120ms-RTT proxy the sync landed at ~1070ms, and at ~670ms
+  // once the socket went first. The socket needs neither answer: the board
+  // never writes to its doc (every mutation goes through the REST gate), and
+  // the upgrade itself marks a socket read-only for a browser that may not
+  // write (`routes/upgrade-stream.ts`). The first sync can therefore
+  // land before the observers below are wired; the boot's own
+  // `readProjection()` before first paint is what picks it up.
+  const client = connect(boardSocketUrl(location, workspaceId));
+  installStaleClientNotice(client);
+  // The server rebuilt this board doc while this tab was away, so what the tab
+  // holds cannot be reconciled with it — the two sets of structs are
+  // concurrent and a Yjs map resolves that by clientID magnitude, which is a
+  // coin flip per row. Reloading is the whole answer: the board keeps no local
+  // state to lose, `board-projection.ts` never writes to the ydoc, and every
+  // board mutation goes through the REST gate. It cannot loop — a reloaded tab
+  // comes back with an empty state vector, which the server never refuses.
+  client.onReset(() => location.reload());
+  client.onReady(loadWidgetOnce);
+  const tasksMap = client.ydoc.getMap('tasks');
+  const wsMap = client.ydoc.getMap('workspace');
+
+  // The three reads the preamble needs, started together. One session read
+  // answers both the write gate and the identity lookup — they asked the same
+  // route one after the other — and the workspace record does not depend on
+  // either answer, so it is in flight while they settle.
+  const session = readSessionBody();
+  // `?format=json` is what asks for the RECORD. This path also serves the
+  // board page — one address, HTML by default — so a read without it would
+  // hand this fetch the shell that is currently running it.
+  const initialRead = fetchJson<{ workspace: BoardWorkspaceInfo }>(
+    `/workspaces/${encodeURIComponent(workspaceId)}?format=json`,
+  );
+
   // Same order as the doc surface: the write answer decides whether the name
   // prompt is worth showing. See signin/write-gate.ts.
-  const writeAccess = await fetchWriteAccess();
+  const writeAccess = await fetchWriteAccess(session);
   // The bar is raised after `buildShell` below, not here: it mounts as a row
   // under `.board-topbar`, and at this point `#board-root` is still the empty div
   // the server sent. Raised here it would be wiped by the very next
@@ -182,7 +242,10 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       get: (k) => localStorage.getItem(k),
       set: (k, v) => localStorage.setItem(k, v),
     },
-    writeAccess.canWrite ? {} : { suppressNamePrompt: true },
+    {
+      fetchSession: () => sessionAnswerOf(session),
+      ...(writeAccess.canWrite ? {} : { suppressNamePrompt: true }),
+    },
   );
   const author = { id: user.id, name: user.name, kind: user.kind, color: user.color };
 
@@ -210,12 +273,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   /** The boot URL named a walkthrough item; opened when the queue holds it. */
   let pendingBootItem = bootLoc.item;
 
-  // `?format=json` is what asks for the RECORD. This path also serves the
-  // board page — one address, HTML by default — so a read without it would
-  // hand this fetch the shell that is currently running it.
-  const initial = await fetchJson<{ workspace: BoardWorkspaceInfo }>(
-    `/workspaces/${encodeURIComponent(workspaceId)}?format=json`,
-  );
+  const initial = await initialRead;
   if (initial) state.info = initial.workspace;
   buildShell(document, root, state.info?.name ?? workspaceId, workspaceId);
   // Now that there is a header to sit under. See signin/write-gate.ts.
@@ -227,9 +285,9 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   mountIslandProbe(root);
 
   // The server-owned `tasks` / `workspace` projection, and the two headers
-  // that must follow it — `board-projection.ts`. Built here, before the socket
-  // below, because the header paints once from the REST read; the maps
-  // arrive through a thunk for exactly that reason.
+  // that must follow it — `board-projection.ts`. The header paints once from
+  // the REST read, whether or not the socket above has synced; the maps
+  // arrive through a thunk so the projection reads whatever it holds by then.
   const { readProjection, syncHeader, syncTabTitle } = createBoardProjection({
     state,
     workspaceId,
@@ -261,17 +319,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     renderPresenceRegion: () => renderPresenceRegion(),
   });
 
-  // ── Realtime: the ws:<id> board doc ────────────────────────────────────
-  const client = connect(boardSocketUrl(location, workspaceId));
-  installStaleClientNotice(client);
-  // The server rebuilt this board doc while this tab was away, so what the tab
-  // holds cannot be reconciled with it — the two sets of structs are
-  // concurrent and a Yjs map resolves that by clientID magnitude, which is a
-  // coin flip per row. Reloading is the whole answer: the board keeps no local
-  // state to lose, `board-projection.ts` never writes to the ydoc, and every
-  // board mutation goes through the REST gate. It cannot loop — a reloaded tab
-  // comes back with an empty state vector, which the server never refuses.
-  client.onReset(() => location.reload());
   // The board had no reading of its own connection at all, in any viewport —
   // during a restart it just stopped updating. Wired here rather than in
   // renderAll: this subscribes once, to THIS client, and the banner it drives
@@ -280,8 +327,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     onStatus: (cb) => client.onStatus(cb),
     onView: (view) => renderConnectionBanner(document.getElementById('board-connection'), view),
   });
-  const tasksMap = client.ydoc.getMap('tasks');
-  const wsMap = client.ydoc.getMap('workspace');
 
   // ── The projections every region reads ──────────────────────────────────
   const taskList = () => [...state.tasks.values()];
@@ -684,24 +729,6 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     loadReportSent = true;
     postLoadReport({ workspaceId, msToBoot, msToFirstProjection, sentry });
   };
-  // The ydoc's initial sync is the phase boundary, not the first tasksMap
-  // mutation: an empty workspace's sync changes no task and would otherwise
-  // report boot-only after the fallback, and any later peer edit would be
-  // mistaken for the initial load (codex review on PR 384). onReady fires
-  // once, after sync-step-2 lands — empty doc included.
-  client.onReady(() => {
-    if (msToFirstProjection === null) {
-      msToFirstProjection = Math.round(performance.now());
-      // onReady can beat the boot block below (the ydoc syncs concurrently)
-      // — only send once boot has painted and stamped msToBoot.
-      if (msToBoot > 0) sendLoadReport();
-    }
-    // The projection half of the queue is in — an EMPTY board's sync too,
-    // which changes no task and so never reaches the observeDeep tick.
-    walkSources.projection = true;
-    autoWalkTick?.();
-  });
-
   // ── Wiring ──────────────────────────────────────────────────────────────
   //
   // The ydoc observers, the awareness feed, the SSE listeners and the catch-up
@@ -882,7 +909,30 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   readProjection();
   renderAll();
   msToBoot = Math.round(performance.now());
-  if (msToFirstProjection !== null) sendLoadReport();
+  // The ydoc's initial sync is the phase boundary, not the first tasksMap
+  // mutation: an empty workspace's sync changes no task and would otherwise
+  // report boot-only after the fallback, and any later peer edit would be
+  // mistaken for the initial load (codex review on PR 384). onReady fires
+  // once, after sync-step-2 lands — empty doc included — and at once when it
+  // already has.
+  //
+  // Registered here, after the first paint, because the socket now opens
+  // before the preamble's awaits and its sync often lands during them. The
+  // stamp is when the synced list is ON SCREEN: a sync that beat this paint
+  // is stamped now, since `readProjection()` above is what drew it, and one
+  // that lands later is stamped after its observer tick has repainted.
+  // Stamped at registration instead, a fast sync would read earlier than the
+  // list it is meant to time.
+  client.onReady(() => {
+    if (msToFirstProjection === null) {
+      msToFirstProjection = Math.round(performance.now());
+      sendLoadReport();
+    }
+    // The projection half of the queue is in — an EMPTY board's sync too,
+    // which changes no task and so never reaches the observeDeep tick.
+    walkSources.projection = true;
+    autoWalkTick?.();
+  });
   // Fallback: a load whose ydoc never syncs is the slowest kind and must
   // still get recorded — report boot-only after 15s rather than never.
   setTimeout(sendLoadReport, 15_000);

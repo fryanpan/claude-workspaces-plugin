@@ -22,7 +22,6 @@ import {
   fakeLocation,
   fakeSockets,
   fakeStorage,
-  firstAt,
   installFakeBeacon,
   installFakeEventSource,
   installFakeServer,
@@ -434,37 +433,8 @@ describe('a browser that may not write is told before it tries', () => {
     expect(document.querySelector('.signin-required')).not.toBeNull();
   });
 
-  it('has the write answer IN HAND before it opens the board doc', async () => {
-    server.on('/api/auth/session', { authenticated: false, canWrite: false });
-    const sockets = fakeSockets();
-    shell();
-    // Read at the moment the doc opens. The request log alone cannot carry
-    // this: `ensureUserIdentity` asks the SAME endpoint, so a boot that never
-    // awaited the write answer still shows a session request before the
-    // socket.
-    let barUpWhenSocketOpened = false;
-    const running = bootBoard({
-      document,
-      location: fakeLocation(`https://board.test/workspaces/${WS}/tasks`),
-      history: fakeHistory(),
-      localStorage: fakeStorage({ [NAME_KEY]: 'Ada' }),
-      window: new EventTarget(),
-      connect: (url) => {
-        barUpWhenSocketOpened = document.querySelector('.signin-bar') !== null;
-        return sockets.connect(url);
-      },
-    });
-    await settle();
-    seedProjection(sockets);
-    sockets.first().sync();
-    await running;
-    await settle();
-    expect(barUpWhenSocketOpened).toBe(true);
-    const session = firstAt('/api/auth/session');
-    const socket = firstAt('socket ');
-    expect(session).toBeGreaterThanOrEqual(0);
-    expect(session).toBeLessThan(socket);
-  });
+  // Whether the doc opens before or after the write answer, and the bar that
+  // answer raises, is `board-boot-first-sync.test.ts`.
 });
 
 describe('a ticket carries no Plan or Review ask of its own', () => {
