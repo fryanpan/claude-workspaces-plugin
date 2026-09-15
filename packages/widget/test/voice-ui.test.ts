@@ -68,9 +68,10 @@ describe('the live comment', () => {
     expect(t.where().textContent).toBe('Goal bar');
   });
 
-  it('shows the tidied words growing, and the raw words under them', () => {
+  it('shows the finished note, and the words said since the pause under it', () => {
     const t = setup();
-    t.session.heard = 'like too tall';
+    t.session.heard = 'the goal bar is like too tall';
+    t.session.pending = 'like too tall';
     t.add(comment({ text: 'The goal bar' }));
     expect(t.view.live.querySelector('.vpol')?.textContent).toBe('The goal bar');
     expect(t.view.live.querySelector('.vraw span')?.textContent).toBe('like too tall');
@@ -96,44 +97,7 @@ describe('a settled comment’s card', () => {
     t.add(comment({ final: true }));
     expect(t.card()?.querySelector('.vtext')?.textContent).toBe('The goal bar is too tall.');
     expect(t.card()?.querySelector('.vplay')?.textContent).toBe('▶ 0:19');
-    // The author's name is text, not markup.
-    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Guest <Admin> · by voice');
-  });
-
-  it('names the author the server recorded once the thread exists', () => {
-    const t = setup();
-    t.add(comment({ final: true }));
-    expect(t.card()?.querySelector('.vby')?.textContent, 'CONTROL: the widget’s own name').toBe(
-      'Guest <Admin> · by voice',
-    );
-    t.add(
-      comment({
-        final: true,
-        posted: { threadId: 't1', commentId: 'c1', author: 'Reviewer' },
-      }),
-    );
-    expect(t.card()?.querySelector('.vby')?.textContent).toBe('Reviewer · by voice');
-  });
-
-  it('before its thread exists, takes the name the server gave this recording’s others', () => {
-    const t = setup({ author: null });
-    t.add(comment({ key: 'v1', final: true }));
-    expect(
-      t.card('v1')?.querySelector('.vby')?.textContent,
-      'no name the server has not given',
-    ).toBe('By voice');
-    t.add(
-      comment({
-        key: 'v1',
-        final: true,
-        posted: { threadId: 't1', commentId: 'c1', author: 'Signed-in reviewer' },
-      }),
-    );
-    t.add(comment({ key: 'v2', final: true }));
-    expect(t.card('v2')?.querySelector('.vby')?.textContent).toBe('Signed-in reviewer · by voice');
-    // A later recording may be someone else signed in: no name borrowed across.
-    t.add(comment({ key: '2.v1', take: 2, final: true }));
-    expect(t.card('2.v1')?.querySelector('.vby')?.textContent).toBe('By voice');
+    expect(t.card()?.textContent, 'no byline').not.toContain('voice');
   });
 
   it('plays the clip from the server', () => {

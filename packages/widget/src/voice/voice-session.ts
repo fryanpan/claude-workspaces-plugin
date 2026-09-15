@@ -17,7 +17,11 @@ import type { PostedComment, VoicePoster } from './voice-post.ts';
  * words, which element each is about (`voice-feedback-relay.ts`). This decides
  * nothing of that. It keeps each comment the server named in step with a
  * thread: the first frame for a key creates it, a later one edits its words or
- * moves its anchor, and the frame marked final is the last. Writing through
+ * moves its anchor. The server sends a comment's words only when a note is
+ * finished — at a pause, or a switch — so a thread is edited once per
+ * finished note, never word by word; the words in between are `pending`.
+ * A tap on an earlier note of the recording opens it again (`reopen`), and
+ * the next words add to it. Writing through
  * the thread routes rather than having the server post means a spoken comment
  * carries the identity and sign-in of the widget that heard it, exactly as a
  * typed one does.
@@ -46,6 +50,9 @@ export interface VoiceComment {
   refused?: boolean;
   /** Undone — resolved — by the person. */
   resolved?: boolean;
+  /** Tapped to add to, and the server has not answered yet: it is the note
+   *  being talked about already. */
+  reopening?: boolean;
 }
 
 export interface SocketLike {
@@ -93,6 +100,8 @@ export class VoiceSession {
   readonly comments = new Map<string, VoiceComment>();
   /** The last few seconds of raw words. */
   heard = '';
+  /** The words said since the last pause that no note holds yet. */
+  pending = '';
   /** A tapped element the next comment starts on; `undefined` for none. */
   pinned: number | null | undefined = undefined;
   /** Something to tell the person — a refusal, a failure. */
@@ -112,6 +121,11 @@ export class VoiceSession {
   private take = 0;
 
   constructor(private readonly deps: VoiceSessionDeps) {}
+
+  /** Which recording is the current one; a comment's `take` says if it is from it. */
+  get recording(): number {
+    return this.take;
+  }
 
   private get timers() {
     return (
@@ -133,6 +147,7 @@ export class VoiceSession {
     this.take += 1;
     this.note = null;
     this.heard = '';
+    this.pending = '';
     this.pinned = undefined;
     this.ready = false;
     this.buffered = [];
@@ -179,11 +194,39 @@ export class VoiceSession {
     this.change();
   }
 
-  /** The person tapped an element: the next words go there. */
+  /** The person tapped an element: the next words go there — into the note
+   *  this recording already has on it, or a new one. */
+  pointAt(target: number | null): void {
+    const notes = [...this.comments.values()].reverse();
+    const had = notes.find((c) => c.take === this.take && target !== null && c.target === target);
+    if (had) this.reopen(had.key);
+    else this.pin(target);
+  }
+
+  /** The next words start a new note on `target`. */
   pin(target: number | null): void {
     if (this.state !== 'recording' && this.state !== 'connecting') return;
+    for (const c of this.comments.values()) c.reopening = false;
     this.pinned = target;
     this.sendJson({ type: 'pin', target });
+    this.change();
+  }
+
+  /** The person tapped an earlier note: the next words add to it. A note from
+   *  an earlier recording is past the server's reach, so its element takes a
+   *  new one. */
+  reopen(key: string): void {
+    const c = this.comments.get(key);
+    if (!c || (this.state !== 'recording' && this.state !== 'connecting')) return;
+    if (c.take !== this.take) {
+      this.pin(c.target);
+      return;
+    }
+    if (!c.final || c.reopening) return;
+    for (const o of this.comments.values()) o.reopening = false;
+    c.reopening = true;
+    this.pinned = undefined;
+    this.sendJson({ type: 'reopen', key: c.wire });
     this.change();
   }
 
@@ -255,6 +298,7 @@ export class VoiceSession {
         return;
       case 'heard':
         this.heard = m.text;
+        this.pending = m.pending;
         this.change();
         return;
       case 'comment':
@@ -288,8 +332,10 @@ export class VoiceSession {
     c.clip = f.clip;
     c.target = f.target;
     c.final = f.final;
-    // A new comment has taken the pinned element; the pin is spent.
-    if (!had && this.pinned !== undefined) this.pinned = undefined;
+    c.reopening = false;
+    // A new comment has taken the pinned element; the pin is spent. One the
+    // words said before the tap made, elsewhere, leaves it waiting.
+    if (!had && this.pinned !== undefined && f.target === this.pinned) this.pinned = undefined;
     this.comments.set(c.key, c);
     this.sync(c);
     this.change();
@@ -362,6 +408,8 @@ export class VoiceSession {
     this.ready = false;
     this.buffered = [];
     this.pinned = undefined;
+    this.pending = '';
+    for (const c of this.comments.values()) c.reopening = false;
     if (note) this.note = note;
     this.change();
   }

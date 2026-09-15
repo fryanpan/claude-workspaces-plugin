@@ -17,7 +17,8 @@ import { VoiceView } from './voice-ui.ts';
  * The glue between the three halves — `VoiceSession` (the socket and the
  * threads), `VoiceView` (what is drawn) and the page itself: the catalog of
  * elements the server picks from, a tap that pins the next words to an
- * element, and Move's tap that re-points a comment.
+ * element (or adds to the note already on it), and Move's tap that re-points
+ * a comment.
  *
  * Mounted on a mic `addMic` already made, so the board (which imports this)
  * and a mock page (which fetches it as `voice.js` on the first tap, see
@@ -143,9 +144,6 @@ export function mountVoiceMode(
     shadow: widget.shadow,
     element,
     name: (t) => nameOf(t === null ? undefined : targets.get(t), element(t)),
-    // A token sign-in names the widget's user; a guest name may be replaced by
-    // the server with a workspace sign-in's, so it waits for the server's word.
-    author: () => widget.authUser?.name ?? null,
     clipUrl: (clip) => `${widget.opts.serverUrl.replace(/^ws/, 'http')}${clip}`,
     onMove: (key) => {
       view.picking = key;
@@ -208,7 +206,7 @@ export function mountVoiceMode(
       view.picking = null;
       session.move(key, target);
     } else {
-      session.pin(target);
+      session.pointAt(target);
     }
     if (highlight) highlight.hidden = true;
   };

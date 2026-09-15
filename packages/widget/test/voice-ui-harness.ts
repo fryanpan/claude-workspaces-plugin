@@ -4,16 +4,19 @@ import { VoiceView } from '../src/voice/voice-ui.ts';
 
 /**
  * A view over a session that is state alone — the fields the view reads, set
- * by each test — and `setResolved` recorded. Shared by the view's two suites.
+ * by each test — and `setResolved` and `reopen` recorded. Shared by the view's two suites.
  */
 
 export interface FakeSession {
   state: VoiceSession['state'];
   comments: Map<string, VoiceComment>;
   heard: string;
+  pending: string;
+  recording: number;
   pinned: number | null | undefined;
   note: string | null;
   setResolved: ReturnType<typeof vi.fn>;
+  reopen: ReturnType<typeof vi.fn>;
 }
 
 export const CLIP = '/workspaces/w-1/docs/d-1/voice-feedback/seg-1.wav#t=12.4,31';
@@ -32,7 +35,7 @@ export function comment(over: Partial<VoiceComment> = {}): VoiceComment {
   };
 }
 
-export function setup(over: { author?: string | null } = {}) {
+export function setup() {
   const host = document.createElement('div');
   const shadow = host.attachShadow({ mode: 'open' });
   document.body.append(host);
@@ -43,9 +46,12 @@ export function setup(over: { author?: string | null } = {}) {
     state: 'recording',
     comments: new Map(),
     heard: '',
+    pending: '',
+    recording: 1,
     pinned: undefined,
     note: null,
     setResolved: vi.fn(async () => {}),
+    reopen: vi.fn(),
   };
   const moved: string[] = [];
   let now = 1_000;
@@ -54,7 +60,6 @@ export function setup(over: { author?: string | null } = {}) {
     shadow,
     element: (t) => (t === null ? null : (elements.get(t) ?? null)),
     name: (t) => (t === 2 ? 'Goal bar' : `#${t}`),
-    author: () => (over.author === undefined ? 'Guest <Admin>' : over.author),
     clipUrl: (clip) => `http://host${clip}`,
     onMove: (key) => moved.push(key),
     now: () => now,
