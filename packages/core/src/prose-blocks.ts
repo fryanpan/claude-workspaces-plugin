@@ -31,6 +31,7 @@ import {
 } from './prose-fragment.ts';
 import { parseMarkdownBlocks, textContent } from './prose-markdown.ts';
 import type { MarkdownParseOptions } from './prose-mdx.ts';
+import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK } from './suggest.ts';
 
 /** Where insertBlocksAfterAnchor splices relative to the anchor's block. */
 export type BlockPlacement = 'after-block' | 'top-level';
@@ -422,6 +423,30 @@ export function deleteAgentAnchor(doc: Y.Doc, anchorId: string): boolean {
 // insertBlocksAfterAnchor.
 // ===========================================================================
 
+/**
+ * Why a delete that would take a pending suggestion with it is refused.
+ *
+ * An agent moves a section by writing a copy and deleting the original. The
+ * copy is built from what the agent read — the accepted text, or the plain
+ * text with both of a replace's words run together — so it cannot carry the
+ * proposal, and deleting the original was where the proposal quietly died.
+ */
+export const PENDING_SUGGESTION_REASON =
+  'a block in this range carries a pending suggestion, and deleting it would lose the proposal: accept_suggestion or reject_suggestion first';
+
+/** Does any text under these blocks carry a suggestion mark? */
+function holdsPendingSuggestion(blocks: readonly Y.XmlElement[]): boolean {
+  const marked = (node: Y.XmlElement | Y.XmlText): boolean =>
+    node instanceof Y.XmlText
+      ? (node.toDelta() as Array<{ attributes?: Record<string, unknown> }>).some(
+          (op) =>
+            op.attributes?.[SUGGEST_INSERT_MARK] != null ||
+            op.attributes?.[SUGGEST_DELETE_MARK] != null,
+        )
+      : (node.toArray() as Array<Y.XmlElement | Y.XmlText>).some(marked);
+  return blocks.some(marked);
+}
+
 /** Short preview of a block's textual content — useful for the
  *  agent-facing return of deleteBlockAtAnchor. Strips wrapper marks. */
 function blockSnippet(block: Y.XmlElement, max = 80): string {
@@ -431,7 +456,8 @@ function blockSnippet(block: Y.XmlElement, max = 80): string {
 
 export interface DeleteBlockResult {
   ok: boolean;
-  error?: 'anchor-orphaned' | 'no-host-block';
+  error?: 'anchor-orphaned' | 'no-host-block' | 'holds-pending-suggestion';
+  reason?: string;
   deleted?: { tag: string; snippet: string };
 }
 
@@ -472,6 +498,9 @@ export function deleteBlockAtAnchor(
   const idx = siblings.indexOf(block);
   if (idx < 0) return { ok: false, error: 'no-host-block' };
 
+  if (holdsPendingSuggestion([block])) {
+    return { ok: false, error: 'holds-pending-suggestion', reason: PENDING_SUGGESTION_REASON };
+  }
   const tag = block.nodeName;
   const snippet = blockSnippet(block);
 
@@ -484,7 +513,8 @@ export function deleteBlockAtAnchor(
 
 export interface DeleteBlocksInRangeResult {
   ok: boolean;
-  error?: 'no-match' | 'ambiguous' | 'inverted-range' | 'no-blocks';
+  error?: 'no-match' | 'ambiguous' | 'inverted-range' | 'no-blocks' | 'holds-pending-suggestion';
+  reason?: string;
   /** Number of TOP-LEVEL blocks removed from the fragment. */
   deleted?: number;
   /** For ambiguous results, candidate previews. `which` says whether
@@ -548,6 +578,9 @@ export function deleteBlocksInRange(
   if (endIdx < startIdx) return { ok: false, error: 'inverted-range' };
 
   const count = endIdx - startIdx + 1;
+  if (holdsPendingSuggestion(top.slice(startIdx, endIdx + 1))) {
+    return { ok: false, error: 'holds-pending-suggestion', reason: PENDING_SUGGESTION_REASON };
+  }
   doc.transact(() => {
     fragment.delete(startIdx, count);
   }, opts.transactionOrigin ?? 'agent');
@@ -557,7 +590,8 @@ export function deleteBlocksInRange(
 
 export interface DeleteSectionResult {
   ok: boolean;
-  error?: 'no-match' | 'ambiguous' | 'not-a-heading';
+  error?: 'no-match' | 'ambiguous' | 'not-a-heading' | 'holds-pending-suggestion';
+  reason?: string;
   /** Number of top-level blocks removed (heading + body). */
   deleted?: number;
   /** Heading that ended the run (= first block AFTER the deleted span),
@@ -641,6 +675,9 @@ export function deleteSection(
   }
 
   const count = endExclusive - chosen.idx;
+  if (holdsPendingSuggestion(top.slice(chosen.idx, endExclusive))) {
+    return { ok: false, error: 'holds-pending-suggestion', reason: PENDING_SUGGESTION_REASON };
+  }
   doc.transact(() => {
     fragment.delete(chosen.idx, count);
   }, opts.transactionOrigin ?? 'agent');
