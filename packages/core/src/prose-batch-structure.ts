@@ -55,6 +55,12 @@ export function holdsNoWords(el: Y.XmlElement): boolean {
       }
       continue;
     }
+    // A line break is not a word. A paragraph holding only breaks outlines as
+    // blank text and serializes to nothing, so a reader sees an empty line
+    // whose id refused both edits with `no-range`.
+    if (child instanceof Y.XmlElement && child.nodeName === 'hardBreak' && child.length === 0) {
+      continue;
+    }
     if (!(child instanceof Y.XmlElement) || !holdsNoWords(child)) return false;
   }
   return true;

@@ -52,6 +52,7 @@ import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware
 import { MountStore } from './mount-store.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
 import { writeNotesMethod } from './notes-method-store.ts';
+import { fileOnMeetingDoc } from './notes-quality-review.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import {
@@ -468,9 +469,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           // start long after createServer has returned.
           captureBoard: () => taskStore,
           // Where a meeting whose notes came out badly is reported: a review
-          // item on the row the meeting's doc is linked to. Same store, same
-          // thunk reason as `captureBoard`.
-          qualityBoard: () => taskStore,
+          // item on the row the meeting's doc is linked to, or on the doc
+          // itself when no row links it. Same stores, same thunk reason as
+          // `captureBoard`.
+          qualityBoard: () => ({
+            backlinksFor: (ref) => taskStore.backlinksFor(ref),
+            addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
+            fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(docStore, docId, review, actor),
+          }),
           // Where "pull up last week's notes" looks. Board docs and when
           // each last carried a meeting; the meeting's own doc is dropped
           // by the caller, since "the last meeting" means the one before.
