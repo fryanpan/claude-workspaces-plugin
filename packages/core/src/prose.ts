@@ -110,6 +110,8 @@ export {
   setBlockAuthor,
   addressableBlocks,
   ensureBlockIds,
+  duplicateIdBlocks,
+  remintDuplicateIds,
   newBlockId,
   claimSubtree,
   parentOf,
