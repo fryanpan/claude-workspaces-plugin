@@ -44,6 +44,9 @@ export type VoiceClientMessage =
   | { type: 'pin'; target: number | null }
   /** The person moved a comment to the element they meant. It stays there. */
   | { type: 'move'; key: string; target: number | null }
+  /** The person tapped an earlier note of this recording: the NEXT words add
+   *  to it, and it is written again from everything said for it. */
+  | { type: 'reopen'; key: string }
   /** The page posted comment `key` as this thread — recorded in the log. */
   | { type: 'posted'; key: string; threadId: string }
   | { type: 'stop' };
@@ -69,8 +72,13 @@ export interface VoiceCommentFrame {
 export type VoiceServerMessage =
   | { type: 'ready'; segment: number }
   | { type: 'unavailable'; reason: string }
-  /** The raw words of the last few seconds, still-provisional ones included. */
-  | { type: 'heard'; text: string }
+  /**
+   * The raw words of the last few seconds, still-provisional ones included —
+   * and `pending`, the words said since the last pause that no note holds yet.
+   * A pause (or a switch to another note) folds them into one, and the frame
+   * after that says so with `pending` empty.
+   */
+  | { type: 'heard'; text: string; pending: string }
   | VoiceCommentFrame
   | { type: 'stopped' }
   | { type: 'error'; message: string };
@@ -180,6 +188,8 @@ export function parseVoiceClientMessage(raw: unknown): VoiceClientMessage | null
       return target === undefined ? null : { type: 'pin', target };
     case 'move':
       return target === undefined || !key ? null : { type: 'move', key, target };
+    case 'reopen':
+      return key ? { type: 'reopen', key } : null;
     case 'posted':
       return key && typeof m.threadId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(m.threadId)
         ? { type: 'posted', key, threadId: m.threadId }

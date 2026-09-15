@@ -25,10 +25,15 @@ const MAX_TOKENS = 700;
 const TIMEOUT_MS = 20_000;
 
 export interface TidyOpen {
+  /** Its note as it stands — what `apportionTick` checks a rewrite against. */
   text: string;
+  /** Everything said for it so far, which the note is written again from. */
+  raw: string;
   target: number | null;
   /** The person placed it (tap or Move): the model may not re-point it. */
   fixed: boolean;
+  /** The person tapped this earlier note to add to it. */
+  chosen?: boolean;
 }
 
 export interface TidyInput {
@@ -56,14 +61,14 @@ export type TidyComplete = (req: { system: string; user: string }) => Promise<Ti
 
 export const TIDY_SYSTEM = `You turn a person's spoken feedback about a web page into short written review comments, each attached to the page element it is about.
 
-You get the page's element catalog, the comment currently open (if any), and the NEW words just heard. The words are a live transcript: no punctuation guarantees, filler, false starts, mis-heard words.
+You get the page's element catalog, the comment currently open (if any) with every word said for it so far, and the NEW words just heard, after a pause. The words are a live transcript: no punctuation guarantees, filler, false starts, mis-heard words.
 
 Decide:
 1. Topic. Do the new words continue the open comment's topic, start a new topic, or continue it and then change topic? A new topic is a different element or a different problem. More detail, a reason, or a suggested fix for the same problem continues it.
-2. Words. For each comment write the speaker's point in clear, concise sentences. Drop filler, repetition and false starts. Keep their meaning, specifics and tone. Never add ideas they did not say. No preamble such as "The user says". For a continued comment return the WHOLE comment rewritten to include the new words.
+2. Words. For each comment write the speaker's point in clear, concise sentences. Drop filler, repetition and false starts. Keep their meaning, specifics and tone. Never add ideas they did not say. No preamble such as "The user says". For a continued comment write the WHOLE comment again, as one finished note, from everything said for it: its earlier words and the new ones.
 3. Element. Pick the one catalog element each comment is about, by id. Prefer the most specific element matching what they named — a chip, a button, a heading, a bar — and use the enclosing element's text and the "in" links to tell similar elements apart ("the done chip on the pantry task"). Pick a container when they talk about the whole group. Use null when the words are about the page in general or nothing fits.
 
-If the open comment says [fixed], keep its element. If a pinned element is given, the first NEW comment is about it.
+If the open comment says fixed, keep its element. If it says chosen, the person picked it to add to: the new words continue it unless they plainly move to another element or problem. If a pinned element is given, the first NEW comment is about it.
 If the new words carry no feedback (filler, thinking aloud), return {"comments":[]}.
 
 Reply with JSON only, no prose:
@@ -83,9 +88,8 @@ export function buildTidyPrompt(input: TidyInput): { system: string; user: strin
   const parts = ['<catalog>', ...input.targets.map(describe), '</catalog>'];
   if (input.open) {
     const where = input.open.target === null ? 'page' : `e${input.open.target}`;
-    parts.push(
-      `<open element="${where}"${input.open.fixed ? ' fixed' : ''}>${input.open.text}</open>`,
-    );
+    const flags = `${input.open.fixed ? ' fixed' : ''}${input.open.chosen ? ' chosen' : ''}`;
+    parts.push(`<open element="${where}"${flags}><said>${input.open.raw}</said></open>`);
   } else {
     parts.push('<open>none</open>');
   }

@@ -172,7 +172,8 @@ describe('VoiceFeedbackRelay', () => {
     );
     speak(ws, 4);
     const grown = await until(() => ws.comments('v1')[1], 'v1 grown');
-    expect(t.prompts[1]).toContain('<open element="e0">The header is too tall.</open>');
+    // The note is written again from everything said for it.
+    expect(t.prompts[1]).toContain('<open element="e0"><said>the header is too tall</said></open>');
     expect(t.prompts[1]).toContain('<new_words>make it shorter</new_words>');
     expect(grown).toMatchObject({
       text: 'The header is too tall; make it shorter.',
@@ -281,7 +282,7 @@ describe('VoiceFeedbackRelay', () => {
     await until(() => ws.comments('v1')[0], 'v1');
 
     relay.onText(ws, JSON.stringify({ type: 'pin', target: 2 }));
-    expect(ws.comments('v1').at(-1)).toMatchObject({ final: true });
+    await until(() => ws.comments('v1').at(-1)?.final === true, 'v1 settled by the pin');
 
     // The model claims it continues and names another element; the pin wins.
     t.replies.push(reply({ continues: true, text: 'Make it shorter.', element: 'e3' }));

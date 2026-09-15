@@ -1,19 +1,24 @@
 import { escapeHtml as escape } from '@claude-workspaces/core';
 import { isPhoneFace } from '../widget-card.ts';
+import { stackColumn } from './voice-column.ts';
+import { VOICE_CSS } from './voice-css.ts';
 import type { VoiceComment, VoiceSession } from './voice-session.ts';
 
 /**
  * What a recording looks like on the page — the round-4 design the owner
- * approved ("Build it").
+ * approved ("Build it"), with the finished-notes flow of the round after.
  *
  * - Nothing pulses or blinks (calm by default, owner 2026-09-13): the live
  *   comment carries a steady red recording dot, and the mic is a still red
  *   Stop button with no timer.
- * - The live comment shows the tidied words on top, growing, and two lines of
- *   raw transcript below.
+ * - The live comment shows the finished note, and under it, grey, the words
+ *   said since the last pause. At the pause they are folded into the note.
+ *   One faded line keeps the note's raw words; a tap shows all of them.
  * - It floats above the buttons until the transcriber picks an element, then
  *   stands beside it. Move, then a tap on the element, fixes a wrong pick.
- * - No "Posted" label: a comment that settles turns its dashed edge solid.
+ * - Every other note stands beside the page as a card (a dot on its element,
+ *   on a phone); a tap on either adds to that note again.
+ * - No byline, no counts, no "Posted" label.
  * - Every voice comment keeps its clip (▶) and its raw words at its foot.
  *
  * Drawn from the session's state every time it changes; placed every frame
@@ -28,44 +33,6 @@ const BUTTONS_H = 190;
 /** On a phone, how long the newest settled card stays up once recording stops. */
 export const SETTLED_MS = 6000;
 
-export const VOICE_CSS = [
-  '.vlive,.vcard{position:fixed;z-index:2147483647;width:280px;background:#fff;color:#1b1f23;border-radius:12px;box-shadow:0 8px 24px rgba(18,38,63,.16);font-size:14px;line-height:1.45;margin-right:var(--cw-edge)}',
-  '.vlive{border:1.5px dashed #2e7dd7;overflow:hidden}',
-  '.vlive.float{right:16px;bottom:calc(var(--cw-vv-bottom) + var(--cw-dock-h) + 132px)}',
-  '.vhead{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #eef1f4;font:600 12px/1.2 system-ui,sans-serif;color:#6e7781}',
-  '.vdot{flex:none;width:9px;height:9px;border-radius:50%;background:#d1242f}',
-  '.vwhere{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1b1f23}',
-  '.vwhere.seeking{color:#6e7781;font-weight:500;font-style:italic}',
-  '.vlive.picking .vwhere{color:#2e7dd7}',
-  '.vmove{position:relative;margin-left:auto;flex:none;min-height:28px;padding:3px 10px;border:1px solid #cfd8e3;border-radius:6px;color:#2e7dd7;font:600 12px system-ui,sans-serif;background:#fff;cursor:pointer}',
-  // A finger needs 44px; the grip keeps its 28px look and takes taps around it.
-  '.vmove::after{content:"";position:absolute;inset:-9px -4px}',
-  '.vlive.float .vmove,.vlive.picking .vmove{display:none}',
-  '.vpol{padding:9px 12px 2px;overflow-wrap:anywhere}',
-  '.vpol:empty::before{content:"Say your feedback.";color:#a3acb5}',
-  '.vraw{display:flex;flex-direction:column;justify-content:flex-end;padding:0 12px;margin:4px 0 10px;max-height:2.9em;overflow:hidden;font-size:12px;color:#8a939c;overflow-wrap:anywhere}',
-  '.vcard{border:1px solid #d5dce4;padding:10px 12px}',
-  '.vcard.undone .vtext{text-decoration:line-through;color:#8a939c}',
-  '.vby{font:600 11px/1.2 system-ui,sans-serif;color:#6e7781;margin-bottom:6px}',
-  '.vtext{overflow-wrap:anywhere}',
-  '.vrawtext{margin-top:6px;font-size:12px;color:#8a939c;overflow-wrap:anywhere}',
-  '.vfoot{display:flex;gap:4px;align-items:center;margin-top:8px;padding-top:4px;border-top:1px solid #eef1f4}',
-  // 44px tall to a finger, 32px to the eye: the margins give the height back.
-  '.vfoot button{min-height:44px;min-width:44px;margin:-6px 0;padding:0 8px;border:0;background:none;font:500 12px system-ui,sans-serif;color:#6e7781;cursor:pointer;border-radius:6px}',
-  '.vfoot button:disabled{color:#c9d1d9;cursor:default}',
-  '.vpager{display:none;align-items:center;font:500 12px system-ui,sans-serif;color:#6e7781}',
-  '.vcard.paged .vpager{display:flex}',
-  '.vfoot .vplay{color:#2e7dd7}',
-  '.vfoot .vundo{margin-left:auto}',
-  '.vlead{position:fixed;inset:0;pointer-events:none;z-index:2147483646}',
-  '.vlead svg{width:100%;height:100%}',
-  '.vlead line{stroke:#9fb9d8;stroke-width:1.2;stroke-dasharray:3 3}',
-  '.vhl{position:fixed;border:2px dashed #2e7dd7;border-radius:6px;background:rgba(46,125,215,.1);pointer-events:none;z-index:2147483646}',
-  // The mic is a still Stop button while recording: no animation of its own.
-  '.fab-mic.voice-active .vstop{display:block;width:14px;height:14px;border-radius:3px;background:#fff}',
-  '@media (max-width:1100px){.vlive,.vcard{width:auto;left:12px;right:12px}}',
-].join('');
-
 export interface VoiceViewDeps {
   session: VoiceSession;
   shadow: ShadowRoot;
@@ -73,8 +40,6 @@ export interface VoiceViewDeps {
   element: (target: number | null) => HTMLElement | null;
   /** A short name for where a comment is ("Goal bar", "Done chip"). */
   name: (target: number | null) => string;
-  /** The name the widget itself is signed in as, if it knows one. */
-  author: () => string | null;
   /** The clip's URL, made absolute against the server. */
   clipUrl: (clip: string) => string;
   onMove: (key: string) => void;
@@ -97,6 +62,10 @@ export class VoiceView {
   private page: string | null = null;
   private cards = new Map<string, { el: HTMLDivElement; until: number; html: string }>();
   private settled = new Set<string>();
+  /** Notes whose raw words are shown in full. */
+  private rawOpen = new Set<string>();
+  /** A phone's dots on earlier notes' elements while recording. */
+  private dots: HTMLDivElement;
   private raf: number | null = null;
   /** When the last recording stopped; a phone shows its newest card after. */
   private stoppedAt = Number.NEGATIVE_INFINITY;
@@ -113,15 +82,21 @@ export class VoiceView {
     this.live.innerHTML =
       '<div class="vhead"><span class="vdot"></span>' +
       '<span class="vwhere"></span><button class="vmove" type="button">Move</button></div>' +
-      '<div class="vpol"></div><div class="vraw"><span></span></div>';
+      '<div class="vpol"></div><div class="vraw"><span></span></div>' +
+      '<button class="vkept" type="button"></button>';
     this.lead = document.createElement('div');
     this.lead.className = 'vlead';
     this.mark = document.createElement('div');
     this.mark.className = 'vhl';
     this.mark.hidden = true;
+    this.dots = document.createElement('div');
     const style = document.createElement('style');
     style.textContent = VOICE_CSS;
-    deps.shadow.append(style, this.lead, this.mark, this.live);
+    deps.shadow.append(style, this.lead, this.mark, this.dots, this.live);
+    this.dots.addEventListener('click', (ev) => {
+      const key = (ev.target as HTMLElement).closest<HTMLElement>('.vpin')?.dataset.key;
+      if (key) deps.session.reopen(key);
+    });
     // A tap anywhere else, once recording has stopped, puts the cards away.
     document.addEventListener(
       'pointerdown',
@@ -138,16 +113,28 @@ export class VoiceView {
       const open = this.openComment();
       if (open) deps.onMove(open.key);
     });
+    const toggleRaw = () => {
+      const open = this.openComment();
+      if (!open) return;
+      if (!this.rawOpen.delete(open.key)) this.rawOpen.add(open.key);
+      this.render();
+    };
+    this.live.querySelector('.vpol')?.addEventListener('click', toggleRaw);
+    this.live.querySelector('.vkept')?.addEventListener('click', toggleRaw);
   }
 
   private get now(): number {
     return (this.deps.now ?? Date.now)();
   }
 
-  /** The comment the live card is showing: the newest one still growing. */
+  /** The note the live card is showing: one tapped to add to, or else the
+   *  newest one still growing. */
   openComment(): VoiceComment | null {
     let open: VoiceComment | null = null;
-    for (const c of this.deps.session.comments.values()) if (!c.final) open = c;
+    for (const c of this.deps.session.comments.values()) {
+      if (c.reopening) return c;
+      if (!c.final) open = c;
+    }
     return open;
   }
 
@@ -173,7 +160,9 @@ export class VoiceView {
         ? open.target
         : (s.pinned ?? null);
     const attached = target !== null && this.deps.element(target) !== null;
-    this.live.className = `vlive ${attached ? 'attached' : 'float'}${this.picking ? ' picking' : ''}`;
+    const hearing = s.pending.trim() !== '';
+    const noted = !!open?.text;
+    this.live.className = `vlive ${attached ? 'attached' : 'float'}${this.picking ? ' picking' : ''}${hearing ? ' hearing' : ' quiet'}${noted ? ' noted' : ''}`;
     const where = this.live.querySelector('.vwhere') as HTMLElement;
     where.textContent = this.picking
       ? 'Tap where this belongs'
@@ -184,8 +173,11 @@ export class VoiceView {
           : 'Listening…';
     where.classList.toggle('seeking', !this.picking && !attached);
     (this.live.querySelector('.vpol') as HTMLElement).textContent = open?.text ?? '';
-    (this.live.querySelector('.vraw span') as HTMLElement).textContent = s.heard;
-    // Every new card first, so each one's "2 of 3" counts them all.
+    (this.live.querySelector('.vraw span') as HTMLElement).textContent = s.pending;
+    const kept = this.live.querySelector('.vkept') as HTMLElement;
+    kept.textContent = open?.raw ? `“${open.raw}”` : '';
+    kept.classList.toggle('open', !!open && this.rawOpen.has(open.key));
+    // Every new card first, so each one's pager knows them all.
     for (const c of s.comments.values()) this.makeCard(c);
     for (const c of s.comments.values()) this.drawCard(c);
     // Placed now as well as next frame: a card just attached has lost the
@@ -194,9 +186,15 @@ export class VoiceView {
   }
 
   private makeCard(c: VoiceComment): void {
+    // A note tapped to add to is the live card's again: its card goes, and
+    // comes back when it settles.
+    if ((!c.final || c.reopening) && this.settled.delete(c.key)) {
+      this.cards.get(c.key)?.el.remove();
+      this.cards.delete(c.key);
+    }
     // A card is made once, when its comment settles. One put away stays
     // away: the comment is its pin now, and a render comes with every word.
-    if (!c.final || this.settled.has(c.key)) return;
+    if (!c.final || c.reopening || this.settled.has(c.key)) return;
     this.settled.add(c.key);
     const el = document.createElement('div');
     el.className = 'vcard';
@@ -204,17 +202,6 @@ export class VoiceView {
     this.deps.shadow.append(el);
     this.cards.set(c.key, { el, until: Number.NEGATIVE_INFINITY, html: '' });
     this.wireCard(c.key, el);
-  }
-
-  /** Who wrote it, as the server has it. Until its thread exists, the name
-   *  the server gave another comment from this recording: the widget's own
-   *  may be a guest name the server replaces with a signed-in one. */
-  private byline(c: VoiceComment): string {
-    let who = c.posted?.author;
-    for (const o of this.deps.session.comments.values())
-      if (o.take === c.take) who ??= o.posted?.author;
-    who ??= this.deps.author() ?? undefined;
-    return who ? `${escape(who)} · by voice` : 'By voice';
   }
 
   /** The cards from the recording that said `key`, which its pager steps through. */
@@ -232,7 +219,6 @@ export class VoiceView {
     const keys = this.sameTake(c.key);
     const at = keys.indexOf(c.key) + 1;
     const html =
-      `<div class="vby">${this.byline(c)}</div>` +
       `<div class="vtext">${escape(c.text)}</div>` +
       `<div class="vrawtext"${rawOpen ? '' : ' hidden'}>“${escape(c.raw)}”</div>` +
       '<div class="vfoot">' +
@@ -240,7 +226,7 @@ export class VoiceView {
       '<button type="button" class="vrawbtn">Raw words</button>' +
       // A phone shows one card at a time after Stop; these step through the rest.
       (keys.length > 1
-        ? `<span class="vpager"><button type="button" class="vprev" aria-label="Earlier comment"${at === 1 ? ' disabled' : ''}>‹</button>${at} of ${keys.length}<button type="button" class="vnext" aria-label="Later comment"${at === keys.length ? ' disabled' : ''}>›</button></span>`
+        ? `<span class="vpager"><button type="button" class="vprev" aria-label="Earlier comment"${at === 1 ? ' disabled' : ''}>‹</button><button type="button" class="vnext" aria-label="Later comment"${at === keys.length ? ' disabled' : ''}>›</button></span>`
         : '') +
       (c.posted
         ? `<button type="button" class="vundo">${c.resolved ? 'Redo' : 'Undo'}</button>`
@@ -267,7 +253,14 @@ export class VoiceView {
     el.addEventListener('click', (ev) => {
       const b = (ev.target as Element).closest('button');
       const c = this.deps.session.comments.get(key);
-      if (!b || !c) return;
+      if (!c) return;
+      if (!b) {
+        // While talking, a tap on a note adds to it; after, a tap on its words shows the raw ones.
+        if (this.deps.session.state !== 'idle') this.deps.session.reopen(key);
+        else if ((ev.target as Element).closest('.vtext'))
+          el.querySelector('.vrawtext')?.toggleAttribute('hidden');
+        return;
+      }
       if (b.classList.contains('vplay')) this.play(c.clip);
       else if (b.classList.contains('vrawbtn'))
         el.querySelector('.vrawtext')?.toggleAttribute('hidden');
@@ -284,6 +277,33 @@ export class VoiceView {
       }
       const card = this.cards.get(key);
       if (card) card.until = Math.max(card.until, this.now + SETTLED_MS);
+    });
+  }
+
+  /** On a phone while talking, a dot on the element of each earlier note of this recording. */
+  private drawDots(on: boolean): void {
+    const s = this.deps.session;
+    const notes = on
+      ? [...this.cards.keys()].flatMap((key) => {
+          const c = s.comments.get(key);
+          const el = c?.take === s.recording ? this.deps.element(c.target) : null;
+          return c && el ? [{ key, el }] : [];
+        })
+      : [];
+    const keys = notes.map((n) => n.key).join(' ');
+    if (this.dots.dataset.keys !== keys) {
+      this.dots.dataset.keys = keys;
+      this.dots.innerHTML = notes
+        .map(
+          (n) =>
+            `<button class="vpin" type="button" data-key="${escape(n.key)}" aria-label="${escape(this.deps.name(s.comments.get(n.key)?.target ?? null))}"></button>`,
+        )
+        .join('');
+    }
+    notes.forEach(({ el }, i) => {
+      const r = el.getBoundingClientRect();
+      const dot = this.dots.children[i] as HTMLElement;
+      Object.assign(dot.style, { left: `${r.right - 8}px`, top: `${r.top - 6}px` });
     });
   }
 
@@ -386,6 +406,7 @@ export class VoiceView {
       card.el.hidden = false;
       spot(card.el, this.deps.element(s.comments.get(key)?.target ?? null));
     }
+    this.drawDots(phone && recording);
     const ys = stackColumn(spots, top, room);
     let lines = '';
     spots.forEach(({ el, r, h }, i) => {
@@ -404,46 +425,4 @@ export class VoiceView {
     }
     return !this.live.hidden || this.cards.size > 0;
   }
-}
-
-/** Space between two cards in the column. */
-const GAP = 10;
-
-/**
- * Where each card in the column stands, or null for one that waits behind its
- * pin. `spots` come most important first: the ones kept are the first that
- * fit the column's height together, so opening one card's raw words moves the
- * others rather than hiding one while there is still room. The kept cards
- * stand in the order of the elements they are about — so leader lines never
- * cross — each as near its element as the cards above and below allow.
- */
-export function stackColumn(
-  spots: ReadonlyArray<{ h: number; want: number }>,
-  top: number,
-  room: number,
-): Array<number | null> {
-  const out: Array<number | null> = spots.map(() => null);
-  let used = 0;
-  const kept: number[] = [];
-  spots.forEach((sp, i) => {
-    if (used + sp.h > room - top) return;
-    used += sp.h + GAP;
-    kept.push(i);
-  });
-  kept.sort((a, b) => (spots[a]?.want ?? 0) - (spots[b]?.want ?? 0) || a - b);
-  let floor = top;
-  for (const i of kept) {
-    const sp = spots[i] as { h: number; want: number };
-    const y = Math.max(floor, Math.min(sp.want, room - sp.h));
-    out[i] = y;
-    floor = y + sp.h + GAP;
-  }
-  let ceiling = room + GAP;
-  for (const i of [...kept].reverse()) {
-    const sp = spots[i] as { h: number; want: number };
-    const y = Math.max(top, Math.min(out[i] as number, ceiling - GAP - sp.h));
-    out[i] = y;
-    ceiling = y;
-  }
-  return out;
 }

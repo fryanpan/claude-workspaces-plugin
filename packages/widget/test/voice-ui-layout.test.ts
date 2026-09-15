@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SETTLED_MS, stackColumn } from '../src/voice/voice-ui.ts';
+import { stackColumn } from '../src/voice/voice-column.ts';
+import { SETTLED_MS } from '../src/voice/voice-ui.ts';
 import { box, comment, heights, rowAt, screen, setup } from './voice-ui-harness.ts';
 
 /**
@@ -64,7 +65,7 @@ describe('a phone after Stop', () => {
     const tap = (key: string, cls: string) =>
       (t.card(key)?.querySelector(cls) as HTMLButtonElement).click();
     expect(shown()).toEqual(['v3']);
-    expect(t.card('v3')?.querySelector('.vpager')?.textContent).toBe('‹3 of 3›');
+    expect(t.card('v3')?.querySelector('.vpager')?.textContent, 'no count').toBe('‹›');
     expect((t.card('v3')?.querySelector('.vnext') as HTMLButtonElement).disabled).toBe(true);
 
     tap('v3', '.vprev');
@@ -95,7 +96,7 @@ describe('a phone after Stop', () => {
     t.session.state = 'idle';
     t.view.render();
     t.view.place();
-    expect(t.card('2.v2')?.querySelector('.vpager')?.textContent).toBe('‹2 of 2›');
+    expect((t.card('2.v2')?.querySelector('.vnext') as HTMLButtonElement).disabled).toBe(true);
     (t.card('2.v2')?.querySelector('.vprev') as HTMLButtonElement).click();
     t.view.place();
     const prev = t.card('2.v1')?.querySelector('.vprev') as HTMLButtonElement;

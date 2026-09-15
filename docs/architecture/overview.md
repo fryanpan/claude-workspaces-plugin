@@ -440,8 +440,10 @@ their rules. Voice feedback itself is the widget's `voice/` directory, a third
 entry (`@claude-workspaces/widget/voice`): `voice-session.ts` streams PCM over
 `WS /workspaces/<ws>/docs/<docId>/voice` and writes the comments the server
 settles through the ordinary thread routes, `voice-ui.ts` draws the live
-comment and the settled cards, and `voice-mode.ts` glues them to the page
-(taps pin the next words to an element). The board imports it directly
+comment and the settled cards (its styles in `voice-css.ts`, the column
+layout in `voice-column.ts`), and `voice-mode.ts` glues them to the page (a
+tap sends the next words to an element, or back into that element's earlier
+note). The board imports it directly
 (`board/board-feedback-mic.ts`); a mock page gets the mic from
 `mockup-live.js` and fetches the rest as the lazy chunk `voice.js` on the
 first tap (`voice/voice-loader.ts`), so none of it is in `widget.iife.js`,
@@ -457,7 +459,10 @@ resampler and one worklet; `meeting-audio.ts` re-exports it.
 On the server, `routes/upgrade-stream.ts` hands that socket to
 `voice-feedback-relay.ts`, which runs the meeting's transcription engine and a
 Haiku tidy (`voice-feedback-tidy.ts`) that decides which words become which
-comment on which catalog element, and `voice-feedback-store.ts` keeps each
+comment on which catalog element. The tidy runs at a pause in the talk, with a
+ceiling for talk that never pauses; `voice-feedback-turns.ts` tracks which
+heard words a note holds yet, and `voice-feedback-session.ts` holds the
+relay's per-recording state types. `voice-feedback-store.ts` keeps each
 recording's WAV and a timestamped raw transcript beside the doc
 (`routes/doc-voice-feedback.ts` serves both). No new write path: a spoken
 comment is the thread POST the typed composer already makes, carrying a

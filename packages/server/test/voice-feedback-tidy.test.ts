@@ -35,13 +35,21 @@ const input = (over: Partial<TidyInput> = {}): TidyInput => ({
 
 describe('buildTidyPrompt', () => {
   it('lists the catalog, the open comment, the pin and the new words', () => {
-    const { system, user } = buildTidyPrompt(
-      input({ open: { text: 'Header is too tall.', target: 0, fixed: true }, pinned: 2 }),
-    );
+    const open = {
+      text: 'Header is too tall.',
+      raw: 'um the header is like way too tall',
+      target: 0,
+      fixed: true,
+    };
+    const { system, user } = buildTidyPrompt(input({ open, pinned: 2 }));
     expect(system).toContain('JSON only');
     expect(user).toContain('e1 <button> "Save" in e0');
     expect(user).toContain('e2 <span> "done" label="Status" in e0');
-    expect(user).toContain('<open element="e0" fixed>Header is too tall.</open>');
+    // The note is written again from everything said for it, not from its last tidied words.
+    expect(user).toContain(
+      '<open element="e0" fixed><said>um the header is like way too tall</said></open>',
+    );
+    expect(user).not.toContain('Header is too tall.');
     expect(user).toContain('<pinned>e2</pinned>');
     expect(user).toContain('<new_words>the save button is hard to find</new_words>');
   });
@@ -51,6 +59,14 @@ describe('buildTidyPrompt', () => {
     expect(user).toContain('<open>none</open>');
     expect(user).toContain('<pinned>page</pinned>');
     expect(buildTidyPrompt(input()).user).not.toContain('<pinned>');
+  });
+
+  it('marks an earlier note the person tapped to add to', () => {
+    const open = { text: 'Header.', raw: 'the header', target: 0, fixed: true, chosen: true };
+    expect(buildTidyPrompt(input({ open })).user).toContain(
+      '<open element="e0" fixed chosen><said>the header</said></open>',
+    );
+    expect(buildTidyPrompt(input({ open })).system).toContain('chosen');
   });
 });
 
@@ -85,7 +101,7 @@ describe('parseTidyReply', () => {
         { continues: true, text: 'second', element: 'e1' },
       ],
     });
-    const open = { text: 'Header.', target: 0, fixed: false };
+    const open = { text: 'Header.', raw: 'header', target: 0, fixed: false };
     expect(parseTidyReply(reply, input({ open }))?.map((c) => c.continues)).toEqual([true, false]);
     expect(parseTidyReply(reply, input())?.map((c) => c.continues)).toEqual([false, false]);
   });
@@ -94,7 +110,10 @@ describe('parseTidyReply', () => {
     const reply = JSON.stringify({
       comments: [null, { text: '   ' }, { continues: true, text: 'real', element: 'e2' }],
     });
-    const out = parseTidyReply(reply, input({ open: { text: 'x', target: null, fixed: false } }));
+    const out = parseTidyReply(
+      reply,
+      input({ open: { text: 'x', raw: 'x', target: null, fixed: false } }),
+    );
     expect(out).toEqual([{ continues: true, text: 'real', target: 2 }]);
   });
 
@@ -202,7 +221,10 @@ describe('apportionTick', () => {
   const SAID = 'And the save button should say save changes.';
   const tick = (open: string | null, ...comments: TidyComment[]) =>
     apportionTick(
-      input({ open: open === null ? null : { text: open, target: 0, fixed: false }, words: SAID }),
+      input({
+        open: open === null ? null : { text: open, raw: open, target: 0, fixed: false },
+        words: SAID,
+      }),
       comments,
       0,
       8,

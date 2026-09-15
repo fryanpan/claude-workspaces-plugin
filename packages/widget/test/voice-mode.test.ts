@@ -160,6 +160,19 @@ describe('tapping the page while recording', () => {
     expect(t.socket().json().at(-1)).toEqual({ type: 'pin', target: t.indexOf('done') });
   });
 
+  it('adds to the note this recording already made on the tapped element', async () => {
+    const t = setup();
+    await recording(t);
+    t.socket().recv(commentFrame({ key: 'v1', target: t.indexOf('goal'), final: true }));
+    t.tap(document.getElementById('goal') as HTMLElement);
+    expect(t.socket().json().at(-1)).toEqual({ type: 'reopen', key: 'v1' });
+    t.tap(document.getElementById('done') as HTMLElement);
+    expect(t.socket().json().at(-1), 'CONTROL: an element with no note').toEqual({
+      type: 'pin',
+      target: t.indexOf('done'),
+    });
+  });
+
   it('describes an element added since the start before pinning it', async () => {
     const t = setup();
     await recording(t);

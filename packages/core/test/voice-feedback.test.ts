@@ -83,6 +83,7 @@ describe('parseVoiceClientMessage', () => {
       key: 'v1',
       threadId: 'th_abc-1',
     });
+    expect(p({ type: 'reopen', key: 'v1' })).toEqual({ type: 'reopen', key: 'v1' });
     expect(p({ type: 'stop' })).toEqual({ type: 'stop' });
   });
 
@@ -93,6 +94,8 @@ describe('parseVoiceClientMessage', () => {
     expect(p({ type: 'pin', target: 1.5 })).toBeNull();
     expect(p({ type: 'move', key: '../v1', target: 1 })).toBeNull();
     expect(p({ type: 'move', key: 'v1' })).toBeNull();
+    expect(p({ type: 'reopen' })).toBeNull();
+    expect(p({ type: 'reopen', key: 't-1' })).toBeNull();
     expect(p({ type: 'posted', key: 'v1', threadId: '../../etc' })).toBeNull();
     expect(p({ type: 'dance' })).toBeNull();
     expect(p(null)).toBeNull();
