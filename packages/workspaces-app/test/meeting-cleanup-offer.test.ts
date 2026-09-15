@@ -89,7 +89,7 @@ function stubFetch(reply: { status?: number; body?: unknown } = {}): typeof fetc
   const impl = ((url: string, init?: RequestInit) => {
     calls.push({ url: String(url), ...(init?.method ? { method: init.method } : {}) });
     return Promise.resolve(
-      new Response(JSON.stringify(reply.body ?? { ok: true, touched: 2 }), {
+      new Response(JSON.stringify(reply.body ?? { ok: true, changed: true, touched: 2 }), {
         status: reply.status ?? 200,
         headers: { 'content-type': 'application/json' },
       }),
@@ -334,6 +334,52 @@ describe('the tidy-up offer', () => {
     expect(offerEl().hidden).toBe(false);
     expect(goEl().disabled).toBe(false);
     expect(dismissEl().disabled).toBe(false);
+  });
+
+  /**
+   * THE 15 SEPTEMBER FAILURE. The pass ran, the gate refused all sixteen of
+   * its edits, the doc was left exactly as it was — and the reply said `ok`,
+   * so the dialog closed over notes nothing had touched and said nothing at
+   * all. A person who had just asked for a tidy-up was left believing he had
+   * had one.
+   *
+   * The body below is what the server actually answers for that pass; the
+   * refusal that produces it is driven through the real gate in
+   * `packages/server/test/notes-cleanup-nothing-changed.test.ts`.
+   */
+  it('keeps the offer up, and says so, when the pass changed nothing', async () => {
+    const f = stubFetch({
+      body: { ok: true, changed: false, proposed: 16, refused: 16, touched: 0 },
+    });
+    const offer = mount(f);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() =>
+      expect(noteEl().textContent).toBe(
+        'Nothing changed — none of the edits could be made to these notes.',
+      ),
+    );
+    // The offer is the thing that must survive: one bad pass cannot be what
+    // costs him the chance to ask again.
+    expect(offerEl().hidden).toBe(false);
+    expect(goEl().disabled).toBe(false);
+    expect(dismissEl().disabled).toBe(false);
+  });
+
+  it('says a pass that found nothing to improve found nothing, rather than closing', async () => {
+    // An empty edit list is a documented success of the pass — and still not
+    // something to answer by vanishing, because the person cannot tell it
+    // apart from a tidy-up that ran and rewrote nothing he can see.
+    const f = stubFetch({
+      body: { ok: true, changed: false, proposed: 0, refused: 0, touched: 0 },
+    });
+    const offer = mount(f);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() =>
+      expect(noteEl().textContent).toBe('Nothing changed — the tidy-up found nothing to improve.'),
+    );
+    expect(offerEl().hidden).toBe(false);
   });
 
   it('withdraws when the next recording starts, and dismisses on request', () => {

@@ -1822,9 +1822,6 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // reconnect is called off, and the backoff starts from the top.
     cancelReconnect();
     liveMeetingId = null;
-    // A meeting is beginning and nothing knows its id yet. Whatever is keyed
-    // to the last one is about people this meeting has not heard from.
-    opts.onMeetingChange?.(null);
     standingNote = '';
     // A new recording answers whatever the last one's ending said.
     endedNote = '';
@@ -1879,6 +1876,28 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       return;
     }
     capture = started;
+    // A MEETING IS BEGINNING — announced HERE, and not from the top of this
+    // function, because until the microphone actually opened there was no
+    // meeting to announce. Whatever is keyed to the last one is now about
+    // people this meeting has not heard from.
+    //
+    // WHAT IT COST TO SAY IT EARLY. The tidy-up offer withdraws on this
+    // `null`, so a Record press the browser then refused — a denied
+    // microphone, a prompt dismissed, a mis-tap — took the LAST meeting's
+    // offer off the screen for good, over a recording that never started.
+    // Nothing above this line has written to the doc or the wire, so what a
+    // blocked start now leaves alone is THE OFFER.
+    //
+    // AND ONLY THE OFFER — the reset block at the top of this function still
+    // runs on a false start. `names`, `seen` and `lastMeetingId` are cleared
+    // before the microphone is ever asked for, so a refused press still costs
+    // the last meeting's rename target: `postName` is addressed to
+    // `lastMeetingId`, and after a blocked start there is none. That is the
+    // same fault in a second place, and moving that block is work nothing
+    // here tests — deliberately not done with this fix rather than
+    // overlooked. See `meeting-tidy-offer-false-start.test.ts`, which asserts
+    // the offer and says nothing about the cast.
+    opts.onMeetingChange?.(null);
     // What is RUNNING, which is what the record and the wire have to name — a
     // meeting that asked for two streams and got one is a one-stream meeting.
     liveSource = started.source;

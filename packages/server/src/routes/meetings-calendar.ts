@@ -371,16 +371,29 @@ export async function handleMeetingCalendarRoutes(
     // still worth a line, because the alternative is a feature nobody can
     // check the restraint of after the fact.
     console.log(`[meeting-notes] ${result.line}`);
+    // DID THE DOCUMENT MOVE? Summed here, from every kind of change one pass
+    // can make, because `ok` answers a different question — whether the pass
+    // RAN — and the dialog that asked for it needs this one. A pass whose
+    // every edit the gate refused is `ok` and touched nothing, and reading
+    // that as a success is what closed the offer over unchanged notes on
+    // 2026-09-15. `touched` alone is not it either: a pass that proposed
+    // nothing still tidies, so a blank line removed or a repeated topic
+    // folded is a change a person can see.
+    const changed = result.touched + result.blanks + result.merged > 0;
     return j(result.ok ? 200 : 409, {
       docId,
       meetingId,
       ok: result.ok,
+      changed,
       ...(result.reason !== undefined ? { reason: result.reason } : {}),
       proposed: result.proposed,
       refused: result.refused,
       applied: result.applied,
+      suggested: result.suggested,
       failed: result.failed,
       touched: result.touched,
+      blanks: result.blanks,
+      merged: result.merged,
       turns: result.turns,
     });
   }

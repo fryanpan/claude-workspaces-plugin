@@ -46,6 +46,15 @@ import type { MeetingLiveZone } from './meeting-live-zone.ts';
 interface CleanupReply {
   ok?: boolean;
   error?: string;
+  /**
+   * Whether the document actually moved — the server's own sum over every
+   * kind of change a pass can make, which is not the same question as `ok`.
+   *
+   * ONLY AN EXPLICIT `false` KEEPS THE DIALOG UP. A server that predates this
+   * field sends nothing, and the honest reading of nothing is the old one: it
+   * says the pass ran and says no more. A missing field is not a claim.
+   */
+  changed?: boolean;
   touched?: number;
   refused?: number;
   proposed?: number;
@@ -66,6 +75,23 @@ export const CLEANUP_WASH_HOLD_MS = 90_000;
 const WORKING_NOTE = 'Tidying up these notes…';
 /** What a failure says when the server sends no sentence of its own. */
 const FAILED_NOTE = 'The tidy-up could not run. The notes are unchanged.';
+/**
+ * The two ways a pass can finish having changed nothing, and they are said
+ * differently because they are different news.
+ *
+ * A pass whose edits were all refused is a pass that TRIED and could not:
+ * something about the doc — a section the notes never landed in, a bullet
+ * somebody is discussing — put every one of them out of reach, and pressing
+ * again after moving the notes is a reasonable thing to do. A pass that
+ * proposed nothing read the notes and found them finished, which is a
+ * documented success of the feature and not a fault to chase.
+ *
+ * Neither of them closes the dialog. Both used to: `ok` was the whole test,
+ * so the offer vanished, the notes were exactly as they had been, and nothing
+ * on screen said which of the two had happened — or that anything had.
+ */
+const NOTHING_LANDED_NOTE = 'Nothing changed — none of the edits could be made to these notes.';
+const NOTHING_TO_CHANGE_NOTE = 'Nothing changed — the tidy-up found nothing to improve.';
 
 export interface MeetingCleanupOffer {
   /** A recording just ended: offer a pass over this meeting. */
@@ -157,7 +183,16 @@ export function mountMeetingCleanupOffer(opts: {
     note.hidden = message === null;
   };
 
-  const fail = (message: string): void => {
+  /**
+   * Leave the dialog where it is, saying `message`, with both answers live
+   * again.
+   *
+   * THIS IS THE ANSWER TO EVERYTHING EXCEPT NOTES THAT CHANGED. A refusal, a
+   * request that never arrived, a pass that ran and moved nothing — in every
+   * one of them the offer is still the offer to make, and the person is the
+   * one who decides whether to press again or to say Not now.
+   */
+  const holdOpen = (message: string): void => {
     say(message);
     button.disabled = false;
     dismiss.disabled = false;
@@ -192,14 +227,22 @@ export function mountMeetingCleanupOffer(opts: {
       const body = (await res.json().catch(() => ({}))) as CleanupReply;
       if (superseded()) return;
       if (!res.ok || body.ok !== true) {
-        fail(body.error ?? FAILED_NOTE);
+        holdOpen(body.error ?? FAILED_NOTE);
+        return;
+      }
+      // RAN IS NOT THE SAME AS CHANGED. The server sums every kind of change
+      // one pass can make and says so; a pass that moved nothing leaves the
+      // offer up and says which of the two nothings it was, because the
+      // notes behind the dialog are the receipt and there is no receipt here.
+      if (body.changed === false) {
+        holdOpen((body.proposed ?? 0) > 0 ? NOTHING_LANDED_NOTE : NOTHING_TO_CHANGE_NOTE);
         return;
       }
       // Done: the notes themselves are the receipt, so the dialog gets out of
       // the way of the thing the person asked to see.
       close();
     } catch {
-      if (!superseded()) fail(FAILED_NOTE);
+      if (!superseded()) holdOpen(FAILED_NOTE);
     } finally {
       inFlight.delete(id);
     }
