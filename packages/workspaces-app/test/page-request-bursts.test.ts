@@ -68,9 +68,7 @@ describe('link-title hydration', () => {
   it('posts one lookup when a second pass starts before the first has landed', async () => {
     const { calls, fetcher } = recorder(() => ({ titles: {}, statuses: {}, planHeld: {} }));
     const host = document.createElement('div');
-    host.innerHTML = renderCommentMarkdown(
-      `${location.origin}/workspaces/w-abc123?task=t-one`,
-    );
+    host.innerHTML = renderCommentMarkdown(`${location.origin}/workspaces/w-abc123?task=t-one`);
     document.body.append(host);
     expect(host.querySelectorAll('a[data-ws-link][data-ws-pending]').length).toBe(1);
 
