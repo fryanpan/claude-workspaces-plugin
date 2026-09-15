@@ -59,8 +59,8 @@ per 30 new commits on main.
 - a number, amount or key: a run of six or more digits (a phone or account
   number; an ISO date is left out), an amount with a currency sign or
   currency word, a reading with a medical unit such as mg/dL, or an opaque
-  string of 20 or more characters that mixes letters and digits, or 16 or
-  more hex digits. Haiku judges these as well as names, and `tokens()` drops
+  string: 20 or more characters mixing letters and digits, 16 or more hex
+  digits, or any unbroken run of 40 or more letters and digits. Haiku judges these as well as names, and `tokens()` drops
   digits, so without this rule a salary or a key written among ordinary words
   would never be sent.
 

@@ -69,8 +69,10 @@ _OWNER = re.compile(r"\b([A-Z][a-z]+)['’]s\b")
 # readings and keys. Those are digits and opaque strings, which tokens() drops,
 # so they are counted as marks of their own and a new one is sent like a new
 # word. An ISO date is left out: this repository writes a new one every day.
+# Every run tokens() skips as a blob is one of these, so none goes unread.
 _OPAQUE = re.compile(r"(?<![\w-])(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{20,}(?![\w-])"
-                     r"|(?<![0-9A-Za-z])[0-9a-fA-F]{16,}(?![0-9A-Za-z])")
+                     r"|(?<![0-9A-Za-z])[0-9a-fA-F]{16,}(?![0-9A-Za-z])"
+                     r"|(?<![^\W_])[^\W_]{40,}(?![^\W_])")
 _NUMBER = re.compile(r"(?<!\w)(?<!\d\.)\+?\(?\d[\d ().-]{4,}\d(?!\w|\.\d)")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONEY = re.compile(r"[$€£]\s?\d[\d,]*(?:\.\d+)?"

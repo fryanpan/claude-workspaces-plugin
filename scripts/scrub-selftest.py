@@ -1380,6 +1380,7 @@ def check_rules_pass() -> None:
         ("amount", "Every sailing waits $0.00.", "$ "),
         ("reading", "Every sailing waits 0 mg/dL.", "reading "),
         ("key", "Every sailing waits EXAMPLE_KEY_00000000000000.", "key "),
+        ("letters-only key", "Every sailing waits " + "EXAMPLEKEY" * 5 + ".", "key "),
     ):
         chosen = scrub_names.select(rules_patch("notes.md", [ordinary, line, ordinary]), public)
         expect(f"rules pass: a line of published words with a {kind} on it is sent",
