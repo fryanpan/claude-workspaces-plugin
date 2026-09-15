@@ -42,6 +42,9 @@ today's code fails is flagged.
   and then not again until that wait's identity changes — a re-hold, a second
   question, or the wait clearing. Before that filter such a ticket woke its
   lead every window with `changed: { escalated: true }` and nothing else. A
+  task with a standing declared wait is taken off `stalled` before any of
+  this (`withoutStandingWaits`), so it neither wakes the lead nor appears
+  under "stopped moving" on a wake something else caused, until it lapses. A
   task past the parallelism cap needs no filter: the gate never judges it, and
   `beyondCapacity` is a count on the frame that never enters the stamp.
 - **Measured by:** the `[stall] wake` log lines per board per day, and the

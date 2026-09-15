@@ -297,48 +297,45 @@ describe('a row carrying a DECLARED wait on something off the board', () => {
     ...over,
   });
 
-  it('is named once, then says nothing for three repeat windows', () => {
+  it('is never named while it stands, across three repeat windows', () => {
+    // A standing wait is not a finding. The frame used to name the row once
+    // under "stopped moving" and then fall quiet; a board whose only quiet
+    // row is waiting now wakes nobody at all.
     const h = harness(board({ declaredWaits: [declared()] }));
 
     h.tick();
-    expect(h.sent).toHaveLength(1);
-    // Named, never hidden — in the declarer's own words, so the lead reads
-    // what the wait IS rather than being told a second time that a row is
-    // quiet.
-    expect(h.sent[0]?.declaredWaits?.[0]?.what).toBe(
-      'the fleet restart, then a peer filing the follow-up',
-    );
-    expect(h.sent[0]?.rows?.[0]?.id).toBe('t-rollout');
-
     h.windows(3);
 
-    expect(h.sent).toHaveLength(1);
+    expect(h.sent).toHaveLength(0);
   });
 
   it('comes back loud the moment the declaration LAPSES', () => {
     // The anti-mute property. The silence a declaration buys is deferred,
-    // never cancelled: the row re-enters the clock carrying every minute it
-    // accumulated, so the next tick escalates rather than the next window.
+    // never cancelled: the row returns as a finding on the lapse tick itself,
+    // carrying every minute it accumulated.
     const h = harness(board({ declaredWaits: [declared()] }));
     h.tick();
     h.windows(3);
-    expect(h.sent).toHaveLength(1);
+    expect(h.sent).toHaveLength(0);
 
     h.set({ ...h.current(), declaredWaits: [declared({ lapsed: true })] });
     h.tick();
 
-    expect(h.sent).toHaveLength(2);
-    expect(h.sent[1]?.changed?.escalated).toBe(true);
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.rows?.[0]?.id).toBe('t-rollout');
     // …and the frame says which sentence ran out, so the lead knows why the
     // row got loud rather than only that it did.
-    expect(h.sent[1]?.declaredWaits?.[0]?.lapsed).toBe(true);
+    expect(h.sent[0]?.declaredWaits?.[0]?.lapsed).toBe(true);
+    expect(h.sent[0]?.declaredWaits?.[0]?.what).toBe(
+      'the fleet restart, then a peer filing the follow-up',
+    );
   });
 
   it('escalates again once the wait is cleared', () => {
     const h = harness(board({ declaredWaits: [declared()] }));
     h.tick();
     h.windows(2);
-    expect(h.sent).toHaveLength(1);
+    expect(h.sent).toHaveLength(0);
 
     h.set({ ...h.current(), declaredWaits: [] });
     h.windows(2);

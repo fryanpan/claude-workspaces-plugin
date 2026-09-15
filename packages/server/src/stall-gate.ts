@@ -179,9 +179,9 @@ export interface WaitingRow {
  * time that a row is quiet.
  *
  * Emitted for every NAMED row carrying a declaration — stalled or unfiled —
- * because the point is that nothing is hidden; which of those the clock
- * actually stops for is `stall-nudge.ts`'s `clockRows`, and it is only ever
- * the stalled ones.
+ * because the point is that nothing is hidden; which of those the wake stops
+ * treating as a finding is `stall-nudge.ts`'s `withoutStandingWaits`, and it
+ * is only ever the stalled ones.
  */
 export interface DeclaredWaitRow {
   id: string;
