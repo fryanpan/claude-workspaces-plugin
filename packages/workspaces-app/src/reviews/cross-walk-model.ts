@@ -4,7 +4,8 @@
  * The server hands `/api/review-queue` every open review item on every board
  * in one order (top project first, then each board's Home order), each row
  * sized. This turns those rows into the `ReviewItem`s the card already draws,
- * narrows them to the size the reader chose, and says where the reader stands
+ * says which card the walk opens on, and — only when choose-difficulty is on —
+ * narrows them to the size the reader chose and says where the reader stands
  * when the choice changes under them.
  *
  * Pure: the page (`reviews-app.ts`) owns the fetch, the stored choice and the
@@ -17,6 +18,7 @@ import {
   type ReviewThreadItem,
   reviewQueue,
 } from '../board/board-review-model.ts';
+import type { WalkChrome } from '../board/walkthrough-island.tsx';
 
 /** One row of `/api/review-queue`. */
 export type CrossReviewRow = ReviewThreadItem & {
@@ -78,6 +80,45 @@ export function crossEntry(row: CrossReviewRow, now: number): CrossEntry | null 
   if (!item) return null;
   if (row.dueAt !== undefined) item = { ...item, dueAt: row.dueAt };
   return { item, project: row.project, workspaceId: row.workspaceId, size: row.size };
+}
+
+/**
+ * The card the walk opens on: the first item of the project Home's group
+ * named (`/review?from=<workspaceId>`), or the top of the queue when no
+ * project was named or it has nothing waiting any more.
+ */
+export function startKey(entries: readonly CrossEntry[], from: string | null): string | null {
+  const first = from ? entries.find((e) => e.workspaceId === from) : undefined;
+  return (first ?? entries[0])?.item.key ?? null;
+}
+
+/** Choose-difficulty as the walk sees it: whether it is on, and when it is,
+ *  the chosen size and what a tap on the bar does. */
+export interface WalkSizing {
+  on: boolean;
+  level: ReviewSize;
+  onPick: (size: ReviewSize) => void;
+}
+
+/**
+ * The words and controls around the card. With choose-difficulty off (the
+ * default) there is no size bar and no "harder items not shown" line, so
+ * nothing in the flow speaks of size or time.
+ */
+export function walkChrome(
+  current: CrossEntry | null,
+  entries: readonly CrossEntry[],
+  sizing: WalkSizing,
+): WalkChrome {
+  const doneNote = sizing.on ? hiddenNote(entries, sizing.level) : null;
+  return {
+    backLabel: '‹ Back to Workspaces',
+    heading: current ? `Workspace: ${current.project}` : 'Workspaces',
+    ...(sizing.on ? { size: { level: sizing.level, onPick: sizing.onPick } } : {}),
+    ...(doneNote ? { doneNote } : {}),
+    doneLabel: 'Back to Workspaces',
+    tally: false,
+  };
 }
 
 /** The entries a size lets through, in the server's order. */

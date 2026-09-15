@@ -1051,8 +1051,8 @@ body.board-body {
   padding-left: 0;
 }
 /* The size bar shares the top line with the way out (the cross-board review,
-   `/review`). One colour for every stop up to the chosen one, no knob — the
-   same bar the all-workspaces page draws. */
+   `/review`), when choose-difficulty is on. One colour for every stop up to
+   the chosen one, no knob. */
 .board-walk-topline:has(.review-sizes) {
   align-items: center;
   justify-content: space-between;
@@ -1085,12 +1085,6 @@ body.board-body {
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-}
-.board-walk-topline .review-sizes .board-tab small {
-  font-size: 11px;
-  font-weight: 400;
-  color: inherit;
-  opacity: 0.8;
 }
 .board-walk-topline .review-sizes .board-tab.filled {
   background: #d9803a;

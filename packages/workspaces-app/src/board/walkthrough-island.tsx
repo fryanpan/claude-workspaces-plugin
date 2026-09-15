@@ -166,9 +166,8 @@ export interface WalkthroughView {
 /**
  * The cross-board review (`/review`) walks the same card through different
  * chrome: the way back goes to the workspaces list, the heading names the
- * project the card is from, the top line carries the size bar, and nothing
- * counts what the sitting cleared (the owner's comment on the mock: no stats
- * anywhere but the total time).
+ * project the card is from, the top line carries the size bar when
+ * choose-difficulty is on, and nothing counts what the sitting cleared.
  */
 export interface WalkChrome {
   backLabel: string;
@@ -182,8 +181,8 @@ export interface WalkChrome {
   tally: boolean;
 }
 
-/** The one bar, drawn the way `paintFillBar` paints the server's copy: every
- *  stop up to the chosen one filled, the chosen one checked. */
+/** The one bar: every stop up to the chosen one filled, the chosen one
+ *  checked. Drawn only when choose-difficulty is on (`review-sizes.ts`). */
 function SizeBar(props: { level: ReviewSize; onPick: (size: ReviewSize) => void }) {
   return (
     <div
@@ -197,13 +196,12 @@ function SizeBar(props: { level: ReviewSize; onPick: (size: ReviewSize) => void 
           type="button"
           class={`board-tab${sizeAllowed(size, props.level) ? ' filled' : ''}${size === props.level ? ' board-tab-active' : ''}`}
           data-size={size}
-          // biome-ignore lint/a11y/useSemanticElements: a filled bar of buttons, the same markup as the landing page's server-rendered copy
+          // biome-ignore lint/a11y/useSemanticElements: a filled bar of buttons, not a set of radio inputs
           role="radio"
           aria-checked={size === props.level}
           onClick={() => props.onPick(size)}
         >
-          {`${REVIEW_SIZE_LABELS[size].label} `}
-          <small>{REVIEW_SIZE_LABELS[size].hint}</small>
+          {REVIEW_SIZE_LABELS[size]}
         </button>
       ))}
     </div>
