@@ -311,3 +311,169 @@ describe('the audio tee on the microphone socket', () => {
     expect(sent.some((p) => JSON.parse(p).type === 'stopped')).toBe(true);
   });
 });
+
+/**
+ * The shape of the file a person opens, measured end to end: a fixture
+ * meeting recorded through the real store, stopped, and read back off disk.
+ *
+ * Nothing here imports the fold — these cases go through `MeetingStore` and
+ * the written markdown, which is what makes them fail on the base commit's
+ * `meeting-raw.ts` for the reason the feature exists rather than for a
+ * missing import.
+ */
+describe('what a reader ends up with', () => {
+  let dataDir: string;
+  beforeAll(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-shape-'));
+  });
+  afterAll(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const NAMES: Record<string, string> = { A: 'Jordan', B: 'Devi' };
+
+  /** Every transcript bullet in the file, nested ones included. */
+  function bulletsOf(md: string): string[] {
+    return md.split('\n').filter((l) => l.startsWith('- [') || l.startsWith('  - '));
+  }
+
+  /**
+   * The speech the file still holds, in the order a reader meets it: a bullet's
+   * own words, then whatever was folded onto it. Reconstructible exactly
+   * because the scaffolding is a fixed grammar and the fixture's names are
+   * known — which is the point of asserting on it rather than on a count.
+   */
+  function spokenOf(md: string): string[] {
+    const NAME = /^(?:Jordan|Devi): /;
+    const said: string[] = [];
+    for (const line of md.split('\n')) {
+      let body: string;
+      if (line.startsWith('- [')) body = line.replace(/^- \[\d\d:\d\d:\d\dZ\] /, '');
+      else if (line.startsWith('  - ')) body = line.slice(4);
+      else continue;
+      body = body.replace(NAME, '');
+      const folded = / _\((.*)\)_$/.exec(body);
+      if (folded) body = body.slice(0, folded.index);
+      said.push(body);
+      if (!folded) continue;
+      for (const group of (folded[1] as string).split('; ')) {
+        for (const one of group.replace(NAME, '').split(' · ')) said.push(one);
+      }
+    }
+    return said;
+  }
+
+  function record(docId: string, spoken: ReadonlyArray<[string, string]>): string {
+    const store = new MeetingStore(dataDir, { docInfo: () => ({}) });
+    const m = store.start({ docId, engine: 'mock', sampleRate: 16_000, mode: 'conversation' });
+    if (!m) throw new Error('refused');
+    for (const [label, name] of Object.entries(NAMES)) m.nameSpeaker(label, name);
+    spoken.forEach(([label, text], i) => m.recordTurn(i, text, label));
+    m.stop();
+    return readFileSync(rawTranscriptPath(dataDir, docId, docId), 'utf8');
+  }
+
+  it('puts acknowledgement on the row it answered instead of a row of its own', () => {
+    const md = record('acks', [
+      ['A', 'The ferry timetable slips whenever the tide is out.'],
+      ['B', 'Yeah.'],
+      ['B', 'Right.'],
+      ['A', 'So we publish two timetables.'],
+    ]);
+    const bullets = bulletsOf(md);
+    expect(bullets).toHaveLength(2);
+    expect(bullets[0]).toContain('_(Devi: Yeah. · Right.)_');
+    expect(bullets[1]).toMatch(/\] Jordan: So we publish two timetables\.$/);
+  });
+
+  it('keeps a short row that is a real answer on a row of its own', () => {
+    const md = record('answers', [
+      ['A', 'How long does the harbour survey take?'],
+      ['B', 'Three weeks.'],
+      ['A', 'Did the tide gauge come back?'],
+      ['B', 'No.'],
+    ]);
+    expect(bulletsOf(md)).toHaveLength(4);
+    expect(md).toMatch(/\] Devi: Three weeks\.$/m);
+    expect(md).toMatch(/\] Devi: No\.$/m);
+  });
+
+  it('breaks a wall of words at a pause, under one clock and one name', () => {
+    const sentence = (n: number) =>
+      `Point ${n} is that the dredging schedule and the harbour survey window have never once lined up inside the same quarter, which is how the ferry operator ends up publishing a timetable nobody on the jetty believes.`;
+    const wall = [1, 2, 3, 4].map(sentence).join(' ');
+    const md = record('wall', [['A', wall]]);
+    const bullets = bulletsOf(md);
+    expect(bullets.length).toBeGreaterThan(1);
+    // One turn, so exactly one bullet carries a clock and a name.
+    expect(bullets.filter((b) => b.startsWith('- ['))).toHaveLength(1);
+    expect(spokenOf(md).join(' ')).toBe(wall);
+  });
+
+  it('a meeting of the reported shape loses rows and not one word', () => {
+    // The shape measured on a real 41-minute meeting, rebuilt from invented
+    // speech: about half the rows three words or fewer, one phrase said over
+    // and over, and a handful of walls carrying most of the words. The
+    // proportions are asserted below before the fold is measured, so the
+    // fixture cannot quietly drift into proving nothing.
+    const topics = [
+      'the dredging schedule',
+      'the harbour survey',
+      'the jetty repairs',
+      'the ferry timetable',
+      'the tide gauge',
+      'the winter budget',
+      'the pilot boat',
+      'the mooring fees',
+      'the slipway lease',
+      'the fuel contract',
+      'the night crossing',
+      'the spring haul-out',
+    ];
+    const acks = ['Yeah.', 'Right.', 'Mhm.', 'Okay.', 'Yeah yeah.', 'Makes sense.'];
+    const spoken: Array<[string, string]> = [];
+    topics.forEach((topic, i) => {
+      spoken.push(['A', `We still have not decided what happens to ${topic} in the spring.`]);
+      for (let k = 0; k <= i % 3; k++) spoken.push(['B', acks[(i + k) % acks.length] as string]);
+      spoken.push(['B', `I would rather we settled ${topic} before the survey window opens.`]);
+      for (let k = 0; k <= (i + 1) % 3; k++) {
+        spoken.push(['A', acks[(i + k + 2) % acks.length] as string]);
+      }
+      spoken.push(['A', 'That depends on whether the harbour office moves the window again.']);
+      spoken.push(['B', 'Mhm.']);
+      if (i % 4 === 0) {
+        spoken.push([
+          'A',
+          [1, 2, 3, 4, 5, 6]
+            .map(
+              (n) =>
+                `The ${n === 1 ? 'first' : 'next'} thing about ${topic} is that it was scheduled against a window the harbour office had already moved, and nobody told the ferry operator until the timetable had gone to print.`,
+            )
+            .join(' '),
+        ]);
+        spoken.push(['B', 'Right.']);
+      }
+    });
+
+    const words = (t: string): number => t.split(/\s+/).filter((w) => w !== '').length;
+    const short = spoken.filter(([, t]) => words(t) <= 3).length;
+    const walls = spoken.filter(([, t]) => words(t) > 80).length;
+    // The reported meeting: 51% of rows three words or fewer, 4% of rows
+    // holding 41% of the words.
+    expect(short / spoken.length).toBeGreaterThan(0.45);
+    expect(walls / spoken.length).toBeLessThan(0.08);
+
+    const md = record('shape', spoken);
+    const before = spoken.length;
+    const after = bulletsOf(md).length;
+    const wordsIn = spoken.reduce((n, [, t]) => n + words(t), 0);
+    const recovered = spokenOf(md);
+    const wordsOut = recovered.reduce((n, t) => n + words(t), 0);
+    console.log(`[shape] rows ${before} -> ${after}; words ${wordsIn} -> ${wordsOut}`);
+
+    // Every word, in the order it was said. Not a count: the sequence.
+    expect(recovered.join(' ')).toBe(spoken.map(([, t]) => t).join(' '));
+    expect(wordsOut).toBe(wordsIn);
+    expect(after).toBeLessThan(before);
+  });
+});

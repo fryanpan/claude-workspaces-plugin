@@ -12,6 +12,13 @@
  * recording is made and this is a report on the last one. They share a
  * popover and nothing else.
  *
+ * A LINE IS A ROW, NOT A TURN. What it shows is the reshape
+ * `foldTranscriptRows` decides — acknowledgement riding on the row it
+ * answered, a wall of words broken at a pause — so that this panel and the
+ * `-raw-transcript.md` file show the same thing. Which is why the reader
+ * hands back structure rather than strings: a continuation and an answer are
+ * not rows of their own and must not be dressed as them.
+ *
  * FETCHED AT THE FIRST OPEN, never at mount. The meeting whose words somebody
  * wants is usually the one that has just ended, and a bot meeting's end moves
  * nothing else on this surface — so a value loaded when the doc opened would
@@ -19,8 +26,15 @@
  * the next open; a successful one is not re-asked.
  */
 
+/** One line to render: see `TranscriptLine` in `speaker-voices.ts`. */
+export interface PanelLine {
+  text: string;
+  continued?: boolean;
+  answers?: string;
+}
+
 /** The reader the fold calls. Null means the doc has never held a meeting. */
-export type TranscriptReader = () => Promise<{ lines: string[] } | null>;
+export type TranscriptReader = () => Promise<{ lines: PanelLine[] } | null>;
 
 /**
  * The `<details>` element, ready to append. It wires its own `toggle`
@@ -49,8 +63,18 @@ export function mountTranscriptFold(read: TranscriptReader): HTMLElement {
         }
         for (const line of found.lines) {
           const row = document.createElement('div');
-          row.className = 'meeting-pop-transcript-line';
-          row.textContent = line;
+          row.className = line.continued
+            ? 'meeting-pop-transcript-line meeting-pop-transcript-cont'
+            : 'meeting-pop-transcript-line';
+          row.textContent = line.text;
+          if (line.answers !== undefined) {
+            const back = document.createElement('span');
+            back.className = 'meeting-pop-transcript-answers';
+            // A leading space so the annotation does not run into the words
+            // it rides on when a reader copies the line out as plain text.
+            back.textContent = ` (${line.answers})`;
+            row.append(back);
+          }
           body.append(row);
         }
       })

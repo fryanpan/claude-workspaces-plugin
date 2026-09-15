@@ -622,6 +622,27 @@ writes the file, rebinds the doc through `file-binding.ts`, claims the file's
 address in `repo-registry.ts` so the Library above reads it as one document,
 and moves a meeting's filing record with it. `routes/doc-move.ts` answers it.
 
+`core/src/meeting-transcript-fold.ts` and `core/src/speech-lexicon.ts` join
+the shared tier and move nothing in the picture, but they are the reason a
+`meeting-*` module sits in `core` at all. The fold is a pure function from
+the turns a meeting stored to the ROWS a person is shown; the lexicon is the
+vocabulary it and `notes-idea-coverage.ts` both ask which words carry no
+subject (it moved out of that file, which re-exports every name). They are in
+`core` because two packages show a meeting's words as a list of rows and each
+used to build that list itself: the server composes
+`<docname>-raw-transcript.md` at stop (`formatRawSegment` in
+`meeting-raw.ts`), and the board's Transcript fold composes the same grammar
+in the browser off the REST record (`loadDocTranscript` in
+`speaker-voices.ts`). Two implementations of one grammar are two answers to
+"what was said", so both now call the one function. Neither module reads a
+file, writes one, or touches the append-only JSONL and the audio beside it —
+acknowledgement rides on the row it answered and a wall of words breaks at a
+pause, while the record a replay lines PCM up against keeps every turn at its
+own number. The meeting's two LIVE surfaces are deliberately untouched: the
+strip holds a rolling window of three turns and cannot grow, and the live
+zone is one flowing run of inline spans with no per-turn block, so neither is
+a list of rows to fold.
+
 `notes-timing.ts` joins the same `notes-*` family in the services tier and
 changes none of the picture: it is where one meeting's per-tick latency is
 recorded, opened only when the operator turns timing on. It holds no meeting
@@ -734,6 +755,9 @@ topics whose flat run has reached the bar `notes-quality.ts` scores, and writes
 the block ids into the prompt so the note-taker groups that topic instead of
 extending it. It counts runs the way `flatBulletRuns` does, deliberately, so
 the directive can never fire on a topic the eval calls fine.
+`notes-unconfirmed.ts` joins the same DOMAIN tier as the half that settles the
+guesses a meeting marked "(unconfirmed)" — it finds them and names their ids to
+the cleanup pass, which counts what is left afterwards.
 
 WHAT A MEETING COSTS is three modules and no new box, and the point of them is
 that one price table answers both ends. `core/model-cost.ts` is that table —
@@ -789,7 +813,7 @@ owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 

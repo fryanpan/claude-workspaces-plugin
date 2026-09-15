@@ -293,6 +293,17 @@ describe('the nested rule keeps the speaker where the flat one had it', () => {
     expect(nested).toContain('Do not remove a tag to make a lead note shorter.');
   });
 
+  test('its worked example demonstrates no "(unconfirmed)" tag', () => {
+    // The example used to end a sub-note "Cost of the beeper is not known yet
+    // (unconfirmed)". A rule deleted in prose and kept in an example is not
+    // deleted — the example is the half a model copies. So this asserts over
+    // the WHOLE assembled instructions, example included.
+    expect(nested.toLowerCase()).not.toContain('unconfirmed');
+    // And the sub-note it lived on is still there, so the case above is the
+    // tag going rather than the example being dropped.
+    expect(nested).toContain('Cost of the beeper is not known yet');
+  });
+
   test('the two layers take the place of the grouping section, by its heading', () => {
     expect(nested).toContain('### Two layers');
     expect(nested).not.toContain('### Grouping');

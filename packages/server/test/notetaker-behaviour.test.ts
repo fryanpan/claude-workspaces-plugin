@@ -129,8 +129,21 @@ describe('the notetaking instructions', () => {
     expect(system).toContain('**Question:**');
   });
 
-  it('ask for a guess to be marked rather than dropped or asserted', () => {
-    expect(system).toContain('end it with "(unconfirmed)"');
+  it('ask for the smaller sure point rather than a hedged bigger one', () => {
+    // This REPLACED "write the note and end it with (unconfirmed)". That
+    // instruction was the only thing that ever produced the marker, and a
+    // real meeting ended with three of them still in the notes. Deleting it
+    // alone would make an unsure note read as certain, so the rule that
+    // stands in its place asks for the claim the speech actually supports.
+    expect(system).toContain('write the smaller point that you are sure of');
+    expect(system).toContain('Do not write a larger point with a caveat');
+  });
+
+  it('nowhere ask the note-taker to emit an "(unconfirmed)" tag', () => {
+    // The whole prompt, not just the Accuracy section: an instruction in
+    // prose and an example that demonstrates the same thing are the same
+    // teaching, and the marker survived once because only the prose went.
+    expect(system.toLowerCase()).not.toContain('unconfirmed');
   });
 
   it('keep a decision and an open question attributed', () => {

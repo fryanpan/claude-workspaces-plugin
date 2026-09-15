@@ -1,4 +1,5 @@
 import { describe, expect, it, test } from 'vitest';
+import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
 /**
  * The eval's invented-link column, over a synthetic meeting.
  *
@@ -14,11 +15,14 @@ import { emptyHeadings } from '../packages/server/src/notes-quality.ts';
 import { addNotes, createNotesTickHarness } from '../packages/server/test/notes-tick-harness.ts';
 import {
   Behaviour,
+  JUDGED_COLUMNS,
+  JUDGE_SYSTEM,
   JudgeBudget,
   JudgeWindow,
   type JudgedWindow,
   MAX_JUDGED_WINDOW_TICKS,
   inventedLinkVerdict,
+  judgedBehaviours,
 } from './notes-eval.ts';
 
 const ROW = '/workspaces/w-riverbend?task=t-42';
@@ -363,5 +367,53 @@ describe('the count of windows that waited', () => {
       [0, 2],
     );
     expect(windows).toHaveLength(2);
+  });
+});
+
+/**
+ * THE RUBRIC AND THE PROMPT ARE ONE CLAIM, AND THEY DRIFTED APART ONCE.
+ *
+ * The shipped instructions used to say "write the note and end it with
+ * (unconfirmed)", and this rubric scored notes on carrying that marker. When
+ * the instruction was removed — the marker was the whole reason the tag ever
+ * appeared, and a real meeting ended with three of them still in the notes —
+ * the rubric was left behind. A note-taker following the NEW rule writes the
+ * narrower claim the speech supports and states it plainly, which the old
+ * criterion scored FALSE. The next eval run would have reported the fix as a
+ * regression, and the number would have been read as evidence against it.
+ *
+ * So this holds the two together rather than checking either alone.
+ */
+describe('the judge grades what the prompt actually asks for', () => {
+  it('neither the prompt nor the rubric asks for an "(unconfirmed)" marker', () => {
+    // The prompt teaches no marker...
+    expect(DEFAULT_NOTES_INSTRUCTIONS.toLowerCase()).not.toContain('unconfirmed');
+    // ...so the rubric may not require one. The criterion may still MENTION
+    // it, to tell the judge that an absent marker is correct — what it may
+    // not do is make its presence the passing condition.
+    expect(JUDGE_SYSTEM).not.toContain('anything uncertain is marked');
+    expect(JUDGE_SYSTEM).not.toMatch(/is marked "\(unconfirmed\)" rather than/);
+  });
+
+  it('grades the narrower claim instead, and says an absent marker is a pass', () => {
+    expect(JUDGE_SYSTEM).toContain('NARROWER thing the speech does support');
+    expect(JUDGE_SYSTEM).toContain('is the rule working, not a miss');
+  });
+});
+
+/**
+ * A column filed under an id the table does not have fails nowhere: the
+ * judge's `?.see(...)` drops the verdict and the column prints zero examples.
+ * The rename this branch made — `unconfirmed` to `narrowed` — could have been
+ * applied to one of these two lists and not the other, and every run since
+ * would have reported the retired behaviour as simply unexercised.
+ */
+describe('every judged column has a behaviour to file under', () => {
+  it('names an id the shipped table actually has', () => {
+    const table = judgedBehaviours();
+    // Guards the assertion below against passing vacuously if the column list
+    // is ever emptied.
+    expect(JUDGED_COLUMNS.length).toBeGreaterThan(0);
+    expect(JUDGED_COLUMNS.filter(([, id]) => !(id in table)).map(([, id]) => id)).toEqual([]);
   });
 });
