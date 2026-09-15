@@ -8,11 +8,21 @@
  * is be opened by the person whose note came out wrong. That person needs
  * the words as they were heard, in order, with a clock and a name on each
  * line, in a file that any markdown viewer renders and any grep searches.
- * That is this file, and its whole grammar is three markdown forms: a
+ * That is this file, and its whole grammar is four markdown forms: a
  * `## Segment N — <ISO start>` heading per recording, a
- * `- [HH:MM:SSZ] Speaker: words` bullet per settled turn, and a
- * `- [HH:MM:SSZ] — ... —` bullet for a stretch where a capture was dead. No
- * custom syntax, so a viewer later is a rendering choice, not a parser.
+ * `- [HH:MM:SSZ] Speaker: words` bullet per settled turn, a
+ * `- [HH:MM:SSZ] — ... —` bullet for a stretch where a capture was dead, and
+ * a plain nested `  - words` bullet for the rest of a turn too long to read
+ * as one. No custom syntax, so a viewer later is a rendering choice, not a
+ * parser.
+ *
+ * WHY A BULLET IS NOT A TURN. It was, and the file that produced was unusable:
+ * a row arrived every few seconds carrying "Yeah", while the substance sat in
+ * a handful of 200-word walls. `meeting-transcript-fold.ts` decides what a row
+ * is — acknowledgement rides on the row it answered, in an italic parenthesis
+ * naming the voice that said it, and a wall breaks at a pause into nested
+ * bullets under its own. No word is dropped and no turn is renumbered; the
+ * JSONL and the audio beside it are untouched, so a replay still lines up.
  *
  * WHY A GAP IS A LINE AND NOT AN ABSENCE. A meeting whose microphone died for
  * three minutes produces a transcript whose turns simply run from before the
@@ -65,6 +75,11 @@ import {
   describeCaptureSource,
   speakerDisplayName,
 } from '@claude-workspaces/core';
+import {
+  type FoldedAnswer,
+  type FoldedRow,
+  foldTranscriptRows,
+} from './meeting-transcript-fold.ts';
 import {
   type MeetingGap,
   type MeetingRecord,
@@ -191,9 +206,69 @@ function utcClock(ts: number): string {
   return `${new Date(ts).toISOString().slice(11, 19)}Z`;
 }
 
+/** Whatever the engine wrapped, on one line: a bullet is a line. */
+function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ').trim();
+}
+
 /** `- [HH:MM:SSZ] Speaker: words` — the whole grammar of a transcript line. */
 export function formatRawBullet(ts: number, speaker: string, text: string): string {
-  return `- [${utcClock(ts)}] ${speaker}: ${text.replace(/\s*\n\s*/g, ' ').trim()}`;
+  return `- [${utcClock(ts)}] ${speaker}: ${oneLine(text)}`;
+}
+
+/** What a speaker label is called on a line of this segment. */
+export type SpeakerNamer = (label: string | undefined) => string;
+
+/**
+ * ` _(Alex: yeah · right; Sam: mhm)_` — the acknowledgement that answered a
+ * row, riding on it.
+ *
+ * Every word still here and still attributed, which is what makes the fold a
+ * reshape rather than a filter: a run of "yeah" from one voice reads as one
+ * voice saying it, and a second voice joining in starts a new group rather
+ * than borrowing the first one's name. Italic parentheses because the words
+ * are real speech a grep must still find, not editorial.
+ */
+export function formatFoldedAnswers(
+  answers: readonly FoldedAnswer[],
+  nameOf: SpeakerNamer,
+): string {
+  if (answers.length === 0) return '';
+  const groups: string[] = [];
+  let openName: string | null = null;
+  let said: string[] = [];
+  const close = (): void => {
+    if (openName !== null) groups.push(`${openName}: ${said.join(' · ')}`);
+  };
+  for (const answer of answers) {
+    const name = nameOf(answer.speaker);
+    if (name !== openName) {
+      close();
+      openName = name;
+      said = [];
+    }
+    said.push(oneLine(answer.text));
+  }
+  close();
+  return ` _(${groups.join('; ')})_`;
+}
+
+/**
+ * One reshaped row: its bullet, the rest of it nested under that when it was
+ * broken at a pause, and what was said back to it on the last of those.
+ *
+ * The nested bullets carry no clock and no name. The turn settled once, so
+ * there is one honest timestamp for all of it, and the voice has not changed
+ * — writing either again would say a second turn happened.
+ */
+export function formatFoldedRow(row: FoldedRow, nameOf: SpeakerNamer): string {
+  const lines = [
+    formatRawBullet(row.ts, nameOf(row.speaker), row.text),
+    ...row.continued.map((chunk) => `  - ${oneLine(chunk)}`),
+  ];
+  const last = lines.length - 1;
+  lines[last] = `${lines[last] as string}${formatFoldedAnswers(row.answers, nameOf)}`;
+  return lines.join('\n');
 }
 
 /**
@@ -337,11 +412,21 @@ export function formatRawSegment(seg: RawSegmentInput): string {
     // which is a tie this record cannot break and does not try to. In a real
     // meeting the two are seconds apart, because a gap opens when a device
     // dies and a turn settles when somebody stops talking.
+    const nameOf: SpeakerNamer = (label) => speakerLineName(label, seg.names, seg.participant);
+    // A fold may not reach across a hole in the record: the moment a capture
+    // died and the moment it came back are both places where the next thing
+    // said is not an answer to the last thing written.
+    const barriers: number[] = [];
+    for (const g of gaps) {
+      barriers.push(g.from);
+      if (g.to !== null) barriers.push(g.to);
+    }
+    for (const g of carried) barriers.push(g.to);
     const entries: Array<{ at: number; turn: boolean; line: string }> = [
-      ...seg.turns.map((t) => ({
-        at: t.ts,
+      ...foldTranscriptRows(seg.turns, { barriers }).map((r) => ({
+        at: r.ts,
         turn: true,
-        line: formatRawBullet(t.ts, speakerLineName(t.speaker, seg.names, seg.participant), t.text),
+        line: formatFoldedRow(r, nameOf),
       })),
       ...gaps.map((g) => ({ at: g.from, turn: false, line: formatGapBullet(g) })),
       // Dated when the capture CAME BACK, which is the moment this block is

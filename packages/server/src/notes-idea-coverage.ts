@@ -123,6 +123,48 @@ const BACKCHANNEL =
   /^(?:okay|ok|right|yeah|yep|yes|no|uh|um|er|ah|oh|sure|thanks|thank you|hi|hello|hey|good morning|good afternoon|alright|exactly|mhm|hmm)\b/i;
 
 /**
+ * Is this whole utterance acknowledgement and nothing else?
+ *
+ * "Yeah." "Okay, right." "Mm, sure, thanks." Every opener in `BACKCHANNEL` is
+ * taken off the front in turn — a run of them is still a run of them — and
+ * what remains has to carry no content word at all. So "Okay, the export
+ * dialog drops the range" is not backchannel and "No." is.
+ *
+ * AT LEAST ONE OPENER HAS TO HAVE BEEN THERE. Having no content word left is
+ * not enough on its own: the stoplist is built to strip the words that make
+ * two ideas different, so it swallows a whole short sentence that is
+ * nevertheless a decision — "We should go." is three stopwords and a full
+ * stop. Acknowledgement is a vocabulary, not an absence.
+ *
+ * It lives here rather than beside its second caller because the stoplist and
+ * the opener list are here, and the failure this repo has already had once is
+ * two lists of filler words disagreeing about which words are filler. The raw
+ * transcript's fold (`meeting-transcript-fold.ts`) asks this question about a
+ * row; coverage asks it about a sentence; both get the same answer.
+ */
+export function isPureBackchannel(text: string): boolean {
+  let rest = text.trim();
+  let opened = false;
+  for (;;) {
+    const stripped = rest.replace(/^[^\p{L}\p{N}]+/u, '');
+    const opener = BACKCHANNEL.exec(stripped);
+    if (!opener) {
+      rest = stripped;
+      break;
+    }
+    opened = true;
+    rest = stripped.slice(opener[0].length);
+  }
+  if (!opened) return false;
+  // `contentWords` tokenizes on `[a-z0-9]`, so a remainder written in a script
+  // it cannot see comes back empty and would read as filler: "Yeah, 我不同意"
+  // is a disagreement, not an acknowledgement. Any letter or digit left
+  // outside that alphabet is content, whatever the stoplist knows about it.
+  if (/[\p{L}\p{N}]/u.test(rest.replace(/[a-zA-Z0-9]/g, ''))) return false;
+  return contentWords(rest).length === 0;
+}
+
+/**
  * A word reduced to the part a paraphrase keeps.
  *
  * Crude stemming — plurals, past tense, gerunds — because the notes say

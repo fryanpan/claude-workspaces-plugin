@@ -622,6 +622,15 @@ writes the file, rebinds the doc through `file-binding.ts`, claims the file's
 address in `repo-registry.ts` so the Library above reads it as one document,
 and moves a meeting's filing record with it. `routes/doc-move.ts` answers it.
 
+`meeting-transcript-fold.ts` joins the `meeting-*` family and moves nothing
+in the picture: it is a pure function from the turns a meeting stored to the
+rows the `<docname>-raw-transcript.md` shows, called only by
+`formatRawSegment` in `meeting-raw.ts` as a segment is composed at stop. It
+reads no file, writes none, and touches neither the append-only JSONL nor the
+audio beside it — a reader's acknowledgement rides on the row it answered and
+a wall of words breaks at a pause, while the record a replay lines PCM up
+against keeps every turn at its own number.
+
 `notes-timing.ts` joins the same `notes-*` family in the services tier and
 changes none of the picture: it is where one meeting's per-tick latency is
 recorded, opened only when the operator turns timing on. It holds no meeting
