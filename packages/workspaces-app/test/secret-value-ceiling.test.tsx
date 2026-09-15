@@ -78,6 +78,39 @@ describe('the card refuses a value too long to store', () => {
     expect(root.querySelector('.board-walk-cred-miss')).toBeNull();
   });
 
+  it.each([
+    ['three', '\u20ac'],
+    ['four', '\u{1F511}'],
+  ])(
+    'refuses 900 characters of %s bytes each, inside the character count, before sending',
+    async (_bytes, wide) => {
+      const onSave = vi.fn(async () => true);
+      const boxes = draw(onSave);
+      const value = wide.repeat(900);
+      expect(value.length).toBeLessThanOrEqual(SECRET_VALUE_MAX_CHARS);
+      boxes[0]!.value = value;
+      boxes[1]!.value = PLACEHOLDER;
+      submit();
+      await tick();
+      expect(onSave).not.toHaveBeenCalled();
+      const said = root.querySelector('.board-walk-cred-miss')?.textContent ?? '';
+      expect(said).toBe('Relay account name is too long to save.');
+      expect(document.activeElement).toBe(boxes[0]!);
+      expect(boxes[0]!.value).toBe(value);
+    },
+  );
+
+  it('CONTROL: a value of wide characters that fits the line is sent', async () => {
+    const onSave = vi.fn(async () => true);
+    const boxes = draw(onSave);
+    boxes[0]!.value = '\u20ac'.repeat(300);
+    boxes[1]!.value = PLACEHOLDER;
+    submit();
+    await tick();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('.board-walk-cred-miss')).toBeNull();
+  });
+
   it('CONTROL: a value exactly at the ceiling is sent', async () => {
     const onSave = vi.fn(async () => true);
     const boxes = draw(onSave);

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { secretValueFitsStore } from '@claude-workspaces/core/secret-name';
 import {
   SECRET_ACCOUNT,
   SECRET_COMMAND_LINE_BUDGET,
@@ -250,6 +251,28 @@ describe('what it refuses before running anything', () => {
       error,
     });
     expect(fake.calls).toHaveLength(0);
+  });
+
+  test("the card's check gives the writer's answer on each side of the line's edge", () => {
+    // The board refuses with `secretValueFitsStore` from core, which never
+    // encodes; this module encodes. Walk every width of character past the
+    // point where the line fills, under the shortest and longest names, and
+    // hold the two to one answer — including a lone surrogate, which both
+    // encoders write as the three bytes of U+FFFD.
+    let seen = { fits: 0, refused: 0 };
+    for (const service of ['r', LONGEST_SERVICE]) {
+      for (const unit of ['a', '\u00e9', '\u20ac', '\u{1F511}', '\ud800']) {
+        for (let n = 1; n <= 1100; n++) {
+          const value = unit.repeat(n);
+          const writer = secretValueFits(service, value);
+          expect(secretValueFitsStore(service, value)).toBe(writer);
+          seen = writer ? { ...seen, fits: seen.fits + 1 } : { ...seen, refused: seen.refused + 1 };
+        }
+      }
+    }
+    // Both answers occur, so the agreement is not two functions that always say yes.
+    expect(seen.fits).toBeGreaterThan(0);
+    expect(seen.refused).toBeGreaterThan(0);
   });
 
   test('the ceiling is exact: one character under stores', async () => {
