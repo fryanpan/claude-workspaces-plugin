@@ -289,6 +289,62 @@ describe('talk becomes a finished note', () => {
     expect(prompts[3]).toContain('<open element="e0" fixed><said>');
   });
 
+  it('a pause after a tap, while the tidy call before it is still out, does not send the new words to the old note', async () => {
+    await start();
+    let answer = () => {};
+    slow = new Promise<void>((r) => {
+      answer = r;
+    });
+    replies.push(reply({ text: 'The header is too tall.', element: 'e0' }));
+    speak(6);
+    clock.advance(VOICE_PAUSE_MS);
+    await until(() => prompts.length === 1, 'the header tick is out');
+    send({ type: 'pin', target: 3 });
+    speak(4); // "make it shorter", after the tap
+    clock.advance(VOICE_PAUSE_MS * 2); // a full pause, the model still thinking
+    await Promise.resolve();
+    expect(prompts, 'no tick while the one before the tap is out').toHaveLength(1);
+    slow = null;
+    answer();
+    await until(() => notes('v1').at(-1)?.final === true, 'v1 settled by the pin');
+    replies.push(reply({ text: 'Make it shorter.', element: 'e0' }));
+    clock.advance(VOICE_PAUSE_MS);
+    await until(() => prompts.length === 2, 'the tick after the tap');
+    expect(prompts[1]).toContain('<pinned>e3</pinned>');
+    expect(prompts[1]).toContain('<new_words>make it shorter</new_words>');
+    expect(notes('v1').at(-1)?.raw, 'the old note kept only its own words').toBe(
+      'the header is too tall',
+    );
+  });
+
+  it('a pause after a tap, while the tap folds the words before it, does not send the new words to the old note', async () => {
+    await start();
+    await firstNote();
+    let answer = () => {};
+    slow = new Promise<void>((r) => {
+      answer = r;
+    });
+    replies.push(
+      reply({ continues: true, text: 'The header is too tall; make it shorter.', element: 'e0' }),
+    );
+    speak(4); // "make it shorter", before the tap and before a pause
+    send({ type: 'pin', target: 3 });
+    await until(() => prompts.length === 2, 'the tap folds its words');
+    speak(5); // "footer text is faint", after the tap
+    clock.advance(VOICE_PAUSE_MS * 2);
+    await Promise.resolve();
+    expect(prompts, 'no tick while the fold is out').toHaveLength(2);
+    slow = null;
+    answer();
+    await until(() => notes('v1').at(-1)?.final === true, 'v1 settled by the pin');
+    replies.push(reply({ text: 'The footer text is faint.', element: 'e0' }));
+    clock.advance(VOICE_PAUSE_MS);
+    await until(() => prompts.length === 3, 'the tick after the tap');
+    expect(prompts[2]).toContain('<pinned>e3</pinned>');
+    expect(prompts[2]).toContain('<new_words>footer text is faint</new_words>');
+    expect(notes('v1').at(-1)?.raw).toBe('the header is too tall make it shorter');
+  });
+
   it('words said before a tap stay with the old note even if they had not settled', async () => {
     let onTurn: TranscriptionOpenOpts['onTurn'] = () => {};
     const engine: TranscriptionEngine = {
