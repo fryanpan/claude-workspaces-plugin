@@ -54,6 +54,20 @@
  * that already exists. One wall, two shapes, and neither instruction can be
  * carried out by doing the other.
  *
+ * AND "HOMELESS" IS ABOUT THE TOPIC, NOT ABOUT WHETHER A HEADING EXISTS
+ * (2026-09-15). The first version asked that question as "is there a heading
+ * above this run", which is the same question only on a doc that has no
+ * structure of its own. A person preparing for a meeting writes structure:
+ * `## Meeting notes` and an agenda under it. Measured on a real 41-minute
+ * meeting, every note landed under the agenda and every run therefore had a
+ * heading above it — so the meeting could only ever be asked to NEST, and it
+ * produced 192 bullets carrying zero topic headings. A `##` heading says
+ * where notes live; only a `### ` says what they are about
+ * ({@link TOPIC_HEADING_LEVEL}), so a run under one of the former is asked
+ * for a topic exactly as a run under nothing is. The ES2002a finding that
+ * cost two bars still holds unchanged: a run under a real `### ` topic is
+ * asked to nest, never to open a second heading for a topic that has one.
+ *
  * WHAT THE ASK CANNOT DO, AND WHY IT IS STILL THE RIGHT ASK. A heading is
  * appended; there is no edit that moves an existing bullet under one. So the
  * bullets already written stay above the heading they earned, and only what
@@ -74,8 +88,9 @@ import { notesSectionEnd } from './notes-section-fit.ts';
 
 /** One topic that has filled up, and the bullets it filled up with. */
 export interface RegroupTarget {
-  /** The heading the run sits under. Always present: a run above every
-   *  heading is not reported at all — see the header. */
+  /** The TOPIC heading the run sits under. Always present, and always a
+   *  `### ` or deeper: a run no topic names is reported as a
+   *  {@link HomelessRun} instead — see the header. */
   headingId: string;
   /** Its words, for the directive to name. */
   heading: string;
@@ -87,14 +102,30 @@ export interface RegroupTarget {
   movable: Array<{ id: string; text: string }>;
 }
 
-/** A run of top-level bullets sitting above every heading — a wall the room
- *  cannot navigate because nothing says what it is about. */
+/** A run of top-level bullets that no TOPIC names — a wall the room cannot
+ *  navigate because nothing says what it is about. */
 export interface HomelessRun {
   /** How long the run is by the BAR's reckoning. */
   runLength: number;
   /** The bullets in it, in document order, the note-taker's own first. */
   bullets: Array<{ id: string; text: string }>;
+  /** The section heading the run sits under, when it sits under one at all.
+   *  Absent for a run above every heading — the shape this remedy was first
+   *  written for. Its words are for the directive to name, so the note-taker
+   *  can see that the heading it has is a section and not a topic. */
+  under?: { id: string; heading: string };
 }
+
+/**
+ * The shallowest heading level that NAMES A TOPIC.
+ *
+ * The prompt asks for `### ` headings inside a `## Meeting notes` section, so
+ * every heading a note-taker opens is level 3 or deeper and every heading at
+ * level 2 or above is structure — the meeting's own section, a doc's agenda,
+ * a page's chapter. Bullets under structure have no topic, whatever heading
+ * stands above them.
+ */
+const TOPIC_HEADING_LEVEL = 3;
 
 export interface RegroupOptions {
   /** The agent whose bullets may be moved — the note-taker's own id. */
@@ -155,6 +186,7 @@ function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions):
   const scoped = sectionOf(outline, opts.notesHeadingId);
   let heading = '';
   let headingId: string | undefined;
+  let headingLevel = 0;
   let run: prose.OutlineEntry[] = [];
   const flush = (): void => {
     const mine = run.filter((e) => e.author === opts.author);
@@ -162,17 +194,28 @@ function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions):
       // Only a list item can be nested under a lead, so a paragraph note counts
       // towards the bar and is never offered as a block to move.
       const nestable = mine.filter((e) => e.kind === 'listItem');
-      if (headingId === undefined) {
-        // At most one run can be homeless — a heading, once seen, stands over
-        // everything after it — and the earliest is the one to name.
+      // NO TOPIC NAMES THIS RUN — whether that is because no heading stands
+      // over it at all, or because the one that does is a SECTION. Both are
+      // the same wall to a reader, and the first version of this only saw the
+      // first of them: on a doc whose agenda sits below the meeting's own
+      // heading, every note landed under the agenda, and a run under a
+      // heading could only ever be asked to nest. A meeting on that doc could
+      // not be asked to open a topic at all, which is how 192 bullets came to
+      // carry zero topic headings.
+      const homelessHere = headingId === undefined || headingLevel < TOPIC_HEADING_LEVEL;
+      if (homelessHere) {
+        // The EARLIEST such run is the one to name. A note-taker opens one
+        // heading per update, so a second ask in the same tick is an ask it
+        // cannot carry out.
         homeless ??= {
           runLength: run.length,
           bullets: mine.map((e) => ({ id: e.id, text: e.text })),
+          ...(headingId === undefined ? {} : { under: { id: headingId, heading } }),
         };
         // Two is the fewest bullets that can become a group. One movable bullet
         // in a run of five is a topic the note-taker cannot fix, and telling it
         // to anyway spends prompt on an instruction with no legal answer.
-      } else if (nestable.length >= 2) {
+      } else if (headingId !== undefined && nestable.length >= 2) {
         targets.push({
           headingId,
           heading,
@@ -188,6 +231,7 @@ function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions):
       flush();
       heading = entry.text;
       headingId = entry.id;
+      headingLevel = entry.level ?? TOPIC_HEADING_LEVEL;
       continue;
     }
     if (entry.kind !== 'listItem') {
@@ -218,7 +262,7 @@ export function regroupTargets(
   return scanRuns(outline, opts).targets;
 }
 
-/** The run above every heading that has filled up, if there is one. */
+/** The filled-up run that no topic names, if there is one. */
 export function homelessRun(
   outline: readonly prose.OutlineEntry[],
   opts: RegroupOptions,
@@ -255,11 +299,23 @@ export function regroupDirective(
   const bar = opts.bar ?? MAX_FLAT_RUN_BULLETS;
   const lines: string[] = [];
   if (homeless !== null) {
+    const under = homeless.under;
     lines.push(
-      `THE NOTES HAVE RUN TO ${homeless.runLength} BULLETS UNDER NO HEADING — OPEN ONE IN`,
-      `THIS UPDATE. A list ${bar} bullets long that nothing names is the wall these`,
+      under === undefined
+        ? `THE NOTES HAVE RUN TO ${homeless.runLength} BULLETS UNDER NO HEADING — OPEN ONE IN`
+        : `THE NOTES HAVE RUN TO ${homeless.runLength} BULLETS WITH NO TOPIC OVER THEM — OPEN`,
+      under === undefined
+        ? `THIS UPDATE. A list ${bar} bullets long that nothing names is the wall these`
+        : `ONE IN THIS UPDATE. A list ${bar} bullets long that nothing names is the wall these`,
       'notes exist instead of, and what it is missing is the topic, not a',
       'group: nesting bullets nobody has named leaves them just as homeless.',
+      ...(under === undefined
+        ? []
+        : [
+            `"${under.heading}" (${under.id}) is a SECTION, not a topic — it says`,
+            'where these notes live, not what they are about, so it does not',
+            'count as the heading they need.',
+          ]),
       "Insert the `### ` heading these belong under, then put this speech's",
       'points under its id on the next update. Where they are two subjects,',
       'open the heading for the one this speech is about.',
