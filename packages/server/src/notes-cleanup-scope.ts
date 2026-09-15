@@ -185,7 +185,23 @@ export function claimable(scope: { owned: Set<string> }): (id: string) => boolea
  * is a stricter rule than the anchor argument alone requires (a suggestion
  * re-creates no text), and it is deliberate: at the end of a meeting a bullet
  * somebody is already discussing is the last one to reopen.
+ *
+ * EVERY REFUSAL SAYS WHY (2026-09-15). This used to answer with a COUNT, and
+ * on the run that prompted this change the count was the whole record: "16
+ * edits proposed, 16 refused, 0 blocks touched", over a meeting whose notes
+ * had all landed outside its section. A reader could not tell that from a
+ * pass that had simply proposed sixteen bad edits, and the number that would
+ * have said so — sixteen edits naming blocks outside the section — was
+ * computed here and thrown away. `reasons` carries one line per dropped edit,
+ * naming the op, the block and the rule; `refused` stays the count, because
+ * the counters above it are what the route reports.
  */
+
+/** One dropped edit's reason, in the words the log prints. */
+function why(op: prose.BlockEditOp, id: string, rule: string): string {
+  return `${op} ${id}: ${rule}`;
+}
+
 export function confineToSection(
   edits: readonly prose.BlockEdit[],
   scope: {
@@ -195,8 +211,9 @@ export function confineToSection(
     headingId: string;
     commented?: Set<string>;
   },
-): { kept: prose.BlockEdit[]; refused: number } {
+): { kept: prose.BlockEdit[]; refused: number; reasons: string[] } {
   const kept: prose.BlockEdit[] = [];
+  const reasons: string[] = [];
   const ours = claimable(scope);
   // Inside this meeting's own notes, and not the section heading itself —
   // deleting that orphans every note under it, and rewriting it moves the
@@ -210,27 +227,56 @@ export function confineToSection(
   const worthSaying = (id: string): boolean => inSection(id) && uncommented(id);
   // Striking a line out is only ever the pass's own to propose.
   const rewritable = (id: string): boolean => mine(id) && uncommented(id);
+  /** Why a block is out of reach, in the order the rules are asked. */
+  const blockRule = (id: string): string =>
+    !scope.blocks.has(id)
+      ? "the block is outside this meeting's notes section"
+      : id === scope.headingId
+        ? "the block is the meeting's own section heading"
+        : scope.commented?.has(id) === true
+          ? 'somebody has commented on the block'
+          : 'the document does not record the block as the note-taker’s own';
   for (const edit of edits) {
     switch (edit.op) {
       case 'insert_under_heading':
         if (scope.headings.has(edit.headingId)) kept.push(edit);
+        else
+          reasons.push(
+            why(
+              edit.op,
+              edit.headingId,
+              scope.blocks.has(edit.headingId)
+                ? 'the block is not a heading inside this meeting’s notes section'
+                : "the heading is outside this meeting's notes section",
+            ),
+          );
         break;
       case 'replace_block':
         if (worthSaying(edit.blockId)) kept.push(edit);
+        else reasons.push(why(edit.op, edit.blockId, blockRule(edit.blockId)));
         break;
       case 'delete_block':
         if (rewritable(edit.blockId)) kept.push(edit);
+        else reasons.push(why(edit.op, edit.blockId, blockRule(edit.blockId)));
         break;
       // Nesting keeps every block's own text, so a comment inside one rides
       // along — which is why this asks `mine` and not `rewritable`.
       case 'nest_blocks':
         if (mine(edit.leadBlockId) && edit.blockIds.every(mine)) kept.push(edit);
+        else {
+          const bad =
+            [edit.leadBlockId, ...edit.blockIds].find((id) => !mine(id)) ?? edit.leadBlockId;
+          reasons.push(why(edit.op, bad, blockRule(bad)));
+        }
         break;
       // A cleanup has a section already; writing at the end of the doc is the
       // one way to grow a second one.
       case 'insert_at_end':
+        reasons.push(
+          why(edit.op, 'the end of the doc', 'a cleanup may not open a second notes section'),
+        );
         break;
     }
   }
-  return { kept, refused: edits.length - kept.length };
+  return { kept, refused: edits.length - kept.length, reasons };
 }
