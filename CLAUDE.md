@@ -29,7 +29,10 @@ remainder, and when a goal lands),
 its work starts, and the loop that files each occurrence),
 [unfiled-ask](docs/architecture/unfiled-ask.md) (whether a closing message
 asked Bryan something with nothing filed, and the measured rates at which that
-judgement is wrong) and
+judgement is wrong),
+[scrub-name-finder](docs/architecture/scrub-name-finder.md) (the free pass
+that picks which pushed lines Haiku reads, its measured recall, and the
+names it never sends) and
 [security](docs/architecture/security.md) (trust boundaries, the gates that
 enforce them, where secrets live, the deploy and webhook surfaces). Read the
 relevant one before touching its subsystem.
@@ -262,7 +265,15 @@ with `--cc`.
 
 `.githooks/pre-push` runs a regex scanner (denylist + registry project names)
 on every push, and a Haiku scanner only on pushes to fryanpan-owned remotes
-(`SCRUB_HAIKU_FORCE=1` forces it elsewhere). One config source resolving
+(`SCRUB_HAIKU_FORCE=1` forces it elsewhere). Haiku reads only the lines a
+free local pass flags as carrying a word, number or key the repository has
+not already published, with two lines of context; a push with none makes no call, and a
+name built from already-public words is never judged
+(`SCRUB_HAIKU_RULES=off` sends the whole push). The Haiku key's daily spend cap
+is shared with other repos on the machine (`SCRUB_HAIKU_DAILY_USD`, ledger
+`SCRUB_HAIKU_SPEND_LOG`); a cap hit or a ledger it cannot read or append to makes no call and
+blocks like any other could-not-run case — `scrub-haiku.py --spend-report`
+says who spent it. One config source resolving
 without the other FAILS the push (exit 2 — broken install); neither resolving
 skips cleanly (`SCRUB_REQUIRE_SOURCES=1` makes even that hard). The scanner
 takes paths / `--diff-range` / `--staged` and ignores stdin (piping scans

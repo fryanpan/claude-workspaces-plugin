@@ -12,6 +12,18 @@ Usage:
                                        # what this push makes public (the hook's mode)
   scrub-haiku.py --diff-range A..B    # scan diff in range
   scrub-haiku.py                       # read diff from stdin
+  scrub-haiku.py --spend-report        # today's spend on the key, every repo; no scan
+  ... --public-base REV                # words in REV count as already public
+
+**Only lines that may hold a leak are sent.** A free local pass
+(scrub_names.py) reads the whole push first and picks the lines carrying a
+word, email, long number, amount, reading or key the repository has not
+already published, with two lines either side.
+Only those go to Haiku; a push with none makes no call and books nothing.
+`--push-tip` finds the public base itself. The other modes know nothing is
+public unless `--public-base` says so, and then every line with a word on it
+is sent. `SCRUB_HAIKU_RULES=off` sends the whole push as before. What the
+pass misses, measured: docs/architecture/scrub-name-finder.md.
 
 `--push-tip` is the mode the pre-push hook uses. It asks about the COMMITS a
 push would publish rather than comparing two trees, because a tree comparison
@@ -28,25 +40,34 @@ There is no quiet third code any more. "Could not run" used to return 2, and
 main() turned every 2 into 0 behind one line of stderr, so a gate that could
 not look answered a push exactly as it answers one it looked at and found
 clean. A real name reached this public repo's main branch that way. Now the
-three ways it can fail to run are told apart, said out loud in a banner, and
-each has a recorded answer below.
+ways it can fail to run are told apart, said out loud in a banner, and each
+has a recorded answer below.
+
+`--spend-report` exits 0, or 2 when the spend ledger cannot be read.
+
+The key is shared with other repositories on this machine, and so is its
+daily spend cap: see "The key's daily spend cap" below.
 
 Bypass entirely with SCRUB_SKIP=1. Skip just Haiku with SCRUB_SKIP_HAIKU=1.
 """
 
 from __future__ import annotations
 
+import functools
 import json
+import math
 import os
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, NamedTuple
+from datetime import datetime, timezone
+from typing import Dict, List, NamedTuple, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scrub_git  # noqa: E402
+import scrub_names  # noqa: E402
 
 MODEL = "claude-haiku-4-5-20251001"
 # Overridable so the self-test can drive every failure case against a stub on
@@ -262,15 +283,27 @@ KEYCHAIN_SERVICE = os.environ.get("SCRUB_HAIKU_KEYCHAIN_SERVICE") or "scrub-haik
 #
 # All three used to collapse into one `return 2`.
 #
+# Two more came with the shared daily spend cap (below), and both are this
+# tool declining to call rather than the API declining to answer:
+#
+#   budget             today's spend on the key, summed over every repo that
+#                      writes the shared ledger, is at or over the cap. It
+#                      lifts at 00:00 UTC — exhausted's twin, one level down.
+#   ledger-unreadable  the ledger exists and cannot be read, or it cannot be
+#                      appended to, so the budget check could not look — a
+#                      cap that cannot book a call cannot count it. Somebody's
+#                      to fix today.
+#
 # WHICH OF THEM BLOCKS A PUSH IS A PROJECT DECISION, and it is recorded here so
 # that the answer is a line in the gate rather than something you learn by
 # reading a hook. The three settings, exhaustively:
 #
 #   "warn-all"               never block; print the banner, let the push go.
-#   "block-all"              block on any of the three.
-#   "block-except-exhausted" block on absent and unreachable — each is
-#                            somebody's to fix today — and warn on exhausted,
-#                            which nobody can fix before the reset date.
+#   "block-all"              block on any of them.
+#   "block-except-exhausted" block on absent, unreachable and an unreadable
+#                            ledger — each is somebody's to fix today — and
+#                            warn on exhausted and budget, which nobody can
+#                            fix before the reset.
 #
 # ANSWERED by the repo owner on 2026-09-10: "Always block". A push that the
 # name-aware layer never saw is a push nobody checked for an unfamiliar real
@@ -280,21 +313,40 @@ KEYCHAIN_SERVICE = os.environ.get("SCRUB_HAIKU_KEYCHAIN_SERVICE") or "scrub-haik
 # where the weaker check is the only one running is exactly the window this
 # decision exists to close. SCRUB_HAIKU_UNAVAILABLE overrides it for a push
 # that genuinely cannot wait, and says so in the banner when it does.
+#
+# The budget and unreadable-ledger cases were added under that same decision
+# rather than beside it: a push stopped by the cap is a push the name-aware
+# layer never saw, which is the window "Always block" was chosen to close.
 UNAVAILABLE_POLICY = "block-all"
 
 EXHAUSTED = "exhausted"
 ABSENT = "absent"
 UNREACHABLE = "unreachable"
+BUDGET = "budget"
+LEDGER = "ledger-unreadable"
 
 POLICIES = {
-    "warn-all": {EXHAUSTED: "warn", ABSENT: "warn", UNREACHABLE: "warn"},
-    "block-all": {EXHAUSTED: "block", ABSENT: "block", UNREACHABLE: "block"},
+    "warn-all": {
+        EXHAUSTED: "warn", ABSENT: "warn", UNREACHABLE: "warn",
+        BUDGET: "warn", LEDGER: "warn",
+    },
+    "block-all": {
+        EXHAUSTED: "block", ABSENT: "block", UNREACHABLE: "block",
+        BUDGET: "block", LEDGER: "block",
+    },
     "block-except-exhausted": {
         EXHAUSTED: "warn", ABSENT: "block", UNREACHABLE: "block",
+        BUDGET: "warn", LEDGER: "block",
     },
 }
 
 POLICY_ENV = "SCRUB_HAIKU_UNAVAILABLE"
+# Another repo's copy of this scanner warns on a cap hit unless this is "1".
+# Here the table above decides, so the variable is honoured in the one
+# direction that maps onto it: "1" makes the budget case block under any
+# policy. It never loosens one — SCRUB_HAIKU_UNAVAILABLE is the only knob that
+# does — so a machine-wide "1" means the same thing in both repositories.
+BUDGET_BLOCK_ENV = "SCRUB_HAIKU_BUDGET_BLOCK"
 
 
 class Policy(NamedTuple):
@@ -321,7 +373,7 @@ def resolve_policy() -> Policy:
 class Unavailable(NamedTuple):
     """This layer could not run, and why — in words, never carrying a key."""
 
-    case: str    # EXHAUSTED | ABSENT | UNREACHABLE
+    case: str    # EXHAUSTED | ABSENT | UNREACHABLE | BUDGET | LEDGER
     detail: str  # one line a person can act on
     hint: str = ""  # what would fix it, or "" when nothing here can
 
@@ -372,20 +424,301 @@ def classify_http_error(status: int, body: str) -> Unavailable:
     return Unavailable(UNREACHABLE, f"HTTP {status} from the API: {message}")
 
 
+# ---------------------------------------------------------------------------
+# The key's daily spend cap, shared with every repo that uses the key
+# ---------------------------------------------------------------------------
+#
+# Another repository on this machine scans with the same key, and the key has
+# hit its provider limit once already. The cap belongs to the key, not to a
+# repository, so every copy of this scanner writes each call's cost to ONE
+# ledger and sums every repo's entries before it calls. The file format is a
+# contract between those copies — the path, the keys, the prices — and is not
+# this file's to change alone.
+#
+# One JSON object per line. Each is written with a single `write` on an
+# O_APPEND descriptor, which is what keeps up to CHUNK_JOBS concurrent pieces
+# (and other repos' pushes) from interleaving inside a line: the kernel moves
+# to end-of-file and writes the whole buffer as one step. No lock file.
+
+SPEND_LOG_ENV = "SCRUB_HAIKU_SPEND_LOG"
+DEFAULT_SPEND_LOG = os.path.join("~", ".local", "state", "scrub-haiku", "spend.jsonl")
+DAILY_USD_ENV = "SCRUB_HAIKU_DAILY_USD"
+DEFAULT_DAILY_USD = 1.00
+# Haiku 4.5 list price, dollars per million tokens.
+USD_PER_MTOK_INPUT = 1.00
+USD_PER_MTOK_OUTPUT = 5.00
+
+# Exactly these keys, in this order — both repositories read what either wrote.
+LEDGER_KEYS = (
+    "ts", "date", "repo", "range", "model", "diff_chars",
+    "input_tokens", "output_tokens", "estimated_usd", "verdict",
+)
+
+
+class LedgerUnreadable(Exception):
+    """The ledger exists and could not be read. Never the same as $0."""
+
+
+class Spend(NamedTuple):
+    """Today's entries, summed."""
+
+    total: float
+    by_repo: Dict[str, float]
+    malformed: int  # lines skipped because they were not a readable entry
+
+
+def spend_log_path() -> str:
+    return os.path.expanduser(os.environ.get(SPEND_LOG_ENV) or DEFAULT_SPEND_LOG)
+
+
+def utc_today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+@functools.lru_cache(maxsize=None)
+def _warn_bad_cap(raw: str) -> None:
+    print(
+        f"[scrub-haiku] {DAILY_USD_ENV}={raw!r} is not a dollar amount; "
+        f"applying the default cap of ${DEFAULT_DAILY_USD:.2f}.",
+        file=sys.stderr,
+    )
+
+
+def daily_cap() -> float:
+    """The cap in dollars. A value that is not a finite, non-negative number
+    applies the default rather than no cap, and says so."""
+    raw = os.environ.get(DAILY_USD_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_DAILY_USD
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value < 0:
+        _warn_bad_cap(raw)
+        return DEFAULT_DAILY_USD
+    return value
+
+
+def spent_today(path: Optional[str] = None, today: Optional[str] = None) -> Spend:
+    """Today's (UTC) spend on the key, from every repository's entries.
+
+    Three outcomes, and only one of them is zero: no ledger file is $0 — no
+    scan has been recorded yet today or ever. A readable ledger is its sum,
+    with lines that are not a readable entry skipped and counted. A ledger
+    that exists but cannot be read raises `LedgerUnreadable`: reading it as $0
+    is how a cap stops capping without anybody being told.
+    """
+    path = path or spend_log_path()
+    today = today or utc_today()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return Spend(0.0, {}, 0)
+    except OSError as e:
+        raise LedgerUnreadable(f"{path}: {e.strerror or e}") from e
+    total = 0.0
+    by_repo: Dict[str, float] = {}
+    malformed = 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+            date = entry["date"]
+            usd = entry["estimated_usd"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            malformed += 1
+            continue
+        # A negative amount would cancel real spend; a bool is an int to Python.
+        if (isinstance(usd, bool) or not isinstance(usd, (int, float))
+                or not math.isfinite(usd) or usd < 0):
+            malformed += 1
+            continue
+        if date != today:
+            continue
+        repo = str(entry.get("repo") or "unknown")
+        total += usd
+        by_repo[repo] = by_repo.get(repo, 0.0) + usd
+    return Spend(total, by_repo, malformed)
+
+
+def estimate_usd(input_tokens: int, output_tokens: int) -> float:
+    return (input_tokens * USD_PER_MTOK_INPUT + output_tokens * USD_PER_MTOK_OUTPUT) / 1_000_000
+
+
+@functools.lru_cache(maxsize=None)
+def repo_name() -> str:
+    """This repository's top-level directory name.
+
+    Read from the COMMON git dir, so a push from a linked worktree is booked
+    to the repository and not to whatever the worktree's folder is called.
+    """
+    def git(*args: str) -> str:
+        try:
+            return subprocess.run(
+                ["git", *args], capture_output=True, text=True, check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            return ""
+
+    common = git("rev-parse", "--path-format=absolute", "--git-common-dir").rstrip("/")
+    if os.path.basename(common) == ".git":
+        return os.path.basename(os.path.dirname(common))
+    top = git("rev-parse", "--show-toplevel")
+    return os.path.basename(top or os.getcwd()) or "unknown"
+
+
+def _token_count(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def record_spend(scan_range: str, diff_chars: int, usage: dict, verdict: str,
+                 path: Optional[str] = None) -> Optional[str]:
+    """Append one call's cost. None on success, else what went wrong."""
+    path = path or spend_log_path()
+    input_tokens = _token_count(usage.get("input_tokens"))
+    output_tokens = _token_count(usage.get("output_tokens"))
+    now = datetime.now(timezone.utc)
+    entry = dict(zip(LEDGER_KEYS, (
+        now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        now.strftime("%Y-%m-%d"),
+        repo_name(),
+        scan_range,
+        MODEL,
+        diff_chars,
+        input_tokens,
+        output_tokens,
+        round(estimate_usd(input_tokens, output_tokens), 6),
+        verdict,
+    )))
+    line = (json.dumps(entry) + "\n").encode("utf-8")
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            written = os.write(fd, line)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        return f"{path}: {e.strerror or e}"
+    if written != len(line):
+        return f"{path}: short write ({written} of {len(line)} bytes)"
+    return None
+
+
+def ledger_appendable(path: Optional[str] = None) -> Optional[str]:
+    """None when an entry could be appended now; otherwise what stops it.
+
+    Opened exactly as `record_spend` opens it, so a parent that cannot be
+    created, a folder that cannot be written or a bad path fails here, before
+    the call, rather than after the money is spent. It creates the file empty
+    when absent, which reads as $0 exactly as an absent file does.
+    """
+    path = path or spend_log_path()
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        os.close(os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600))
+    except OSError as e:
+        return f"{path}: {e.strerror or e}"
+    return None
+
+
+def check_budget() -> Optional[Unavailable]:
+    """None when a call may go out; otherwise why it may not."""
+    cap = daily_cap()
+    try:
+        spend = spent_today()
+    except LedgerUnreadable as e:
+        return Unavailable(
+            LEDGER,
+            f"The budget check could not look: the spend ledger exists but "
+            f"cannot be read ({e}). Nothing was called, because an unread "
+            "ledger is not a ledger reading $0.",
+            f"Fix the file's permissions or move it aside, or point "
+            f"{SPEND_LOG_ENV} at a readable path.",
+        )
+    # A ledger this call could not be booked to would read the same total next
+    # time, so every later call would pass the cap uncounted.
+    unwritable = ledger_appendable()
+    if unwritable is not None:
+        return Unavailable(
+            LEDGER,
+            f"The budget check could not look: the spend ledger cannot be "
+            f"written ({unwritable}). Nothing was called, because a call the "
+            "ledger cannot book is a call the cap cannot count.",
+            f"Fix the folder's permissions or free the disk, or point "
+            f"{SPEND_LOG_ENV} at a writable path.",
+        )
+    if spend.total >= cap:
+        skipped = f" ({spend.malformed} unreadable line(s) skipped)" if spend.malformed else ""
+        return Unavailable(
+            BUDGET,
+            f"Today's spend on this key, across every repo: ${spend.total:.4f}. "
+            f"Daily cap: ${cap:.2f}.{skipped}",
+            f"The day rolls over at 00:00 UTC. `scrub-haiku.py --spend-report` "
+            f"shows who spent it; {DAILY_USD_ENV} raises the cap for one push.",
+        )
+    return None
+
+
+def spend_report() -> int:
+    """Today's total, the cap, and each repo's share. Scans nothing."""
+    cap = daily_cap()
+    today = utc_today()
+    path = spend_log_path()
+    try:
+        spend = spent_today(path, today)
+    except LedgerUnreadable as e:
+        print(f"[scrub-haiku] the budget check could not look: {e}", file=sys.stderr)
+        return 2
+    state = ("REACHED — the scanner will not call" if spend.total >= cap
+             else f"${cap - spend.total:.4f} left")
+    print(f"scrub-haiku spend on {today} (UTC), every repo on this key")
+    print(f"  today:  ${spend.total:.4f}")
+    print(f"  cap:    ${cap:.2f}  ({state})")
+    print("  by repo:")
+    if not spend.by_repo:
+        print("    (nothing recorded today)")
+    for repo, usd in sorted(spend.by_repo.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"    {repo:<36} ${usd:.4f}")
+    if spend.malformed:
+        print(f"  unreadable lines skipped: {spend.malformed}")
+    print(f"  ledger: {path}")
+    return 0
+
+
 BANNER_RULE = "=" * 74
 
+# What the banner's headline says the scan did not do. Every case gets one:
+# a banner that names the cause without saying "this is not a clean verdict"
+# can be read as a verdict with a footnote.
+HEADLINES = {
+    BUDGET: "SCAN DID NOT RUN — daily budget reached",
+    LEDGER: "SCAN DID NOT RUN — the budget check could not look",
+}
+DEFAULT_HEADLINE = "SCAN DID NOT RUN — this is not a clean verdict"
 
-def print_banner(unavailable: Unavailable, policy: Policy, action: str) -> None:
+
+def print_banner(unavailable: Unavailable, policy: Policy, action: str,
+                 policy_label: str = "") -> None:
     """Say, unmissably, that only half the gate ran.
 
     One line of stderr among a push's other output is what this had before,
     and it is what let a real name through: the line was printed, and nobody
     saw it. The frame is the point.
     """
+    label = policy_label or policy.name
     lines = [
         "",
         BANNER_RULE,
         "  LEAK GATE: ONLY HALF OF IT RAN",
+        f"  {HEADLINES.get(unavailable.case, DEFAULT_HEADLINE)}",
         BANNER_RULE,
         f"  The name-aware scanner could not run — {unavailable.case}.",
         f"  {unavailable.detail}",
@@ -394,16 +727,17 @@ def print_banner(unavailable: Unavailable, policy: Policy, action: str) -> None:
         lines.append(f"  {unavailable.hint}")
     lines += [
         "",
-        "  The regex scanner ran and passed. It matches names and patterns it",
-        "  has been given. It does not recognise an unfamiliar real name, and",
-        "  recognising those is the whole job of the layer that did not run.",
+        "  This is not a clean verdict. The regex scanner ran and passed. It",
+        "  matches names and patterns it has been given. It does not recognise",
+        "  an unfamiliar real name, and recognising those is the whole job of",
+        "  the layer that did not run.",
         "",
     ]
     if action == "block":
-        lines.append(f"  PUSH BLOCKED.  [policy: {policy.name}]")
+        lines.append(f"  PUSH BLOCKED.  [policy: {label}]")
     else:
         lines += [
-            f"  PUSH ALLOWED on the regex layer alone.  [policy: {policy.name}]",
+            f"  PUSH ALLOWED on the regex layer alone.  [policy: {label}]",
             "  Read what this push publishes before it lands.",
         ]
     lines += [BANNER_RULE, ""]
@@ -556,7 +890,7 @@ def split_patch(patch: str, limit: int | None = None) -> List[str]:
     return pieces
 
 
-def call_haiku(diff_content: str) -> "int | Unavailable":
+def call_haiku(diff_content: str, scan_range: str = "stdin") -> "int | Unavailable":
     """Every piece of the push, one verdict.
 
     Any piece finding a leak blocks: a leak is a property of a line, not of
@@ -569,12 +903,14 @@ def call_haiku(diff_content: str) -> "int | Unavailable":
     "unavailable" is handed to a policy that may be set to warn, and a leak one
     piece actually found must not be softened into a banner by a different
     piece that timed out.
+
+    `scan_range` only labels the spend ledger's entries.
     """
     pieces = split_patch(diff_content)
     if len(pieces) == 1:
-        return _scan_piece(pieces[0])
+        return _scan_piece(pieces[0], scan_range)
     with ThreadPoolExecutor(max_workers=CHUNK_JOBS) as pool:
-        results = list(pool.map(_scan_piece, pieces))
+        results = list(pool.map(lambda piece: _scan_piece(piece, scan_range), pieces))
     if any(r == 1 for r in results):
         return 1
     for r in results:
@@ -583,7 +919,21 @@ def call_haiku(diff_content: str) -> "int | Unavailable":
     return 0
 
 
-def _scan_piece(diff_content: str) -> "int | Unavailable":
+def _read_reply(data: object) -> "tuple[str, str]":
+    """(verdict word, reply text). Never raises, so the spend entry that must
+    be written before anything acts on the reply cannot be skipped by it."""
+    content = data.get("content") if isinstance(data, dict) else None
+    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+        return "wrong-shape", ""
+    text = str(content[0].get("text", "")).strip()
+    if "VERDICT: CLEAN" in text:
+        return "clean", text
+    if "VERDICT: LEAKS_FOUND" in text:
+        return "findings", text
+    return "no-verdict", text
+
+
+def _scan_piece(diff_content: str, scan_range: str = "stdin") -> "int | Unavailable":
     """0 clean, 1 leaks found, or an `Unavailable` saying which way it failed."""
     # Keychain first, then the env vars. SCRUB_HAIKU_API_KEY is preferred over
     # ANTHROPIC_API_KEY so this layer can use a key separate from
@@ -600,6 +950,18 @@ def _scan_piece(diff_content: str) -> "int | Unavailable":
             "No API key resolved — not from the Keychain, not from the environment.",
             KEY_HINT,
         )
+
+    # Per piece, not once per push: the cap is on API calls, and a long scan
+    # can cross it — or another repo's push can — between one piece and the
+    # next. It is a check, not a reservation: calls already in flight are not
+    # yet in the ledger, so the cap can be overshot by every call in flight
+    # when it is crossed — up to CHUNK_JOBS per concurrent scanning process,
+    # across repos. At a few cents a call that is cents past a dollar cap.
+    # Closing it needs a cross-process lock or a reservation entry, and both
+    # change the ledger contract every copy of this scanner shares.
+    over = check_budget()
+    if over is not None:
+        return over
 
     body = json.dumps({
         "model": MODEL,
@@ -640,18 +1002,35 @@ def _scan_piece(diff_content: str) -> "int | Unavailable":
     # [null]}` — would otherwise raise out of here as a traceback, which is
     # neither of the two answers this tool is allowed to give and says nothing
     # a person can act on.
-    content = data.get("content") if isinstance(data, dict) else None
-    if not isinstance(content, list) or not content or not isinstance(content[0], dict):
+    verdict, text = _read_reply(data)
+
+    # RECORDED BEFORE ANYTHING ACTS ON THE REPLY. The call cost money the
+    # moment `usage` came back; a reply that then carries no verdict, or the
+    # wrong shape, is still a call the cap has to count, and every return
+    # below is a path that would otherwise skip it.
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if isinstance(usage, dict):
+        failed = record_spend(scan_range, len(diff_content), usage, verdict)
+        if failed is not None:
+            # The verdict stands — this scan did run and the money is spent —
+            # but the cap cannot see what it cost, so say so where the push's
+            # output is read. The pre-check stops the next call if it still fails.
+            print(
+                f"[scrub-haiku] SPEND NOT BOOKED: this scan's cost could not be "
+                f"written to the shared spend ledger ({failed}). The daily cap "
+                "does not count it, and the next scan will not call until the "
+                "ledger can be written.",
+                file=sys.stderr,
+            )
+
+    if verdict == "wrong-shape":
         return Unavailable(
             UNREACHABLE,
             "The API's reply was not in a shape this tool can read.",
         )
-
-    text = str(content[0].get("text", "")).strip()
-
-    if "VERDICT: CLEAN" in text:
+    if verdict == "clean":
         return 0
-    if "VERDICT: LEAKS_FOUND" in text:
+    if verdict == "findings":
         print("[scrub-haiku] Haiku flagged leaks:", file=sys.stderr)
         for line in text.split("\n"):
             print(f"  {line}", file=sys.stderr)
@@ -661,6 +1040,28 @@ def _scan_piece(diff_content: str) -> "int | Unavailable":
         UNREACHABLE,
         f"The scanner's reply carried no verdict line: {text[:200]!r}",
     )
+
+
+def excerpt(diff: str, base: "str | None") -> str:
+    """The part of `diff` worth a call: flagged lines and their context.
+
+    "" means the rules pass found nothing new, and then no call is made and
+    nothing is booked. It runs over the WHOLE push, before the cost ceiling
+    below trims anything, so a long push is no longer read only to 320KB.
+    """
+    if scrub_names.rules_off():
+        print("[scrub-haiku] SCRUB_HAIKU_RULES=off — sending the whole push.", file=sys.stderr)
+        return diff
+    chosen = scrub_names.select(diff, scrub_names.public_vocabulary(base),
+                                scrub_git.IDENTITY_PLACEHOLDER)
+    if not chosen.text:
+        print(f"[scrub-haiku] rules pass: none of {chosen.read} lines carries anything "
+              "this repository has not published. No call.", file=sys.stderr)
+        return ""
+    print(f"[scrub-haiku] rules pass: {chosen.flagged} of {chosen.read} lines carry something "
+          f"new; sending {chosen.sent} with context ({len(chosen.text):,} of "
+          f"{len(diff):,} chars).", file=sys.stderr)
+    return chosen.text
 
 
 def get_diff(range_spec: str) -> str:
@@ -675,13 +1076,17 @@ def get_diff(range_spec: str) -> str:
 
 
 def main() -> int:
+    args = sys.argv[1:]
+    # A report scans nothing and spends nothing, so no skip switch applies.
+    if "--spend-report" in args:
+        return spend_report()
+
     if os.environ.get("SCRUB_SKIP") == "1":
         return 0
     if os.environ.get("SCRUB_SKIP_HAIKU") == "1":
         print("[scrub-haiku] SCRUB_SKIP_HAIKU=1 — bypassing Haiku check.", file=sys.stderr)
         return 0
 
-    args = sys.argv[1:]
     if "--help" in args or "-h" in args:
         print(__doc__)
         return 0
@@ -692,18 +1097,34 @@ def main() -> int:
         print(f"[scrub-haiku] {e}", file=sys.stderr)
         return 2
 
+    base = None
+    if "--public-base" in args:
+        idx = args.index("--public-base")
+        if idx + 1 >= len(args):
+            print("[scrub-haiku] --public-base needs a value", file=sys.stderr)
+            return 2
+        base = args[idx + 1]
+
     if rev_args is not None:
         diff = scrub_git.push_patch(rev_args)
+        scan_range = "push " + args[args.index("--push-tip") + 1][:12]
+        base = base or scrub_names.public_base(rev_args)
     elif "--diff-range" in args:
         idx = args.index("--diff-range")
         if idx + 1 >= len(args):
             print("[scrub-haiku] --diff-range needs a value", file=sys.stderr)
             return 2
         diff = get_diff(args[idx + 1])
+        scan_range = args[idx + 1][:80]
     else:
         diff = sys.stdin.read()
+        scan_range = "stdin"
 
     if not diff.strip():
+        return 0
+
+    diff = excerpt(diff, base)
+    if not diff:
         return 0
 
     if len(diff) > MAX_DIFF_CHARS:
@@ -713,7 +1134,7 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    result = call_haiku(diff)
+    result = call_haiku(diff, scan_range)
     if not isinstance(result, Unavailable):
         return result
 
@@ -727,7 +1148,11 @@ def main() -> int:
             file=sys.stderr,
         )
     action = POLICIES[policy.name][result.case]
-    print_banner(result, policy, action)
+    label = policy.name
+    if result.case == BUDGET and os.environ.get(BUDGET_BLOCK_ENV) == "1" and action != "block":
+        action = "block"
+        label = f"{policy.name}, {BUDGET_BLOCK_ENV}=1"
+    print_banner(result, policy, action, label)
     return 1 if action == "block" else 0
 
 
