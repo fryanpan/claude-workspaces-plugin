@@ -2335,12 +2335,13 @@ export class FileBindings {
   /**
    * Snapshot the doc's own content before a disk-wins replacement, bounded.
    *
-   * Two bounds, because this now fires on an ordinary external deletion and
-   * not only on a shortened file:
+   * Two bounds, because this fires on a section leaving as well as on a
+   * shortened file:
    *
    *   - **Nothing is reached on a quiet poll.** A reconcile runs only on a
    *     stat that actually changed, so the ceiling is "one small file per
-   *     external save that removed a block", not per tick. The write path is
+   *     external save that took a section or shortened the file", not per
+   *     tick. The write path is
    *     untaxed either way — this is on the READ side.
    *   - **The same content is never kept twice in a row**, and a doc keeps at
    *     most {@link LIVE_BACKUP_CAP} of them; past that the oldest goes. That

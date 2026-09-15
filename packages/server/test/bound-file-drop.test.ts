@@ -24,19 +24,22 @@
  * shortened it. What these tests pin is that the losing side is KEPT and
  * ANNOUNCED.
  *
- * Two triggers, because the two actions cost different things and the shapes
- * do not separate on any count (`blockDelta` carries the measurements):
+ * Two triggers, because the two actions cost different things
+ * (`blockDelta` carries the measurements behind both):
  *
- *   - a COPY whenever any block's words left, swap or deletion alike —
- *     otherwise a revision that replaces the section rather than removing it
- *     is the loudest possible loss reporting nothing;
+ *   - a COPY when a SECTION left — its heading went with it — or the file
+ *     came back shorter. The heading is what makes the swap case catchable:
+ *     a revision that replaces the notes with a comparable amount of other
+ *     text leaves every block count at zero net, and is the loudest possible
+ *     loss;
  *   - the `syncError` only when the file came back SHORTER, because it
  *     reaches get_doc, every edit response and every watching session, and an
  *     ordinary external save must not light it up.
  *
  * So the negative controls below come in two kinds: an ordinary save must
- * raise no sync error, and a save that removes nothing at all must not even
- * keep a copy.
+ * raise no sync error, and an edit that takes no section and leaves the file
+ * no shorter must not even keep a copy — including the ones that look like
+ * removals to a block diff, a reworded paragraph and an appended bullet.
  *
  * The doc, the paths and the words here are invented.
  */
