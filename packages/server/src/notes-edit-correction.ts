@@ -82,7 +82,8 @@ export function ownWords(
  * 3. one sentence of the speech takes something back and shares two words with
  *    `now` beyond the cue, so the correction is one the tick heard — and names
  *    the note's subject twice between them: two of its own words in `now`, or
- *    two in the take-back itself.
+ *    two AFTER the take-back's cue, where what it withdraws is said. An
+ *    insert needs the second always: the speaker has to withdraw THAT note.
  *
  * The speech is matched against `now`, not the note, because the note-taker
  * paraphrases both ways: the speaker withdrew "hour guesses", the old note
@@ -100,23 +101,23 @@ export function ownWords(
  * heading, so they are nobody's own: under `### Hull patch`, "Hull patch took
  * three hours; estimate was forty minutes" corrected to "track incoming
  * requests instead of the board estimate" names one own word, "estimate". The
- * speaker, "forget the estimated hours", named two. Either side naming the
- * subject twice is the evidence; one word on each is not, which is what keeps
- * "the hull crew goes home early instead" from withdrawing a note about the
- * hull patch.
+ * speaker, "forget the estimated hours", named two in what they withdrew.
+ * Either side naming the subject twice is the evidence; one word on each is
+ * not, which is what keeps "the hull crew goes home early instead" from
+ * withdrawing a note about the hull patch.
  */
 export function correctsIt(
   own: readonly string[],
   now: string,
   speech: readonly string[],
-  opts: { named?: 'anywhere' | 'after-cue' } = {},
+  opts: { as?: 'replace' | 'insert' } = {},
 ): boolean {
   const has = new Set(contentWords(now));
   const subject = new Set(own.filter((w) => has.has(w)));
   if (subject.size === 0) return false;
   const withdrawn = now
     .split(/[;:.,!?]|\s[-–—]\s/)
-    .some((clause) => withdrawsSubject(clause, subject, opts.named ?? 'anywhere'));
+    .some((clause) => withdrawsSubject(clause, subject, opts.as ?? 'replace'));
   if (!withdrawn) return false;
   const reported = [...has].filter((w) => !CUE_STEMS.has(w));
   return speech
@@ -125,14 +126,23 @@ export function correctsIt(
       if (!TAKES_BACK.test(sentence)) return false;
       const said = new Set(contentWords(sentence));
       if (reported.filter((w) => said.has(w)).length < 2) return false;
-      return subject.size >= 2 || own.filter((w) => said.has(w)).length >= 2;
+      if (subject.size >= 2 && opts.as !== 'insert') return true;
+      const withdrawnWords = new Set(afterCue(sentence, TAKES_BACK));
+      return own.filter((w) => withdrawnWords.has(w)).length >= 2;
     });
+}
+
+/** The content words after the first `cue` in `text`, cue words left out. */
+function afterCue(text: string, cue: RegExp): string[] {
+  const first = new RegExp(cue.source, 'i').exec(text);
+  if (first === null) return [];
+  return contentWords(text.slice(first.index + first[0].length)).filter((w) => !CUE_STEMS.has(w));
 }
 
 /**
  * Whether one clause withdraws a subject word: a withdrawing word, and a
- * subject word anywhere in the clause — or, `after-cue`, a subject word AFTER
- * a withdrawing word that is not one itself.
+ * subject word anywhere in the clause — or, for an insert, a subject word
+ * AFTER a withdrawing word that is not one itself.
  *
  * WHY THE INSERT PATH READS THE ORDER. "Track incoming requests instead of
  * hour estimates" withdraws what follows the cue, and that is the note's
@@ -146,15 +156,11 @@ export function correctsIt(
 function withdrawsSubject(
   clause: string,
   subject: ReadonlySet<string>,
-  named: 'anywhere' | 'after-cue',
+  as: 'replace' | 'insert',
 ): boolean {
-  const cue = new RegExp(WITHDRAWS.source, 'gi');
-  const first = cue.exec(clause);
-  if (first === null) return false;
-  if (named === 'anywhere') return contentWords(clause).some((w) => subject.has(w));
-  return contentWords(clause.slice(first.index + first[0].length)).some(
-    (w) => subject.has(w) && !CUE_STEMS.has(w),
-  );
+  if (!WITHDRAWS.test(clause)) return false;
+  const named = as === 'replace' ? contentWords(clause) : afterCue(clause, WITHDRAWS);
+  return named.some((w) => subject.has(w));
 }
 
 /** What `correctedNote` needs to know about the section. */
@@ -196,7 +202,7 @@ export function correctedNote(
       e.underHeadingId === scope.headingId &&
       scope.commented?.has(e.id) !== true &&
       (outline[i + 1]?.depth ?? 0) <= (e.depth ?? 0) &&
-      correctsIt(ownWords(e, outline, section), markdown, scope.speech, { named: 'after-cue' }),
+      correctsIt(ownWords(e, outline, section), markdown, scope.speech, { as: 'insert' }),
   );
   return answers.length === 1 ? answers[0] : undefined;
 }

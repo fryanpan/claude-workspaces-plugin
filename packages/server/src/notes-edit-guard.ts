@@ -372,8 +372,8 @@ export function guardNotesEdits(
         targeted.add(corrected.id);
         out.push({ op: 'replace_block', blockId: corrected.id, markdown: edit.markdown });
         kept.push(
-          `insert_under_heading withdrew ${corrected.id}, which the speaker took back — ` +
-            'replaced it instead, so the correction stands alone',
+          `insert_under_heading beside ${corrected.id} wrote the correction of a note the speaker ` +
+            'took back — replaced it instead, so one note stands',
         );
         continue;
       }

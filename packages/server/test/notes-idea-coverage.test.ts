@@ -95,6 +95,17 @@ describe('whether the notes carry an idea', () => {
     }
   });
 
+  it('keeps the double letter a word has of its own', () => {
+    // Only the consonant "-ed" and "-ing" double goes; "pass" is not "pas".
+    expect(['pass', 'fall', 'class', 'staff'].map((w) => contentWords(w).join(''))).toEqual([
+      'pass',
+      'fall',
+      'class',
+      'staff',
+    ]);
+    expect(contentWords('falling')).toEqual(contentWords('fall'));
+  });
+
   it('keeps different words apart', () => {
     for (const [a, b] of [
       ['estimate', 'estate'],
@@ -102,6 +113,7 @@ describe('whether the notes carry an idea', () => {
       ['range', 'ranger'],
       ['100', '1000'],
       ['request', 'requester'],
+      ['file', 'fill'],
     ]) {
       expect(contentWords(a as string), `${a} vs ${b}`).not.toEqual(contentWords(b as string));
     }

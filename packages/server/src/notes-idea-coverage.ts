@@ -146,9 +146,7 @@ export function stem(word: string): string {
   // "status" and "statuses", "menu" and "menus": a singular can end in "us"
   // or "is" and a plural can too, so the one "s" either keeps goes from both.
   if (base.length > 3 && /[iu]s$/.test(base)) base = base.slice(0, -1);
-  const bare = base.length > 3 && base.endsWith('e') ? base.slice(0, -1) : base;
-  // Consonant letters only: "1000" is not "100" with a doubled zero.
-  return bare.length > 3 && /([b-df-hj-np-tv-z])\1$/.test(bare) ? bare.slice(0, -1) : bare;
+  return base.length > 3 && base.endsWith('e') ? base.slice(0, -1) : base;
 }
 
 /** `w` with one inflectional suffix taken off, leaving at least three letters. */
@@ -157,17 +155,34 @@ function unsuffixed(w: string): string {
   if (/ie[sd]$/.test(w) && cut(3) !== null) return `${cut(3)}y`;
   // A two-letter root before "-ing" is a short word that lost its "e"
   // ("using", "owing") when it has a vowel, and no root ("bring") when not.
-  if (w.endsWith('ing'))
-    return cut(3) ?? (/^[^aeiou]*$/.test(w.slice(0, -3)) ? w : `${w.slice(0, -3)}e`);
+  if (w.endsWith('ing')) {
+    const root = cut(3);
+    if (root !== null) return undoubled(root);
+    return /^[^aeiou]*$/.test(w.slice(0, -3)) ? w : `${w.slice(0, -3)}e`;
+  }
   // "-d" alone is the past tense of a word ending in "e" ("used"); longer
   // words reach the same stem through "-ed" and the final "e" going.
-  if (w.endsWith('ed')) return cut(2) ?? cut(1) ?? w;
+  if (w.endsWith('ed')) {
+    const root = cut(2);
+    return root !== null ? undoubled(root) : (cut(1) ?? w);
+  }
   // "-es" is only a two-letter plural after a sibilant ("batches", "boxes").
   // Everywhere else the "e" belongs to the word: "ranges" loses only its "s",
   // and the "e" goes with every other form's in `stem`.
   if (/(?:s|x|z|ch|sh)es$/.test(w) && cut(2) !== null) return cut(2) as string;
   if (w.endsWith('s') && !w.endsWith('ss')) return cut(1) ?? w;
   return w;
+}
+
+/**
+ * A root with the consonant English doubles before "-ed" and "-ing" taken
+ * back off: "stopped" is "stop". Only after one of those suffixes, and never
+ * an s, l, f or z, which a word doubles itself — "pass", "fall", "staff" and
+ * "buzz" keep theirs, so "passed" is "pass". The price is the spellings that
+ * double an l before a suffix ("labelled" stays "labell").
+ */
+function undoubled(root: string): string {
+  return root.length > 3 && /([bcdghjkmnpqrtvwxy])\1$/.test(root) ? root.slice(0, -1) : root;
 }
 
 /** The content words of a piece of text, stemmed and deduplicated. */
