@@ -322,7 +322,7 @@ export const LEDGER_TWO_LAYERS_SECTION = [
   '- Remote has to survive the couch',
   '  - People lose it between the cushions each week',
   '  - Option: a locator beep that a whistle starts',
-  '  - Cost of the beeper is not known yet (unconfirmed)',
+  '  - Cost of the beeper is not known yet',
   '```',
   '',
   '- Do not drop a point for length. The top layer stays short because the detail is one layer down. If a fact does not fit in the lead note, make it a sub-note.',

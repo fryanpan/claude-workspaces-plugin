@@ -62,6 +62,16 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  *   all three shipped methods wrote a joke about the cables on AMI ES2002b as
  *   a design proposal. That is not fabrication — the idea was there, one step
  *   weaker — so the rule names the move rather than listing cases.
+ * - BESIDE IT, AND IT REPLACED A HEDGE. Accuracy used to end with "write the
+ *   note and end it with (unconfirmed)". That instruction manufactured the
+ *   tag: it is the only reason the marker ever appears, and a real 41-minute
+ *   meeting finished with three of them still in the notes after a cleanup
+ *   pass had been asked twice to settle them. Deleting it alone would have
+ *   been worse than keeping it — an unsure note would then read as certain —
+ *   so what stands in its place asks for the SMALLER CLAIM the speech
+ *   actually supports instead of a larger one with a caveat attached. Same
+ *   principle as the strength rule, which is why it sits next to it: write
+ *   the point the speech made, not a bigger one wearing a label.
  * - Regrouping goes through `nest_blocks`, which moves bullets rather than
  *   retyping them: same words, same ids, comment threads kept. The server
  *   counts the flat run itself and names the ids in the prompt
@@ -131,9 +141,9 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '',
   '- Write only what the speakers said. Do not invent names, numbers or decisions.',
   '- Keep the strength that the speaker gave. An aside is not a proposal. A fragment is not a commitment. "Right, okay" is not a decision.',
+  '- If you are not sure what the speaker meant, write the smaller point that you are sure of. Do not write a larger point with a caveat.',
   '- Do not join the words of two speakers who talk at the same time into one intention.',
   '- If a word is garbled, use the reading that agrees with the project context.',
-  '- If you are not sure what the speaker meant, write the note and end it with "(unconfirmed)".',
   '',
   '### Speakers and links',
   '',

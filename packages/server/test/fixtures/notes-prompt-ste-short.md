@@ -53,9 +53,9 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 
 - Write only what the speakers said. Do not invent names, numbers or decisions.
 - Keep the strength that the speaker gave. An aside is not a proposal. A fragment is not a commitment. "Right, okay" is not a decision.
+- If you are not sure what the speaker meant, write the smaller point that you are sure of. Do not write a larger point with a caveat.
 - Do not join the words of two speakers who talk at the same time into one intention.
 - If a word is garbled, use the reading that agrees with the project context.
-- If you are not sure what the speaker meant, write the note and end it with "(unconfirmed)".
 
 ### Speakers and links
 

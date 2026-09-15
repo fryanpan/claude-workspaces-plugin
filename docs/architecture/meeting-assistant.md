@@ -865,10 +865,11 @@ with headings"*):
   notes came to carry.
 - **The floor for every topic**, wherever the speech supplies it: what was
   discussed, what it means and why, what was decided and by whom, what happens
-  next and who owns it, what is still open, what is unconfirmed, and every
-  task, doc or meeting it named, linked inline. A hint became a bar. A
-  decision is its own bullet, never a clause inside a description of the
-  discussion.
+  next and who owns it, what is still open, and every task, doc or meeting it
+  named, linked inline. A hint became a bar. A decision is its own bullet,
+  never a clause inside a description of the discussion. "What is unconfirmed"
+  was a member of this list and is not one now — see the smaller-sure-point
+  rule below, which retired it.
 - **Open questions have one fixed heading**, `### Open questions`, kept last.
   A fixed place beats a good place: the room stops hunting, and a question
   later answered is replaced under the topic it belongs to.
@@ -899,9 +900,18 @@ with headings"*):
   underneath is narrower and matters more — their line is never rewritten or
   deleted, because an edit naming a block that is not the note-taker's own
   arrives as a suggestion instead.
-- **Mark a guess.** Where the point rests on a garbled word, write the note
-  and end it `(unconfirmed)`. A marked guess beats a confident wrong note and
-  beats no note.
+- **Write the smaller sure point, not a hedged bigger one.** Where the speech
+  will not support the claim, the note says the part it does support. This
+  REPLACED "write the note and end it `(unconfirmed)`" (2026-09-15). That
+  instruction was the only thing that ever produced the marker, and a real
+  41-minute meeting finished with three still in the notes after the
+  end-of-meeting pass had been asked twice to settle them — so the tag was
+  never a temporary state the pass cleaned up, it was output. Deleting the
+  rule alone would have been worse than keeping it, because an unsure note
+  would then read as certain; what stands in its place asks for the claim the
+  speech actually made. The tidy-up still COUNTS any survivor and changes
+  nothing (`notes-unconfirmed.ts`), so a non-zero count is the prompt rule
+  failing to hold and is meant to be read as that.
 - **Keep the speaker on a decision and on an open question.** Who decided and
   who is asking is part of what those notes say.
 - **Link what it names**: a board task or doc the tick's speech named arrives
@@ -2153,6 +2163,12 @@ Full run, 273 ticks, judge on 48 of them:
 | A named board task is linked | 36 | 81% |
 | Decisions and questions keep a speaker | 273 | 86% |
 | Uncertain points marked unconfirmed | 46 | 78% |
+
+The last row is a RETIRED criterion, kept because the number is what retired
+it. It scored the note-taker on emitting `(unconfirmed)`, which the prompt no
+longer asks for at all (2026-09-15); a rerun would read 0% and mean the rule
+is working. Read it as the measurement of a behaviour that has since been
+removed, not as a bar anything is held to.
 
 The structural guarantees — a person's line, one heading per topic, notes
 under topics — are the 100%s, and they are the ones the pipeline enforces

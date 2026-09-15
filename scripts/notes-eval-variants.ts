@@ -91,7 +91,7 @@ const NESTED_RULE = [
   '      - Remote has to survive the couch',
   '        - B: people lose it between the cushions weekly',
   '        - Option: a locator beep triggered by a whistle',
-  '        - Cost of the beeper is not known yet (unconfirmed)',
+  '        - Cost of the beeper is not known yet',
   '- SO NOTHING IS EVER DROPPED FOR LENGTH. The glance layer stays short',
   '  because the detail is one layer DOWN, not because it was cut. If a',
   '  proposition does not fit in the lead bullet, it becomes a sub-bullet;',
@@ -104,7 +104,7 @@ const NESTED_RULE = [
 const ANCHOR_RULE = [
   '- ANCHOR EVERY NOTE TO THE MOMENT IT CAME FROM. End each bullet you',
   '  write with the moment marker given to you for this speech — "(#7)" —',
-  '  after the words and after any "(unconfirmed)". A reader who wants the',
+  '  after the words. A reader who wants the',
   '  detail behind a note opens that moment of the transcript, so the note',
   '  itself carries only the point.',
   '- BECAUSE THE DETAIL IS ONE CLICK AWAY, the note can be short. It can',

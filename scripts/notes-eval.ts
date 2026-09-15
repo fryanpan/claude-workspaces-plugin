@@ -426,7 +426,15 @@ function countingFetch(model: string): typeof fetch {
 
 /* ===== The model judge ===== */
 
-const JUDGE_SYSTEM = [
+/**
+ * Exported so a test can hold it against the SHIPPED PROMPT. The rubric and
+ * the instructions are two halves of one claim about what good notes are, and
+ * they drifted apart once: the prompt stopped asking for an "(unconfirmed)"
+ * marker while this still scored notes on carrying one, so a note-taker doing
+ * exactly what it was told would have scored FALSE and the eval would have
+ * reported the fix as a regression. `notes-eval.test.ts` pins them together.
+ */
+export const JUDGE_SYSTEM = [
   'You are grading a live meeting note-taker, strictly and briefly.',
   '',
   'You get the speech from one moment of a meeting, the notes as they stood',
@@ -449,9 +457,12 @@ const JUDGE_SYSTEM = [
   '- topics: headings match the discussion. False if a new heading was opened',
   '  for a topic already present, or if the speech clearly changed subject and',
   '  everything was still filed under the old heading.',
-  '- guesses: anything uncertain is marked "(unconfirmed)" rather than',
-  '  asserted. False if the notes state as fact something the speech left',
-  '  ambiguous or garbled. True if there was nothing uncertain.',
+  '- guesses: where the speech was ambiguous or garbled, the note says the',
+  '  NARROWER thing the speech does support, rather than a wider claim it',
+  '  does not. False if a note asserts more than the speech carried. True if',
+  '  there was nothing uncertain. A note is NOT marked down for stating its',
+  '  narrower claim plainly: the prompt no longer asks for a hedge, so an',
+  '  absent "(unconfirmed)" is the rule working, not a miss.',
   '- together: related points sit together rather than being repeated or',
   '  scattered. False if the same point now appears twice in different places.',
 ].join('\n');
@@ -751,14 +762,59 @@ function spanning(first: string, last: string): string {
   return `${from[1]} ticks ${from[2]!.split('-')[0]}-${to[1]}`;
 }
 
-/** The judge's five fields, and the behaviour each is filed under. */
-const JUDGED_COLUMNS = [
+/**
+ * Every behaviour a run can report, keyed by the id its verdicts file under.
+ *
+ * Exported for the same reason `JUDGE_SYSTEM` is: while this lived inside
+ * `main` nothing could check that the ids `JUDGED_COLUMNS` files under are ids
+ * this table actually has — and NOTHING ELSE CAN. Both consumers reach for an
+ * escape hatch: the judge's path is `behaviours[...]?.see(...)`, which drops a
+ * verdict for a missing key without a word, and the unpaired control asserts
+ * non-null on a path only `CW_NOTES_EVAL_UNPAIRED=1` runs. So a renamed key
+ * throws nothing and reddens nothing. It empties a column, and an empty column
+ * reads as "this behaviour was never exercised" rather than as a bug — which
+ * is worse than a failure, because somebody believes it.
+ *
+ * The return type is deliberately inferred: annotating it `Record<string,
+ * Behaviour>` would erase the key names and with them `BehaviourId` below.
+ */
+export function judgedBehaviours() {
+  return {
+    length: new Behaviour('1.1', 'Bullets: 20 words or fewer'),
+    verbatim: new Behaviour('1.1', 'Bullets: not copied from the transcript'),
+    paraphrase: new Behaviour('1.1', 'Paraphrased into written sentences'),
+    covers: new Behaviour('1.1', 'Covers discussed / decided / next'),
+    together: new Behaviour('1.1', 'Related points kept together'),
+    human: new Behaviour('1.2', "A person's bullet is never edited"),
+    oneHeading: new Behaviour('1.3', 'One heading per topic'),
+    organised: new Behaviour('1.3', 'Notes are organised under topics'),
+    flatRuns: new Behaviour('1.3', `No topic runs past ${MAX_FLAT_RUN_BULLETS} flat bullets`),
+    topicChange: new Behaviour('1.3', 'A new heading means a new topic'),
+    links: new Behaviour('1.4', 'A named board row is linked'),
+    inventedLinks: new Behaviour('1.4', 'No link the tick was not given'),
+    speakers: new Behaviour('1.4', 'Decisions and questions keep a speaker'),
+    narrowed: new Behaviour('1.4', 'Uncertain points written as the narrower claim'),
+  };
+}
+
+/** An id a judged column may file under — the table's own keys, nothing else. */
+export type BehaviourId = keyof ReturnType<typeof judgedBehaviours>;
+
+/**
+ * The judge's five fields, and the behaviour each is filed under.
+ *
+ * `satisfies` is the compile-time half of the guard: a second id here that no
+ * longer names a row above stops typecheck instead of quietly emptying a
+ * column. `as const` still comes first, so the field names stay literal and
+ * keep indexing the judge's verdict.
+ */
+export const JUDGED_COLUMNS = [
   ['paraphrased', 'paraphrase'],
   ['covers', 'covers'],
   ['topics', 'topicChange'],
-  ['guesses', 'unconfirmed'],
+  ['guesses', 'narrowed'],
   ['together', 'together'],
-] as const;
+] as const satisfies readonly (readonly [string, BehaviourId])[];
 
 /**
  * What `CW_NOTES_EVAL_UNPAIRED=1` adds to a run: the same five columns again,
@@ -1425,22 +1481,7 @@ async function main(argv: string[]): Promise<number> {
     recordUsage(model === JUDGE_MODEL ? JUDGE_LABEL : model, input, output),
   );
 
-  const behaviours: Record<string, Behaviour> = {
-    length: new Behaviour('1.1', 'Bullets: 20 words or fewer'),
-    verbatim: new Behaviour('1.1', 'Bullets: not copied from the transcript'),
-    paraphrase: new Behaviour('1.1', 'Paraphrased into written sentences'),
-    covers: new Behaviour('1.1', 'Covers discussed / decided / next'),
-    together: new Behaviour('1.1', 'Related points kept together'),
-    human: new Behaviour('1.2', "A person's bullet is never edited"),
-    oneHeading: new Behaviour('1.3', 'One heading per topic'),
-    organised: new Behaviour('1.3', 'Notes are organised under topics'),
-    flatRuns: new Behaviour('1.3', `No topic runs past ${MAX_FLAT_RUN_BULLETS} flat bullets`),
-    topicChange: new Behaviour('1.3', 'A new heading means a new topic'),
-    links: new Behaviour('1.4', 'A named board row is linked'),
-    inventedLinks: new Behaviour('1.4', 'No link the tick was not given'),
-    speakers: new Behaviour('1.4', 'Decisions and questions keep a speaker'),
-    unconfirmed: new Behaviour('1.4', 'Uncertain points marked unconfirmed'),
-  };
+  const behaviours: Record<string, Behaviour> = judgedBehaviours();
   // The control columns, only when asked for. Absent, nothing calls the judge
   // twice and the run costs what it always did.
   if (process.env.CW_NOTES_EVAL_UNPAIRED === '1') {
