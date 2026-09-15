@@ -622,6 +622,27 @@ writes the file, rebinds the doc through `file-binding.ts`, claims the file's
 address in `repo-registry.ts` so the Library above reads it as one document,
 and moves a meeting's filing record with it. `routes/doc-move.ts` answers it.
 
+`core/src/meeting-transcript-fold.ts` and `core/src/speech-lexicon.ts` join
+the shared tier and move nothing in the picture, but they are the reason a
+`meeting-*` module sits in `core` at all. The fold is a pure function from
+the turns a meeting stored to the ROWS a person is shown; the lexicon is the
+vocabulary it and `notes-idea-coverage.ts` both ask which words carry no
+subject (it moved out of that file, which re-exports every name). They are in
+`core` because two packages show a meeting's words as a list of rows and each
+used to build that list itself: the server composes
+`<docname>-raw-transcript.md` at stop (`formatRawSegment` in
+`meeting-raw.ts`), and the board's Transcript fold composes the same grammar
+in the browser off the REST record (`loadDocTranscript` in
+`speaker-voices.ts`). Two implementations of one grammar are two answers to
+"what was said", so both now call the one function. Neither module reads a
+file, writes one, or touches the append-only JSONL and the audio beside it —
+acknowledgement rides on the row it answered and a wall of words breaks at a
+pause, while the record a replay lines PCM up against keeps every turn at its
+own number. The meeting's two LIVE surfaces are deliberately untouched: the
+strip holds a rolling window of three turns and cannot grow, and the live
+zone is one flowing run of inline spans with no per-turn block, so neither is
+a list of rows to fold.
+
 `notes-timing.ts` joins the same `notes-*` family in the services tier and
 changes none of the picture: it is where one meeting's per-tick latency is
 recorded, opened only when the operator turns timing on. It holds no meeting

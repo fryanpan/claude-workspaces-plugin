@@ -1921,6 +1921,17 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   padding: 2px 0;
   line-height: 1.4;
 }
+/* A chunk of a row that was broken at a pause: the same turn, still the same
+   voice, so it carries no clock and no name and is indented to say so. */
+.meeting-pop-transcript-cont {
+  padding-left: 14px;
+}
+/* What was said back while somebody held the floor. Quieter than the words it
+   rides on, because it is the part a reader skips. */
+.meeting-pop-transcript-answers {
+  opacity: 0.7;
+  font-style: italic;
+}
 .meeting-choice-group {
   margin: 0 8px 10px;
 }
