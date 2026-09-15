@@ -289,6 +289,34 @@ describe('talk becomes a finished note', () => {
     expect(prompts[3]).toContain('<open element="e0" fixed><said>');
   });
 
+  it('words said before a tap stay with the old note even if they had not settled', async () => {
+    let onTurn: TranscriptionOpenOpts['onTurn'] = () => {};
+    const engine: TranscriptionEngine = {
+      name: 'slow-to-settle',
+      open: async (opts) => {
+        onTurn = opts.onTurn;
+        return { send: () => {}, close: async () => {} };
+      },
+    };
+    await start(SCRIPT, engine);
+    replies.push(reply({ text: 'The header is too tall.', element: 'e0' }));
+    onTurn({ turn: 0, text: 'the header is too tall', settledText: 'the header', final: false });
+    send({ type: 'pin', target: 3 });
+    await until(() => notes('v1')[0], 'v1 from the words before the tap');
+    expect(prompts[0]).toContain('<new_words>the header is too tall</new_words>');
+    expect(prompts[0]).not.toContain('<pinned>');
+
+    onTurn({ turn: 0, text: 'the header is too tall', final: true });
+    onTurn({ turn: 1, text: 'footer text is faint', final: true });
+    replies.push(reply({ text: 'The footer text is faint.', element: 'e0' }));
+    clock.advance(VOICE_PAUSE_MS);
+    await until(() => prompts.length === 2, 'the tick after the tap');
+    expect(prompts[1], 'none of the words before the tap came back').toContain(
+      '<new_words>footer text is faint</new_words>',
+    );
+    expect(prompts[1]).toContain('<pinned>e3</pinned>');
+  });
+
   it('a frame the engine repeats with no new word does not hold the note back', async () => {
     let onTurn: TranscriptionOpenOpts['onTurn'] = () => {};
     const engine: TranscriptionEngine = {

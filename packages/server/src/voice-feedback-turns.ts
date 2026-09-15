@@ -7,7 +7,8 @@
  * turn as last reported and, per turn, the words a tick has already taken.
  * Three readings come off that:
  *
- * - `take` — the settled words no tick has had, handed to the next one;
+ * - `take` — the settled words no tick has had, handed to the next one (at a
+ *   tap, the provisional ones too: they were said before it);
  * - `untaken` — every word no tick has had, still-provisional ones included,
  *   which is what keeps a pause timer running;
  * - `waiting` — the words said that no note holds yet: `untaken`, plus what
@@ -64,11 +65,13 @@ export class VoiceTurns {
     return out;
   }
 
-  /** Settled words no tick has taken, now marked taken and held until `done`. */
-  take(): string {
+  /** Settled words no tick has taken — every word, with `provisional` — now
+   *  marked taken and held until `done`. An engine that later rewrites a word
+   *  taken provisionally repeats it rather than loses it (`unusedWords`). */
+  take(provisional = false): string {
     const out: string[] = [];
     for (const turn of this.turns.values()) {
-      const all = words(turn.settled);
+      const all = words(provisional ? turn.text : turn.settled);
       out.push(...unusedWords(all, turn.used));
       turn.used = all.map(normWord);
     }

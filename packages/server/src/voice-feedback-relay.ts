@@ -240,10 +240,10 @@ export class VoiceFeedbackRelay {
   }
 
   /** A tap that changes which note the next words are for. The words said up
-   *  to it are taken now and go to the note they were about, without the
-   *  pause, however long a tidy call already out takes to come back. */
+   *  to it, settled or not, are taken now and go to the note they were about,
+   *  without the pause, however long a tidy call already out takes. */
   private switchTo(s: Session, apply: () => void): void {
-    const words = s.turns.take();
+    const words = s.turns.take(true);
     const endMs = this.audioMs(s);
     s.switching = s.switching
       .then(async () => {
