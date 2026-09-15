@@ -1,0 +1,87 @@
+{
+  "meeting": "RIVERBEND01",
+  "listedBy": "hand-written",
+  "listedAt": "2026-09-14T00:00:00.000Z",
+  "ticks": [
+    {
+      "tick": 1,
+      "ideas": []
+    },
+    {
+      "tick": 2,
+      "ideas": [
+        "The Riverbend ferry timetable changes on the first of the month",
+        "Someone asks which sailings move"
+      ]
+    },
+    {
+      "tick": 3,
+      "ideas": [
+        "The early sailing moves from seven to half past six",
+        "The change breaks the school run for Saltmarsh families"
+      ]
+    },
+    {
+      "tick": 4,
+      "ideas": [
+        "Proposal to keep a seven o'clock weekday sailing",
+        "Keeping it means dropping the late Friday sailing"
+      ]
+    },
+    {
+      "tick": 5,
+      "ideas": ["Nobody uses the late Friday sailing"]
+    },
+    {
+      "tick": 6,
+      "ideas": [
+        "Decision: keep the seven o'clock weekday sailing and drop late Friday",
+        "B will tell the harbour office"
+      ]
+    },
+    {
+      "tick": 7,
+      "ideas": [
+        "Question whether council sign-off is needed",
+        "Answer: changes under an hour need no council sign-off"
+      ]
+    },
+    {
+      "tick": 8,
+      "ideas": ["Next topic is the Harborlight kiln budget"]
+    },
+    {
+      "tick": 9,
+      "ideas": ["The kiln quote is forty two thousand", "The quote is eight thousand over plan"]
+    },
+    {
+      "tick": 10,
+      "ideas": [
+        "Idea to reuse the old kiln shelving to save money",
+        "Reusing shelving saves at most three thousand"
+      ]
+    },
+    {
+      "tick": 11,
+      "ideas": [
+        "Question whether the extra money comes from ferry savings",
+        "Dropping the Friday sailing saves about two thousand a month"
+      ]
+    },
+    {
+      "tick": 12,
+      "ideas": ["The gap can be covered in four months", "A will ask finance to split the payment"]
+    },
+    {
+      "tick": 13,
+      "ideas": [
+        "Question who checks the shelving is safe to reuse",
+        "C will check the shelving by Thursday"
+      ]
+    },
+    {
+      "tick": 14,
+      "ideas": []
+    }
+  ]
+}

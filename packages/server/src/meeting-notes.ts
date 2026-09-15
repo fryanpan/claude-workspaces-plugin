@@ -853,6 +853,12 @@ export interface MeetingNotesDeps {
    */
   onMeetingSummary?: (summary: NotesMeetingSummary) => void;
   /**
+   * The first tick whose words reached the doc, once per session, with how long
+   * after the session opened it landed. Nothing measured this: the tick timings
+   * start at the first pause, so a slow first note read the same as a quick one.
+   */
+  onFirstNote?: (first: { docId: string; meetingId: string; afterMs: number }) => void;
+  /**
    * A new session is beginning on this doc — called synchronously from
    * `beginNotesSession`, before any tick can fire. The server sink releases
    * the ownership ledger's claims here, so a stop-and-restart can never
@@ -1269,6 +1275,7 @@ export function beginNotesSession(
    * would shrink the denominator and inflate the rate.
    */
   const meetingStartedAt = clock();
+  let firstNoteReported = false;
   const meetingCalls: NotesCallUsage[] = [];
   /**
    * When each turn's words stopped changing — the moment Bryan finished the
@@ -1805,7 +1812,16 @@ export function beginNotesSession(
         const unknownTags: string[] = [];
         const checked = composed.map((edit) => {
           if (!('markdown' in edit)) return edit;
+          // What the block held before, so a tag copied off another note in
+          // the outline does not keep that note's turns (`claimsFrom`). An
+          // insert held nothing; a replace of a block the outline does not
+          // show keeps its claims, as it did before.
+          const before =
+            edit.op === 'replace_block'
+              ? input.outline.find((e) => e.id === edit.blockId)?.text
+              : '';
           const out = normalizeSpeakerTags(edit.markdown, {
+            ...(before !== undefined ? { claimsFrom: before } : {}),
             names,
             // While the session is effectively solo the composer was shown no
             // voices at all, so ANY tag it writes is invented — an empty
@@ -1988,6 +2004,18 @@ export function beginNotesSession(
         // gets the old reading, which is right for every batch it can see.
         const wroteWords = answer !== 'no-words' && edits.some((e) => 'markdown' in e);
         if (wroteWords) writesFailedInARow = 0;
+        if (wroteWords && !firstNoteReported) {
+          firstNoteReported = true;
+          try {
+            deps.onFirstNote?.({
+              docId: ids.docId,
+              meetingId: ids.meetingId,
+              afterMs: clock() - meetingStartedAt,
+            });
+          } catch {
+            // An observer. It must not fail the tick that wrote the note.
+          }
+        }
         // A question is only asked once, and it is asked once it has LANDED.
         // Marking them offered before the write meant a refused write lost
         // the questions outright — the retry composed without them.

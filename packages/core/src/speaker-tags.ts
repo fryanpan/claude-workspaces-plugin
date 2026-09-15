@@ -519,6 +519,21 @@ export interface NormalizeSpeakerTagsOptions {
    * mention. Omitted entirely by callers with no tick to speak for.
    */
   turnsByLabel?: Readonly<Record<string, readonly number[]>>;
+  /**
+   * The markdown the edited block held before this edit: `''` for an insert,
+   * which held nothing. Given, a tag keeps its provenance only when this text
+   * carries the same claim for the same voice. Any other claim is treated as a
+   * bare tag and gets this tick's turns.
+   *
+   * WHY. The outline the composer reads shows each tag's full href, turns
+   * included, and a model writing a new note about a voice copies the tag it
+   * can see. So every note about one voice came to carry the turn of its first
+   * mention, and a late reattribution of that one turn would move all of them
+   * (a huddle on 2026-09-14). A claim is only the block's own if the block
+   * already had it. Omitted, every claim is kept, which is how this pass
+   * behaved before.
+   */
+  claimsFrom?: string;
 }
 
 export interface NormalizeSpeakerTagsResult {
@@ -549,6 +564,17 @@ export function normalizeSpeakerTags(
   opts: NormalizeSpeakerTagsOptions,
 ): NormalizeSpeakerTagsResult {
   const protectedLines = protectedLineSet(opts.protect);
+  // How many times the block already carried each claim. A mention consumes
+  // one, so a copy of a claim the block holds once is still a new mention.
+  let ownClaims: Map<string, number> | undefined;
+  if (opts.claimsFrom !== undefined) {
+    ownClaims = new Map();
+    for (const tag of findSpeakerTags(opts.claimsFrom)) {
+      if (!tag.claimsTurns) continue;
+      const key = claimKey(tag.label, tag.turns);
+      ownClaims.set(key, (ownClaims.get(key) ?? 0) + 1);
+    }
+  }
   const unknown: string[] = [];
   let renamed = 0;
   let stamped = 0;
@@ -567,13 +593,15 @@ export function normalizeSpeakerTags(
       // of `claimsTurns` and not of the list, so a mention whose parameter
       // was corrupted keeps its empty handle instead of being handed one
       // from a tick it never came from.
-      const turns = tag.claimsTurns ? tag.turns : (opts.turnsByLabel?.[tag.label] ?? []);
+      // A claim copied from another block is not this block's (`claimsFrom`).
+      const claims = tag.claimsTurns && (ownClaims === undefined || takeClaim(ownClaims, tag));
+      const turns = claims ? tag.turns : (opts.turnsByLabel?.[tag.label] ?? []);
       const want = renderSpeakerTag(tag.label, opts.names, {
         turns,
         // Canonicalizing a corrupted handle drops the unreadable value, so
         // the empty claim is written back explicitly — otherwise this pass
         // turns the mention into a bare tag and the NEXT one stamps it.
-        claimsTurns: tag.claimsTurns,
+        claimsTurns: claims,
         unsure: tag.unsure,
       });
       if (want === tag.raw) return null;
@@ -582,12 +610,29 @@ export function normalizeSpeakerTags(
       // into the empty one — nothing was renamed and no provenance was
       // gained, so counting it as either would overstate what happened.
       if (speakerTagText(tag.label, opts.names) !== tag.text) renamed++;
-      else if (!tag.claimsTurns && turns.length > 0) stamped++;
+      else if (!claims && turns.length > 0) stamped++;
       return want;
     },
     { skip: (line) => isProtected(line, protectedLines) },
   );
   return { markdown: next, renamed, stamped, unknown };
+}
+
+/** Whether the block still holds this tag's claim, using one up if it does. */
+function takeClaim(
+  held: Map<string, number>,
+  tag: { label: string; turns: readonly number[] },
+): boolean {
+  const key = claimKey(tag.label, tag.turns);
+  const left = held.get(key) ?? 0;
+  if (left === 0) return false;
+  held.set(key, left - 1);
+  return true;
+}
+
+/** One voice's claim to a set of turns, as a comparable key. */
+function claimKey(label: string, turns: readonly number[]): string {
+  return `${label}?${turns.join(',')}`;
 }
 
 /**

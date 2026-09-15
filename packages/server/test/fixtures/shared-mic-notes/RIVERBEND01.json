@@ -1,0 +1,192 @@
+{
+  "meeting": "RIVERBEND01",
+  "corpus": "Fictional shared-mic huddle",
+  "licence": "Written for this repository",
+  "source": "packages/server/test/fixtures/shared-mic-notes/NOTICE.md",
+  "window": {
+    "fromSeconds": 0,
+    "seconds": 210
+  },
+  "board": [
+    {
+      "kind": "task",
+      "title": "Riverbend ferry timetable",
+      "url": "/workspaces/w-eval?task=t-1"
+    },
+    {
+      "kind": "task",
+      "title": "Harborlight kiln budget",
+      "url": "/workspaces/w-eval?task=t-2"
+    }
+  ],
+  "ticks": [
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "Okay, quick one before lunch."
+        },
+        {
+          "speaker": "B",
+          "text": "Sure."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "The Riverbend ferry timetable changes on the first of the month."
+        },
+        {
+          "speaker": "C",
+          "text": "Which sailings move?"
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "The early sailing moves from seven to half past six."
+        },
+        {
+          "speaker": "B",
+          "text": "That breaks the school run for the Saltmarsh families."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "C",
+          "text": "Can we keep a seven o'clock sailing on weekdays?"
+        },
+        {
+          "speaker": "A",
+          "text": "Only if we drop the late Friday one."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "B",
+          "text": "Nobody uses the late Friday sailing anyway."
+        },
+        {
+          "speaker": "C",
+          "text": "Right."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "So we keep seven on weekdays and drop late Friday."
+        },
+        {
+          "speaker": "B",
+          "text": "Agreed, I'll tell the harbour office."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "C",
+          "text": "Do we need council sign-off for that?"
+        },
+        {
+          "speaker": "B",
+          "text": "No, timetable changes under an hour don't need it."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "Good. Harborlight kiln budget next."
+        },
+        {
+          "speaker": "C",
+          "text": "Mm-hmm."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "C",
+          "text": "The kiln quote came in at forty two thousand."
+        },
+        {
+          "speaker": "A",
+          "text": "That's eight over what we planned."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "B",
+          "text": "Could we reuse the old kiln shelving to save some of it?"
+        },
+        {
+          "speaker": "C",
+          "text": "Maybe three thousand, not more."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "Is the extra money coming from the ferry savings?"
+        },
+        {
+          "speaker": "B",
+          "text": "Partly, the dropped Friday sailing saves about two thousand a month."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "C",
+          "text": "Then we can cover the gap in four months."
+        },
+        {
+          "speaker": "A",
+          "text": "Fine, I'll ask finance to split the payment."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "B",
+          "text": "Who checks the shelving is safe to reuse?"
+        },
+        {
+          "speaker": "C",
+          "text": "I will, by Thursday."
+        }
+      ]
+    },
+    {
+      "turns": [
+        {
+          "speaker": "A",
+          "text": "Great, that's everything."
+        },
+        {
+          "speaker": "B",
+          "text": "Thanks all."
+        }
+      ]
+    }
+  ]
+}

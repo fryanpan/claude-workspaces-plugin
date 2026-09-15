@@ -70,7 +70,7 @@ function bullets(store: NotesDocStore): string[] {
 describe('a topic whose bullets a paragraph split in two', () => {
   test('regroups across the split, and reports no failed write', () => {
     const store = notesDoc(
-      '## Meeting notes\n\n### Case design\n\n- the case has to survive a drop\n- rubber edging was floated\n\nNobody costed the edging.\n\n- a hard shell was preferred\n',
+      '## Meeting notes\n\n### Case design\n\n- the case has to survive a drop\n- rubber edging was floated\n\n> Nobody costed the edging.\n\n- a hard shell was preferred\n',
     );
     const skip = applyNotesUpdate(
       store,

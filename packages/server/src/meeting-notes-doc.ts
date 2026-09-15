@@ -97,6 +97,7 @@ import {
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
 import { repairNotesEditAddresses } from './notes-edit-address.ts';
+import { bulletNotesEdits } from './notes-edit-bullets.ts';
 import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
 import {
@@ -686,7 +687,10 @@ export function applyNotesUpdate(
     full,
     docStore,
   );
-  const guarded = guardNotesEdits(update.edits, {
+  // EVERY NOTE A BULLET, before the guard and the dedupe read the batch, so
+  // both judge the notes in the shape they will land in (`notes-edit-bullets.ts`).
+  const shaped = bulletNotesEdits(update.edits, { outline: full }).edits;
+  const guarded = guardNotesEdits(shaped, {
     notesHeadingId,
     outline: full,
     speech: update.tick.turns.map((t) => t.text),
@@ -1324,6 +1328,16 @@ export function withServerNotesSinks(
     onError: (message): void => {
       console.error(`[meeting-notes] ${message}`);
       options.onError?.(message);
+    },
+    // How long the room waited for its first note. Ids and a duration only.
+    onFirstNote: (first): void => {
+      console.log(
+        // No colon after the meeting id: the summary line is found by
+        // `meeting <id>:`, and this line is not that one.
+        `[meeting-notes] ${first.docId} meeting ${first.meetingId} wrote its first note ` +
+          `${first.afterMs}ms after the meeting started`,
+      );
+      options.onFirstNote?.(first);
     },
     // ONE LINE PER MEETING, and the reason it exists is that there were
     // none. A meeting reported as "skipping chunks" left nothing in the log
