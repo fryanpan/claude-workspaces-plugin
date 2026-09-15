@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { _resetCalendarEventsForTest } from '../src/calendar-events-source.ts';
 import type { CalendarBannerEvent } from '../src/meeting-banner-model.ts';
 import { MeetingBannerEl } from '../src/meeting-banner.ts';
 
@@ -96,6 +97,10 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  // The calendar read is shared by every banner on the page, so "there is no
+  // calendar here" outlives the element that learned it — deliberately, and
+  // across a test file too until this puts it back.
+  _resetCalendarEventsForTest();
 });
 
 describe('<meeting-banner>', () => {
