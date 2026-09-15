@@ -20,9 +20,17 @@ import type {
 } from '../packages/server/src/meeting-task-capture.ts';
 import type { NotesComposeMeasure } from '../packages/server/src/notes-timing.ts';
 import type { ReplayInput, ReplayTarget } from './replay-meeting-lib.ts';
+import type { RerunArgs } from './rerun-meeting-args.ts';
 import { bySegment, streamsOf } from './rerun-meeting-feed.ts';
-import { audioLengthMs, methodReader, runFolderName } from './rerun-meeting-run.ts';
+import {
+  audioLengthMs,
+  billedTotals,
+  makeRunDir,
+  methodReader,
+  runFolderName,
+} from './rerun-meeting-run.ts';
 import { SpendCapReached, createSpendMeter } from './rerun-meeting-spend.ts';
+import { engineFor } from './rerun-meeting.ts';
 
 /** Opus bills $25 per million output tokens, so this is one dollar of it. */
 const DOLLAR_OF_OPUS = {
@@ -226,6 +234,87 @@ describe('a recording that kept two streams', () => {
       '/m/segment-2-mic.pcm': 32_000,
     };
     expect(audioLengthMs(two, (p) => sizes[p] as number)).toBe(3000);
+  });
+});
+
+describe('billedTotals', () => {
+  it('adds what was billed after the meeting summary was struck', () => {
+    // The tidy-up runs after the stop, through the same metered composer. A
+    // report that took the summary alone left its call out of a figure that
+    // had already helped decide whether the cap fired.
+    expect(
+      billedTotals({ usd: 0.05, calls: 30 }, { usd: 0.048, calls: 30 }, { usd: 0.061, calls: 31 }),
+    ).toEqual({ usd: 0.05 + 0.013, calls: 31 });
+  });
+
+  it('falls back to the meter when the meeting recorded no spend of its own', () => {
+    expect(billedTotals(undefined, { usd: 0.02, calls: 4 }, { usd: 0.03, calls: 5 })).toEqual({
+      usd: 0.03,
+      calls: 5,
+    });
+  });
+});
+
+describe('makeRunDir', () => {
+  it('gives a second run of the same second a folder of its own', () => {
+    // Two comparison runs against one --out is the ordinary way this is used,
+    // and a recursive create would have let the second write its notes, its
+    // report and its log over the first one's in silence.
+    const made = new Set<string>();
+    const make = (dir: string): void => {
+      if (made.has(dir)) {
+        const err = new Error('exists') as NodeJS.ErrnoException;
+        err.code = 'EEXIST';
+        throw err;
+      }
+      made.add(dir);
+    };
+    const at = Date.UTC(2026, 8, 15, 9, 30, 0);
+    const first = makeRunDir('/out', at, make);
+    const second = makeRunDir('/out', at, make);
+    const third = makeRunDir('/out', at, make);
+    expect(new Set([first, second, third]).size).toBe(3);
+    expect(first).toBe('/out/rerun-20260915T093000Z');
+    expect(second).toBe('/out/rerun-20260915T093000Z-2');
+    expect(third).toBe('/out/rerun-20260915T093000Z-3');
+  });
+
+  it('lets any other failure through rather than looping on it', () => {
+    const make = (): never => {
+      const err = new Error('read-only') as NodeJS.ErrnoException;
+      err.code = 'EROFS';
+      throw err;
+    };
+    expect(() => makeRunDir('/out', 0, make)).toThrow('read-only');
+  });
+});
+
+describe('the mock engine on a two-stream recording', () => {
+  const args = (mockScript?: string): RerunArgs =>
+    ({
+      target: '/m',
+      method: 'original',
+      engine: 'mock',
+      doc: 'empty',
+      out: '/out',
+      spendUsd: 1,
+      chunkMs: 20,
+      port: 0,
+      keep: false,
+      engineSpendOk: false,
+      ...(mockScript !== undefined ? { mockScript } : {}),
+    }) as RerunArgs;
+
+  it('refuses one supplied script across two streams', () => {
+    // The mock starts the script at index zero in every session, so both
+    // sides of the call would say all of it and every idea count twice.
+    expect(() =>
+      engineFor(args('/m/script.json'), target([{ n: 1, streams: ['mic', 'system'] }])),
+    ).toThrow(/--mock-script cannot drive mic \+ system/);
+  });
+
+  it('leaves the one-stream case, and its own default script, alone', () => {
+    expect(engineFor(args(), target([{ n: 1, streams: ['mic', 'system'] }])).name).toBeTruthy();
   });
 });
 

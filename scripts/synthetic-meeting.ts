@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { MEETING_SAMPLE_RATE } from '../packages/core/src/meeting.ts';
 
 /** One thing somebody says, and who says it. */
-interface Line {
+export interface Line {
   voice: string;
   text: string;
   /** First line of a new subject — takes the long pause in front of it. */
@@ -123,8 +123,8 @@ const PREP_EDITS = [
 
 /** The words `--engine mock` reveals, one per audio chunk, so the mock hears
  *  what the speech actually says. */
-function mockScript(): unknown[] {
-  return SCRIPT.map((line) => ({
+function mockScript(script: readonly Line[]): unknown[] {
+  return script.map((line) => ({
     words: line.text.replace(/[.,]/g, '').split(/\s+/),
     settled: line.text,
   }));
@@ -178,28 +178,27 @@ function parseArgs(argv: readonly string[]): SyntheticOptions {
   return { dir, ...(lines !== undefined ? { lines } : {}) };
 }
 
-function main(argv: string[]): number {
-  const opts = parseArgs(argv);
-  const script = opts.lines === undefined ? SCRIPT : SCRIPT.slice(0, opts.lines);
-  mkdirSync(opts.dir, { recursive: true });
-  const scratch = join(tmpdir(), `cw-synthetic-${process.pid}`);
-  mkdirSync(scratch, { recursive: true });
-  const parts: Buffer[] = [];
-  try {
-    for (const [i, line] of script.entries()) {
-      if (i > 0) parts.push(silence(line.opensTopic ? TOPIC_GAP_MS : GAP_MS));
-      parts.push(speak(line, scratch));
-      process.stderr.write(`synthetic: ${i + 1}/${script.length} ${line.voice}\n`);
-    }
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
-  const pcm = Buffer.concat(parts);
+/** The lines the script names, so a test can shorten it without speaking. */
+export const SYNTHETIC_SCRIPT: readonly Line[] = SCRIPT;
+
+/**
+ * Everything a meeting folder holds, written from audio already made.
+ *
+ * SEPARATE FROM THE SPEAKING so it can be tested at all: `say` takes the best
+ * part of a minute for the full script, and what needs pinning here is not
+ * the speech — it is that every file describes the SAME recording. A
+ * `--lines 4` run whose mock script still carried seventeen would have put
+ * thirteen lines of dialogue in the transcript that nobody ever said, and the
+ * mock reveals words per audio chunk rather than hearing them, so nothing
+ * downstream would have noticed.
+ */
+export function writeMeetingFiles(dir: string, script: readonly Line[], pcm: Buffer): void {
   const startedAt = Date.now();
   const file = 'segment-1-mic.pcm';
-  writeFileSync(join(opts.dir, file), pcm);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, file), pcm);
   writeFileSync(
-    join(opts.dir, 'meeting.json'),
+    join(dir, 'meeting.json'),
     `${JSON.stringify(
       {
         docId: 'synthetic-harbour-survey',
@@ -231,12 +230,32 @@ function main(argv: string[]): number {
       2,
     )}\n`,
   );
-  writeFileSync(join(opts.dir, 'mock-script.json'), `${JSON.stringify(mockScript(), null, 2)}\n`);
-  writeFileSync(join(opts.dir, 'prep-outline.md'), PREP_OUTLINE);
+  writeFileSync(join(dir, 'mock-script.json'), `${JSON.stringify(mockScript(script), null, 2)}\n`);
+  writeFileSync(join(dir, 'prep-outline.md'), PREP_OUTLINE);
   writeFileSync(
-    join(opts.dir, 'prep-outline-edits.json'),
+    join(dir, 'prep-outline-edits.json'),
     `${JSON.stringify({ markdown: PREP_OUTLINE, edits: PREP_EDITS }, null, 2)}\n`,
   );
+}
+
+function main(argv: string[]): number {
+  const opts = parseArgs(argv);
+  const script = opts.lines === undefined ? SCRIPT : SCRIPT.slice(0, opts.lines);
+  mkdirSync(opts.dir, { recursive: true });
+  const scratch = join(tmpdir(), `cw-synthetic-${process.pid}`);
+  mkdirSync(scratch, { recursive: true });
+  const parts: Buffer[] = [];
+  try {
+    for (const [i, line] of script.entries()) {
+      if (i > 0) parts.push(silence(line.opensTopic ? TOPIC_GAP_MS : GAP_MS));
+      parts.push(speak(line, scratch));
+      process.stderr.write(`synthetic: ${i + 1}/${script.length} ${line.voice}\n`);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  const pcm = Buffer.concat(parts);
+  writeMeetingFiles(opts.dir, script, pcm);
   const seconds = pcm.byteLength / (MEETING_SAMPLE_RATE * 2);
   process.stderr.write(
     `synthetic: ${script.length} line(s), ${seconds.toFixed(1)}s of audio → ${opts.dir}\n`,

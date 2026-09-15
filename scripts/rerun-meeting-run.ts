@@ -49,7 +49,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { NotesMethod } from '../packages/core/src/notes-method.ts';
 import type { MeetingNamer } from '../packages/server/src/meeting-namer.ts';
 import type { NotesComposer, NotesMeetingSummary } from '../packages/server/src/meeting-notes.ts';
@@ -164,6 +164,63 @@ export function runFolderName(at: number): string {
   return `rerun-${stamp}`;
 }
 
+/**
+ * A folder of this run's own, even when another run started in the same
+ * second.
+ *
+ * EXCLUSIVE CREATION, not `recursive: true`. Two comparison runs against the
+ * same `--out` are the ordinary way this harness is used, and a `recursive`
+ * create accepts a directory that already exists — so the second run would
+ * have written its notes, its report and its log over the first one's and
+ * said nothing. The stamp keeps seconds; the suffix is what makes it unique.
+ */
+export function makeRunDir(
+  out: string,
+  at: number,
+  make: (dir: string) => void = mkdirDeep,
+): string {
+  const stem = join(out, runFolderName(at));
+  for (let n = 1; ; n++) {
+    const dir = n === 1 ? stem : `${stem}-${n}`;
+    try {
+      make(dir);
+      return dir;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+}
+
+/** The parent chain, then this directory and only if it is new. */
+function mkdirDeep(dir: string): void {
+  mkdirSync(dirname(dir), { recursive: true });
+  mkdirSync(dir);
+}
+
+/** What a run billed, and how many calls did it. */
+export interface Billed {
+  usd: number;
+  calls: number;
+}
+
+/**
+ * The meeting's own bill plus whatever was billed after it was struck.
+ *
+ * The summary is made when the meeting stops, and the tidy-up runs after that
+ * through the same metered composer — so a report that took the summary's
+ * figure alone left the cleanup's call out of a number that had already
+ * helped decide whether the cap fired. `summary` is preferred for the meeting
+ * itself because it is the pipeline's own accounting; the meter supplies only
+ * the difference it has booked since.
+ */
+export function billedTotals(summary: Billed | undefined, atSummary: Billed, now: Billed): Billed {
+  const meeting = summary ?? atSummary;
+  return {
+    usd: meeting.usd + (now.usd - atSummary.usd),
+    calls: meeting.calls + (now.calls - atSummary.calls),
+  };
+}
+
 export interface RerunOutcome {
   report: RerunReport;
   runDir: string;
@@ -177,6 +234,10 @@ export interface RerunOutcome {
 interface RunState {
   firstNoteMs: number | null;
   summary: NotesMeetingSummary | undefined;
+  /** What the meter had booked when the meeting's own summary arrived — the
+   *  line between what the summary already counts and what came after it. */
+  meteredAtSummary: number;
+  callsAtSummary: number;
   spentUsd: number;
   spentCalls: number;
   capped: Error | null;
@@ -203,12 +264,13 @@ export async function runRerun(
   if (!budget.ok) throw new UsageError(budget.line);
 
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-rerun-data-'));
-  const runDir = join(args.out, runFolderName(Date.now()));
-  mkdirSync(runDir, { recursive: true });
+  const runDir = makeRunDir(args.out, Date.now());
 
   const state: RunState = {
     firstNoteMs: null,
     summary: undefined,
+    meteredAtSummary: 0,
+    callsAtSummary: 0,
     spentUsd: 0,
     spentCalls: 0,
     capped: null,
@@ -239,6 +301,8 @@ export async function runRerun(
       },
       onMeetingSummary: (summary) => {
         state.summary = summary;
+        state.meteredAtSummary = meter.totalUsd;
+        state.callsAtSummary = meter.calls;
       },
     },
   });
@@ -273,6 +337,11 @@ export async function runRerun(
     );
 
     const tidy = await runTidy(base, ws, docId, meetingId, deps.log);
+    const billed = billedTotals(
+      summary.spend ? { usd: summary.spend.totalUsd, calls: summary.spend.calls } : undefined,
+      { usd: state.meteredAtSummary, calls: state.callsAtSummary },
+      { usd: meter.totalUsd, calls: meter.calls },
+    );
     const headingId = createNotesHeadingFileStore(dataDir).read({ docId, meetingId });
     const section = readSectionMarkdown(server.docStore, docId, headingId);
     const quality = readNotesQuality(dataDir, docId, meetingId);
@@ -299,8 +368,8 @@ export async function runRerun(
       ideasCovered:
         quality !== undefined ? quality.ideas - quality.uncoveredIdeas : summary.ideas.carried,
       tidy,
-      billedUsd: summary.spend?.totalUsd ?? state.spentUsd,
-      billedCalls: summary.spend?.calls ?? state.spentCalls,
+      billedUsd: billed.usd,
+      billedCalls: billed.calls,
       unpricedModels: summary.spend?.unpricedModels ?? [],
       firstNoteMs: state.firstNoteMs,
       notesPath,

@@ -35,9 +35,10 @@ import {
   type TranscriptionEngine,
   createMockTranscriptionEngine,
 } from '../packages/server/src/transcribe.ts';
-import { resolveReplayTarget } from './replay-meeting-lib.ts';
+import { type ReplayTarget, resolveReplayTarget } from './replay-meeting-lib.ts';
 import { USAGE, UsageError, loadDocSpec, parseRerunArgs } from './rerun-meeting-args.ts';
 import type { RerunArgs } from './rerun-meeting-args.ts';
+import { streamsOf } from './rerun-meeting-feed.ts';
 import { methodReader, runRerun } from './rerun-meeting-run.ts';
 
 /**
@@ -49,7 +50,26 @@ import { methodReader, runRerun } from './rerun-meeting-run.ts';
  * chunk that is fifty words a second — set `--chunk-ms 400` for something
  * near conversational speed.
  */
-function engineFor(args: RerunArgs): TranscriptionEngine {
+export function engineFor(args: RerunArgs, target: ReplayTarget): TranscriptionEngine {
+  // ONE SCRIPT, ONE STREAM. The server opens a transcription session per
+  // stream and the mock starts its script at index zero in each, so a
+  // two-stream recording driven from one script would put the whole
+  // conversation on BOTH sides — the same words attributed to the room and to
+  // the far end, and every idea counted twice. Refused rather than halved:
+  // which half belongs to which stream is the operator's to say, and this
+  // harness guessing it would be a transcript nobody wrote.
+  //
+  // The mock's OWN default script is not refused, because it is filler rather
+  // than this meeting's words: repeating it on both streams misattributes
+  // nothing, and it is the only free way left to exercise the two-stream
+  // path at all.
+  if (args.mockScript && streamsOf(target).length > 1) {
+    throw new UsageError(
+      `--mock-script cannot drive ${streamsOf(target).join(' + ')}: the mock replays the whole ` +
+        'script on every stream, so both sides of the call would say all of it. Replay one ' +
+        'stream at a time, or use a live engine.',
+    );
+  }
   let engine: TranscriptionEngine | null;
   switch (args.engine) {
     case 'mock': {
@@ -127,7 +147,7 @@ async function main(argv: string[]): Promise<number> {
   const args = parseRerunArgs(argv);
   const target = resolveReplayTarget(args.target, args.segment);
   const doc = loadDocSpec(args.doc);
-  const transcription = engineFor(args);
+  const transcription = engineFor(args, target);
   const promptStore = createPromptStore({
     dataDir: mkdtempSync(join(tmpdir(), 'cw-rerun-capture-prompts-')),
   });
