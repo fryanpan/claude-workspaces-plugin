@@ -77,8 +77,30 @@ describe('measureAnswer', () => {
     expect(measureAnswer({ queue, workspaceId: 'w-harbor', ask, board })).toEqual({
       rankAtAnswer: 3,
       higherOpen: { easy: 0, medium: 1, hard: 2 },
+      higherOpenSameBoard: { easy: 0, medium: 1, hard: 1 },
       projectRank: 2,
     });
+  });
+
+  it('separates what was above on this board from what was above elsewhere', () => {
+    const m = measureAnswer({ queue, workspaceId: 'w-harbor', ask, board });
+    // Two items were above: t-1 on this board, and t-9 on the higher-ranked
+    // one. Only the first says anything about how this board was worked.
+    expect(m.higherOpen.hard).toBe(2);
+    expect(m.higherOpenSameBoard.hard).toBe(1);
+  });
+
+  it('counts nothing on this board when only other boards were above', () => {
+    const m = measureAnswer({
+      queue,
+      workspaceId: 'w-harbor',
+      // The board's first row: nothing on Harborlight outranks it, so every
+      // item above it belongs to Riverbend.
+      ask: { kind: 'task-review', taskId: 't-1', direct: true, since: 1, tie: 't-1:r-1' },
+      board,
+    });
+    expect(m.higherOpenSameBoard).toEqual({ easy: 0, medium: 0, hard: 0 });
+    expect(m.higherOpen.hard).toBeGreaterThan(0);
   });
 
   it('reads an answer at the very top as in order', () => {
