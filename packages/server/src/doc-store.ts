@@ -2071,6 +2071,13 @@ export class DocStore {
       webhookUrl: init?.webhookUrl,
       seq: 0,
     };
+    // A doc saved while the editor still copied ids on Enter holds one id on
+    // several blocks. Re-mint the copies HERE, before `wireEvents` listens:
+    // the fix fires no update, so it schedules no save and writes nothing to
+    // disk on its own. It rides the next save a real edit causes.
+    if (!isNew && contentKind(meta.type) === 'prose') {
+      ydoc.transact(() => prose.remintDuplicateIds(prose.getProseFragment(ydoc)), 'block-ids');
+    }
     this.docs.set(docId, doc);
     this.hydratedAt.set(docId, this.now());
     this.fanout.wireEvents(doc);

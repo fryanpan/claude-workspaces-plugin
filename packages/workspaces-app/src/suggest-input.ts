@@ -136,6 +136,33 @@ interface Seg {
   from: number;
   to: number;
   kind: SegKind;
+  /** The proposal a marked segment belongs to. */
+  sid?: string;
+}
+
+/** The sid a text node's suggestion mark carries, if it has one. */
+function sidOf(node: PMNode | null | undefined, types: { ins: MarkType; del: MarkType }) {
+  if (!node?.isText) return undefined;
+  const mark = types.ins.isInSet(node.marks) ?? types.del.isInSet(node.marks);
+  const sid = mark?.attrs.sid;
+  return typeof sid === 'string' && sid.length > 0 ? sid : undefined;
+}
+
+/** The proposals on the text immediately before and after an inserted range —
+ *  the only places input can inherit a suggestion mark from. */
+function sidsAround(
+  doc: PMNode,
+  range: { from: number; to: number },
+  types: { ins: MarkType; del: MarkType },
+): Set<string> {
+  const out = new Set<string>();
+  for (const sid of [
+    sidOf(doc.resolve(range.from).nodeBefore, types),
+    sidOf(doc.resolve(range.to).nodeAfter, types),
+  ]) {
+    if (sid !== undefined) out.add(sid);
+  }
+  return out;
 }
 
 function collectSegments(
@@ -155,7 +182,8 @@ function collectSegments(
       : types.del.isInSet(node.marks)
         ? 'del'
         : 'plain';
-    segs.push({ from: f, to: t, kind });
+    const sid = kind === 'plain' ? undefined : sidOf(node, types);
+    segs.push(sid === undefined ? { from: f, to: t, kind } : { from: f, to: t, kind, sid });
     return false;
   });
   return segs;
@@ -430,17 +458,27 @@ function appendBackstop(trs: readonly Transaction[], newState: EditorState): Tra
   // Suggesting OFF: default input INHERITS the marks at the caret when it
   // sits inside a pending span (`inclusive: false` only guards the
   // boundaries — PM's $pos.marks() returns a text node's own marks mid-node,
-  // and tr.insertText applies them to the typed text). Inherited
-  // suggestInsert makes the human's real keystrokes invisible on disk and
-  // deletes them outright if the proposal is rejected; inherited
-  // suggestDelete strikes them through and deletes them on accept. Strip
-  // both marks from any locally-inserted text so a normal-mode edit is
-  // always a direct edit. (Remote/agent transactions carry the ySync meta
-  // and are skipped above, so agent-authored proposals are untouched.)
+  // and tr.insertText applies them to the typed text; a plain-text paste
+  // takes them the same way). Inherited suggestInsert makes the human's real
+  // keystrokes invisible on disk and deletes them outright if the proposal
+  // is rejected; inherited suggestDelete strikes them through and deletes
+  // them on accept. So a normal-mode edit is always a direct edit.
+  // (Remote/agent transactions carry the ySync meta and are skipped above,
+  // so agent-authored proposals are untouched.)
+  //
+  // ONLY the inherited marks. Moving a section — a drag, or a cut and a
+  // paste — also inserts text locally, and that text carries the proposal it
+  // was written with. Stripping every mark there turned a pending replace
+  // into plain text holding both its words, "ferrybridge", and dropped the
+  // proposal. An inherited mark is one whose proposal also sits right beside
+  // the insertion — that is where the caret took it from — so a mark is
+  // stripped only when its sid does.
   let stripped: Transaction | null = null;
   for (const range of ranges) {
+    const around = sidsAround(newState.doc, range, types);
+    if (around.size === 0) continue;
     for (const seg of collectSegments(newState.doc, range.from, range.to, types)) {
-      if (seg.kind === 'plain') continue;
+      if (seg.kind === 'plain' || seg.sid === undefined || !around.has(seg.sid)) continue;
       stripped = stripped ?? newState.tr;
       stripped.removeMark(seg.from, seg.to, seg.kind === 'ins' ? types.ins : types.del);
     }

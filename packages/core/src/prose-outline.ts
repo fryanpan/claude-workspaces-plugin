@@ -192,20 +192,54 @@ export function claimSubtree(el: Y.XmlElement, author: string): void {
 }
 
 /**
- * Give every addressable block an id it does not already have. Idempotent,
- * and a no-op transaction-wise when there is nothing to mint — which matters,
- * because reading an outline must not look like an edit to the write-back.
+ * The blocks whose id is a COPY: every holder of an id after the first, in
+ * document order. An id is an address, and an address that names two blocks
+ * sends an edit to whichever a lookup meets first. The browser no longer
+ * makes copies (`block-identity.ts`), but a doc that already holds them keeps
+ * them until something hands the extras ids of their own.
+ */
+export function duplicateIdBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
+  const seen = new Set<string>();
+  const out: Y.XmlElement[] = [];
+  for (const el of addressableBlocks(fragment)) {
+    const id = readBlockId(el);
+    if (id === undefined) continue;
+    if (seen.has(id)) out.push(el);
+    else seen.add(id);
+  }
+  return out;
+}
+
+/** Give each copy a fresh id and drop the author it copied: nothing proves
+ *  the agent wrote a block that only carries another block's attributes.
+ *  Call inside a transaction. Returns how many it re-minted. */
+export function remintDuplicateIds(fragment: Y.XmlFragment): number {
+  const copies = duplicateIdBlocks(fragment);
+  for (const el of copies) {
+    el.setAttribute(BLOCK_ID_ATTR, newBlockId());
+    el.removeAttribute(BLOCK_AUTHOR_ATTR);
+  }
+  return copies.length;
+}
+
+/**
+ * Give every addressable block an id it does not already have, and an id of
+ * its own to every block holding a copy of another's. Idempotent, and a no-op
+ * transaction-wise when there is nothing to mint — which matters, because
+ * reading an outline must not look like an edit to the write-back.
  *
  * Returns how many ids were minted.
  */
 export function ensureBlockIds(doc: Y.Doc, opts: { transactionOrigin?: unknown } = {}): number {
   const fragment = getProseFragment(doc);
   const missing = addressableBlocks(fragment).filter((el) => readBlockId(el) === undefined);
-  if (missing.length === 0) return 0;
+  const copies = duplicateIdBlocks(fragment);
+  if (missing.length === 0 && copies.length === 0) return 0;
   doc.transact(() => {
     for (const el of missing) el.setAttribute(BLOCK_ID_ATTR, newBlockId());
+    remintDuplicateIds(fragment);
   }, opts.transactionOrigin ?? 'block-ids');
-  return missing.length;
+  return missing.length + copies.length;
 }
 
 /** The element carrying `id`, or nothing. Ids are unique per doc; a
