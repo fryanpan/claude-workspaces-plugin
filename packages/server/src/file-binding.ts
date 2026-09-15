@@ -248,6 +248,84 @@ export function decideReconcile(args: {
 }
 
 /**
+ * How many blocks an incoming copy of the file REMOVES from the live doc, net
+ * of the ones it introduces.
+ *
+ * WHY A NET COUNT AND NOT A SET DIFFERENCE. Every ordinary external edit makes
+ * some live block disappear — editing a paragraph in VS Code retires the old
+ * text and brings a new one. Counting those as removals would fire on every
+ * save. A REWRITE swaps one block for another, so the two sides cancel; a
+ * DELETION takes blocks away and puts nothing back. This returns what is left
+ * over, which is the number of blocks whose words exist nowhere in the
+ * incoming file.
+ *
+ * It is deliberately blind to WHO shortened the file. A person deleting a
+ * section in their editor and a cloud-sync provider handing back the revision
+ * it held before the meeting produce the same bytes, and the server cannot
+ * tell them apart — nothing on the file says which. So this does not decide a
+ * winner (disk still wins at rest, as the sync contract says); it decides
+ * whether the doc's own copy is worth keeping before it goes.
+ *
+ * Multiset, not set: a doc holding the same bullet twice that comes back
+ * holding it once has lost one, and a `Set` would say it lost nothing.
+ *
+ * Pure + exported so the rule is unit-tested without a filesystem, the same
+ * way `decideReconcile` is.
+ */
+export function blocksDroppedByIncoming(
+  live: readonly string[],
+  incoming: readonly string[],
+): number {
+  const spare = new Map<string, number>();
+  for (const block of incoming) spare.set(block, (spare.get(block) ?? 0) + 1);
+  let removed = 0;
+  for (const block of live) {
+    const left = spare.get(block) ?? 0;
+    if (left === 0) removed++;
+    else spare.set(block, left - 1);
+  }
+  let added = 0;
+  for (const left of spare.values()) added += left;
+  return Math.max(0, removed - added);
+}
+
+/**
+ * One block's markdown each, for the comparison above.
+ *
+ * A block that will not serialize gets a value nothing else can equal, so it
+ * counts as removed rather than as matched — this decides whether to keep a
+ * BACKUP, and an unreadable block is exactly the one worth erring towards
+ * keeping.
+ */
+function blockTexts(blocks: readonly Y.XmlElement[]): string[] {
+  return blocks.map((block, i) => {
+    try {
+      return prose.serializeBlockToMarkdown(block);
+    } catch {
+      // Unique per block and unreachable by any serializer, so an
+      // unreadable block matches nothing — not even another one.
+      return `\u0000unreadable-${i}`;
+    }
+  });
+}
+
+/**
+ * The same, for blocks straight out of `parseMarkdownBlocks`.
+ *
+ * They belong to no document yet, and reading a Yjs type before it is in one
+ * is an error — every block would have come back "unreadable" and the count
+ * would have been the doc's own block count, which is right only by accident.
+ * A scratch `Y.Doc` is the cheapest place to put them; the caller has already
+ * paid for the parse and uses these blocks for nothing else.
+ */
+function incomingBlockTexts(blocks: Y.XmlElement[]): string[] {
+  const scratch = new Y.Doc();
+  const fragment = prose.getProseFragment(scratch);
+  fragment.push(blocks);
+  return blockTexts(fragment.toArray() as Y.XmlElement[]);
+}
+
+/**
  * The one log line for an attach whose file is not on disk (`isDataless`):
  * the doc, the errno and what happens next. No stack, because nothing here is
  * a fault to debug, and no path, because a path under a cloud-sync folder can
@@ -1587,9 +1665,20 @@ export class FileBindings {
       return { ok: true };
     }
     const opts = parseOptsFor(binding.path);
-    if (prose.parseMarkdownBlocks(md, opts).length === 0) return { ok: false, error: 'missing' };
+    const diskBlocks = prose.parseMarkdownBlocks(md, opts);
+    if (diskBlocks.length === 0) return { ok: false, error: 'missing' };
     binding.diskSource = md;
     const fragment = prose.getProseFragment(doc.ydoc);
+    // A force-pull is the bluntest disk-wins path there is: it cleared the
+    // pending write-back above, so anything the doc holds that the file has
+    // never seen is about to exist nowhere. The caller asked for disk and
+    // still gets it — but not silently, and not without a copy. See
+    // `recordBlocksDropped`.
+    const liveBefore = prose.serializeFragmentToMarkdown(fragment);
+    const dropped = blocksDroppedByIncoming(
+      blockTexts(fragment.toArray() as Y.XmlElement[]),
+      incomingBlockTexts(diskBlocks),
+    );
     doc.ydoc.transact(() => {
       // Block-level diff, not delete-all + push: blocks the rewrite didn't
       // touch keep their Y.XmlText identity, so their thread anchors keep
@@ -1604,7 +1693,8 @@ export class FileBindings {
     prose.normalizeHeadingLevels(doc.ydoc);
     // Serializer-space, not raw disk bytes — see attachFile (RC1).
     binding.lastWritten = prose.serializeFragmentToMarkdown(fragment);
-    binding.lastSyncError = undefined;
+    if (dropped > 0) this.recordBlocksDropped(doc, binding, liveBefore, dropped);
+    else binding.lastSyncError = undefined;
     return { ok: true };
   }
 
@@ -1769,6 +1859,15 @@ export class FileBindings {
     // pending sids so the drop can be recorded below (syncError pattern; a
     // snippet-match re-anchor sweep for suggestions is out of scope for v1).
     const sidsBefore = new Set(suggestOps.scanSuggestions(fragment).keys());
+    // Whatever this apply is about to take OUT of the doc, before it is gone.
+    // `apply` means the live doc equals our last write, which is why it is
+    // safe to let disk win — but it says nothing about the file having moved
+    // FORWARD. A shortened copy is applied by the same arm as an edited one,
+    // and the words it drops were only ever in the `.ydoc`.
+    const dropped = blocksDroppedByIncoming(
+      blockTexts(fragment.toArray() as Y.XmlElement[]),
+      incomingBlockTexts(blocks),
+    );
     doc.ydoc.transact(() => {
       prose.applyMarkdownToFragment(fragment, md, opts);
     }, 'file-watch');
@@ -1796,9 +1895,16 @@ export class FileBindings {
       console.warn(
         `[doc-store] ${doc.docId}: external edit to ${binding.path} dropped suggestion(s) ${droppedSids.join(', ')}`,
       );
-    } else {
+    } else if (dropped === 0) {
       binding.lastSyncError = undefined;
     }
+    // Recorded LAST, so it is the message a reader gets when an apply both
+    // shortened the doc and disturbed a suggestion: losing whole blocks is
+    // the worse of the two, and `lastSyncError` holds one message. The apply
+    // itself STANDS — disk is the source of truth at rest and this does not
+    // relitigate that. What changes is that the words it removed are still
+    // somewhere, and somebody is told.
+    if (dropped > 0) this.recordBlocksDropped(doc, binding, currentSerialized, dropped);
     console.log(
       `[doc-store] ${doc.docId}: applied external edit from ${binding.path} (${blocks.length} blocks)`,
     );
@@ -2074,6 +2180,52 @@ export class FileBindings {
         (gitHint ? ' — the overwritten bytes came from git, not an editor save' : ''),
     );
     this.scheduleFileWrite(doc, binding);
+  }
+
+  /**
+   * A disk-wins replacement REMOVED blocks from the doc: keep the doc's own
+   * copy, say where it went, and announce it.
+   *
+   * The counterpart of `recordConflictReassert`, for the arm that reaches the
+   * opposite verdict. When the live doc wins, the external version is backed
+   * up so the loser is recoverable; when DISK wins, nothing was — the doc's
+   * copy went straight into the transact and the only trace of the words was
+   * the `.ydoc` that had just been overwritten. That is how a meeting's notes
+   * can leave the doc and the file together with nothing kept anywhere: the
+   * file goes backwards (a cloud-sync provider handing back the revision it
+   * held, a materialization that answers short, an editor saving a stale
+   * buffer), the arbitration correctly reads a clean doc and an externally
+   * changed file, and the section is gone.
+   *
+   * This does not change who wins — see `blocksDroppedByIncoming` for why the
+   * server cannot tell a regression from a person's deletion. It makes the
+   * loss recoverable and visible, which is what "the file is the source of
+   * truth at rest" owes the side that loses.
+   *
+   * Never throws: the backup is best-effort and the reconcile has already
+   * happened by the time this runs.
+   */
+  private recordBlocksDropped(
+    doc: LiveDoc,
+    binding: FileBinding,
+    liveBefore: string,
+    dropped: number,
+  ): void {
+    const backupPath = this.backupExternalVersion(doc.docId, liveBefore, 'live');
+    const blocks = `${dropped} block${dropped === 1 ? '' : 's'}`;
+    this.recordSyncError(
+      doc,
+      binding,
+      `the bound file no longer holds ${blocks} the doc did; disk won and those blocks are gone from the doc. ` +
+        (backupPath
+          ? `The doc's copy was saved to ${backupPath} — restore it over the file and reparse_from_disk to bring the blocks back.`
+          : "Backup of the doc's copy FAILED — those blocks survive only in an earlier .ydoc snapshot."),
+      backupPath,
+    );
+    console.warn(
+      `[doc-store] ${doc.docId}: ${binding.path} came back short; ${blocks} dropped from the doc` +
+        (backupPath ? ` (the doc's copy was backed up to ${backupPath})` : ''),
+    );
   }
 
   /**
