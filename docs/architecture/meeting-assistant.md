@@ -2913,7 +2913,9 @@ strictly) + `notes-edit-guard.ts` (the edits the applier refuses whatever the
 reply said: a replace against the meeting's own section heading, which is
 what strands every earlier bullet above a second heading; and a replace that
 keeps only its topic's words, added beside the note instead unless the speaker
-took that note back) + `notes-edit-dedupe.ts`
+took that note back) + `notes-edit-correction.ts` (whether the speaker took a
+note back, so a correction written as a replace or as a new bullet beside it
+leaves one note) + `notes-edit-dedupe.ts`
 (each topic heading once and each note once, whatever the reply repeated, and
 no `Decision:` label the speech did not state) + `notes-doc-access.ts` (who the note-taker is, and the one
 doc-store slice every notes writer goes through) + `notes-speaker-tags.ts`

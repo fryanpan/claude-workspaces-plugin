@@ -147,6 +147,31 @@ describe('a replace the speaker said as a correction', () => {
     expect(after.filter((t) => /hour/i.test(t))).toEqual([removed]);
   });
 
+  test('leaves one note when the take-back says the note’s word in another form', () => {
+    // "estimated" in the speech, "estimates" in the correction: one word,
+    // and with "hours" the take-back's second word in common with it.
+    const after = replace(meeting(), HOURS, `- ${CORRECTED}`, [
+      'Forget the estimated hours, we will track what comes in instead.',
+    ]);
+    expect(after.filter((t) => /hour/i.test(t))).toEqual([CORRECTED]);
+  });
+
+  test('keeps both when the take-back shares only an inflected word with the correction', () => {
+    const after = replace(meeting(), HOURS, `- ${CORRECTED}`, [
+      "Let's stop estimating the ferry crossings instead.",
+    ]);
+    expect(after).toContain(HOURS);
+    expect(after).toContain(CORRECTED);
+  });
+
+  test('keeps both when the speech uses the note’s words in another form but takes nothing back', () => {
+    const after = replace(meeting(), HOURS, `- ${CORRECTED}`, [
+      'We estimated forty minutes for the hull patch and it took three hours, so count the requests.',
+    ]);
+    expect(after).toContain(HOURS);
+    expect(after).toContain(CORRECTED);
+  });
+
   test('keeps both when the speech takes back something the correction does not report', () => {
     const after = replace(meeting(), HOURS, `- ${CORRECTED}`, [
       "Let's drop the Sunday ferry instead.",

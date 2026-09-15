@@ -17,6 +17,7 @@ import {
   createIdeaLedger,
   extractIdeas,
   ideaCarried,
+  stem,
 } from '../src/notes-idea-coverage.ts';
 
 const turn = (n: number, text: string): NotesTurn => ({ turn: n, text, speaker: 'Devi' });
@@ -69,6 +70,69 @@ describe('whether the notes carry an idea', () => {
 
   it('sees through a plural and a tense', () => {
     expect(contentWords('dialogs picking ranges')).toEqual(contentWords('dialog picked range'));
+  });
+
+  it('gives every regular inflection of a word one stem', () => {
+    // A word ending in "e" keeps it bare and in "-s", and loses it before
+    // "-ed" and "-ing" — "estimates" and "estimated" read as two words once.
+    for (const forms of [
+      ['estimate', 'estimates', 'estimated', 'estimating'],
+      ['hide', 'hides', 'hiding'],
+      ['code', 'codes', 'coded', 'coding'],
+      ['stop', 'stops', 'stopped', 'stopping'],
+      ['pass', 'passes', 'passed', 'passing'],
+      ['copy', 'copies', 'copied', 'copying'],
+      ['use', 'uses', 'used', 'using'],
+      ['status', 'statuses'],
+      ['focus', 'focuses', 'focused'],
+      ['menu', 'menus'],
+      ['taxi', 'taxis'],
+      ['box', 'boxes', 'boxed'],
+    ]) {
+      expect(
+        forms.map((w) => contentWords(w).join(' ')),
+        forms.join('/'),
+      ).toEqual(forms.map(() => contentWords(forms[0] as string).join(' ')));
+    }
+  });
+
+  it('gives a word whose own letters end in -ed or -ee one stem', () => {
+    // "need" is not "ne" + "-ed", and "agreed" is "agree" + "-d".
+    for (const forms of [
+      ['need', 'needs', 'needed'],
+      ['seed', 'seeds', 'seeded'],
+      ['speed', 'speeds'],
+      ['hundred', 'hundreds'],
+      ['agree', 'agrees', 'agreed'],
+    ]) {
+      expect(forms.map(stem), forms.join('/')).toEqual(forms.map(() => stem(forms[0] as string)));
+    }
+    expect(stem('seed')).not.toBe(stem('see'));
+    expect(stem('feed')).not.toBe(stem('fee'));
+  });
+
+  it('keeps the double letter a word has of its own', () => {
+    // Only the consonant "-ed" and "-ing" double goes; "pass" is not "pas".
+    expect(['pass', 'fall', 'class', 'staff'].map((w) => contentWords(w).join(''))).toEqual([
+      'pass',
+      'fall',
+      'class',
+      'staff',
+    ]);
+    expect(contentWords('falling')).toEqual(contentWords('fall'));
+  });
+
+  it('keeps different words apart', () => {
+    for (const [a, b] of [
+      ['estimate', 'estate'],
+      ['hour', 'house'],
+      ['range', 'ranger'],
+      ['100', '1000'],
+      ['request', 'requester'],
+      ['file', 'fill'],
+    ]) {
+      expect(contentWords(a as string), `${a} vs ${b}`).not.toEqual(contentWords(b as string));
+    }
   });
 });
 

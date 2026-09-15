@@ -1,0 +1,38 @@
+{
+  "about": "A fictional yard huddle in which a speaker takes back an earlier note (the hull patch hour estimates) using another form of its word. Replays feed these turns through the live notes tick to count how often the withdrawn note is left beside its correction. notes-edit-correction.test.ts reads the take-back from here.",
+  "turns": [
+    {
+      "text": "Okay, let's start with the hull patch at the Saltmarsh yard."
+    },
+    {
+      "text": "The hour estimates for the hull patch were way off. We put forty minutes on the board and it took the crew three hours."
+    },
+    {
+      "text": "Right, and the pier inbox hides which requests are urgent until you open each one."
+    },
+    {
+      "text": "Could the pier inbox show the total number of requests waiting at the top?"
+    },
+    {
+      "text": "Yes, a count at the top would help the dispatcher at Harborlight."
+    },
+    {
+      "text": "The Kiln crew also wants the welding checklist printed before the shift."
+    },
+    {
+      "text": "We can print it from the tracker, that part already works."
+    },
+    {
+      "text": "Going back to the hull patch. Forget the estimated hours on the board, we will track the requests that come in instead."
+    },
+    {
+      "text": "Makes sense, nobody trusts those numbers anyway."
+    },
+    {
+      "text": "Last thing, the Riverbend ferry schedule moves to the new dock on Monday."
+    },
+    {
+      "text": "Okay, I think that's everything for today."
+    }
+  ]
+}
