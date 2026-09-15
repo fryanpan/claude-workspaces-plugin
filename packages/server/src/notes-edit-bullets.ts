@@ -39,7 +39,8 @@ export function bulletProseLines(markdown: string): { markdown: string; bulleted
   let bulleted = 0;
   const source = markdown.split('\n');
   const lines = source.map((line, i) => {
-    const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    // Four spaces in is indented code, not a fence.
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (marker) {
       const run = marker[1]!;
       const rest = marker[2] ?? '';

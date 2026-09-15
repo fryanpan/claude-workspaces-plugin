@@ -49,6 +49,13 @@ describe('bulletProseLines', () => {
       ['~~~', '```js', 'kiln budget line', '~~~', '- After the code'].join('\n'),
     );
   });
+
+  test('a fence marker four spaces in is code, and does not close the fence', () => {
+    const md = ['```', '    ```', 'kiln budget line', '```', 'After the code'].join('\n');
+    expect(bulletProseLines(md).markdown).toBe(
+      ['```', '    ```', 'kiln budget line', '```', '- After the code'].join('\n'),
+    );
+  });
 });
 
 describe('bulletNotesEdits', () => {
