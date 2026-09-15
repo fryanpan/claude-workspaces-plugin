@@ -22,6 +22,7 @@ import {
   parseMeetingServerMessage,
   rollTranscript,
 } from '../src/meeting-protocol.ts';
+import { AUDIO_HOLD_MS } from '../src/meeting-reconnect.ts';
 import type { MeetingAudioSource } from '../src/meeting-source.ts';
 import {
   type MeetingSocket,
@@ -3093,5 +3094,115 @@ describe('Record Audio under the doc write gate', () => {
     d.bar.append(other);
     lockDocToReading({ root: d.bar });
     expect(other.disabled).toBe(false);
+  });
+});
+
+/**
+ * Audio the strip carries across a reconnect.
+ *
+ * The bound on it and both sides of that bound are `meeting-audio-hold`'s
+ * own unit tests; what these keep is that the strip actually banks the frames
+ * while the socket is down, replays them on the connection that picks the
+ * meeting up, and tells the server how much it carried so the record says
+ * only what was really lost.
+ */
+describe('the words spoken while the socket was down', () => {
+  /** A meeting recording, with the frame sink the capture handed the strip. */
+  async function recording(): Promise<{
+    h: Harness;
+    feed: (n: number) => void;
+  }> {
+    let sink: ((pcm: Int16Array) => void) | null = null;
+    const h = mount((o) => {
+      sink = o.onFrame;
+      return Promise.resolve({
+        ok: true,
+        capture: {
+          stop: () => {},
+          setEchoCancellation: () => Promise.resolve(),
+          reopen: () => Promise.resolve({ ok: true as const }),
+        },
+      });
+    });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    return { h, feed: (n: number) => sink?.(Int16Array.of(n)) };
+  }
+
+  /** The bytes of every binary frame this socket was sent, in order. */
+  const audio = (s: FakeSocket | undefined): number[] =>
+    (s?.sent ?? [])
+      .filter((d): d is ArrayBufferView => typeof d !== 'string')
+      .map((d) => (d as Int16Array)[0] as number);
+
+  /** The `start` frame this socket opened with. */
+  const started = (s: FakeSocket | undefined): Record<string, unknown> =>
+    JSON.parse(
+      (s?.sent ?? []).find((d): d is string => typeof d === 'string' && d.includes('"start"')) ??
+        '{}',
+    ) as Record<string, unknown>;
+
+  it('replays them on the socket that picks the meeting up', async () => {
+    const { h, feed } = await recording();
+    feed(1);
+    h.sockets[0]?.onclose?.();
+    // Spoken into a socket that is not there. Inside the cap, so none of it
+    // is the excess the drop still exists for.
+    h.clock.at += 2_000;
+    feed(2);
+    h.clock.at += 2_000;
+    feed(3);
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    expect(audio(h.sockets[0])).toEqual([1]);
+    expect(audio(h.sockets[1])).toEqual([2, 3]);
+  });
+
+  it('drops the excess of an outage longer than the cap', async () => {
+    const { h, feed } = await recording();
+    h.sockets[0]?.onclose?.();
+    feed(1);
+    // Past the cap, so this frame's sentence is the one the deliberate drop
+    // is still for: banking it would push stale speech into a session that
+    // has only just opened.
+    h.clock.at += AUDIO_HOLD_MS + 1_000;
+    feed(2);
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    expect(audio(h.sockets[1])).toEqual([2]);
+  });
+
+  it('tells the server how much of the outage it carried', async () => {
+    const { h, feed } = await recording();
+    h.sockets[0]?.onclose?.();
+    feed(1);
+    h.clock.at += 3_000;
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    const frame = started(h.sockets[1]);
+    expect(frame.resume).toBe('m1');
+    expect(frame.heldMs).toBe(3_000);
+  });
+
+  it('sends nothing held on a first start, which has nothing to resume', async () => {
+    const { h } = await recording();
+    expect(started(h.sockets[0]).resume).toBeUndefined();
+    expect(started(h.sockets[0]).heldMs).toBeUndefined();
+  });
+
+  it('replays the held audio BEFORE the words spoken after the reconnect', async () => {
+    // Order is the whole reason the hold is flushed on the new socket's open
+    // rather than when the server answers: a frame sent live in between would
+    // reach the transcript ahead of the sentence it interrupted.
+    const { h, feed } = await recording();
+    h.sockets[0]?.onclose?.();
+    h.clock.at += 1_000;
+    feed(1);
+    h.fireRetry();
+    h.sockets[1]?.onopen?.();
+    feed(2);
+    expect(audio(h.sockets[1])).toEqual([1, 2]);
   });
 });

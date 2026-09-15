@@ -81,6 +81,7 @@ import {
 import {
   type MeetingGap,
   type MeetingRecord,
+  RECONNECT_GAP_REASON,
   type TranscriptTurn,
   listMeetings,
   meetingDirPath,
@@ -656,14 +657,28 @@ export function flushRawSegments(args: {
       // Only the outages of THIS leg: the block before the restart already
       // carries the ones that happened before it, and a gap printed twice
       // reads as two separate losses.
-      const legGaps = all.filter((g) => g.from >= resumedAt);
+      //
+      // THE OUTAGE THE RECONNECT ITSELF CROSSED IS AN EXCEPTION, and it has to
+      // be: it opens before `resumedAt` and closes at or before it, so the
+      // plain arithmetic would file it as a recovery the block above is
+      // waiting for. That block is not waiting for anything — it was written
+      // at the stop, BEFORE this gap existed, so it makes no claim a
+      // `came back after` line could answer, and a lone recovery bullet would
+      // point at a loss no reader can find. It belongs to this block, stated
+      // in full, and it sorts to the head of it because that is when it began.
+      const legGaps = all.filter(
+        (g) => g.from >= resumedAt || (g.reason === RECONNECT_GAP_REASON && g.from < resumedAt),
+      );
       // And the recoveries that block could not know about — a capture that
       // was already down when the socket dropped and came back after it. That
       // block states the loss as still open, so without this the file makes a
       // claim the folded record contradicts.
       const carriedGaps = all.filter(
         (g): g is MeetingGap & { to: number } =>
-          g.from < resumedAt && typeof g.to === 'number' && g.to >= resumedAt,
+          g.reason !== RECONNECT_GAP_REASON &&
+          g.from < resumedAt &&
+          typeof g.to === 'number' &&
+          g.to >= resumedAt,
       );
       // THE STORED SEGMENT IS UPDATED WHATEVER THE MARKDOWN DOES. It used to
       // sit past the early return below, so a resumed leg whose capture was

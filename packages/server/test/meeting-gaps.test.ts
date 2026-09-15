@@ -229,7 +229,10 @@ describe('a meeting picked up again after its socket dropped', () => {
     if (!again) throw new Error('the resume was refused');
     again.recordGap('system', 'lost', 'ended');
     again.recordGap('system', 'restored');
-    const gaps = again.stop().gaps ?? [];
+    // On the `system` stream only: the resume writes its own gap for the
+    // outage the socket was down for, on the streams the capture carried, and
+    // that one is neither the loss this case is about nor a second open of it.
+    const gaps = (again.stop().gaps ?? []).filter((g) => g.stream === 'system');
     expect(gaps).toHaveLength(1);
     expect(gaps[0]?.to).not.toBeNull();
   });

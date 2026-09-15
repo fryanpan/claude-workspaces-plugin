@@ -30,6 +30,14 @@ import { parseNotesMethod } from './notes-method.ts';
  * bound is generous — a doc id is part of the id — and anything else is
  * dropped, which reads downstream as a resume the server could not honour.
  */
+/**
+ * The ceiling on `heldMs`, matching the client's two-minute reconnect window
+ * (`RECONNECT_WINDOW_MS`). Spelled here rather than imported because the
+ * parser is shared with the server, which has no reason to know the browser's
+ * backoff — what it needs is a bound, and this is the bound that exists.
+ */
+const MAX_HELD_AUDIO_MS = 120_000;
+
 export function parseMeetingId(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
   return /^[A-Za-z0-9._-]{1,200}$/.test(raw) ? raw : undefined;
@@ -154,7 +162,30 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       // this frame: a resume id the server could never match is a new
       // meeting, which is exactly the fallback a failed resume takes anyway.
       ...(resume !== undefined ? { resume } : {}),
+      // Only beside a resume, because it is a claim ABOUT an outage and a
+      // first start has none. Bounded at the top by the whole reconnect
+      // window — a client claiming to have carried an hour would silently
+      // erase a real gap from the record — and a value that is not a finite
+      // number at all is simply absent, which reads as "nothing carried".
+      ...(resume !== undefined && parseHeldMs(m.heldMs) !== undefined
+        ? { heldMs: parseHeldMs(m.heldMs) }
+        : {}),
     };
   }
   return null;
+}
+
+/**
+ * How much audio a reconnect says it carried, as a number this server will
+ * subtract from a durable record.
+ *
+ * Clamped rather than refused, like the room size beside it: the value only
+ * shortens a gap, so a hostile one costs a record that understates a hole
+ * rather than a meeting that will not start. The ceiling is the reconnect
+ * window itself — nothing can have been carried across an outage longer than
+ * the one the client was still willing to wait out.
+ */
+function parseHeldMs(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
+  return Math.min(Math.round(raw), MAX_HELD_AUDIO_MS);
 }

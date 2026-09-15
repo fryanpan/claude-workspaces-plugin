@@ -201,9 +201,9 @@ describe('a meeting whose socket drops', () => {
     expect(h.stopMic).not.toHaveBeenCalled();
     expect(h.strip.state().kind).toBe('recording');
     expect(h.note()).toBe(RECONNECTING_NOTE);
-    // And the sentence says the words spoken meanwhile are gone, because they
-    // are: nothing is buffered across the outage.
-    expect(h.note()).toContain('not recorded');
+    // And the sentence says the one thing a person can act on: a long outage
+    // costs words. How the short one is covered is the code's business.
+    expect(h.note()).toContain('A long outage loses what was said');
 
     h.fire();
     expect(h.sockets).toHaveLength(2);

@@ -279,6 +279,19 @@ export type MeetingClientMessage =
        * its own bill.
        */
       resume?: string;
+      /**
+       * How many milliseconds of audio, banked during the outage, the frames
+       * after this one are about to replay.
+       *
+       * Sent only beside `resume`, and only by a client that held some. The
+       * server subtracts it from the outage it would otherwise write into the
+       * record as lost, so it has to be the span the replayed frames COVER —
+       * not the cap, and not the length of the outage. Absent means nothing
+       * was carried, which is what every client that predates the hold sends
+       * and is the honest reading for a resume with an empty bank: the whole
+       * outage was lost.
+       */
+      heldMs?: number;
     }
   | { type: 'stop' }
   /**

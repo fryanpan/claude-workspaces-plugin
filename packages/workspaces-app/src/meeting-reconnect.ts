@@ -96,9 +96,14 @@ export function createReconnectPlan(opts: ReconnectPlanOpts = {}): ReconnectPlan
 /**
  * What the strip says while it is trying. One plain sentence, because the
  * strip has one line and the words share it with the transcript.
+ *
+ * It says the ONE thing a person mid-meeting can act on — a long outage costs
+ * words, a short one does not — and not how the holding works. The mechanism
+ * is `AUDIO_HOLD_MS` below, and explaining it here would double a line that
+ * has no room and calm nobody down.
  */
 export const RECONNECTING_NOTE =
-  'The connection dropped — reconnecting. Words spoken until it comes back are not recorded.';
+  'The connection dropped — reconnecting. A long outage loses what was said.';
 
 /**
  * And what it says when the meeting could not be picked up again: the
@@ -107,3 +112,98 @@ export const RECONNECTING_NOTE =
  */
 export const RESUME_FAILED_NOTE =
   'The earlier meeting could not be resumed, so this is a new recording with its own notes section.';
+
+/**
+ * How much of the audio spoken during an outage a reconnect carries across.
+ *
+ * THE DROP IS DELIBERATE AND IT STAYS. Replaying a minute of banked speech
+ * into an engine session that has just opened means paying for it by the
+ * second while the words arrive out of time with the ones around them, and a
+ * transcript nobody can trust is worse than a hole a reader can see. What was
+ * wrong was that the bound was zero: a three-second blip cost three seconds
+ * of conversation, and five of them inside one real meeting cost 36 seconds.
+ *
+ * EIGHT SECONDS, and the number has three reasons rather than a feel:
+ *
+ * - The outages measured on the meeting this fix comes from ran 3 to 8
+ *   seconds. The cap covers the whole measured band and nothing beyond it.
+ * - It is the sum of the backoff's own first rungs — 1s + 2s + 4s is the wait
+ *   before the fourth attempt — so an outage the reconnect resolves early is
+ *   covered, and one still failing after that is past the point where a burst
+ *   is the right answer anyway.
+ * - It fits inside the server's own pre-handshake buffer with room to spare.
+ *   That buffer holds 256 frames — 12.8 seconds at this frame size — and the
+ *   replay goes out before the handshake finishes, so a cap of 160 frames
+ *   leaves 4.8 seconds of handshake headroom before the far end would start
+ *   dropping what this end just carefully kept.
+ *
+ * Past it the excess is dropped exactly as all of it used to be: the oldest
+ * frames go, because what a room wants back is the sentence it was in the
+ * middle of, not the one before the network died.
+ */
+export const AUDIO_HOLD_MS = 8_000;
+
+/** What a hold hands back when it is emptied. */
+export interface HeldAudio {
+  /** Every frame still inside the cap, oldest first. */
+  frames: readonly ArrayBufferView[];
+  /**
+   * From the oldest frame still held to the moment it was taken.
+   *
+   * The server subtracts it from the outage to work out what was actually
+   * lost, so it has to be the span the frames COVER rather than the cap or
+   * the length of the outage. Zero when nothing was held, which is the same
+   * answer as never having held anything.
+   */
+  heldMs: number;
+}
+
+/**
+ * A bounded, ordered bank of audio frames.
+ *
+ * Opaque frames in order rather than one bank per stream: a two-stream
+ * meeting tags each frame with the stream it belongs to before it reaches
+ * here, so one queue replays both in the order they were captured, and the
+ * cap is one fact about time rather than a number that has to be divided by
+ * however many captures are open.
+ */
+export interface AudioHold {
+  /** Bank one frame. Anything older than the cap is dropped. */
+  push(frame: ArrayBufferView, at: number): void;
+  /** Everything still inside the cap, and the hold is emptied. */
+  take(at: number): HeldAudio;
+  /** Forget it all — a new recording, or a resume nobody took. */
+  clear(): void;
+}
+
+export function createAudioHold(opts: { capMs?: number } = {}): AudioHold {
+  const capMs = opts.capMs ?? AUDIO_HOLD_MS;
+  let frames: Array<{ frame: ArrayBufferView; at: number }> = [];
+  /** Drop what is now older than the cap, measured back from `at`. */
+  const expire = (at: number): void => {
+    // A linear scan from the front rather than a filter: frames arrive in
+    // time order, so everything to drop is at the head.
+    let first = 0;
+    while (first < frames.length && at - (frames[first]?.at ?? at) > capMs) first += 1;
+    if (first > 0) frames = frames.slice(first);
+  };
+  return {
+    push(frame, at) {
+      frames.push({ frame, at });
+      expire(at);
+    },
+    take(at) {
+      expire(at);
+      const held = frames;
+      frames = [];
+      const oldest = held[0]?.at;
+      return {
+        frames: held.map((f) => f.frame),
+        heldMs: oldest === undefined ? 0 : Math.max(0, at - oldest),
+      };
+    },
+    clear() {
+      frames = [];
+    },
+  };
+}

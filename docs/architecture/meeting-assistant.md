@@ -116,18 +116,105 @@ true` when the server took it.
   person reads. `flushRawSegments` takes the leg's first turn number and
   appends `## Segment N (resumed) — <ISO>` holding exactly the turns from
   there. Same segment number, same `.pcm` files (the sink opens with `a`).
-- **Audio spoken during the outage is DROPPED, and the strip says so** in the
-  same sentence that says it is reconnecting. Buffering it would mean pushing a
-  minute of speech into a streaming session priced by the second it is open,
-  out of time with the words around it; the server's own pre-handshake buffer
-  stops at a few seconds for the same reason. A gap is visible in the record;
-  a burst replayed out of order is a transcript nobody can trust.
+- **A BOUNDED few seconds of audio is held across the outage; past the cap it
+  is dropped**, and the strip says the half a person can act on — "A long
+  outage loses what was said" — rather than the caching policy, because it has
+  one line and somebody has just lost their connection. The drop is still the
+  rule, and the reason it is the rule has
+  not changed: pushing a minute of banked speech into a streaming session
+  priced by the second it is open costs real money for words that arrive out
+  of time with the ones around them, and the server's own pre-handshake buffer
+  stops at a few seconds for the same reason. What changed is that the whole
+  measured outage band of the five-reconnect meeting was 3 to 8 seconds, so
+  the cap covers it and the cost stays bounded.
+  **`AUDIO_HOLD_MS` is 8 seconds** (`meeting-reconnect.ts`, beside the backoff
+  it is sized against), and the number has three reasons: it covers that band;
+  1+2+4 = 7s is the backoff already waited before the fourth attempt, so the
+  cap outlasts the retries that land; and 160 frames of 50ms sits inside the
+  server's 256-frame (12.8s) pre-handshake buffer with headroom for the
+  handshake, so the replay is never truncated at the far end nor marks the
+  ledger untrusted. The hold is a ring trimmed by age on every push, flushed
+  on the resuming socket's `open` — BEFORE `ready`, so the server's in-order
+  pre-handshake buffer keeps the replayed frames ahead of any live one.
+- **The resuming `start` frame carries `heldMs`**, and the server subtracts it
+  from the outage before writing the gap. So a reconnect inside the cap
+  records NO gap — nothing was lost — and one past it records only the head
+  that really was. `parseHeldMs` (`core/meeting-parse.ts`) takes it only
+  alongside `resume`, rounds it, refuses anything non-finite or non-positive,
+  and clamps it at 120s, which is the reconnect window itself.
+- **A reconnect writes the stretch it lost into the record, on every stream.**
+  The gap machinery was fed only by the client's `stream_state` frames — the
+  one report a browser that cannot reach the server is unable to send — so
+  every outage in that meeting went unrecorded. `MeetingStore.resume` now
+  derives it instead: the previous leg's `endedAt` to this leg's `resumedAt`,
+  minus `heldMs`, written as the usual two append-only index lines per stream
+  with `gapReason: 'reconnect'`. A `bot` source writes none (there is no local
+  capture to lose). `flushRawSegments` sorts a reconnect gap into the leg it
+  belongs to rather than treating it as a gap CARRIED across the resume,
+  which is what a `stream_state` gap still open at the drop is.
 - **The backoff is 1s, 2s, 4s, 8s, then 15s, giving up after two minutes**
   (`meeting-reconnect.ts`, which holds the policy and nothing else). An
   `already_recording` refusal DURING a resume is retried rather than reported:
   the dropped socket's teardown flushes an engine session and can still hold
   the doc's lock for a moment. Past the window the strip lands exactly where it
   used to — "The connection to the meeting was lost", mic released.
+
+### Why a meeting socket closed (2026-09-15)
+
+A meeting that dropped its socket five times left nothing in the server log
+saying why any of them closed — the `[meeting] ended` line named `endedBy` only
+for the paths the server chose itself, and a socket that simply went away was
+indistinguishable from a person pressing Stop. Every close now says its cause
+in one greppable word.
+
+- **`onClose` is the one place that decides**, and it always runs: the relay
+  logs `[meeting] socket closed doc=… meeting=… cause=… code=… recording=…
+  audioBytes=…` before it ends the meeting, so a close that ends nothing (a
+  socket that never got past the handshake) still leaves a line.
+- **The cause is the server's own intent where it had one** — `client-stop` for
+  a stop frame, `silence` for the no-content timeout — **and the close code's
+  name otherwise**: `clean-close`, `tab-closed`, `protocol-error`,
+  `unsupported`, `no-status`, `network-drop`, `policy`, `too-big`,
+  `extension-failed`, `server-error`, `server-restart`, `try-again`,
+  `tls-failed`, `unknown` for no code at all, and `code-<n>` for anything else,
+  so a vocabulary gap degrades to a number rather than to silence. The table is
+  `meetingCloseCause` in `meeting-protocol.ts`.
+- **`conn.endedCause` is cleared when a connection reopens**, because one
+  socket can carry a stop and then a fresh `start`; without the reset the
+  second meeting's drop would be logged as somebody pressing Stop.
+- **A close `reason` string is scrubbed through `engineErrorForLog`** before it
+  reaches the log: it is attacker- or vendor-supplied text.
+
+### What a reconnect resets in the note-taker — measured, 2026-09-15
+
+A reconnect keeps the meeting but NOT the notes session: the dropped socket
+took its `beginNotesSession` with it, and the resuming socket opens a new one,
+so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
+(`meeting-reconnect-notes-context.test.ts` holds every number here):
+
+- **Kept: the section.** The heading memory is keyed by doc AND meeting id and
+  backed by `<meetingId>-section.json`, so the resuming leg adopts the section
+  the dropped one opened. Take the file store away and it opens a SECOND, empty
+  `## Meeting notes` — which is what makes the store load-bearing rather than
+  an optimisation, and why the measurement runs with a data dir.
+- **Kept: the doc.** Nothing written is lost, and `carry` is flushed by the
+  previous leg's `end()`, so an uncomposed turn is not stranded.
+- **Reset: tick numbering.** The resuming leg's first tick is tick 1 again.
+- **Reset: the transcript window.** That tick carries only what was said after
+  the socket came back; the previous leg's speech is not re-offered and nothing
+  in the input marks the seam. The per-leg state that goes with it —
+  `priorRaw`, the offered-suggestion set, `lastTickNo`, the speaker `names`
+  map, the idea/coverage ledger, the tick cadence — starts again too.
+- **Reset, and the expensive one: authorship.** `onSessionStart` calls
+  `releaseNotesAuthorship(docStore, docId)`, which drops the note-taker's claim
+  on every block in the doc. So the bullets the meeting wrote BEFORE the drop
+  come back to it as a person's lines: they arrive in `humanNotes`, the outline
+  shows no block of its own, and an edit naming one of them lands as a
+  SUGGESTION rather than a rewrite. That is the safe direction — the same one a
+  restarted server lands in, and the reason the release exists — but on a
+  five-reconnect meeting it means most of the minutes stop being editable by
+  the hand that wrote them. **Left as measured; changing it is a separate
+  decision, not a bug fix.**
 
 ## A recording with nothing in it ends itself (2026-09-12)
 
@@ -2992,6 +3079,14 @@ meeting re-announcing a loss does not open a second gap over the one already
 there. The raw transcript then carries the gap as a **bullet among the turns**,
 ordered by the same clock: the durable record says time was lost, because
 silently closing the seam is the bug rather than the fix.
+
+**A `stream_state` frame is not the only writer of one.** A browser that cannot
+reach the server cannot report anything, so the gaps of a reconnect are written
+by the SERVER, from the previous leg's `endedAt` to this leg's `resumedAt` less
+whatever the client held — see "Resume on reconnect". They carry
+`gapReason: 'reconnect'`, which is what separates a gap the outage caused from
+one a capture reported before it, and `flushRawSegments` reads that reason to
+sort each into the right leg.
 
 **What is proved, and what is not.** `meeting-track-death-browser.test.ts`
 drives the real capture path in headless Chromium against real

@@ -112,8 +112,11 @@ describe('the outages a resumed leg has to work out for itself', () => {
     secondLeg(store, meetingId).stop();
 
     const seg = readMeetingJson(dir, 'd1')?.segments.find((s) => s.meetingId === meetingId);
-    expect(seg?.gaps?.map((g) => g.stream)).toEqual(['mic']);
-    expect(seg?.gaps?.[0]?.to).toBeNull();
+    // The resume's own gap for the outage between the legs rides along in the
+    // same list; the loss this case is about is the one still OPEN, because
+    // the capture was dead for the whole leg and never came back.
+    const open = (seg?.gaps ?? []).filter((g) => g.to === null);
+    expect(open.map((g) => g.stream)).toEqual(['mic']);
   });
 
   it('appends a continuation block for a leg whose only news is the outage', () => {
@@ -181,7 +184,9 @@ describe('the outages a resumed leg has to work out for itself', () => {
     again.stop();
 
     const text = transcript(dir);
-    expect(text.split('nothing from it was recorded').length - 1).toBe(1);
+    // Counted on THIS stream: the resume writes its own gap for the outage
+    // between the legs, on `mic`, and the loss under test is the Mac's audio.
+    expect(text.split("this Mac's audio stopped for").length - 1).toBe(1);
     // And it is not restated as a RECOVERY either. An outage that both opened
     // and closed before the restart is wholly the business of the block above;
     // carried into the continuation it becomes a second ending for a loss that
