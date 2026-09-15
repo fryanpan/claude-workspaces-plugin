@@ -664,7 +664,8 @@ their filename), `notes-quality-store.ts` and `notes-tick-timing.ts` read and
 write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a
-bad one on the task the doc belongs to. Nothing under `routes/` is added: the
+bad one on the task the doc belongs to, or on the doc itself when no task
+links it. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
 
@@ -719,6 +720,13 @@ it is a REFUSAL the picture had no home for — a batch it empties is reported
 as `guard-refused` and is deliberately not retried, unlike the write failures
 beside it.
 
+`notes-edit-dedupe.ts` sits right after it in the same flow and the same
+tier: the guard's edits and the doc's outline in, the same edits out with a
+topic heading the section already has re-addressed to it, a note it already
+carries dropped or moved, and a `Decision:` label nobody spoke taken off. Pure
+like the guard, and named for the same reason — it is the answer to "what if
+the model writes it twice anyway", which no box above says.
+
 `notes-idea-coverage.ts` joins the DOMAIN tier below, not this one, and it
 changes no boundary: it is functions over values — sentences in, a verdict on
 whether the notes carry them out — plus a per-meeting ledger the notes session
@@ -729,6 +737,20 @@ note, as opposed to whether it reached the composer.
 | **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-section-fit.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
+
+`answer-coverage.ts` (server) and `answer-coverage-prompt.ts` (core) join
+the Board group beside the review judge, split the same way and moving no
+boundary. When a person types or speaks an answer to a review item that asks
+more than one question, one Haiku call asks whether the answer covers them
+all. That holds for every door an answer comes through: a ticket item's answer
+route, an item declared on a comment (its answer route, or a plain reply
+folded into an answer) and voice. An answer that leaves questions open is
+stored as a partial answer, on the ticket item or on the comment's payload.
+The item stays on the queue with a note naming what is left, and the filer's
+`decision.answered` event or `thread.replied` frame lists it, as does the
+lead's wake. The server module is the network call and
+the rules for when it runs; it fails open, so the answer closes the item. The
+core module is the prompt, the parser and the note, with no socket.
 
 `supervisor-health.ts` joins Ops and moves no boundary. It is the health
 check `scripts/serve.ts` runs against the server it supervises — one HTTP
@@ -936,12 +958,21 @@ ending `.mdx` it finds each JSX component, `{…}` expression and import run,
 and the parser stores it as a code block whose language is `mdx-flow` and
 whose text is the exact source lines. A component is then one block the
 writer serializes byte for byte, not a paragraph that an edit could reflow.
-The editor draws that block through two client modules beside
+`prose-mdx-retype.ts` sits beside it and does not move the picture. A doc
+parsed before that grammar holds its components as paragraphs, and once a
+flush had written one onto a single line, the doc and its file serialized
+alike, so the attach never re-read it. The attach now re-types each such
+paragraph in place into the block the grammar makes, with the same text, so
+the file does not change.
+The editor draws that block through three client modules beside
 `mermaid-code-block.ts`, and they do not move the picture either.
 `mdx-flow-block.ts` is the node view and the plugin that makes the block
 read-only. `mdx-preview.ts` reads a component's props with a literal parser,
-never by running them, and draws a chart's title and a line for its literal
-data.
+never by running them, and shows a component's title and words.
+`mdx-chart.ts` takes those props by shape rather than by component name — a
+`series` of x/y points draws lines with axes, a legend and a band, a `data`
+list of label/value rows draws bars — as SVG whose every string is a text
+node.
 
 `prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
 document-model tier, and together they are how an agent addresses a block
@@ -956,7 +987,11 @@ which proposes whole blocks rather than a run of text: the target's words
 struck, the replacement offered as real blocks beside it under the same sid,
 so `suggest-ops.ts` resolves it with no new code and a replacement that is
 itself a heading, a list or a fence is accepted as one rather than as
-characters. `prose-nest.ts` is one of those edits given a
+characters. `prose-batch-structure.ts` holds what an applied edit must leave
+standing around itself: the notes nested under a bullet it replaces, the
+editor's trailing blank line kept at the end rather than stranded above an
+insert, and a block with no words, which applies directly whoever owns it.
+`prose-nest.ts` is one of those edits given a
 module of its own: `nest_blocks` MOVES existing list items under a lead bullet
 rather than restating them, which is what lets a note-taker regroup a topic
 without retyping a point or orphaning the comment threads anchored to it. Server-side they are reached through

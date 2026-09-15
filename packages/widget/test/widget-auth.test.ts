@@ -1,4 +1,7 @@
+import * as encoding from 'lib0/encoding';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as syncProtocol from 'y-protocols/sync';
+import * as Y from 'yjs';
 import { SIGN_IN_NOTE } from '../src/widget-mic.ts';
 
 /**
@@ -22,6 +25,28 @@ interface FetchCall {
 
 let fetchCalls: FetchCall[];
 let fetchResponder: (url: string, init?: RequestInit) => Response;
+/** The subprotocols each socket the widget opened offered, in order. */
+let socketProtocols: Array<string | string[] | undefined>;
+/** Every socket the widget opened, in order. */
+let sockets: FakeSocket[];
+/**
+ * `answer`: each socket opens and the server's sync step 2 lands, as a doc
+ * the server holds answers. `drive`: nothing happens until the test fires it.
+ */
+let socketMode: 'answer' | 'drive';
+
+interface FakeSocket {
+  protocols?: string | string[];
+  fire(type: string, data?: ArrayBuffer): void;
+}
+
+/** The server's half of a sync: step 2 of an empty doc, as the socket delivers it. */
+function syncStep2(): ArrayBuffer {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, 0);
+  syncProtocol.writeSyncStep2(enc, new Y.Doc());
+  return encoding.toUint8Array(enc).slice().buffer;
+}
 
 function stubGlobals() {
   fetchCalls = [];
@@ -36,11 +61,33 @@ function stubGlobals() {
     fetchCalls.push({ url: String(url), init });
     return fetchResponder(String(url), init);
   }) as unknown as typeof fetch;
-  class FakeWS {
+  socketProtocols = [];
+  sockets = [];
+  socketMode = 'answer';
+  class FakeWS implements FakeSocket {
     static OPEN = 1;
     readyState = 1;
     binaryType = 'arraybuffer';
-    addEventListener() {}
+    listeners = new Map<string, ((ev: { data?: ArrayBuffer }) => void)[]>();
+    constructor(
+      _url: string,
+      public protocols?: string | string[],
+    ) {
+      socketProtocols.push(protocols);
+      sockets.push(this);
+      if (socketMode === 'answer') {
+        queueMicrotask(() => {
+          this.fire('open');
+          this.fire('message', syncStep2());
+        });
+      }
+    }
+    fire(type: string, data?: ArrayBuffer) {
+      for (const cb of this.listeners.get(type) ?? []) cb({ data });
+    }
+    addEventListener(type: string, cb: (ev: { data?: ArrayBuffer }) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), cb]);
+    }
     removeEventListener() {}
     send() {}
     close() {}
@@ -59,6 +106,15 @@ function serverOrigin(): string {
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+
+/** Arm feedback mode and click the page, the way a person opens the composer. */
+function openComposer(el: HTMLElement): HTMLElement {
+  const root = el.shadowRoot!;
+  document.elementFromPoint = () => document.getElementById('hello') as HTMLElement;
+  (root.querySelector('.fab') as HTMLButtonElement).click();
+  window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
+  return root.querySelector('.composer') as HTMLElement;
+}
 
 function authHeaderOf(call: FetchCall): string | null {
   const headers = (call.init?.headers ?? {}) as Record<string, string>;
@@ -156,6 +212,158 @@ describe('the popup handshake', () => {
     // The offer collapses into the signed-in identity.
     expect(el.shadowRoot!.querySelector('.auth-signin')).toBeNull();
     expect(el.shadowRoot!.querySelector('.me')?.textContent).toContain('Reviewer');
+  });
+});
+
+describe('a page on the tailnet widget door', () => {
+  // The server this page's widget talks to is the tailnet hostname, and the
+  // popup cannot sign in there: it opens on the public host the door's 401
+  // names, and that host is then the ONLY origin a token is taken from.
+  const SIGN_IN = 'https://operator.example.com';
+  const user = { id: 'user-abc', name: 'Reviewer', kind: 'known', color: '#2e7dd7' };
+  const doorRefusal = () =>
+    new Response(
+      JSON.stringify({ error: 'sign_in_required', signInToWrite: true, signInOrigin: SIGN_IN }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+
+  async function signInOnDoor() {
+    const mod = await importWidget();
+    fetchResponder = (url) =>
+      url.includes('/api/auth/session') ? doorRefusal() : new Response('{}');
+    const opened: string[] = [];
+    const popup = {} as Window;
+    (window as unknown as { open: unknown }).open = (url: string) => {
+      opened.push(String(url));
+      return popup;
+    };
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-riverbend', docId: 'doc-door' });
+    await flush();
+    (el.shadowRoot!.querySelector('.auth-signin') as HTMLButtonElement).click();
+    const send = (origin: string, token: string) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin,
+          source: popup,
+          data: { type: 'cw-widget-auth', token, user },
+        }),
+      );
+    return { el, opened, send };
+  }
+
+  it('opens the popup on the sign-in origin, naming this page and its board', async () => {
+    const { opened } = await signInOnDoor();
+    expect(opened.length).toBe(1);
+    const url = new URL(opened[0] as string);
+    expect(url.origin).toBe(SIGN_IN);
+    expect(url.pathname).toBe('/widget-auth');
+    expect(url.searchParams.get('origin')).toBe(location.origin);
+    expect(url.searchParams.get('workspace')).toBe('w-riverbend');
+  });
+
+  it('ignores a token message from any origin but the sign-in origin', async () => {
+    const { el, send } = await signInOnDoor();
+    // The widget's own server origin is no longer the sender it trusts.
+    send(serverOrigin(), 'wt2.from-the-server-origin');
+    send('https://evil.example.com', 'wt2.from-elsewhere');
+    send(`${SIGN_IN}:8443`, 'wt2.from-another-port');
+    expect(localStorage.getItem('cfw:authToken')).toBeNull();
+    expect(el.shadowRoot!.querySelector('.auth-signin')).toBeTruthy();
+    send(SIGN_IN, 'wt2.real-token');
+    expect(localStorage.getItem('cfw:authToken')).toBe('wt2.real-token');
+  });
+
+  it('reconnects with the token at once, and posts the held draft once that socket has synced', async () => {
+    // On the door a socket without a token is refused, so a page nobody has
+    // opened has no doc on the server, and a post to it would 404. The held
+    // post has to wait for the socket the token opens.
+    const mod = await importWidget();
+    socketMode = 'drive';
+    let posts = 0;
+    fetchResponder = (url, init) => {
+      if (url.includes('/api/auth/session')) return doorRefusal();
+      if (url.includes('/threads')) {
+        posts += 1;
+        return authHeaderOf({ url, init }) ? new Response('{}') : doorRefusal();
+      }
+      return new Response('{}');
+    };
+    const popup = {} as Window;
+    (window as unknown as { open: unknown }).open = () => popup;
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-riverbend', docId: 'doc-door-new' });
+    await flush();
+    sockets[0]?.fire('close');
+    const composer = openComposer(el);
+    (composer.querySelector('textarea') as HTMLTextAreaElement).value = 'the header overlaps';
+    (composer.querySelector('.submit') as HTMLButtonElement).click();
+    await flush();
+    expect(posts, 'CONTROL: the post was refused without a token').toBe(1);
+    (composer.querySelector('.auth-signin') as HTMLButtonElement).click();
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: SIGN_IN,
+        source: popup,
+        data: { type: 'cw-widget-auth', token: 'wt2.real-token', user },
+      }),
+    );
+    await flush();
+    expect(socketProtocols.at(-1), 'a socket with the token, not at the end of a backoff').toBe(
+      'wt2.real-token',
+    );
+    expect(posts, 'nothing posted before the doc exists').toBe(1);
+    sockets.at(-1)?.fire('open');
+    sockets.at(-1)?.fire('message', syncStep2());
+    await flush();
+    expect(posts).toBe(2);
+    const retry = fetchCalls.filter((c) => c.url.includes('/threads'))[1] as FetchCall;
+    expect(authHeaderOf(retry)).toBe('Bearer wt2.real-token');
+  });
+
+  /** A board token's shape: its fifth segment is the board, base64url. */
+  const boardToken = (board: string) =>
+    `wt2.user-abc.1.2.${btoa(board).replace(/=+$/, '')}.${btoa(location.origin).replace(/=+$/, '')}.sig`;
+
+  it('offers the held token as the socket subprotocol', async () => {
+    localStorage.setItem('cfw:authToken', boardToken('w-1'));
+    localStorage.setItem('cfw:authUser', JSON.stringify(user));
+    const mod = await importWidget();
+    mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-door-socket', authOffer: true });
+    expect(socketProtocols).toEqual([boardToken('w-1')]);
+  });
+
+  it('never offers a session token on the socket, so a localhost embed opens as it did', async () => {
+    localStorage.setItem('cfw:authToken', 'wt1.stored-token');
+    localStorage.setItem('cfw:authUser', JSON.stringify(user));
+    const mod = await importWidget();
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-1', docId: 'doc-local', authOffer: true });
+    expect(
+      el.shadowRoot!.querySelector('.auth-signout'),
+      'CONTROL: the token is held',
+    ).toBeTruthy();
+    expect(socketProtocols).toEqual([undefined]);
+  });
+
+  it("does not hold another board's token that a page on this origin stored", async () => {
+    localStorage.setItem('cfw:authToken', boardToken('w-saltmarsh'));
+    localStorage.setItem('cfw:authUser', JSON.stringify(user));
+    const mod = await importWidget();
+    // The door's refusal is what makes the widget adopt a stored token, and a
+    // live-looking probe answer is what would keep it.
+    fetchResponder = (url) =>
+      url.includes('/api/auth/session')
+        ? doorRefusal()
+        : new Response(JSON.stringify({ authenticated: true, user }), {
+            headers: { 'content-type': 'application/json' },
+          });
+    const el = mod.FeedbackWidget.init({ workspaceId: 'w-riverbend', docId: 'doc-door-other' });
+    await flush();
+    expect(
+      fetchCalls.some((c) => c.url.includes('/api/auth/session')),
+      'CONTROL: asked',
+    ).toBe(true);
+    expect(fetchCalls.some((c) => authHeaderOf(c))).toBe(false);
+    expect(el.shadowRoot!.querySelector('.auth-signin')).toBeTruthy();
+    expect(el.shadowRoot!.querySelector('.me')?.textContent).not.toContain(user.name);
   });
 });
 
@@ -459,15 +667,6 @@ describe('a workspace that requires a signed-in writer', () => {
   const required = () => json({ signInToWrite: true, canWrite: false });
   const refuse = () => json({ error: 'sign_in_required', signInUrl: '/signin' }, 401);
 
-  /** Arm feedback mode and click the page, the way a person opens the composer. */
-  function openComposer(el: HTMLElement): HTMLElement {
-    const root = el.shadowRoot!;
-    document.elementFromPoint = () => document.getElementById('hello') as HTMLElement;
-    (root.querySelector('.fab') as HTMLButtonElement).click();
-    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
-    return root.querySelector('.composer') as HTMLElement;
-  }
-
   it('asks once on load and offers sign-in without auth-offer', async () => {
     const mod = await importWidget();
     fetchResponder = (url) => (url.includes('/api/auth/session') ? required() : json({}));
@@ -615,14 +814,6 @@ describe('a workspace that requires a signed-in writer, asked by a browser that 
       status,
       headers: { 'content-type': 'application/json' },
     });
-
-  function openComposer(el: HTMLElement): HTMLElement {
-    const root = el.shadowRoot!;
-    document.elementFromPoint = () => document.getElementById('hello') as HTMLElement;
-    (root.querySelector('.fab') as HTMLButtonElement).click();
-    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 10 }));
-    return root.querySelector('.composer') as HTMLElement;
-  }
 
   async function mount(session: unknown, docId: string) {
     const mod = await importWidget();

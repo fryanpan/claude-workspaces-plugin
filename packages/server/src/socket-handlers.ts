@@ -83,6 +83,7 @@ export type UpgradeData = {
   shareId?: string;
   shareMember?: string;
   readOnly?: boolean;
+  widgetDoorGrant?: { token: string; origin: string };
 };
 
 /**

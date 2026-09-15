@@ -32,6 +32,14 @@
  *    while a token lifted out of the dev server's localStorage is worth
  *    nothing from curl, from another origin, or from an opaque one.
  *
+ * A second shape, `wt2`, is the same format under its own version tag: a
+ * token for the TAILNET WIDGET DOOR (middleware/widget-door.ts). A page on the
+ * tailnet hostname cannot carry any cookie to the public Access host, so no
+ * session exists to borrow; the popup there proves the person through
+ * Cloudflare Access instead. With no session to die with, the `wt2` token is
+ * narrower in the other direction: ONE board, ONE page origin, a day's life,
+ * and dead the moment the identity's `sessionsValidFrom` watermark moves.
+ *
  * Same construction as session.ts and the share cookie, which is now one
  * module (`signed-token.ts`): HMAC over a dotted payload, key derived from
  * the shared cookie key under its own domain string so no format can ever
@@ -92,6 +100,85 @@ export const widgetToken: TokenFormat<WidgetTokenClaims> = {
   },
   expiresAt: (claims) => claims.expiresAt,
 };
+
+/** One day. A `wt2` token has no session whose logout could end it, so its
+ *  own expiry does more of the work than the `wt1` week does. */
+export const BOARD_WIDGET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+const BOARD_VERSION = 'wt2';
+
+export interface BoardWidgetTokenClaims {
+  identityId: string;
+  /** ms epoch the token was minted — what the roster watermark is held to. */
+  issuedAt: number;
+  /** ms epoch. */
+  expiresAt: number;
+  /** The one board whose widget docs this token may reach. */
+  workspaceId: string;
+  /** The one page origin this token may be presented from. */
+  origin: string;
+}
+
+/**
+ * `wt2.<identityId>.<issuedAt>.<expiresAt>.<workspaceId>.<origin>` — the
+ * workspace id and the origin base64url-encoded, so no id shape can ever add
+ * a dot to a dot-split payload.
+ *
+ * Its own `TokenFormat` rather than a union inside `widgetToken`, and under
+ * the SAME key domain: one scheme, two version tags. The tag check in
+ * `verifyToken` is what keeps them apart, so a `wt1` value can never verify
+ * as a board token or the other way round.
+ */
+export const boardWidgetToken: TokenFormat<BoardWidgetTokenClaims> = {
+  keyDomain: widgetToken.keyDomain,
+  tags: [BOARD_VERSION],
+  encode: (claims) =>
+    [
+      BOARD_VERSION,
+      claims.identityId,
+      claims.issuedAt,
+      claims.expiresAt,
+      Buffer.from(claims.workspaceId).toString('base64url'),
+      Buffer.from(claims.origin).toString('base64url'),
+    ].join('.'),
+  decode(payload) {
+    const parts = payload.split('.');
+    if (parts.length !== 6) return null;
+    const [version, identityId, issuedRaw, expiresRaw, workspaceRaw, originRaw] = parts;
+    if (version !== BOARD_VERSION || !identityId || !workspaceRaw || !originRaw) return null;
+    const issuedAt = Number(issuedRaw);
+    const expiresAt = Number(expiresRaw);
+    if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt)) return null;
+    const workspaceId = Buffer.from(workspaceRaw, 'base64url').toString();
+    const origin = Buffer.from(originRaw, 'base64url').toString();
+    if (!workspaceId || !origin) return null;
+    return { identityId, issuedAt, expiresAt, workspaceId, origin };
+  },
+  expiresAt: (claims) => claims.expiresAt,
+};
+
+/** A board token for one identity, one board and one page origin. */
+export function mintBoardWidgetToken(
+  grant: { identityId: string; workspaceId: string; origin: string },
+  key: string,
+  now: number = Date.now(),
+): string {
+  return mintToken(
+    boardWidgetToken,
+    { ...grant, issuedAt: now, expiresAt: now + BOARD_WIDGET_TOKEN_TTL_MS },
+    key,
+  );
+}
+
+/** The claims a board token attests to, or null. Pure crypto + expiry — the
+ *  caller still owes the roster checks, as with `verifyWidgetToken`. */
+export function verifyBoardWidgetToken(
+  value: string | undefined | null,
+  key: string,
+  now: number = Date.now(),
+): BoardWidgetTokenClaims | null {
+  return tokenClaims(boardWidgetToken, value, key, now);
+}
 
 /** The widget-token key, derived from the shared cookie key. */
 export function widgetTokenKey(cookieKey: string): string {

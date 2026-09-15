@@ -189,6 +189,7 @@ export class FeedbackWidgetEl extends HTMLElement {
   /** The identity the browser had before sign-in — restored on sign-out. */
   anonUser: User | null = null;
   authPopup: Window | null = null;
+  signInOrigin?: string;
   authMsgHandler: ((ev: MessageEvent) => void) | null = null;
   /**
    * The thread a `?thread=` deep link asked to be opened on, until the dock
@@ -449,7 +450,12 @@ export class FeedbackWidgetEl extends HTMLElement {
       sourceUrl: location.href,
     });
     const url = `${this.opts.serverUrl}${this.docPath()}/y?${qs.toString()}`;
-    this.client = connect(url);
+    // Only a BOARD token rides the socket: the tailnet door needs it, and a
+    // localhost socket never asked for one — a session token that died there
+    // would turn a read-only socket into a refused one.
+    this.client = connect(url, () =>
+      this.authToken?.startsWith('wt2.') ? this.authToken : undefined,
+    );
     this.client.onStatus((s) => {
       if (this.statusEl) {
         this.statusEl.textContent =

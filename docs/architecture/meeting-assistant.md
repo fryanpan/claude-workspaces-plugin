@@ -2911,13 +2911,19 @@ at) · `packages/server/src/meeting-notes.ts` + `meeting-notes-doc.ts` (composer
 outline it puts in the prompt) + `notes-edit-parse.ts` (a reply read as edits,
 strictly) + `notes-edit-guard.ts` (the edits the applier refuses whatever the
 reply said: a replace against the meeting's own section heading, which is
-what strands every earlier bullet above a second heading) + `notes-doc-access.ts` (who the note-taker is, and the one
+what strands every earlier bullet above a second heading; and a replace that
+keeps only its topic's words, added beside the note instead unless the speaker
+took that note back) + `notes-edit-dedupe.ts`
+(each topic heading once and each note once, whatever the reply repeated, and
+no `Decision:` label the speech did not state) + `notes-doc-access.ts` (who the note-taker is, and the one
 doc-store slice every notes writer goes through) + `notes-speaker-tags.ts`
 (the in-place renaming passes) + `notes-research-placeholder.ts` (the section
 a spoken "can you research X" leaves behind) ·
 `packages/core/src/prose-identity.ts` + `prose-outline.ts` (the two block
 attributes, the outline read, and what clears authorship) + `prose-batch.ts`
-(a batch of block-addressed edits in one transaction) ·
+(a batch of block-addressed edits in one transaction) + `prose-batch-structure.ts`
+(what an edit leaves around itself: nested notes, the trailing blank line, and
+blank blocks anyone may remove) ·
 `packages/server/src/doc-outline-ops.ts` (the store's two block verbs, which
 the `read_doc_outline` / `apply_block_edits` MCP tools and their routes call
 too) · `packages/workspaces-app/src/block-identity.ts` (the Tiptap extension

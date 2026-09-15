@@ -20,12 +20,12 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
+import { type Ref, type TaskReviewItem, prose } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { MEETING_NOTES_HEADING, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import { meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
-import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { type NotesTickHarness, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const dirs: string[] = [];
 const freshDir = (): string => {
@@ -66,6 +66,26 @@ async function captureLog(run: () => Promise<void>): Promise<string[]> {
 /** The one line a meeting ends with. */
 const summaryLine = (lines: string[], meetingId: string): string =>
   lines.find((l) => l.includes(`meeting ${meetingId}:`)) ?? '';
+
+/**
+ * Put `line` into the notes four more times, as a person pasting it would.
+ *
+ * The note-taker can no longer write a repeat itself — `notes-edit-dedupe.ts`
+ * drops one before it lands — so notes that repeat themselves now reach the
+ * quality pass from outside the write path, and that is where these scripts
+ * make them. The line's job is to report what the notes carry, however they
+ * came to carry it.
+ */
+function pasteRepeats(harness: NotesTickHarness, line: string): void {
+  prose.applyBlockEdits(
+    harness.ydoc,
+    [{ op: 'insert_at_end', markdown: [line, line, line, line].join('\n') }],
+    {
+      author: 'person-a',
+      suggestionAuthor: { id: 'person-a', name: 'Harbour clerk', color: '#777777' },
+    },
+  );
+}
 
 function recordingBoard(rows: Task[]): NotesQualityBoard & { filed: string[] } {
   const filed: string[] = [];
@@ -117,10 +137,11 @@ describe('the end-of-meeting line', () => {
       meetingId: 'm-repeats',
       workspaceId: 'w-1',
       qualityBoard: board,
-      compose: (input) => addNotes(input, [repeat, repeat, repeat, repeat, repeat].join('\n')),
+      compose: (input, tick) => (tick === 1 ? addNotes(input, repeat) : []),
     });
     const lines = await captureLog(async () => {
       await harness.speak('Kestrel Lane keeps the winter crew until April.');
+      pasteRepeats(harness, repeat);
       await harness.end();
     });
     const line = summaryLine(lines, 'm-repeats');
@@ -140,15 +161,44 @@ describe('the end-of-meeting line', () => {
       meetingId: 'm-orphan',
       workspaceId: 'w-1',
       qualityBoard: board,
-      compose: (input) => addNotes(input, [repeat, repeat, repeat, repeat, repeat].join('\n')),
+      compose: (input, tick) => (tick === 1 ? addNotes(input, repeat) : []),
     });
     const lines = await captureLog(async () => {
       await harness.speak('Kestrel Lane keeps the winter crew until April.');
+      pasteRepeats(harness, repeat);
       await harness.end();
     });
     const line = summaryLine(lines, 'm-orphan');
     expect(line).toContain('NOT filed (no-row)');
     expect(board.filed).toEqual([]);
+  });
+
+  it('says a bad meeting on a doc no row links was filed on the doc', async () => {
+    const onDoc: string[] = [];
+    const board = {
+      ...recordingBoard([]),
+      fileOnDoc: (docId: string) => {
+        onDoc.push(docId);
+        return true;
+      },
+    };
+    const repeat = '- Saltmarsh keeps the winter crew until April';
+    const harness = createNotesTickHarness({
+      meetingId: 'm-unlinked',
+      workspaceId: 'w-1',
+      qualityBoard: board,
+      compose: (input, tick) => (tick === 1 ? addNotes(input, repeat) : []),
+    });
+    const lines = await captureLog(async () => {
+      await harness.speak('Saltmarsh keeps the winter crew until April.');
+      pasteRepeats(harness, repeat);
+      await harness.end();
+    });
+    const line = summaryLine(lines, 'm-unlinked');
+    expect(line).toContain('BAD');
+    expect(line).toContain('filed on the doc');
+    expect(line).not.toContain('NOT filed');
+    expect(onDoc).toEqual(['d-meeting']);
   });
 
   it('reads only what it wrote when it continued the last recording’s section', async () => {
@@ -164,10 +214,11 @@ describe('the end-of-meeting line', () => {
     const first = createNotesTickHarness({
       heading,
       meetingId: 'm-first',
-      compose: (input) => addNotes(input, [repeat, repeat, repeat, repeat, repeat].join('\n')),
+      compose: (input, tick) => (tick === 1 ? addNotes(input, repeat) : []),
     });
     const firstLines = await captureLog(async () => {
       await first.speak('Kestrel Lane keeps the winter crew until April.');
+      pasteRepeats(first, repeat);
       await first.end();
     });
 

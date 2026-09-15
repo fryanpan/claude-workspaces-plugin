@@ -341,6 +341,20 @@ describe('describeEvent', () => {
     expect(s).toContain('g-pr');
   });
 
+  it('an answer that left questions open says so, rather than "answered"', () => {
+    const row = {
+      event: 'decision.answered',
+      ts: NOW,
+      taskId: 't-1',
+      answer: 'Run it at 04:00.',
+      actor: { id: 'known-reader', name: 'Reader', kind: 'known' },
+    };
+    expect(describeEvent(row, titleOf)).toBe('Reader answered “Fix ranking”: “Run it at 04:00.”');
+    expect(describeEvent({ ...row, openParts: ['Who gets the alert?'] }, titleOf)).toBe(
+      'Reader answered part of “Fix ranking”: “Run it at 04:00.” — still open: “Who gets the alert?”',
+    );
+  });
+
   it('names a description rewrite, rather than printing the raw event slug', () => {
     // The feed's fallback prints the event name for anything the table
     // misses, so this row would have "worked" — as the literal string

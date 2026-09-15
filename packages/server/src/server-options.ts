@@ -1,3 +1,4 @@
+import type { AnswerCoverage } from './answer-coverage.ts';
 /**
  * Everything `createServer` can be handed, and what each option MEANS.
  *
@@ -336,6 +337,13 @@ export interface ServerOptions {
    */
   reviewJudge?: ReviewJudge;
   /**
+   * Whether an answer covered every question a review item asks. **No
+   * default**, for the same reason: omitted, every answer closes its item,
+   * as before the check existed. `bin.ts` constructs the real one
+   * (`haikuAnswerCoverage`); tests pass a stub.
+   */
+  answerCoverage?: AnswerCoverage;
+  /**
    * The words this server's prompts run on, and the settings page's writes.
    *
    * UNLIKE the judges above this one HAS a default: `createServer` builds a
@@ -363,6 +371,12 @@ export interface ServerOptions {
    * is one.
    */
   heldReviewItemMs?: number;
+  /**
+   * How long a held review item may stand UNREVISED before it goes to the
+   * reader's queue as filed (default `REVIEW_GATE_RELEASE_MS`, one hour). A
+   * test seam: the release runs on the stall tick, and no test waits an hour.
+   */
+  heldReleaseMs?: number;
   /**
    * How long a row must stay stalled before the wake says it AGAIN (default
    * `STALL_REPEAT_DEFAULT_MS`, four hours; `CW_STALL_REPEAT_HOURS` sets it on
@@ -527,6 +541,18 @@ export interface ServerOptions {
    * see middleware/browser-origin.ts.
    */
   allowedOrigins?: string[];
+  /**
+   * The TAILNET WIDGET DOOR's hostnames (middleware/widget-door.ts): under
+   * access-only, a page served on one of these names may load the widget and,
+   * with a board token, reach that one board's comment routes and socket.
+   *
+   * Unset — every deployment — derives it from this machine's MagicDNS name,
+   * the same discovery that already names the tailnet host elsewhere, so the
+   * door needs no configuration of its own. Tests name a fictional host. An
+   * empty list closes the door. Where the popup signs in is derived too: the
+   * first of `proxiedTrustedHosts`, over https.
+   */
+  widgetDoorHosts?: readonly string[];
   /**
    * The external base URL this deployment is reached on, when something in
    * front terminates TLS (`tailscale serve` → this process on loopback).

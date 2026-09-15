@@ -29,11 +29,12 @@ import {
   mintSession,
   verifySession as verifyEmailSession,
 } from '../auth/session.ts';
-import { mintWidgetToken } from '../auth/widget-token.ts';
+import { mintBoardWidgetToken, mintWidgetToken } from '../auth/widget-token.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { Identities, IdentityRecord } from '../identities.ts';
 import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
@@ -195,6 +196,12 @@ export interface AuthShareRoutesContext {
   emailSessionKey: () => string;
   /** The HMAC key behind widget popup tokens. */
   widgetTokenKey: () => string;
+  /** The tailnet widget door's hostnames — the pages a BOARD token may be
+   *  minted for (middleware/widget-door.ts). */
+  widgetDoorHosts: () => readonly string[];
+  /** Whether this email's role on this board lets them comment — the only
+   *  people a board token is minted for. */
+  mayCommentOnBoard: (workspaceId: string, email: string) => boolean;
   /** Whether the request really reached us over https. */
   isSecureRequest: (req: Request) => boolean;
   /** The origin policy for a request. */
@@ -216,6 +223,8 @@ export interface AuthShareRouteRequest {
    *  then the session cookie. The same resolution the write gate uses, so
    *  the me-menu and the gate cannot disagree about who is signed in. */
   provenIdentityFor: () => IdentityRecord | null;
+  /** The identity Cloudflare Access proved, never a session cookie's. */
+  accessIdentityFor: () => IdentityRecord | null;
 }
 
 /**
@@ -249,11 +258,20 @@ export async function handleAuthShareRoutes(
     clientKeyFor,
     emailSessionKey,
     widgetTokenKey,
+    widgetDoorHosts,
+    mayCommentOnBoard,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
   } = ctx;
-  const { req, pathname, widgetIdentity, browserProvedNobody, provenIdentityFor } = rq;
+  const {
+    req,
+    pathname,
+    widgetIdentity,
+    browserProvedNobody,
+    provenIdentityFor,
+    accessIdentityFor,
+  } = rq;
 
   // --- The widget popup-token handshake ---
   // The popup page itself. The handshake is popup-only: framed, it
@@ -278,10 +296,38 @@ export async function handleAuthShareRoutes(
     if (callerOrigin !== null && callerOrigin !== policyFor(req).requestOrigin) {
       return j(403, { error: 'same_origin_only' });
     }
-    const rec = sessionIdentityFor(req);
-    if (!rec) return j(401, { error: 'not_signed_in' });
     const body = await safeJson(req);
     const target = typeof body?.origin === 'string' ? body.origin : '';
+    // A page on the tailnet widget door gets a BOARD token instead: one board,
+    // 24 hours, and no session behind it. Only Cloudflare Access may prove the
+    // person — it is how the popup on the public host is reached at all — and
+    // never a session cookie: a board token outlives a logout, so minting one
+    // from a cookie would undo the rule below that a token dies with its
+    // session. The allowlist is the door's own hostnames; the board must
+    // exist, because the token names it exactly.
+    if (target !== '' && isWidgetDoorOrigin(target, widgetDoorHosts())) {
+      const person = accessIdentityFor();
+      if (!person) return j(401, { error: 'not_signed_in' });
+      const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : '';
+      if (workspaceId === '') return j(400, { error: 'unknown_workspace' });
+      // Access proves WHO, not what they may do here: its policy admits
+      // collaborators too. Only the board's owner, or someone whose role on
+      // it lets them comment, gets a token — and before the existence check,
+      // so a non-member cannot learn which board ids are real.
+      if (!person.email || !mayCommentOnBoard(workspaceId, person.email)) {
+        return j(403, { error: 'forbidden' });
+      }
+      if (!taskStore.getWorkspace(workspaceId)) {
+        return j(400, { error: 'unknown_workspace' });
+      }
+      const token = mintBoardWidgetToken(
+        { identityId: person.id, workspaceId, origin: target },
+        widgetTokenKey(),
+      );
+      return j(200, { ok: true, token, user: userForIdentity(person), origin: target });
+    }
+    const rec = sessionIdentityFor(req);
+    if (!rec) return j(401, { error: 'not_signed_in' });
     // The origin the popup will postMessage the token TO. Validated
     // against the same policy that governs which pages may write —
     // an origin that could not post a comment cannot receive a token

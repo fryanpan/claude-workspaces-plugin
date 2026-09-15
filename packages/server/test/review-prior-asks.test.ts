@@ -27,17 +27,15 @@ function source(over: Partial<PriorAskSource>): PriorAskSource {
 }
 
 describe('the two filing channels see each other', () => {
-  // The measured failure: the same question reached the reader through the
-  // ticket channel, was answered, and reached him again two hours later
-  // through the thread channel, which the ticket store cannot read.
+  // A question open on the ticket channel is invisible to the thread channel,
+  // which the ticket store cannot read — so the gather reads both.
   const TICKET_ITEM = {
     id: 'r-first',
     createdAt: NOW - 5 * HOUR,
     review: { headline: 'Eleven documents have no address — archive or rehome?' },
-    answer: { text: 'Archive them', by: 'Reader', ts: NOW - 4 * HOUR },
   };
 
-  it('hands an item filed on a THREAD the question already answered on the TICKET', () => {
+  it('hands an item filed on a THREAD the question still open on the TICKET', () => {
     const asks = priorAsksFor(
       { kind: 'task', taskId: 't-1', exceptCommentId: 'c-new' },
       source({ getTask: () => taskWith([TICKET_ITEM]) }),
@@ -45,7 +43,6 @@ describe('the two filing channels see each other', () => {
     );
     expect(asks).toHaveLength(1);
     expect(asks[0]?.headline).toBe('Eleven documents have no address — archive or rehome?');
-    expect(asks[0]?.answer).toBe('Archive them');
     // The id the judge quotes in a hold is the ticket item's own.
     expect(asks[0]?.id).toBe('r-first');
   });
@@ -130,42 +127,35 @@ describe('which history is worth the prompt tokens', () => {
     const old = {
       id: 'r-old',
       createdAt: NOW - PRIOR_ASK_WINDOW_MS - HOUR,
-      review: { headline: 'Settled last quarter' },
-      answer: { text: 'Yes', by: 'Reader', ts: NOW },
+      review: { headline: 'Filed last quarter' },
     };
     const fresh = {
       id: 'r-new',
       createdAt: NOW - PRIOR_ASK_WINDOW_MS + HOUR,
-      review: { headline: 'Settled just inside the window' },
+      review: { headline: 'Filed just inside the window' },
     };
     const asks = priorAsksFor(
       { kind: 'task', taskId: 't-1' },
       source({ getTask: () => taskWith([old, fresh]) }),
       NOW,
     );
-    expect(asks.map((a) => a.headline)).toEqual(['Settled just inside the window']);
+    expect(asks.map((a) => a.headline)).toEqual(['Filed just inside the window']);
   });
 
-  it('caps the list, and keeps the ANSWERED ones when it has to cut', () => {
-    const open = Array.from({ length: PRIOR_ASK_MAX }, (_, i) => ({
+  it('caps the list at the newest open questions', () => {
+    const open = Array.from({ length: PRIOR_ASK_MAX + 2 }, (_, i) => ({
       id: `r-open-${i}`,
-      // Newest of all, so a cut that ignored answers would keep only these.
       createdAt: NOW - 60_000 * (i + 1),
       review: { headline: `open ${i}` },
     }));
-    const answered = {
-      id: 'r-answered',
-      createdAt: NOW - 4 * HOUR,
-      review: { headline: 'the one that makes a repeat a repeat' },
-      answer: { text: 'Archive them', by: 'Reader', ts: NOW - 3 * HOUR },
-    };
     const asks = priorAsksFor(
       { kind: 'task', taskId: 't-1' },
-      source({ getTask: () => taskWith([...open, answered]) }),
+      source({ getTask: () => taskWith(open) }),
       NOW,
     );
     expect(asks).toHaveLength(PRIOR_ASK_MAX);
-    expect(asks[0]?.headline).toBe('the one that makes a repeat a repeat');
+    expect(asks[0]?.headline).toBe('open 0');
+    expect(asks.map((a) => a.headline)).not.toContain(`open ${PRIOR_ASK_MAX}`);
   });
 
   it('orders what it keeps newest first', () => {
@@ -181,18 +171,6 @@ describe('which history is worth the prompt tokens', () => {
       NOW,
     );
     expect(asks.map((a) => a.headline)).toEqual(['newer', 'older']);
-  });
-
-  it('marks an unanswered question as carrying no answer', () => {
-    const asks = priorAsksFor(
-      { kind: 'task', taskId: 't-1' },
-      source({
-        getTask: () =>
-          taskWith([{ id: 'r-a', createdAt: NOW - HOUR, review: { headline: 'still open' } }]),
-      }),
-      NOW,
-    );
-    expect(asks[0]?.answer).toBeUndefined();
   });
 });
 
@@ -250,7 +228,10 @@ describe('an item the reader was never shown is not a question they were asked',
     expect(asks).toEqual([]);
   });
 
-  it('keeps one the reader ANSWERED, whatever its verdict — the control', () => {
+  it('leaves out an ANSWERED item on either channel, whatever else is true of it', () => {
+    // 2026-09-14: three of five items were held as repeats of answered items
+    // whose answers did not settle them. The judge cannot match on an ask it
+    // is never shown, so an answer takes the ask out of the evidence.
     const asks = priorAsksFor(
       { kind: 'task', taskId: 't-1' },
       source({
@@ -259,9 +240,9 @@ describe('an item the reader was never shown is not a question they were asked',
             {
               id: 'r-a',
               createdAt: NOW - HOUR,
-              review: { headline: 'answered then retracted', withdrawnAt: NOW },
+              review: { headline: 'answered on the ticket' },
               answer: { text: 'Do it', by: 'Reader', ts: NOW - 30 * 60_000 },
-              judge: held,
+              judge: { verdict: 'ok', at: NOW - HOUR },
             },
           ]),
         listThreads: () => [
@@ -273,18 +254,19 @@ describe('an item the reader was never shown is not a question they were asked',
                 headline: 'answered on the thread',
                 answeredAt: NOW - 1000,
                 answerText: 'Yes',
-                judge: held,
               },
+            },
+            {
+              id: 'c-tapped',
+              ts: NOW - HOUR,
+              review: { headline: 'answered by a tap', answeredWith: 'o-1' },
             },
           ]),
         ],
       }),
       NOW,
     );
-    expect(asks.map((a) => a.headline).sort()).toEqual([
-      'answered on the thread',
-      'answered then retracted',
-    ]);
+    expect(asks).toEqual([]);
   });
 
   it('still hands over an open item the gate passed — the other control', () => {

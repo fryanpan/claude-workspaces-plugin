@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   SECRET_ACCOUNT,
+  SECRET_COMMAND_LINE_BUDGET,
   SECRET_SERVICE_PREFIX,
   SECRET_VALUE_MAX_CHARS,
   type SecretRunResult,
@@ -8,6 +9,7 @@ import {
   type SecretWriteFailure,
   encodeSecretValue,
   secretReadCommand,
+  secretValueFits,
   storeSecret,
 } from '../src/secret-store.ts';
 
@@ -15,109 +17,206 @@ import {
  *  look like a real value, in the source or in a failure message. */
 const PLACEHOLDER = 'not-a-real-value-1';
 
+/** A 200-character placeholder: past the 96 characters whose base64 still
+ *  fit the old prompt's 128, and nothing like a real key. */
+const LONG_PLACEHOLDER = 'not-a-real-value-'.repeat(12).slice(0, 200);
+
+/** The longest service name a review item may declare. */
+const LONGEST_SERVICE = `r${'x'.repeat(63)}`;
+
 interface Call {
   file: string;
   args: string[];
   stdin: string;
 }
 
+/** The prompt reads at most this much of a line — measured 2026-09-14 with
+ *  129, 144 and 200-character inputs, each stored as 128. */
+const PROMPT_READ_MAX = 128;
+/** `security -i` cuts a command line here and runs the rest as a command of
+ *  its own — measured the same day. */
+const INTERACTIVE_LINE_MAX = 4095;
+
+/** Split one `security -i` command line into words the way the tool does for
+ *  what this module sends: spaces separate, double quotes group, and a quote
+ *  left open at a cut line runs to the end. */
+function words(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  let started = false;
+  for (const ch of line) {
+    if (ch === '"') {
+      quoted = !quoted;
+      started = true;
+    } else if (ch === ' ' && !quoted) {
+      if (started) out.push(cur);
+      cur = '';
+      started = false;
+    } else {
+      cur += ch;
+      started = true;
+    }
+  }
+  if (started) out.push(cur);
+  return out;
+}
+
+function flag(args: string[], name: string): string | undefined {
+  const at = args.indexOf(name);
+  return at >= 0 ? args[at + 1] : undefined;
+}
+
 /**
- * A stand-in for `security` that RECORDS rather than stores.
+ * A stand-in for `security` that behaves as the real one was MEASURED to.
  *
  * It is the whole point of the runner being injected: the thing worth
- * asserting is where the value went, and only something standing in the
- * command's place can see that. It answers a read-back with whatever the
- * write put in, so the happy path exercises the verification step for real.
+ * asserting is where the value went and what the store kept, and only
+ * something standing in the command's place can see both. Both write paths
+ * are modelled with their measured caps — the prompt's 128 characters, and
+ * interactive mode's 4,095-character line with the remainder run as a command
+ * — so the old prompt path, restored into this file, stores a cut key here
+ * exactly as it did on the machine.
  */
-function fakeSecurity(
+function modelSecurity(
   overrides: { writeCode?: number; readCode?: number; readStdout?: string } = {},
-): { run: SecretRunner; calls: Call[] } {
+): { run: SecretRunner; calls: Call[]; store: Map<string, string> } {
   const calls: Call[] = [];
-  let stored: string | null = null;
+  const store = new Map<string, string>();
+  const add = (args: string[], password: string): number => {
+    if (overrides.writeCode !== undefined && overrides.writeCode !== 0) return overrides.writeCode;
+    store.set(flag(args, '-s') ?? '', password);
+    return 0;
+  };
   const run: SecretRunner = async (file, args, stdin): Promise<SecretRunResult> => {
     calls.push({ file, args, stdin });
-    if (args[0] === 'add-generic-password') {
-      const code = overrides.writeCode ?? 0;
-      if (code === 0) stored = stdin.split('\n')[0] ?? '';
+    const [verb] = args;
+    if (verb === '-i') {
+      let code = 0;
+      for (const whole of stdin.split('\n').filter((l) => l !== '')) {
+        for (let at = 0; at < whole.length; at += INTERACTIVE_LINE_MAX) {
+          const cmd = words(whole.slice(at, at + INTERACTIVE_LINE_MAX));
+          if (cmd[0] !== 'add-generic-password') {
+            code = 1;
+            continue;
+          }
+          const w = flag(cmd, '-w');
+          code = w === undefined ? 1 : add(cmd, w);
+        }
+      }
       return { code, stdout: '', stderr: '' };
     }
+    if (verb === 'add-generic-password') {
+      // Prompt mode: two reads, each cut at the prompt's cap. Disagreeing
+      // reads store an empty password and still exit 0.
+      const [first = '', second = ''] = stdin.split('\n');
+      const a = first.slice(0, PROMPT_READ_MAX);
+      const b = second.slice(0, PROMPT_READ_MAX);
+      return { code: add(args, a === b ? a : ''), stdout: '', stderr: '' };
+    }
+    const service = flag(args, '-s') ?? '';
+    if (verb === 'delete-generic-password') {
+      return { code: store.delete(service) ? 0 : 44, stdout: '', stderr: '' };
+    }
+    const held = store.get(service);
     return {
-      code: overrides.readCode ?? 0,
-      stdout: overrides.readStdout ?? `${stored ?? ''}\n`,
+      code: overrides.readCode ?? (held === undefined ? 44 : 0),
+      stdout: overrides.readStdout ?? (held === undefined ? '' : `${held}\n`),
       stderr: '',
     };
   };
-  return { run, calls };
+  return { run, calls, store };
 }
 
+const stored = (service: string) => `${SECRET_SERVICE_PREFIX}${service}`;
+
 describe('the value goes on stdin and nowhere else', () => {
-  test('never appears in the argument list', async () => {
-    const fake = fakeSecurity();
-    expect(await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run)).toEqual({ ok: true });
-    for (const call of fake.calls) {
-      expect(call.args.join(' ')).not.toContain(PLACEHOLDER);
-      expect(call.file).not.toContain(PLACEHOLDER);
-    }
-    // …and it did travel, so the assertion above is not passing vacuously on
-    // a value that never reached the runner at all.
-    expect(fake.calls[0]?.stdin).toContain(encodeSecretValue(PLACEHOLDER));
-  });
-
-  test('is written twice, because one line stores an empty password', async () => {
-    const fake = fakeSecurity();
-    await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run);
-    const encoded = encodeSecretValue(PLACEHOLDER);
-    expect(fake.calls[0]?.stdin).toBe(`${encoded}\n${encoded}\n`);
-  });
-
-  test('sends a MULTI-LINE value as one line, and stores it whole', async () => {
-    // The blocker the UX walk found (2026-09-12): a three-line paste — an SSH
-    // key, a service-account file — arrived joined into one 52-character line
-    // and the item said "Secrets saved". The browser input had stripped the
-    // breaks before the server's newline refusal could fire.
-    //
-    // The value is encoded now, so the prompt sees one line whatever the
-    // reader pasted. Measured on macOS 26.2 first: the raw three-line attempt
-    // printed "passwords don't match" three times and exited 1 with nothing
-    // stored, so joining was never the alternative to refusing — it was the
-    // alternative to working.
-    const threeLines = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
-    const fake = fakeSecurity();
-    expect(await storeSecret('riverbend-weather-key', threeLines, fake.run)).toEqual({ ok: true });
-    // One line to the prompt, twice — the confirm read sees the same thing.
-    const stdin = fake.calls[0]?.stdin ?? '';
-    expect(stdin.split('\n').filter((l) => l !== '')).toHaveLength(2);
-    // …and what went down it decodes back to every line the reader typed. The
-    // read-back inside `storeSecret` already compared it; this says the value
-    // survived rather than that two equal wrong things were compared.
-    const sent = stdin.split('\n')[0] ?? '';
-    expect(Buffer.from(sent, 'base64').toString('utf8')).toBe(threeLines);
-    expect(Buffer.from(sent, 'base64').toString('utf8').split('\n')).toHaveLength(3);
-
-    // CONTROL: the same runner with a store that hands back something else
-    // refuses, so the pass above is the read-back agreeing and not the check
-    // being absent.
-    const wrong = fakeSecurity({ readStdout: 'c29tZXRoaW5nLWVsc2U=\n' });
-    expect(await storeSecret('riverbend-weather-key', threeLines, wrong.run)).toEqual({
-      ok: false,
-      error: 'verify-failed',
+  test('never appears in any argument list, and did travel', async () => {
+    const fake = modelSecurity();
+    expect(await storeSecret('riverbend-weather-key', LONG_PLACEHOLDER, fake.run)).toEqual({
+      ok: true,
     });
+    const encoded = encodeSecretValue(LONG_PLACEHOLDER);
+    for (const call of fake.calls) {
+      for (const needle of [LONG_PLACEHOLDER, encoded]) {
+        expect(call.args.join(' ')).not.toContain(needle);
+        expect(call.file).not.toContain(needle);
+      }
+    }
+    // The write's whole argument list is the mode switch: the command, and
+    // the value in it, are on stdin.
+    expect(fake.calls[0]?.args).toEqual(['-i']);
+    // …and it did travel, so the assertions above are not passing vacuously
+    // on a value that never reached the runner at all.
+    expect(fake.calls[0]?.stdin).toContain(encoded);
   });
 
-  test('passes -w last and with no argument, so the command prompts', async () => {
-    const fake = fakeSecurity();
+  test('a failed check deletes by name, still with no value in the arguments', async () => {
+    const fake = modelSecurity({ readStdout: '\n' });
     await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run);
-    const args = fake.calls[0]?.args ?? [];
-    expect(args).toEqual([
-      'add-generic-password',
-      '-U',
+    const del = fake.calls.find((c) => c.args[0] === 'delete-generic-password');
+    expect(del?.args).toEqual([
+      'delete-generic-password',
       '-a',
       SECRET_ACCOUNT,
       '-s',
-      `${SECRET_SERVICE_PREFIX}riverbend-weather-key`,
-      '-w',
+      stored('riverbend-weather-key'),
     ]);
-    expect(args[args.length - 1]).toBe('-w');
+    expect(del?.stdin).toBe('');
+  });
+
+  test('sends one command line whose only reader-supplied part is base64 in quotes', async () => {
+    // A value whose encoding is long and uses every character base64 has
+    // beyond letters — `+`, `/` and padding — so a quoting slip would show.
+    const bytes = String.fromCharCode(...Array.from({ length: 200 }, (_, i) => 0xf8 + (i % 8)));
+    const fake = modelSecurity();
+    expect(await storeSecret('riverbend-weather-key', bytes, fake.run)).toEqual({ ok: true });
+    const lines = (fake.calls[0]?.stdin ?? '').split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe('');
+    const encoded = encodeSecretValue(bytes);
+    expect(encoded).toMatch(/[+/]/);
+    expect(lines[0]).toBe(
+      `add-generic-password -U -a ${SECRET_ACCOUNT} -s ${stored('riverbend-weather-key')} -w "${encoded}"`,
+    );
+    expect(fake.store.get(stored('riverbend-weather-key'))).toBe(encoded);
+  });
+});
+
+describe('a value of any real length is stored whole', () => {
+  test('a 200-character value reads back identical', async () => {
+    // The failure of 2026-09-14: a real key of about a hundred characters,
+    // base64 past the prompt's 128, stored cut and reported as a failed save.
+    const fake = modelSecurity();
+    expect(await storeSecret('riverbend-weather-key', LONG_PLACEHOLDER, fake.run)).toEqual({
+      ok: true,
+    });
+    const held = fake.store.get(stored('riverbend-weather-key')) ?? '';
+    expect(Buffer.from(held, 'base64').toString('utf8')).toBe(LONG_PLACEHOLDER);
+  });
+
+  test('the longest value allowed, under the longest name, fits the line with room to spare', async () => {
+    const value = 'n'.repeat(SECRET_VALUE_MAX_CHARS);
+    expect(secretValueFits(LONGEST_SERVICE, value)).toBe(true);
+    const fake = modelSecurity();
+    expect(await storeSecret(LONGEST_SERVICE, value, fake.run)).toEqual({ ok: true });
+    const line = (fake.calls[0]?.stdin ?? '').replace(/\n$/, '');
+    expect(line.length).toBeLessThanOrEqual(SECRET_COMMAND_LINE_BUDGET);
+    expect(SECRET_COMMAND_LINE_BUDGET).toBeLessThan(INTERACTIVE_LINE_MAX);
+    expect(Buffer.from(fake.store.get(stored(LONGEST_SERVICE)) ?? '', 'base64').toString()).toBe(
+      value,
+    );
+  });
+
+  test('sends a MULTI-LINE value as one line, and stores it whole', async () => {
+    // A three-line paste — an SSH key, a service-account file — is encoded,
+    // so the store sees one line whatever the reader pasted.
+    const threeLines = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
+    const fake = modelSecurity();
+    expect(await storeSecret('riverbend-weather-key', threeLines, fake.run)).toEqual({ ok: true });
+    const held = fake.store.get(stored('riverbend-weather-key')) ?? '';
+    expect(Buffer.from(held, 'base64').toString('utf8').split('\n')).toHaveLength(3);
+    expect(Buffer.from(held, 'base64').toString('utf8')).toBe(threeLines);
   });
 });
 
@@ -126,19 +225,26 @@ describe('what it refuses before running anything', () => {
     ['a name that is not a legal service name', 'riverbend weather key', 'bad-service'],
     ['a name that would read as a flag', '-w', 'bad-service'],
   ] as Array<[string, string, SecretWriteFailure]>)('refuses %s', async (_why, service, error) => {
-    const fake = fakeSecurity();
+    const fake = modelSecurity();
     expect(await storeSecret(service, PLACEHOLDER, fake.run)).toEqual({ ok: false, error });
     expect(fake.calls).toHaveLength(0);
   });
 
   test.each([
     ['an empty value', '', 'bad-value'],
-    // A NUL is still refused, and for a reason that is not the prompt's: it
-    // cannot survive the shell pipeline an agent reads the value back
-    // through, so storing one would be storing something nobody can use.
+    // A NUL is still refused: it cannot survive the shell pipeline an agent
+    // reads the value back through.
     ['a value carrying a NUL', 'line-one\u0000line-two', 'bad-value'],
+    [
+      'a value past the character ceiling',
+      'a'.repeat(SECRET_VALUE_MAX_CHARS + 1),
+      'value-too-long',
+    ],
+    // Within the character count, past the line: each of these encodes to
+    // four bytes of base64 per character.
+    ['a value of wide characters too long for one line', '\u{1F511}'.repeat(900), 'value-too-long'],
   ] as Array<[string, string, SecretWriteFailure]>)('refuses %s', async (_why, value, error) => {
-    const fake = fakeSecurity();
+    const fake = modelSecurity();
     expect(await storeSecret('riverbend-weather-key', value, fake.run)).toEqual({
       ok: false,
       error,
@@ -146,38 +252,46 @@ describe('what it refuses before running anything', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  test('refuses a value past the ceiling', async () => {
-    const fake = fakeSecurity();
-    const long = 'a'.repeat(SECRET_VALUE_MAX_CHARS + 1);
-    expect(await storeSecret('riverbend-weather-key', long, fake.run)).toEqual({
-      ok: false,
-      error: 'value-too-long',
-    });
-    expect(fake.calls).toHaveLength(0);
+  test('the ceiling is exact: one character under stores', async () => {
+    const fake = modelSecurity();
+    const atCeiling = 'a'.repeat(SECRET_VALUE_MAX_CHARS);
+    expect(await storeSecret('riverbend-weather-key', atCeiling, fake.run)).toEqual({ ok: true });
   });
 });
 
 describe('saved means read back, not exit 0', () => {
-  test('reports a failure when the store kept something else', async () => {
-    // The measured failure mode: the command exits 0 having stored an empty
-    // password. Exit code alone would call this a success.
-    const fake = fakeSecurity({ readStdout: '\n' });
+  test('a store that kept something else is a failure, and keeps nothing', async () => {
+    // The measured failure mode: the command exits 0 having stored a value
+    // that is not the reader's. Exit code alone would call this a success —
+    // and the entry left behind would be read by an agent as the key.
+    const fake = modelSecurity({ readStdout: 'c29tZXRoaW5nLWVsc2U=\n' });
     expect(await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run)).toEqual({
       ok: false,
       error: 'verify-failed',
     });
+    expect(fake.store.has(stored('riverbend-weather-key'))).toBe(false);
   });
 
-  test('reports a failure when the read-back itself fails', async () => {
-    const fake = fakeSecurity({ readCode: 44 });
+  test('a failed read-back is a failure, and keeps nothing', async () => {
+    const fake = modelSecurity({ readCode: 44 });
     expect(await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run)).toEqual({
       ok: false,
       error: 'verify-failed',
     });
+    expect(fake.store.has(stored('riverbend-weather-key'))).toBe(false);
+  });
+
+  test('a store that confirms leaves the entry in place', async () => {
+    // CONTROL for the two above: the delete is the failed check's, not a
+    // step every write takes.
+    const fake = modelSecurity();
+    expect(await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run)).toEqual({ ok: true });
+    expect(fake.store.has(stored('riverbend-weather-key'))).toBe(true);
+    expect(fake.calls.some((c) => c.args[0] === 'delete-generic-password')).toBe(false);
   });
 
   test('does not attempt a read-back when the write failed', async () => {
-    const fake = fakeSecurity({ writeCode: 1 });
+    const fake = modelSecurity({ writeCode: 1 });
     expect(await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run)).toEqual({
       ok: false,
       error: 'write-failed',
@@ -186,7 +300,7 @@ describe('saved means read back, not exit 0', () => {
   });
 
   test('a failure tag carries no value', async () => {
-    const fake = fakeSecurity({ readStdout: '\n' });
+    const fake = modelSecurity({ readStdout: '\n' });
     const res = await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run);
     expect(JSON.stringify(res)).not.toContain(PLACEHOLDER);
   });
@@ -200,10 +314,6 @@ describe('the read-back command handed to an agent', () => {
   });
 
   test('decodes exactly what the writer would have stored', () => {
-    // The two halves have to agree or an agent reads a value that is not the
-    // one the reader typed — which is the failure encoding could introduce if
-    // only one end knew about it. Run the command's own decode over the
-    // writer's own encode, on a value with newlines in it.
     const threeLines = 'aaa-not-real-1\nbbb-not-real-2\nccc-not-real-3';
     expect(secretReadCommand('riverbend-weather-key')).toContain('base64 --decode');
     expect(Buffer.from(encodeSecretValue(threeLines), 'base64').toString('utf8')).toBe(threeLines);
@@ -220,22 +330,19 @@ describe('the namespace a stored name lands in', () => {
    * actually reaches the command rather than the one the card showed.
    */
   test("a name that collides with the server's own configuration is stored elsewhere", async () => {
-    const fake = fakeSecurity();
+    const fake = modelSecurity();
     await storeSecret('cloudflare-api-token', PLACEHOLDER, fake.run);
-    const written = fake.calls[0]?.args ?? [];
-    expect(written).toContain(`${SECRET_SERVICE_PREFIX}cloudflare-api-token`);
-    // The bare name reaches no argument of either command, on its own.
-    expect(written).not.toContain('cloudflare-api-token');
+    expect([...fake.store.keys()]).toEqual([stored('cloudflare-api-token')]);
+    // The bare name reaches no word of either command, on its own.
+    expect(words(fake.calls[0]?.stdin.trim() ?? '')).not.toContain('cloudflare-api-token');
     expect(fake.calls[1]?.args ?? []).not.toContain('cloudflare-api-token');
   });
 
   test('the read-back reads the same entry the write wrote', async () => {
-    const fake = fakeSecurity();
+    const fake = modelSecurity();
     await storeSecret('riverbend-weather-key', PLACEHOLDER, fake.run);
-    const wroteAt = (fake.calls[0]?.args ?? []).indexOf('-s');
-    const readAt = (fake.calls[1]?.args ?? []).indexOf('-s');
-    expect(fake.calls[0]?.args[wroteAt + 1]).toBe(fake.calls[1]?.args[readAt + 1] ?? '');
-    // And it is the namespaced one, not the bare name, on both.
-    expect(fake.calls[0]?.args[wroteAt + 1]).toBe(`${SECRET_SERVICE_PREFIX}riverbend-weather-key`);
+    const wrote = flag(words(fake.calls[0]?.stdin.trim() ?? ''), '-s');
+    expect(wrote).toBe(stored('riverbend-weather-key'));
+    expect(flag(fake.calls[1]?.args ?? [], '-s')).toBe(wrote ?? '');
   });
 });

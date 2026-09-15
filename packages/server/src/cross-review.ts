@@ -188,6 +188,8 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
 
   const offTask = taskStore.onEvent((event) => {
     if (event.type !== 'decision.answered') return;
+    // A partial answer leaves the ask open; it is recorded when it closes.
+    if (event.openParts !== undefined && event.openParts.length > 0) return;
     later(() => {
       const task = taskStore.getTask(event.taskId);
       if (!task) return;
@@ -233,6 +235,7 @@ export function createCrossReview(ctx: CrossReviewContext): CrossReview {
   };
 
   const offDoc = docStore.onReviewAnswered((event) => {
+    if (event.openParts !== undefined && event.openParts.length > 0) return;
     later(() => {
       const comment = docStore
         .listThreads(event.docId)

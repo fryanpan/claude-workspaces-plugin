@@ -184,6 +184,13 @@ export type WsCtx = {
    * seen in the doc is a worse review surface, not a safer one.
    */
   readOnly?: boolean;
+  /**
+   * The board widget token and page origin a tailnet widget door socket was
+   * admitted with. Like `shareId`: the token is checked once at the upgrade,
+   * so without this a socket outlived the token's expiry, its watermark and
+   * its identity's archiving. Absent on every other socket.
+   */
+  widgetDoorGrant?: { token: string; origin: string };
 };
 
 export type FeedbackWs = ServerWebSocket<WsCtx>;
@@ -561,7 +568,13 @@ export class DocStore {
   /** The thread verbs, and this store seen through the contract they need. */
   private readonly docThreads = new DocThreads(this.docThreadPersistence());
   private readonly reviewAnsweredListeners = new Set<
-    (event: { docId: string; threadId: string; commentId: string; ts: number }) => void
+    (event: {
+      docId: string;
+      threadId: string;
+      commentId: string;
+      ts: number;
+      openParts?: string[];
+    }) => void
   >();
   private readonly commentPostedListeners = new Set<
     (event: {
@@ -2564,7 +2577,12 @@ export class DocStore {
     author: User,
     text: string,
     optionId?: string,
-    opts?: { generate?: boolean; onlyIfUnanswered?: boolean; via?: WriteVia },
+    opts?: {
+      generate?: boolean;
+      onlyIfUnanswered?: boolean;
+      via?: WriteVia;
+      openParts?: string[];
+    },
   ): Promise<{ ok: true; thread: Thread } | { ok: false; error: string }> {
     const res = await this.docThreads.answerReviewItem(
       docId,
@@ -2577,7 +2595,13 @@ export class DocStore {
     );
     if (res.ok) {
       for (const listener of this.reviewAnsweredListeners) {
-        listener({ docId, threadId, commentId, ts: Date.now() });
+        listener({
+          docId,
+          threadId,
+          commentId,
+          ts: Date.now(),
+          ...(opts?.openParts && opts.openParts.length > 0 ? { openParts: opts.openParts } : {}),
+        });
       }
     }
     return res;
@@ -2587,7 +2611,14 @@ export class DocStore {
    *  voice) reaches `answerReviewItem`, so this is where a listener hears all
    *  of them. Returns the unsubscribe. */
   onReviewAnswered(
-    listener: (event: { docId: string; threadId: string; commentId: string; ts: number }) => void,
+    listener: (event: {
+      docId: string;
+      threadId: string;
+      commentId: string;
+      ts: number;
+      /** Set when the answer was partial: the item is still open. */
+      openParts?: string[];
+    }) => void,
   ): () => void {
     this.reviewAnsweredListeners.add(listener);
     return () => this.reviewAnsweredListeners.delete(listener);
@@ -3119,6 +3150,10 @@ export class DocStore {
 
   closeSocketsForDeadShares(isLive: (shareId: string) => boolean): string[] {
     return this.fanout.closeSocketsForDeadShares(isLive);
+  }
+
+  closeSocketsForDeadWidgetGrants(isLive: (token: string, origin: string) => boolean): number {
+    return this.fanout.closeSocketsForDeadWidgetGrants(isLive);
   }
 
   /** Re-reconcile a workspace against disk, keeping docIds (and therefore

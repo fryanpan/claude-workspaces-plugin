@@ -40,6 +40,7 @@ function fakeClient(docId: string): FakeClient {
     onReady: () => {},
     onStatus: () => {},
     onReset: () => {},
+    reconnect: () => {},
   };
   return c;
 }

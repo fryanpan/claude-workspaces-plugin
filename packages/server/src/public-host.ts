@@ -136,12 +136,27 @@ export function normalizePublicBaseUrl(raw: string | null | undefined): string |
  * picks up the MagicDNS name without a restart.
  */
 let cachedLocalNames: string[] | undefined;
+let cachedTailnetName: string | null = null;
 let localNamesAt = 0;
 export function localHostnames(): string[] {
   const now = Date.now();
   if (cachedLocalNames !== undefined && now - localNamesAt < HOST_TTL_MS) return cachedLocalNames;
   const ts = tailscaleHost();
+  cachedTailnetName = ts;
   cachedLocalNames = [...(ts ? [ts] : []), ...lanHostnames()];
   localNamesAt = now;
   return cachedLocalNames;
+}
+
+/**
+ * This machine's MagicDNS name alone, or null — from the same cache as
+ * `localHostnames()`, so asking costs no second `tailscale status`.
+ *
+ * Separate because one caller needs the tailnet name and not the LAN names:
+ * the tailnet widget door (middleware/widget-door.ts) is a door on the private
+ * network Bryan's devices share, and a LAN IP is not that network.
+ */
+export function tailnetHostname(): string | null {
+  localHostnames();
+  return cachedTailnetName;
 }

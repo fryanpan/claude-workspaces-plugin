@@ -52,6 +52,7 @@ import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware
 import { MountStore } from './mount-store.ts';
 import { spokenLinkRef } from './notes-link-intent.ts';
 import { writeNotesMethod } from './notes-method-store.ts';
+import { fileOnMeetingDoc } from './notes-quality-review.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import {
@@ -62,7 +63,7 @@ import {
 import { parkNoteText } from './park-note.ts';
 import { malformedPathSegment } from './path-params.ts';
 import { createPromptStore } from './prompt-store.ts';
-import { publicBaseUrl } from './public-host.ts';
+import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
 import { CalendarConnectionStore, CalendarSyncConsumer } from './recall-calendar.ts';
@@ -77,6 +78,7 @@ import {
   readDocArchiveManifest,
 } from './review-archive.ts';
 import { createReviewGate } from './review-gate.ts';
+import { gateOwnerItems } from './review-items/done-when-owner.ts';
 import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
@@ -267,8 +269,9 @@ export interface ServerHandle {
    *  (dispatch-registry.ts). Exposed for the same reason `agentWatches` is. */
   dispatches: DispatchRegistry;
   shares: Shares | null;
-  /** Hang up every websocket and SSE stream whose share is no longer live.
-   *  Runs on a 60s interval; exposed so tests exercise the real sweep. */
+  /** Hang up every websocket and SSE stream whose share is no longer live,
+   *  and every widget door socket whose board token is dead. Runs on a 60s
+   *  interval; exposed so tests exercise the real sweep. */
   sweepDeadShares: () => void;
   /**
    * The startup pass that moves rows off the removed `parked` state onto
@@ -466,9 +469,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           // start long after createServer has returned.
           captureBoard: () => taskStore,
           // Where a meeting whose notes came out badly is reported: a review
-          // item on the row the meeting's doc is linked to. Same store, same
-          // thunk reason as `captureBoard`.
-          qualityBoard: () => taskStore,
+          // item on the row the meeting's doc is linked to, or on the doc
+          // itself when no row links it. Same stores, same thunk reason as
+          // `captureBoard`.
+          qualityBoard: () => ({
+            backlinksFor: (ref) => taskStore.backlinksFor(ref),
+            addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
+            fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(docStore, docId, review, actor),
+          }),
           // Where "pull up last week's notes" looks. Board docs and when
           // each last carried a meeting; the meeting's own doc is dropped
           // by the caller, since "the last meeting" means the one before.
@@ -1131,6 +1139,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardsForDoc,
     backTargetFor,
     reviseCallFor: (address) => reviseCallFor(address),
+    releaseUnrevisedHold: (item) => releaseUnrevisedHold(item),
     ...(opts.readyNudgeIdleMs !== undefined ? { readyNudgeIdleMs: opts.readyNudgeIdleMs } : {}),
     ...(opts.stallNudgeQuietMs !== undefined ? { stallNudgeQuietMs: opts.stallNudgeQuietMs } : {}),
     ...(opts.checkInMs !== undefined ? { checkInMs: opts.checkInMs } : {}),
@@ -1143,6 +1152,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.stallEscalateMs !== undefined ? { stallEscalateMs: opts.stallEscalateMs } : {}),
     ...(spawnerAgentId !== undefined ? { spawnerAgentId } : {}),
     ...(opts.heldReviewItemMs !== undefined ? { heldReviewItemMs: opts.heldReviewItemMs } : {}),
+    ...(opts.heldReleaseMs !== undefined ? { heldReleaseMs: opts.heldReleaseMs } : {}),
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
       : {}),
@@ -1281,6 +1291,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // was injected; changes go to the attached agent (or the on-disk queue).
   const voiceRouter = new VoiceRouter({
     tasks: taskStore,
+    ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     // Read per utterance, so an edit on the settings page reaches the next
     // thing spoken without a restart.
     instructions: () => promptStore.read('voice-router'),
@@ -1635,6 +1646,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     regateDecisionWords,
     heldFields,
     askBackOnItem,
+    releaseUnrevisedHold,
   } = createReviewGate({
     docStore,
     taskStore,
@@ -1681,10 +1693,38 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * request-admission.ts. Composed here because `createIdentitySetup` below
    * takes `policyFor` as an input.
    */
+  /**
+   * The tailnet widget door (middleware/widget-door.ts): its hostnames, and
+   * where a page on one sends the person to sign in. Both derived — the
+   * MagicDNS name is re-read through the same 60s cache every host decision
+   * uses, and the sign-in origin is the operator's own Access-fronted host.
+   * No Access host means no sign-in origin, which leaves the door refusing
+   * every token-bearing route rather than pointing the popup somewhere wrong.
+   */
+  const widgetDoorHosts = (): readonly string[] => {
+    if (opts.widgetDoorHosts) return opts.widgetDoorHosts;
+    const name = tailnetHostname();
+    return name ? [name] : [];
+  };
+  const widgetSignInOrigin = proxiedTrustedHosts[0] ? `https://${proxiedTrustedHosts[0]}` : null;
+
+  /**
+   * May this person hold a board widget token for this board? Its owner (the
+   * operator allowlist), or someone whose role on it lets them comment. Both
+   * `BoardRole`s comment today, so a membership row of either kind — on the
+   * collaboration hostname's shares or through a redeemed link — is the
+   * answer; a role that could not comment would be refused here. Asked when a
+   * token is minted and on every use (`boardWidgetGrantFor`), because a
+   * membership can end inside the token's 24 hours.
+   */
+  const mayCommentOnBoard = (workspaceId: string, email: string): boolean =>
+    collabMemberOf(workspaceId, email) || shareLinkMemberOf(workspaceId, email);
+
   const { policyFor, applyCors } = createOriginPolicy({
     opts,
     proxiedTrustedHosts,
     proxiedTrustedVerifier,
+    widgetDoorHosts,
   });
 
   // --- Email-keyed identity --- see identity-setup.ts. The roster, the
@@ -1706,6 +1746,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     widgetTokenKey,
     widgetBearerOf,
     widgetTokenIdentityFor,
+    boardWidgetGrantFor,
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
@@ -1719,6 +1760,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // predicate here is only ever asked during a request.
     requestAddress: (req) => server.requestIP(req)?.address,
     policyFor,
+    mayCommentOnBoard,
   });
 
   /**
@@ -1753,6 +1795,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeDecodeSegment,
     withReviewUrl,
     recallRelay,
+    widgetDoorHosts,
+    widgetSignInOrigin,
+    widgetBearerOf,
+    boardWidgetGrantFor,
+    docTypeOf: (docId) => docStore.peekMeta(docId)?.type,
     // Forward reference on purpose: `server` is bound below, and the peer
     // address is only ever asked during a request. Same shape, and the same
     // reason, as the identity setup's own `requestAddress` above.
@@ -2058,6 +2105,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     webhooks,
     leadPresence,
     readyNudger,
+    ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     threadRequestDedup,
     summarizer,
     dataDir,
@@ -2115,6 +2163,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     clientKeyFor,
     emailSessionKey,
     widgetTokenKey,
+    widgetDoorHosts,
+    mayCommentOnBoard,
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
@@ -2131,6 +2181,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // answers 503 for both, but leaving the key out keeps "nothing wired one"
     // legible in a debugger.
     ...(opts.secretWriter ? { secretWriter: opts.secretWriter } : {}),
+    ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     taskStore,
     taskProjection,
     docStore,
@@ -2148,6 +2199,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     heldFields,
     holdersClause,
     boardsForDocIndexed,
+    externalBaseUrl,
     judgeReviewItem,
     judgeTaskDecision,
     mergedHold,
@@ -2339,7 +2391,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // union is what makes that a compile error rather than a review note.
       const gate = await admit(req, { pathname });
       if (!gate.admitted) return gate.response;
-      const { visitor, visitorShareId, visitorMemberKey, metaFor, roleFor, requireOwner } = gate;
+      const {
+        visitor,
+        visitorShareId,
+        visitorMemberKey,
+        widgetDoorGrant,
+        metaFor,
+        roleFor,
+        requireOwner,
+      } = gate;
 
       // --- REST: email login ---
       // Reachability (the host gate, Access, a share session) and identity
@@ -2362,6 +2422,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const {
         widgetIdentity,
         provenIdentityFor,
+        accessIdentityFor,
         authorFor,
         refuseCategoryAuthor,
         withTaskChips,
@@ -2400,6 +2461,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           widgetIdentity,
           browserProvedNobody,
           provenIdentityFor,
+          accessIdentityFor,
         });
         if (handled) return handled;
       }
@@ -2436,6 +2498,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         visitorShareId,
         visitorMemberKey,
         browserProvedNobody,
+        widgetDoorGrant,
       });
       if (streamed) {
         if (streamed.kind === 'upgraded') return undefined;
@@ -3074,6 +3137,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** Exactly what the interval does, named so tests drive the real thing
    *  rather than a re-implementation of it. */
   const sweepDeadShares = (): void => {
+    // A tailnet widget door socket is authorized once at its upgrade too, by
+    // a board token that expires and that the roster can revoke — and no
+    // share is needed for the door, so this half runs without one.
+    docStore.closeSocketsForDeadWidgetGrants(
+      (token, origin) => boardWidgetGrantFor(token, origin) !== null,
+    );
     if (!shares) return;
     const isLive = (id: string) => shares.findLive(id) !== null;
     docStore.closeSocketsForDeadShares(isLive);
@@ -3088,17 +3157,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore.closeSocketsForShareMembers(ended);
     sse.closeForShareMembers(ended);
   };
-  const shareSweep = shares
-    ? setInterval(() => {
-        try {
-          sweepDeadShares();
-        } catch {
-          // A sweep failure must never take the server down with it.
-        }
-      }, SHARE_SWEEP_MS)
-    : null;
+  // Armed whatever is configured: the widget door's hostname can be discovered
+  // after boot (`tailnetHostname` in public-host.ts re-asks Tailscale), and a door socket
+  // admitted then still needs this sweep. A pass with nothing open costs a
+  // walk over no sockets.
+  const shareSweep = setInterval(() => {
+    try {
+      sweepDeadShares();
+    } catch {
+      // A sweep failure must never take the server down with it.
+    }
+  }, SHARE_SWEEP_MS);
   // Never hold the process (or a test runner) open.
-  shareSweep?.unref?.();
+  shareSweep.unref?.();
 
   // Armed here rather than in bin.ts, because the wake is a property of a
   // running board and not of the production deployment — a staging server
@@ -3107,6 +3178,31 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   readyNudger.start();
   stallNudger.start();
   taskScheduler.start(opts.schedulerTickMs ?? undefined);
+
+  // Done-when lines already marked for the owner before their review items
+  // existed get one each. Idempotent by construction — a line with an open
+  // item gets nothing — so every start runs it and a second start files none.
+  // What it filed or revised goes through the quality gate like any filing,
+  // fired without awaiting: a board must come up while a judge is slow.
+  try {
+    const owner = taskStore.syncOwnerItemsEverywhere();
+    if (owner.filed + owner.withdrawn + owner.revised > 0) {
+      console.log(
+        `[tasks] owner done-when lines: filed ${owner.filed} review item(s), withdrew ${owner.withdrawn}, revised ${owner.revised}`,
+      );
+    }
+    void (async () => {
+      for (const { taskId, reviewItemIds } of owner.toJudge) {
+        await gateOwnerItems(taskId, reviewItemIds, undefined, {
+          getTask: (id) => taskStore.getTask(id),
+          judgeReviewItem,
+          announceTaskReview,
+        });
+      }
+    })().catch((err) => console.error('[tasks] judging owner done-when items failed:', err));
+  } catch (err) {
+    console.error('[tasks] owner done-when review items failed:', err);
+  }
 
   // Rows still carrying the removed `parked` state come onto the new spelling
   // for it here — triage, plus a comment holding the date and the reason. See
@@ -3180,7 +3276,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sharingGate,
     webhookLog,
     stop: async () => {
-      if (shareSweep) clearInterval(shareSweep);
+      clearInterval(shareSweep);
       // Release before anything else can fail: a lock left behind by a clean
       // shutdown would make the next repair refuse for no reason. It is
       // reclaimed as stale on a crash either way, but only after a pid check

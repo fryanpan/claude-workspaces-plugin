@@ -109,6 +109,36 @@ describe('a brief built from one decision and one hand-over', () => {
   });
 });
 
+describe('an answer that left questions open', () => {
+  const partly: BriefEventRow = {
+    ...answer(NOW + 5, 't-copy', 'r-copy', 'Keep the first paragraph.'),
+    openParts: ['Should the changelog link stay?'],
+  };
+
+  it('is not counted as answered, and says the rest is still queued', () => {
+    const md = deterministicBrief(input([partly]));
+    expect(md).not.toContain('**Reviewed:**');
+    expect(md).not.toContain('**Decided:**');
+    expect(md).toContain(
+      '**Answered in part:** [Tighten the launch notes](/workspaces/ws-1?task=t-copy) — the rest is still on your queue.',
+    );
+  });
+
+  it('reads to the model as partly answered, naming what is open', () => {
+    const { user } = buildBriefPrompt(input([partly]), 'x', {
+      from: NOW,
+      capped: false,
+      shown: 0,
+      total: 0,
+    });
+    const line = user.split('\n').find((l) => l.includes('t-copy'));
+    expect(line).toContain(
+      'review.partly_answered · still open: "Should the changelog link stay?"',
+    );
+    expect(line).not.toContain('review.answered');
+  });
+});
+
 describe('the Home route reads what each answered item asked', () => {
   // The brief above is pure; this is the wiring that hands it the lookup. A
   // hand-over made through the real secrets door, then read back off Home.

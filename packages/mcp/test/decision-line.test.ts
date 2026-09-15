@@ -59,6 +59,21 @@ describe('decisionAnsweredLine', () => {
     expect(line).toContain('…');
     expect(line).not.toContain('x'.repeat(200));
   });
+
+  it('names the questions a partial answer left open, so the filer does not re-ask the rest', () => {
+    const line = decisionAnsweredLine({
+      ...ANSWERED,
+      openParts: ['Include archived rows?', 'Who gets the alert?'],
+    });
+    expect(line).toContain('PARTIAL');
+    expect(line).toContain('"Include archived rows?"; "Who gets the alert?"');
+    expect(line).toContain('Rebuild after the freeze.');
+  });
+
+  it('says nothing about open parts for an answer that closed the item', () => {
+    expect(decisionAnsweredLine({ ...ANSWERED, openParts: [] })).not.toContain('PARTIAL');
+    expect(decisionAnsweredLine(ANSWERED)).not.toContain('PARTIAL');
+  });
 });
 
 describe('the shipped bundle renders the event with it', () => {

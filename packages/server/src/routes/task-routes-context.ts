@@ -1,6 +1,7 @@
 import type { DocMeta, TaskReviewItem, User } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 import type { AgentNoteRing } from '../agent-notes.ts';
+import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
 import type { DocStore } from '../doc-store.ts';
@@ -72,6 +73,11 @@ export interface TaskRoutesContext {
    * about this whole path.
    */
   secretWriter?: SecretWriter;
+  /**
+   * Whether an answer covered every question an item asks. **No default**,
+   * the judge's seam rule; omitted, every answer closes its item as before.
+   */
+  answerCoverage?: AnswerCoverage;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -114,6 +120,12 @@ export interface TaskRoutesContext {
   ) => string;
   /** Which boards hold a doc, answered off a prebuilt index. */
   boardsForDocIndexed: (index: Map<string, string[]>, meta: DocMeta) => Set<string>;
+  /**
+   * The base every link this server hands a reader is built on. Optional so a
+   * test context can leave it out; a done-when proof's board path is then
+   * refused rather than made absolute.
+   */
+  externalBaseUrl?: () => string;
   /** Put a filed or revised review item through the quality gate. */
   judgeReviewItem: (
     task: Task,

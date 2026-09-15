@@ -1,5 +1,5 @@
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { SECRET_VALUE_MAX_CHARS, isStorableSecretValue } from '../secret-store.ts';
+import { SECRET_VALUE_MAX_CHARS, isStorableSecretValue, secretValueFits } from '../secret-store.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
@@ -124,17 +124,28 @@ export async function handleTaskSecrets(
       // EVERY VALUE IS JUDGED BEFORE THE FIRST ONE IS WRITTEN, against the
       // store's own rules rather than a looser copy of them. The writer
       // refuses an empty value, a value carrying a NUL and a value over
-      // `SECRET_VALUE_MAX_CHARS` — and it refuses them one at a time,
-      // mid-loop, which is how the second field of a pair could be refused
-      // with the first already in the store. Nothing here can roll a Keychain
-      // write back, so the fix is that the refusable cases are all spent
-      // before any write happens. The value is never echoed, and neither is
-      // its length. A multi-line value is NOT refused: it is encoded on the
-      // way into the store and comes back whole.
-      if (!isStorableSecretValue(value) || value.length > SECRET_VALUE_MAX_CHARS) {
+      // `SECRET_VALUE_MAX_CHARS` or too long for one `security` command line
+      // (`secretValueFits`, the writer's own check) — and it refuses them one
+      // at a time, mid-loop, which is how the second field of a pair could be
+      // refused with the first already in the store. Nothing here can roll a
+      // Keychain write back, so the refusable cases are all spent before any
+      // write happens. The value is never echoed, and neither is its length.
+      // The SERVICE is: it is a name the item declared and the card showed,
+      // checked above, and it is how the card says which field to fix. A
+      // multi-line value is NOT refused: it is encoded on the way into the
+      // store and comes back whole.
+      if (!isStorableSecretValue(value)) {
         return j(400, {
           error: 'unstorable-value',
-          message: `each value is text, not empty, and at most ${SECRET_VALUE_MAX_CHARS} characters`,
+          service,
+          message: `${service} is empty or holds a character that cannot be stored. Nothing was saved.`,
+        });
+      }
+      if (!secretValueFits(service, value)) {
+        return j(400, {
+          error: 'value-too-long',
+          service,
+          message: `${service} is too long to store — at most ${SECRET_VALUE_MAX_CHARS} characters. Nothing was saved.`,
         });
       }
       if (sent.has(service)) return j(400, { error: 'one entry per service' });
@@ -148,6 +159,7 @@ export async function handleTaskSecrets(
       });
     }
 
+    const saved: string[] = [];
     for (const field of declared) {
       // `??` cannot fire: every declared service is in the map by the check
       // above. It is here because the compiler cannot see that, and an empty
@@ -159,15 +171,22 @@ export async function handleTaskSecrets(
         // denied consent dialog — because every refusable value was refused
         // above, before the first write. An earlier field of the same
         // hand-over may already be stored, and no Keychain write can be
-        // rolled back; the item stays open and a retry rewrites whatever
-        // landed, because the writer updates in place rather than refusing
-        // an existing name.
+        // rolled back; so the reply names the field that failed and the ones
+        // that landed, the item stays open, and a retry rewrites whatever
+        // landed, because the writer updates in place rather than refusing an
+        // existing name. A failed field holds nothing: the writer deletes an
+        // entry it could not verify.
         return j(502, {
           error: 'store-failed',
           reason: wrote.error,
-          message: 'the secret could not be stored; nothing was recorded on the item',
+          service: field.service,
+          saved,
+          message: `${field.service} could not be stored${
+            saved.length > 0 ? ` (${saved.join(', ')} did)` : ''
+          }. The ask is still open — try again.`,
         });
       }
+      saved.push(field.service);
     }
 
     // Service names only. This string is the item's answer, the activity

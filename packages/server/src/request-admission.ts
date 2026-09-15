@@ -52,6 +52,7 @@ import {
   shareScopeAllows,
 } from './middleware/host-guard.ts';
 import { recallCallbackAllows } from './middleware/recall-callback-gate.ts';
+import { widgetDoorRoute, widgetDoorSignInBody } from './middleware/widget-door.ts';
 import { localHostnames } from './public-host.ts';
 import { type BoardRole } from './share/board-role.ts';
 import { collabMemberKey } from './share/collab-member-key.ts';
@@ -76,13 +77,17 @@ export interface OriginPolicyContext {
    *  "the operator's public door" for origin purposes. */
   proxiedTrustedHosts: string[];
   proxiedTrustedVerifier: CfAccessVerifier | null;
+  /** The tailnet widget door's hostnames. A page on one embeds the widget, so
+   *  for origin purposes the door is this machine's own surface. A thunk: the
+   *  tailnet name is discovered at runtime and can arrive after boot. */
+  widgetDoorHosts: () => readonly string[];
 }
 
 export function createOriginPolicy(ctx: OriginPolicyContext): {
   policyFor: (req: Request) => OriginPolicy;
   applyCors: (req: Request, res: Response) => Response;
 } {
-  const { opts, proxiedTrustedHosts, proxiedTrustedVerifier } = ctx;
+  const { opts, proxiedTrustedHosts, proxiedTrustedVerifier, widgetDoorHosts } = ctx;
 
   /**
    * CORS is decided once, here, for every response the handler produces,
@@ -125,7 +130,12 @@ export function createOriginPolicy(ctx: OriginPolicyContext): {
     // they ever need, and it's all they get.
     // Cached (60s TTL) — tailscaleHost() shells out, and this runs on every
     // write and every websocket handshake.
-    const ourNames = localHostnames();
+    // The door's names are this machine's names — in production the tailnet
+    // name is already among `localHostnames()`, and a door named explicitly
+    // (a test, or a deployment whose MagicDNS lookup failed) must read the
+    // same, or its own page's comment would be refused by the cross-origin
+    // write gate before the door ever saw it.
+    const ourNames = [...localHostnames(), ...widgetDoorHosts()];
     const viaProxy = req.headers.has('cf-ray');
     const isLocalSurface = isTrustedLocalHost(host, {
       lanHosts: ourNames,
@@ -223,6 +233,21 @@ export interface RequestAdmissionContext {
   withReviewUrl: <T extends DocMeta>(meta: T) => T & { reviewUrl?: string };
   /** Whether the meeting relay is wired, for the recall callback allowlist. */
   recallRelay: { configured: () => boolean };
+  /** The tailnet widget door's hostnames (a thunk, see `OriginPolicyContext`). */
+  widgetDoorHosts: () => readonly string[];
+  /** Where a door visitor signs in — the operator's public Access origin — or
+   *  null when this deployment has none, which leaves the door unusable
+   *  rather than pointing the popup somewhere wrong. */
+  widgetSignInOrigin: string | null;
+  /** The widget token a request presents (header or socket subprotocol). */
+  widgetBearerOf: (req: Request) => string | null;
+  /** What a board widget token grants, after every liveness check. */
+  boardWidgetGrantFor: (
+    raw: string,
+    origin: string | null,
+  ) => { identity: { id: string }; workspaceId: string } | null;
+  /** A doc's type, or undefined for a doc this server does not hold. */
+  docTypeOf: (docId: string) => string | undefined;
   /** The peer address of a request. A forward reference on purpose: the Bun
    *  server is bound below this factory and is only ever asked per request. */
   requestAddress: (req: Request) => string | undefined;
@@ -253,6 +278,15 @@ export type Admission =
       visitorMemberKey: string | null;
       /** The email Cloudflare Access verified for this request, if any. */
       accessEmail: string | null;
+      /**
+       * The board token and page origin a request came through the tailnet
+       * widget door with, or null for every other request. Read by the doc
+       * socket's upgrade, which opens a door socket READ-ONLY — the widget
+       * never writes the doc over it (its comments are REST posts), so a token
+       * lifted from a page's storage gets no editing socket — and stamps the
+       * pair on it, so the sweep can hang up once the token stops verifying.
+       */
+      widgetDoorGrant: { token: string; origin: string } | null;
       /** Doc metadata as this caller may see it. */
       metaFor: MetaForVisitor;
       /**
@@ -309,6 +343,11 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     withReviewUrl,
     recallRelay,
     requestAddress,
+    widgetDoorHosts,
+    widgetSignInOrigin,
+    widgetBearerOf,
+    boardWidgetGrantFor,
+    docTypeOf,
   } = ctx;
 
   const admit = async (req: Request, addressed: { pathname: string }): Promise<Admission> => {
@@ -338,6 +377,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      * namespace exists to distrust.
      */
     let accessEmail: string | null = null;
+    /** Set by the widget-door branch below; see the admitted field. */
+    let widgetDoorGrant: { token: string; origin: string } | null = null;
 
     // --- Cloudflare Access gate ---
     // When cfAccess is configured (server is reachable via a public
@@ -394,6 +435,9 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // applies to it — see the field on TrustedHostOpts for why both
         // absences are deliberate.
         recallCallbackHost,
+        // The tailnet widget door. Consulted only for a Host that did not
+        // classify `local`, and never through the Cloudflare edge.
+        widgetDoorHosts: widgetDoorHosts(),
         // Access on every browser-facing hostname (rule 3 in host-guard).
         // `loopbackPeer` is the half the Host header cannot fake: both of
         // this deployment's proxies dial us over loopback, so it does not
@@ -612,6 +656,43 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         }
         // Nothing else: no `visitor`, no scope, no accessEmail. The two
         // routes below authenticate themselves.
+      } else if (decision.kind === 'widget-door') {
+        // The tailnet hostname under access-only (middleware/widget-door.ts).
+        // An allowlist first, so every route this server has that the
+        // widget does not call is 404 here — deploy, refresh, MCP, share
+        // administration, the board, the doc list — whatever token comes
+        // with it. 404 for the reason the recall host gives: on this name
+        // there is nothing else.
+        const route = widgetDoorRoute(pathname, req.method);
+        if (!route) return j(404, { error: 'not_found' });
+        // The bundle is the one request with no token: the widget cannot ask
+        // for one before it has run, and the bytes are the same for everyone.
+        if (route.kind === 'bundle') return null;
+        // Every other route needs a live BOARD token presented from the page
+        // origin it was minted for. No token, a session token (`wt1`), a
+        // forged, expired or revoked one, or one from another origin all get
+        // the same answer — the widget's cue to offer sign-in, and where —
+        // because telling them apart would hand a caller a decision tree.
+        const raw = widgetBearerOf(req);
+        const origin = req.headers.get('origin');
+        const grant = raw && origin ? boardWidgetGrantFor(raw, origin) : null;
+        if (!grant || !raw || !origin) return j(401, widgetDoorSignInBody(widgetSignInOrigin));
+        if (route.kind === 'doc') {
+          // One board: exactly the one the token names. The workspace scope
+          // middleware then refuses a doc that board does not hold.
+          if (route.workspaceId !== grant.workspaceId) {
+            return j(403, { error: 'out_of_widget_scope' });
+          }
+          // And only a WIDGET doc on it — a mockup or dev page, or one that
+          // does not exist yet (the widget's socket creates it). A bound
+          // markdown doc's prose is not what a page's comment button needs,
+          // so a token lifted from that page cannot read it.
+          const type = docTypeOf(route.docId);
+          if (type !== undefined && type !== 'mockup') {
+            return j(403, { error: 'out_of_widget_scope' });
+          }
+        }
+        widgetDoorGrant = { token: raw, origin };
       } else if (decision.kind === 'proxied-local') {
         // The operator's own hostname through the tunnel: an Access
         // application in front of it, and the WHOLE product behind it.
@@ -714,6 +795,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       visitorShareId,
       visitorMemberKey,
       accessEmail,
+      widgetDoorGrant,
       metaFor,
       roleFor,
       requireOwner,

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 /**
  * `launchChrome` against a stand-in browser, so a stalled cold start can be
  * built on purpose rather than waited for on a loaded CI runner.
@@ -7,11 +8,20 @@
  * to, for as many launches as the case asks. It `exec`s `sleep` either way, so
  * the process a kill lands on is the one that was spawned.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type Browser, launchChrome, stopBrowser } from './headless-chrome.ts';
+import { profilesOfRun } from './ui-shot-lib.ts';
 
 const dirs: string[] = [];
 const spawned: Browser[] = [];
@@ -56,6 +66,8 @@ function fakeChrome(behaviour: { stalls: number } | { exitCode: number }): {
 }
 
 const args = (profile: string) => [`--user-data-dir=${profile}`];
+const profilePrefixOf = (runId: string) =>
+  `--user-data-dir=${join(tmpdir(), `cw-ui-shot-${runId}-`)}`;
 const PER_LAUNCH_MS = 400;
 
 describe('launchChrome', () => {
@@ -100,4 +112,28 @@ describe('launchChrome', () => {
     ).rejects.toThrow(/Chrome exited with 3 before CDP came up/);
     expect(chrome.launches()).toBe(1);
   }, 30_000);
+
+  /**
+   * A caller that passes no `onSpawn` holds nothing to clean up with, so a
+   * launch that fails has to leave nothing behind by itself — the watchdog only
+   * acts once this process is gone, and a caller that catches the error lives on.
+   */
+  it.each([
+    ['exits', { exitCode: 3 }, /Chrome exited with 3/],
+    ['stalls on every launch', { stalls: 99 }, /CDP never came up/],
+  ] as const)(
+    'a launch that %s with no onSpawn leaves no profile or process',
+    async (_, how, err) => {
+      const chrome = fakeChrome(how);
+      const runId = `noregister${process.pid}${'exitCode' in how ? 'x' : 's'}`;
+      await expect(launchChrome(chrome.bin, args, PER_LAUNCH_MS, runId)).rejects.toThrow(err);
+      // Registered for afterEach before asserting, so a failure here leaks nothing.
+      const left = profilesOfRun(readdirSync(tmpdir()), runId);
+      dirs.push(...left.map((name) => join(tmpdir(), name)));
+      expect(profilesOfRun(readdirSync(tmpdir()), runId)).toEqual([]);
+      const ps = spawnSync('ps', ['-Ao', 'command='], { encoding: 'utf8' }).stdout;
+      expect(ps.split('\n').filter((l) => l.includes(profilePrefixOf(runId)))).toEqual([]);
+    },
+    30_000,
+  );
 });

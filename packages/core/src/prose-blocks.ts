@@ -30,6 +30,7 @@ import {
   walkProse,
 } from './prose-fragment.ts';
 import { parseMarkdownBlocks, textContent } from './prose-markdown.ts';
+import type { MarkdownParseOptions } from './prose-mdx.ts';
 
 /** Where insertBlocksAfterAnchor splices relative to the anchor's block. */
 export type BlockPlacement = 'after-block' | 'top-level';
@@ -57,6 +58,8 @@ export function insertBlocksAfterAnchor(
     markdown: string;
     placement?: BlockPlacement;
     transactionOrigin?: unknown;
+    /** How `markdown` parses: `{ mdx: true }` for an `.mdx` doc. */
+    parse?: MarkdownParseOptions;
   },
 ): AnchoredEditResult {
   const raw = resolveRelativePositionRaw(doc, opts.anchorRel);
@@ -75,7 +78,7 @@ export function insertBlocksAfterAnchor(
   const idx = siblings.indexOf(block);
   if (idx < 0) return { ok: false, error: 'no-host-block' };
 
-  const blocks = parseMarkdownBlocks(opts.markdown);
+  const blocks = parseMarkdownBlocks(opts.markdown, opts.parse);
   if (blocks.length === 0) return { ok: false, error: 'parse-failed' };
 
   doc.transact(() => {

@@ -52,6 +52,21 @@ describe('boardSummaryPrompt', () => {
     expect(prompt).not.toContain('Old work');
   });
 
+  it('an answer that left questions open is not written as answered', () => {
+    const answered = { event: 'decision.answered', taskId: 't-1', ts: NOW - 60_000 };
+    const prompt = (extra: Partial<BriefEventRow>) =>
+      boardSummaryPrompt({
+        name: 'Saltmarsh',
+        rows: [{ ...answered, ...extra }],
+        titleOf,
+        now: NOW,
+      });
+    expect(prompt({})).toContain('decision.answered "Tide table"');
+    expect(prompt({ openParts: ['Which buoy?'] })).toContain(
+      'decision.partly_answered "Tide table"',
+    );
+  });
+
   it('has nothing to say about a quiet hour', () => {
     expect(
       boardSummaryPrompt({ name: 'Saltmarsh', rows, titleOf, now: NOW + 5 * HOUR }),

@@ -6,6 +6,7 @@ import {
   latestThreadedQuestion,
 } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
+import { ticketOpenParts } from '../answer-coverage.ts';
 /**
  * A ticket's review items — 0..n, several possibly open at once.
  *
@@ -41,6 +42,7 @@ export async function handleTaskReviewItems(
     heldFields,
     judgeReviewItem,
     judgeTaskDecision,
+    answerCoverage,
   } = ctx;
   const { req, scope, visitor, authorFor, refuseCategoryAuthor, requireOwner } = rq;
 
@@ -194,14 +196,30 @@ export async function handleTaskReviewItems(
       if (item) return askBackOnItem(task, item, text, author, Boolean(visitor));
     }
     const via = writeViaOf(req);
+    // An item that asks several things can be answered on one of them. Such
+    // an answer is recorded as PARTIAL and the item stays on the reader's
+    // queue naming what is left — it used to close, and the rest waited on
+    // the reader with nothing on their queue (2026-09-14). Not asked for the
+    // ticket's own decision or an owner-line item, which each ask one thing.
+    const openParts = await ticketOpenParts(
+      answerCoverage,
+      taskStore,
+      taskId,
+      reviewItemId,
+      text,
+      answeredWith,
+    );
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, {
       actor: author,
       ...(answeredWith !== undefined ? { answeredWith } : {}),
       ...(via ? { via } : {}),
+      ...(openParts.length > 0 ? { openParts } : {}),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     taskProjection.refreshTask(res.task);
-    return j(200, res);
+    const stillOpen =
+      res.item.answer === undefined ? res.item.partialAnswers?.at(-1)?.open : undefined;
+    return j(200, { ...res, ...(stillOpen ? { openParts: stillOpen } : {}) });
   }
   // "Tell me more" on ONE review item — the `request_more_info` tool's
   // door, and deliberately NOT the reader's "I have a question". It

@@ -27,6 +27,7 @@ import type {
   ReviewItemRevision,
   ReviewJudgeVerdictKind,
   ReviewOption,
+  ReviewPartialAnswer,
   ReviewPayload,
   ReviewShape,
   TaskReviewItem,
@@ -162,6 +163,20 @@ function readRevisions(value: unknown): ReviewItemRevision[] | undefined {
   return revs.length > 0 ? revs : undefined;
 }
 
+/** Answers that left questions open. One without its open questions is not
+ *  one, and is dropped: read as a full answer it would close nothing either. */
+function readPartialAnswers(value: unknown): ReviewPartialAnswer[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const partial: ReviewPartialAnswer[] = [];
+  for (const raw of value) {
+    const read = readAnswer(raw);
+    if (!read || !isPlainObject(raw) || !Array.isArray(raw.open)) continue;
+    const open = raw.open.filter((p): p is string => typeof p === 'string' && p.trim() !== '');
+    if (open.length > 0) partial.push({ ...read, open });
+  }
+  return partial.length > 0 ? partial : undefined;
+}
+
 export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   if (!isPlainObject(value)) return undefined;
   const shape = normalizeReviewType(value.review_type ?? value.shape);
@@ -214,6 +229,11 @@ export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   // filing with `judge: {verdict: 'ok'}` would clear the gate in one key.
   const payloadJudge = readJudgement(value.judge);
   if (payloadJudge) out.judge = payloadJudge;
+
+  // A comment-borne item's partial answers live on the payload, for the
+  // reason `revisions` does: the payload IS the item there.
+  const payloadPartial = readPartialAnswers(value.partialAnswers);
+  if (payloadPartial) out.partialAnswers = payloadPartial;
 
   if (Array.isArray(value.answerHistory)) {
     const history: ReviewAnswerUndone[] = [];
@@ -320,6 +340,9 @@ export function readTaskReviewItem(value: unknown): TaskReviewItem | undefined {
     }
     if (prior.length > 0) out.priorAnswers = prior;
   }
+
+  const partial = readPartialAnswers(value.partialAnswers);
+  if (partial) out.partialAnswers = partial;
 
   if (Array.isArray(value.infoRequests)) {
     const reqs: ReviewInfoRequest[] = [];

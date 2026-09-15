@@ -45,7 +45,9 @@
  *     scrollbars that take none, so hiding it is what models the device.
  *
  * Cleanup is unconditional — killed process, removed profile, on success, on
- * error and on SIGINT/SIGTERM/SIGHUP. The mechanics, and the stale profiles
+ * error and on SIGINT/SIGTERM/SIGHUP; a SIGKILLed run is cleaned by the
+ * launch's watchdog within about a second (`scripts/chrome-orphans.ts`,
+ * asserted per exit path in `ui-shot-exits.test.ts`). The mechanics, and the stale profiles
  * that taught them, are in `scripts/headless-chrome.ts`, which also holds the
  * CDP client so `scripts/client-boot-check.ts` drives the same browser rather
  * than a second copy of it. The profile directory carries a run id

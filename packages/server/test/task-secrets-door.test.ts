@@ -21,7 +21,7 @@ import { describe, expect, it } from 'bun:test';
 import type { TaskReviewItem, User } from '@claude-workspaces/core';
 import type { TaskRouteRequest, TaskRoutesContext } from '../src/routes/task-routes-context.ts';
 import { handleTaskSecrets } from '../src/routes/task-secrets.ts';
-import type { SecretWriteResult } from '../src/secret-store.ts';
+import { SECRET_VALUE_MAX_CHARS, type SecretWriteResult } from '../src/secret-store.ts';
 
 const AGENT: User = { id: 'a-riverbend', name: 'Nightly Indexer', kind: 'known', color: '#888888' };
 const TASK = 't-nightly';
@@ -176,16 +176,48 @@ describe('a value the store cannot hold is refused before anything is written', 
     expect(denied.answered).toEqual([]);
   });
 
-  it("refuses a value past the store's ceiling, and stores nothing", async () => {
-    const denied = await drive(secretAsk, [{ service: SERVICE, value: 'x'.repeat(4097) }]);
+  it("refuses a value past the store's ceiling, names the field, and stores nothing", async () => {
+    // The pair Bryan saved on 2026-09-14: the first key's entry was cut, the
+    // second never stored, and the card said only that saving failed. A value
+    // the store cannot take whole is now refused at the door, before the
+    // FIRST write — even when it is the second field of two.
+    const twoFields = storedItem({
+      shape: 'secret',
+      headline: 'Paste the two relay values',
+      secrets: [
+        { label: 'Relay account name', service: SERVICE },
+        { label: 'Relay signing value', service: 'saltmarsh-relay-signer' },
+      ],
+    });
+    const tooLong = 'x'.repeat(SECRET_VALUE_MAX_CHARS + 1);
+    const denied = await drive(twoFields, [
+      { service: SERVICE, value: 'not-a-real-value-1' },
+      { service: 'saltmarsh-relay-signer', value: tooLong },
+    ]);
     expect(denied.res.status).toBe(400);
-    expect(denied.body.error).toBe('unstorable-value');
-    // The refusal says nothing about what was sent — no value, no length.
-    expect(JSON.stringify(denied.body)).not.toContain('4097');
+    expect(denied.body.error).toBe('value-too-long');
+    // Which field, so the card can send the reader back to it…
+    expect(denied.body.service).toBe('saltmarsh-relay-signer');
+    expect(String(denied.body.message)).toContain('saltmarsh-relay-signer');
+    expect(String(denied.body.message)).toContain(String(SECRET_VALUE_MAX_CHARS));
+    // …and nothing about what was sent: no value, no length.
+    expect(JSON.stringify(denied.body)).not.toContain(String(SECRET_VALUE_MAX_CHARS + 1));
+    expect(JSON.stringify(denied.body)).not.toContain('not-a-real-value-1');
     expect(denied.written).toEqual([]);
+    expect(denied.answered).toEqual([]);
 
-    // CONTROL: one character under the ceiling is stored.
-    const ok = await drive(secretAsk, [{ service: SERVICE, value: 'x'.repeat(4096) }]);
+    // A value within the character count that is still too long for one
+    // store command — wide characters encode to more — is refused the same
+    // way, by the writer's own check rather than a looser copy of it.
+    const wide = await drive(secretAsk, [{ service: SERVICE, value: '\u{1F511}'.repeat(900) }]);
+    expect(wide.res.status).toBe(400);
+    expect(wide.body.error).toBe('value-too-long');
+    expect(wide.written).toEqual([]);
+
+    // CONTROL: exactly at the ceiling is stored.
+    const ok = await drive(secretAsk, [
+      { service: SERVICE, value: 'x'.repeat(SECRET_VALUE_MAX_CHARS) },
+    ]);
     expect(ok.res.status).toBe(200);
     expect(ok.written).toHaveLength(1);
   });
@@ -218,6 +250,11 @@ describe('the ask is recorded only after the store has confirmed every write', (
     );
     expect(denied.res.status).toBe(502);
     expect(denied.body.error).toBe('store-failed');
+    // It says WHICH field did not save, and which one did, so the card can
+    // tell the reader rather than "saving failed" over a pair.
+    expect(denied.body.service).toBe('saltmarsh-relay-signer');
+    expect(denied.body.saved).toEqual([SERVICE]);
+    expect(String(denied.body.message)).toContain('saltmarsh-relay-signer could not be stored');
     // The one thing the card must never be told: that it landed.
     expect(denied.answered).toEqual([]);
     // And the reply names the step, never a value.

@@ -97,6 +97,7 @@ import {
   releaseNotesAuthorship,
 } from './notes-doc-access.ts';
 import { repairNotesEditAddresses } from './notes-edit-address.ts';
+import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
 import {
   type NotesHeadingStore,
@@ -679,14 +680,16 @@ export function applyNotesUpdate(
   // remembered id against the blocks that are actually there, so it needs the
   // outline the tick itself read.
   const full = readNotesOutline(docStore, update.docId);
+  const notesHeadingId = notesSectionForMeeting(
+    heading,
+    { docId: update.docId, meetingId: update.meetingId },
+    full,
+    docStore,
+  );
   const guarded = guardNotesEdits(update.edits, {
-    notesHeadingId: notesSectionForMeeting(
-      heading,
-      { docId: update.docId, meetingId: update.meetingId },
-      full,
-      docStore,
-    ),
+    notesHeadingId,
     outline: full,
+    speech: update.tick.turns.map((t) => t.text),
   });
   for (const why of guarded.refused) {
     noteGuardRefusal(update.docId, update.meetingId, why);
@@ -694,6 +697,18 @@ export function applyNotesUpdate(
   for (const why of guarded.kept) {
     noteGuardKept(update.docId, update.meetingId, why);
   }
+  // EACH TOPIC HEADING ONCE, EACH NOTE ONCE (2026-09-14). After the guard, so
+  // a replace it turned into an insert is judged against the note it was
+  // meant to replace (`notes-edit-dedupe.ts`).
+  const deduped = dedupeNotesEdits(guarded.edits, {
+    notesHeadingId,
+    outline: full,
+    speech: update.tick.turns.map((t) => t.text),
+    authorId: NOTES_AUTHOR_ID,
+    commented: () => commentedBlockIds(doc.ydoc),
+    prior: heading.priorIn({ docId: update.docId, meetingId: update.meetingId }),
+  });
+  for (const why of deduped.notes) noteGuardKept(update.docId, update.meetingId, why);
   // THE SECOND DETERMINISTIC REFUSAL ON THIS PATH, and it runs after the
   // guard for the same reason the guard runs before the store: an edit that
   // is not going to be applied does not need its links judged.
@@ -711,8 +726,8 @@ export function applyNotesUpdate(
   // tick's own; unresolved it is gone before the check sees it.
   const schemed =
     update.linkSources === undefined
-      ? { edits: guarded.edits, linked: [] as string[], dropped: [] as string[] }
-      : resolveSchemeLinks(guarded.edits, update.linkSources.named ?? []);
+      ? { edits: deduped.edits, linked: [] as string[], dropped: [] as string[] }
+      : resolveSchemeLinks(deduped.edits, update.linkSources.named ?? []);
   if (schemed.dropped.length > 0) noteSchemeCitations(update.docId, update.meetingId, schemed);
   const linked =
     update.linkSources === undefined
@@ -739,6 +754,13 @@ export function applyNotesUpdate(
   // `refused` is the evidence, not the empty list: an empty batch answered
   // `null` above before the guard ever saw it.
   if (guarded.edits.length === 0 && guarded.refused.length > 0) return 'guard-refused';
+  // A batch whose every note was already written wrote nothing and lost
+  // nothing: the words are in the doc, so the tick is not carried. Keyed on
+  // what DEDUPE left, so a batch another pass emptied still fails as before.
+  if (deduped.edits.length === 0) {
+    if (deduped.alreadyWritten > 0) opts.onWordsLanded?.();
+    return null;
+  }
   const res = applyNotesBlockEdits(docStore, update.docId, linked.edits);
   if (!res.ok) return 'store-refused';
   opts.onOutcomes?.(res.outcomes);
@@ -795,6 +817,12 @@ export function applyNotesUpdate(
           `${tidied.bullets} empty bullet removed from the section`,
       );
     }
+    if (tidied.emptied > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${tidied.emptied} topic heading with nothing under it removed`,
+      );
+    }
   }
   // A batch every one of whose edits failed wrote nothing, and saying so is
   // what reports the skip. A batch that landed some of its edits is a
@@ -815,7 +843,11 @@ export function applyNotesUpdate(
   // A RECOVERED NOTE COUNTS AS A WRITE, because it is one: the words are in
   // the doc. Reporting the tick as failed anyway would carry turns that are
   // already written up, and the next compose would note them a second time.
-  if (recovered > 0 || res.outcomes.some((o) => o.status !== 'failed' && carriesWords(o))) {
+  if (
+    recovered > 0 ||
+    deduped.alreadyWritten > 0 ||
+    res.outcomes.some((o) => o.status !== 'failed' && carriesWords(o))
+  ) {
     opts.onWordsLanded?.();
   }
   if (res.applied + res.suggested + recovered > 0) return null;
@@ -1202,6 +1234,21 @@ export function withServerNotesSinks(
       return null;
     }
   };
+  const tidyLastTopic = (summary: { docId: string; meetingId: string }): void => {
+    try {
+      const doc = deps.docStore().get(summary.docId);
+      const ids = { docId: summary.docId, meetingId: summary.meetingId };
+      const section = heading.headingId(ids, readNotesOutline(deps.docStore(), summary.docId));
+      if (!doc || section === undefined) return;
+      tidyNotesSection(doc.ydoc, section, () => commentedBlockIds(doc.ydoc), {
+        blanks: false,
+        bulletsAuthoredBy: NOTES_AUTHOR_ID,
+        lastTopic: true,
+      });
+    } catch (err) {
+      console.error('[meeting-notes] last-topic tidy failed:', err);
+    }
+  };
   const captureIntents: MeetingNotesDeps['captureIntents'] =
     options.captureIntents ??
     (extractor && captureBoard
@@ -1290,6 +1337,11 @@ export function withServerNotesSinks(
       // Named from the whole meeting, in the background: the stop does not
       // wait on a model call, and the title lands when it lands.
       if (titler) void titler.onMeetingEnd(summary.docId);
+      // THE LAST TOPIC IS JUDGED NOW. Each tick leaves an empty heading at the
+      // section's end standing, in case the next tick fills it; at the stop
+      // there is no next tick. Before the quality pass, so it reads the notes
+      // the reader will.
+      tidyLastTopic(summary);
       // AND WHAT THE NOTES THEMSELVES CAME OUT LIKE. The line above says how
       // much of the meeting reached a compose, and a meeting once reported
       // every turn handled while its doc carried dozens of repeated lines,

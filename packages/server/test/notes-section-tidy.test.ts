@@ -315,3 +315,72 @@ describe('a tick that opens a topic the section already has', () => {
     expect(bullets(harness.ydoc)).toHaveLength(2);
   });
 });
+
+/**
+ * A TOPIC THE NOTE-TAKER OPENED AND WROTE NOTHING UNDER (2026-09-14). A tick
+ * opens `### Slipway costs` and puts its note under another topic, and the
+ * reader is left a heading over nothing — most of the headings on that day's
+ * doc were this.
+ */
+describe("a topic heading of the note-taker's own with nothing under it", () => {
+  const openElsewhere = (input: Parameters<typeof addNotes>[0], tick: number) => {
+    if (tick === 1) return addNotes(input, '### Ferry timetable\n\n- the harbour run moves');
+    const ferry = input.outline.find((e) => e.text === 'Ferry timetable')?.id as string;
+    if (tick === 3) return addNotes(input, '### Crew rota\n\n- rota changes every Monday');
+    return [
+      { op: 'insert_at_end' as const, markdown: '### Slipway costs' },
+      {
+        op: 'insert_under_heading' as const,
+        headingId: ferry,
+        markdown: '- last sailing at seven',
+      },
+    ];
+  };
+
+  it('is removed once a later topic follows it', async () => {
+    const harness = createNotesTickHarness({ compose: openElsewhere });
+    await harness.speak('the harbour run moves');
+    await harness.speak('the last sailing is at seven');
+    const third = await harness.speak('the rota changes every Monday');
+    expect(third.headings).not.toContain('Slipway costs');
+    expect(third.headings).toContain('Crew rota');
+    expect(bullets(harness.ydoc)).toEqual([
+      'the harbour run moves',
+      'last sailing at seven',
+      'rota changes every Monday',
+    ]);
+  });
+
+  it('CONTROL: as the last topic it stays, so the next tick can fill it', async () => {
+    const harness = createNotesTickHarness({ compose: openElsewhere });
+    await harness.speak('the harbour run moves');
+    const second = await harness.speak('the last sailing is at seven');
+    expect(second.headings).toContain('Slipway costs');
+  });
+
+  it('as the last topic, is removed when the meeting stops and no tick can fill it', async () => {
+    const harness = createNotesTickHarness({ compose: openElsewhere });
+    await harness.speak('the harbour run moves');
+    await harness.speak('the last sailing is at seven');
+    await harness.end();
+    expect(harness.headings()).not.toContain('Slipway costs');
+    expect(bullets(harness.ydoc)).toEqual(['the harbour run moves', 'last sailing at seven']);
+  });
+
+  it('CONTROL: the same heading with a sub-topic under it stays', async () => {
+    const harness = createNotesTickHarness({
+      compose: (input, tick) =>
+        tick === 1
+          ? addNotes(input, '### Ferry timetable\n\n- the harbour run moves')
+          : [
+              {
+                op: 'insert_at_end',
+                markdown: '### Slipway costs\n\n#### Haul-out\n\n- quote is in',
+              },
+            ],
+    });
+    await harness.speak('the harbour run moves');
+    const second = await harness.speak('the haul-out quote is in');
+    expect(second.headings).toContain('Slipway costs');
+  });
+});

@@ -432,12 +432,36 @@ export class LiveDocFanout {
     return Array.from(dead);
   }
 
+  /**
+   * Close every tailnet widget door socket whose board token no longer
+   * verifies — expired, its identity archived, or its watermark moved. The
+   * door checks the token once, at the upgrade, exactly as a share is checked;
+   * this is that problem's sweep for the one door no share admits. Only doc
+   * sockets carry the grant, so `conns` is the whole set.
+   */
+  closeSocketsForDeadWidgetGrants(isLive: (token: string, origin: string) => boolean): number {
+    let closed = 0;
+    for (const doc of this.host.residentDocs()) {
+      for (const ws of doc.conns) {
+        const grant = ws.data?.widgetDoorGrant;
+        if (!grant || isLive(grant.token, grant.origin)) continue;
+        try {
+          ws.close(1008, 'widget token ended');
+        } catch {
+          // Already gone — the close handler does the bookkeeping.
+        }
+        closed += 1;
+      }
+    }
+    return closed;
+  }
+
   fireEvent(
     doc: LiveDoc,
     event: 'thread.created' | 'thread.replied' | 'thread.resolved' | 'thread.reopened',
     thread: Thread,
     comment?: { id: string; author: User; text: string; ts: number },
-    opts?: { generate?: boolean; via?: WriteVia },
+    opts?: { generate?: boolean; via?: WriteVia; openParts?: string[] },
     // Who performed a resolve/reopen. The comment param can't carry it —
     // there is no comment on a status change, and a frame without an actor
     // sent channel renderers to comments[0].author, i.e. the CREATOR.
@@ -465,6 +489,9 @@ export class LiveDocFanout {
       // owner's channel line can say which item to revise without walking
       // the thread's anchor.
       ...(thread.anchor.kind === 'review-item' ? { reviewItemId: thread.anchor.reviewItemId } : {}),
+      // A reply that answered some of an item's questions, not all: the ones
+      // still open, so the filer acts on the answered part and does not re-ask.
+      ...(opts?.openParts && opts.openParts.length > 0 ? { openParts: opts.openParts } : {}),
       seq: doc.seq,
     });
   }

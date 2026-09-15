@@ -13,7 +13,7 @@
  * `workspace.`, `agent.`, `voice.`) go to `emitBoardChannelMessage`; everything
  * else keeps the doc-shaped path.
  */
-import { decisionAnsweredLine, fromMockNote } from './decision-line.ts';
+import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
 import {
   type HeldRowPayload,
   type StalledRowPayload,
@@ -87,6 +87,8 @@ export interface ChannelPayload {
     comments?: Array<{ author?: { name?: string }; text?: string; ts?: number; via?: string }>;
   };
   comment?: { author?: { name?: string }; text?: string; ts?: number; via?: string };
+  /** A reply that answered some of a review item's questions: the ones still open. */
+  openParts?: unknown[];
   /** A resolve/reopen relayed from inside a mock page. A comment event's mark
    *  is on the comment. */
   via?: string;
@@ -461,7 +463,7 @@ async function emitChannelMessage(
     ? ` on review item ${reviewItemId}${snippet ? ` "${truncate(snippet, 60)}"` : ''} —`
     : '';
   const body = text
-    ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ''}${text}`
+    ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ''}${text}${openPartsClause(p.openParts)}`
     : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
 
   await deps.notify({

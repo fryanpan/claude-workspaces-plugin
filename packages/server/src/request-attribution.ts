@@ -98,6 +98,10 @@ export type Attribution =
       widgetIdentity: IdentityRecord | null;
       /** The identity this request has proven, resolved at most once. */
       provenIdentityFor: () => IdentityRecord | null;
+      /** The identity Cloudflare Access proved for this request, never a
+       *  session cookie's. What mints a board widget token, which no logout
+       *  can end (routes/auth-share.ts). */
+      accessIdentityFor: () => IdentityRecord | null;
       /** The author to attribute a write to, given what the body claimed. */
       authorFor: (claimed: unknown) => User | undefined;
       /** The 400 every comment route answers the shared category with. */
@@ -152,6 +156,8 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
       provenIdentity = sessionIdentityFor(req);
       return provenIdentity;
     };
+    const accessIdentityFor = (): IdentityRecord | null =>
+      accessEmail && isEmailLike(accessEmail) ? provenIdentityFor() : null;
 
     /**
      * The author to attribute a write to.
@@ -335,6 +341,7 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
       attributed: true,
       widgetIdentity,
       provenIdentityFor,
+      accessIdentityFor,
       authorFor,
       refuseCategoryAuthor,
       withTaskChips,

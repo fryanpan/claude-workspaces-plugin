@@ -61,22 +61,27 @@ afterEach(async () => {
   await h.stop();
 });
 
+/**
+ * A judge that holds ANY item whose prompt lists a prior ask — the worst case
+ * of a model matching on topic. What it holds is therefore decided entirely
+ * by what the server puts in front of it.
+ */
+function repeatHoldingJudge(): JudgeHarness['judge'] {
+  return async (input) => {
+    const { user } = buildReviewJudgePrompt(input.criteria, input.item);
+    return user.includes('<prior-asks>')
+      ? { ok: false, reason: 'This repeats a question already on the task.' }
+      : { ok: true, reason: 'Fine.' };
+  };
+}
+
 describe('a question asked on the ticket reaches an item filed on its thread', () => {
-  it('carries the earlier headline AND the answer the reader gave', async () => {
+  it('carries the earlier headline while it is still open', async () => {
     const { workspaceId, taskId } = await h.board();
-    const first = await jj<Held>(
+    await jj<Held>(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
         author: FILER,
         review: ARCHIVE_QUESTION,
-      }),
-    );
-    const itemId = first.item?.id ?? '';
-    expect(itemId).not.toBe('');
-    await jj(
-      await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${itemId}/answer`, {
-        text: 'Archive them',
-        answeredWith: 'archive',
-        author: PERSON,
       }),
     );
 
@@ -92,7 +97,7 @@ describe('a question asked on the ticket reaches an item filed on its thread', (
 
     const second = seenAsks[1] ?? '';
     expect(second).toContain('Eleven documents have no address');
-    expect(second).toContain('answered: Archive them');
+    expect(second).toContain('still unanswered');
   });
 
   it('the control: the first item on a fresh row is given no history at all', async () => {
@@ -104,6 +109,69 @@ describe('a question asked on the ticket reaches an item filed on its thread', (
       }),
     );
     expect(seenAsks[0]).toBe('');
+  });
+});
+
+describe('an answered item is never grounds for a hold', () => {
+  // 2026-09-14: three of five items were held as "duplicates" of an item the
+  // reader had already answered, when that answer did not settle them.
+  it('passes a follow-up filed after the reader answered the earlier item', async () => {
+    const { workspaceId, taskId } = await h.board();
+    const first = await jj<Held>(
+      await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+        author: FILER,
+        review: ARCHIVE_QUESTION,
+      }),
+    );
+    await jj(
+      await post(
+        `/workspaces/${workspaceId}/tasks/${taskId}/review-items/${first.item?.id}/answer`,
+        { text: 'Archive them', answeredWith: 'archive', author: PERSON },
+      ),
+    );
+    h.judge = repeatHoldingJudge();
+
+    const onTicket = await jj<Held>(
+      await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+        author: FILER,
+        review: { ...ARCHIVE_QUESTION, headline: 'Archived — check them on your phone?' },
+      }),
+    );
+    expect(onTicket.held ?? false).toBe(false);
+    // Answered too, so the thread filing below has no OPEN ask on the row.
+    await jj(
+      await post(
+        `/workspaces/${workspaceId}/tasks/${taskId}/review-items/${onTicket.item?.id}/answer`,
+        { text: 'Checked, they are fine', author: PERSON },
+      ),
+    );
+    const onThread = await jj<ThreadReply & Held>(
+      await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
+        author: FILER,
+        anchor: { kind: 'subject' },
+        text: 'One more on this.',
+        review: { ...ARCHIVE_QUESTION, headline: 'Documents that lost their board — what now?' },
+      }),
+    );
+    expect(onThread.held ?? false).toBe(false);
+  });
+
+  it('the control: a repeat of an item still OPEN is held', async () => {
+    const { workspaceId, taskId } = await h.board();
+    await jj<Held>(
+      await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+        author: FILER,
+        review: ARCHIVE_QUESTION,
+      }),
+    );
+    h.judge = repeatHoldingJudge();
+    const repeat = await jj<Held>(
+      await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+        author: FILER,
+        review: { ...ARCHIVE_QUESTION, headline: 'Same thing, asked again' },
+      }),
+    );
+    expect(repeat.held).toBe(true);
   });
 });
 

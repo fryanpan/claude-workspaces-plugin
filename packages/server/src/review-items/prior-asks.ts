@@ -1,6 +1,6 @@
 /**
- * What this reader has ALREADY been asked on this row — the fact the quality
- * gate could not see.
+ * What this reader has been asked on this row and NOT YET ANSWERED — the fact
+ * the quality gate could not see.
  *
  * A row can be asked about through two channels that know nothing of each
  * other: `add_review_item` writes an item into `task.reviews`, and
@@ -8,24 +8,30 @@
  * comment in the ticket's body doc. `persistence.ts` says as much where it
  * has to count the second kind — "a doc-thread item never lands there ...
  * which this store cannot see". The judge reads one item at a time, so a
- * question asked down one channel and answered is invisible to the same
- * question filed down the other.
- *
- * That is not hypothetical. On 2026-09-06 the stranded-documents ticket was
- * asked at 14:59 through the ticket channel, answered "Archive them" at
- * 15:14, asked again at 17:17 through the thread channel, and answered a
- * second time that evening with "didn't I already make this decision?".
+ * question still sitting on the queue down one channel is invisible to the
+ * same question filed down the other.
  *
  * This module gathers both channels for one row and hands the judge the
  * result. It decides nothing: whether an item is a repeat is a judgement
- * about meaning, and the two headlines in that incident — "Eleven documents
- * from two boards you deleted have no address" and "11 documents lost their
- * board — archive or rehome?" — share three content words out of nine. A
- * lexical threshold high enough not to fire on unrelated items scores that
- * pair at 0.33 and misses it, which is why the comparison is the judge's and
- * this file only supplies the evidence.
+ * about meaning, and two headlines for one question can share three content
+ * words out of nine, which is why the comparison is the judge's and this file
+ * only supplies the evidence.
+ *
+ * ── An ANSWERED question is not evidence ────────────────────────────────
+ *
+ * This used to hand over answered asks too, with their answers, so the judge
+ * could hold a question the reader had already settled. It held the wrong
+ * things: on 2026-09-14 three of five items filed on the board were held as
+ * repeats of an answered item whose answer did not settle them — a phone test
+ * after the design was approved, a follow-up after "I'll fix this with Team
+ * Lead". The owner's call that day: the gate must not hold an item as a
+ * duplicate of one already answered. Leaving answered asks out of the prompt
+ * makes that a property of the evidence rather than a request the model may
+ * or may not honour — the judge cannot match on an ask it is never shown. A
+ * duplicate of a question STILL OPEN is still held: answering the new one
+ * would leave the old one sitting on the queue.
  */
-import type { Thread } from '@claude-workspaces/core';
+import { type Thread, reviewAnswered } from '@claude-workspaces/core';
 import type { PriorAsk } from '@claude-workspaces/core/review-judge-prompt';
 import type { Task } from '../tasks.ts';
 
@@ -39,14 +45,13 @@ export interface PriorAskSource {
 }
 
 /**
- * How far back a settled question still counts as one the reader has
- * answered.
+ * How far back an open question still counts as one the reader is being
+ * asked.
  *
- * Thirty days. The failure this exists for happened inside three hours, so
- * the window is not what makes it work; what the window does is stop a
- * question settled last quarter from holding a fair re-ask when the ground
- * has since moved. A row nobody has touched in a month asking the same thing
- * again is usually a new question wearing old words.
+ * Thirty days. What the window does is stop a question filed last quarter
+ * and never answered from holding a fair re-ask when the ground has since
+ * moved. A row nobody has touched in a month asking the same thing again is
+ * usually a new question wearing old words.
  */
 export const PRIOR_ASK_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -54,11 +59,9 @@ export const PRIOR_ASK_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
  * The most prior asks handed to the judge, newest first.
  *
  * Eight. Every one costs prompt tokens on a call that sits inside a filing
- * route the agent is waiting on, and a row with more than eight settled
+ * route the agent is waiting on, and a row with more than eight open
  * questions on it is one where the newest are the ones a repeat would be
- * repeating. Answered asks are kept ahead of open ones when the list has to
- * be cut, because an answered question is the one that makes an item a
- * repeat — an open one is at worst a duplicate of something still waiting.
+ * repeating.
  */
 export const PRIOR_ASK_MAX = 8;
 
@@ -98,28 +101,26 @@ export type PriorAskRow =
 interface Gathered {
   at: number;
   ask: PriorAsk;
-  answered: boolean;
 }
 
 /**
- * An item the reader was never shown is not a question they were asked.
+ * Is this item a question still in front of the reader?
  *
- * A withdrawn item is off the queue by definition, and a HELD one never
- * reached it — the gate's whole job is to keep it there until it passes. Both
- * used to be gathered anyway, so the judge was told "asked on 7 September,
- * still unanswered" about an item that had been held and withdrawn the same
- * hour, and held the next filing for repeating a question nobody had read
- * (2026-09-07, twice on one row). An answered item is kept whatever its
- * verdict: an answer is proof the reader saw it.
+ * Answered is out — see the header. A withdrawn item is off the queue by
+ * definition, and a HELD one never reached it — the gate's whole job is to
+ * keep it there until it passes. Both used to be gathered anyway, so the
+ * judge was told "asked on 7 September, still unanswered" about an item that
+ * had been held and withdrawn the same hour, and held the next filing for
+ * repeating a question nobody had read (2026-09-07, twice on one row).
  */
-function neverReached(
-  review: { withdrawnAt?: number; answeredAt?: number },
+function stillOpen(
+  review: { withdrawnAt?: number },
   judge: { verdict: string } | undefined,
-  answered = review.answeredAt !== undefined,
+  answered: boolean,
 ): boolean {
   if (answered) return false;
-  if (review.withdrawnAt !== undefined) return true;
-  return judge?.verdict === 'held';
+  if (review.withdrawnAt !== undefined) return false;
+  return judge?.verdict !== 'held';
 }
 
 /** The ticket channel: items in `task.reviews`. */
@@ -128,16 +129,13 @@ function fromTask(task: Task, exceptItemId: string | undefined, now: number): Ga
   for (const item of task.reviews ?? []) {
     if (item.id === exceptItemId) continue;
     if (now - item.createdAt > PRIOR_ASK_WINDOW_MS) continue;
-    if (neverReached(item.review, item.judge, item.answer !== undefined)) continue;
-    const answer = item.answer?.text;
+    if (!stillOpen(item.review, item.judge, item.answer !== undefined)) continue;
     out.push({
       at: item.createdAt,
-      answered: answer !== undefined,
       ask: {
         id: item.id,
         headline: item.review.headline,
         askedAt: formatAskedAt(item.createdAt, now),
-        ...(answer !== undefined ? { answer } : {}),
       },
     });
   }
@@ -162,16 +160,13 @@ function fromThreads(
       if (!review) continue;
       if (comment.id === exceptCommentId) continue;
       if (now - comment.ts > PRIOR_ASK_WINDOW_MS) continue;
-      if (neverReached(review, review.judge)) continue;
-      const answer = review.answerText;
+      if (!stillOpen(review, review.judge, reviewAnswered(review))) continue;
       out.push({
         at: comment.ts,
-        answered: answer !== undefined,
         ask: {
           id: comment.id,
           headline: review.headline,
           askedAt: formatAskedAt(comment.ts, now),
-          ...(answer !== undefined ? { answer } : {}),
         },
       });
     }
@@ -180,7 +175,7 @@ function fromThreads(
 }
 
 /**
- * Every question already put to the reader on this row, newest first.
+ * Every question put to the reader on this row and still open, newest first.
  *
  * Empty for a row with no history, which leaves the judge exactly as it
  * behaved before — the prompt omits the block entirely.
@@ -194,11 +189,7 @@ export function priorAsksFor(row: PriorAskRow, source: PriorAskSource, now: numb
         ]
       : fromThreads(source.listThreads(row.docId), row.exceptCommentId, now);
   gathered.sort((a, b) => b.at - a.at);
-  // Answered first when the list has to be cut — see PRIOR_ASK_MAX. Within
-  // each half the newest still leads, because `sort` here is stable.
-  const answered = gathered.filter((g) => g.answered);
-  const open = gathered.filter((g) => !g.answered);
-  return [...answered, ...open].slice(0, PRIOR_ASK_MAX).map((g) => g.ask);
+  return gathered.slice(0, PRIOR_ASK_MAX).map((g) => g.ask);
 }
 
 /** A row that has gone contributes nothing, without a null check at every

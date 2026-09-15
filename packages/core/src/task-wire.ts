@@ -346,6 +346,13 @@ export interface InfoRequest {
  */
 export interface StoredReviewItem extends TaskReviewItem {
   filedBy?: TaskActor;
+  /**
+   * The done-when line this item asks the owner about, when the server filed
+   * it for a line marked `owner`. Its answer sets that line's verdict, and it
+   * is how the filing stays one item per line across restarts. Store-only
+   * like `filedBy`.
+   */
+  doneWhenLineId?: string;
 }
 
 /**

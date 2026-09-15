@@ -78,9 +78,15 @@ export interface FeedbackClient {
   onReset(cb: () => void): void;
   /** Fires on every transition; also called immediately with the current status. */
   onStatus(cb: (s: ConnectionStatus) => void): void;
+  /**
+   * Open a socket now if the last one closed, instead of at the end of its
+   * backoff. For when what refused it has changed: a widget that just got a
+   * token can open a socket the server refused without one.
+   */
+  reconnect(): void;
 }
 
-export function connect(url: string): FeedbackClient {
+export function connect(url: string, protocol?: () => string | undefined): FeedbackClient {
   const ydoc = new Y.Doc();
   const awareness = new awarenessProtocol.Awareness(ydoc);
   let ws: WebSocket;
@@ -92,6 +98,7 @@ export function connect(url: string): FeedbackClient {
   const statusCbs: ((s: ConnectionStatus) => void)[] = [];
   let status: ConnectionStatus = 'connecting';
   let reconnectDelay = 500;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
   const docUpdate = (update: Uint8Array, origin: unknown) => {
     if (origin === ws || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -124,7 +131,7 @@ export function connect(url: string): FeedbackClient {
   function open() {
     if (closed) return;
     setStatus('connecting');
-    ws = new WebSocket(url);
+    ws = new WebSocket(url, protocol?.());
     ws.binaryType = 'arraybuffer';
     const thisWs = ws;
 
@@ -224,7 +231,7 @@ export function connect(url: string): FeedbackClient {
       if (syncTimer !== null) clearTimeout(syncTimer);
       setStatus('closed');
       if (closed) return;
-      setTimeout(open, Math.min(reconnectDelay, 10000));
+      retryTimer = setTimeout(open, Math.min(reconnectDelay, 10000));
       reconnectDelay = Math.min(reconnectDelay * 2, 10000);
     });
 
@@ -273,6 +280,12 @@ export function connect(url: string): FeedbackClient {
     onStatus(cb) {
       statusCbs.push(cb);
       cb(status);
+    },
+    reconnect() {
+      if (closed || status !== 'closed') return;
+      clearTimeout(retryTimer);
+      reconnectDelay = 500;
+      open();
     },
   };
 }

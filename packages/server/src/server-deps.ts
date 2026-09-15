@@ -1,3 +1,4 @@
+import { haikuAnswerCoverage } from './answer-coverage.ts';
 /**
  * The other half of the composition root: the ONE place a real adapter is
  * constructed.
@@ -119,6 +120,10 @@ export function createServerDeps(
   if (!reviewJudge && !reviewGateEnabled()) {
     console.log('[review-gate] off (CW_REVIEW_GATE=0); review items pass unjudged.');
   }
+  // And whether an answer covered every question an item asks — the same
+  // consent again: the item's words and the reader's answer leave the machine.
+  // Absent key or CW_ANSWER_COVERAGE=0 → null → every answer closes its item.
+  const answerCoverage = haikuAnswerCoverage();
 
   // The ONLY place the real effort-estimate scorer is constructed — same seam
   // rule and the same dedicated-key consent as the summarizer and the review
@@ -383,6 +388,7 @@ export function createServerDeps(
     voiceComplete,
     voiceFeedbackTidy,
     reviewJudge,
+    answerCoverage,
     effortEstimator,
     transcription,
     meetingBot,

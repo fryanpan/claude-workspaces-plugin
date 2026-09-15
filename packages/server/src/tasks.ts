@@ -25,6 +25,12 @@ import {
   endBoardPromptBeforeMarkdown,
 } from './prompt-markdown-migration.ts';
 import { TaskDecisionStore } from './review-items/decisions.ts';
+import {
+  type OwnerItemDeps,
+  applyOwnerAnswer,
+  refuseOwnerAnswer,
+  syncOwnerItems,
+} from './review-items/done-when-owner.ts';
 import { ReviewJudgementStore } from './review-items/judgements.ts';
 import { ReviewItemQueries } from './review-items/queries.ts';
 import { ReviewItemStore } from './review-items/store.ts';
@@ -1160,6 +1166,13 @@ export interface DecisionAnsweredEvent {
   headline?: string;
   /** Set when the answer was sent from inside a mock page — see `WriteVia`. */
   via?: WriteVia;
+  /**
+   * The item's questions this answer did NOT cover, when it covered only
+   * some. The item stays open on the reader's queue; the filer acts on what
+   * was answered and leaves the rest to the reader. Absent on an answer that
+   * closed the item. See `answer-coverage.ts`.
+   */
+  openParts?: string[];
   actor: TaskActor;
   /** The decision task's links — a ready-made propagation checklist. */
   links: Ref[];
@@ -2519,16 +2532,18 @@ export class TaskStore {
     lines: readonly DoneWhenInput[],
     opts: { actor: { id: string; name: string; kind?: string } },
   ): DoneWhenResult {
-    return this.doneWhen.setLines(taskId, lines, opts.actor);
+    return this.withOwnerItems(this.doneWhen.setLines(taskId, lines, opts.actor), opts.actor);
   }
 
-  /** The builder's report — a verdict per line, with the proof behind it. */
+  /** The builder's report — a verdict per line, with the proof behind it.
+   *  `baseUrl` resolves a proof's board path ("/workspaces/…"). */
   reportDoneWhen(
     taskId: string,
     entries: readonly DoneWhenReportInput[],
-    opts: { actor: { id: string; name: string; kind?: string } },
+    opts: { actor: { id: string; name: string; kind?: string }; baseUrl?: string },
   ): DoneWhenResult {
-    return this.doneWhen.report(taskId, entries, opts.actor);
+    const res = this.doneWhen.report(taskId, entries, opts.actor, opts.baseUrl);
+    return this.withOwnerItems(res, opts.actor);
   }
 
   /** The owner's word on a line only a person can judge. */
@@ -2538,8 +2553,64 @@ export class TaskStore {
     verdict: 'met' | 'not-met',
     opts: { actor: { id: string; name: string; kind?: string } },
   ): DoneWhenResult {
-    return this.doneWhen.ownerCheck(taskId, lineId, verdict, opts.actor);
+    return this.withOwnerItems(
+      this.doneWhen.ownerCheck(taskId, lineId, verdict, opts.actor),
+      opts.actor,
+    );
   }
+
+  /** Every write to a done-when list keeps one review item open per line
+   *  marked for the owner, and none for a line that no longer is — see
+   *  review-items/done-when-owner.ts. The items whose words are new come
+   *  back as `ownerItemsToJudge`, for the route to put through the gate. */
+  private withOwnerItems(
+    res: DoneWhenResult,
+    actor: { id: string; name: string; kind?: string },
+  ): DoneWhenResult {
+    if (!res.ok) return res;
+    const { toJudge } = syncOwnerItems(res.task.id, this.ownerItemDeps, actor);
+    return toJudge.length > 0 ? { ...res, ownerItemsToJudge: toJudge } : res;
+  }
+
+  /** The boot pass: owner lines written before their items existed get one.
+   *  Idempotent — a line that already has an open item gets nothing. */
+  syncOwnerItemsEverywhere(): {
+    filed: number;
+    withdrawn: number;
+    revised: number;
+    toJudge: Array<{ taskId: string; reviewItemIds: string[] }>;
+  } {
+    const total = {
+      filed: 0,
+      withdrawn: 0,
+      revised: 0,
+      toJudge: [] as Array<{ taskId: string; reviewItemIds: string[] }>,
+    };
+    for (const workspace of this.listWorkspaces()) {
+      for (const task of this.listTasks(workspace.id)) {
+        if (!task.doneWhen?.length && !task.reviews?.some((r) => r.doneWhenLineId)) continue;
+        const res = syncOwnerItems(task.id, this.ownerItemDeps);
+        total.filed += res.filed;
+        total.withdrawn += res.withdrawn;
+        total.revised += res.revised;
+        if (res.toJudge.length > 0)
+          total.toJudge.push({ taskId: task.id, reviewItemIds: res.toJudge });
+      }
+    }
+    return total;
+  }
+
+  private readonly ownerItemDeps: OwnerItemDeps = {
+    getTask: (taskId) => this.getTask(taskId),
+    addReviewItem: (taskId, review, opts) => this.reviewItems.addReviewItem(taskId, review, opts),
+    withdrawReviewItem: (taskId, reviewItemId, opts) =>
+      this.reviewItems.withdrawReviewItem(taskId, reviewItemId, opts),
+    reviseReviewItem: (taskId, reviewItemId, patch, opts) =>
+      this.reviewItems.reviseReviewItem(taskId, reviewItemId, patch, opts),
+    ownerCheck: (taskId, lineId, verdict, actor) =>
+      this.doneWhen.ownerCheck(taskId, lineId, verdict, actor),
+    appendNote: (taskId, input) => this.appendNote(taskId, input),
+  };
 
   // ── Review items ─────────────────────────────────────────────────────────
 
@@ -2674,9 +2745,24 @@ export class TaskStore {
       actor: { id: string; name: string; kind?: string };
       answeredWith?: string;
       via?: WriteVia;
+      openParts?: string[];
     },
   ): AnswerTaskReviewResult {
-    return this.reviewItems.answerTaskReview(taskId, reviewItemId, text, opts);
+    const task = this.getTask(taskId);
+    const refused = task ? refuseOwnerAnswer(task, reviewItemId, opts.actor) : undefined;
+    if (refused) return { ok: false, error: 'not-a-person', message: refused };
+    const res = this.reviewItems.answerTaskReview(taskId, reviewItemId, text, opts);
+    // An item filed for an owner line carries its answer to the line.
+    if (res.ok) {
+      applyOwnerAnswer(
+        taskId,
+        reviewItemId,
+        { text, ...(opts.answeredWith !== undefined ? { answeredWith: opts.answeredWith } : {}) },
+        opts.actor,
+        this.ownerItemDeps,
+      );
+    }
+    return res;
   }
 
   requestMoreInfoOnReview(

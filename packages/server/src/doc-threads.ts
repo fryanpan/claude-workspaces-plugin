@@ -92,7 +92,7 @@ export interface DocThreadPersistence {
     event: 'thread.created' | 'thread.replied' | 'thread.resolved' | 'thread.reopened',
     thread: Thread,
     comment?: { id: string; author: User; text: string; ts: number },
-    opts?: { generate?: boolean; via?: WriteVia },
+    opts?: { generate?: boolean; via?: WriteVia; openParts?: string[] },
     actor?: User,
   ): void;
   recordActivity(
@@ -138,6 +138,9 @@ export class DocThreads {
       review?: ReviewPayload;
       /** A spoken comment's clip and raw words — see `VoiceNote`. */
       voice?: VoiceNote;
+      /** This reply was a partial answer: the item's questions it left open,
+       *  carried on the frame so a watching filer is told. */
+      openParts?: string[];
       /** Sent from inside a mock page — see `WriteVia`. */
       via?: WriteVia;
     },
@@ -252,7 +255,15 @@ export class DocThreads {
     author: User,
     text: string,
     optionId?: string,
-    opts?: { generate?: boolean; onlyIfUnanswered?: boolean; via?: WriteVia },
+    opts?: {
+      generate?: boolean;
+      onlyIfUnanswered?: boolean;
+      via?: WriteVia;
+      /** The item's questions this answer leaves open. Non-empty on an item
+       *  still unanswered, it is recorded as a PARTIAL answer and the item
+       *  stays open; see `threadOpenParts`. */
+      openParts?: string[];
+    },
   ): Promise<{ ok: true; thread: Thread } | { ok: false; error: string }> {
     const doc = this.p.doc(docId);
     if (!doc) return { ok: false, error: 'no-doc' };
@@ -274,6 +285,30 @@ export class DocThreads {
     // says "answered" carries a card that still says "unanswered".
     const prior = target.review;
     const ts = Date.now();
+    // Some of its questions answered, not all: the words go on the item as a
+    // partial answer and on the thread as the reply, with no answer stamp,
+    // so the item stays on the reader's queue naming what is left.
+    const { openParts, ...postOpts } = opts ?? {};
+    if (openParts !== undefined && openParts.length > 0 && !reviewAnswered(prior)) {
+      setCommentReview(doc.ydoc, threadId, commentId, {
+        ...prior,
+        partialAnswers: [
+          ...(prior.partialAnswers ?? []),
+          {
+            text,
+            by: author.name,
+            ts,
+            open: openParts,
+            ...(opts?.via ? { via: opts.via } : {}),
+          },
+        ],
+      });
+      const replied = await this.postComment(docId, threadId, author, text, undefined, {
+        ...postOpts,
+        openParts,
+      });
+      return replied ? { ok: true, thread: replied } : { ok: false, error: 'reply-failed' };
+    }
     // A second answer landing over a standing one is a race, not a rewrite
     // request — two browsers both showing the same card, the slower tap
     // arriving after the faster one recorded. Last write stands, but the
@@ -308,7 +343,7 @@ export class DocThreads {
       answerText: text,
       ...(optionId !== undefined ? { answeredWith: optionId } : {}),
     });
-    const replied = await this.postComment(docId, threadId, author, text, undefined, opts);
+    const replied = await this.postComment(docId, threadId, author, text, undefined, postOpts);
     return replied ? { ok: true, thread: replied } : { ok: false, error: 'reply-failed' };
   }
 

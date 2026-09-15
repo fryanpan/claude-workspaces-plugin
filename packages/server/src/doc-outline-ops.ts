@@ -71,6 +71,8 @@ export function applyDocBlockEdits(
     // write-back observer flushes the result to disk and
     // `clearAuthorshipOnPersonEdit` does not mistake it for a person typing.
     transactionOrigin: 'agent',
+    // An `.mdx` doc reads a component in the markdown as a block, as its file does.
+    parse: { mdx: prose.isMdxPath(doc.meta.sourceUrl) },
   });
   return { ok: true, ...res };
 }
