@@ -43,9 +43,9 @@ import { threadOpenParts } from '../answer-coverage.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
 import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
-import { taskIdOfBodyDoc } from '../task-row.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
+import { taskIdOfBodyDoc } from '../task-row.ts';
 import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
@@ -193,8 +193,7 @@ export async function handleDocThreadRoutes(
     heldFields,
     parseRevisedRange,
   } = ctx;
-  const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, roleFor, withTaskChips } =
-    rq;
+  const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, roleFor, withTaskChips } = rq;
   // Set only by a mock page's host, on the writes it relays out of the
   // sandboxed frame. Recorded on what each write leaves behind so an agent
   // can tell a comment typed in the board from one a mock page could have sent.

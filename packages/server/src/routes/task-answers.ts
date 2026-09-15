@@ -7,8 +7,8 @@ import { answerAsksBack } from '@claude-workspaces/core';
  */
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { SECRET_ANSWER_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
+import { SECRET_ANSWER_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { LEGACY_REVIEW_ITEM_ID, legacyDecisionItem } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 

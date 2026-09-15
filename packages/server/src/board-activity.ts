@@ -52,9 +52,7 @@ import type { BoardWorkspace, Task } from './tasks.ts';
  * moving, and `decision.answered` beside it already counts.
  */
 export function isBoardActivity(type: string): boolean {
-  return (
-    !type.startsWith('agent.') && type !== 'task.noted' && type !== 'review_item.viewed'
-  );
+  return !type.startsWith('agent.') && type !== 'task.noted' && type !== 'review_item.viewed';
 }
 
 /**

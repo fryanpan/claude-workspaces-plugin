@@ -74,8 +74,8 @@ import {
   revisedPhrase,
 } from './board-review-model.ts';
 import { requireText } from './board-review-render.ts';
-import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { markPhrase, unmarkPhrase } from './review-item-phrase.ts';
+import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
 import { useSelectionPill } from './selection-pill.ts';
 

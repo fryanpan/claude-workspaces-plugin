@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { isReviewItemMeasurementEvent } from '../review-items/analytics.ts';
 /**
  * What to work on next, the load reports behind it, and the board's event feed.
  *
@@ -16,7 +17,6 @@ import { join } from 'node:path';
 import { redactBoardEventForVisitor } from '../share/redact-board-events.ts';
 import type { LoadReportReading } from '../slow-load-alarm.ts';
 import { buildQueue } from '../task-queue.ts';
-import { isReviewItemMeasurementEvent } from '../review-items/analytics.ts';
 import { eventsLogPath, isRetired, retiredNotice } from '../tasks.ts';
 import { SERVER_TICK_EVENT, analyzeUptime } from '../uptime.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';

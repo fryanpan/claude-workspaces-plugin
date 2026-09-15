@@ -98,8 +98,8 @@ import {
 import { panelReviewQueue } from './board-review-render.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { DoneWhenList } from './done-when-list.tsx';
-import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { markPhrase } from './review-item-phrase.ts';
+import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
 import { ScheduleEditor } from './schedule-editor.tsx';
 import { selectWordAtPoint, useSelectionPill } from './selection-pill.ts';
