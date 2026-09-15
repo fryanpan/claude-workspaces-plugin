@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TranscriptLine } from '../src/speaker-voices.ts';
 import {
   createDocSpeakersCache,
   loadDocSpeakers,
@@ -94,7 +95,29 @@ describe('loadDocSpeakers', () => {
 });
 
 describe('loadDocTranscript', () => {
-  it('renders the latest meeting’s turns in the raw record’s own grammar', async () => {
+  /** A meeting record the REST route would answer with, for these turns. */
+  function served(
+    spoken: ReadonlyArray<[label: string, text: string]>,
+    names: Record<string, string> = { p7: 'Rowan Pike', p8: 'Ada Vale' },
+  ): typeof fetch {
+    const impl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/meetings')) {
+        return ok({ meetings: [{ meetingId: 'm-new', startedAt: 900 }] });
+      }
+      return ok({
+        speakers: names,
+        transcript: spoken.map(([speaker, text], i) => ({
+          turn: i,
+          text,
+          speaker,
+          ts: Date.UTC(2026, 8, 9, 9, 12, 0) + i * 1000,
+        })),
+      });
+    });
+    return impl as unknown as typeof fetch;
+  }
+
+  it('renders the latest meeting’s rows in the raw record’s own grammar', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       if (String(url).endsWith('/meetings')) {
         return ok({
@@ -113,6 +136,7 @@ describe('loadDocTranscript', () => {
             speaker: 'p7',
             ts: Date.UTC(2026, 8, 9, 9, 12, 4),
           },
+          // Acknowledgement: rides on the row above rather than taking one.
           { turn: 1, text: 'Right.', speaker: 'p8', ts: Date.UTC(2026, 8, 9, 9, 12, 9) },
           // No speaker at all: a solo capture's turns carry none.
           { turn: 2, text: 'Ending there.', ts: Date.UTC(2026, 8, 9, 9, 12, 20) },
@@ -122,13 +146,137 @@ describe('loadDocTranscript', () => {
     expect(await loadDocTranscript('huddle', fetchImpl as unknown as typeof fetch)).toEqual({
       meetingId: 'm-new',
       lines: [
-        '[09:12:04Z] Rowan Pike: So the Riverbend sync.',
-        '[09:12:09Z] Speaker p8: Right.',
-        '[09:12:20Z] Speaker 1: Ending there.',
+        {
+          text: '[09:12:04Z] Rowan Pike: So the Riverbend sync.',
+          answers: 'Speaker p8: Right.',
+        },
+        { text: '[09:12:20Z] Speaker 1: Ending there.' },
       ],
     });
     // The LATEST meeting, which after a bot call is the one that just ended.
     expect(String(fetchImpl.mock.calls[1]?.[0])).toContain('m-new');
+  });
+
+  it('keeps a short row that is a real answer on a row of its own', async () => {
+    const found = await loadDocTranscript(
+      'answers',
+      served([
+        ['p7', 'How long does the harbour survey take?'],
+        ['p8', 'Three weeks.'],
+        ['p7', 'Did the tide gauge come back?'],
+        ['p8', 'No.'],
+      ]),
+    );
+    expect(found?.lines.map((l) => l.text.replace(/^\[.*?\] /, ''))).toEqual([
+      'Rowan Pike: How long does the harbour survey take?',
+      'Ada Vale: Three weeks.',
+      'Rowan Pike: Did the tide gauge come back?',
+      'Ada Vale: No.',
+    ]);
+    expect(found?.lines.every((l) => l.answers === undefined)).toBe(true);
+  });
+
+  it('breaks a wall of words at a pause, under one clock and one name', async () => {
+    const sentence = (n: number) =>
+      `Point ${n} is that the dredging schedule and the harbour survey window have never once lined up inside the same quarter, which is how the ferry operator ends up publishing a timetable nobody on the jetty believes.`;
+    const wall = [1, 2, 3, 4].map(sentence).join(' ');
+    const found = await loadDocTranscript('wall', served([['p7', wall]]));
+    const lines = found?.lines ?? [];
+    expect(lines.length).toBeGreaterThan(1);
+    // One turn, so exactly one line carries a clock and a name; the rest are
+    // marked as continuations so the panel can indent them.
+    expect(lines.filter((l) => l.continued !== true)).toHaveLength(1);
+    expect(spokenOf(lines).join(' ')).toBe(wall);
+  });
+
+  /**
+   * The speech the panel still shows, in the order a reader meets it: a line's
+   * own words, then whatever was folded onto it. Reconstructible exactly
+   * because the scaffolding is a fixed grammar and the fixture's names are
+   * known — which is the point of asserting on it rather than on a count.
+   */
+  function spokenOf(lines: readonly TranscriptLine[]): string[] {
+    const NAME = /^(?:Rowan Pike|Ada Vale): /;
+    const said: string[] = [];
+    for (const line of lines) {
+      said.push(
+        line.continued === true
+          ? line.text
+          : line.text.replace(/^\[\d\d:\d\d:\d\dZ\] /, '').replace(NAME, ''),
+      );
+      if (line.answers === undefined) continue;
+      for (const group of line.answers.split('; ')) {
+        for (const one of group.replace(NAME, '').split(' \u00b7 ')) said.push(one);
+      }
+    }
+    return said;
+  }
+
+  it('a meeting of the reported shape loses rows and not one word', async () => {
+    // The same shape the file's own proof uses — the proportions measured on a
+    // real 41-minute meeting, rebuilt from invented speech — measured here on
+    // the surface a person watches rather than on the artifact.
+    const topics = [
+      'the dredging schedule',
+      'the harbour survey',
+      'the jetty repairs',
+      'the ferry timetable',
+      'the tide gauge',
+      'the winter budget',
+      'the pilot boat',
+      'the mooring fees',
+      'the slipway lease',
+      'the fuel contract',
+      'the night crossing',
+      'the spring haul-out',
+    ];
+    const acks = ['Yeah.', 'Right.', 'Mhm.', 'Okay.', 'Yeah yeah.', 'Makes sense.'];
+    const spoken: Array<[string, string]> = [];
+    topics.forEach((topic, i) => {
+      spoken.push(['p7', `We still have not decided what happens to ${topic} in the spring.`]);
+      for (let k = 0; k <= i % 3; k++) spoken.push(['p8', acks[(i + k) % acks.length] as string]);
+      spoken.push(['p8', `I would rather we settled ${topic} before the survey window opens.`]);
+      for (let k = 0; k <= (i + 1) % 3; k++) {
+        spoken.push(['p7', acks[(i + k + 2) % acks.length] as string]);
+      }
+      spoken.push(['p7', 'That depends on whether the harbour office moves the window again.']);
+      spoken.push(['p8', 'Mhm.']);
+      if (i % 4 === 0) {
+        spoken.push([
+          'p7',
+          [1, 2, 3, 4, 5, 6]
+            .map(
+              (n) =>
+                `The ${n === 1 ? 'first' : 'next'} thing about ${topic} is that it was scheduled against a window the harbour office had already moved, and nobody told the ferry operator until the timetable had gone to print.`,
+            )
+            .join(' '),
+        ]);
+        spoken.push(['p8', 'Right.']);
+      }
+    });
+
+    const words = (t: string): number => t.split(/\s+/).filter((w) => w !== '').length;
+    const short = spoken.filter(([, t]) => words(t) <= 3).length;
+    const walls = spoken.filter(([, t]) => words(t) > 80).length;
+    // The reported meeting: 51% of rows three words or fewer, 4% of rows
+    // holding 41% of the words. Asserted before the fold is measured, so the
+    // fixture cannot quietly drift into proving nothing.
+    expect(short / spoken.length).toBeGreaterThan(0.45);
+    expect(walls / spoken.length).toBeLessThan(0.08);
+
+    const found = await loadDocTranscript('shape', served(spoken));
+    const lines = found?.lines ?? [];
+    const before = spoken.length;
+    const after = lines.length;
+    const wordsIn = spoken.reduce((n, [, t]) => n + words(t), 0);
+    const recovered = spokenOf(lines);
+    const wordsOut = recovered.reduce((n, t) => n + words(t), 0);
+    console.log(`[panel shape] rows ${before} -> ${after}; words ${wordsIn} -> ${wordsOut}`);
+
+    // Every word, in the order it was said. Not a count: the sequence.
+    expect(recovered.join(' ')).toBe(spoken.map(([, t]) => t).join(' '));
+    expect(wordsOut).toBe(wordsIn);
+    expect(after).toBeLessThan(before);
   });
 
   it('answers null for a doc that has never held a meeting', async () => {

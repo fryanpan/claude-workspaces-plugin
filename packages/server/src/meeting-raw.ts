@@ -70,16 +70,14 @@ import {
 } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import {
+  type FoldedAnswer,
+  type FoldedRow,
   MEETING_CAPTURE_SOURCES,
   type MeetingCaptureSource,
   describeCaptureSource,
+  foldTranscriptRows,
   speakerDisplayName,
 } from '@claude-workspaces/core';
-import {
-  type FoldedAnswer,
-  type FoldedRow,
-  foldTranscriptRows,
-} from './meeting-transcript-fold.ts';
 import {
   type MeetingGap,
   type MeetingRecord,
@@ -260,10 +258,15 @@ export function formatFoldedAnswers(
  * The nested bullets carry no clock and no name. The turn settled once, so
  * there is one honest timestamp for all of it, and the voice has not changed
  * — writing either again would say a second turn happened.
+ *
+ * `at` is passed rather than read off the row because a folded row's clock is
+ * optional — the fold also serves a caller reading a record that may carry no
+ * clock at all — while every turn THIS record stores has one, and resolving
+ * that belongs at the one call site that knows it.
  */
-export function formatFoldedRow(row: FoldedRow, nameOf: SpeakerNamer): string {
+export function formatFoldedRow(row: FoldedRow, at: number, nameOf: SpeakerNamer): string {
   const lines = [
-    formatRawBullet(row.ts, nameOf(row.speaker), row.text),
+    formatRawBullet(at, nameOf(row.speaker), row.text),
     ...row.continued.map((chunk) => `  - ${oneLine(chunk)}`),
   ];
   const last = lines.length - 1;
@@ -423,10 +426,14 @@ export function formatRawSegment(seg: RawSegmentInput): string {
     }
     for (const g of carried) barriers.push(g.to);
     const entries: Array<{ at: number; turn: boolean; line: string }> = [
+      // `recordTurn` stamps every turn it stores, so every row folded from
+      // them carries a clock and the fallback never fires here. It is the
+      // segment's own start rather than a zero because that is where a row
+      // with nothing to sort on belongs.
       ...foldTranscriptRows(seg.turns, { barriers }).map((r) => ({
-        at: r.ts,
+        at: r.ts ?? seg.startedAt,
         turn: true,
-        line: formatFoldedRow(r, nameOf),
+        line: formatFoldedRow(r, r.ts ?? seg.startedAt, nameOf),
       })),
       ...gaps.map((g) => ({ at: g.from, turn: false, line: formatGapBullet(g) })),
       // Dated when the capture CAME BACK, which is the moment this block is

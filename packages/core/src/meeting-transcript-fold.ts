@@ -18,18 +18,55 @@
  * have made costs a line its own bullet, not its words. A filter would have
  * to be right every time, and no lexical rule is.
  *
- * WHY HERE AND NOT IN THE RECORD. `meetings.ts` owns the append-only JSONL a
- * replay lines PCM up against, and the engine seam revises a turn in place
- * long after it first settles — a fold applied there would have to renumber
- * or drop stored turns, and would be folding text that is still being
- * rewritten. This module is pure, is handed the turns only once the segment
- * is composed at stop, and changes no stored byte. `formatRawSegment` is its
- * one caller, which is also why the replay script gets the same reshape for
- * free: it composes its segments through the same function.
+ * WHY HERE AND NOT IN THE RECORD. The server's `meetings.ts` owns the
+ * append-only JSONL a replay lines PCM up against, and the engine seam
+ * revises a turn in place long after it first settles — a fold applied there
+ * would have to renumber or drop stored turns, and would be folding text that
+ * is still being rewritten. This module is pure, is handed the turns only
+ * once, and changes no stored byte.
+ *
+ * WHY IT IS IN `core`. Two surfaces show a meeting's words as a list of rows,
+ * and until this moved they each built that list themselves: the server
+ * composes `<docname>-raw-transcript.md` at stop (`formatRawSegment`), and the
+ * board's Transcript fold composes the same grammar in the browser off the
+ * REST record (`loadDocTranscript`). Two implementations of one grammar is two
+ * answers to "what was said", so both now call this. The replay script gets it
+ * for free, composing through the server's side.
+ *
+ * WHAT IT DOES NOT REACH, and why that is right rather than an omission: the
+ * live strip holds a rolling window of three turns and cannot grow, and the
+ * live zone at the end of the doc is one flowing run of inline spans with no
+ * per-turn block at all (owner, 2026-09-01: "engine turns have no meaning or
+ * value to the viewer, I expect a stream of text"). Neither is a list of rows,
+ * so neither has rows to fold.
  */
 
-import type { TranscriptTurn } from './meetings.ts';
-import { isPureBackchannel, sentencesOf } from './notes-idea-coverage.ts';
+import { isPureBackchannel, sentencesOf } from './speech-lexicon.ts';
+// The repo's one word counter. This module wrote its own for a while, which
+// skipped a token holding no letter or digit; the difference never showed on
+// engine output, and a second counter is how the "80 words" this module
+// enforces drifts away from the 80 words a reader is told about elsewhere.
+import { wordCount } from './word-count.ts';
+
+/**
+ * The least a turn has to be for this module to place it: its words.
+ *
+ * Everything else is optional because one of the two callers reads a meeting
+ * record back over the wire, where a field is whatever the server that wrote
+ * it chose to store. The fold needs none of them to decide anything except
+ * `ts`, which it uses only when EVERY turn has one. Structural, so the
+ * server's own `TranscriptTurn` and the board's `RecordTurn` both satisfy it
+ * without either importing the other.
+ */
+export interface FoldableTurn {
+  text: string;
+  /** The stored turn number. Absent on a record that did not number them. */
+  turn?: number;
+  /** When the turn settled. Absent on a record that stored no clock. */
+  ts?: number;
+  /** The engine's label for the voice. */
+  speaker?: string;
+}
 
 /**
  * The most words a row may hold and still be foldable.
@@ -76,9 +113,9 @@ export interface FoldedAnswer {
 /** One row of the rendered transcript, after the reshape. */
 export interface FoldedRow {
   /** The stored turn this row opens. Turn numbers are never rewritten. */
-  turn: number;
+  turn?: number;
   /** When that turn settled — the only clock this row may claim. */
-  ts: number;
+  ts?: number;
   speaker?: string;
   /** The row's first chunk of words. */
   text: string;
@@ -90,11 +127,6 @@ export interface FoldedRow {
   continued: readonly string[];
   /** Short rows folded onto this one, in the order they were said. */
   answers: readonly FoldedAnswer[];
-}
-
-/** Words, as a person counts them: anything holding a letter or a digit. */
-export function wordCount(text: string): number {
-  return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
 /** The form two utterances are "the same text" in. */
@@ -187,7 +219,7 @@ export interface FoldOptions {
  * previous row instead of under it.
  */
 export function foldTranscriptRows(
-  turns: readonly TranscriptTurn[],
+  turns: readonly FoldableTurn[],
   options: FoldOptions = {},
 ): FoldedRow[] {
   const maxWords = options.maxWords ?? FOLD_MAX_WORDS;
@@ -204,12 +236,19 @@ export function foldTranscriptRows(
   // IN THE ORDER THEY WILL BE READ, which is not always the order they were
   // stored. A provider that settles a turn twice — rough, then punctuated —
   // leaves the turn where it was in the array and moves its timestamp to the
-  // revision, and the caller renders every row by timestamp. Folding in array
-  // order would then hang a short row on whichever turn was revised last
-  // rather than on the one it follows on the page, and would hand the barrier
-  // check a decreasing interval that matches no gap at all. The sort is
-  // stable, so turns that settled in the same millisecond keep their order.
-  const ordered = [...turns].sort((a, b) => a.ts - b.ts);
+  // revision, and the file's composer renders every row by timestamp. Folding
+  // in array order would then hang a short row on whichever turn was revised
+  // last rather than on the one it follows on the page, and would hand the
+  // barrier check a decreasing interval that matches no gap at all. The sort
+  // is stable, so turns that settled in the same millisecond keep their order.
+  //
+  // A record with no clock at all keeps its stored order, which is the only
+  // order it has. Sorting a mixture would move the timestamped turns around
+  // the others for no reason, so it is all or nothing.
+  const clocked = turns.every((t) => typeof t.ts === 'number');
+  const ordered = clocked
+    ? [...turns].sort((a, b) => (a.ts as number) - (b.ts as number))
+    : [...turns];
 
   const rows: FoldedRow[] = [];
   // The last thing SAID, which is not the last row once something has folded
@@ -223,7 +262,7 @@ export function foldTranscriptRows(
 
   for (const turn of ordered) {
     const previous = lastSpoken;
-    lastSpoken = { at: turn.ts };
+    lastSpoken = turn.ts === undefined ? null : { at: turn.ts };
     const anchor = rows[rows.length - 1];
     const key = normalize(turn.text);
     const foldable =
@@ -242,7 +281,9 @@ export function foldTranscriptRows(
     // bounds follow that rule rather than the arithmetic: half-open the other
     // way round from the obvious reading.
     const crossesBarrier =
-      previous !== null && barriers.some((b) => b >= previous.at && b < turn.ts);
+      previous !== null &&
+      turn.ts !== undefined &&
+      barriers.some((b) => b >= previous.at && b < (turn.ts as number));
     if (foldable && anchor !== undefined && !answersQuestion && !crossesBarrier) {
       anchor.answers = [
         ...anchor.answers,
@@ -253,8 +294,8 @@ export function foldTranscriptRows(
     answering = isQuestion(turn.text) || (answering && foldable);
     const [first = turn.text, ...continued] = breakAtPauses(turn.text, limit);
     rows.push({
-      turn: turn.turn,
-      ts: turn.ts,
+      ...(turn.turn !== undefined ? { turn: turn.turn } : {}),
+      ...(turn.ts !== undefined ? { ts: turn.ts } : {}),
       ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
       text: first,
       continued,

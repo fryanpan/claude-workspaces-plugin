@@ -9,17 +9,17 @@
  *
  * All speech is invented. The repo is public.
  */
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import {
   type FoldedRow,
   breakAtPauses,
   foldTranscriptRows,
-  wordCount,
 } from '../src/meeting-transcript-fold.ts';
-import type { TranscriptTurn } from '../src/meetings.ts';
+import type { FoldableTurn } from '../src/meeting-transcript-fold.ts';
+import { wordCount } from '../src/word-count.ts';
 
 /** Turns a second apart, in the order given. */
-function turns(...spoken: Array<[speaker: string, text: string]>): TranscriptTurn[] {
+function turns(...spoken: Array<[speaker: string, text: string]>): FoldableTurn[] {
   return spoken.map(([speaker, text], i) => ({
     turn: i,
     text,
@@ -201,7 +201,7 @@ describe('which short rows fold', () => {
     // and leaves it where it was in the array, so the stored order and the
     // read order come apart. The acknowledgement belongs to the row it sits
     // under once the segment is ordered by the clock.
-    const said: TranscriptTurn[] = [
+    const said: FoldableTurn[] = [
       { turn: 0, text: 'The tide gauge went quiet at noon.', ts: 1_000, speaker: 'A' },
       { turn: 1, text: 'We should call the harbour office about it.', ts: 5_000, speaker: 'A' },
       { turn: 2, text: 'Yeah.', ts: 2_000, speaker: 'B' },

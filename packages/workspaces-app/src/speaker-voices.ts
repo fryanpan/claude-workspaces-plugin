@@ -13,7 +13,13 @@
  * meeting three weeks ago is not the correction anybody is reaching for.
  */
 
-import { type RosterVoice, speakerDisplayName, speakerRoster } from '@claude-workspaces/core';
+import {
+  type FoldedAnswer,
+  type RosterVoice,
+  foldTranscriptRows,
+  speakerDisplayName,
+  speakerRoster,
+} from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 
 interface MeetingSummary {
@@ -28,9 +34,15 @@ export interface DocSpeakers {
   voices: RosterVoice[];
 }
 
-/** One settled turn as the meeting record carries it. */
+/**
+ * One settled turn as the meeting record carries it.
+ *
+ * Every field but the words is optional because this is a JSON body written
+ * by whatever server version stored the meeting, not a value this page built.
+ */
 interface RecordTurn {
   text: string;
+  turn?: number;
   speaker?: string;
   ts?: number;
 }
@@ -158,12 +170,32 @@ export function createDocSpeakersCache(
   };
 }
 
+/**
+ * One line of the panel, which is a ROW of the transcript rather than a turn.
+ *
+ * The distinction is the whole point of the fold: a run of acknowledgement
+ * from one voice rides on the row it answered instead of taking rows of its
+ * own, and a row too long to read breaks at a pause into chunks that are not
+ * separate turns and must not be dressed as them.
+ */
+export interface TranscriptLine {
+  /**
+   * `[HH:MM:SSZ] Rowan Pike: words` — the raw record's own grammar, minus its
+   * leading bullet. A continuation carries its words alone: the turn settled
+   * once and the voice has not changed, so writing either again would say a
+   * second turn happened.
+   */
+  text: string;
+  /** True on chunks two onwards of a row that was broken at a pause. */
+  continued?: boolean;
+  /** What was said back, already joined: `Rowan Pike: yeah · right`. */
+  answers?: string;
+}
+
 /** The words of this doc's latest meeting, ready to render. */
 export interface DocTranscript {
   meetingId: string;
-  /** `[HH:MM:SSZ] Rowan Pike: words` — the raw record's own grammar, minus
-   *  its leading bullet, so the panel can render one line per turn. */
-  lines: string[];
+  lines: TranscriptLine[];
 }
 
 /**
@@ -186,16 +218,74 @@ export async function loadDocTranscript(
   if (!latest) return null;
   const names = latest.record.speakers ?? latest.summary.speakers ?? {};
   const turns = latest.record.transcript ?? [];
-  return {
-    meetingId: latest.summary.meetingId,
-    lines: turns.map((turn) => {
-      const who =
-        turn.speaker === undefined ? 'Speaker 1' : speakerDisplayName(turn.speaker, names);
-      const clock =
-        turn.ts === undefined ? '' : `[${new Date(turn.ts).toISOString().slice(11, 19)}Z] `;
-      return `${clock}${who}: ${turn.text.replace(/\s*\n\s*/g, ' ').trim()}`;
-    }),
+  const nameOf = (label: string | undefined): string =>
+    label === undefined ? 'Speaker 1' : speakerDisplayName(label, names);
+  const lines: TranscriptLine[] = [];
+  // THE SAME FOLD THE FILE GETS, off the same decision function. This page
+  // built its own row list until 2026-09-15, which made it the second place
+  // that decided what a row is — and the one a person actually watches. No
+  // barriers are passed: a gap is a line of the FILE's grammar and this
+  // record carries none, so the fold sees an unbroken run.
+  for (const row of foldTranscriptRows(turns)) {
+    const clock = row.ts === undefined ? '' : `[${clockOf(row.ts)}] `;
+    lines.push({
+      text: `${clock}${nameOf(row.speaker)}: ${oneLine(row.text)}`,
+      ...(row.answers.length > 0 && row.continued.length === 0
+        ? { answers: joinAnswers(row.answers, nameOf) }
+        : {}),
+    });
+    row.continued.forEach((chunk, i) => {
+      const last = i === row.continued.length - 1;
+      lines.push({
+        text: oneLine(chunk),
+        continued: true,
+        // The answers ride on the LAST chunk, because that is the words they
+        // were said over.
+        ...(last && row.answers.length > 0 ? { answers: joinAnswers(row.answers, nameOf) } : {}),
+      });
+    });
+  }
+  return { meetingId: latest.summary.meetingId, lines };
+}
+
+/** `HH:MM:SSZ`, the clock the raw record's bullets carry. */
+function clockOf(ts: number): string {
+  return `${new Date(ts).toISOString().slice(11, 19)}Z`;
+}
+
+/** A turn's text on one line, however the engine wrapped it. */
+function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ').trim();
+}
+
+/**
+ * What was said back to a row: `Rowan Pike: yeah · right; Alex Reyes: mhm`.
+ *
+ * Grouped by voice and in the order it was said, so a reader can still tell
+ * who agreed with what. Deliberately the same shape the file's italic
+ * annotation uses, minus the markdown it cannot render here.
+ */
+function joinAnswers(
+  answers: readonly FoldedAnswer[],
+  nameOf: (label: string | undefined) => string,
+): string {
+  const groups: string[] = [];
+  let openName: string | null = null;
+  let said: string[] = [];
+  const close = (): void => {
+    if (openName !== null) groups.push(`${openName}: ${said.join(' \u00b7 ')}`);
   };
+  for (const answer of answers) {
+    const name = nameOf(answer.speaker);
+    if (name !== openName) {
+      close();
+      openName = name;
+      said = [];
+    }
+    said.push(oneLine(answer.text));
+  }
+  close();
+  return groups.join('; ');
 }
 
 /** The voices of this doc's latest meeting, or none if it has never had one. */

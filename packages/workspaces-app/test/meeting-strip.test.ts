@@ -30,6 +30,7 @@ import {
   formatElapsed,
   mountMeetingStrip,
 } from '../src/meeting-strip.ts';
+import type { PanelLine } from '../src/meeting-transcript-panel.ts';
 import { lockDocToReading } from '../src/signin/write-gate.ts';
 import type { DocSpeakers } from '../src/speaker-voices.ts';
 
@@ -313,7 +314,7 @@ function mount(
     loadSpeakers?: () => Promise<DocSpeakers | null>;
     onMeetingChange?: (meetingId: string | null) => void;
     onMeetingEnded?: (meetingId: string) => void;
-    loadTranscript?: () => Promise<{ lines: string[] } | null>;
+    loadTranscript?: () => Promise<{ lines: PanelLine[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
     botNamePrefill?: string;
@@ -1571,7 +1572,10 @@ describe('naming a voice after the meeting — the chooser keeps the cast', () =
       loadTranscript: () => {
         asked += 1;
         return Promise.resolve({
-          lines: ['[09:12:04Z] Rowan Pike: So the Riverbend sync.', '[09:12:09Z] Ada Vale: Right.'],
+          lines: [
+            { text: '[09:12:04Z] Rowan Pike: So the Riverbend sync.', answers: 'Ada Vale: Right.' },
+            { text: 'And then the harbour piece.', continued: true },
+          ],
         });
       },
     });
@@ -1589,7 +1593,17 @@ describe('naming a voice after the meeting — the chooser keeps the cast', () =
     expect(asked).toBe(1);
     expect(
       [...fold.querySelectorAll('.meeting-pop-transcript-line')].map((el) => el.textContent),
-    ).toEqual(['[09:12:04Z] Rowan Pike: So the Riverbend sync.', '[09:12:09Z] Ada Vale: Right.']);
+    ).toEqual([
+      '[09:12:04Z] Rowan Pike: So the Riverbend sync. (Ada Vale: Right.)',
+      'And then the harbour piece.',
+    ]);
+    // A chunk of a broken row is marked as one, so it can be indented rather
+    // than read as a second turn from the same voice.
+    expect(
+      [...fold.querySelectorAll('.meeting-pop-transcript-line')].map((el) =>
+        el.classList.contains('meeting-pop-transcript-cont'),
+      ),
+    ).toEqual([false, true]);
 
     // Folded shut and open again asks nothing more.
     fold.open = false;
