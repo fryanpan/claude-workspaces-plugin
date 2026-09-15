@@ -9,6 +9,11 @@
  * the queue has moved on by the next read. So every answer appends one line
  * to `<dataDir>/review-answers.jsonl`, from release onwards.
  *
+ * `higherOpenSameBoard` counts only the ones on the answered item's own
+ * board. Without it a board low in the plan always reads as deep in the queue,
+ * because every open item on every higher-ranked board is counted above it —
+ * which says where the board sits, not how its own rows were worked through.
+ *
  * `higherOpen` counts the open items ranked above the answered one, per size
  * level: at `easy` only easy ones, at `medium` easy and medium, at `hard`
  * everything. Recording all three means the report can ask "in order" both
@@ -55,6 +60,14 @@ export interface AnswerRecord {
   rankAtAnswer: number;
   /** Open items ranked above it, counted at each cumulative size level. */
   higherOpen: Record<ReviewSize, number>;
+  /**
+   * The same count, limited to the answered item's OWN board. Every open item
+   * on a higher-ranked board counts as above, so a board near the bottom of
+   * the plan reads as deep in the queue however carefully its own rows are
+   * worked through. This separates the two. Absent on records written before
+   * 2026-09-15.
+   */
+  higherOpenSameBoard?: Record<ReviewSize, number>;
   /** The board's project rank, and the plan board it was read from. */
   projectRank: number;
   planWorkspaceId?: string;
@@ -86,24 +99,32 @@ export function measureAnswer(args: {
   workspaceId: string;
   ask: AskShape;
   board: { tasks: OrderTask[]; goalIds: string[] };
-}): { rankAtAnswer: number; higherOpen: Record<ReviewSize, number>; projectRank: number } {
+}): {
+  rankAtAnswer: number;
+  higherOpen: Record<ReviewSize, number>;
+  higherOpenSameBoard: Record<ReviewSize, number>;
+  projectRank: number;
+} {
   const { queue, workspaceId, ask, board } = args;
   const project = queue.projects.find((p) => p.workspaceId === workspaceId);
   const projectRank = project?.rank ?? queue.projects.length + 1;
   const rankOf = new Map(queue.projects.map((p) => [p.workspaceId, p.rank]));
   const ranker = boardRanker(board.tasks, board.goalIds);
   const higherOpen: Record<ReviewSize, number> = { easy: 0, medium: 0, hard: 0 };
+  const higherOpenSameBoard: Record<ReviewSize, number> = { easy: 0, medium: 0, hard: 0 };
+  const count = (into: Record<ReviewSize, number>, size: ReviewSize): void => {
+    if (size === 'easy') into.easy += 1;
+    if (size !== 'hard') into.medium += 1;
+    into.hard += 1;
+  };
   for (const item of queue.items) {
     const itemProject = rankOf.get(item.workspaceId) ?? Number.POSITIVE_INFINITY;
-    const above =
-      itemProject < projectRank ||
-      (item.workspaceId === workspaceId && ranksAhead(ranker, askShapeOf(item), ask));
-    if (!above) continue;
-    if (item.size === 'easy') higherOpen.easy += 1;
-    if (item.size !== 'hard') higherOpen.medium += 1;
-    higherOpen.hard += 1;
+    const sameBoard = item.workspaceId === workspaceId && ranksAhead(ranker, askShapeOf(item), ask);
+    if (!(itemProject < projectRank || sameBoard)) continue;
+    count(higherOpen, item.size);
+    if (sameBoard) count(higherOpenSameBoard, item.size);
   }
-  return { rankAtAnswer: higherOpen.hard + 1, higherOpen, projectRank };
+  return { rankAtAnswer: higherOpen.hard + 1, higherOpen, higherOpenSameBoard, projectRank };
 }
 
 /** The append-only log. */
