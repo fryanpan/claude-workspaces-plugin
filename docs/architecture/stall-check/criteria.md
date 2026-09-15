@@ -50,6 +50,19 @@ today's code fails is flagged.
 - **Measured by:** the `[stall] wake` log lines per board per day, and the
   lead's act latency from transcripts (measured 2026-09-08: median 0–4 min).
 
+## `review-items/done-when-ready.ts` — the ready reminder
+
+- **Must:** tell the task's agent (else the board's lead) once, on the stall
+  tick, when an in-progress task has every line met but one written as
+  needing a person that has not been reported `owner`; record the line as
+  told only once a stream took the frame; forget it when it stops waiting, so
+  a person's Not met sending it back is told afresh.
+- **Must never:** put anything on the person's queue, fire while an ordinary
+  line is still open, or re-send on every tick.
+- **Measured by:** `done-when-ready.test.ts` and
+  `done-when-needs-owner.test.ts`. The told set is in memory, so a restart
+  can re-send at most one frame per waiting line.
+
 ## `keep-moving-verdict.ts` — the measurement
 
 - **Must:** record one verdict per live board per cadence, off the same

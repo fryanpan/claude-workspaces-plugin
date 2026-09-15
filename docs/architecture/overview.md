@@ -525,6 +525,13 @@ open line and the board's own rendering cannot disagree about what "open"
 means. The lines are the sixth field `task-row-slim.ts` drops, because a
 closed task's row carries only the two numbers the pill needs. The routes are
 `routes/task-done-when.ts`, one family, three paths under `tasks/:id/`.
+`task-done-when-input.ts` joins the same group: it reads a list write's words
+(and a line's `needs: 'owner'`, written when only a person can judge it) and
+is re-exported by `task-done-when.ts`, so nothing moves across a boundary. A
+line that needs a person asks nobody until its builder reports it `owner`;
+the stall tick reminds that builder once every other line is met
+(`review-items/done-when-ready.ts`), and the reminder renders in `mcp`
+through `done-when-ready-line.ts`, beside the other line modules.
 
 **A rebuild changes every clientID, so a tab that was away is told to start
 over.** Sync is a state-vector exchange, and after a rebuild a reconnecting
