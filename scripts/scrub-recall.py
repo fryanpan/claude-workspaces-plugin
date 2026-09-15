@@ -30,6 +30,13 @@ blocked-out-of-runs, not a tick.
                                         # print sizes and the cost of a run
   scrub-recall.py --json out.json       # per-run verdicts, for a diff of two
                                         # prompts rather than two summaries
+  scrub-recall.py --rules off           # today's full scan, for the comparison
+
+Each case is scanned the way a push is: the free rules pass (scrub_names.py)
+picks the lines carrying a word the repository had not published before the
+case's first commit, and only those go to Haiku. `--dry-run` also says, for a
+planted case, whether the pass flagged the planted name at all — a name it
+misses is never judged, so that column is the pass's own recall.
 
 Every run is a paid Haiku call. `--dry-run` prints what the full sweep would
 cost before you spend it, and the summary prints what it did spend.
@@ -69,6 +76,7 @@ CASES = os.path.join(HERE, "scrub-recall-cases.json")
 
 sys.path.insert(0, HERE)
 import scrub_git  # noqa: E402
+import scrub_names  # noqa: E402
 
 _SPEC = importlib.util.spec_from_file_location(
     "scrub_haiku", os.path.join(HERE, "scrub-haiku.py"),
@@ -107,6 +115,8 @@ class Case(NamedTuple):
     label: str
     patch: str
     why: str
+    excerpt: str          # what the scanner is handed: the rules pass's pick, or the patch
+    named: Optional[bool]  # planted cases: did the pass flag the planted name
 
 
 def build_patch(spec: dict, fragments: dict) -> str:
@@ -166,9 +176,16 @@ def plant(fragment: dict, name: str) -> str:
     )
 
 
-def load_cases(only: Optional[List[str]]) -> List[Case]:
+def public_base(spec: dict) -> str:
+    """The commit before the case's first one: what was public when it was pushed."""
+    return subprocess.run(["git", "rev-parse", f"{spec['shas'][0]}^"],
+                          capture_output=True, text=True).stdout.strip()
+
+
+def load_cases(only: Optional[List[str]], rules: bool = True) -> List[Case]:
     spec = json.load(open(CASES))
     fragments = spec["fragments"]
+    vocabularies: Dict[str, scrub_names.Vocabulary] = {}
     cases: List[Case] = []
     for label, key in (("positive", "positives"), ("negative", "negatives")):
         for c in spec[key]:
@@ -181,7 +198,18 @@ def load_cases(only: Optional[List[str]]) -> List[Case]:
                 if slotted != (label == "positive"):
                     raise SystemExit(f"[scrub-recall] {c['id']}: a {label} whose fragment "
                                      f"has {'a' if slotted else 'no'} {{name}} slot")
-            cases.append(Case(c["id"], label, build_patch(c, fragments), c.get("why", "")))
+            patch = build_patch(c, fragments)
+            excerpt, named = patch, None
+            if rules:
+                base = public_base(c)
+                if base not in vocabularies:
+                    vocabularies[base] = scrub_names.vocabulary_at(base)
+                chosen = scrub_names.select(patch, vocabularies[base], scrub_git.IDENTITY_PLACEHOLDER)
+                excerpt = chosen.text
+                if c["kind"] == "planted" and label == "positive":
+                    parts = {t.word.lower() for t in scrub_names.tokens(fabricate_name(c["fragment"]))}
+                    named = bool(parts & {w for hit in chosen.triggers for w in hit.split()})
+            cases.append(Case(c["id"], label, patch, c.get("why", ""), excerpt, named))
     missing = set(only or []) - {c.id for c in cases}
     if missing:
         raise SystemExit(f"[scrub-recall] no such case: {', '.join(sorted(missing))}")
@@ -201,7 +229,10 @@ def scan(case: Case) -> Run:
     # scanning it. Without this, a case past the ceiling measures content the
     # shipped gate never reads, and its recall is a number about a different
     # scanner.
-    result = haiku.call_haiku(case.patch[: haiku.MAX_DIFF_CHARS], "scrub-recall")
+    if not case.excerpt:
+        # The pass flagged nothing, so a push makes no call: clean, for free.
+        return Run(case.id, case.label, "clean", "", 0.0)
+    result = haiku.call_haiku(case.excerpt[: haiku.MAX_DIFF_CHARS], "scrub-recall")
     elapsed = time.monotonic() - t0
     if isinstance(result, haiku.Unavailable):
         return Run(case.id, case.label, "unavailable", f"{result.case}: {result.detail}", elapsed)
@@ -250,7 +281,9 @@ def estimate_usd(chars: int) -> float:
 
 def case_cost(case: Case) -> "tuple[int, float]":
     """(requests, dollars) for ONE run of this case, prompt and reply included."""
-    pieces = haiku.split_patch(case.patch[: haiku.MAX_DIFF_CHARS])
+    if not case.excerpt:
+        return 0, 0.0
+    pieces = haiku.split_patch(case.excerpt[: haiku.MAX_DIFF_CHARS])
     prompt = len(haiku.system_prompt(scrub_git.maintainer_names()))
     chars = sum(len(p) for p in pieces) + prompt * len(pieces)
     reply = len(pieces) * ASSUMED_REPLY_TOKENS / 1_000_000 * USD_PER_MTOK_OUT
@@ -260,17 +293,18 @@ def case_cost(case: Case) -> "tuple[int, float]":
 def dry_run(cases: List[Case], runs: int) -> int:
     usd = 0.0
     requests = 0
-    print(f"{'case':<26} {'label':<9} {'KB':>7} {'pieces':>6}  {'$/run':>7}  why")
+    print(f"{'case':<26} {'label':<9} {'KB':>7} {'sent KB':>7} {'named':>5} {'pieces':>6}  {'$/run':>7}  why")
     for c in sorted(cases, key=lambda c: (c.label, c.id)):
         n, cost = case_cost(c)
         usd += cost * runs
         requests += n * runs
-        print(f"{c.id:<26} {c.label:<9} {len(c.patch)/1024:7.1f} {n:>6}  "
-              f"{cost:7.4f}  {c.why[:60]}")
+        named = "" if c.named is None else ("yes" if c.named else "NO")
+        print(f"{c.id:<26} {c.label:<9} {len(c.patch)/1024:7.1f} {len(c.excerpt)/1024:7.1f} "
+              f"{named:>5} {n:>6}  {cost:7.4f}  {c.why[:60]}")
     print()
     print(f"{len(cases)} cases x {runs} runs = {requests} API requests, ~${usd:.2f} "
           f"(replies priced at an assumed {ASSUMED_REPLY_TOKENS} tokens each)")
-    truncated = [c.id for c in cases if len(c.patch) > haiku.MAX_DIFF_CHARS]
+    truncated = [c.id for c in cases if len(c.excerpt) > haiku.MAX_DIFF_CHARS]
     if truncated:
         print(f"TRUNCATED by the scanner's own cap, so part of the push is unscanned: "
               f"{', '.join(truncated)}")
@@ -354,12 +388,13 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=6)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", default="")
+    ap.add_argument("--rules", choices=("on", "off"), default="on")
     args = ap.parse_args()
     if args.runs < 1 or args.jobs < 1:
         ap.error("--runs and --jobs must be at least 1: a sweep of nothing has no rate to pass")
 
     only = [s for s in args.only.split(",") if s] or None
-    cases = load_cases(only)
+    cases = load_cases(only, rules=args.rules == "on")
     if args.dry_run:
         return dry_run(cases, args.runs)
 
