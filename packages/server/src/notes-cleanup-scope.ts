@@ -241,10 +241,14 @@ export function docIds(outline: readonly prose.OutlineEntry[]): {
  * - **`insert_at_end`.** A cleanup has a section already; writing at the end
  *   of the doc is the one way to grow a second one.
  * - **A commented block, for a replace or a delete.** Rewriting one
- *   re-creates its text and orphans every thread anchored inside it; at the
- *   end of a meeting a bullet somebody is discussing is the last one to
- *   reopen. A `nest_blocks` is explicitly still allowed on one — nesting
- *   re-creates no text, so the anchor rides along.
+ *   re-creates its text, so a thread anchored inside it can only be recovered
+ *   onto words that may no longer exist; at the end of a meeting a bullet
+ *   somebody is discussing is the last one to reopen. A `nest_blocks` is
+ *   explicitly still allowed on one, and now on one the pass does not own: a
+ *   move re-creates no text, so the block's own snippet still matches and
+ *   `autoReanchorDoc` puts the thread back on it. Measured both halves —
+ *   broken by the clone-and-delete, recovered by the sweep — in
+ *   `notes-cleanup-anchors.test.ts`.
  *
  * `commented` is the set a thread points into; see {@link commentedBlockIds}.
  */
@@ -332,7 +336,8 @@ export function boundByAuthorship(
       // STRUCTURE IS FREE. A nest moves blocks and rewrites none of them, so
       // it asks only that every id it names is a block of this document and
       // is not the meeting's own section heading. Ownership is not asked, and
-      // a comment rides along with the block it is anchored in.
+      // neither is a comment: the move keeps the block's words, so the
+      // snippet sweep re-anchors the thread onto them (see the header).
       case 'nest_blocks':
         if (addressable(edit.leadBlockId) && edit.blockIds.every(addressable)) kept.push(edit);
         else {
