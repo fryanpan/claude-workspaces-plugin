@@ -51,6 +51,7 @@ import {
   RPC,
   type RpcId,
   SSE_HEADERS,
+  isInitializeRequest,
   isRecord,
   isSessionIdShape,
   negotiateProtocolVersion,
@@ -333,6 +334,8 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     entry.headers.pluginVersion ?? deps.fallbackPluginVersion();
 
   function initialize(req: Request, msg: Record<string, unknown>, id: RpcId): Response {
+    if (!isInitializeRequest(msg))
+      return rpcErrorResponse(400, RPC.invalidRequest, 'Invalid initialize request', id);
     const read = readIdentityHeaders(req.headers);
     if (!read.ok) return rpcErrorResponse(400, RPC.invalidRequest, read.message, id);
     const sid = newSessionId();

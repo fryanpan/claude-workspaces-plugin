@@ -128,6 +128,18 @@ describe('/mcp initialize', () => {
     expect(result.serverInfo).toEqual({ name: 'claude-workspaces', version: '0.1.999' });
   });
 
+  it('refuses a malformed initialize without opening a session', async () => {
+    const { host, send } = build();
+    const noVersion = { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} };
+    const noEnvelope = { ...initializeBody(), jsonrpc: undefined };
+    for (const body of [noVersion, noEnvelope]) {
+      const res = await send('POST', ALPHA, body);
+      expect(res.status).toBe(400);
+      expect(res.headers.get('mcp-session-id')).toBeNull();
+    }
+    expect(host.counts().sessions).toBe(0);
+  });
+
   it('refuses a session with no working directory', async () => {
     const { send } = build();
     const res = await send('POST', { 'x-cw-agent': 'Riverbend Alpha' }, initializeBody());

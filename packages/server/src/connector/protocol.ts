@@ -53,6 +53,21 @@ export function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+/** The initialize request's required shape, as the SDK's schema states it.
+ *  Checked before a session is allocated for it. */
+export function isInitializeRequest(msg: Record<string, unknown>): boolean {
+  const p = msg.params;
+  if (msg.jsonrpc !== '2.0' || !isRecord(p)) return false;
+  const client = p.clientInfo;
+  return (
+    typeof p.protocolVersion === 'string' &&
+    isRecord(p.capabilities) &&
+    isRecord(client) &&
+    typeof client.name === 'string' &&
+    typeof client.version === 'string'
+  );
+}
+
 /** The request id, when the message carries a usable one. */
 export function rpcIdOf(msg: unknown): RpcId | undefined {
   if (!isRecord(msg)) return undefined;
