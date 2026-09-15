@@ -60,6 +60,7 @@ import {
   readNotesOutline,
 } from './notes-doc-access.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
+import { unconfirmedDirective, unconfirmedNotes } from './notes-unconfirmed.ts';
 
 /**
  * The instruction block a cleanup adds to the ordinary note-taking rules.
@@ -103,8 +104,7 @@ export const CLEANUP_DIRECTIVE = [
   '  a decision, an owner, an open question. This is the main thing you are',
   '  for — you can now see the whole conversation at once.',
   '- FIX what the whole transcript shows to be wrong: a note that misread a',
-  '  garbled word, a point marked (unconfirmed) that the rest of the meeting',
-  '  confirms or refutes.',
+  '  garbled word, a figure or a name the rest of the meeting corrects.',
   '- REORGANISE only where the notes are actually hard to read: a point filed',
   '  under the wrong heading, a topic left as a wall of bullets past the',
   '  regrouping bar. Bullets that read fine where they are stay where they',
@@ -164,6 +164,17 @@ export interface NotesCleanupResult {
    *  somebody else's line. An edit it turned into an offer is NOT one of
    *  these: it was kept, and comes back under `suggested`. */
   refused: number;
+  /**
+   * One line per refused edit, naming the op, the block and the rule.
+   *
+   * THE COUNT ALONE WAS A DEAD END. A pass reporting "16 edits proposed, 16
+   * refused, 0 blocks touched" reads the same whether the model proposed
+   * sixteen bad edits or whether every note this meeting wrote had landed
+   * outside its own section — and on 2026-09-15 it was the second, which
+   * nothing in the log could say. These lines are what a reader gets instead
+   * of guessing.
+   */
+  refusals: string[];
   applied: number;
   /** Edits that reached somebody's line as a redline to accept or reject,
    *  rather than as a rewrite of it. */
@@ -177,6 +188,18 @@ export interface NotesCleanupResult {
   touched: number;
   /** Settled turns the pass read. */
   turns: number;
+  /**
+   * Notes still marked "(unconfirmed)" when the pass started, and when it
+   * finished.
+   *
+   * REPORTED, NEVER STRIPPED. Deleting the marker would leave the note
+   * unchanged and claiming more than the meeting said, which is worse than
+   * the marker surviving. `unconfirmedLeft` above zero is the pass failing to
+   * settle a guess, and the number is here so the next failure is visible
+   * rather than found by a reader (`notes-unconfirmed.ts`).
+   */
+  unconfirmed: number;
+  unconfirmedLeft: number;
   /** Blank lines the tidy removed from the section, and repeated topic
    *  headings it folded into the topic above them. Independent of what the
    *  model proposed: a pass that proposed nothing still tidies. */
@@ -267,11 +290,14 @@ const refusal = (reason: NotesCleanupRefusal, line: string): NotesCleanupResult 
   reason,
   proposed: 0,
   refused: 0,
+  refusals: [],
   applied: 0,
   suggested: 0,
   failed: 0,
   touched: 0,
   turns: 0,
+  unconfirmed: 0,
+  unconfirmedLeft: 0,
   blanks: 0,
   merged: 0,
   line,
@@ -342,13 +368,24 @@ export async function runNotesCleanupPass(
         e.kind !== 'heading' && e.text.length > 0 && e.author === undefined && !claimed.has(e.id),
     )
     .map((e) => e.text);
+  // THE GUESSES THIS MEETING LEFT, NAMED BY ID. A clause asking the pass to
+  // settle "a point marked (unconfirmed)" shipped once and three survived a
+  // real meeting; `notes-unconfirmed.ts` has why, and the answer is the one
+  // `notes-regroup.ts` already reached — the server finds them and names
+  // them, instead of asking the model to search its own section.
+  const marked = unconfirmedNotes(outline, {
+    headingId,
+    author: NOTES_AUTHOR_ID,
+    commented: commentedBlockIds(doc.ydoc),
+  });
+  const markedAsk = unconfirmedDirective(marked);
   const input: NotesComposeInput = {
     docId,
     meetingId,
     tick: { tick: 0, reason: 'end', turns },
     outline,
     notesHeadingId: headingId,
-    extraPrompt: CLEANUP_DIRECTIVE,
+    extraPrompt: markedAsk === null ? CLEANUP_DIRECTIVE : `${CLEANUP_DIRECTIVE}\n\n${markedAsk}`,
     transcriptLabel: CLEANUP_TRANSCRIPT_LABEL,
     claimed,
     ...(humanNotes.length > 0 ? { humanNotes } : {}),
@@ -381,7 +418,7 @@ export async function runNotesCleanupPass(
   // document the model answered about — but nothing is written on the
   // strength of it.
   const now = readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS });
-  const { kept, refused } = confineToSection(edits, {
+  const { kept, refused, reasons } = confineToSection(edits, {
     ...sectionIds(now, headingId),
     ...ownership(now),
     headingId,
@@ -406,6 +443,13 @@ export async function runNotesCleanupPass(
   const tidied = tidyNotesSection(doc.ydoc, headingId, commentedBlockIds(doc.ydoc), {
     bulletsAuthoredBy: NOTES_AUTHOR_ID,
   });
+  // READ AFTER THE WRITE AND THE TIDY, off the doc rather than off what the
+  // model said it would do: an edit the gate dropped or the applier failed
+  // settled nothing, and a count taken from the batch would say it had.
+  const unconfirmedLeft = unconfirmedNotes(
+    readNotesOutline(docStore, docId, { recentBlocks: CLEANUP_OUTLINE_BLOCKS }),
+    { headingId, author: NOTES_AUTHOR_ID, commented: commentedBlockIds(doc.ydoc) },
+  ).length;
   const result =
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }
@@ -415,19 +459,29 @@ export async function runNotesCleanupPass(
     ok: true,
     proposed: edits.length,
     refused,
+    refusals: reasons,
     applied: result.applied,
     suggested: result.suggested,
     failed: result.failed,
     touched,
     turns: turns.length,
+    unconfirmed: marked.length,
+    unconfirmedLeft,
     blanks: tidied.blanks,
     merged: tidied.merged,
     line:
       `notes cleanup ${docId}/${meetingId}: ${turns.length} turns read, ` +
       `${edits.length} edits proposed, ${refused} refused, ${touched} blocks touched` +
+      // EVERY REFUSAL NAMED, on the same line as its count. A count with no
+      // reasons is what left "16 refused, 0 blocks touched" unexplainable —
+      // see `NotesCleanupResult.refusals`.
+      (reasons.length > 0 ? ` (${reasons.join('; ')})` : '') +
       (result.suggested > 0 ? `, ${result.suggested} offered as suggestions` : '') +
       (result.failed > 0 ? `, ${result.failed} failed` : '') +
       (tidied.blanks > 0 ? `, ${tidied.blanks} blank lines removed` : '') +
-      (tidied.merged > 0 ? `, ${tidied.merged} repeated topics merged` : ''),
+      (tidied.merged > 0 ? `, ${tidied.merged} repeated topics merged` : '') +
+      (marked.length > 0
+        ? `, ${marked.length} marked unconfirmed and ${unconfirmedLeft} still marked`
+        : ''),
   };
 }
