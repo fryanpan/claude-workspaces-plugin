@@ -301,6 +301,15 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
       g,
     );
     if (s.dashed) line.setAttribute('stroke-dasharray', '6 4');
+    // One point draws no line, so it shows as a dot in the series' colour.
+    if (pts.length === 1 && pts[0]) {
+      const p = pts[0];
+      el(
+        'circle',
+        { cx: sx(p.x), cy: sy(p.y), r: 4, fill: seriesColor(i), class: 'mdx-marker' },
+        g,
+      );
+    }
     for (const p of pts) {
       if (tips++ >= MAX_TIPS) break;
       const hit = el('circle', { cx: sx(p.x), cy: sy(p.y), r: 8, class: 'mdx-hit' }, g);
@@ -351,8 +360,10 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
       Math.round(w * 0.38),
       Math.ceil(Math.max(...chart.bars.map((b) => b.label.length)) * CH) + 12,
     );
-    const pw = Math.max(40, w - labelW - valueW);
-    const sx = (v: number) => labelW + ((v - lo) / (hi - lo)) * pw;
+    // A negative value sits left of its bar, so it takes a gutter there too.
+    const leftValueW = lo < 0 ? valueW : 0;
+    const pw = Math.max(40, w - labelW - leftValueW - valueW);
+    const sx = (v: number) => labelW + leftValueW + ((v - lo) / (hi - lo)) * pw;
     const svg = frame(w, h, 'bar');
     chart.bars.forEach((b, i) => {
       const g = el('g', { class: 'mdx-bar-row' }, svg);
@@ -367,8 +378,9 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
       const z = sx(Math.max(0, b.value));
       mark(g, i, { x: a, y: y + 5, width: Math.max(1, z - a), height: row - 10 });
       text(g, valueLabels[i] ?? '', {
-        x: z + 6,
+        x: b.value < 0 ? a - 6 : z + 6,
         y: y + row / 2 + 4,
+        'text-anchor': b.value < 0 ? 'end' : 'start',
         class: i === chart.highlightIndex ? 'mdx-bar-value is-highlight' : 'mdx-bar-value',
       });
     });

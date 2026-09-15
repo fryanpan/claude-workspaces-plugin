@@ -247,6 +247,47 @@ describe('a chart block on the doc page', () => {
     ).toBeGreaterThanOrEqual(14);
   });
 
+  it("puts a negative horizontal bar's value beside its negative end, clear of its label", () => {
+    mount(
+      '<Chart orientation="horizontal" data={[{ label: "Riverbend", value: 6 }, { label: "Saltmarsh", value: -4 }]} />\n',
+    );
+    const svg = views()[0]?.querySelector('svg.mdx-chart[data-chart="bar"]');
+    const num = (e: Element | undefined, a: string) => Number(e?.getAttribute(a));
+    const [upBar, downBar] = [...(svg?.querySelectorAll('rect.mdx-bar') ?? [])];
+    const [upValue, downValue] = [...(svg?.querySelectorAll('.mdx-bar-value') ?? [])];
+    const downLabel = svg?.querySelectorAll('.mdx-bar-label')[1];
+    expect(downValue?.textContent).toBe('-4');
+    // The positive value starts past its bar's right end...
+    expect(upValue?.getAttribute('text-anchor') ?? 'start').toBe('start');
+    expect(num(upValue, 'x')).toBeGreaterThan(num(upBar, 'x') + num(upBar, 'width'));
+    // ...and the negative one ends before its bar's left end, where the bar stops.
+    expect(downValue?.getAttribute('text-anchor')).toBe('end');
+    expect(num(downValue, 'x')).toBeLessThan(num(downBar, 'x'));
+    expect(num(downValue, 'x')).toBeGreaterThan(num(downBar, 'x') - 12);
+    // Its two glyphs (about 7px each) still end right of the row's label.
+    expect(num(downValue, 'x') - 2 * 7).toBeGreaterThan(num(downLabel, 'x'));
+  });
+
+  it('draws a visible dot for each series that has only one point', () => {
+    mount(
+      '<LineChart series={[{ label: "Riverbend", values: [{ x: 1, y: 3 }] }, { label: "Kiln", values: [{ x: 2, y: 5 }] }]} />\n',
+    );
+    const svg = views()[0]?.querySelector('svg.mdx-chart[data-chart="line"]');
+    const groups = [...(svg?.querySelectorAll('.mdx-series') ?? [])];
+    expect(groups).toHaveLength(2);
+    for (const g of groups) {
+      const marker = g.querySelector('circle.mdx-marker');
+      expect(marker).not.toBeNull();
+      expect(Number(marker?.getAttribute('r'))).toBeGreaterThan(0);
+      expect(marker?.getAttribute('fill')).toBe(
+        g.querySelector('polyline')?.getAttribute('stroke'),
+      );
+    }
+    // A series with a line to draw keeps its line and gets no dot.
+    mount(`${LINE}\n`);
+    expect(views()[1]?.querySelectorAll('circle.mdx-marker')).toHaveLength(0);
+  });
+
   it('shows a component that is not a chart as before, and an unreadable chart by name', () => {
     mount(
       '<Callout type="note">\n  Last sailing at 21:30.\n</Callout>\n\n<LineChart series={rows} />\n',
