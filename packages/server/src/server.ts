@@ -2281,6 +2281,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     parallelismCapView,
     slowLoadAlarm,
     resolveWorkspaceForDoc,
+    boardsForDoc,
     fileUnderBoardWorkspace,
     unfileFromDefault,
     workspacesOfDoc: shareWorkspacesOf,

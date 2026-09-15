@@ -136,6 +136,16 @@ describe('what a viewed and an answered item write to the board log', () => {
       .split('\n')
       .filter((l) => l.trim().length > 0);
   };
+  /** The same read, against a board other than the fixture's own. */
+  const rowsOfBoard = (board: string, event: string): LoggedRow[] => {
+    const path = eventsLogPath(dataDir, board);
+    if (!existsSync(path)) return [];
+    return readFileSync(path, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as LoggedRow)
+      .filter((r) => r.event === event);
+  };
   const rowsOf = (event: string): LoggedRow[] =>
     lines()
       .map((l) => JSON.parse(l) as LoggedRow)
@@ -351,6 +361,42 @@ describe('what a viewed and an answered item write to the board log', () => {
     // omission rather than by an empty string.
     expect('taskId' in rows[0]).toBe(false);
     expect(rows[0].actorId).toBe(PERSON.id);
+  });
+
+  it('measures the board the reader was standing on, when two boards hold the doc', async () => {
+    // A doc can be held by more than one board, and the single-answer
+    // resolver names only the first. Both ends have to follow the board the
+    // REQUEST named, or the pair lands in two different logs and the minutes
+    // between them cannot be subtracted.
+    const address = await seedThreadItem();
+    const derived = threadReviewItemId(address.docId, address.threadId, address.commentId);
+    const second = await seedBoard(base, { name: 'harbour' });
+    await jj(await post(`/workspaces/${second}/docs:attach`, { docId: address.docId }));
+
+    const seen = await post(`/workspaces/${second}/review-items/viewed`, {
+      reviewItemId: derived,
+      author: PERSON,
+    });
+    expect(seen.status).toBe(200);
+    const viewed = rowsOfBoard(second, 'review_item.viewed');
+    expect(viewed).toHaveLength(1);
+    expect(viewed[0].workspaceId).toBe(second);
+
+    // A PLAIN REPLY, not the Answer composer: a person's reply folds into the
+    // answer, and that branch has its own emit to get the board right.
+    const answered = await post(
+      `/workspaces/${second}/docs/${address.docId}/threads/${address.threadId}/comments`,
+      {
+        text: `A second reader, once the ${ANSWER_NEEDLE} is in.`,
+        author: PERSON,
+      },
+    );
+    expect(answered.status).toBe(200);
+    const rows = rowsOfBoard(second, 'review_item.answered');
+    expect(rows).toHaveLength(1);
+    // The pair: same board, same item, one log to subtract them in.
+    expect(rows[0].reviewItemId).toBe(derived);
+    expect(rows[0].workspaceId).toBe(second);
   });
 
   it('carries neither the item text nor the answer text — control', () => {

@@ -27,6 +27,7 @@ export async function handleWorkspaceHome(
     homePayload,
     reviewItemsFor,
     resolveWorkspaceForDoc,
+    boardsForDoc,
   } = ctx;
   const { req, pathname, scope, url, visitor, authorFor, roleFor } = rq;
   /**
@@ -160,7 +161,13 @@ export async function handleWorkspaceHome(
       // route above carries, and the same check behind it.
       const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
       if (!comment?.review) return j(404, { error: 'unknown-review-item' });
-      if (resolveWorkspaceForDoc(docId) !== workspaceId) {
+      // EVERY board holding the doc, not the one `resolveWorkspaceForDoc`
+      // picks: two boards can hold the same doc, and a reader who met the ask
+      // on the second one met it just as truly. Asking the single-answer
+      // resolver would 404 that reader's beacon and lose the row, while the
+      // answer they then give — attributed to the board the request named —
+      // would land with no viewed row to subtract from.
+      if (!boardsForDoc(docId).has(workspaceId)) {
         return j(404, { error: 'unknown-review-item' });
       }
       taskId = taskIdOfBodyDoc(docId) ?? undefined;

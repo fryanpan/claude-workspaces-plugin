@@ -217,6 +217,20 @@ export async function handleDocThreadRoutes(
    * string, which refuses a share visitor and admits the operator — see
    * `refuseOwnerOnlyWrite`, and `boardRoleOf` for why that is not a hole.
    */
+  /**
+   * The board a measurement row is written against.
+   *
+   * THE BOARD THE REQUEST NAMED, when it named one — not the one
+   * `resolveWorkspaceForDoc` picks. A doc can be held by two boards, and the
+   * viewed row was written against whichever board the reader was standing on
+   * when the ask came on screen; attributing the answer to a different one
+   * would put the pair in two logs and make the subtraction impossible. The
+   * resolution is the fallback for a doc route reached outside a board scope,
+   * where nothing else names a board.
+   */
+  const measurementBoard = (): string | null =>
+    rq.scope?.workspaceId ?? resolveWorkspaceForDoc(docId);
+
   const ownerOnlyDenial = (threadId: string, commentId: string): Response | null => {
     const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
     return refuseOwnerOnlyWrite(
@@ -324,13 +338,14 @@ export async function handleDocThreadRoutes(
             // the same reason the nudge above is — an answer on a comment
             // moves no task row, so nothing else in the server records that
             // this item was answered at all.
+            const foldedBoard = measurementBoard() ?? foldedHome;
             taskStore.emit(
               reviewItemAnsweredEvent({
-                workspaceId: foldedHome,
+                workspaceId: foldedBoard,
                 reviewItemId: threadReviewItemId(docId, threadId, pending.id),
                 ...(rowOfDoc !== null ? { taskId: rowOfDoc } : {}),
                 actorId: user.id,
-                isOwner: roleFor(foldedHome) === 'owner',
+                isOwner: roleFor(foldedBoard) === 'owner',
                 ts: Date.now(),
               }),
             );
@@ -447,14 +462,16 @@ export async function handleDocThreadRoutes(
           actorId: user.id,
           ...(openParts.length > 0 ? { openParts } : {}),
         });
-        // MEASUREMENT, for the same reason and in the same place as the nudge.
+        // MEASUREMENT, for the same reason and in the same place as the nudge
+        // — but against the board the request named. See `measurementBoard`.
+        const answerBoard = measurementBoard() ?? answerHome;
         taskStore.emit(
           reviewItemAnsweredEvent({
-            workspaceId: answerHome,
+            workspaceId: answerBoard,
             reviewItemId: threadReviewItemId(docId, threadId, commentId),
             ...(rowOfDoc !== null ? { taskId: rowOfDoc } : {}),
             actorId: user.id,
-            isOwner: roleFor(answerHome) === 'owner',
+            isOwner: roleFor(answerBoard) === 'owner',
             ts: Date.now(),
           }),
         );
