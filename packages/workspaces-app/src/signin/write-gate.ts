@@ -104,6 +104,17 @@ export interface WriteAccess {
 export const WRITE_ACCESS_LOOKUP_MS = 4000;
 
 /**
+ * One read of `/api/auth/session`: the parsed body, or null for a throw, a
+ * non-2xx or junk. Never rejects. A page that needs both the write answer and
+ * the identity passes the same read to each, rather than asking twice.
+ */
+export function readSessionBody(): Promise<unknown> {
+  return fetch('/api/auth/session')
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null);
+}
+
+/**
  * Ask the server. A route that throws, 404s, answers with junk, or NEVER
  * ANSWERS AT ALL reads as "may write": an unreachable session route must
  * never lock a person out of a surface the server would have accepted them
@@ -120,25 +131,22 @@ export const WRITE_ACCESS_LOOKUP_MS = 4000;
  * server-side for a browser that has proven nobody, so the worst case is a
  * surface that looks writable and refuses, not one that writes unchecked.
  */
-export async function fetchWriteAccess(): Promise<WriteAccess> {
+export async function fetchWriteAccess(
+  session: Promise<unknown> = readSessionBody(),
+): Promise<WriteAccess> {
   const open: WriteAccess = { signInToWrite: false, canWrite: true };
-  const lookup = (async (): Promise<WriteAccess> => {
-    try {
-      const res = await fetch('/api/auth/session');
-      if (!res.ok) return open;
-      const body = (await res.json()) as Partial<WriteAccess> & { emailCodeSignIn?: boolean };
-      // Recorded as a side effect rather than returned: every caller of this
-      // function wants the write answer, and the surfaces that paint a link
-      // are not the ones that call it.
-      setSignInPageExists(body.emailCodeSignIn !== false);
-      return {
-        signInToWrite: body.signInToWrite === true,
-        canWrite: body.canWrite !== false,
-      };
-    } catch {
-      return open;
-    }
-  })();
+  const lookup = session.then((raw): WriteAccess => {
+    if (!raw || typeof raw !== 'object') return open;
+    const body = raw as Partial<WriteAccess> & { emailCodeSignIn?: boolean };
+    // Recorded as a side effect rather than returned: every caller of this
+    // function wants the write answer, and the surfaces that paint a link
+    // are not the ones that call it.
+    setSignInPageExists(body.emailCodeSignIn !== false);
+    return {
+      signInToWrite: body.signInToWrite === true,
+      canWrite: body.canWrite !== false,
+    };
+  });
   // `race`, not an AbortController: aborting would make the answer
   // unavailable to anything else, and a late answer is simply unwanted here
   // rather than harmful. The lookup can no longer reject, so the race cannot.

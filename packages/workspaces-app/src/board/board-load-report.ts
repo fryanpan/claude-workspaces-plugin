@@ -6,8 +6,9 @@
  * slow on the iPad" was a memory until the server grew `/load-reports`; this
  * is the client half, and the reason it is a module of its own is that its
  * two numbers mean nothing apart. `msToBoot` is the REST first paint;
- * `msToFirstProjection` is when the ydoc's task projection actually landed —
- * the payload that spent those ten seconds. Both are ms from navigation
+ * `msToFirstProjection` is when the ydoc's task projection was on screen —
+ * the payload that spent those ten seconds — and never before the first
+ * paint, since a sync that lands first is only visible once that paint draws it. Both are ms from navigation
  * start (`performance.now()`'s zero), so they compare across loads, and a
  * report carrying one without the other cannot say which phase was slow.
  *
