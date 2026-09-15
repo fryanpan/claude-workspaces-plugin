@@ -67,7 +67,8 @@ export function chartOf(props: Map<string, unknown>): MdxChart | undefined {
   }
   const single = pointsOf(data);
   const series = seriesOf(props.get('series')) ?? (single && [{ points: single, dashed: false }]);
-  if (!series || series.reduce((n, s) => n + s.points.length, 0) < 2) return undefined;
+  // Every series has a point, and a lone point draws as a dot, so any series draws.
+  if (!series) return undefined;
   const chart: LineChart = {
     type: 'line',
     series,

@@ -283,9 +283,13 @@ describe('a chart block on the doc page', () => {
         g.querySelector('polyline')?.getAttribute('stroke'),
       );
     }
+    // A chart of one series with one point draws that dot too, not just its name.
+    mount('<LineChart title="Kiln" data={[{ x: 4, y: 9 }]} />\n');
+    expect(views()[1]?.querySelectorAll('svg.mdx-chart circle.mdx-marker')).toHaveLength(1);
+    expect(views()[1]?.querySelector('.mdx-name')).toBeNull();
     // A series with a line to draw keeps its line and gets no dot.
     mount(`${LINE}\n`);
-    expect(views()[1]?.querySelectorAll('circle.mdx-marker')).toHaveLength(0);
+    expect(views()[2]?.querySelectorAll('circle.mdx-marker')).toHaveLength(0);
   });
 
   it('shows a component that is not a chart as before, and an unreadable chart by name', () => {
