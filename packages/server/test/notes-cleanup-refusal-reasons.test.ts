@@ -89,6 +89,29 @@ describe('the gate names the rule it dropped an edit for', () => {
     expect(reasons[0]).toContain('second notes section');
   });
 
+  it('a nest dropped for ownership says ownership, even on a commented block', () => {
+    // A comment is NO bar to nesting — the move re-creates no text, so the
+    // thread rides along. So when a nest is dropped and the block happens to
+    // carry a comment, the comment is never the reason: ownership is.
+    const { reasons } = confineToSection(
+      [{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }],
+      { ...scope, commented: new Set(['b2']) },
+    );
+    expect(reasons[0]).toContain('b2');
+    expect(reasons[0]).toContain('does not record');
+    expect(reasons[0]).not.toContain('commented');
+  });
+
+  it('and a replace of that same block still says the comment', () => {
+    // The control on the case above: the comment clause is alive, it is just
+    // not asked on a nest. Same block, same scope, an op that DOES consult it.
+    const { reasons } = confineToSection(
+      [{ op: 'replace_block', blockId: 'b1', markdown: '- reworded' }],
+      { ...scope, commented: new Set(['b1']) },
+    );
+    expect(reasons[0]).toContain('commented');
+  });
+
   it('a clean batch carries no reasons at all', () => {
     const { reasons, refused } = confineToSection(
       [{ op: 'insert_under_heading', headingId: 'h1', markdown: '- added' }],

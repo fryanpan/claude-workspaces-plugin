@@ -227,13 +227,23 @@ export function confineToSection(
   const worthSaying = (id: string): boolean => inSection(id) && uncommented(id);
   // Striking a line out is only ever the pass's own to propose.
   const rewritable = (id: string): boolean => mine(id) && uncommented(id);
-  /** Why a block is out of reach, in the order the rules are asked. */
-  const blockRule = (id: string): string =>
+  /**
+   * Why a block is out of reach, asked in the order the rules are asked.
+   *
+   * `countComments` is what keeps the answer TRUE OF THE OP THAT ASKED. The
+   * comment clause belongs to the ops that consult `uncommented`; a
+   * `nest_blocks` never does — nesting re-creates no text, so a thread rides
+   * along and a comment is explicitly no bar to it. Asking one predicate for
+   * every op named a comment as the reason a nest was dropped when the real
+   * reason was ownership, which is misleading exactly where somebody is
+   * reading the log to find out why. False for a nest, true for the rest.
+   */
+  const blockRule = (id: string, countComments = true): string =>
     !scope.blocks.has(id)
       ? "the block is outside this meeting's notes section"
       : id === scope.headingId
         ? "the block is the meeting's own section heading"
-        : scope.commented?.has(id) === true
+        : countComments && scope.commented?.has(id) === true
           ? 'somebody has commented on the block'
           : 'the document does not record the block as the note-taker’s own';
   for (const edit of edits) {
@@ -266,7 +276,7 @@ export function confineToSection(
         else {
           const bad =
             [edit.leadBlockId, ...edit.blockIds].find((id) => !mine(id)) ?? edit.leadBlockId;
-          reasons.push(why(edit.op, bad, blockRule(bad)));
+          reasons.push(why(edit.op, bad, blockRule(bad, false)));
         }
         break;
       // A cleanup has a section already; writing at the end of the doc is the
