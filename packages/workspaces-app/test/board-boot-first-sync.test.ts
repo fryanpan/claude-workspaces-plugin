@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bootBoard } from '../src/board/board-app.ts';
 import type { BoardTask } from '../src/board/board-model.ts';
+import { WRITE_ACCESS_LOOKUP_MS } from '../src/signin/write-gate.ts';
 import {
   type FakeServer,
   type FakeSockets,
@@ -88,6 +89,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   document.body.innerHTML = '';
 });
@@ -153,6 +155,17 @@ describe('the board doc does not wait on the session', () => {
     expect(document.querySelector('.identity-prompt')).toBeNull();
     expect(storage.values.get('feedback-user-name')).toBe('Riverbend Reviewer');
     await running;
+  });
+
+  it('paints after one lookup timeout when the session route never answers', async () => {
+    // Held for good: the route hangs. The write gate and the identity lookup
+    // each bound their wait, and sharing the read must not stack the bounds.
+    vi.useFakeTimers();
+    server.hold('/api/auth/session');
+    const sockets = fakeSockets();
+    void start(sockets);
+    await vi.advanceTimersByTimeAsync(WRITE_ACCESS_LOOKUP_MS + 100);
+    expect(document.getElementById('board')).not.toBeNull();
   });
 
   it('reads the workspace record while the session answer is still out', async () => {

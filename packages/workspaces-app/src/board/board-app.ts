@@ -222,6 +222,10 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // route one after the other — and the workspace record does not depend on
   // either answer, so it is in flight while they settle.
   const session = readSessionBody();
+  // Both answers are bounded from the moment the read starts, not from when
+  // each is asked for: a session route that hangs costs one timeout, not the
+  // write gate's and then the identity lookup's back to back.
+  const identityAnswer = sessionAnswerOf(session);
   // `?format=json` is what asks for the RECORD. This path also serves the
   // board page — one address, HTML by default — so a read without it would
   // hand this fetch the shell that is currently running it.
@@ -243,7 +247,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       set: (k, v) => localStorage.setItem(k, v),
     },
     {
-      fetchSession: () => sessionAnswerOf(session),
+      fetchSession: () => identityAnswer,
       ...(writeAccess.canWrite ? {} : { suppressNamePrompt: true }),
     },
   );
