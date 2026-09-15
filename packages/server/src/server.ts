@@ -1150,6 +1150,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     backTargetFor,
     reviseCallFor: (address) => reviseCallFor(address),
     releaseUnrevisedHold: (item) => releaseUnrevisedHold(item),
+    externalBaseUrl: () => externalBaseUrl(),
     ...(opts.readyNudgeIdleMs !== undefined ? { readyNudgeIdleMs: opts.readyNudgeIdleMs } : {}),
     ...(opts.stallNudgeQuietMs !== undefined ? { stallNudgeQuietMs: opts.stallNudgeQuietMs } : {}),
     ...(opts.checkInMs !== undefined ? { checkInMs: opts.checkInMs } : {}),
