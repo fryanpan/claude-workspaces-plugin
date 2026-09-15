@@ -62,6 +62,30 @@ export function plainWords(markdown: string): string[] {
   return text.split(/\s+/).filter((w) => /[a-zA-Z0-9]/.test(w));
 }
 
+/**
+ * A line that is structure rather than a note: a heading, a list marker, a
+ * quote, a table row, raw HTML, a fence or a rule.
+ */
+const NOT_PROSE = /^(?:#{1,6}\s|[-*+](?:\s|$)|\d+[.)](?:\s|$)|>|\||<|```|~~~|(?:[-*_]\s*){3,}$)/;
+
+/**
+ * The words of a note written as a PARAGRAPH, or `undefined` for any other
+ * line.
+ *
+ * A NOTE IS A NOTE WHATEVER ITS SHAPE. The instructions ask for bullets, and
+ * every check here used to read bullets only, so a note-taker that slipped into
+ * paragraphs escaped all of them at once. A three-voice huddle on 2026-09-14
+ * ended as three bullets and twelve paragraphs: the note count read three, a
+ * repeated paragraph was never a repeat, and the flat run never reached the bar
+ * that asks for a topic heading. A top-level prose line is counted as the note
+ * it is. An indented line is not, because it belongs to the bullet above it.
+ */
+export function proseNote(raw: string): string | undefined {
+  if (/^\s/.test(raw)) return undefined;
+  const line = raw.trim();
+  return line.length === 0 || NOT_PROSE.test(line) ? undefined : line;
+}
+
 /** How long a bullet reads, in words. */
 export function bulletWords(bullet: string): number {
   return plainWords(bullet).length;
@@ -76,7 +100,8 @@ export function bulletWords(bullet: string): number {
  * act would report a heading as "no topic at all".
  *
  * Nested bullets are flattened to the line they lead with. A sub-bullet is
- * still a bullet a reader reads, and the length bar applies to it.
+ * still a bullet a reader reads, and the length bar applies to it. A note
+ * written as a paragraph is one of the topic's bullets too (`proseNote`).
  */
 export function parseNotesTopics(markdown: string): NotesTopic[] {
   const topics: NotesTopic[] = [];
@@ -96,7 +121,8 @@ export function parseNotesTopics(markdown: string): NotesTopic[] {
       continue;
     }
     const bullet = line.match(/^(?:[-*+]|\d+\.)\s+(.*)$/);
-    if (bullet && bullet[1]!.trim()) current.bullets.push(bullet[1]!.trim());
+    const note = bullet ? bullet[1]!.trim() : proseNote(raw);
+    if (note) current.bullets.push(note);
   }
   if (current.heading || current.bullets.length > 0) topics.push(current);
   return topics;
@@ -236,7 +262,16 @@ export function nestedBullets(markdown: string): NestedBullet[] {
     }
     const bullet = trimmed.match(/^(?:[-*+]|\d+\.)\s+(.*)$/);
     const text = bullet?.[1]?.trim();
-    if (!text) continue;
+    if (!text) {
+      // A paragraph note stands at the top level and ends whatever tree was
+      // open above it.
+      const note = bullet ? undefined : proseNote(line);
+      if (note) {
+        stack.length = 0;
+        roots.push({ text: note, children: [] });
+      }
+      continue;
+    }
     const indent = line.length - line.trimStart().length;
     while (stack.length > 0 && stack[stack.length - 1]!.indent >= indent) stack.pop();
     const node: NestedBullet = { text, children: [] };
@@ -390,10 +425,10 @@ export interface FlatRun {
  *   a group — so counting it inside the run it introduces would report the
  *   regrouped shape as the unregrouped one.
  *
- * Blank lines and prose do NOT break a run. A loose list is still one list to
- * a reader, and the notes are bullets by instruction, so a paragraph between
- * two of them is a defect on its own rather than the structure this looks
- * for.
+ * Blank lines do NOT break a run: a loose list is still one list to a reader.
+ * A note written as a paragraph does not break it either, and it COUNTS as one
+ * of the run's notes (`proseNote`). Skipping it let twelve paragraph notes under
+ * no heading read as a run of three.
  *
  * `parseNotesTopics` cannot answer this: it trims every line before reading
  * it and flattens each sub-bullet into the list, which is right for the
@@ -422,7 +457,11 @@ export function flatBulletRuns(markdown: string): FlatRun[] {
       continue;
     }
     const bullet = line.match(/^(?:[-*+]|\d+\.)\s+(.*)$/);
-    if (!bullet || !bullet[1]!.trim()) continue;
+    if (!bullet || !bullet[1]!.trim()) {
+      const note = bullet ? undefined : proseNote(raw);
+      if (note) run.push(note);
+      continue;
+    }
     if (/^\s/.test(raw)) {
       // A sub-bullet. The bullet above it is its lead, not a flat bullet, so
       // it leaves the run before the run is closed.

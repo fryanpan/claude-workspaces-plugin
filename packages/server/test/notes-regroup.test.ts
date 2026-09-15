@@ -154,7 +154,7 @@ describe('regroupTargets', () => {
     expect(targets.map((t) => t.headingId)).toEqual([topic.id]);
   });
 
-  test('a paragraph between bullets does not break the run', () => {
+  test('a paragraph note between bullets does not break the run, and counts in it', () => {
     const targets = regroupTargets(
       [
         heading('Remote control usability'),
@@ -164,7 +164,7 @@ describe('regroupTargets', () => {
       ],
       { author: NOTES_AUTHOR_ID },
     );
-    expect(targets[0]?.runLength).toBe(MAX_FLAT_RUN_BULLETS);
+    expect(targets[0]?.runLength).toBe(MAX_FLAT_RUN_BULLETS + 1);
   });
 });
 

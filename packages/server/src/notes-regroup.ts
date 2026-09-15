@@ -127,7 +127,7 @@ function sectionOf(
  * what the eval scores, so this cannot report a topic the bar would not: a
  * heading of any level breaks a run, a sub-bullet breaks it AND takes the
  * bullet above it out (that bullet is a group's lead, not a flat bullet), and
- * a paragraph between two bullets breaks nothing. Two readings of "what is a
+ * a paragraph note breaks nothing and counts as a note. Two readings of "what is a
  * flat run" that disagree would make the directive fire on topics the eval
  * calls fine and stay silent on the ones it does not.
  */
@@ -144,7 +144,7 @@ interface Scan {
  * what the eval scores, so this cannot report a topic the bar would not: a
  * heading of any level breaks a run, a sub-bullet breaks it AND takes the
  * bullet above it out (that bullet is a group's lead, not a flat bullet), and
- * a paragraph between two bullets breaks nothing. Two readings of "what is a
+ * a paragraph note breaks nothing and counts as a note. Two readings of "what is a
  * flat run" that disagree would make the directive fire on topics the eval
  * calls fine and stay silent on the ones it does not.
  */
@@ -159,6 +159,9 @@ function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions):
   const flush = (): void => {
     const mine = run.filter((e) => e.author === opts.author);
     if (run.length >= bar) {
+      // Only a list item can be nested under a lead, so a paragraph note counts
+      // towards the bar and is never offered as a block to move.
+      const nestable = mine.filter((e) => e.kind === 'listItem');
       if (headingId === undefined) {
         // At most one run can be homeless — a heading, once seen, stands over
         // everything after it — and the earliest is the one to name.
@@ -169,12 +172,12 @@ function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions):
         // Two is the fewest bullets that can become a group. One movable bullet
         // in a run of five is a topic the note-taker cannot fix, and telling it
         // to anyway spends prompt on an instruction with no legal answer.
-      } else if (mine.length >= 2) {
+      } else if (nestable.length >= 2) {
         targets.push({
           headingId,
           heading,
           runLength: run.length,
-          movable: mine.map((e) => ({ id: e.id, text: e.text })),
+          movable: nestable.map((e) => ({ id: e.id, text: e.text })),
         });
       }
     }
@@ -187,7 +190,13 @@ function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOptions):
       headingId = entry.id;
       continue;
     }
-    if (entry.kind !== 'listItem') continue;
+    if (entry.kind !== 'listItem') {
+      // A NOTE WRITTEN AS A PARAGRAPH IS STILL A NOTE IN THE RUN. Skipped, twelve
+      // of them under no heading read as a run of three and the heading was
+      // never asked for (a huddle on 2026-09-14).
+      if (entry.nodeName === 'paragraph' && entry.text.trim().length > 0) run.push(entry);
+      continue;
+    }
     if ((entry.depth ?? 0) > 0) {
       // A sub-bullet. The bullet above it leads a group rather than sitting
       // flat, so it leaves the run before the run is closed.
