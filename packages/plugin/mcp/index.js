@@ -14118,7 +14118,7 @@ function doneWhenReadyLine(p) {
   const line = p.line ? `"${truncate3(p.line, 120)}"` : "a line";
   const behalf = p.forAssignee ? ` (for ${p.forAssignee}, who is not listening)` : "";
   const link = p.url ? ` ${p.url}` : "";
-  return `[workspace.done_when_ready] every other done-when line on ${task} is met; ${line} needs a person and nobody has asked them yet${behalf}.${link} When it is ready for them, call report_done_when(taskId: "${p.taskId ?? "?"}", lines: [{ id: "${p.lineId ?? "?"}", verdict: "owner", proof: [{ text, url }] }]) — that files their review item. Until then they see nothing.`;
+  return `[workspace.done_when_ready] every done-when line on ${task} that you can meet is met; ${line} needs a person and nobody has asked them yet${behalf}.${link} When it is ready for them, call report_done_when(taskId: "${p.taskId ?? "?"}", lines: [{ id: "${p.lineId ?? "?"}", verdict: "owner", proof: [{ text, url }] }]) — that files their review item. Until then they see nothing.`;
 }
 
 // packages/mcp/src/nudge-line.ts

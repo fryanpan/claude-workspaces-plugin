@@ -34,6 +34,14 @@ describe('linesAwaitingReady', () => {
     expect(linesAwaitingReady(task([MET, { ...PERSON, verdict: 'not-met' }]))).toHaveLength(1);
   });
 
+  it('names every person’s line not yet handed over, since each waits on the same ready', () => {
+    const second: DoneWhenLine = { id: 'd-3', text: 'reads aloud right', needs: 'owner' };
+    expect(linesAwaitingReady(task([MET, PERSON, second])).map((l) => l.id)).toEqual([
+      'd-2',
+      'd-3',
+    ]);
+  });
+
   it('names nothing while other work is open, once handed over, or off in-progress', () => {
     expect(linesAwaitingReady(task([{ ...MET, verdict: 'unchecked' }, PERSON]))).toEqual([]);
     expect(linesAwaitingReady(task([MET, { ...PERSON, verdict: 'owner' }]))).toEqual([]);

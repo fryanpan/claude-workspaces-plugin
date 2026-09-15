@@ -33,7 +33,7 @@ check that serves none of them is weight.
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
 | A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
-| An in-progress task has every line met except one written as needing a person (`needs: 'owner'`), which its builder has not reported ready | The task's agent, else the lead | `workspace.done_when_ready`, once per line while it stands (`review-items/done-when-ready.ts`) — never the person, who is asked only once the builder reports the line `owner` |
+| An in-progress task has every line met except those written as needing a person (`needs: 'owner'`), and its builder has not reported one of them ready | The task's agent, else the lead | `workspace.done_when_ready`, one per such line, once while it stands (`review-items/done-when-ready.ts`) — never the person, who is asked only once the builder reports the line `owner` |
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 
 The owner is the addressee of exactly one line of that table, and only when

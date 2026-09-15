@@ -2,8 +2,8 @@
  * A line written as needing a person (`needs: 'owner'`) files nothing until
  * its builder says it is ready — the builder's `owner` report is that signal.
  * This module is the reminder for the one moment a builder is likely to
- * forget it: every other line is met, the task is still in progress, and the
- * person's line has not been handed over. The task cannot close, and nothing
+ * forget it: every line an agent can meet is met, the task is still in
+ * progress, and the person's line has not been handed over. The task cannot close, and nothing
  * on anybody's queue says why.
  *
  * WHO IS TOLD: the task's agent — the roster id of its assignee — and, when

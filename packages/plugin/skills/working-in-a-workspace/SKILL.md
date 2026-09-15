@@ -115,7 +115,7 @@ Write each entry so a reader can check it alone:
 
 **The board closes the task for you.** When you report the last open line as `met`, the board moves the task to done. It also records which line closed the task. Do not call `task_transition` after that.
 
-**`owner` means ready.** Report a `needs: 'owner'` line as `owner`, with a proof whose `url` they can open, once the thing is built and there is something to check. You cannot report such a line `met` yourself. If every other line is met and you have not said it is ready, the board reminds you once, on the channel.
+**`owner` means ready.** Report a `needs: 'owner'` line as `owner`, with a proof whose `url` they can open, once the thing is built and there is something to check. You cannot report such a line `met` yourself. If every line you can meet is met and you have not said it is ready, the board reminds you once, on the channel.
 
 **A line you report as `owner` goes to the person who owns the task.** The board files a review item for that line on their queue; Looks right meets it, and any other answer sends it back as not met with their words on the task. Do not file a second item for the same line. Do not wait for a tool to answer. Take other work.
 
