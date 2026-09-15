@@ -68,6 +68,15 @@ export interface DoneWhenProof {
 export interface DoneWhenLine {
   id: string;
   text: string;
+  /**
+   * `owner` when the line was WRITTEN as needing a person — known from the
+   * start, before anything exists to check. It files nothing on its own: the
+   * builder's `owner` report is what says the thing is ready, and only then
+   * does the person get an item (owner, 2026-09-14: "I don't want to flag a
+   * human for review when it's at that point"). Until then it is an ordinary
+   * open line. Absent on every other line.
+   */
+  needs?: 'owner';
   /** Absent until a builder reports. See `DoneWhenVerdict`. */
   verdict?: DoneWhenVerdict;
   /** What the builder attached, in the order it attached them. */
