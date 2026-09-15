@@ -93,6 +93,12 @@ describe('the spend flag', () => {
       /unknown engine/,
     );
     expect(() => parseRerunArgs(['/m', '--spend-usd'])).toThrow(/needs a value/);
+    // A port the kernel could never bind is a command line to fix, not a bind
+    // error thrown after the run has started.
+    expect(() => parseRerunArgs(['/m', '--spend-usd', '2', '--port', '70000'])).toThrow(
+      /--port must be a port number between 0 and 65535/,
+    );
+    expect(parseRerunArgs(['/m', '--spend-usd', '2', '--port', '65535']).port).toBe(65_535);
   });
 });
 

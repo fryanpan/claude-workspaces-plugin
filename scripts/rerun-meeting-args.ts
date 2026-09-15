@@ -153,7 +153,12 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
       mode = m;
     } else if (a === '--port') {
       const n = Number(next(a, i++));
-      if (!Number.isInteger(n) || n < 0) throw new UsageError('--port must be a port number');
+      // 65535 is the top of the range, and 0 means "any free one". A number
+      // above it is not a port the kernel can bind, and finding that out from
+      // a bind error after the run has started is a worse way to learn it.
+      if (!Number.isInteger(n) || n < 0 || n > 65_535) {
+        throw new UsageError('--port must be a port number between 0 and 65535');
+      }
       port = n;
     } else if (a === '--keep') keep = true;
     else if (a === '--help' || a === '-h') throw new UsageError(USAGE);
