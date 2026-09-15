@@ -485,3 +485,64 @@ describe('a nest names bullets, and says so when it does not', () => {
     expect(markdownNow()).toBe(before);
   });
 });
+
+describe('another meeting’s section on the same doc is out of reach', () => {
+  /**
+   * ONE AUTHOR ID FOR EVERY MEETING, so the mark says a meeting wrote a block
+   * and never which one. A second recording releases every claim in the doc
+   * when it STARTS, so the blocks still carrying the mark when this pass runs
+   * are the LATER meeting's and this one's own are bare. Without the
+   * subtraction that reads as "all of this is mine to rewrite".
+   */
+  const TWO_MEETINGS = [
+    '# Riverbend ferry review',
+    '',
+    '## Meeting notes',
+    '',
+    `- ${OURS}`,
+    '',
+    '## The later recording',
+    '',
+    `- ${THEIRS}`,
+  ].join('\n');
+
+  it('refuses a rewrite of its bullet, and says which section it is in', async () => {
+    const { store, ydoc, markdownNow } = docStoreFrom(TWO_MEETINGS, ['The later recording']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew until May.' }]);
+    const before = markdownNow();
+    const theirs = idOf(store, 'Kestrel Lane');
+    // CONTROL: their block really does carry this pass's own author id — the
+    // subtraction, not a missing mark, is what has to hold it back.
+    expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBe('meeting-notes');
+
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'replace_block',
+            blockId: theirs,
+            markdown: `- ${THEIRS} until May`,
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+        [idOf(store, 'The later recording')],
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+
+    // REFUSED, not offered. A redline would be the kinder answer and there is
+    // no way to ask for one: `applyBlockEdits` reads the block's own mark and
+    // every meeting writes the same id, so an edit that reaches the write
+    // path lands as a direct rewrite. The other meeting's minutes are
+    // byte-identical and nothing is pending against them.
+    expect(result.applied).toBe(0);
+    expect(result.suggested).toBe(0);
+    expect(result.refused).toBe(1);
+    expect(result.refusals[0]).toContain('another meeting\u2019s section');
+    expect(suggestOps.listSuggestions(ydoc)).toHaveLength(0);
+    expect(markdownNow()).toBe(before);
+  });
+});

@@ -61,7 +61,14 @@ import type { NotesComposeInput, NotesComposer, NotesTurn } from './meeting-note
 import { listMeetings, readTranscript } from './meetings.ts';
 import { cleanupWriteSet } from './notes-cleanup-gate.ts';
 import { CLEANUP_DIRECTIVE, CLEANUP_TRANSCRIPT_LABEL } from './notes-cleanup-prompt.ts';
-import { claimable, commentedBlockIds, docIds, sectionIds } from './notes-cleanup-scope.ts';
+import {
+  claimable,
+  commentedBlockIds,
+  docIds,
+  heldByOtherMeetings,
+  ownership,
+  sectionIds,
+} from './notes-cleanup-scope.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -195,6 +202,10 @@ export interface NotesCleanupDeps {
    * — a test driving the pass alone — reads as nothing recording.
    */
   recordingNow?: (docId: string) => boolean;
+  /** Every section heading SOME meeting on this doc has claimed — see
+   *  `heldByOtherMeetings`, which is what the pass asks this for. Absent
+   *  reads as no other meeting, which is what a doc with one meeting holds. */
+  claimedHeadings?: (docId: string) => Iterable<string>;
 }
 
 /** The meeting's transcript as the composer reads turns: the name a person
@@ -211,20 +222,6 @@ export function cleanupTurns(
       ? { speaker: speakerDisplayName(t.speaker, names), speakerLabel: t.speaker }
       : {}),
   }));
-}
-
-/**
- * Which blocks the doc records as the note-taker's own, as of this read.
- *
- * Called TWICE on purpose — once on the outline the model was shown, to say
- * what the prompt claims, and once after the compose, to say what the gate
- * enforces. It is the same field read the same way, and the whole point is
- * that the two reads can legitimately disagree by the time the model answers.
- */
-function ownership(outline: readonly prose.OutlineEntry[]): { owned: Set<string> } {
-  return {
-    owned: new Set(outline.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id)),
-  };
 }
 
 /** The names this meeting's record gave its voices. Empty for a record that
@@ -311,7 +308,11 @@ export async function runNotesCleanupPass(
     return refusal('no-section', 'notes cleanup: the notes section is no longer in the doc');
   }
   const turns = cleanupTurns(transcript, namesOf(deps.dataDir, docId, meetingId));
-  const shown = ownership(outline);
+  // ANOTHER MEETING'S SECTION IS NOT THIS PASS'S — see `heldByOtherMeetings`
+  // for why one shared author id makes that a question location still answers.
+  const others = (o: readonly prose.OutlineEntry[]): Set<string> =>
+    heldByOtherMeetings(o, deps.claimedHeadings?.(docId) ?? [], headingId);
+  const shown = ownership(outline, others(outline));
   const ours = claimable(shown);
   // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER, drawn
   // from one predicate. `claimed` is the pass's own work — the lines it may
@@ -409,7 +410,8 @@ export async function runNotesCleanupPass(
       // boundary is authorship; `headingId` is still passed because the
       // meeting's own section heading is the one block the pass may not touch.
       ...docIds(now),
-      ...ownership(now),
+      ...ownership(now, others(now)),
+      heldByOthers: others(now),
       headingId,
       commented: commentedBlockIds(doc.ydoc),
     },

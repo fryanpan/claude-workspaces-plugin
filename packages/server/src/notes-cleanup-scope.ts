@@ -27,6 +27,7 @@
 
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 
 /**
  * The ids inside one meeting's notes section: the heading itself, then every
@@ -159,6 +160,61 @@ export function claimable(scope: { owned: Set<string> }): (id: string) => boolea
 }
 
 /**
+ * Which blocks the doc records as THIS meeting's own, as of this read.
+ *
+ * Called TWICE on purpose — once on the outline the model was shown, to say
+ * what the prompt claims, and once after the compose, to say what the gate
+ * enforces. It is the same field read the same way, and the whole point is
+ * that the two reads can legitimately disagree by the time the model answers.
+ *
+ * `heldByOthers` IS THE ONE PLACE LOCATION STILL DECIDES ANYTHING, and it is
+ * not the old section test in another coat. `NOTES_AUTHOR_ID` is one constant
+ * for every meeting, so the mark says "a meeting wrote this" and never WHICH.
+ * That was harmless while the gate refused everything outside this meeting's
+ * own section; once the boundary became authorship, a second meeting's
+ * section on the same doc read as this pass's to rewrite and to delete. A
+ * meeting is never recording while a cleanup writes — the pass refuses on
+ * `recordingNow` — but one that recorded and stopped AFTER this meeting did
+ * leaves its bullets marked and this meeting's released, which is the
+ * sequence that bites. So the blocks under somebody else's claimed section
+ * are subtracted, and everything else in the document stays reachable.
+ */
+export function ownership(
+  outline: readonly prose.OutlineEntry[],
+  heldByOthers?: ReadonlySet<string>,
+): { owned: Set<string> } {
+  return {
+    owned: new Set(
+      outline
+        .filter((e) => e.author === NOTES_AUTHOR_ID && heldByOthers?.has(e.id) !== true)
+        .map((e) => e.id),
+    ),
+  };
+}
+
+/**
+ * The blocks inside a section some OTHER meeting has claimed.
+ *
+ * `mine` is this meeting's own heading, skipped; a claim naming a heading the
+ * document no longer holds contributes nothing, because {@link sectionIds}
+ * answers the empty set for one it cannot find. No claims — a test driving
+ * the pass alone, or a doc no meeting has ever claimed — is the empty set,
+ * which reads exactly as this module did before the subtraction existed.
+ */
+export function heldByOtherMeetings(
+  outline: readonly prose.OutlineEntry[],
+  claimed: Iterable<string>,
+  mine: string | undefined,
+): Set<string> {
+  const out = new Set<string>();
+  for (const headingId of claimed) {
+    if (headingId === mine) continue;
+    for (const id of sectionIds(outline, headingId).blocks) out.add(id);
+  }
+  return out;
+}
+
+/**
  * Every block the document holds, and every heading in it.
  *
  * WHAT THIS REPLACED, AND WHY. The gate below used to be handed
@@ -260,6 +316,10 @@ export function docIds(outline: readonly prose.OutlineEntry[]): {
  * `commented` is the set a thread points into; see {@link commentedBlockIds}.
  */
 
+/** The one reason that is about WHOSE SECTION a block is in rather than whose
+ *  words it holds — see `NotesEditScope.heldByOthers`. */
+const ELSEWHERE = 'the block is in another meeting’s section on this doc';
+
 /** One dropped edit's reason, in the words the log prints. */
 function why(op: prose.BlockEditOp, id: string, rule: string): string {
   return `${op} ${id}: ${rule}`;
@@ -277,6 +337,19 @@ export interface NotesEditScope {
   blocks: Set<string>;
   /** Which of `blocks` are list items — the only kind a nest may name. */
   listItems: Set<string>;
+  /**
+   * Blocks and headings inside a section ANOTHER meeting on this doc claimed
+   * ({@link heldByOtherMeetings}). Out of this pass's reach entirely — not
+   * merely unowned.
+   *
+   * IT HAS TO BE THE GATE, because the write path cannot tell two meetings
+   * apart: `applyBlockEdits` reads the block's own `cwAuthor`, every meeting
+   * writes the same `NOTES_AUTHOR_ID`, so a `replace_block` naming the other
+   * meeting's bullet lands as a direct rewrite of it however this module has
+   * answered "is it ours". Withholding it from `owned` alone was measured
+   * doing exactly that. Absent is the empty set — a doc with one meeting.
+   */
+  heldByOthers?: Set<string>;
   headings: Set<string>;
   owned: Set<string>;
   headingId: string;
@@ -290,8 +363,10 @@ export function boundByAuthorship(
   const kept: prose.BlockEdit[] = [];
   const reasons: string[] = [];
   const ours = claimable(scope);
-  // In the document at all, and not the section heading itself.
-  const addressable = (id: string): boolean => scope.blocks.has(id) && id !== scope.headingId;
+  // In the document at all, not the section heading itself, and not inside
+  // another meeting's section — see `NotesEditScope.heldByOthers`.
+  const addressable = (id: string): boolean =>
+    scope.blocks.has(id) && id !== scope.headingId && scope.heldByOthers?.has(id) !== true;
   const mine = (id: string): boolean => addressable(id) && ours(id);
   const uncommented = (id: string): boolean => scope.commented?.has(id) !== true;
   // A better wording reaches the document whoever the line belongs to —
@@ -319,11 +394,13 @@ export function boundByAuthorship(
   const blockRule = (id: string): string =>
     !scope.blocks.has(id)
       ? 'the block is not in the document'
-      : id === scope.headingId
-        ? "the block is the meeting's own section heading"
-        : scope.commented?.has(id) === true
-          ? 'somebody has commented on the block'
-          : 'the document does not record the block as the note-taker’s own';
+      : scope.heldByOthers?.has(id) === true
+        ? ELSEWHERE
+        : id === scope.headingId
+          ? "the block is the meeting's own section heading"
+          : scope.commented?.has(id) === true
+            ? 'somebody has commented on the block'
+            : 'the document does not record the block as the note-taker’s own';
   /**
    * The same question for a nest, which asks neither ownership nor comments —
    * so answering it from `blockRule` named a comment, or a missing mark, as
@@ -333,23 +410,28 @@ export function boundByAuthorship(
   const nestRule = (id: string): string =>
     !scope.blocks.has(id)
       ? 'the block is not in the document'
-      : id === scope.headingId
-        ? "the block is the meeting's own section heading"
-        : scope.headings.has(id)
-          ? 'the block is a heading, and a heading is not moved under a bullet'
-          : 'the block is not a bullet, and only bullets are moved under a bullet';
+      : scope.heldByOthers?.has(id) === true
+        ? ELSEWHERE
+        : id === scope.headingId
+          ? "the block is the meeting's own section heading"
+          : scope.headings.has(id)
+            ? 'the block is a heading, and a heading is not moved under a bullet'
+            : 'the block is not a bullet, and only bullets are moved under a bullet';
   for (const edit of edits) {
     switch (edit.op) {
       case 'insert_under_heading':
-        if (scope.headings.has(edit.headingId)) kept.push(edit);
+        if (scope.headings.has(edit.headingId) && scope.heldByOthers?.has(edit.headingId) !== true)
+          kept.push(edit);
         else
           reasons.push(
             why(
               edit.op,
               edit.headingId,
-              scope.blocks.has(edit.headingId)
-                ? 'the block named is not a heading'
-                : 'the heading is not in the document',
+              scope.heldByOthers?.has(edit.headingId) === true
+                ? ELSEWHERE
+                : scope.blocks.has(edit.headingId)
+                  ? 'the block named is not a heading'
+                  : 'the heading is not in the document',
             ),
           );
         break;
