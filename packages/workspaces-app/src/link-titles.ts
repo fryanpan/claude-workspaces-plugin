@@ -33,6 +33,10 @@ interface LinkInfo {
 
 const cache = new Map<string, LinkInfo>();
 
+/** URLs a lookup is out for right now, each pointing at the round that will
+ *  answer it. Emptied as each round settles — see `fetchLinkInfos`. */
+const inFlight = new Map<string, Promise<boolean>>();
+
 /** The cached title for a URL: a string when known, null when the server said
  *  "not resolvable", undefined when never asked. */
 export function cachedLinkTitle(url: string): string | null | undefined {
@@ -62,6 +66,7 @@ export function primeLinkTitle(
 
 export function _resetLinkTitlesForTest(): void {
   cache.clear();
+  inFlight.clear();
 }
 
 /** Chip words, mirroring board-model's STATUS_LABEL — copied rather than
@@ -117,11 +122,45 @@ export async function fetchLinkInfos(
   fetcher: LinkTitleFetcher = fetch,
 ): Promise<boolean> {
   const wanted = [...new Set(urls.filter((u) => u && !cache.has(u)))];
+  // A URL already out for lookup is JOINED, not asked again. The cache only
+  // fills when a response lands, so two hydration passes inside one round
+  // trip both read `cache.has(u) === false` and both posted the identical
+  // list — measured at 2 of 2, sometimes 3, per board open on staging. This
+  // is a shared read, not a longer-lived cache: the entry is dropped the
+  // moment the round settles, so the next pass asks the server again.
+  const joined = new Set<Promise<boolean>>();
+  const toAsk: string[] = [];
+  for (const u of wanted) {
+    const round = inFlight.get(u);
+    if (round) joined.add(round);
+    else toAsk.push(u);
+  }
+  const own = toAsk.length > 0 ? startLookup(toAsk, fetcher) : null;
+  const rounds = await Promise.all([...joined, ...(own ? [own] : [])]);
+  return rounds.some(Boolean);
+}
+
+/** Register `urls` as out for lookup, ask, and release them however it ends.
+ *  `finally` rather than a success path: a throw that left them registered
+ *  would wedge every later pass onto a promise that already settled. */
+function startLookup(urls: readonly string[], fetcher: LinkTitleFetcher): Promise<boolean> {
+  const round = (async () => {
+    try {
+      return await askServer(urls, fetcher);
+    } finally {
+      for (const u of urls) inFlight.delete(u);
+    }
+  })();
+  for (const u of urls) inFlight.set(u, round);
+  return round;
+}
+
+async function askServer(urls: readonly string[], fetcher: LinkTitleFetcher): Promise<boolean> {
   let landed = false;
   // Every uncached URL gets asked, one route-sized batch at a time — a page
   // with more links than one batch must not leave the tail raw forever.
-  for (let i = 0; i < wanted.length; i += BATCH_LIMIT) {
-    const chunk = wanted.slice(i, i + BATCH_LIMIT);
+  for (let i = 0; i < urls.length; i += BATCH_LIMIT) {
+    const chunk = urls.slice(i, i + BATCH_LIMIT);
     try {
       const res = await fetcher(api('links:titles'), {
         method: 'POST',

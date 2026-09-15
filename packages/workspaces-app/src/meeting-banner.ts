@@ -28,6 +28,7 @@
  * doc in this one.
  */
 
+import { calendarReadSettled, readCalendarEvents } from './calendar-events-source.ts';
 import { api } from './doc-path.ts';
 import {
   type BannerPick,
@@ -114,7 +115,6 @@ export class MeetingBannerEl extends HTMLElement {
   private shadow!: ShadowRoot;
   private events: CalendarBannerEvent[] = [];
   private stopped = false;
-  private disabled = false;
   private busy = false;
   private error: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -147,27 +147,23 @@ export class MeetingBannerEl extends HTMLElement {
     document.removeEventListener('visibilitychange', this.onVisibility);
   }
 
-  /** Exposed so a test can drive a poll without faking timers. */
+  /**
+   * Exposed so a test can drive a poll without faking timers.
+   *
+   * The read itself is `calendar-events-source.ts`, not this element: the
+   * board mounts two banners and they used to ask the same question twice per
+   * page open. Whether the calendar is worth asking about at all is a fact
+   * about the deployment, so it lives there too — one instance learning "no
+   * calendar here" settles it for every instance, which is what
+   * `calendarReadSettled` is asked before a round rather than after it.
+   */
   async refresh(): Promise<void> {
-    if (this.stopped || this.disabled) return;
-    try {
-      const res = await this.fetchImpl('/api/calendar/events');
-      if (res.status === 503 || res.status === 204 || res.status === 404) {
-        // 503 no calendar feature; 204 the feature is there and no Google
-        // account is connected; 404 kept for a server that has neither route.
-        // All three are settled, not errors: stop asking until the next page
-        // load, and read no body — a 204 has none.
-        this.disabled = true;
-        this.events = [];
-        this.render();
-        return;
-      }
-      if (!res.ok) return; // Transient; keep what we have, retry on the tick.
-      const body = (await res.json()) as { events?: CalendarBannerEvent[] };
-      this.events = Array.isArray(body.events) ? body.events : [];
-    } catch {
-      return; // Network blip — same policy as any poll: try again later.
-    }
+    if (this.stopped || calendarReadSettled()) return;
+    const read = await readCalendarEvents(this.fetchImpl);
+    // A blip keeps what is on screen: clearing on one flickers a live meeting
+    // off the banner and back a minute later.
+    if (this.stopped || read.kind === 'unchanged') return;
+    this.events = read.kind === 'events' ? read.events : [];
     this.render();
   }
 
