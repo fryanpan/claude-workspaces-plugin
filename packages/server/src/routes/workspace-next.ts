@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { isReviewItemMeasurementEvent } from '../review-items/analytics.ts';
 /**
  * What to work on next, the load reports behind it, and the board's event feed.
  *
@@ -324,7 +325,20 @@ export async function handleWorkspaceNext(
     // the review list (BEFORE the cap, so a week of beats can't crowd
     // real rows out of it). server.started stays: a restart is honest
     // activity.
-    let events: unknown[] = rows.filter((r) => r.event !== SERVER_TICK_EVENT);
+    //
+    // `review_item.viewed` / `review_item.answered` are stripped for the same
+    // reason and at the same point. They are written for the reporting agent
+    // that reads `events.jsonl` off disk, not for a person reading a feed:
+    // one carries no verb a reader could act on, the other restates
+    // `decision.answered` in ids. A type this feed has no case for renders as
+    // its bare slug (learnings.md, "A new emitted event reaches the surface
+    // as a bare slug"), so leaving them in would put `review_item.viewed` in
+    // front of a reader in a tab that is otherwise written in sentences —
+    // and, being the most frequent row on the board, would push real activity
+    // out of the cap below.
+    let events: unknown[] = rows.filter(
+      (r) => r.event !== SERVER_TICK_EVENT && !isReviewItemMeasurementEvent(r.event),
+    );
     // Cap the payload: the newest rows are the review's working set.
     if (events.length > 1000) events = events.slice(-1000);
     /**

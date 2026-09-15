@@ -100,6 +100,19 @@ export interface WorkspaceRoutesContext {
   ) => ParallelismCapView | undefined;
   /** The board a doc belongs to, or null when none holds it. */
   resolveWorkspaceForDoc: (docId: string) => string | null;
+  /**
+   * EVERY board that holds a doc, set→board hop included — the same set the
+   * live-doc events fan out over.
+   *
+   * Distinct from `resolveWorkspaceForDoc`, which answers ONE board and is
+   * therefore the wrong question to ask about a doc two boards hold: a
+   * request scoped to the second one is as legitimate as one scoped to the
+   * first, and comparing against the single answer refuses it. Narrower than
+   * `workspacesOfDoc` below, which is the SHARE-scoping resolver and includes
+   * a member's grouping — that is who may reach the doc, not which boards
+   * hold it.
+   */
+  boardsForDoc: (docId: string) => Set<string>;
   /** File a doc under a board — the requested one, else the default — and
    *  answer which board it landed on. */
   fileUnderBoardWorkspace: (attachmentId: string, requested?: string) => string;

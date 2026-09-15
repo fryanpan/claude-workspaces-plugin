@@ -43,6 +43,7 @@ interface Driven {
   body: Record<string, unknown>;
   written: Array<{ service: string; value: string }>;
   answered: string[];
+  emitted: Array<{ type: string }>;
 }
 
 /**
@@ -60,12 +61,17 @@ async function drive(
 ): Promise<Driven> {
   const written: Array<{ service: string; value: string }> = [];
   const answered: string[] = [];
+  /** The events the door emitted — a landed answer writes a measurement row. */
+  const emitted: Array<{ type: string }> = [];
   const ctx = {
     taskStore: {
       listReviewItems: () => [item],
       answerTaskReview: (_t: string, _i: string, text: string) => {
         answered.push(text);
         return { ok: true, task: { id: 't-harbor', workspaceId: 'w-harbor' }, item };
+      },
+      emit: (event: { type: string }) => {
+        emitted.push(event);
       },
     },
     taskProjection: { refreshTask: () => undefined },
@@ -94,11 +100,14 @@ async function drive(
     authorFor: () => AGENT,
     // The owner, so every case here is about what comes AFTER the owner gate.
     requireOwner: () => null,
+    // …and the same answer to the question the measurement row asks, which
+    // is a reading of the admission gate rather than of `visitor`.
+    roleFor: () => 'owner',
   } as unknown as TaskRouteRequest;
 
   const res = await handleTaskSecrets(ctx, rq);
   if (!res) throw new Error('the door did not claim its own path');
-  return { res, body: (await res.json()) as Record<string, unknown>, written, answered };
+  return { res, body: (await res.json()) as Record<string, unknown>, written, answered, emitted };
 }
 
 const secretAsk = storedItem({
@@ -257,6 +266,9 @@ describe('the ask is recorded only after the store has confirmed every write', (
     expect(String(denied.body.message)).toContain('saltmarsh-relay-signer could not be stored');
     // The one thing the card must never be told: that it landed.
     expect(denied.answered).toEqual([]);
+    // Nothing measures it as answered either — a row saying this reader
+    // answered would be read as reading time somebody never finished.
+    expect(denied.emitted).toEqual([]);
     // And the reply names the step, never a value.
     expect(JSON.stringify(denied.body)).not.toContain('not-a-real-value');
 
@@ -266,5 +278,6 @@ describe('the ask is recorded only after the store has confirmed every write', (
     const ok = await drive(twoFields, values);
     expect(ok.res.status).toBe(200);
     expect(ok.answered).toEqual([`Secrets saved: ${SERVICE}, saltmarsh-relay-signer`]);
+    expect(ok.emitted.map((e) => e.type)).toEqual(['review_item.answered']);
   });
 });

@@ -23,12 +23,15 @@ import {
   reviewAnswered,
   reviewItemBodyMarkdown,
   reviewWithdrawn,
+  threadReviewItemId,
   threadSummary,
 } from '@claude-workspaces/core';
 import { askedMetaLine, decidedMetaLine } from '../board/board-review-model.ts';
 import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-markdown.ts';
+import { currentWorkspaceId, docIdFromPathOrNull } from '../doc-path.ts';
 import { threadDecision } from '../long-thread.ts';
 import { attachMarkdownComposer } from '../md-composer.ts';
+import { reviewItemSeen } from '../review-item-seen.ts';
 import { threadGlyph, threadKind } from '../thread-kind.ts';
 import { isFoldingTap, syncFaceVisibility } from '../thread-morph.ts';
 import type { ThreadPanelOpts } from '../threads.ts';
@@ -559,6 +562,34 @@ function compactAnswerField(
 }
 
 /**
+ * Measure the moment this item is SHOWN on the doc page — nothing visible,
+ * and nothing about the card changes.
+ *
+ * The id is DERIVED from the address, not stored: `rt-…` over
+ * (docId, threadId, commentId) is the same encoding the server derives, so a
+ * doc-thread item counts under the one id the queue and the task panel also
+ * use for it. The board comes from the URL because every page this bundle
+ * serves is under `/workspaces/<id>/…`; either missing means this card is not
+ * on a page that can address it, and the watcher drops it.
+ *
+ * Both faces of a thread card are always built, so this runs for a FOLDED
+ * card too — the watcher is the half that knows a folded face is not being
+ * shown (it reads the `inert` marking the fold already writes).
+ */
+function watchSeen(card: HTMLElement, t: Thread, c: Comment): void {
+  const workspaceId = currentWorkspaceId() ?? '';
+  const docId =
+    typeof location === 'undefined'
+      ? null
+      : docIdFromPathOrNull(location.pathname + location.search);
+  if (workspaceId === '' || !docId) return;
+  reviewItemSeen().watch(card, {
+    workspaceId,
+    reviewItemId: threadReviewItemId(docId, t.id, c.id),
+  });
+}
+
+/**
  * The FULL review-item interface, in the thread that carries it: the same
  * one-card anatomy as the board's walkthrough and task panel — head row (kind
  * badge, headline, asked-by meta), one markdown body — then the ways to
@@ -574,6 +605,7 @@ function itemCard(
   pending: boolean,
 ): HTMLElement {
   const card = div('thread-item-card');
+  watchSeen(card, t, c);
   const head = div('thread-item-head');
   // NO kind chip, on any face. The folded card dropped it with mock round 4
   // and this one was simply missed: the rule is the same either side of the

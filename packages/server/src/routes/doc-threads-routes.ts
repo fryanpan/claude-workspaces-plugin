@@ -42,8 +42,10 @@ import { classifyActor } from '../actor-identity.ts';
 import { threadOpenParts } from '../answer-coverage.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
+import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
+import { taskIdOfBodyDoc } from '../task-row.ts';
 import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
@@ -191,11 +193,15 @@ export async function handleDocThreadRoutes(
     heldFields,
     parseRevisedRange,
   } = ctx;
-  const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, withTaskChips } = rq;
+  const { req, docId, rest, visitor, authorFor, refuseCategoryAuthor, roleFor, withTaskChips } = rq;
   // Set only by a mock page's host, on the writes it relays out of the
   // sandboxed frame. Recorded on what each write leaves behind so an agent
   // can tell a comment typed in the board from one a mock page could have sent.
   const via = writeViaOf(req);
+  /** The ticket this doc IS the body of, or null when it is an ordinary doc.
+   *  A review item on an ordinary doc's thread genuinely has no row, and the
+   *  measurement rows leave `taskId` off rather than empty. */
+  const rowOfDoc = taskIdOfBodyDoc(docId);
   const viaOpt = via ? { via } : {};
 
   /**
@@ -211,6 +217,20 @@ export async function handleDocThreadRoutes(
    * string, which refuses a share visitor and admits the operator — see
    * `refuseOwnerOnlyWrite`, and `boardRoleOf` for why that is not a hole.
    */
+  /**
+   * The board a measurement row is written against.
+   *
+   * THE BOARD THE REQUEST NAMED, when it named one — not the one
+   * `resolveWorkspaceForDoc` picks. A doc can be held by two boards, and the
+   * viewed row was written against whichever board the reader was standing on
+   * when the ask came on screen; attributing the answer to a different one
+   * would put the pair in two logs and make the subtraction impossible. The
+   * resolution is the fallback for a doc route reached outside a board scope,
+   * where nothing else names a board.
+   */
+  const measurementBoard = (): string | null =>
+    rq.scope?.workspaceId ?? resolveWorkspaceForDoc(docId);
+
   const ownerOnlyDenial = (threadId: string, commentId: string): Response | null => {
     const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
     return refuseOwnerOnlyWrite(
@@ -313,6 +333,22 @@ export async function handleDocThreadRoutes(
               actorId: user.id,
               ...(foldedOpen.length > 0 ? { openParts: foldedOpen } : {}),
             });
+            // MEASUREMENT: the ids-only twin of the `viewed` row this reader's
+            // browser wrote when the item came on screen. Emitted here for
+            // the same reason the nudge above is — an answer on a comment
+            // moves no task row, so nothing else in the server records that
+            // this item was answered at all.
+            const foldedBoard = measurementBoard() ?? foldedHome;
+            taskStore.emit(
+              reviewItemAnsweredEvent({
+                workspaceId: foldedBoard,
+                reviewItemId: threadReviewItemId(docId, threadId, pending.id),
+                ...(rowOfDoc !== null ? { taskId: rowOfDoc } : {}),
+                actorId: user.id,
+                isOwner: roleFor(foldedBoard) === 'owner',
+                ts: Date.now(),
+              }),
+            );
           }
         }
         // A refusal here is the loser of that race, never a reason to
@@ -426,6 +462,19 @@ export async function handleDocThreadRoutes(
           actorId: user.id,
           ...(openParts.length > 0 ? { openParts } : {}),
         });
+        // MEASUREMENT, for the same reason and in the same place as the nudge
+        // — but against the board the request named. See `measurementBoard`.
+        const answerBoard = measurementBoard() ?? answerHome;
+        taskStore.emit(
+          reviewItemAnsweredEvent({
+            workspaceId: answerBoard,
+            reviewItemId: threadReviewItemId(docId, threadId, commentId),
+            ...(rowOfDoc !== null ? { taskId: rowOfDoc } : {}),
+            actorId: user.id,
+            isOwner: roleFor(answerBoard) === 'owner',
+            ts: Date.now(),
+          }),
+        );
       }
       return j(200, { thread: res.thread, ...(openParts.length > 0 ? { openParts } : {}) });
     }

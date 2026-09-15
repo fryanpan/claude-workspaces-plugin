@@ -583,6 +583,13 @@ const BOARD_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   // and the review-item queue the strip's thread half arrives on.
   '': ['GET'],
   'review-items': ['GET'],
+  // "I have seen this" — the browser's beacon, which writes one
+  // `review_item.viewed` row and answers `{ok:true}`. A member's own reading
+  // of their own queue: it discloses nothing (the queue itself is the `GET`
+  // directly above) and the row it writes is ids and timestamps only. Named
+  // HERE, above the member dispatch, because `viewed` is a verb sitting where
+  // an item id goes — the same shape as `goals/add`.
+  'review-items/viewed': ['POST'],
   // The board's rows. GET is the list the Tasks pane pages through; POST is
   // filing one. The board doc syncs the same rows, so the GET is a
   // convenience rather than a new disclosure.

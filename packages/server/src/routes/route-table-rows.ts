@@ -168,6 +168,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/workspace-home.ts', [
     ['share-scope', '/workspaces/:ws/review-items', 'GET'],
     ['trusted-local', '/workspaces/:ws/review-items/:itemId', 'GET'],
+    ['share-scope', '/workspaces/:ws/review-items/viewed', 'POST'],
     ['share-scope', '/workspaces/:ws/home', 'GET'],
     ['share-scope', '/workspaces/:ws/home/read', 'POST'],
     ['share-scope', '/workspaces/:ws/home/instructions', 'PUT'],

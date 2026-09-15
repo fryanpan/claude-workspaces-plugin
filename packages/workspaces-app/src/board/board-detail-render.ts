@@ -9,7 +9,7 @@
  * `board-review-render.ts` import the shapes declared here (`TaskThread`,
  * `PanelReviewItem`), and this file imports neither of them.
  */
-import { type ReviewPayload } from '@claude-workspaces/core';
+import { type ReviewPayload, threadReviewItemId } from '@claude-workspaces/core';
 import type { ReviewSecretField, ReviewShape, Thread, User } from '@claude-workspaces/core';
 import {
   EFFORT_MIN_SAMPLES_FOR_CALIBRATION,
@@ -44,7 +44,12 @@ import {
   statusOptions,
 } from './board-model.ts';
 import { type ActivityEvent, assigneeLabel, describeEvent } from './board-presence-model.ts';
-import { type BlockerRow, type ReviewThreadItem, type SecretsGate } from './board-review-model.ts';
+import {
+  type BlockerRow,
+  LEGACY_REVIEW_ITEM_ID,
+  type ReviewThreadItem,
+  type SecretsGate,
+} from './board-review-model.ts';
 /**
  * Who has this task, as a picker over everyone it could go to.
  *
@@ -1370,4 +1375,41 @@ export interface PanelReviewItem {
    * option's label on a legacy answer that stamped `answeredWith` alone.
    */
   answered?: { by?: string; text?: string; at: number };
+}
+
+/**
+ * WHICH ITEM a panel card is, for the measurement beacon — the task-panel
+ * twin of `reviewItemMeasurementTarget`, which reads the queue's row shape
+ * rather than this one.
+ *
+ * Three sources, three id families, one vocabulary:
+ *  - `task` — the ticket's own decision, which every legacy-decision ticket
+ *    derives the same id for, so the ticket travels with it.
+ *  - `task-review` — the minted `r-…` id the row already carries.
+ *  - `thread` — DERIVED from (docId, threadId, commentId), the same encoding
+ *    the server derives it by, and only for a DECLARED item: an inferred row
+ *    is an open question somebody asked, not a filed item, and has no
+ *    identity to measure.
+ *
+ * `null` where there is nothing to name. The card still renders; only the
+ * beacon stays silent.
+ */
+export function panelItemMeasurementTarget(
+  taskId: string,
+  item: PanelReviewItem,
+  workspaceId: string,
+): { workspaceId: string; reviewItemId: string; taskId?: string } | null {
+  if (workspaceId === '') return null;
+  if (item.source === 'task') {
+    return { workspaceId, reviewItemId: LEGACY_REVIEW_ITEM_ID, taskId };
+  }
+  if (item.source === 'task-review') {
+    return item.reviewItemId ? { workspaceId, reviewItemId: item.reviewItemId, taskId } : null;
+  }
+  if (!item.declared || !item.docId || !item.threadId || item.commentId === undefined) return null;
+  return {
+    workspaceId,
+    reviewItemId: threadReviewItemId(item.docId, item.threadId, item.commentId),
+    taskId,
+  };
 }

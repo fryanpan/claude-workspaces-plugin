@@ -230,8 +230,11 @@ export const SCOPED_COLLECTIONS: Readonly<Record<string, readonly string[]>> = {
   docs: [],
   mockups: [],
   attachments: [],
-  /** One filed ask, read by its own id. */
-  'review-items': [],
+  /** One filed ask, read by its own id — and `viewed`, the browser's
+   *  "I have seen this" beacon, which sits exactly where an item id goes and
+   *  would otherwise be looked up as one. Same shape, and same reason, as the
+   *  band verbs above. */
+  'review-items': ['viewed'],
   /** One builder dispatch, closed by its own id. */
   dispatches: [],
 };
