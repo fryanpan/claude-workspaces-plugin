@@ -38,7 +38,7 @@ export interface IdentityHeaders {
 }
 
 export interface ConnectorIdentity {
-  /** The table key: one hosted session per agent and working directory. */
+  /** The table key: one hosted session per agent, working directory and default board. */
   key: string;
   author: AgentAuthor;
   /** True for the shared `agent` identity, which is never pooled. */
@@ -122,6 +122,11 @@ export function readIdentityHeaders(headers: Headers): IdentityRead {
  * A shared identity — no agent name at all — is keyed per SESSION, never per
  * directory: every unnamed session would otherwise pool into one hosted
  * session and read each other's pushes.
+ *
+ * A named one is keyed by its default workspace as well as its directory. The
+ * pooled connector reads that default on every write that names no board, so
+ * two sessions pinned to different boards sharing one would each file into
+ * whichever board initialized last.
  */
 export function resolveIdentity(
   headers: IdentityHeaders,
@@ -139,7 +144,9 @@ export function resolveIdentity(
       message: 'x-cw-agent does not resolve to a valid agent id',
     };
   }
-  const key = shared ? `shared\n${sessionId}` : `${author.id}\n${headers.cwd}`;
+  const key = shared
+    ? `shared\n${sessionId}`
+    : `${author.id}\n${headers.cwd}\n${headers.workspace ?? ''}`;
   return { ok: true, identity: { key, author, shared, headers } };
 }
 

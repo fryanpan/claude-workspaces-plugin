@@ -49,7 +49,7 @@ describe('identity headers', () => {
   it('keys a named agent by directory and an unnamed one by session', () => {
     const named = resolveIdentity({ agent: 'Riverbend Alpha', cwd: '/w' }, 's-1');
     const unnamed = resolveIdentity({ cwd: '/w' }, 's-1');
-    expect(named.ok && named.identity.key).toBe('agent-riverbend-alpha\n/w');
+    expect(named.ok && named.identity.key).toBe('agent-riverbend-alpha\n/w\n');
     expect(unnamed.ok && unnamed.identity.shared && unnamed.identity.key).toBe('shared\ns-1');
   });
 });

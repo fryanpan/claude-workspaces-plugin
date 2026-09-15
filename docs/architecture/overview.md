@@ -83,13 +83,13 @@ flowchart TB
 | `core` | Wire types, the Yjs⇄markdown document model, anchors, attachment-set ids (`attachment.ts`), review-item rules, goal arithmetic, schedule rules and their English, prompts. | Imports no other workspace package. No `node:` I/O beyond path math, no DOM. |
 | `server` | The one process: data dir, the doc store, board, meetings, auth, sharing, deploys. | The only writer of durable state. Everything else asks it. |
 | `workspaces-app` | The browser client, six bundles from `scripts/build.ts`. | Ships as static assets the server publishes as a numbered release. |
-| `mcp` | The stdio MCP server agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server also hosts, one per agent and working directory, behind `/mcp` (`server/src/connector/`). | No business logic the server does not also enforce. |
+| `mcp` | The stdio MCP server agents talk to — a **client** of the server's REST and SSE. Its per-session wiring is `connector-session.ts`, which the server also hosts, one per agent, working directory and default board, behind `/mcp` (`server/src/connector/`). | No business logic the server does not also enforce. |
 | `widget` | The injectable comment widget for mockups and dev servers. The board imports it into its own bundle rather than loading `/widget.esm.js`, because that bundle carries its own Yjs and a page must run one copy (`check:client-boot` counts them). `widget-iife.ts` is only the script-tag bundle's entry: it imports `widget.ts` and exports nothing. | 40 KB gzipped (`check:widget-size`). Vanilla JS, no framework deps. |
 | `plugin` | Skills, hooks, and a bundled copy of `mcp`. | Version bumped in three places; see CLAUDE.md. |
 
 **The MCP connector can run inside the server.** `server/src/connector/` hosts
-the same `connector-session.ts` the stdio child builds, one per agent and
-working directory, behind `/mcp` (Streamable HTTP, loopback only). It is the
+the same `connector-session.ts` the stdio child builds, one per agent,
+working directory and default board, behind `/mcp` (Streamable HTTP, loopback only). It is the
 one place `server` imports from `packages/mcp/src`, and the direction is
 deliberate: the connector is the mcp package's code, and the server only
 supplies its two seams — REST over a loopback socket, so every route gate

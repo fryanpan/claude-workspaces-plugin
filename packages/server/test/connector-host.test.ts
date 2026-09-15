@@ -143,6 +143,13 @@ describe('/mcp initialize', () => {
     await initialize(send, identityHeaders(null, '/work/riverbend'));
     expect(made.length).toBe(4);
   });
+
+  it('keeps two sessions pinned to different boards on connectors of their own', async () => {
+    const { send, made } = build();
+    await initialize(send, { ...ALPHA, 'x-cw-workspace': 'w-river' });
+    await initialize(send, { ...ALPHA, 'x-cw-workspace': 'w-harbor' });
+    expect(made.map((m) => m.spec.defaultWorkspaceId())).toEqual(['w-river', 'w-harbor']);
+  });
 });
 
 describe('/mcp push routing', () => {
