@@ -268,10 +268,21 @@ describe('a chart block on the doc page', () => {
     expect(num(downValue, 'x') - 2 * 7).toBeGreaterThan(num(downLabel, 'x'));
   });
 
-  it('keeps every bar of a narrow all-negative horizontal chart inside it, using its width', () => {
-    const src =
-      '<Chart orientation="horizontal" unit="crossings" data={[{ label: "Saltmarsh landing", value: -12000 }, { label: "Kiln wharf", value: -300 }]} />';
-    for (const width of [240, 300, 430]) {
+  it('keeps every bar of a narrow horizontal chart inside it, and an all-negative one uses its width', () => {
+    const row = (label: string, value: number) => `{ label: "${label}", value: ${value} }`;
+    const chart = (unit: string, ...rows: string[]) =>
+      `<Chart orientation="horizontal" unit="${unit}" data={[${rows.join(', ')}]} />`;
+    const allNegative = chart('crossings', row('Saltmarsh landing', -12000), row('Kiln wharf', -3));
+    // Value labels too long for a gutter on each side of a 240px chart.
+    const mixed = chart(
+      'passenger crossings',
+      row('Saltmarsh landing', -12000),
+      row('Riverbend pier', 18000),
+    );
+    for (const [src, width] of [240, 300, 430].flatMap((w) => [
+      [allNegative, w] as const,
+      [mixed, w] as const,
+    ])) {
       const host = document.createElement('div');
       renderMdxSummary(host, summarizeMdx(src), width);
       const bars = [...host.querySelectorAll('rect.mdx-bar')].map((r) => {
@@ -283,8 +294,13 @@ describe('a chart block on the doc page', () => {
         expect(bar.left).toBeGreaterThanOrEqual(0);
         expect(bar.right).toBeLessThanOrEqual(width);
       }
+      // ...and the bars still span enough room to tell a long one from a short one.
+      const span = Math.max(...bars.map((b) => b.right)) - Math.min(...bars.map((b) => b.left));
+      expect(span).toBeGreaterThanOrEqual(40);
       // No value sits right of an all-negative chart, so its bars reach the edge.
-      expect(Math.max(...bars.map((b) => b.right))).toBeGreaterThan(width - 8);
+      if (src === allNegative) {
+        expect(Math.max(...bars.map((b) => b.right))).toBeGreaterThan(width - 8);
+      }
     }
   });
 

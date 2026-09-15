@@ -365,9 +365,13 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
     // A value sits beside its bar's far end: left of a negative bar, right of
     // any other, so each side keeps a gutter only when some bar needs it (the
     // right keeps a hair so an all-negative chart's bars stop short of the edge).
-    const leftValueW = lo < 0 ? valueW : 0;
-    const rightValueW = values.some((v) => v >= 0) ? valueW : 4;
-    // Row labels give way before the plot does, so no bar runs past the edge.
+    const wantLeft = lo < 0 ? valueW : 0;
+    const wantRight = values.some((v) => v >= 0) ? valueW : 4;
+    // Too narrow for both gutters whole, they shrink alike; then row labels
+    // give way. The plot keeps its floor, so no bar runs past the edge.
+    const fit = Math.min(1, (w - MIN_LABEL_W - MIN_PLOT_W) / (wantLeft + wantRight));
+    const leftValueW = wantLeft * fit;
+    const rightValueW = wantRight * fit;
     const labelW = Math.max(
       MIN_LABEL_W,
       Math.min(
@@ -376,7 +380,7 @@ function drawBars(chart: BarChart, w: number): SVGSVGElement {
         w - leftValueW - rightValueW - MIN_PLOT_W,
       ),
     );
-    const pw = Math.max(MIN_PLOT_W, w - labelW - leftValueW - rightValueW);
+    const pw = w - labelW - leftValueW - rightValueW;
     const sx = (v: number) => labelW + leftValueW + ((v - lo) / (hi - lo)) * pw;
     const svg = frame(w, h, 'bar');
     chart.bars.forEach((b, i) => {
