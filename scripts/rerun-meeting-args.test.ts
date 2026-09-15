@@ -62,6 +62,7 @@ describe('the spend flag', () => {
       chunkMs: 20,
       port: 0,
       keep: false,
+      engineSpendOk: false,
     });
   });
 
@@ -74,6 +75,7 @@ describe('the spend flag', () => {
       'ledger-opus',
       '--engine',
       'soniox',
+      '--engine-spend-ok',
       '--doc',
       'outline.json',
       '--chunk-ms',
@@ -90,6 +92,25 @@ describe('the spend flag', () => {
       /unknown engine/,
     );
     expect(() => parseRerunArgs(['/m', '--spend-usd'])).toThrow(/needs a value/);
+  });
+});
+
+describe('a paid engine', () => {
+  it('refuses to start until the operator says its bill is theirs', () => {
+    // `--spend-usd` meters the model calls this harness makes. A vendor
+    // engine bills for the audio's whole length through no seam it can see,
+    // so a ceiling that silently covered it would be a promise nothing keeps.
+    expect(() => parseRerunArgs(['/m', '--spend-usd', '2', '--engine', 'assemblyai'])).toThrow(
+      /refusing to start: --engine assemblyai bills the vendor/,
+    );
+    expect(
+      parseRerunArgs(['/m', '--spend-usd', '2', '--engine', 'assemblyai', '--engine-spend-ok'])
+        .engineSpendOk,
+    ).toBe(true);
+  });
+
+  it('asks nothing extra of the free one', () => {
+    expect(parseRerunArgs(['/m', '--spend-usd', '2', '--engine', 'mock']).engine).toBe('mock');
   });
 });
 

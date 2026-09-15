@@ -11,12 +11,18 @@
  * here would make the run measure something nobody experiences.
  */
 
+import {
+  type MeetingStreamId,
+  sourceForStreams,
+  streamsForSource,
+  tagAudioFrame,
+} from '../packages/core/src/meeting-streams.ts';
 import { MEETING_AUDIO_ENCODING, meetingSocketPath } from '../packages/core/src/meeting.ts';
 import type {
   TranscriptionEngine,
   TranscriptionSession,
 } from '../packages/server/src/transcribe.ts';
-import { type ReplayTarget, replayAudio } from './replay-meeting-lib.ts';
+import { type ReplayInput, type ReplayTarget, replayAudio } from './replay-meeting-lib.ts';
 import type { DocSpec, RerunArgs } from './rerun-meeting-args.ts';
 import type { TidyCounts } from './rerun-meeting-report.ts';
 import { SpendCapReached } from './rerun-meeting-spend.ts';
@@ -177,12 +183,22 @@ export async function feedMeeting(f: FeedArgs): Promise<string> {
   const first = f.target.inputs[0];
   if (!first) throw new Error('no audio to replay');
   const mode = f.args.mode ?? (first.mode === 'conversation' ? 'conversation' : 'solo');
+  // WHICH STREAMS THIS RECORDING HELD, told to the server the way the browser
+  // tells it. A mic + Mac-audio capture kept two files per segment and the
+  // socket expects both, each frame carrying its stream byte; a one-stream
+  // recording expects no byte at all. Getting this wrong does not fail
+  // loudly — it feeds a call's two sides to the wrong engines, or prepends a
+  // byte of noise to every frame of a single-stream meeting.
+  const streams = streamsOf(f.target);
+  const source = sourceForStreams(streams) ?? 'mic';
+  const tagged = streamsForSource(source).length > 1;
   socket.send(
     JSON.stringify({
       type: 'start',
       sampleRate: first.sampleRate,
       encoding: MEETING_AUDIO_ENCODING,
       mode,
+      source,
     }),
   );
   const meetingId = await until(
@@ -200,14 +216,30 @@ export async function feedMeeting(f: FeedArgs): Promise<string> {
   const timers = f.doc.edits.map((edit) => scheduleEdit(f, edit));
 
   try {
-    for (const input of f.target.inputs) {
-      const { chunks, bytes } = await replayAudio(input, {
-        engine: wireEngine((chunk) => socket.send(chunk), f.stopping),
-        detectSpeakers: mode === 'conversation',
-        chunkMs: f.args.chunkMs,
-        realtime: true,
-      });
-      f.log(`  segment ${input.segment}: ${chunks} chunk(s), ${bytes} bytes`);
+    // ONE SEGMENT AT A TIME, BUT ITS STREAMS TOGETHER. The two files of a
+    // segment are the two sides of the same minutes, not one after the other:
+    // played in sequence they would double the meeting's length, put the
+    // answer before the question, and land every mid-run document edit
+    // against speech nobody was saying then.
+    for (const [segment, inputs] of bySegment(f.target.inputs)) {
+      const played = await Promise.all(
+        inputs.map((input) =>
+          replayAudio(input, {
+            engine: wireEngine(
+              (chunk) =>
+                socket.send(tagged ? tagAudioFrame(input.stream as MeetingStreamId, chunk) : chunk),
+              f.stopping,
+            ),
+            detectSpeakers: mode === 'conversation',
+            chunkMs: f.args.chunkMs,
+            realtime: true,
+          }),
+        ),
+      );
+      const chunks = played.reduce((n, p) => n + p.chunks, 0);
+      const bytes = played.reduce((n, p) => n + p.bytes, 0);
+      const names = inputs.map((i) => i.stream).join(' + ');
+      f.log(`  segment ${segment} (${names}): ${chunks} chunk(s), ${bytes} bytes`);
     }
   } catch (err) {
     if (!(err instanceof SpendCapReached)) throw err;
@@ -288,4 +320,26 @@ export async function runTidy(
       (counts.ok ? '' : ` (refused: ${counts.reason ?? 'unknown'})`),
   );
   return counts;
+}
+
+/** The segments in order, each with every stream it kept. */
+export function bySegment(inputs: readonly ReplayInput[]): Array<[number, ReplayInput[]]> {
+  const byN = new Map<number, ReplayInput[]>();
+  for (const input of inputs) {
+    const held = byN.get(input.segment);
+    if (held) held.push(input);
+    else byN.set(input.segment, [input]);
+  }
+  return [...byN.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+/** The stream ids this recording holds, in the order the capture opens them.
+ *  A file whose name is not a stream id is left out: it cannot be tagged, and
+ *  guessing a stream for it would put its words under the wrong speaker. */
+export function streamsOf(target: ReplayTarget): MeetingStreamId[] {
+  const held: MeetingStreamId[] = [];
+  for (const id of ['mic', 'system'] as const) {
+    if (target.inputs.some((i) => i.stream === id)) held.push(id);
+  }
+  return held;
 }

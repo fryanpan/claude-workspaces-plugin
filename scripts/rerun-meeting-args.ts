@@ -34,6 +34,11 @@ export const USAGE = `usage: bun run meeting:rerun <meeting folder | segment-N-<
                       has to hear it. \`mock\` is free and reads --mock-script.
   --mock-script <f>   JSON array of { words: string[], settled?, speaker? } for
                       the mock engine, which reveals one word per audio chunk.
+  --engine-spend-ok   REQUIRED with any engine but \`mock\`. A paid engine bills
+                      the vendor for the audio's whole length, on their price
+                      list and not through any seam this harness can meter, so
+                      --spend-usd cannot and does not cover it. This flag is
+                      you saying you know that.
   --doc <shape>       empty (default) | <file.md> | <file.json>. The .json is
                       { markdown, edits: [{ atMs, find, replace }] } — a prep
                       outline a person edits while the meeting runs.
@@ -77,6 +82,9 @@ export interface DocSpec {
 
 export interface RerunArgs {
   target: string;
+  /** The operator said out loud that a paid engine's bill is outside
+   *  `--spend-usd`. Only ever true when they typed it. */
+  engineSpendOk: boolean;
   method: NotesMethod;
   engine: RerunEngine;
   mockScript?: string;
@@ -109,6 +117,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
   let mode: 'solo' | 'conversation' | undefined;
   let port = 0;
   let keep = false;
+  let engineSpendOk = false;
   const next = (flag: string, i: number): string => {
     const v = argv[i + 1];
     if (v === undefined || v.startsWith('--')) throw new UsageError(`${flag} needs a value`);
@@ -128,6 +137,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
       }
       engine = e as RerunEngine;
     } else if (a === '--mock-script') mockScript = next(a, i++);
+    else if (a === '--engine-spend-ok') engineSpendOk = true;
     else if (a === '--doc') doc = next(a, i++);
     else if (a === '--out') out = next(a, i++);
     else if (a === '--chunk-ms') chunkMs = positive(a, next(a, i++));
@@ -152,6 +162,19 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
     else throw new UsageError(`unexpected argument ${a}`);
   }
   if (!target) throw new UsageError('a meeting folder or audio file is required');
+  // THE SECOND REFUSAL, and it is second because it is a different bill. A
+  // paid engine charges the vendor's per-hour rate for the audio's whole
+  // length, through no seam this harness can see: `--spend-usd` meters the
+  // model calls and would go on reading well under its ceiling while the
+  // transcription ran up its own. Rather than invent a price for somebody
+  // else's price list, the run refuses until the operator says they know.
+  if (engine !== 'mock' && !engineSpendOk) {
+    throw new UsageError(
+      `refusing to start: --engine ${engine} bills the vendor for the whole length of the ` +
+        'recording, and --spend-usd does not cover it — it meters the model calls this ' +
+        'harness makes. Pass --engine-spend-ok to say you know that, or use --engine mock.',
+    );
+  }
   // THE REFUSAL. Last, so that a command line with several things wrong still
   // says this one — it is the one that costs money.
   if (spendUsd === undefined) {
@@ -171,6 +194,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
     chunkMs,
     port,
     keep,
+    engineSpendOk,
     ...(mockScript !== undefined ? { mockScript } : {}),
     ...(segment !== undefined ? { segment } : {}),
     ...(mode ? { mode } : {}),

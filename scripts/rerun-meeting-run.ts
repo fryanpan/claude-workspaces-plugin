@@ -71,6 +71,7 @@ import {
 } from './rerun-meeting-args.ts';
 import {
   STOP_TIMEOUT_MS,
+  bySegment,
   feedMeeting,
   runTidy,
   seedContent,
@@ -131,6 +132,29 @@ export function methodReader(
   };
 }
 
+/**
+ * How long the meeting itself ran, from the files it kept.
+ *
+ * THE MEETING'S LENGTH, NOT ITS FILES' TOTAL. A segment's mic and system
+ * files are the same minutes recorded twice, so summing every file costs a
+ * two-stream meeting at double its length — which would refuse runs that fit
+ * and report a rate against a denominator nobody spoke for.
+ */
+export function audioLengthMs(
+  target: ReplayTarget,
+  sizeOf: (path: string) => number = (path) => statSync(path).size,
+): number {
+  return bySegment(target.inputs).reduce(
+    (ms, [, inputs]) =>
+      ms +
+      inputs.reduce(
+        (longest, i) => Math.max(longest, pcmDurationMs(sizeOf(i.path), i.sampleRate)),
+        0,
+      ),
+    0,
+  );
+}
+
 /** `rerun-YYYYMMDDTHHMMSSZ`, so two runs of the same audio sit side by side. */
 export function runFolderName(at: number): string {
   const stamp = new Date(at)
@@ -171,10 +195,7 @@ export async function runRerun(
   doc: DocSpec,
   deps: RerunDeps,
 ): Promise<RerunOutcome> {
-  const audioMs = target.inputs.reduce(
-    (ms, i) => ms + pcmDurationMs(statSync(i.path).size, i.sampleRate),
-    0,
-  );
+  const audioMs = audioLengthMs(target);
   const budget = budgetCheck(audioMs, args.method, args.spendUsd);
   deps.log(budget.line);
   // A UsageError, not an Error: the operator named too small a ceiling for

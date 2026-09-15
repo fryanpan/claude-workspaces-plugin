@@ -19,7 +19,9 @@ import type {
   TaskCaptureInput,
 } from '../packages/server/src/meeting-task-capture.ts';
 import type { NotesComposeMeasure } from '../packages/server/src/notes-timing.ts';
-import { methodReader, runFolderName } from './rerun-meeting-run.ts';
+import type { ReplayInput, ReplayTarget } from './replay-meeting-lib.ts';
+import { bySegment, streamsOf } from './rerun-meeting-feed.ts';
+import { audioLengthMs, methodReader, runFolderName } from './rerun-meeting-run.ts';
 import { SpendCapReached, createSpendMeter } from './rerun-meeting-spend.ts';
 
 /** Opus bills $25 per million output tokens, so this is one dollar of it. */
@@ -169,6 +171,61 @@ describe('methodReader', () => {
     );
     for (let n = 0; n < methods.length; n++) reader('d-1');
     expect(lines).toEqual(['note-taker in force: original', 'note-taker in force: ledger-haiku']);
+  });
+});
+
+/** A recording of `n` segments, each holding the named streams. */
+function target(segments: Array<{ n: number; streams: string[] }>): ReplayTarget {
+  const inputs: ReplayInput[] = [];
+  for (const seg of segments) {
+    for (const stream of seg.streams) {
+      inputs.push({
+        segment: seg.n,
+        stream,
+        path: `/m/segment-${seg.n}-${stream}.pcm`,
+        sampleRate: 16_000,
+        startedAt: 0,
+        mode: 'conversation',
+        source: 'mic',
+      });
+    }
+  }
+  return { dir: '/m', docId: 'd-1', docName: 'd-1', inputs };
+}
+
+describe('a recording that kept two streams', () => {
+  it("groups a segment's streams together, in segment order", () => {
+    const grouped = bySegment(
+      target([
+        { n: 2, streams: ['mic', 'system'] },
+        { n: 1, streams: ['mic'] },
+      ]).inputs,
+    );
+    expect(grouped.map(([n, inputs]) => [n, inputs.map((i) => i.stream)])).toEqual([
+      [1, ['mic']],
+      [2, ['mic', 'system']],
+    ]);
+  });
+
+  it('names the streams it holds, mic first, as the capture opens them', () => {
+    expect(streamsOf(target([{ n: 1, streams: ['system', 'mic'] }]))).toEqual(['mic', 'system']);
+    expect(streamsOf(target([{ n: 1, streams: ['mic'] }]))).toEqual(['mic']);
+  });
+
+  it('is as long as the meeting, not as long as its files added up', () => {
+    // 32,000 bytes is one second of 16 kHz PCM16. Two streams of a segment are
+    // the same minute recorded twice: summing them would cost a two-stream
+    // meeting at double its length and refuse runs that fit.
+    const two = target([
+      { n: 1, streams: ['mic', 'system'] },
+      { n: 2, streams: ['mic'] },
+    ]);
+    const sizes: Record<string, number> = {
+      '/m/segment-1-mic.pcm': 32_000,
+      '/m/segment-1-system.pcm': 64_000,
+      '/m/segment-2-mic.pcm': 32_000,
+    };
+    expect(audioLengthMs(two, (p) => sizes[p] as number)).toBe(3000);
   });
 });
 
