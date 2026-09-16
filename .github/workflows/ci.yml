@@ -161,6 +161,7 @@ jobs:
       - name: Built client boots a doc page
         env:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_BROWSER_TESTS: '1'
         run: bun run check:client-boot
 
       # The whole meeting, end to end: a real server with a mock transcription
@@ -169,6 +170,7 @@ jobs:
       - name: A whole meeting leaves usable notes
         env:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_BROWSER_TESTS: '1'
         run: bun run check:meeting-smoke
 
   # The client + unit suite, in four shards.
@@ -207,6 +209,7 @@ jobs:
         # than skip, which is the state this variable exists to prevent.
         env:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_BROWSER_TESTS: '1'
         run: |
           bun run test:vitest --shard=${{ matrix.shard }}/4 \
             --coverage.enabled --coverage.reporter=lcovonly \
