@@ -86,6 +86,50 @@ describe('classifyOpenTasks — a Backlog row is not an unfiled ask', () => {
     expect(r?.unfiledAsk).toBe(true);
   });
 
+  it('a person-owned backlog row IN PROGRESS is backlog too — no stall wake either', () => {
+    const [r] = classifyOpenTasks(
+      [row({ ownerKind: 'person', goal: 'g-someday', status: 'in-progress' })],
+      [],
+      [],
+      now,
+      STALL,
+      bands,
+    );
+    expect(r?.bucket).toBe('backlog-unranked');
+    expect(r?.stalled).toBe(false);
+  });
+
+  it('an AGENT-owned backlog row in progress still stalls — the narrowing is owner-only', () => {
+    const [r] = classifyOpenTasks(
+      [row({ ownerKind: 'agent', goal: 'g-someday', status: 'in-progress' })],
+      [],
+      [],
+      now,
+      STALL,
+      bands,
+    );
+    expect(r?.bucket).toBe('in-progress');
+    expect(r?.stalled).toBe(true);
+  });
+
+  it('on a GOAL-LESS board nothing is backlog, so an unfiled ask still reports', () => {
+    // stall-wiring.ts builds `dispatchable` from the rows' own goals when the
+    // board declares none, precisely so no row reads as unranked there. Every
+    // server row carries a goal (`chores` is the catch-all), so the set holds
+    // real ids and the person-owned row below is NOT in the backlog.
+    const goalless = { dispatchable: new Set(['chores']), ownerBand: new Set<string>() };
+    const [r] = classifyOpenTasks(
+      [row({ ownerKind: 'person', goal: 'chores' })],
+      [],
+      [],
+      now,
+      STALL,
+      goalless,
+    );
+    expect(r?.bucket).toBe('blocked-on-owner-unfiled');
+    expect(r?.unfiledAsk).toBe(true);
+  });
+
   it('a filed item still wins over the backlog: the row reads blocked-on-owner', () => {
     const [r] = classifyOpenTasks(
       [row({ ownerKind: 'person', goal: 'g-someday' })],

@@ -301,31 +301,31 @@ export function classifyOpenTasks(
     // Owner-blocked is only LEGITIMATE waiting when a pending review item
     // exists — that is what puts the ask on the owner's Home queue. An
     // owner-band row, or a person-owned row (`ownerKind`, the server's
-    // authoritative call) OUTSIDE the backlog, with no pending item is an ask
-    // that exists nowhere he reads: blocked-on-owner-unfiled, a protocol
-    // violation counting toward FAIL (the owner's 08-27 review: 7 of 10
-    // "blocked-on-owner" rows were invisible on his queue). Prose is not a
-    // third way in: a "waiting on Bryan" note only loses its movement credit.
-    // `inBacklog` is the band the board runs for NOBODY — outside the dispatch
-    // order AND the owner band — so no ask anyone could file exists at all.
-    // `dispatchable` SUBTRACTS the owner band (stall-wiring.ts), so only the
-    // person half narrows — an owner-band row is never `inBacklog`.
+    // authoritative call), with no pending item is an ask that exists nowhere
+    // he reads: blocked-on-owner-unfiled, a protocol violation counting toward
+    // FAIL (the 08-27 review: 7 of 10 "blocked-on-owner" rows were invisible
+    // on his queue). Prose is not a third way in — a "waiting on Bryan" note
+    // only loses its movement credit. UNLESS the row is in the BACKLOG — the
+    // band the board runs for nobody, outside the dispatch order AND the owner
+    // band — where there is no ask anyone could file, so the owner branch
+    // returns THAT verdict instead, whatever the row's status. Only the person
+    // half narrows: `dispatchable` SUBTRACTS the owner band (stall-wiring.ts),
+    // so a plain reorder would have silenced the owner band's asks entirely.
     const inBacklog = !bands.dispatchable.has(t.goal ?? '') && !bands.ownerBand.has(t.goal ?? '');
     const boardSaysOwnerWaits = t.ownerKind === 'person' || bands.ownerBand.has(t.goal ?? '');
     let bucket: Bucket;
-    // A rule row first: whatever else is true of it, it is not work anyone
-    // picks up, and reading it as ready-unpicked is how the nudge sent a
-    // session at a runbook (2026-09-07).
+    // A rule row first: not work anyone picks up whatever else is true of it,
+    // and reading it as ready-unpicked sent a session at a runbook
+    // (2026-09-07). Then a FILED ask, which outranks even the backlog.
     if (t.schedule !== undefined) bucket = 'scheduled-rule';
     else if (hasPendingAsk) bucket = 'blocked-on-owner';
-    else if (boardSaysOwnerWaits && !inBacklog) bucket = 'blocked-on-owner-unfiled';
+    else if (boardSaysOwnerWaits)
+      bucket = inBacklog ? 'backlog-unranked' : 'blocked-on-owner-unfiled';
     else if (unmet.length > 0) bucket = 'blocked-on-dependency';
     else if (t.status === 'in-progress') bucket = 'in-progress';
-    // The standing owner rule (2026-08-22): the backlog is NOT auto-dispatched — goal
-    // bands run in priority order, everything else waits for a person to
-    // rank it. A ticket in a band the goal list does not name is idle BY
-    // RULE, so it must not read as a protocol failure whoever owns it — but
-    // the bucket is reported, because 53 unranked tickets is its own finding.
+    // The standing owner rule (2026-08-22): the backlog is NOT auto-dispatched
+    // — goal bands run in priority order, everything else waits for a person
+    // to rank it. Idle BY RULE, never a failure; 53 unranked rows is a finding.
     else if (inBacklog) bucket = 'backlog-unranked';
     else bucket = 'ready-unpicked';
     out.push({
