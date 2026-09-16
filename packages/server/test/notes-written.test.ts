@@ -29,7 +29,7 @@ const WHOLE_DOC_NOTES = [
   '',
   '- Prep note: check the April sailings',
   '- The harbour run moves to the half hour',
-  '- Kestrel Lane keeps the winter crew',
+  '- The winter crew stays on until April',
   '',
   '## Slipway',
   '',
@@ -45,7 +45,7 @@ const WHOLE_DOC_NOTES = [
  *  them (`clearAuthorshipOnPersonEdit` takes the mark off an edited block). */
 const WRITTEN_BY_MEETING = [
   'harbour run moves',
-  'Kestrel Lane keeps',
+  'winter crew stays on',
   'cradle needs a new winch',
   'Paint arrives on Friday',
   'Meeting notes',
@@ -87,7 +87,7 @@ describe('the notes a meeting wrote, wherever they sit', () => {
     const notes = readMeetingNotesMarkdown(store, DOC, headingId('Meeting notes'));
     expect(allBullets(notes)).toEqual([
       'The harbour run moves to the half hour',
-      'Kestrel Lane keeps the winter crew',
+      'The winter crew stays on until April',
       'The cradle needs a new winch',
       'Paint arrives on Friday',
     ]);
@@ -135,9 +135,9 @@ describe('the notes a meeting wrote, wherever they sit', () => {
       store,
       DOC,
       headingId('Meeting notes'),
-      new Set([idOf('Kestrel Lane keeps')]),
+      new Set([idOf('winter crew stays on')]),
     );
-    expect(notes).not.toContain('Kestrel Lane');
+    expect(notes).not.toContain('winter crew');
     expect(notes).toContain('The harbour run moves');
   });
 
