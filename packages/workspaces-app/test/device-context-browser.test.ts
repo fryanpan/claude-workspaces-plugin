@@ -12,15 +12,11 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
+import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 
-const CHROME = ((): string | null => {
-  try {
-    return resolveChromeBin(undefined);
-  } catch {
-    return null;
-  }
-})();
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
 
 interface Load {
   permission: string;

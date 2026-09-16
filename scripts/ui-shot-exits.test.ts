@@ -17,17 +17,13 @@ import { readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { chromeForSuite } from './browser-tests.ts';
 import { WATCHDOG_ENV } from './chrome-orphans.ts';
-import { RUN_ID_ENV, profilePrefix, profilesOfRun, resolveChromeBin } from './ui-shot-lib.ts';
+import { RUN_ID_ENV, profilePrefix, profilesOfRun } from './ui-shot-lib.ts';
 
-/** Same guard as ui-shot.test.ts: `resolveChromeBin` finds a CI runner's Chrome. */
-const CHROME = ((): string | null => {
-  try {
-    return resolveChromeBin(undefined);
-  } catch {
-    return null;
-  }
-})();
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
 const SCRIPT = resolve(process.cwd(), 'scripts/ui-shot.ts');
 const HANG_URL = `data:text/html,${encodeURIComponent('<title>hang</title>')}`;
 
