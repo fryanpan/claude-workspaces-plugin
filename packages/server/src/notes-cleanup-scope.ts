@@ -471,24 +471,17 @@ export function boundByAuthorship(
           why(edit.op, 'the end of the doc', 'a cleanup may not open a second notes section'),
         );
         break;
-      // AN OP WITH NO CASE IS REFUSED LOUDLY, AND FAILS THE BUILD FIRST.
+      // AN OP WITH NO CASE IS REFUSED BY NAME, AND FAILS THE BUILD FIRST.
       //
-      // This switch decides what a cleanup may do, by KEEPING an edit or by
-      // pushing a line saying why it was refused. It used to have no
-      // `default`, so an op nobody had written a case for was neither: it
-      // fell out of the loop, was counted in `refused` by subtraction, and
-      // left no line in `reasons` at all — the pass reporting a refusal it
-      // could not name. That is the same shape as the bug this file's own
-      // branch was written to fix: a remedy that never fires and nothing
-      // anywhere saying it did not.
+      // With no `default` an op nobody had written a case for was neither
+      // kept nor refused-with-a-reason: it fell out of the loop, was counted
+      // in `refused` by subtraction, and left nothing in `reasons` — a pass
+      // reporting a refusal it could not name.
       //
-      // `never` is the half that matters. Every member of `prose.BlockEdit`
-      // has a case above, so this assignment compiles today and stops
-      // compiling the moment a seventh op is added — which turns "somebody
-      // must remember to come back here" into a build failure. The runtime
-      // arm behind it is for the edit that reaches this function without
-      // having gone through the type, and it names the op rather than
-      // dropping it.
+      // `never` is the half that matters: every `prose.BlockEdit` member has
+      // a case above, so this compiles today and stops compiling the moment a
+      // seventh op is added. The runtime arm is for an edit that arrives
+      // without having gone through the type.
       default: {
         const unhandled: never = edit;
         const op = (unhandled as prose.BlockEdit).op;
