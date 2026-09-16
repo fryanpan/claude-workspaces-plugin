@@ -308,12 +308,9 @@ export function classifyOpenTasks(
     //
     // Those are the ONLY two ways a row reads as waiting on a person, and a
     // note saying "waiting on Bryan" is still not a third — no bucket here is
-    // set from prose, and the reader that guessed one was removed 2026-09-08.
-    // What such a note does lose is its movement credit (`waitingNote`
-    // above): it may not EXCUSE the row's clock, so the row reaches the quiet
-    // window and the gate names it `waiting-unfiled`. Excusing a row needs to
-    // be right about the wait; refusing to be quietened by one does not.
-    // `waiting-unfiled.ts` carries the argument in full.
+    // set from prose. What such a note loses is its movement credit
+    // (`waitingNote` above), so the row reaches the quiet window and the gate
+    // names it `waiting-unfiled`. `waiting-unfiled.ts` has the argument.
     const boardSaysOwnerWaits = t.ownerKind === 'person' || bands.ownerBand.has(t.goal ?? '');
     let bucket: Bucket;
     // A rule row first: whatever else is true of it, it is not work anyone

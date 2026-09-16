@@ -1,3 +1,7 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * The aging half: an unfiled wait the lead was told about, and nobody filed,
  * goes past the lead a window later — to Team Lead first, to the owner's own
@@ -17,10 +21,7 @@
  * All fixtures are synthetic — invented names on made-up boards. The repo is
  * public.
  */
-import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { type ReviewPayload, reviewWithdrawn } from '@claude-workspaces/core';
 import { STALL_ESCALATION_ACTOR, type TeamLeadReach } from '../src/stall-escalation.ts';
 import type { StalledRow } from '../src/stall-gate.ts';
 import type { StallNudgeFrame, StallSnapshot } from '../src/stall-nudge.ts';
@@ -45,14 +46,13 @@ describe('an unfiled wait that ages goes past its lead', () => {
   function boardWith(titles: readonly string[]): { store: TaskStore; ws: string; ids: string[] } {
     dir = dir || mkdtempSync(join(tmpdir(), 'wu-escalation-'));
     const store = new TaskStore({ dataDir: dir });
-    const ws = store.createWorkspace({ name: 'release-train', leadAgentId: LEAD.id }).id;
+    const ws = store.createWorkspace('release-train', { leadAgentId: LEAD.id }).id;
     const ids = titles.map((title) => {
       const res = store.createTask(ws, {
         title,
         body: `Agent can ${title.toLowerCase()} so that the train leaves on time.`,
         assignee: LEAD.name,
         assigneeKind: 'agent',
-        author: LEAD,
       });
       if (!res.ok) throw new Error(`could not create ${title}`);
       return res.task.id;
@@ -130,7 +130,7 @@ describe('an unfiled wait that ages goes past its lead', () => {
     dir = mkdtempSync(join(tmpdir(), 'wu-escalation-two-'));
     const store = new TaskStore({ dataDir: dir });
     const boards = ['release-train', 'search-revamp'].map((name) => {
-      const ws = store.createWorkspace({ name, leadAgentId: LEAD.id }).id;
+      const ws = store.createWorkspace(name, { leadAgentId: LEAD.id }).id;
       return ws;
     });
     const titles = [
@@ -144,7 +144,6 @@ describe('an unfiled wait that ages goes past its lead', () => {
           body: `Agent can ${title.toLowerCase()} so that the work lands.`,
           assignee: LEAD.name,
           assigneeKind: 'agent',
-          author: LEAD,
         });
         if (!res.ok) throw new Error('create failed');
         return res.task.id;
@@ -208,8 +207,12 @@ describe('an unfiled wait that ages goes past its lead', () => {
 
     escalations.onTick([snapshot(ws, [])], START + WINDOW + MIN);
     expect(escalations.filedCount()).toBe(0);
-    const items = store.listReviewItems(ids[0] as string);
-    const ours = items.find((i) => i.createdBy === STALL_ESCALATION_ACTOR.name);
-    expect(ours?.withdrawnAt ?? ours?.review).toBeDefined();
+    // The item is not deleted, it is withdrawn: still on the ticket, off the
+    // reader's queue.
+    const ours = store
+      .listReviewItems(ids[0] as string)
+      .find((i) => i.createdBy === STALL_ESCALATION_ACTOR.name);
+    expect(ours).toBeDefined();
+    expect(reviewWithdrawn(ours?.review as ReviewPayload)).toBe(true);
   });
 });
