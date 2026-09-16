@@ -286,6 +286,11 @@ export function nestedBullets(markdown: string): NestedBullet[] {
 /** A speaker tag as the notes carry it: `[@Name](speaker:LABEL)`. */
 const SPEAKER_TAG = /\[@[^\]]+\]\(speaker:[^)]+\)/;
 
+/** A speaker tag that SPEAKS FOR THE NOTES UNDER ITS BULLET — the `g=` marker
+ *  `notes-group-tags.ts` writes when it folds a single-voice run's tags onto
+ *  the bullet above them. */
+const GROUP_SPEAKER_TAG = /\[@[^\]]+\]\(speaker:[^)]*[?&]g=\d+[^)]*\)/;
+
 /**
  * Bullets that record a decision or an open question without saying whose.
  *
@@ -312,18 +317,30 @@ const QUESTION_WORDS =
 
 export function decisionsWithoutSpeaker(markdown: string): string[] {
   const out: string[] = [];
-  const walk = (bullets: NestedBullet[]): void => {
+  const walk = (bullets: NestedBullet[], inherited: boolean): void => {
     for (const bullet of bullets) {
       const claims = DECISION_WORDS.test(bullet.text) || QUESTION_WORDS.test(bullet.text);
-      if (claims && !attributedSomewhere(bullet)) out.push(bullet.text);
-      walk(bullet.children);
+      const here = GROUP_SPEAKER_TAG.test(bullet.text);
+      if (claims && !inherited && !attributedSomewhere(bullet)) out.push(bullet.text);
+      walk(bullet.children, inherited || here);
     }
   };
-  walk(nestedBullets(markdown));
+  walk(nestedBullets(markdown), false);
   return out;
 }
 
-/** True when this bullet, or anything indented under it, names a speaker. */
+/**
+ * True when this bullet, or anything indented under it, names a speaker.
+ *
+ * AND A GROUP TAG ABOVE IT COUNTS TOO — `inherited` in the walk. A run of
+ * notes from one voice carries its tag on the lead bullet rather than on
+ * every line (`notes-group-tags.ts`), so a decision one line under that tag
+ * IS attributed and reading only downwards would report this bar falling on
+ * the change that made the notes easier to read. Only the GROUP marker
+ * inherits: an ordinary tag on a lead bullet names whoever opened the topic,
+ * and letting it cover the notes underneath would pass somebody else's
+ * unattributed decision as attributed.
+ */
 function attributedSomewhere(bullet: NestedBullet): boolean {
   return (
     SPEAKER_TAG.test(bullet.text) || bullet.children.some((child) => attributedSomewhere(child))

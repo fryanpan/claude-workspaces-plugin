@@ -704,6 +704,19 @@ write has had the last word: the tick path in `meeting-notes-doc.ts` (topic
 headings only) and `notes-cleanup-pass.ts` (both). It reads no transcript and
 composes nothing.
 
+`notes-group-tags.ts` sits beside it, in the same after-the-write position and
+for the same reason: a run of notes that all came from one voice carries its
+speaker tag on the bullet ABOVE them rather than on every line, and that is a
+fact about the whole group, which is built across several ticks and so cannot
+be decided from the one block an edit carries. It moves tags and never notes —
+grouping stays by topic, which is `notes-regroup.ts`'s business — and the move
+is reversible: a hoisted tag is written with the `g=<count>` marker
+(`core/speaker-tags.ts`) that nothing else writes, so a group gaining a second
+voice can hand every note its own tag back, and a group that has gained an
+untagged note the fold cannot account for is unfolded rather than guessed at. Like the tidy, it writes the
+document directly, and like the tidy it reads no transcript and composes
+nothing.
+
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a
 second note-taking path — it reuses `NotesComposer`, the shared
