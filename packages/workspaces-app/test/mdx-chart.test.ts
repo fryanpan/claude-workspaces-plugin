@@ -250,7 +250,7 @@ describe('a chart block on the doc page', () => {
     expect(bottom - top).toBeGreaterThan(100);
   });
 
-  it('marks an indexed chart\'s reference line on the plot, with its label and a tick', () => {
+  it("marks an indexed chart's reference line on the plot, with its label and a tick", () => {
     mount(
       '<LineChart baseline={100} baselineLabel="1931 = 100" series={[{ label: "GDP", values: [{ x: 1931, y: 100 }, { x: 1971, y: 247 }, { x: 2011, y: 515 }] }]} />\n',
     );
@@ -270,6 +270,14 @@ describe('a chart block on the doc page', () => {
     // A chart with no baseline draws no rule.
     mount('<LineChart series={[{ label: "GDP", values: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }]} />\n');
     expect(views()[1]?.querySelector('.mdx-baseline')).toBeNull();
+  });
+
+  it('ticks a short series at its own x values, and writes a year without a separator', () => {
+    mount(
+      '<LineChart series={[{ label: "Wages", values: [{ x: 1931, y: 48 }, { x: 1971, y: 41 }, { x: 2011, y: 35 }] }]} />\n',
+    );
+    const svg = views()[0]?.querySelector('svg.mdx-chart[data-chart="line"]');
+    expect(texts(svg, '.mdx-x-axis text')).toEqual(['1931', '1971', '2011']);
   });
 
   it('draws at the width the component asked for, whatever the column is', () => {

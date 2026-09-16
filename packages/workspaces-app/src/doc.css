@@ -997,8 +997,12 @@ body.has-set .doc-switcher-caret {
   margin-top: 8px;
   overflow: visible;
 }
+/* `:not([fill])` so a label that carries its series' colour keeps it: a
+   presentation attribute loses to any rule that names the property. */
 #editor > .ProseMirror .mdx-chart text {
   font: 12px / 1 var(--sans);
+}
+#editor > .ProseMirror .mdx-chart text:not([fill]) {
   fill: var(--fg-muted);
 }
 #editor > .ProseMirror .mdx-grid line {
@@ -1011,8 +1015,10 @@ body.has-set .doc-switcher-caret {
   stroke: var(--border-strong);
   stroke-width: 1;
 }
+/* Neutral, like the published chart's: the band marks a stretch of time, not
+   a selection, so it must not read as the accent. */
 #editor > .ProseMirror .mdx-band rect {
-  fill: var(--accent-subtle);
+  fill: var(--bg-hover);
 }
 #editor > .ProseMirror .mdx-chart .mdx-band-label,
 #editor > .ProseMirror .mdx-chart .mdx-axis-unit {
@@ -1020,6 +1026,7 @@ body.has-set .doc-switcher-caret {
 }
 /* A line may cross the band's label; a halo in the block's ground keeps it legible. */
 #editor > .ProseMirror .mdx-chart .mdx-band-label {
+  font-style: italic;
   paint-order: stroke;
   stroke: var(--bg-panel);
   stroke-width: 3px;

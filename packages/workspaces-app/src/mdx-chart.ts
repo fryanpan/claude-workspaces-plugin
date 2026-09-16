@@ -15,7 +15,6 @@ import type { BarChart, ChartPoint, LineChart, MdxChart } from './mdx-chart-prop
 export type { ChartPoint, LineSeries, LineChart, BarChart, MdxChart } from './mdx-chart-props.ts';
 export { chartOf } from './mdx-chart-props.ts';
 
-
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /** The reference categorical palette, in its fixed order (light surface). */
 const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7'];
@@ -140,7 +139,8 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
     })
     .filter((e): e is { label: string; value: string; point: ChartPoint; i: number } => !!e);
   // Room at the right for those labels, never more than a third of the chart.
-  const wanted = Math.max(0, ...ends.map((e) => Math.max(e.label.length, e.value.length))) * CH + 14;
+  const wanted =
+    Math.max(0, ...ends.map((e) => Math.max(e.label.length, e.value.length))) * CH + 14;
   const right = ends.length > 0 ? Math.max(12, Math.min(Math.round(w * 0.34), wanted)) : 12;
   const bottom = 24;
   const pw = w - left - right;
@@ -166,12 +166,17 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
     text(grid, yLabels[i] ?? '', { x: left - 6, y: y + 4, 'text-anchor': 'end' });
   });
 
+  // A year is not a quantity, so an x tick never takes a thousands separator,
+  // and a short series is ticked at its own points — both as the site does.
+  const own = [...new Set(chart.series[0]?.points.map((p) => p.x) ?? [])].sort((a, b) => a - b);
   const xTicks =
     chart.xTickLabels?.filter((t) => t.x >= x0 && t.x <= x1) ??
-    niceTicks(x0, x1, Math.max(2, Math.floor(pw / 90)))
-      // Whole-number data (years, months, days) gets whole-number ticks.
-      .filter((x) => !xs.every(Number.isInteger) || Number.isInteger(x))
-      .map((x) => ({ x, label: fmt(x, 'plain') }));
+    (own.length > 1 && own.length <= 8
+      ? own
+      : niceTicks(x0, x1, Math.max(2, Math.floor(pw / 90)))
+          // Whole-number data (years, months, days) gets whole-number ticks.
+          .filter((x) => !xs.every(Number.isInteger) || Number.isInteger(x))
+    ).map((x) => ({ x, label: String(Number(x.toFixed(2))) }));
   const widest = Math.max(...xTicks.map((t) => t.label.length), 1) * CH + 8;
   const every = Math.max(1, Math.ceil((xTicks.length * widest) / pw));
   const axis = el('g', { class: 'mdx-x-axis' }, svg);
@@ -214,7 +219,8 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
     for (const p of pts) {
       if (tips++ >= MAX_TIPS) break;
       const hit = el('circle', { cx: sx(p.x), cy: sy(p.y), r: 8, class: 'mdx-hit' }, g);
-      const xLabel = chart.xTickLabels?.find((t) => t.x === p.x)?.label ?? fmt(p.x, 'plain');
+      const xLabel =
+        chart.xTickLabels?.find((t) => t.x === p.x)?.label ?? String(Number(p.x.toFixed(2)));
       const name = s.label ? `${s.label} · ` : '';
       tip(
         hit,
