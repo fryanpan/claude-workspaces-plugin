@@ -267,28 +267,27 @@ describe('a meeting that hears the room and the Mac at once', () => {
     return timing.rows();
   }
 
-  it('tells the notes pipeline it does not know when a two-stream turn was spoken', async () => {
-    // The ledger counts the bytes of BOTH streams while each engine numbers
-    // audio from its own byte zero, so an offset resolves to about half the
-    // elapsed time and the error grows all meeting. A wrong answer here is
-    // worse than none: it would put a fabricated number under every latency
-    // report the repo produces.
+  it('tells the notes pipeline when a two-stream turn was spoken', async () => {
+    // One ledger per stream is what makes this answerable. A single ledger
+    // counted the bytes of BOTH streams while each engine numbered audio from
+    // its own byte zero, so an offset resolved to about half the elapsed time
+    // and the error grew all meeting — and rather than publish a fabricated
+    // number the relay published none, which left every mic + Mac-audio
+    // meeting with no spoken clock and no latency anybody could check.
     const rows = await timingRowsOf('two-spoken', COMBINED_SOURCE);
     expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows) {
-      expect(r.spokenAt).toBeNull();
-      expect(r.spokenToWrittenMs).toBeNull();
-    }
+    expect(rows.some((r) => r.spokenAt !== null)).toBe(true);
+    expect(rows.some((r) => r.lastSpokenAt !== null)).toBe(true);
   });
 
-  it('and does know on a single-stream meeting — the control', async () => {
-    // Without this, the null above would pass on a relay that never resolves
-    // a spoken instant at all.
+  it('and does the same on a single-stream meeting — the control', async () => {
+    // Without this, the row above would pass on a relay that resolves a
+    // spoken instant for everything regardless of how it heard it.
     const rows = await timingRowsOf('one-spoken', undefined);
     expect(rows.some((r) => r.spokenAt !== null)).toBe(true);
   });
 
-  it('refuses to measure a two-stream meeting, rather than measuring the wrong stream', async () => {
+  it('measures a two-stream meeting against the ledger of the stream that spoke', async () => {
     const { engine, sessions } = twoSessionEngine();
     const sent: MeetingServerMessage[] = [];
     const relay = new MeetingRelay({
@@ -324,8 +323,12 @@ describe('a meeting that hears the room and the Mac at once', () => {
     });
     const turn = sent.find((f) => f.type === 'transcript');
     // The ledger correlates a turn to a chunk by an offset into ONE engine's
-    // stream, and two engines have two of those.
-    expect(turn && 'timing' in turn ? turn.timing : undefined).toBeUndefined();
+    // stream, and two engines have two of those — so there are two ledgers,
+    // and this turn is priced against the microphone's, whose first and only
+    // chunk is the frame sent just above.
+    const mark = turn && 'timing' in turn ? turn.timing : undefined;
+    expect(mark).toBeDefined();
+    expect(mark?.seq).toBe(0);
     relay.onText(ws, JSON.stringify({ type: 'stop' }));
     await settle();
   });
