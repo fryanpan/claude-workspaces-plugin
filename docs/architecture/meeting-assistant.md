@@ -1325,6 +1325,22 @@ meeting started`. It holds ids and a duration only. The tick timings start at
 the first pause, so until this line a slow first note looked the same as a
 quick one.
 
+**The notes a meeting is judged on are the blocks it WROTE, not a section.**
+Whole-doc note-taking files each note under the heading for its topic,
+wherever that heading already is, so a meeting on a prepared document opens no
+section of its own. Every reading keyed on a heading id then reads the tail
+and misses the rest: a real run on 2026-09-16 read 4 bullets and skipped the
+182 the same meeting had written elsewhere, and reported coverage over the 4.
+The address is now `notes-written.ts` — the note-taker's own authorship marks
+anywhere in the doc, union the section it opened, with the heading each note
+sits under brought along so the structure checks still see topics. The union's
+two halves cover each other: the marks find notes under somebody else's
+headings, and the section finds notes whose mark a person's edit or a markdown
+round trip took off. The at-stop quality pass and the tidy-up's
+"(unconfirmed)" scan both read the notes this way, and the rerun report prints
+the coverage reading over each slice so the change of definition is visible
+beside the change in the notes.
+
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw
 and wrote nothing about — the complaint a reader actually makes. The second

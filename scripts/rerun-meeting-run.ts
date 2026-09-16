@@ -55,9 +55,14 @@ import type { MeetingNamer } from '../packages/server/src/meeting-namer.ts';
 import type { NotesComposer, NotesMeetingSummary } from '../packages/server/src/meeting-notes.ts';
 import type { TaskCaptureExtractor } from '../packages/server/src/meeting-task-capture.ts';
 import { meetingDirPath } from '../packages/server/src/meetings.ts';
+import { readTranscript } from '../packages/server/src/meetings.ts';
 import { createNotesHeadingFileStore } from '../packages/server/src/notes-heading-store.ts';
 import { readNotesMethod, writeNotesMethod } from '../packages/server/src/notes-method-store.ts';
-import { readSectionMarkdown } from '../packages/server/src/notes-quality-pass.ts';
+import {
+  readMeetingNotesMarkdown,
+  readSectionMarkdown,
+} from '../packages/server/src/notes-quality-pass.ts';
+import { uncoveredIdeaCount } from '../packages/server/src/notes-quality-report.ts';
 import { readNotesQuality } from '../packages/server/src/notes-quality-store.ts';
 import { type ServerHandle, createServer } from '../packages/server/src/server.ts';
 import type { TranscriptionEngine } from '../packages/server/src/transcribe.ts';
@@ -70,6 +75,7 @@ import {
   checkDocEdits,
   pcmDurationMs,
 } from './rerun-meeting-args.ts';
+import { REPORT_JSON, headCommit, loadRerunReport } from './rerun-meeting-compare.ts';
 import {
   STOP_TIMEOUT_MS,
   bySegment,
@@ -266,6 +272,11 @@ export async function runRerun(
   if (!budget.ok) throw new UsageError(budget.line);
   checkDocEdits(doc.edits, audioMs);
   checkStreams(target);
+  // THE COMPARISON TARGET IS READ BEFORE ANYTHING BILLS. A typo in
+  // `--compare` used to surface after the whole recording had been replayed,
+  // which spends the ceiling and then writes no report at all — the same
+  // reason `--spend-usd` is judged up here rather than at the first compose.
+  const before = args.compare === undefined ? undefined : loadRerunReport(args.compare);
 
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-rerun-data-'));
   const runDir = makeRunDir(args.out, Date.now());
@@ -350,12 +361,26 @@ export async function runRerun(
     );
     const headingId = createNotesHeadingFileStore(dataDir).read({ docId, meetingId });
     const section = readSectionMarkdown(server.docStore, docId, headingId);
+    // WHAT THIS MEETING WROTE, WHEREVER IT SITS — the notes the server's own
+    // coverage pass now reads, and the file whose bullets the report's
+    // coverage line counts. `notes-section.md` is kept beside it because the
+    // report prints the old reading too, and a number in a report a reader
+    // cannot open is a number they have to take on trust.
+    const written = readMeetingNotesMarkdown(server.docStore, docId, headingId);
     const quality = readNotesQuality(dataDir, docId, meetingId);
     const notesPath = join(runDir, 'notes.md');
+    const writtenNotesPath = join(runDir, 'notes-meeting.md');
     const document = server.docStore.readMarkdownBody(docId) ?? '';
     writeFileSync(notesPath, document);
+    writeFileSync(writtenNotesPath, written);
     writeFileSync(join(runDir, 'notes-section.md'), section);
     copyTranscript(dataDir, docId, runDir);
+    // THE OLD READING OF THE SAME RUN, computed here rather than remembered:
+    // the same function the server calls, over the section alone. Without it
+    // a run on this commit and a run on the last one differ by a definition
+    // nobody can see.
+    const turns = readTranscriptSafely(dataDir, docId, meetingId);
+    const sectionCoverage = uncoveredIdeaCount(section, turns);
 
     const report = buildRerunReport({
       method: args.method,
@@ -373,6 +398,9 @@ export async function runRerun(
       ideasVoiced: quality?.ideas ?? summary.ideas.seen,
       ideasCovered:
         quality !== undefined ? quality.ideas - quality.uncoveredIdeas : summary.ideas.carried,
+      sectionIdeasVoiced: sectionCoverage.ideas,
+      sectionIdeasCovered: sectionCoverage.ideas - sectionCoverage.uncovered,
+      commit: headCommit(),
       tidy,
       billedUsd: billed.usd,
       billedCalls: billed.calls,
@@ -380,11 +408,16 @@ export async function runRerun(
       firstNoteMs: state.firstNoteMs,
       notesPath,
       logPath: join(runDir, 'run.log'),
+      writtenNotesPath,
       document,
       section,
+      written,
     });
     const reportPath = join(runDir, 'report.md');
-    writeFileSync(reportPath, renderRerunReport(report));
+    writeFileSync(reportPath, renderRerunReport(report, before));
+    // The machine-readable half, so the NEXT run can be compared against this
+    // one without parsing a table back out of markdown.
+    writeFileSync(join(runDir, REPORT_JSON), `${JSON.stringify(report, null, 2)}\n`);
     return {
       report,
       runDir,
@@ -435,5 +468,20 @@ function copyTranscript(dataDir: string, docId: string, runDir: string): void {
   if (!existsSync(dir)) return;
   for (const file of readdirSync(dir)) {
     if (file.endsWith('-raw-transcript.md')) cpSync(join(dir, file), join(runDir, 'transcript.md'));
+  }
+}
+
+/** The meeting's settled turns, or none. A run whose transcript will not read
+ *  still gets a report; it simply reports no ideas for the old reading, which
+ *  is what an unreadable transcript honestly supports. */
+function readTranscriptSafely(
+  dataDir: string,
+  docId: string,
+  meetingId: string,
+): { text: string; ts?: number }[] {
+  try {
+    return readTranscript(dataDir, docId, meetingId);
+  } catch {
+    return [];
   }
 }
