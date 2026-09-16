@@ -152,6 +152,7 @@ describe('commentRow on an answered declaration', () => {
             answerText: 'Keep disk',
           },
         },
+        siblings: [],
       },
       undefined,
       NOW,
@@ -168,6 +169,7 @@ describe('commentRow on an answered declaration', () => {
       {
         threadId: 'th-2',
         comment: { author: 'A', text: 'x', ts: NOW, review: { shape: 'review', headline: 'H' } },
+        siblings: [],
       },
       undefined,
       NOW,

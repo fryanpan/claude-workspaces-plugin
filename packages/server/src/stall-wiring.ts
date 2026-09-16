@@ -42,6 +42,7 @@ import {
 import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
+import { commentOfEvent, handedToAgent, recordDelivery } from './comment-receipt.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
 import { changedFilesInWorktree } from './git-diff.ts';
@@ -1233,15 +1234,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     payload: WebhookPayload,
   ): Map<string, string> => {
     const rows = new Map<string, string>();
+    // The event test stays here as well as inside `commentOfEvent` because it
+    // is what narrows the payload union — `threadId` below exists only on the
+    // thread frames. Which COMMENT the event names is `commentOfEvent`,
+    // shared with the receipt stamp so the queue and the tick cannot come to
+    // name different comments.
     if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return rows;
-    // thread.replied carries the comment on the payload; thread.created fires
-    // with `comment: undefined` and the opening comment inside the thread
-    // (doc-store.ts fireEvent call sites), so fall back to the newest one there.
-    const comment =
-      payload.comment ??
-      (payload.event === 'thread.created'
-        ? payload.thread?.comments?.[payload.thread.comments.length - 1]
-        : undefined);
+    const comment = commentOfEvent(payload);
     if (!comment) return rows;
     const addressees = new Set<string>(agentWatches.agentsWatching(`ws:${workspaceId}`));
     const lead = taskStore.getWorkspace(workspaceId)?.leadAgentId;
@@ -1273,6 +1272,42 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     }
   };
 
+  /**
+   * The RECEIPT half of a comment's delivery: the second tick.
+   *
+   * The queue above is about not LOSING a comment; this is about the author
+   * being able to see that it landed. It runs after the frames have gone out,
+   * asks `handedToAgent` whether any session other than the author is holding
+   * one of the channels the comment went out on, and stamps the comment when
+   * one is.
+   *
+   * Write-once and silent when nothing changed — `markCommentDelivered`
+   * answers `already` for a comment that is stamped, so a second frame about
+   * the same comment costs a map read and tells nobody. The frame it does
+   * send is for PAGES only (`skipAgentStreams`): a board reads its discussion
+   * over REST and would otherwise never learn, while an agent has no use at
+   * all for the news that it was handed something it was just handed.
+   */
+  const stampReceipt = (docId: string, payload: WebhookPayload, channels: string[]): void => {
+    if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return;
+    const comment = commentOfEvent(payload);
+    const threadId = payload.threadId;
+    if (!comment || threadId === undefined) return;
+    const delivered = handedToAgent(channels, {
+      agentsOn: (channel) => sse.agentsOn(channel),
+      isAuthor: (agentId) => commentAuthorIs(agentId, comment.author),
+    });
+    if (!delivered) return;
+    recordDelivery(
+      { docId, threadId, commentId: comment.id, channels, at: Date.now() },
+      {
+        markDelivered: (d, t, c, at) => docStore.markCommentDelivered(d, t, c, at),
+        announce: (channel, frame) =>
+          sse.broadcastTransient(channel, frame, { skipAgentStreams: true }),
+      },
+    );
+  };
+
   const onLiveDocEvent = (docId: string, payload: WebhookPayload): void => {
     const rowId = taskIdOfBodyDoc(docId);
     if (rowId) {
@@ -1290,6 +1325,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         return rowId ? { ...payload, workspaceId, commentQueueId: rowId } : undefined;
       });
       markCommentRowsEmitted(workspaceId, rows);
+      stampReceipt(docId, payload, [docId, `ws~${workspaceId}`]);
       // Task path only: a plain doc thread moves no row, so refreshing the
       // projection for it would be a board-wide rewrite that changes nothing.
       // And only this row: a comment moves its own count and nothing else's.
@@ -1300,7 +1336,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // `shareWorkspacesOf` spells out, so what an agent HEARS about a review
     // and what a share visitor may OPEN in it cannot drift apart.
     const attachmentId = attachmentIdOf(docStore.peekMeta(docId) ?? {});
-    for (const board of boardsForDoc(docId)) {
+    // Every board this doc hangs on, gathered BEFORE the stamp: the write is
+    // write-once, so stamping inside the loop would announce to whichever
+    // board came first and leave every other board's open pages on one tick
+    // until they reloaded.
+    const boards = [...boardsForDoc(docId)];
+    for (const board of boards) {
       const rows = queueCommentRows(board, docId, payload);
       // doc-store.ts already broadcast on the review's own channel; a second
       // send here would deliver the same comment twice to one listener. The
@@ -1314,6 +1355,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       }
       markCommentRowsEmitted(board, rows);
     }
+    stampReceipt(docId, payload, [docId, ...boards.map((b) => `ws~${b}`)]);
   };
 
   return {

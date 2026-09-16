@@ -1,4 +1,11 @@
-import { type Thread, type User, authorLabel, formatTime } from '@claude-workspaces/core';
+import {
+  type Thread,
+  type User,
+  authorLabel,
+  formatTime,
+  receiptState,
+} from '@claude-workspaces/core';
+import { commentHead } from '../comment-view.ts';
 /**
  * The two places a person writes on an attachment: the comment composer
  * that opens off a selection, and the full-screen thread view with its reply
@@ -19,6 +26,7 @@ import {
   blurMarkdownComposer,
   focusMarkdownComposer,
 } from '../md-composer.ts';
+import { clearNotSent, markNotSent } from '../not-sent.ts';
 import type { ReviewSurface } from '../review-surface.ts';
 import type { ThreadPanel } from '../threads.ts';
 import { type ChromeSelection, anchorBody } from './anchor-body.ts';
@@ -306,6 +314,7 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
       });
       if (!res.ok) throw new Error('post failed');
       const body = (await res.json()) as { thread: { id: string } };
+      clearNotSent(composer);
       hideComposer();
       opts.onPosted?.();
       showToast('✓ Comment posted');
@@ -321,6 +330,14 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
       }, 150);
     } catch {
       showToast('Failed to post comment');
+      // The toast is gone in seconds and the box stays open holding the
+      // words — which is indistinguishable from a comment never sent. The
+      // note stands until the comment goes.
+      markNotSent({
+        near: composer.querySelector('.composer-inner') ?? composerText,
+        field: composerText,
+        retry: () => void submitComposer(),
+      });
     } finally {
       submitBtn.disabled = false;
       composerText.disabled = false;
@@ -360,18 +377,15 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     for (const c of t.comments) {
       const row = document.createElement('div');
       row.className = 'comment';
-      const a = document.createElement('div');
-      a.className = 'author';
-      const sw = document.createElement('span');
-      sw.className = 'swatch';
-      sw.style.background = c.author.color;
-      const nm = document.createElement('span');
-      nm.className = 'name';
-      nm.textContent = authorLabel(c.author);
-      const tm = document.createElement('span');
-      tm.className = 'time';
-      tm.textContent = formatTime(c.ts);
-      a.append(sw, nm, tm);
+      // The same header the thread card draws, receipt included — this sheet
+      // is where a reader on a phone reads the comment they just wrote.
+      const a = commentHead({
+        variant: 'doc',
+        name: authorLabel(c.author),
+        color: c.author.color,
+        time: { text: formatTime(c.ts) },
+        receipt: receiptState(c, t.comments, user),
+      });
       const bodyEl = document.createElement('div');
       bodyEl.className = 'body';
       bodyEl.textContent = c.text;

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   type Anchor,
   type Comment,
+  type DeliveryStamp,
   type DocMeta,
   type DocOriginRepo,
   type DocTitleSource,
@@ -84,6 +85,7 @@ import {
   setWorkspaceGroups as setWorkspaceGroupsImpl,
 } from './binds.ts';
 import { compactBoardState } from './board-doc-compaction.ts';
+import { logCommentAttempt } from './comment-log.ts';
 import {
   type DocIdAuthority,
   ReservedDocIdError,
@@ -2620,6 +2622,18 @@ export class DocStore {
         (newest, c) => (newest && newest.ts > c.ts ? newest : c),
         undefined,
       );
+    // One line per comment that reached this process, refusals included. This
+    // is the only choke point all three write paths (browser REST, MCP
+    // `post_reply`, widget) pass through, so it is the only place the record
+    // can be complete. The words are never written — see `comment-log.ts`.
+    logCommentAttempt({
+      docId,
+      threadId,
+      authorId: author.id,
+      chars: text.length,
+      landedThreadId: thread?.id ?? null,
+      landedCommentId: posted?.id ?? null,
+    });
     if (thread && posted) {
       for (const listener of this.commentPostedListeners) {
         listener({ docId, threadId: thread.id, commentId: posted.id, author, ts: posted.ts });
@@ -2697,6 +2711,16 @@ export class DocStore {
   ): () => void {
     this.reviewAnsweredListeners.add(listener);
     return () => this.reviewAnsweredListeners.delete(listener);
+  }
+
+  /** @see DocThreads.markCommentDelivered */
+  markCommentDelivered(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    at: number,
+  ): DeliveryStamp {
+    return this.docThreads.markCommentDelivered(docId, threadId, commentId, at);
   }
 
   /** Replace a posted comment's words, keeping the old ones on its trail. */

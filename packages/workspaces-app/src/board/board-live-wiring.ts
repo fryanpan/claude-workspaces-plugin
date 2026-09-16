@@ -226,6 +226,20 @@ export function wireBoardLive(deps: BoardLiveDeps): void {
       void loadDiscussion(open, true);
     });
   }
+  // The receipt landing. A doc page repaints from the ydoc sync; the board
+  // reads its discussion over REST, so without this frame the second tick
+  // would appear on the next reload and nowhere else. It carries no review
+  // change, so the queue is left alone — only the open panel repaints.
+  es.addEventListener('comment.delivered', () => {
+    const open: LiveDiscussionRow | undefined = state.detailTaskId
+      ? state.tasks.get(state.detailTaskId)
+      : state.detailGoalId
+        ? { id: state.detailGoalId, bodyDocId: `task:${state.detailGoalId}` }
+        : undefined;
+    if (!open || discussionIsBusy(document)) return;
+    void loadDiscussion(open, true);
+  });
+
   // A task going done takes its discussion out of the queue.
   es.addEventListener('task.transitioned', () => void loadReviewItems());
   // …and stales every status chip a pasted task/goal link is wearing, so the

@@ -7,9 +7,15 @@
  * `board-review-render.ts` draws a ticket-borne item with the same anatomy as a
  * declaring comment's row. One spelling, so the two cannot read differently.
  */
-import { reviewAnswered, reviewWithdrawn } from '@claude-workspaces/core';
+import {
+  type ReceiptComment,
+  receiptState,
+  reviewAnswered,
+  reviewWithdrawn,
+} from '@claude-workspaces/core';
 import type { ReviewPayload, ReviewShape } from '@claude-workspaces/core';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
+import { commentHead } from '../comment-view.ts';
 import {
   type ComposerSelection,
   composerSelection,
@@ -138,6 +144,16 @@ export function discussionIsBusy(root: ParentNode): boolean {
 export interface StreamComment {
   threadId: string;
   comment: TaskComment;
+  /**
+   * The comment's own THREAD, not the flattened stream around it.
+   *
+   * The receipt goes away when somebody else replies, and a reply means a
+   * reply to this — a comment on another conversation that happens to sort
+   * after it is not an answer to it. The panel shows one sequence (Bryan,
+   * 2026-08-18), but that is a rendering decision and this is a question
+   * about who answered whom.
+   */
+  siblings: TaskComment[];
 }
 
 /**
@@ -160,7 +176,7 @@ export function flattenComments(threads: TaskThread[]): StreamComment[] {
   const rows = threads.flatMap((t, ti) =>
     t.comments.map((c, ci) => ({
       order: ti * 1000 + ci,
-      row: { threadId: t.id, comment: c } satisfies StreamComment,
+      row: { threadId: t.id, comment: c, siblings: t.comments } satisfies StreamComment,
     })),
   );
   rows.sort((a, b) =>
@@ -261,6 +277,23 @@ export function composerTarget(threads: TaskThread[], focusThreadId?: string): T
  * part-way through, so rebuilding it on every paint costs nothing — while a
  * second copy of this markup in JSX would be a second thing to keep in step.
  */
+/**
+ * A projected board comment, read as the receipt reads a comment.
+ *
+ * The board's projection keeps a NAME where the doc keeps a `User`, and its
+ * `id` is optional on a payload from an older server — so the fallback is the
+ * thread and the clock, which is unique within one thread and is only ever
+ * compared against the other rows of that same thread.
+ */
+function asReceiptComment(threadId: string, c: TaskComment): ReceiptComment {
+  return {
+    id: c.id ?? `${threadId}:${c.ts}`,
+    ts: c.ts,
+    author: { name: c.author },
+    ...(c.deliveredAt !== undefined ? { deliveredAt: c.deliveredAt } : {}),
+  };
+}
+
 export function commentRow(
   row: StreamComment,
   focusThreadId: string | undefined,
@@ -291,16 +324,19 @@ export function commentRow(
   // attribute — which is a hover tooltip, and the reader this surface is
   // for is on a phone, where nothing hovers. "Who said this and when" was
   // therefore unanswerable on the device it mattered on.
-  const head = document.createElement('div');
-  head.className = 'board-comment-head';
-  const who = document.createElement('span');
-  who.className = 'board-comment-author';
-  who.textContent = c.author;
-  const when = document.createElement('span');
-  when.className = 'board-comment-when';
-  when.textContent = timeAgo(c.ts, now);
-  when.title = new Date(c.ts).toLocaleString();
-  head.append(who, when);
+  // The app's one comment header — see `comment-view.ts`. The board keeps its
+  // own class names (its rules live in board.css) and its own clock wording;
+  // what it shares is the anatomy, and with it the receipt.
+  const head = commentHead({
+    variant: 'board',
+    name: c.author,
+    time: { text: timeAgo(c.ts, now), title: new Date(c.ts).toLocaleString() },
+    receipt: receiptState(
+      asReceiptComment(row.threadId, c),
+      row.siblings.map((s) => asReceiptComment(row.threadId, s)),
+      selfName === undefined ? undefined : { name: selfName },
+    ),
+  });
   if (c.review) {
     // A WITHDRAWN item still belongs in the stream — it is history, and the
     // reader may already have acted on it — but badging it 'Question' is the

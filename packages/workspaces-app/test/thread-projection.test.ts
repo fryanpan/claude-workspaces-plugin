@@ -9,7 +9,7 @@
  * first shipped broken (docs/process/learnings.md). Every assertion below
  * drives `createThreadProjection` directly and reads what came out.
  */
-import { createThread, postReply, summaryHash } from '@claude-workspaces/core';
+import { createThread, postReply, setCommentDelivered, summaryHash } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { createSeenTracker } from '../src/comment-seen.ts';
@@ -109,6 +109,22 @@ describe('the ydoc → Thread[] projection', () => {
     ]);
     expect(t?.commentCount).toBe(2);
     expect(t?.lastActivity).toBe(reply?.ts);
+  });
+
+  it('carries the delivery stamp, so the receipt reads the same here as on the board', () => {
+    const ydoc = new Y.Doc();
+    createThread(ydoc, {
+      threadId: 't1',
+      anchor: range(0, 3),
+      createdBy: AUTHOR,
+      firstComment: { id: 'c1', text: 'anyone there?' },
+    });
+    const { projection } = projectionOver(ydoc);
+    // Before the server stamps it, the comment is on one tick.
+    expect(projection.collect()[0]?.comments[0]?.deliveredAt).toBeUndefined();
+
+    expect(setCommentDelivered(ydoc, 't1', 'c1', 1_700_000_000_000)).toBe('stamped');
+    expect(projection.collect()[0]?.comments[0]?.deliveredAt).toBe(1_700_000_000_000);
   });
 
   it('carries a comment’s review payload, which is what makes the thread an item', () => {

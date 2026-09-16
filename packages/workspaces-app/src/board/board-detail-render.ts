@@ -515,6 +515,12 @@ export interface TaskComment {
   text: string;
   ts: number;
   /**
+   * When the server handed this comment to a live agent session — the second
+   * tick. Forwarded from the thread payload untouched; see `Comment` in core
+   * for what it does and does not mean.
+   */
+  deliveredAt?: number;
+  /**
    * The Review Item this comment declared, when it declared one.
    *
    * Carried at COMMENT grain because that is where it is written — a thread

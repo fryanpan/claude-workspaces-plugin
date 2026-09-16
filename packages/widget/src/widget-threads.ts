@@ -14,7 +14,7 @@ import {
 // (`scripts/bundle-guard.ts`).
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
-import { httpBase } from './widget-auth.ts';
+import { composerNote, httpBase } from './widget-auth.ts';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -368,7 +368,20 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
     const ta = pop.querySelector('textarea') as HTMLTextAreaElement;
     const text = ta.value.trim();
     if (!text) return;
-    if (!(await el.postReply(t.id, text))) return;
+    // A rejected fetch (server unreachable) is a refused reply like any
+    // other. Without the catch it left an unhandled rejection and a popover
+    // still holding the words with nothing said about them — the same shape
+    // as a reply never sent. The note stands until the reply goes.
+    let posted = false;
+    try {
+      posted = await el.postReply(t.id, text);
+    } catch {}
+    if (!posted) {
+      const note = composerNote(pop, 'Not sent — tap Reply to retry.');
+      // Whatever they type next is not what failed, so the note goes with it.
+      ta.addEventListener('input', () => note.remove(), { once: true });
+      return;
+    }
     pop.remove();
   });
   pop.querySelector('.resolve')?.addEventListener('click', async () => {

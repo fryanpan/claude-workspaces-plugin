@@ -2392,6 +2392,76 @@ body.composer-open #editor > .ProseMirror ::selection {
   }
 }
 
+/* ================= NOT SENT (a draft the server never took) =================
+   One control that is both the state and the way out of it: the words are
+   still in the box above, and this says so and sends them again. Every
+   surface that can post a comment draws the same one (not-sent.ts), so
+   "did that land" has one answer everywhere. Deliberately quiet — a red
+   word, not a red box: nothing has been lost, and a banner over a kept
+   draft would say otherwise. */
+
+.not-sent {
+  margin: 0 0 6px;
+}
+.not-sent-retry {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--red);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  /* A finger's worth of target without a finger's worth of box: the note
+     sits inside a composer, where 44px of padding would push the Send
+     button off a phone's fold. */
+  min-height: 24px;
+}
+.not-sent-retry:hover,
+.not-sent-retry:focus-visible {
+  color: var(--red-strong);
+}
+
+/* ================= RECEIPT (the other half of "did that land") ==========
+   The mark beside a comment YOU wrote: one grey tick, the server has it;
+   two, a session watching this doc has been handed it; none once somebody
+   has replied, because the reply answers the question better than a mark.
+
+   It lives in the base stylesheet because both pages that draw comments
+   reach it — the review editor's thread cards and sheet, and the board's
+   discussion stream — which is the test CLAUDE.md sets for this file.
+
+   Both ticks are always in the box and the second is revealed by opacity
+   rather than inserted, so the second tick arriving never nudges the time
+   beside it. Grey in both states: a delivery is not an event worth colour. */
+
+.cw-receipt {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 11px;
+  margin-left: 6px;
+  color: var(--fg-muted);
+  opacity: 0.85;
+}
+.cw-receipt svg {
+  display: block;
+}
+.cw-receipt .cw-tick-back {
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.cw-receipt[data-receipt="received"] .cw-tick-back {
+  opacity: 1;
+}
+/* The thread card's head is a grid of named slots; the mark rides beside
+   the clock rather than claiming a column of its own. */
+.thread-head .cw-receipt {
+  margin-left: 4px;
+}
+
 /* ================= TOAST ================= */
 
 #toast {

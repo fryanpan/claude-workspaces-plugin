@@ -17,9 +17,11 @@ import {
   type Participants,
   type ReviewPayload,
   type Thread,
+  type User,
   authorLabel,
   formatTime,
   pendingDeclaration,
+  receiptState,
   reviewAnswered,
   reviewItemBodyMarkdown,
   reviewWithdrawn,
@@ -28,9 +30,11 @@ import {
 } from '@claude-workspaces/core';
 import { askedMetaLine, decidedMetaLine } from '../board/board-review-model.ts';
 import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-markdown.ts';
+import { commentHead, receiptMark } from '../comment-view.ts';
 import { currentWorkspaceId, docIdFromPathOrNull } from '../doc-path.ts';
 import { threadDecision } from '../long-thread.ts';
 import { attachMarkdownComposer } from '../md-composer.ts';
+import { clearNotSent, markNotSent } from '../not-sent.ts';
 import { reviewItemSeen } from '../review-item-seen.ts';
 import { threadGlyph, threadKind } from '../thread-kind.ts';
 import { isFoldingTap, syncFaceVisibility } from '../thread-morph.ts';
@@ -223,6 +227,14 @@ function head(
   started.textContent = formatTime(t.comments[0]?.ts ?? t.lastActivity);
   head.appendChild(started);
 
+  // The opening comment's receipt, beside the opening comment's clock. A
+  // folded card shows the words and this time and nothing else, so leaving
+  // the mark to the detail face would mean the one state a reader glances at
+  // — the card they just wrote, still folded — was the state without it.
+  const opening = t.comments[0];
+  const openingReceipt = opening ? receiptState(opening, t.comments, host.opts.currentUser) : null;
+  if (openingReceipt) head.appendChild(receiptMark(openingReceipt));
+
   // As far from ✓ Resolve as the card allows: the two were a thumb-width
   // apart, and the misfire that costs you resolves a thread. Resolve now lives
   // on the detail face, which puts a whole fold between them.
@@ -346,7 +358,9 @@ function slotB(
   // the ask the item card is carrying must not repeat its chip, headline and
   // why in the history directly beneath the card that just said them.
   for (const c of t.comments.slice(1))
-    comments.appendChild(commentRow(c, c.id === itemComment?.id));
+    comments.appendChild(
+      commentRow(c, t.comments, host.opts.currentUser, c.id === itemComment?.id),
+    );
 
   const reply = div('thread-reply');
   // The ask these words will answer, if there is one. `pendingDeclaration`
@@ -367,24 +381,39 @@ function slotB(
   // Every composer is a markdown editor (design point 4); refresh covers
   // the programmatic clear below, which the editor cannot see.
   const refreshComposer = attachMarkdownComposer(ta);
-  const submitReply = () => {
-    const text = ta.value.trim();
+  // `text` is passed in by the retry, so a second attempt sends the words
+  // that failed rather than whatever is in the box by then: a reader who
+  // started the next sentence while the first was in flight would otherwise
+  // find the button posting THAT and the failed one gone for good.
+  const postReply = (text: string) => {
     if (!text) return;
     const posted = host.opts.onReply(t.id, text, answering);
-    ta.value = '';
-    refreshComposer();
+    // Emptied only when the box still holds the words going out — a retry of
+    // an older attempt must not take away a sentence typed since.
+    if (ta.value.trim() === text) {
+      ta.value = '';
+      refreshComposer();
+    }
     // A refused post hands the words back — the chrome's 'try again' toast
     // must never point at an empty box. Only while the box is still empty,
-    // though: restoring over words typed since would stomp them.
+    // though: restoring over words typed since would stomp them. The toast
+    // is not the report: it is gone in seconds, and a plain reply never got
+    // one at all, so the card says so beside the draft until it is sent.
     void Promise.resolve(posted)
       .catch(() => false)
       .then((ok) => {
-        if (ok === false && ta.value === '') {
+        if (ok !== false) {
+          clearNotSent(reply);
+          return;
+        }
+        if (ta.value === '') {
           ta.value = text;
           refreshComposer();
         }
+        markNotSent({ near: actions, field: ta, retry: () => postReply(text) });
       });
   };
+  const submitReply = () => postReply(ta.value.trim());
   ta.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
       ev.preventDefault();
@@ -534,20 +563,30 @@ function compactAnswerField(
   input.className = 'thread-answer-input';
   input.placeholder = `Answer as ${host.opts.currentUser.name}…`;
   input.setAttribute('aria-label', 'Answer this question');
-  const send = () => {
-    const text = input.value.trim();
+  // Same contract as the card's own composer: a retry re-sends the words
+  // that failed, not whatever the field holds by then.
+  const sendText = (text: string) => {
     if (!text) return;
     const posted = host.opts.onReply(t.id, text, answersCommentId);
-    input.value = '';
+    if (input.value.trim() === text) input.value = '';
     // A refused post hands the words back — the chrome's 'try again' toast
     // must never point at an empty box. Only while the box is still empty,
-    // though: restoring over words typed since would stomp them.
+    // though: restoring over words typed since would stomp them. And the
+    // folded face says it in place, because the toast has already gone.
     void Promise.resolve(posted)
       .catch(() => false)
       .then((ok) => {
-        if (ok === false && input.value === '') input.value = text;
+        if (ok !== false) {
+          clearNotSent(wrap.parentElement ?? wrap);
+          return;
+        }
+        if (input.value === '') input.value = text;
+        // Beside the field, not inside it: `.thread-answer-field` is a one-row
+        // flex, and a note in it would take the field's width away.
+        markNotSent({ near: wrap, field: input, retry: () => sendText(text) });
       });
   };
+  const send = () => sendText(input.value.trim());
   input.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.isComposing) {
       ev.preventDefault();
@@ -868,17 +907,23 @@ function reviewHeader(review: Comment['review']): HTMLElement | null {
  * this comment's declaration in full, so the row shows the words and not a
  * second copy of the ask.
  */
-function commentRow(c: Comment, carriedByItemCard = false): HTMLElement {
+function commentRow(
+  c: Comment,
+  thread: ReadonlyArray<Comment>,
+  reader: User | undefined,
+  carriedByItemCard = false,
+): HTMLElement {
   const row = div(c.review ? 'comment comment-declared' : 'comment');
-  const authorRow = div('author');
-  const swatch = span('swatch');
-  swatch.style.background = c.author.color;
-  const name = span('name');
-  // Plain text, never HTML: names are untrusted (agent-supplied).
-  name.textContent = authorLabel(c.author);
-  const time = span('time');
-  time.textContent = formatTime(c.ts);
-  authorRow.append(swatch, name, time);
+  // One header for every comment this app draws — see `comment-view.ts`. The
+  // receipt rides on it, which is what makes "every surface has the ticks" a
+  // property of the code rather than of four people remembering.
+  const authorRow = commentHead({
+    variant: 'doc',
+    name: authorLabel(c.author),
+    color: c.author.color,
+    time: { text: formatTime(c.ts) },
+    receipt: receiptState(c, thread, reader),
+  });
 
   const body = div('body');
   // Comments are untrusted input; renderCommentMarkdown escapes first and

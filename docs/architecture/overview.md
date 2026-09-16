@@ -435,6 +435,44 @@ items ride the doc record the page already reads — `linkedItems` on
 adds no fetch. The bar's measured height is `--doc-dock-h`, which `doc.css`
 takes out of `#shell` and adds to the composer, toast and phone comment sheet.
 
+**A comment that never reached the server says so, on the comment.** Every
+composer on every surface already handed the words back when a post was
+refused; none of them left anything standing to say why, so a box holding your
+sentence looked exactly like one you had never sent from.
+`workspaces-app/src/not-sent.ts` is the one affordance all of them now draw —
+a button reading "Not sent — tap to retry", beside the draft, clearing on a
+retry, on a send that lands, or on the next keystroke. It joins no data flow
+and reads no state: the four call sites (the board's `ComposerForm`, the doc
+card's reply and its folded answer field, the doc's new-comment composer) hand
+it the box, the control to sit beside, and the same send to run again. The
+widget says it in its own `composerNote`, for the bundle's sake. The server
+half is `server/src/comment-log.ts`, one stamped `[comment]` line per write
+through `docStore.postComment` — the choke point all three write paths share —
+carrying the doc, the thread, the author and the LENGTH of the text, never the
+text. Between them, the next lost comment can be told from one nobody sent.
+
+**And a comment that DID reach somebody says that too, on the comment.** The
+other half of the same question: one grey tick means the server has it, two
+mean a session watching the doc was handed it, and both disappear once a reply
+lands. The decision is `core/src/comment-receipt.ts` — pure, DOM-free, so the
+board, the review editor and (one day) the widget cannot come to disagree
+about what a tick means — and the durable fact is a write-once `deliveredAt`
+on the comment itself, stamped through `core/src/comment-delivery.ts` so it
+syncs, survives a reload and rides the REST threads payload the board already
+reads. The judgement is `server/src/comment-receipt.ts`, dependency-injected
+over `SseBus.agentsOn` because delivery means a LIVE stream, never a line in
+`agent-watches.json`; `stall-wiring.ts` calls it where it already knows a
+comment's board channels, and `recordDelivery` writes the stamp once and
+broadcasts a transient `comment.delivered` to pages on every channel the
+comment travelled. Its other caller is the heartbeat route's hand-over of a
+PARKED comment (`routes/workspace-attachments.ts`), which is where most second
+ticks are set: a comment written while nobody was listening reaches a session
+when that session attaches, and no doc event fires for it. On the client every app surface now draws its comment header
+through `workspaces-app/src/comment-view.ts`, one module owning the structure
+and the mark's position with a class-name variant per stylesheet — because a
+feature added to "comments" that reaches one surface out of four is the
+failure that module exists to make impossible.
+
 **The comment card stands where its comment will live.** In comment mode the
 composer is a card fixed to the right edge of the viewport at its element's
 height, joined to the element by a faint line, and on post it becomes the saved

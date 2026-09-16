@@ -24,6 +24,7 @@
 import { attachNotes } from '../attach-notes.ts';
 import { localDay } from '../chat-audit.ts';
 import { clientReleaseStatus } from '../client-release.ts';
+import { commentIdOfReplay, recordDelivery } from '../comment-receipt.ts';
 import {
   agentsBehind,
   checkableAttachments,
@@ -65,6 +66,7 @@ export async function handleWorkspaceAttachments(
   const {
     taskStore,
     sse,
+    docStore,
     agentWatches,
     chatAudit,
     clientReleaseRootDir,
@@ -275,6 +277,29 @@ export async function handleWorkspaceAttachments(
         sent = sse.sendToAgent(`ws~${workspaceId}`, agentId, frame);
       }
       if (sent === 0) taskStore.clearCommentEmitted(workspaceId, q.id);
+      // The second tick, on the path that carries most of them. A person
+      // comments on a board nobody is watching and an agent picks the work up
+      // minutes later; THIS is the moment their words reached a session, and
+      // the live path in stall-wiring.ts never runs for it. The row is
+      // addressed to somebody other than the author by construction (see
+      // `queueCommentRows`), so a hand-over here needs no author test.
+      const commentId = sent > 0 ? commentIdOfReplay(q.payload) : undefined;
+      if (commentId !== undefined && q.threadId !== undefined) {
+        recordDelivery(
+          {
+            docId: q.docId,
+            threadId: q.threadId,
+            commentId,
+            channels: [q.docId, `ws~${workspaceId}`],
+            at: Date.now(),
+          },
+          {
+            markDelivered: (d, t, c, at) => docStore.markCommentDelivered(d, t, c, at),
+            announce: (channel, f) =>
+              sse.broadcastTransient(channel, f, { skipAgentStreams: true }),
+          },
+        );
+      }
     }
     return j(200, res);
   }
