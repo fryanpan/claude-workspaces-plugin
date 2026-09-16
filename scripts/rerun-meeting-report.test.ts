@@ -104,7 +104,7 @@ describe('the unnamed-voice measure', () => {
   const document = [
     '## Meeting notes',
     '',
-    '- [@Riverbend](speaker:room:A) wants the crane booked this week',
+    '- [@Harbourmaster](speaker:room:A) wants the crane booked this week',
     '- [@Room Speaker B](speaker:room:B) asked who signs it off',
     '- [@Speaker C](speaker:C) said the quote expires Friday',
     '- Nobody in particular said the office is copied',
@@ -121,8 +121,8 @@ describe('the unnamed-voice measure', () => {
 
   it('reads a fully named set of notes as nothing to answer for', () => {
     const named = document
-      .replaceAll('Room Speaker B', 'Harborlight')
-      .replaceAll('Speaker C', 'Saltmarsh');
+      .replaceAll('Room Speaker B', 'Dockmaster')
+      .replaceAll('Speaker C', 'Crane Lead');
     const report = buildRerunReport(input({ document: named, section: named }));
     expect(report.unnamedVoiceBullets).toBe(0);
     expect(report.unnamedVoiceLabels).toEqual([]);
