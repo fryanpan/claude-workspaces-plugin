@@ -120,6 +120,12 @@ function sourcesFor(
   ctx: LibraryRoutesContext,
   scope: Pick<WorkspaceScope<BoardWorkspace>, 'workspaceId' | 'board'>,
   onBox: boolean,
+  /** The lister to read the project's markdown with. Defaults to the page's
+   *  short-lived cache; the run-output reader passes a fresh one. It is taken
+   *  HERE rather than swapped onto the result, because the hidden-folder
+   *  filter below wraps whichever lister is used — a caller that replaced the
+   *  wrapped function afterwards would have unwrapped the filter with it. */
+  lister: (root: string) => readonly ProjectFile[] = ctx.markdownFiles,
 ): LibrarySources {
   const { docStore, mounts, dataDir } = ctx;
   const ids = new Set(scope.board.docIds);
@@ -177,8 +183,8 @@ function sourcesFor(
     // are dropped here too, and the two sources agree.
     markdownFiles: (root) =>
       hiddenFolders.length === 0
-        ? ctx.markdownFiles(root)
-        : ctx.markdownFiles(root).filter((f) => !hiddenFolders.some((d) => under(f.relPath, d))),
+        ? lister(root)
+        : lister(root).filter((f) => !hiddenFolders.some((d) => under(f.relPath, d))),
     mountedFiles: (repoKey) => {
       // Each file's birth time is read in the checkout its MOUNT was made
       // from, which may be a worktree the project root is not.
@@ -375,7 +381,7 @@ export function libraryRunOutputSource(
     files: (workspaceId) => {
       const scope = scopeOf(workspaceId);
       if (!scope) return null;
-      const src = { ...sourcesFor(ctx, scope, false), markdownFiles: createMarkdownLister() };
+      const src = sourcesFor(ctx, scope, false, createMarkdownLister());
       const repoKey = projectRepoKey(src.docs, src.docKeyOf);
       if (!repoKey || !src.projectRoot(repoKey)) return null;
       const byPath = new Map<string, number | undefined>();

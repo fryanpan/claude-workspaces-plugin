@@ -27,7 +27,11 @@ import { type LibraryPayload, createMarkdownLister } from '../src/library.ts';
 import type { ShareTarget } from '../src/middleware/host-guard.ts';
 import { MountStore } from '../src/mount-store.ts';
 import { RepoRegistry } from '../src/repo-registry.ts';
-import { type LibraryRoutesContext, handleLibraryRoutes } from '../src/routes/workspace-library.ts';
+import {
+  type LibraryRoutesContext,
+  handleLibraryRoutes,
+  libraryRunOutputSource,
+} from '../src/routes/workspace-library.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoard } from './workspace-seed.ts';
 
@@ -406,6 +410,19 @@ describe('library routes', () => {
         | LibraryPayload
         | undefined;
       expect((onBox?.files ?? []).map((f) => f.name)).toContain('notes.md');
+
+      /**
+       * The second reader of the same listing. A run's output item is read
+       * with a FRESH lister rather than the page's cache, and it lands on a
+       * queue a share visitor can read — so the hidden folder has to be
+       * dropped there too, and it is the reader most likely to miss it.
+       */
+      const runFiles = libraryRunOutputSource(ctxFor('127.0.0.1'), (id) =>
+        handle.tasks.getWorkspace(id),
+      ).files(WS);
+      const runPaths = (runFiles ?? []).map((f) => f.relPath);
+      expect(runPaths).toContain('riverbend/brief.md');
+      expect(runPaths).not.toContain('harborlight/notes.md');
     });
   });
 
