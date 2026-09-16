@@ -389,6 +389,12 @@ export async function handleWorkspaceTool(
           projects: Array<{ slug: string; raises: string }>;
           remedy: string;
         };
+        mounts?: {
+          project: string | null;
+          count: number;
+          folders?: string[];
+          note: string;
+        };
       };
       // Only when this session attached as ITSELF: the keepalive proves
       // THIS process is alive, and refreshing somebody else's attachment
@@ -476,6 +482,13 @@ export async function handleWorkspaceTool(
         // sentry_watch_project on each slug (idempotent) and check with
         // sentry_list_my_watches. Absent from an older server.
         ...(res.sentry !== undefined ? { sentry: res.sentry } : {}),
+        // WHAT THIS BOARD'S PROJECT HAS MOUNTED, and what mounting does when
+        // it has nothing. `note` is the part to read: a mount is a
+        // filesystem walk, so .gitignore is not a privacy control. Here
+        // rather than in a skill because a skill is read once, at session
+        // start, and the capability went unused for exactly that reason.
+        // Absent from an older server.
+        ...(res.mounts !== undefined ? { mounts: res.mounts } : {}),
       });
     }
     case 'heartbeat': {

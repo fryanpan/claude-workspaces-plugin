@@ -30,6 +30,7 @@ import { type TaskSchedule, nextOccurrence } from '@claude-workspaces/core/task-
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardPathOf } from '../board-path.ts';
+import { scheduleOutputLine } from '../schedule-output-line.ts';
 import { projectTaskRows } from '../task-projection.ts';
 
 /** What the board tools read out of `mcp.ts`. */
@@ -1178,6 +1179,11 @@ export async function handleTaskTool(
         ...(nextAt !== undefined
           ? { nextAt, nextAtIso: new Date(nextAt).toISOString() }
           : { nextAt: null }),
+        // WHAT THIS RULE'S RUNS WRITE, and what declaring a folder buys when
+        // it declares none. In the answer rather than in a document because
+        // a document is the reason the field went unused: nobody declared one
+        // until they were told by hand (`schedule-output-line.ts`).
+        output: scheduleOutputLine(schedule),
       });
     }
     case 'import_tasks_markdown': {
