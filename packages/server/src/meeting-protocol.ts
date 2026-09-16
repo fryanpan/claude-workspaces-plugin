@@ -328,6 +328,30 @@ export type MeetingCloseCause =
   | `code-${number}`;
 
 /**
+ * The endings that mean the MEETING is over rather than one leg of it.
+ *
+ * Everything not listed is treated as a drop the browser may reconnect from,
+ * which is the safe direction for the one reader of this set: a quality item
+ * held a little longer than it needed to be is a delay, and one filed while
+ * the person is still in the room is the failure the hold exists to prevent.
+ * `meeting-reconnect.ts` gives the window up after two minutes either way.
+ */
+const MEETING_OVER_CAUSES: ReadonlySet<MeetingCloseCause> = new Set<MeetingCloseCause>([
+  // The person pressed Stop.
+  'client-stop',
+  // The server timed the recording out for silence.
+  'silence',
+  // The socket closed the way a page leaving closes it.
+  'clean-close',
+  'tab-closed',
+]);
+
+/** Whether the browser will try to pick this meeting back up. */
+export function legIsResumable(cause: MeetingCloseCause | undefined): boolean {
+  return cause === undefined ? false : !MEETING_OVER_CAUSES.has(cause);
+}
+
+/**
  * RFC 6455's codes, plus 1005/1006 which are never sent on the wire and are
  * synthesised by the receiving end — 1006 being the one this whole diagnosis
  * turns on, since it is what a connection that simply vanished looks like.
@@ -1289,5 +1313,13 @@ export class MeetingRelay {
       turns: record.turns ?? 0,
       ...(reason !== undefined ? { reason } : {}),
     });
+    // AFTER the record is stopped, and only here: this is the first moment
+    // anything knows whether the conversation is over or whether a browser is
+    // about to reconnect to it. The notes sink holds a bad meeting's review
+    // item until this says the meeting is done with.
+    this.deps.notes?.onLegEnded?.(
+      { docId: meeting.docId, meetingId: record.meetingId },
+      { resumable: legIsResumable(cause ?? conn.endedCause ?? 'client-stop') },
+    );
   }
 }

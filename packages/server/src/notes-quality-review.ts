@@ -25,9 +25,12 @@
  * lands on the notes it is about. Only a board with no way to reach threads
  * still answers `no-row`.
  *
- * ONE ITEM PER MEETING, and no memory is needed for that: a meeting stops
- * once. The repeat this must not become is one item per TICK, and it cannot,
- * because nothing calls it until the stop.
+ * ONE ITEM PER MEETING, AND THE MEMORY FOR THAT IS NOT HERE. This module
+ * files; `notes-quality-filing.ts` decides when, and remembers where the one
+ * item went so a later reading revises it. That split exists because the
+ * reasoning this paragraph used to carry was wrong: "a meeting stops once"
+ * is false for a meeting whose socket drops, since a reconnect resumes the
+ * same recording and every leg's stop runs the pass again.
  */
 
 import {
@@ -57,14 +60,39 @@ export interface NotesQualityBoard {
     | { ok: false; error: string; message?: string };
   /**
    * File the item on the meeting doc as a thread about the whole doc, for a
-   * doc no row links. `false` when the doc could not take it. Absent, such a
+   * doc no row links. `null` when the doc could not take it. Absent, such a
    * meeting is reported `no-row`. {@link fileOnMeetingDoc} is the server's.
+   *
+   * It answers WHERE the item landed rather than merely whether it did,
+   * because one meeting gets one item: a later reading of the same meeting
+   * revises those words, and `(threadId, commentId)` is the address the
+   * doc-thread revise path takes.
    */
   fileOnDoc?(
     docId: string,
     review: Record<string, unknown>,
     actor: { id: string; name: string; kind?: string },
-  ): boolean;
+  ): { threadId: string; commentId: string } | null;
+  /**
+   * Rewrite the words of an item already on a row — `TaskStore`'s own
+   * `reviseReviewItem`. Absent, a meeting whose reading changed keeps the
+   * item it has: the reader's queue must never carry two items about one
+   * meeting, so a board that cannot revise does not get a second filing.
+   */
+  reviseReviewItem?(
+    taskId: string,
+    reviewItemId: string,
+    patch: { headline?: unknown; detail?: unknown },
+    opts: { actor: { id: string; name: string; kind?: string } },
+  ): { ok: true } | { ok: false; error: string; message?: string };
+  /** The same for an item filed on the doc itself. `reviseCommentReview`. */
+  reviseOnDoc?(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    patch: { headline?: unknown; detail?: unknown },
+    actor: { id: string; name: string; kind?: string },
+  ): { ok: true } | { ok: false; error: string; message?: string };
 }
 
 /**
@@ -76,7 +104,7 @@ export type ThreadAuthor = Omit<User, 'kind'> & { kind: User['kind'] | 'agent' }
 /** What {@link fileOnMeetingDoc} reaches in the doc store. `DocStore` satisfies it. */
 export interface NotesQualityThreads {
   get(docId: string): unknown;
-  listThreads(docId: string): readonly unknown[];
+  listThreads(docId: string): readonly { id: string; comments: readonly { id: string }[] }[];
   postComment(
     docId: string,
     threadId: null,
@@ -104,9 +132,9 @@ export function fileOnMeetingDoc(
   docId: string,
   review: Record<string, unknown>,
   actor: { id: string; name: string; kind?: string },
-): boolean {
+): { threadId: string; commentId: string } | null {
   const payload = readReviewPayload(review);
-  if (!payload || !threads.get(docId)) return false;
+  if (!payload || !threads.get(docId)) return null;
   // `kind: 'agent'` so the queue reads it as an ask waiting on a person, and a
   // color stable for the name because every thread renderer paints the
   // author's accent from it.
@@ -116,7 +144,7 @@ export function fileOnMeetingDoc(
     kind: 'agent',
     color: hashToColor(actor.name),
   };
-  const before = threads.listThreads(docId).length;
+  const before = new Set(threads.listThreads(docId).map((t) => t.id));
   threads
     .postComment(
       docId,
@@ -130,7 +158,12 @@ export function fileOnMeetingDoc(
       },
     )
     .catch((err) => console.error(`[meeting-notes] quality item on ${docId} failed:`, err));
-  return threads.listThreads(docId).length > before;
+  // The thread this call just wrote, by difference: `postComment` mints it
+  // before its first await, so a thread that is new here is the one carrying
+  // this item, and no new thread at all means the doc declined.
+  const written = threads.listThreads(docId).find((t) => !before.has(t.id));
+  const commentId = written?.comments[0]?.id;
+  return written && commentId !== undefined ? { threadId: written.id, commentId } : null;
 }
 
 /**
@@ -235,8 +268,25 @@ export function buildNotesQualityReview(input: {
 /** What happened when a reading was filed. */
 export type NotesQualityFiling =
   | { filed: true; taskId: string; itemId: string }
-  | { filed: true; docId: string }
-  | { filed: false; reason: 'healthy' | 'no-row' | 'no-board' | 'refused'; message?: string };
+  | { filed: true; docId: string; threadId: string; commentId: string }
+  /**
+   * `held` is a reading the meeting is not over for yet — the one outcome
+   * that is not a verdict. `notes-quality-filing.ts` answers it at every leg
+   * stop and files when the meeting is done with.
+   */
+  | {
+      filed: false;
+      reason: 'healthy' | 'held' | 'no-row' | 'no-board' | 'refused';
+      message?: string;
+    };
+
+/** The reading a filing is built from. */
+export interface NotesQualityFileInput {
+  workspaceId: string | undefined;
+  docId: string;
+  docTitle?: string;
+  report: NotesQualityReport;
+}
 
 /**
  * File the item for a meeting whose notes went past a bar. A healthy meeting
@@ -246,12 +296,7 @@ export type NotesQualityFiling =
 export function fileNotesQualityReview(
   board: NotesQualityBoard,
   actor: { id: string; name: string; kind?: string },
-  input: {
-    workspaceId: string | undefined;
-    docId: string;
-    docTitle?: string;
-    report: NotesQualityReport;
-  },
+  input: NotesQualityFileInput,
 ): NotesQualityFiling {
   if (input.report.flags.length === 0) return { filed: false, reason: 'healthy' };
   if (input.workspaceId === undefined) return { filed: false, reason: 'no-board' };
@@ -264,8 +309,9 @@ export function fileNotesQualityReview(
   const row = rowForMeetingDoc(board, input.docId);
   if (!row) {
     if (!board.fileOnDoc) return { filed: false, reason: 'no-row' };
-    return board.fileOnDoc(input.docId, review, actor)
-      ? { filed: true, docId: input.docId }
+    const on = board.fileOnDoc(input.docId, review, actor);
+    return on
+      ? { filed: true, docId: input.docId, threadId: on.threadId, commentId: on.commentId }
       : { filed: false, reason: 'refused', message: 'the doc took no thread' };
   }
   const res = board.addReviewItem(row.id, review, { actor });
@@ -278,4 +324,29 @@ export function fileNotesQualityReview(
 /** The row's own deep link, for the log line that says where the item went. */
 export function filedItemLink(workspaceId: string, taskId: string): string {
   return taskDeepLink(workspaceId, taskId);
+}
+
+/**
+ * Where an item went, in the words a log line uses.
+ *
+ * Spelled once and read twice — the stop's own line and the filer's, which
+ * are written at different moments now that a meeting's item waits for the
+ * meeting to be over. Two spellings of this would be two vocabularies for
+ * one fact, and the grep that finds a meeting's item would only find half of
+ * them.
+ */
+export function filingWhere(filing: NotesQualityFiling, workspaceId: string | undefined): string {
+  if (!filing.filed) {
+    return filing.reason === 'held'
+      ? 'held until the meeting is over'
+      : `NOT filed (${filing.reason}${filing.message !== undefined ? `: ${filing.message}` : ''})`;
+  }
+  if ('docId' in filing) {
+    return `filed on the doc ${
+      workspaceId !== undefined ? docLookupUrl(workspaceId, filing.docId) : filing.docId
+    }`;
+  }
+  return `filed on ${
+    workspaceId !== undefined ? filedItemLink(workspaceId, filing.taskId) : filing.taskId
+  }`;
 }

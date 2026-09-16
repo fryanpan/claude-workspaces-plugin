@@ -25,7 +25,7 @@ import { meetingDirPath, meetingIndexPath, meetingTranscriptPath } from '../src/
 import type { NotesDocStore } from '../src/notes-doc-access.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import { readSectionMarkdown, runNotesQualityPass } from '../src/notes-quality-pass.ts';
-import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
+import { type NotesQualityBoard, fileNotesQualityReview } from '../src/notes-quality-review.ts';
 import { readNotesQuality } from '../src/notes-quality-store.ts';
 
 const dirs: string[] = [];
@@ -143,7 +143,9 @@ describe('the whole pass', () => {
     const result = runNotesQualityPass(
       {
         docStore: () => store,
-        board: () => board,
+        // The immediate filing policy: the pass's own unit tests care WHERE a
+        // reading goes, not when. `notes-quality-timing.test.ts` covers when.
+        file: (input) => fileNotesQualityReview(board, ACTOR, input),
         boardOf: () => 'w-1',
         dataDir,
         headingIdOf: () => headingIdAt(store, 0),
@@ -204,7 +206,9 @@ describe('the whole pass', () => {
     const result = runNotesQualityPass(
       {
         docStore: () => store,
-        board: () => board,
+        // The immediate filing policy: the pass's own unit tests care WHERE a
+        // reading goes, not when. `notes-quality-timing.test.ts` covers when.
+        file: (input) => fileNotesQualityReview(board, ACTOR, input),
         boardOf: () => 'w-1',
         dataDir,
         headingIdOf: () => headingIdAt(store, 0),

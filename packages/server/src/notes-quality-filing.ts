@@ -1,0 +1,274 @@
+/**
+ * WHEN a meeting's quality item reaches a person, and how many of them there
+ * are.
+ *
+ * THE FAILURE THIS MODULE EXISTS TO END. The pass that judges a meeting's
+ * notes runs inside `notes.end()`, and `notes.end()` runs at the end of a
+ * RECORDING LEG rather than at the end of a MEETING. A socket that drops
+ * mid-sentence ends a leg; the browser reconnects, `MeetingStore.resume`
+ * picks the same meeting back up, and the conversation carries on. So the
+ * item filed at that leg's stop reached Bryan's queue while he was still in
+ * the room — and the resumed leg's own stop filed a SECOND item about the
+ * same meeting, because the filing path had no memory and the module that
+ * owned it reasoned, correctly for the world it was written in, that "a
+ * meeting stops once".
+ *
+ * THE FIX IS A SCHEDULER, NOT A SECOND FILING PATH. Every reading still goes
+ * through `fileNotesQualityReview` exactly as it did; what changed is that
+ * the pass hands its reading here instead of filing it, and this module
+ * decides when the meeting is over:
+ *
+ *  - A leg that ended the way a person ends a meeting — the Stop button, the
+ *    silence deadline, a tab closing — is the end of the meeting, and the
+ *    item files at once. That is the common case and it is not delayed.
+ *  - A leg that ended the way a network ends one holds the reading for
+ *    {@link RESUME_GRACE_MS}. A resume inside that window cancels the hold
+ *    and throws the reading away, because the next stop will read the whole
+ *    meeting's notes again and that reading is the true one. No resume, and
+ *    the hold expires and the item files.
+ *
+ * ONE ITEM PER MEETING, and the memory is what makes that true where the old
+ * reasoning no longer is. The first filing is remembered; a later reading of
+ * the same meeting REVISES those words through the same revise path the
+ * stall escalation uses, so a reader's queue never carries two items about
+ * one meeting with the older, wronger one still reading as live.
+ *
+ * A REFUSED REVISION IS NOT A REASON TO FILE A SECOND ITEM. That is the one
+ * outcome this module must never produce, so a refusal is logged and the
+ * standing item is left as it is.
+ */
+
+import type { TickScheduler } from './meeting-notes.ts';
+import {
+  type NotesQualityBoard,
+  type NotesQualityFileInput,
+  type NotesQualityFiling,
+  buildNotesQualityReview,
+  fileNotesQualityReview,
+  filingWhere,
+} from './notes-quality-review.ts';
+
+/** A meeting, as every file on this path names one. */
+export interface MeetingIds {
+  docId: string;
+  meetingId: string;
+}
+
+/**
+ * How long a reading waits for a reconnect that may never come.
+ *
+ * Two minutes, which is `RECONNECT_WINDOW_MS` in the browser's own
+ * `meeting-reconnect.ts`: past it the client gives the meeting up and starts
+ * a new recording with its own section, so a resume cannot arrive any more
+ * and holding longer only delays an item nobody is waiting on.
+ */
+export const RESUME_GRACE_MS = 120_000;
+
+/** What a filing is remembered by, so a later reading can revise it. */
+type Filed =
+  | { kind: 'row'; taskId: string; itemId: string }
+  | { kind: 'doc'; docId: string; threadId: string; commentId: string };
+
+interface Held {
+  /** The newest reading of this meeting that crossed a bar. */
+  input?: NotesQualityFileInput;
+  /** Where this meeting's one item went, once it has gone anywhere. */
+  filed?: Filed;
+  /** The resume grace, while one is armed. */
+  timer?: unknown;
+}
+
+/**
+ * How many meetings are remembered. A filing is remembered so a revision can
+ * find it, and nothing ever tells this module that a meeting will not be
+ * resumed again, so the map needs a bound. Oldest out first; a meeting that
+ * fell off gets a fresh item rather than a revision, which is the safe
+ * direction — an item is never lost, at worst a very old one is duplicated.
+ */
+const REMEMBERED_MEETINGS = 200;
+
+export interface NotesQualityFilerDeps {
+  /** The board the item goes on. Absent, nothing is filed. */
+  board?: () => NotesQualityBoard;
+  actor: { id: string; name: string; kind?: string };
+  /** The resume grace's clock. Injected so a test fires it by hand. */
+  schedule?: TickScheduler;
+  graceMs?: number;
+  /** Where the filing's own line goes. */
+  say?: (message: string) => void;
+}
+
+/**
+ * The pass's filing sink, and the two lifecycle facts that decide when it
+ * acts.
+ */
+export interface NotesQualityFiler {
+  /**
+   * A reading that crossed a bar. Held rather than filed — the answer is
+   * always `held`, and the item lands when {@link legEnded} says the meeting
+   * is over.
+   */
+  file(ids: MeetingIds, input: NotesQualityFileInput): NotesQualityFiling;
+  /**
+   * A recording leg ended. `resumable` when the way it ended is one the
+   * browser tries to reconnect from; false for a stop a person or the server
+   * meant.
+   */
+  legEnded(ids: MeetingIds, opts: { resumable: boolean }): void;
+  /** A recording leg began on this meeting — a resume, if the ids are held. */
+  legBegan(ids: MeetingIds): void;
+  /** How many meetings are holding a reading. Diagnostics and tests. */
+  heldCount(): number;
+}
+
+// JSON rather than a joined string: a docId is caller-supplied, so any
+// separator a key picked could appear inside one and merge two meetings'
+// memory into one.
+const keyOf = (ids: MeetingIds): string => JSON.stringify([ids.docId, ids.meetingId]);
+
+const defaultSchedule: TickScheduler = {
+  set: (fn, ms) => {
+    const handle = setTimeout(fn, ms);
+    (handle as unknown as { unref?: () => void }).unref?.();
+    return handle;
+  },
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+
+export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQualityFiler {
+  const state = new Map<string, Held>();
+  const schedule = deps.schedule ?? defaultSchedule;
+  const graceMs = deps.graceMs ?? RESUME_GRACE_MS;
+  const say = deps.say ?? ((message: string) => console.error(message));
+
+  const held = (key: string): Held => {
+    let h = state.get(key);
+    if (!h) {
+      h = {};
+      state.set(key, h);
+      // Oldest first: a Map iterates in insertion order, so the first key is
+      // the meeting nothing has touched for longest.
+      while (state.size > REMEMBERED_MEETINGS) {
+        const oldest = state.keys().next();
+        if (oldest.done || oldest.value === key) break;
+        const dropped = state.get(oldest.value);
+        if (dropped?.timer !== undefined) schedule.clear(dropped.timer);
+        state.delete(oldest.value);
+      }
+    }
+    return h;
+  };
+
+  const disarm = (h: Held): void => {
+    if (h.timer === undefined) return;
+    schedule.clear(h.timer);
+    h.timer = undefined;
+  };
+
+  /** Rewrite the words of the item this meeting already has. */
+  const revise = (ids: MeetingIds, filed: Filed, input: NotesQualityFileInput): boolean => {
+    const board = deps.board?.();
+    if (!board || input.workspaceId === undefined) return false;
+    const review = buildNotesQualityReview({
+      workspaceId: input.workspaceId,
+      docId: input.docId,
+      ...(input.docTitle !== undefined ? { docTitle: input.docTitle } : {}),
+      report: input.report,
+    });
+    const patch = { headline: review.headline, detail: review.detail };
+    const res =
+      filed.kind === 'row'
+        ? board.reviseReviewItem?.(filed.taskId, filed.itemId, patch, { actor: deps.actor })
+        : board.reviseOnDoc?.(filed.docId, filed.threadId, filed.commentId, patch, deps.actor);
+    if (res === undefined) {
+      say(
+        `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: the quality item cannot be ` +
+          'revised on this board — the standing item keeps the reading it was filed with',
+      );
+      return false;
+    }
+    if (!res.ok) {
+      // Never a second item. The reader's queue carrying one stale ask is
+      // better than it carrying two about the same meeting.
+      say(
+        `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item revise refused ` +
+          `(${res.error}${res.message !== undefined ? `: ${res.message}` : ''})`,
+      );
+      return false;
+    }
+    return true;
+  };
+
+  /** The meeting is over: file the reading it left, or revise the item it has. */
+  const commit = (ids: MeetingIds): void => {
+    const key = keyOf(ids);
+    const h = state.get(key);
+    if (!h) return;
+    disarm(h);
+    const input = h.input;
+    h.input = undefined;
+    if (!input) return;
+    // THE SAME VOCABULARY THE STOP'S OWN LINE USES, because the two halves of
+    // one meeting's story are now written at two moments and a reader greps
+    // for one phrase.
+    const line = (where: string): void =>
+      say(`[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item ${where}`);
+    if (h.filed) {
+      if (revise(ids, h.filed, input)) {
+        line(
+          h.filed.kind === 'row'
+            ? `revised on ${filingWhere(
+                { filed: true, taskId: h.filed.taskId, itemId: h.filed.itemId },
+                input.workspaceId,
+              )}`
+            : `revised on the doc ${h.filed.docId}`,
+        );
+      }
+      return;
+    }
+    const board = deps.board?.();
+    const filing = board
+      ? fileNotesQualityReview(board, deps.actor, input)
+      : ({ filed: false, reason: 'no-board' } as NotesQualityFiling);
+    line(filingWhere(filing, input.workspaceId));
+    if (!filing.filed) return;
+    h.filed =
+      'taskId' in filing
+        ? { kind: 'row', taskId: filing.taskId, itemId: filing.itemId }
+        : {
+            kind: 'doc',
+            docId: filing.docId,
+            threadId: filing.threadId,
+            commentId: filing.commentId,
+          };
+  };
+
+  return {
+    file(ids, input) {
+      const h = held(keyOf(ids));
+      h.input = input;
+      return { filed: false, reason: 'held' };
+    },
+    legEnded(ids, opts) {
+      const h = state.get(keyOf(ids));
+      if (!h) return;
+      disarm(h);
+      if (!opts.resumable) {
+        commit(ids);
+        return;
+      }
+      // A drop. The words either side of it are one conversation, so nothing
+      // reaches a person until the conversation is done with.
+      h.timer = schedule.set(() => commit(ids), graceMs);
+    },
+    legBegan(ids) {
+      const h = state.get(keyOf(ids));
+      if (!h) return;
+      disarm(h);
+      // The meeting is running again, so the reading taken at the drop is
+      // about half a meeting. The next stop reads the whole of it.
+      h.input = undefined;
+    },
+    heldCount: () => [...state.values()].filter((h) => h.input !== undefined).length,
+  };
+}
