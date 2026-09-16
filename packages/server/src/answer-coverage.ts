@@ -197,20 +197,18 @@ export async function openPartsAfter(
   retries = 1,
 ): Promise<string[]> {
   if (!coverage) return [];
-  if (blanketAnswer(text)) return [];
   const { review } = item;
+  const asked: AnswerCoverageItem = {
+    headline: review.headline,
+    ...(review.detail !== undefined ? { detail: review.detail } : {}),
+    ...(review.options ? { options: review.options.map((o) => ({ label: o.label })) } : {}),
+  };
+  if (blanketAnswer(text, asked)) return [];
   const before = coverageStamp(item);
   const earlier = standingPartials(item.partialAnswers, item.revisions?.at(-1)?.at);
   let verdict: { open: string[] } | null;
   try {
-    verdict = await coverage({
-      item: {
-        headline: review.headline,
-        ...(review.detail !== undefined ? { detail: review.detail } : {}),
-        ...(review.options ? { options: review.options.map((o) => ({ label: o.label })) } : {}),
-      },
-      answers: [...earlier.map((p) => p.text), text],
-    });
+    verdict = await coverage({ item: asked, answers: [...earlier.map((p) => p.text), text] });
   } catch (err) {
     warnOnce(
       'threw',

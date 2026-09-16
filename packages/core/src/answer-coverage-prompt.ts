@@ -30,16 +30,14 @@ export interface AnswerCoverageItem {
 }
 
 /**
- * How many distinct questions the item's words ask, counted by their question
- * marks.
+ * Each question the item's words ask, lowercased, in the item's own words.
  *
  * Deliberately crude, because it only decides whether the model call is worth
- * making: an item that asks one thing cannot be half-answered, and most items
- * ask one thing. Link targets and bare URLs are stripped first — a query
- * string's `?` is not a question — and a sentence repeated between headline
- * and detail counts once.
+ * making and what a whole-ask refusal has to cover: link targets and bare
+ * URLs are stripped first — a query string's `?` is not a question — and a
+ * sentence repeated between headline and detail counts once.
  */
-export function questionsAsked(item: AnswerCoverageItem): number {
+export function questionSegments(item: AnswerCoverageItem): string[] {
   const text = `${item.headline}\n${item.detail ?? ''}`
     .replace(/\]\([^)]*\)/g, ']')
     .replace(/https?:\/\/\S+/g, ' ')
@@ -52,7 +50,13 @@ export function questionsAsked(item: AnswerCoverageItem): number {
       .toLowerCase();
     if (/[a-z]{2,}/.test(words)) seen.add(words);
   }
-  return seen.size;
+  return [...seen];
+}
+
+/** How many distinct questions the item asks. An item that asks one thing
+ *  cannot be half-answered, and most items ask one thing. */
+export function questionsAsked(item: AnswerCoverageItem): number {
+  return questionSegments(item).length;
 }
 
 /**
@@ -65,37 +69,82 @@ export const BLANKET_MAX_WORDS = 25;
 /** Speaks to SOME of the ask: a carve-out, a preference between the parts, or
  *  one part singled out. Any of these and the reply is not a blanket one. */
 const CARVE_OUT =
-  /\b(but|except|apart from|other than|only|instead|first|second|third|fourth|fifth|latter|former|rest of)\b/;
-
-/** The whole ask settled or handed back at once, whatever the parts are. */
-const ALL_OR_NOTHING: RegExp[] = [
-  /^(yes|no|yeah|yep|nope|nah|sure|ok|okay)\b[^a-z0-9]{0,4}(to\s+)?(all|both|any|none|every)\b/,
-  /\b(all|both|none|any|neither)\s+(of\s+)?(them|these|those|it|the above|the questions?|the asks?)\b/,
-  /\b(all|both|everything)\s+(is\s+|are\s+|looks?\s+|sounds?\s+)?(fine|good|ok|okay|right|approved)\b/,
-  /\b(whatever|however)\s+you\s+(think|want|like|prefer|decide|see fit)\b/,
-  /\byour call\b/,
-  /\bup to you\b/,
-  /\bno preference\b/,
-  /\bdon'?t mind\b/,
-];
+  /\b(but|except|apart from|other than|only|instead|first|second|third|fourth|fifth|latter|former)\b/;
 
 /** A reply that opens by accepting or refusing. */
 const ACCEPT_REFUSE =
   /^(no|nope|nah|yes|yeah|yep|sure|fine|ok|okay|agreed|don'?t|do not|please don'?t|skip|drop|forget|leave out|not now)\b/;
 
-/** A reply made only of these words accepts or refuses and says nothing else,
- *  so it can only be speaking to the ask as a whole. */
+/**
+ * Words that accept or refuse and say nothing else. A reply made only of
+ * these — "no", "no thanks", "skip it", "do it", "none of them" — carries no
+ * subject of its own, so the only thing it can be answering is the ask.
+ */
 const BARE_WORDS = new Set(
-  'no nope nah none never not yes yeah yep sure ok okay fine good right agreed please thanks thank you do it don t dont go ahead all'.split(
+  'no nope nah none never not yes yeah yep sure ok okay fine good right agreed please thanks thank you do it them these those all both either any of go ahead skip drop forget dont don t'.split(
     ' ',
   ),
 );
+const BARE_LEAD =
+  /^(no|nope|nah|none|not|yes|yeah|yep|sure|ok|okay|fine|agreed|do|go|skip|drop|forget|don'?t)\b/;
 
-/** Refers to the ask as a body rather than to one part of it. */
-const COLLECTIVE = /\b(these|those|them|they|either)\b/;
-/** Singular, and only a whole-ask reading when the reply is this short. */
-const WHOLE_SINGULAR = /\b(this|that|it|the lot)\b/;
-const WHOLE_SINGULAR_MAX_WORDS = 8;
+/**
+ * The whole ask settled at once, as the ENTIRE last sentence — "no to all",
+ * "all fine", "none of them", "both, please".
+ *
+ * A full match, not a phrase found anywhere: "any of them can own it" answers
+ * one question of several and carries the same words.
+ */
+const TOTAL_QUANTIFIER =
+  /^(?:(?:yes|no|yeah|yep|nope|nah|sure|ok|okay)[,\s-]+)?(?:to\s+)?(all|both|none|any|neither|everything)(?:\s+of\s+(?:them|these|those|it|the above|the questions?|the asks?))?(?:\s+(?:is|are|looks?|sounds?|seems?))?(?:[,\s]+(?:fine|good|ok|okay|right|approved|then|please))?$/;
+
+/**
+ * The remaining questions handed back, as the ENTIRE last sentence — "your
+ * call", "do whatever you think for the rest". Every question handed back is
+ * answered; a hand-back aimed at one named thing ("your call on the header")
+ * is not one of these.
+ */
+const HAND_BACK =
+  /^(?:(?:yes|no|sure|ok|okay)[,\s-]+)?(?:(?:i\s+)?don'?t\s+mind|no\s+preference|your\s+call|up\s+to\s+you|(?:do\s+)?whatever\s+you\s+(?:think|want|like|prefer|decide|see\s+fit))(?:\s+(?:on|for|about|with)\s+(?:the\s+)?(?:rest|others|lot|questions?|asks?|them|these|those|all|both|everything))?$/;
+
+/** The reply's last sentence, which is where a whole-ask settlement sits: an
+ *  earlier sentence may answer one part and the last one hand back the rest. */
+function lastSentence(one: string): string {
+  const parts = one
+    .split(/[.!;]+/)
+    .map((p) => p.trim())
+    .filter((p) => p !== '');
+  return parts.at(-1) ?? one;
+}
+
+/** The word as the item might also spell it: with or without a plural `s`. */
+function nounForms(noun: string): string[] {
+  const bare = noun.replace(/s$/, '');
+  return [...new Set([noun, bare])].filter((w) => w.length >= 3);
+}
+
+/**
+ * Does the reply refuse or accept the ask's OWN subject — "don't give these
+ * tips", against an item every one of whose questions is about a tip?
+ *
+ * The demonstrative is not enough by itself: "no, email them" and "don't
+ * alert them" are ordinary answers to one question of several, and a plural
+ * noun can name one part as easily as all of them. So the noun the reply
+ * refuses has to be a word every question asks about — which is what makes
+ * refusing it a refusal of all of them. Anything less goes to the model.
+ */
+function refusesTheAsksSubject(last: string, item: AnswerCoverageItem | undefined): boolean {
+  if (!item || !ACCEPT_REFUSE.test(last)) return false;
+  const m = last.match(
+    /\b(?:these|those)\s+(?:\d+\s+|two\s+|three\s+|four\s+)?([a-z][a-z-]{2,})\b/,
+  );
+  const noun = m?.[1];
+  if (noun === undefined) return false;
+  const questions = questionSegments(item);
+  if (questions.length < 2) return false;
+  const forms = nounForms(noun);
+  return questions.every((q) => forms.some((w) => new RegExp(`\\b${w}e?s?\\b`).test(q)));
+}
 
 /**
  * Does this reply accept or refuse the ask as a whole — every part of it at
@@ -110,39 +159,43 @@ const WHOLE_SINGULAR_MAX_WORDS = 8;
  * comes back open. Nothing downstream of the model disagreed with it.
  *
  * So this is the rule the model was being asked to infer, written down and
- * decided before the call: a short reply that accepts or refuses the ask
- * bodily, with nothing in it singling out a part, answers every part. It is
- * deliberately lexical and deliberately narrow — "no, don't send the alert"
- * names one thing and is NOT blanket, which is what keeps a genuinely
- * partial answer on the queue. When it does fire the item closes, which is
- * the same direction the prompt already leans: an unsure verdict counts as
- * answered, because leaving a question open puts it back in front of a busy
- * reader.
+ * decided before the call. Four shapes, each of which can only be speaking to
+ * the ask as a body: a reply made only of accepting and refusing words, a
+ * total quantifier as the whole last sentence, a hand-back as the whole last
+ * sentence, and a refusal of the very subject every question asks about.
+ *
+ * Everything else goes to the model, which is what keeps a genuinely partial
+ * answer on the queue: "no, don't send the alert" names one thing, and so
+ * does "any of them can own it". When one of the four DOES fire the item
+ * closes, which is the direction the prompt already leans — an unsure verdict
+ * counts as answered, because leaving a question open puts it back in front
+ * of a busy reader.
  */
-export function blanketAnswer(text: string): boolean {
+export function blanketAnswer(text: string, item?: AnswerCoverageItem): boolean {
   const lowered = text
     .replace(/[*_`>#]/g, ' ')
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
     .toLowerCase();
   // An enumerated reply is answering part by part, and a reply that asks
   // something back is not an answer at all.
-  if (/^\s*([-*\u2022]|\d+[.)])\s/m.test(lowered)) return false;
+  if (/^\s*([-*•]|\d+[.)])\s/m.test(lowered)) return false;
   if (lowered.includes('?')) return false;
   const one = lowered.replace(/\s+/g, ' ').trim();
   const words = one.split(' ').filter((w) => w !== '');
   if (words.length === 0 || words.length > BLANKET_MAX_WORDS) return false;
   if (CARVE_OUT.test(one)) return false;
-  if (ALL_OR_NOTHING.some((r) => r.test(one))) return true;
-  if (!ACCEPT_REFUSE.test(one)) return false;
   const bare = one
     .replace(/[^a-z' ]/g, ' ')
     .replace(/'/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  if (bare !== '' && bare.split(' ').every((w) => BARE_WORDS.has(w))) return true;
-  if (COLLECTIVE.test(one)) return true;
-  return WHOLE_SINGULAR.test(one) && words.length <= WHOLE_SINGULAR_MAX_WORDS;
+  if (bare !== '' && BARE_LEAD.test(one) && bare.split(' ').every((w) => BARE_WORDS.has(w))) {
+    return true;
+  }
+  const last = lastSentence(one);
+  if (TOTAL_QUANTIFIER.test(last) || HAND_BACK.test(last)) return true;
+  return refusesTheAsksSubject(last, item);
 }
 
 /** Collapse whitespace and fence-breaking angle brackets, as the judge does. */

@@ -160,8 +160,8 @@ describe('an answer that refuses or accepts the whole ask at once', () => {
     expect(row?.review?.detail).toContain('Should it tip them to turn on Saltmarsh alerts?');
 
     // And the blanket reply closes what is left, in one sentence.
-    const closed = await answer(ws, taskId, itemId, 'No, skip both of those.');
-    expect(closed.item.answer?.text).toBe('No, skip both of those.');
+    const closed = await answer(ws, taskId, itemId, 'None of them.');
+    expect(closed.item.answer?.text).toBe('None of them.');
     expect(await queueRow(ws, itemId)).toBeUndefined();
     expect(calls).toHaveLength(1);
   });

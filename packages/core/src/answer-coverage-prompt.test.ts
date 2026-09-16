@@ -153,40 +153,85 @@ describe('partial answers read back off a stored item', () => {
 });
 
 describe('blanketAnswer — one reply that settles the whole ask', () => {
-  it('reads a whole-ask refusal or acceptance as answering every part', () => {
+  /** Three questions, each about a tip: the measured case, invented content. */
+  const THREE_TIPS = {
+    headline: 'Three tips for the Riverbend onboarding page',
+    detail: [
+      '1. Should the page tip readers to rename their first board?',
+      '2. Should it tip them to pin the Harborlight view?',
+      '3. Should it tip them to turn on Saltmarsh alerts?',
+    ].join('\n'),
+  };
+  /** Three questions about three different things. */
+  const THREE_THINGS = {
+    headline: 'Three calls before the Saltmarsh digest ships',
+    detail: [
+      '1. Who should own the digest?',
+      '2. Should archived rows be included?',
+      '3. Who gets the failure alert?',
+    ].join('\n'),
+  };
+
+  it('reads a reply made only of accepting or refusing words as settling all of it', () => {
     for (const reply of [
-      "No, don't give these tips.",
-      'No — skip them.',
-      'Yes, go ahead with all of them.',
-      'no to all',
-      'All fine.',
-      'Do whatever you think.',
-      'Your call.',
-      'Skip it.',
       'No.',
       'Yes please',
+      'Skip it.',
+      'Do it.',
+      'No thanks',
+      'Drop them.',
+      'Go ahead.',
     ]) {
-      expect([reply, blanketAnswer(reply)]).toEqual([reply, true]);
+      expect([reply, blanketAnswer(reply, THREE_THINGS)]).toEqual([reply, true]);
     }
+  });
+
+  it('reads a total quantifier or a hand-back that IS the last sentence', () => {
+    for (const reply of [
+      'no to all',
+      'All fine.',
+      'None of them.',
+      'Yes to all of them, please.',
+      'Your call.',
+      'Do whatever you think.',
+      'Use the Harborlight window. Do whatever you think for the rest.',
+    ]) {
+      expect([reply, blanketAnswer(reply, THREE_THINGS)]).toEqual([reply, true]);
+    }
+  });
+
+  it('reads a refusal of the very subject every question asks about', () => {
+    expect(blanketAnswer("No, don't give these tips.", THREE_TIPS)).toBe(true);
+    expect(blanketAnswer('No, drop these three tips.', THREE_TIPS)).toBe(true);
+    // The same words against an item whose questions are about three
+    // different things name one part, not all of them.
+    expect(blanketAnswer("No, don't give these tips.", THREE_THINGS)).toBe(false);
+    // And with no item to check the subject against, the model decides.
+    expect(blanketAnswer("No, don't give these tips.")).toBe(false);
   });
 
   it('leaves a reply that speaks to one part to the model', () => {
     for (const reply of [
+      'No, email them.',
+      "Don't alert them.",
+      'Any of them can own it.',
+      'Everything looks fine for the header.',
+      'Your call on the header.',
       'No, don’t send the alert.',
       'Use the Harborlight window.',
       'Run it at 04:00.',
       'Leave archived rows out; alert the on-call.',
       'Yes to the first one.',
-      'No to these, but keep the Saltmarsh banner and move the Riverbend header up a line.',
+      'No to these, but keep the Saltmarsh banner.',
       '1. No\n2. Yes',
       'Which of these ships first?',
     ]) {
-      expect([reply, blanketAnswer(reply)]).toEqual([reply, false]);
+      expect([reply, blanketAnswer(reply, THREE_TIPS)]).toEqual([reply, false]);
     }
   });
 
   it('stops reading a long reply as a blanket one', () => {
-    const long = `No, drop these ${'and the rest of the wording too '.repeat(8)}`;
-    expect(blanketAnswer(long)).toBe(false);
+    const long = `No, drop these tips ${'and the wording around them too '.repeat(8)}`;
+    expect(blanketAnswer(long, THREE_TIPS)).toBe(false);
   });
 });
