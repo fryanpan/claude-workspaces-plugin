@@ -149,3 +149,54 @@ describe('a meeting that talks past its own heading', () => {
     expect(harness.markdown()).toContain('four tiers, not three');
   });
 });
+
+/**
+ * WHAT THE MEETING KNOWS AFTER THE READER SAYS YES.
+ *
+ * A proposal replaces the block: the struck text goes, the offered element
+ * stays, and the offered element is a NEW element with a new id. The meeting's
+ * claim and its `NotesHeadingMemory` hold the OLD id. If accepting a rename
+ * orphans the claim, the meeting silently loses the section it has been
+ * writing into — which is the failure this whole PR exists to remove, arriving
+ * by another door. Raised by an independent review, tested here rather than
+ * reasoned about.
+ */
+describe('a rename the reader accepts', () => {
+  it('leaves the meeting still writing under the heading it renamed', async () => {
+    const harness = createNotesTickHarness({
+      compose: (input, tick) => {
+        if (tick === 1) return addNotes(input, '- three tiers on the table', 'Pricing');
+        const heading = input.outline.find((e) => e.kind === 'heading');
+        if (tick === 2 && heading !== undefined) {
+          return [
+            { op: 'replace_block', blockId: heading.id, markdown: '## Pricing and packaging' },
+          ];
+        }
+        return addNotes(input, '- and onboarding moves with it');
+      },
+    });
+    await harness.speak('three tiers on the table');
+    await harness.speak('support hours come out of the top tier');
+
+    const pending = suggestOps.listSuggestions(harness.ydoc);
+    expect(pending).toHaveLength(1);
+    const was = prose.readOutline(harness.ydoc).find((e) => e.kind === 'heading');
+    // THE READER SAYS YES, mid-meeting.
+    expect(suggestOps.acceptSuggestion(harness.ydoc, pending[0]!.sid)).toEqual({ ok: true });
+    expect(harness.headings()).toEqual(['Pricing and packaging']);
+    // THE ID IS THE SAME ID. An accept that minted a new block would orphan
+    // the meeting's claim and its heading memory, both of which hold this one,
+    // and the meeting would open a second topic beside the heading it just
+    // renamed. Raised by an independent review; measured here.
+    const now = prose.readOutline(harness.ydoc).find((e) => e.kind === 'heading');
+    expect(now?.id).toBe(was?.id as string);
+
+    // The meeting keeps going, and its next note has to land under that same
+    // heading rather than opening a second topic beside it.
+    await harness.speak('and onboarding moves with it');
+    await harness.end();
+    expect(harness.headings()).toHaveLength(1);
+    expect(harness.markdown()).toContain('onboarding moves with it');
+    expect(harness.errors).toEqual([]);
+  });
+});

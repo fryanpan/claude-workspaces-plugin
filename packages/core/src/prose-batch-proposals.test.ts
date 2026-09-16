@@ -382,3 +382,60 @@ describe('a replace the caller asked to propose', () => {
     expect(md(doc)).toBe(md(docOf(DOC)).trimEnd());
   });
 });
+
+/**
+ * A BLOCK'S ID IS THE SAME ID AFTER ITS REPLACEMENT IS ACCEPTED.
+ *
+ * Everything that addresses a block from outside the doc holds its id: a
+ * comment's anchor, a meeting's claim on the heading it writes under. The
+ * accept path empties the struck block and removes it, so without a handover
+ * the replacement stands there under an id nobody has.
+ */
+describe('identity across an accepted whole-block proposal', () => {
+  const FIXTURE_ID = '## Pricing\n\n- A bullet a person wrote\n';
+
+  it('the replacement keeps the id of the block it replaced', () => {
+    const doc = docOf(FIXTURE_ID);
+    const blockId = idOf(doc, 'Pricing');
+    const res = apply(doc, [
+      { op: 'replace_block', blockId, markdown: '## Pricing and packaging', propose: true },
+    ]);
+    expect(res.suggested).toBe(1);
+    // While it is pending the accepted text is unchanged: the offered words
+    // are marked, so the outline does not read them yet.
+    expect(md(doc)).toContain('## Pricing');
+
+    acceptSuggestion(doc, res.outcomes[0]?.suggestionId as string);
+    expect(md(doc)).toContain('## Pricing and packaging');
+    expect(idOf(doc, 'Pricing and packaging')).toBe(blockId);
+    // And no shell of the old block is left behind.
+    expect(blockCount(doc)).toBe(2);
+  });
+
+  it('CONTROL: rejecting leaves the original block and its id alone', () => {
+    const doc = docOf(FIXTURE_ID);
+    const blockId = idOf(doc, 'Pricing');
+    const res = apply(doc, [
+      { op: 'replace_block', blockId, markdown: '## Pricing and packaging', propose: true },
+    ]);
+    rejectSuggestion(doc, res.outcomes[0]?.suggestionId as string);
+    expect(md(doc)).toBe(md(docOf(FIXTURE_ID)));
+    expect(idOf(doc, 'Pricing')).toBe(blockId);
+  });
+
+  it('CONTROL: an accepted whole-block DELETE still removes the block', () => {
+    // There is no replacement to carry the id, so the handover must not keep
+    // the block alive. Without this, "the id survives" could be met by never
+    // removing anything.
+    const doc = docOf(FIXTURE_ID);
+    const person = twin(doc);
+    const blockId = idOf(person, 'A bullet a person wrote');
+    const res = applyBlockEdits(person, [{ op: 'delete_block', blockId }], {
+      author: 'agent:someone-else',
+      suggestionAuthor: SUGGESTER,
+    });
+    acceptSuggestion(person, res.outcomes[0]?.suggestionId as string);
+    expect(md(person)).not.toContain('A bullet a person wrote');
+    expect(readOutline(person).some((e) => e.id === blockId)).toBe(false);
+  });
+});

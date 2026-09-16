@@ -6,6 +6,7 @@ import * as Y from 'yjs';
 import { resolveSingleFind } from './prose-blocks.ts';
 import { type TextSlice, coveringInlineMarks, insertTextWithMarks } from './prose-edit.ts';
 import { getProseFragment, resolveRelativePositionRaw, walkProse } from './prose-fragment.ts';
+import { BLOCK_ID_ATTR } from './prose-identity.ts';
 import { inlineMarkdownFromDelta, serializeBlockToMarkdown } from './prose-markdown.ts';
 import {
   SUGGEST_DELETE_MARK,
@@ -392,6 +393,52 @@ function removeEmptiedBlocks(blocks: Set<Y.XmlElement>): void {
   }
 }
 
+/** Is `el` this block, or an ancestor of it? */
+function holds(el: Y.XmlElement, block: Y.XmlElement): boolean {
+  for (let node: unknown = block; node instanceof Y.XmlElement; node = node.parent) {
+    if (node === el) return true;
+  }
+  return false;
+}
+
+/**
+ * A BLOCK'S IDENTITY SURVIVES ITS REPLACEMENT BEING ACCEPTED.
+ *
+ * A whole-block proposal strikes the old block's text and puts the offered
+ * block right after it, so accepting empties the old one and `removeEmptiedBlocks`
+ * takes it away — leaving the replacement under an id nothing else in the
+ * product has ever seen. Everything that addresses a block by id is keyed on
+ * the OLD one: a meeting's claim on the heading it is writing under, the
+ * heading memory that decides whether to open a topic, a comment anchored to
+ * the block. Accepting a heading rename mid-meeting used to orphan all three,
+ * and the meeting opened a second topic beside the heading it had just
+ * renamed (caught by the independent review of the rename PR, then measured).
+ *
+ * So the emptied block hands its id to the replacement standing in its place.
+ * Only on ACCEPT, and only when the very next sibling is a block this same
+ * suggestion inserted — a plain whole-block deletion leaves nothing to carry
+ * the id, and a reject empties the offered blocks instead, where the original
+ * is still there holding its own.
+ *
+ * The duplicate id this creates lives inside the caller's transaction and is
+ * gone before it commits, because the block it came from is deleted next.
+ */
+function handOverBlockIds(emptied: Set<Y.XmlElement>, inserted: Set<Y.XmlElement>): void {
+  for (const block of emptied) {
+    if (totalTextLength(block) > 0) continue;
+    const id = block.getAttribute(BLOCK_ID_ATTR);
+    if (typeof id !== 'string' || id.length === 0) continue;
+    const parent = block.parent;
+    if (!(parent instanceof Y.XmlFragment) && !(parent instanceof Y.XmlElement)) continue;
+    const siblings = parent.toArray();
+    const next = siblings[siblings.indexOf(block) + 1];
+    if (!(next instanceof Y.XmlElement)) continue;
+    let carries = false;
+    for (const ins of inserted) if (holds(next, ins)) carries = true;
+    if (carries) next.setAttribute(BLOCK_ID_ATTR, id);
+  }
+}
+
 function resolveOne(
   doc: Y.Doc,
   sid: string,
@@ -411,7 +458,11 @@ function resolveOne(
     byNode.set(r.node, list);
   }
   const affectedBlocks = new Set<Y.XmlElement>();
-  for (const r of entry.ranges) if (r.block) affectedBlocks.add(r.block);
+  const insertedBlocks = new Set<Y.XmlElement>();
+  for (const r of entry.ranges) {
+    if (r.block) affectedBlocks.add(r.block);
+    if (r.block && r.kind === 'insert') insertedBlocks.add(r.block);
+  }
 
   doc.transact(() => {
     for (const ranges of byNode.values()) {
@@ -426,6 +477,7 @@ function resolveOne(
         }
       }
     }
+    if (action === 'accept') handOverBlockIds(affectedBlocks, insertedBlocks);
     removeEmptiedBlocks(affectedBlocks);
   }, transactionOrigin);
   return { ok: true };
