@@ -1078,6 +1078,35 @@ with headings"*):
   underneath is narrower and matters more — their line is never rewritten or
   deleted, because an edit naming a block that is not the note-taker's own
   arrives as a suggestion instead.
+- **Open the next heading once a topic has swallowed the meeting** — the
+  remedy nesting cannot be (2026-09-16). Grouping answers "this STRETCH of
+  notes has no structure"; it cannot answer "this HEADING now stands over half
+  an hour", because a topic gathered into four tidy groups is still one entry
+  in the outline for thirty minutes of talk. So there are two bars, and the
+  server counts both: `MAX_FLAT_RUN_BULLETS` on the run, `MAX_TOPIC_NOTES`
+  (twelve — three groups of four) on everything under one heading whatever its
+  depth. Past the second, the per-tick directive stops asking for a group and
+  asks for a heading instead, spelling both shapes at the levels this document
+  writes at: a sub-topic where the room is still on the subject and has
+  reached a new part of it, a new topic where it has moved on. The ask goes
+  only to the heading the room is writing under RIGHT NOW — one aimed at a
+  heading already moved on from can never be carried out, repeats every
+  remaining tick, and produced 51 headings over 70 ticks the first time it was
+  tried. And it carries the speech with it: one `insert_at_end` writes the
+  heading and this tick's points together, so no idea waits a tick for
+  somewhere to go.
+- **Two bugs kept all of this from firing at all**, and they are why a real
+  meeting on 16 September left sixty-five flat bullets under one heading with
+  the bar at four. The scan was scoped to the meeting's section by slicing the
+  outline AFTER the section heading — so a meeting's first topic arrived with
+  no heading in hand and was reported as a run under no heading, and the
+  note-taker was told to open the heading it was already writing under. And
+  the slice ended at the next heading of the section's own level, which is the
+  meeting's own second topic, so everything said after the room first moved on
+  was outside the scan entirely. The scope now starts AT the section heading
+  and walks past every heading the note-taker itself wrote, stopping at one it
+  did not — which keeps what the slice was for: a long list in the document's
+  own section is still not this meeting's wall.
 - **Write the smaller sure point, not a hedged bigger one.** Where the speech
   will not support the claim, the note says the part it does support. This
   REPLACED "write the note and end it `(unconfirmed)`" (2026-09-15). That

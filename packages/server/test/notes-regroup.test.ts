@@ -13,7 +13,13 @@ import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import { notesTopicHashes } from '../src/notes-heading-level.ts';
 import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { MAX_FLAT_RUN_BULLETS } from '../src/notes-quality.ts';
-import { homelessRun, regroupDirective, regroupTargets } from '../src/notes-regroup.ts';
+import {
+  MAX_TOPIC_NOTES,
+  homelessRun,
+  overgrownTopics,
+  regroupDirective,
+  regroupTargets,
+} from '../src/notes-regroup.ts';
 
 let seq = 0;
 function heading(text: string, level = 3): prose.OutlineEntry {
@@ -326,5 +332,162 @@ describe('the tick prompt', () => {
     const lines = user.split('\n');
     expect(lines.find((l) => l.endsWith('| lead'))).toContain(' bullet ');
     expect(lines.find((l) => l.endsWith('| nested'))).toContain(' sub-bullet ');
+  });
+});
+
+/* ===== The meeting's own notes, all of them (2026-09-16) ===== */
+
+/**
+ * A live meeting's section heading is the one the note-taker is writing under
+ * RIGHT NOW, and the scan used to begin one block after it — so the first
+ * topic of every meeting read as a wall with no heading over it, and the
+ * meeting's second topic ended the scope outright. Every case here is about
+ * the scoped path, which is the path production takes and the one no test
+ * reached.
+ */
+function ownHeading(text: string, level = 2): prose.OutlineEntry {
+  return {
+    id: `h${++seq}`,
+    kind: 'heading',
+    nodeName: 'heading',
+    level,
+    text,
+    author: NOTES_AUTHOR_ID,
+  };
+}
+
+describe("the meeting's own section", () => {
+  test('names the run under the section heading itself, rather than calling it homeless', () => {
+    const own = ownHeading('Harborlight survey');
+    const outline = [own, ...bullets(MAX_FLAT_RUN_BULLETS, 'point')];
+    const opts = { author: NOTES_AUTHOR_ID, notesHeadingId: own.id };
+    expect(regroupTargets(outline, opts).map((t) => t.headingId)).toEqual([own.id]);
+    // The control, and the bug itself: these bullets have a heading, so
+    // nothing may ask the note-taker to open one for them.
+    expect(homelessRun(outline, opts)).toBeNull();
+    expect(regroupDirective(outline, opts)).not.toContain('UNDER NO HEADING');
+  });
+
+  test('follows the meeting into the next topic IT opened', () => {
+    const first = ownHeading('Harborlight survey');
+    const second = ownHeading('Slipway crane booking');
+    const outline = [
+      first,
+      ...bullets(2, 'early'),
+      second,
+      ...bullets(MAX_FLAT_RUN_BULLETS, 'later'),
+    ];
+    const targets = regroupTargets(outline, {
+      author: NOTES_AUTHOR_ID,
+      notesHeadingId: first.id,
+    });
+    expect(targets.map((t) => t.heading)).toEqual(['Slipway crane booking']);
+  });
+
+  test('stops at a heading the meeting did not write — the control', () => {
+    const own = ownHeading('Harborlight survey');
+    // Same shape, except the second heading is the document's own: a long
+    // list in somebody else's section is not this meeting's wall, and telling
+    // the note-taker to reorganise it would be worse than saying nothing.
+    const theirs = heading('Standing agenda', 2);
+    const outline = [
+      own,
+      ...bullets(2, 'early'),
+      theirs,
+      ...bullets(MAX_FLAT_RUN_BULLETS, 'later'),
+    ];
+    expect(regroupTargets(outline, { author: NOTES_AUTHOR_ID, notesHeadingId: own.id })).toEqual(
+      [],
+    );
+  });
+});
+
+describe('overgrownTopics', () => {
+  /** A topic already gathered into groups: no flat run anywhere in it, and
+   *  still a heading the reader meets a whole stretch of meeting under. */
+  function grouped(n: number, under: string): prose.OutlineEntry[] {
+    const out: prose.OutlineEntry[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push(bullet(`${under} lead ${i}`), bullet(`${under} a ${i}`, { depth: 1 }));
+      out.push(bullet(`${under} b ${i}`, { depth: 1 }));
+    }
+    return out;
+  }
+
+  test('names a heading past the bar even when nothing under it is flat', () => {
+    const own = ownHeading('Slipway crane booking');
+    const outline = [own, ...grouped(5, 'crane')];
+    const opts = { author: NOTES_AUTHOR_ID, notesHeadingId: own.id };
+    // Fifteen notes in five tidy groups: the flat-run bar sees nothing at all.
+    expect(regroupTargets(outline, opts)).toEqual([]);
+    expect(overgrownTopics(outline, opts).map((t) => t.notes)).toEqual([15]);
+  });
+
+  test('is silent one note below the bar — the control', () => {
+    const own = ownHeading('Slipway crane booking');
+    const outline = [own, ...bullets(MAX_TOPIC_NOTES - 1, 'crane')];
+    expect(overgrownTopics(outline, { author: NOTES_AUTHOR_ID, notesHeadingId: own.id })).toEqual(
+      [],
+    );
+  });
+
+  test('says nothing about a heading the room has already moved on from', () => {
+    // The ask is "open the NEXT heading", which only the heading this speech
+    // is landing under can carry out. Asked of an earlier one it repeats every
+    // remaining tick and the note-taker opens a heading a tick.
+    const swallowed = ownHeading('Slipway crane booking');
+    const now = ownHeading('Budget line');
+    const outline = [swallowed, ...bullets(MAX_TOPIC_NOTES, 'crane'), now, ...bullets(1, 'budget')];
+    const opts = { author: NOTES_AUTHOR_ID, notesHeadingId: swallowed.id };
+    expect(overgrownTopics(outline, opts)).toEqual([]);
+    // CONTROL: the same heading, still the live one, is named.
+    expect(
+      overgrownTopics([swallowed, ...bullets(MAX_TOPIC_NOTES, 'crane')], opts).map(
+        (t) => t.heading,
+      ),
+    ).toEqual(['Slipway crane booking']);
+  });
+});
+
+describe('the three remedies', () => {
+  test('asks a swallowed topic for the next heading, and not for a group', () => {
+    const own = ownHeading('Slipway crane booking');
+    const text =
+      regroupDirective([own, ...bullets(MAX_TOPIC_NOTES, 'crane')], {
+        author: NOTES_AUTHOR_ID,
+        notesHeadingId: own.id,
+      }) ?? '';
+    expect(text).toContain('HAS RUN PAST ONE HEADING');
+    expect(text).toContain(own.id);
+    // Both other remedies, spelled at the levels THIS doc writes at.
+    expect(text).toContain('### ');
+    expect(text).toContain('## ');
+    // Nesting is the remedy it is being told not to reach for.
+    expect(text).not.toContain('GROUP THEM IN THIS UPDATE');
+  });
+
+  test('asks a topic that is merely full for a group — the control', () => {
+    const own = ownHeading('Harborlight survey');
+    const text =
+      regroupDirective([own, ...bullets(MAX_FLAT_RUN_BULLETS, 'point')], {
+        author: NOTES_AUTHOR_ID,
+        notesHeadingId: own.id,
+      }) ?? '';
+    expect(text).toContain('GROUP THEM IN THIS UPDATE');
+    expect(text).not.toContain('HAS RUN PAST ONE HEADING');
+  });
+
+  test("the group ask no longer trades this speech's note for the grouping", () => {
+    // It used to say "Do NOT add another bullet". An obedient note-taker then
+    // spent a tick in five on structure and wrote nothing for the speech that
+    // tick — fourteen notes of seventy, measured in notes-long-topic.test.ts.
+    const own = ownHeading('Harborlight survey');
+    const text =
+      regroupDirective([own, ...bullets(MAX_FLAT_RUN_BULLETS, 'point')], {
+        author: NOTES_AUTHOR_ID,
+        notesHeadingId: own.id,
+      }) ?? '';
+    expect(text).toContain('Keep every idea');
+    expect(text).not.toContain('Do NOT add another bullet');
   });
 });
