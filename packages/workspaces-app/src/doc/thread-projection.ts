@@ -138,7 +138,19 @@ export function createThreadProjection(deps: ThreadProjectionDeps): ThreadProjec
             // all through the mounted chrome until the glue tests posted
             // through it.
             const review = readReviewPayload(c.get('review'));
-            comments.push({ id: cid, author, text, ts, ...(review ? { review } : {}) });
+            // `deliveredAt` is the receipt: absent, the author's comment is
+            // stuck on one tick forever on this surface while the board (which
+            // reads the REST projection) shows two. Exactly the class of bug
+            // the header of this file warns about.
+            const deliveredAt = c.get('deliveredAt');
+            comments.push({
+              id: cid,
+              author,
+              text,
+              ts,
+              ...(review ? { review } : {}),
+              ...(typeof deliveredAt === 'number' ? { deliveredAt } : {}),
+            });
           }
         }
       }

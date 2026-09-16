@@ -17,7 +17,9 @@ import {
   type Participants,
   type ReviewPayload,
   type Thread,
+  type User,
   authorLabel,
+  receiptState,
   formatTime,
   pendingDeclaration,
   reviewAnswered,
@@ -28,6 +30,7 @@ import {
 } from '@claude-workspaces/core';
 import { askedMetaLine, decidedMetaLine } from '../board/board-review-model.ts';
 import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-markdown.ts';
+import { commentHead, receiptMark } from '../comment-view.ts';
 import { currentWorkspaceId, docIdFromPathOrNull } from '../doc-path.ts';
 import { threadDecision } from '../long-thread.ts';
 import { attachMarkdownComposer } from '../md-composer.ts';
@@ -224,6 +227,16 @@ function head(
   started.textContent = formatTime(t.comments[0]?.ts ?? t.lastActivity);
   head.appendChild(started);
 
+  // The opening comment's receipt, beside the opening comment's clock. A
+  // folded card shows the words and this time and nothing else, so leaving
+  // the mark to the detail face would mean the one state a reader glances at
+  // — the card they just wrote, still folded — was the state without it.
+  const opening = t.comments[0];
+  const openingReceipt = opening
+    ? receiptState(opening, t.comments, host.opts.currentUser)
+    : null;
+  if (openingReceipt) head.appendChild(receiptMark(openingReceipt));
+
   // As far from ✓ Resolve as the card allows: the two were a thumb-width
   // apart, and the misfire that costs you resolves a thread. Resolve now lives
   // on the detail face, which puts a whole fold between them.
@@ -347,7 +360,9 @@ function slotB(
   // the ask the item card is carrying must not repeat its chip, headline and
   // why in the history directly beneath the card that just said them.
   for (const c of t.comments.slice(1))
-    comments.appendChild(commentRow(c, c.id === itemComment?.id));
+    comments.appendChild(
+      commentRow(c, t.comments, host.opts.currentUser, c.id === itemComment?.id),
+    );
 
   const reply = div('thread-reply');
   // The ask these words will answer, if there is one. `pendingDeclaration`
@@ -894,17 +909,23 @@ function reviewHeader(review: Comment['review']): HTMLElement | null {
  * this comment's declaration in full, so the row shows the words and not a
  * second copy of the ask.
  */
-function commentRow(c: Comment, carriedByItemCard = false): HTMLElement {
+function commentRow(
+  c: Comment,
+  thread: ReadonlyArray<Comment>,
+  reader: User | undefined,
+  carriedByItemCard = false,
+): HTMLElement {
   const row = div(c.review ? 'comment comment-declared' : 'comment');
-  const authorRow = div('author');
-  const swatch = span('swatch');
-  swatch.style.background = c.author.color;
-  const name = span('name');
-  // Plain text, never HTML: names are untrusted (agent-supplied).
-  name.textContent = authorLabel(c.author);
-  const time = span('time');
-  time.textContent = formatTime(c.ts);
-  authorRow.append(swatch, name, time);
+  // One header for every comment this app draws — see `comment-view.ts`. The
+  // receipt rides on it, which is what makes "every surface has the ticks" a
+  // property of the code rather than of four people remembering.
+  const authorRow = commentHead({
+    variant: 'doc',
+    name: authorLabel(c.author),
+    color: c.author.color,
+    time: { text: formatTime(c.ts) },
+    receipt: receiptState(c, thread, reader),
+  });
 
   const body = div('body');
   // Comments are untrusted input; renderCommentMarkdown escapes first and

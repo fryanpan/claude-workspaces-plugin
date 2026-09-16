@@ -451,6 +451,24 @@ through `docStore.postComment` — the choke point all three write paths share �
 carrying the doc, the thread, the author and the LENGTH of the text, never the
 text. Between them, the next lost comment can be told from one nobody sent.
 
+**And a comment that DID reach somebody says that too, on the comment.** The
+other half of the same question: one grey tick means the server has it, two
+mean a session watching the doc was handed it, and both disappear once a reply
+lands. The decision is `core/src/comment-receipt.ts` — pure, DOM-free, so the
+board, the review editor and (one day) the widget cannot come to disagree
+about what a tick means — and the durable fact is a write-once `deliveredAt`
+on the comment itself, stamped through `core/src/comment-delivery.ts` so it
+syncs, survives a reload and rides the REST threads payload the board already
+reads. The judgement is `server/src/comment-receipt.ts`, dependency-injected
+over `SseBus.agentsOn` because delivery means a LIVE stream, never a line in
+`agent-watches.json`; `stall-wiring.ts` calls it where it already knows a
+comment's board channels, and broadcasts a transient `comment.delivered` to
+pages only. On the client every app surface now draws its comment header
+through `workspaces-app/src/comment-view.ts`, one module owning the structure
+and the mark's position with a class-name variant per stylesheet — because a
+feature added to "comments" that reaches one surface out of four is the
+failure that module exists to make impossible.
+
 **The comment card stands where its comment will live.** In comment mode the
 composer is a card fixed to the right edge of the viewport at its element's
 height, joined to the element by a faint line, and on post it becomes the saved

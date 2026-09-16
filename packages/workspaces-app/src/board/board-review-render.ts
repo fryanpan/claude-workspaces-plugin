@@ -1,5 +1,6 @@
 import { reviewAnswered } from '@claude-workspaces/core';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
+import { commentHead } from '../comment-view.ts';
 /**
  * The review surface's renderers (plan §3.9): a ticket-borne review item drawn
  * as a row of the comment history, the question a decision task is asking
@@ -42,19 +43,21 @@ export function reviewItemRow(
   li.className = 'board-comment board-comment-review board-comment-ticket-item';
   li.dataset.reviewItemId = item.id;
 
-  const head = document.createElement('div');
-  head.className = 'board-comment-head';
-  const who = document.createElement('span');
-  who.className = 'board-comment-author';
-  who.textContent = item.createdBy ?? 'Someone';
-  head.append(who);
-  if (item.createdAt !== undefined) {
-    const when = document.createElement('span');
-    when.className = 'board-comment-when';
-    when.textContent = timeAgo(item.createdAt, now);
-    when.title = new Date(item.createdAt).toLocaleString();
-    head.append(when);
-  }
+  // The app's one comment header, so this row cannot drift from the comment
+  // rows it sits between. No receipt: an item raised on the TICKET has no
+  // comment behind it, so there is nothing whose delivery a tick could report.
+  const head = commentHead({
+    variant: 'board',
+    name: item.createdBy ?? 'Someone',
+    ...(item.createdAt !== undefined
+      ? {
+          time: {
+            text: timeAgo(item.createdAt, now),
+            title: new Date(item.createdAt).toLocaleString(),
+          },
+        }
+      : {}),
+  });
   head.append(reviewBadge(r.shape, withdrawn, item.answer !== undefined));
   li.append(head);
 
