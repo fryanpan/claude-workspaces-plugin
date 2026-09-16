@@ -7,23 +7,19 @@
  * the answer to "what happens when the model does it anyway", and the answer
  * has to be that the notes survive.
  *
- * RULE 1 — THE SECTION HEADING IS NOT AN EDITABLE BLOCK. What a
- * `replace_block` against the meeting's own `## Meeting notes` heading writes
- * is whatever the model composed, and the section is found BY ITS WORDS —
- * `settle-wash.ts` in the client and the server's own finder both look for
- * the heading's text, and both take the LAST match. Reword it and the next
- * tick opens a SECOND section; from that moment everything written before,
- * including any line a person typed, drops out of the notes view while
- * staying in the doc. Measured on AMI fixture ES2002c: the composer replaced
- * its heading at tick 30, and for the remaining thirteen ticks the doc's
- * outline grew from 55 entries to 76 while the notes section stayed frozen at
- * 21 bullets. The meeting kept being noted; none of it arrived.
- *
- * That run also lost the heading's ADDRESS, because a rewrite was a delete
- * and an insert and the replacement came back under a new id, which is how
- * `NotesHeadingMemory` concluded the heading was gone. That half is closed in
- * the applier — `prose-batch.ts` hands a rewrite the address it replaced — so
- * the id is no longer what this rule protects. The words still are.
+ * RULE 1 — THE SECTION HEADING IS NOT AN EDITABLE BLOCK. A `replace_block`
+ * against the meeting's own `## Meeting notes` heading writes whatever the
+ * model composed, and the section is found BY ITS WORDS — `settle-wash.ts`
+ * in the client and the server's own finder both look for the heading's text
+ * and both take the LAST match. Reword it and the next tick opens a SECOND
+ * section; everything written before, including any line a person typed,
+ * drops out of the notes view while staying in the doc. Measured on AMI
+ * fixture ES2002c: the composer replaced its heading at tick 30, and for the
+ * remaining thirteen ticks the doc's outline grew from 55 entries to 76 while
+ * the notes section stayed frozen at 21 bullets. That run lost the heading's
+ * ADDRESS too — a rewrite was a delete and an insert, so `NotesHeadingMemory`
+ * found nothing — but `prose-batch.ts` now hands a rewrite the address it
+ * replaced. The id is no longer what this rule protects. The words are.
  *
  * RULE 2 — A REVISION MAY NOT THROW AWAY THE NOTE IT REPLACES. The prompt
  * lets the note-taker rewrite its own bullet, because a note-taker revises
