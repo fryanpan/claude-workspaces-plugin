@@ -16,11 +16,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import { findSpeakerTags, type prose } from '@claude-workspaces/core';
-import {
-  type NotesComposeInput,
-  addNotes,
-  createNotesTickHarness,
-} from './notes-tick-harness.ts';
+import type { NotesComposeInput } from '../src/meeting-notes.ts';
+import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 /** How many names the section prints. */
 function tags(notes: string): number {
@@ -84,11 +81,15 @@ describe('a replayed meeting', () => {
     harness.say({ speaker: 'B', text: 'Can we have the 07:40 sailing back on the timetable?' });
     harness.say({ speaker: 'C', text: 'Say more about the timetable.' });
     const first = await harness.tick();
-    composed.push(...first.composed.map((e) => ('markdown' in e ? e.markdown : '')));
+    composed.push(
+      ...first.composed.map((e: prose.BlockEdit) => ('markdown' in e ? e.markdown : '')),
+    );
 
     harness.say({ speaker: 'B', text: 'The ramp is where the money actually goes.' });
     const second = await harness.tick();
-    composed.push(...second.composed.map((e) => ('markdown' in e ? e.markdown : '')));
+    composed.push(
+      ...second.composed.map((e: prose.BlockEdit) => ('markdown' in e ? e.markdown : '')),
+    );
 
     harness.say({ speaker: 'B', text: 'I will ask the operator what the numbers are.' });
     await harness.tick();
