@@ -164,21 +164,21 @@ describe('nudgeLine', () => {
  * Fixtures are synthetic; the names are invented. The repo is public.
  */
 describe('detectAsk — what the 2026-09-15 re-measurement added', () => {
-  const OWNERS = ['Harborlight Vance'];
+  const OWNERS = ['Harborlight Market'];
 
   it('reads the name a lead actually writes, not only the name on the board', () => {
-    // The board learns "Harborlight Vance" from a transition; every wait in
+    // The board learns "Harborlight Market" from a transition; every wait in
     // the corpus was written with the first name alone.
     expect(asks('Branch is cut. Waiting on Harborlight for the release window.', OWNERS)).toBe(
       true,
     );
-    expect(asks('Branch is cut. Waiting on Harborlight Vance for the window.', OWNERS)).toBe(true);
+    expect(asks('Branch is cut. Waiting on Harborlight Market for the window.', OWNERS)).toBe(true);
   });
 
   it('does not turn a short first name into a wildcard', () => {
     // A two-letter leading token would match inside ordinary prose, so it is
     // never added as a spelling of its own.
-    expect(asks('Waiting on jo to finish the upstream rebase.', ['Jo Marchetti'])).toBe(false);
+    expect(asks('Waiting on jo to finish the upstream rebase.', ['Jo Harborlight'])).toBe(false);
     // And a one-word owner name is unchanged: no first-name variant exists.
     expect(asks('Waiting on the nightly to go green.', ['Harborlight'])).toBe(false);
   });
