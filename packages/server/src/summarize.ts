@@ -115,6 +115,12 @@ export interface ScheduleArgs {
  * review comments and anchored source lines off-machine without anyone
  * choosing it. Adding the dedicated entry is the act of consent; a key that
  * happens to be in the environment for other reasons is not.
+ *
+ * IT RECORDS NOTHING, and neither does `resolveCredentialFrom` below. A
+ * caller that resolves through either does not appear in the slot trace and
+ * cannot be asked which key it spent, so an adapter that reaches the API goes
+ * through `resolveKeySlotFrom` / `resolveCredentialSlotFrom` instead. What is
+ * left here is the shape tests and value-only callers already had.
  */
 export function resolveKeyFrom(
   explicit: string | null | undefined,
