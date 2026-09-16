@@ -17,11 +17,29 @@
  * which it is part of the page. It is raised by `offer()` and by nothing
  * else; a doc that mounts this and never records shows a scrim-free page.
  *
- * WHAT IT SAYS. A question, two answers, and one line that reports. No
- * caption explaining what a tidy-up is: the notes are on screen behind it and
- * "Tidy up" says what pressing it does. It leaves on the first of four
- * things — the pass finishing, "Not now", Escape or the scrim, or the next
- * recording starting.
+ * WHAT IT SAYS. A question, two answers, and a report that appears only when
+ * there is something to report. No caption explaining what a tidy-up is: the
+ * notes are on screen behind it and "Tidy up" says what pressing it does. It
+ * leaves on the first of four things — the pass LANDING, "Not now", Escape or
+ * the scrim, or the next recording starting.
+ *
+ * WHAT A FAILURE SAYS, WHICH IS THE POINT OF THE REPORT (2026-09-16). On
+ * 2026-09-15 a pass read 355 turns, proposed sixteen edits, had every one
+ * refused, and this dialog said nothing a person could act on. Three lines
+ * now stand in its place, and `readCleanupReply` in `@claude-workspaces/core`
+ * decides all three so that this dialog and `meeting:rerun`'s report cannot
+ * drift apart:
+ *
+ * - the HEADLINE names which of the four happened — it changed the notes, it
+ *   found nothing to improve, every edit was out of reach, or it never ran;
+ * - the REASONS list every rule that dropped an edit, with how many it
+ *   dropped. Grouped by rule and not listed per edit: block ids are not
+ *   something a reader can act on and sixteen of them are sixteen things to
+ *   read past on the way to the one sentence that is;
+ * - the RECOVERY line says what to do or what will not happen on its own —
+ *   and never names a button, because the button says it. The primary answer
+ *   relabels to "Try again" exactly when another press could answer
+ *   differently (`retry`), and is disabled when it could not.
  *
  * WHILE IT RUNS. The dialog stays up and the report line says so, because the
  * pass is a request over a whole transcript and a dialog that vanished on the
@@ -39,26 +57,13 @@
  * feature, so it is held here rather than left to the grace window.
  */
 
+import {
+  type NotesCleanupReply,
+  cleanupReasonLine,
+  readCleanupReply,
+} from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
-
-/** What the route answers with; every field optional to a hostile reader. */
-interface CleanupReply {
-  ok?: boolean;
-  error?: string;
-  /**
-   * Whether the document actually moved — the server's own sum over every
-   * kind of change a pass can make, which is not the same question as `ok`.
-   *
-   * ONLY AN EXPLICIT `false` KEEPS THE DIALOG UP. A server that predates this
-   * field sends nothing, and the honest reading of nothing is the old one: it
-   * says the pass ran and says no more. A missing field is not a claim.
-   */
-  changed?: boolean;
-  touched?: number;
-  refused?: number;
-  proposed?: number;
-}
 
 /**
  * How long the wash is held open around a pass.
@@ -73,25 +78,13 @@ export const CLEANUP_WASH_HOLD_MS = 90_000;
 
 /** The line under the question, while the pass is on the wire. */
 const WORKING_NOTE = 'Tidying up these notes…';
-/** What a failure says when the server sends no sentence of its own. */
-const FAILED_NOTE = 'The tidy-up could not run. The notes are unchanged.';
-/**
- * The two ways a pass can finish having changed nothing, and they are said
- * differently because they are different news.
- *
- * A pass whose edits were all refused is a pass that TRIED and could not:
- * something about the doc — a section the notes never landed in, a bullet
- * somebody is discussing — put every one of them out of reach, and pressing
- * again after moving the notes is a reasonable thing to do. A pass that
- * proposed nothing read the notes and found them finished, which is a
- * documented success of the feature and not a fault to chase.
- *
- * Neither of them closes the dialog. Both used to: `ok` was the whole test,
- * so the offer vanished, the notes were exactly as they had been, and nothing
- * on screen said which of the two had happened — or that anything had.
- */
-const NOTHING_LANDED_NOTE = 'Nothing changed — none of the edits could be made to these notes.';
-const NOTHING_TO_CHANGE_NOTE = 'Nothing changed — the tidy-up found nothing to improve.';
+/** What a request that never arrived says. A reply that ARRIVED says its own
+ *  words through `readCleanupReply`; this is the one case with no reply at
+ *  all, so the recovery has to be written here. */
+const UNREACHABLE = {
+  headline: 'The tidy-up could not run — the request did not reach the server.',
+  recovery: 'The notes are unchanged, and nothing runs it again on its own.',
+};
 
 export interface MeetingCleanupOffer {
   /** A recording just ended: offer a pass over this meeting. */
@@ -140,6 +133,19 @@ export function mountMeetingCleanupOffer(opts: {
   // without the focus moving, so nothing else would announce them.
   note.setAttribute('role', 'status');
 
+  // WHY A LIST AND NOT A SENTENCE. The rules that drop edits are several at
+  // once on a real pass, and a reader wants the one that dropped the most.
+  // A list with a count per row answers that at a glance; the same content
+  // joined with semicolons does not.
+  const reasons = document.createElement('ul');
+  reasons.className = 'cleanup-offer-reasons';
+  reasons.hidden = true;
+
+  // Said after the reasons, because it is the answer to them.
+  const recovery = document.createElement('p');
+  recovery.className = 'cleanup-offer-recovery';
+  recovery.hidden = true;
+
   const actions = document.createElement('div');
   actions.className = 'cleanup-offer-actions';
 
@@ -154,7 +160,7 @@ export function mountMeetingCleanupOffer(opts: {
   button.textContent = 'Tidy up';
 
   actions.append(dismiss, button);
-  card.append(title, note, actions);
+  card.append(title, note, reasons, recovery, actions);
   root.append(card);
   (opts.parent ?? document.body).append(root);
 
@@ -181,20 +187,44 @@ export function mountMeetingCleanupOffer(opts: {
   const say = (message: string | null): void => {
     note.textContent = message ?? '';
     note.hidden = message === null;
+    // The reasons and the recovery belong to ONE reply. Anything that
+    // rewrites the line above them — the working note, a fresh offer — leaves
+    // the last pass's explanation standing otherwise, which is worse than
+    // saying nothing: it explains a run that is no longer the one on screen.
+    reasons.replaceChildren();
+    reasons.hidden = true;
+    recovery.textContent = '';
+    recovery.hidden = true;
+    button.textContent = 'Tidy up';
   };
 
   /**
-   * Leave the dialog where it is, saying `message`, with both answers live
-   * again.
+   * Put one finished pass on screen and leave the dialog open.
    *
-   * THIS IS THE ANSWER TO EVERYTHING EXCEPT NOTES THAT CHANGED. A refusal, a
-   * request that never arrived, a pass that ran and moved nothing — in every
-   * one of them the offer is still the offer to make, and the person is the
-   * one who decides whether to press again or to say Not now.
+   * The button is the recovery when there is one to take: it says "Try again"
+   * and stays live when another press could answer differently, and is
+   * disabled when the answer would be the same for ever. "Not now" is live in
+   * every case — the person may always leave.
    */
-  const holdOpen = (message: string): void => {
-    say(message);
-    button.disabled = false;
+  const report = (r: {
+    headline: string;
+    reasons: readonly { rule: string; count: number }[];
+    recovery: string;
+    retry: boolean;
+  }): void => {
+    say(r.headline);
+    reasons.replaceChildren(
+      ...r.reasons.map((group) => {
+        const row = document.createElement('li');
+        row.textContent = cleanupReasonLine(group);
+        return row;
+      }),
+    );
+    reasons.hidden = r.reasons.length === 0;
+    recovery.textContent = r.recovery;
+    recovery.hidden = r.recovery.length === 0;
+    button.textContent = r.retry ? 'Try again' : 'Tidy up';
+    button.disabled = !r.retry;
     dismiss.disabled = false;
   };
 
@@ -224,25 +254,29 @@ export function mountMeetingCleanupOffer(opts: {
         ),
         { method: 'POST' },
       );
-      const body = (await res.json().catch(() => ({}))) as CleanupReply;
+      const body = (await res.json().catch(() => ({}))) as NotesCleanupReply;
       if (superseded()) return;
-      if (!res.ok || body.ok !== true) {
-        holdOpen(body.error ?? FAILED_NOTE);
-        return;
-      }
+      // ONE READING FOR EVERY ANSWER, INCLUDING THE HTTP ONE. A non-2xx
+      // carries the same shape and the same `reason`, so it is read the same
+      // way rather than collapsed into a generic sentence — that collapse is
+      // how a refusal naming a live recording used to read as "could not
+      // run" with nothing to do about it.
+      const outcome = readCleanupReply(res.ok ? body : { ...body, ok: false });
       // RAN IS NOT THE SAME AS CHANGED. The server sums every kind of change
-      // one pass can make and says so; a pass that moved nothing leaves the
-      // offer up and says which of the two nothings it was, because the
-      // notes behind the dialog are the receipt and there is no receipt here.
-      if (body.changed === false) {
-        holdOpen((body.proposed ?? 0) > 0 ? NOTHING_LANDED_NOTE : NOTHING_TO_CHANGE_NOTE);
+      // one pass can make and says so; only a pass that MOVED the document
+      // closes the dialog, because the notes behind it are that pass's
+      // receipt and none of the others has one.
+      if (outcome.kind === 'changed') {
+        close();
         return;
       }
-      // Done: the notes themselves are the receipt, so the dialog gets out of
-      // the way of the thing the person asked to see.
-      close();
+      report(outcome);
     } catch {
-      if (!superseded()) holdOpen(FAILED_NOTE);
+      // No reply at all, so nothing said anything about the notes. They are
+      // untouched: the writes happen inside the request this never completed.
+      if (!superseded()) {
+        report({ ...UNREACHABLE, reasons: [], retry: true });
+      }
     } finally {
       inFlight.delete(id);
     }

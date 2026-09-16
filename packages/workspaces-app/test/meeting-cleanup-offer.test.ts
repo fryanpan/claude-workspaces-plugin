@@ -17,148 +17,22 @@
  * Fictional names throughout; the repo is public.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLEANUP_WASH_HOLD_MS, mountMeetingCleanupOffer } from '../src/meeting-cleanup-offer.ts';
-
-let parent: HTMLElement;
-/**
- * Every mount this file makes, destroyed when the case ends.
- *
- * Not hygiene for its own sake: the dialog's Tab trap and its Escape handler
- * are bound to `document`, so a mount left alive keeps judging keystrokes in
- * every case that follows — emptying the body detaches its element and leaves
- * its listeners. A leaked mount made three later cases read the previous
- * case's dialog.
- */
-const mounted: { destroy: () => void }[] = [];
-
-beforeEach(() => {
-  document.body.innerHTML = '';
-  parent = document.createElement('div');
-  document.body.append(parent);
-  history.replaceState(null, '', '/workspaces/w-riverbend/docs/d-ferry');
-});
-afterEach(() => {
-  for (const m of mounted.splice(0)) m.destroy();
-  vi.restoreAllMocks();
-});
-
-const offerEl = (): HTMLElement => {
-  const el = parent.querySelector<HTMLElement>('.cleanup-offer');
-  if (!el) throw new Error('no .cleanup-offer rendered');
-  return el;
-};
-const goEl = (): HTMLButtonElement => {
-  const el = offerEl().querySelector<HTMLButtonElement>('.cleanup-offer-go');
-  if (!el) throw new Error('no button');
-  return el;
-};
-const dismissEl = (): HTMLButtonElement => {
-  const el = offerEl().querySelector<HTMLButtonElement>('.cleanup-offer-dismiss');
-  if (!el) throw new Error('no dismiss button');
-  return el;
-};
-const noteEl = (): HTMLElement => {
-  const el = offerEl().querySelector<HTMLElement>('.cleanup-offer-note');
-  if (!el) throw new Error('no note');
-  return el;
-};
-const tab = (shiftKey = false): KeyboardEvent => {
-  const ev = new KeyboardEvent('keydown', {
-    key: 'Tab',
-    shiftKey,
-    bubbles: true,
-    cancelable: true,
-  });
-  document.dispatchEvent(ev);
-  return ev;
-};
-const shiftTab = (): KeyboardEvent => tab(true);
-/** Escape, dispatched where a real one lands: the focused control. */
-const escape = (): void => {
-  (document.activeElement ?? document).dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-  );
-};
-
-/** A fetch that records its calls and answers with `reply`. */
-function stubFetch(reply: { status?: number; body?: unknown } = {}): typeof fetch & {
-  calls: { url: string; method?: string }[];
-} {
-  const calls: { url: string; method?: string }[] = [];
-  const impl = ((url: string, init?: RequestInit) => {
-    calls.push({ url: String(url), ...(init?.method ? { method: init.method } : {}) });
-    return Promise.resolve(
-      new Response(JSON.stringify(reply.body ?? { ok: true, changed: true, touched: 2 }), {
-        status: reply.status ?? 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-  }) as typeof fetch & { calls: { url: string; method?: string }[] };
-  impl.calls = calls;
-  return impl;
-}
-
-/**
- * A fetch whose every call is answered when the case says so.
- *
- * `read(i)` is how a case waits for the CALLER to have finished with a reply
- * rather than for the reply to have been sent: it flips once the body has
- * been read, and `vi.waitFor` polls on a timer, so everything queued behind
- * that read has run by the time it is seen. Asserting straight after
- * `settle` would be asking the question before the answer arrived.
- */
-function deferredFetch(): {
-  impl: typeof fetch;
-  calls: { url: string }[];
-  settle: (i: number, body: unknown, status?: number) => void;
-  reject: (i: number) => void;
-  read: (i: number) => boolean;
-} {
-  const calls: { url: string }[] = [];
-  const consumed: boolean[] = [];
-  const pending: { resolve: (r: Response) => void; reject: (e: Error) => void }[] = [];
-  const impl = ((url: string) => {
-    calls.push({ url: String(url) });
-    return new Promise<Response>((resolve, reject) => {
-      pending.push({ resolve, reject });
-    });
-  }) as typeof fetch;
-  return {
-    impl,
-    calls,
-    settle: (i, body, status = 200) => {
-      const res = new Response(JSON.stringify(body), {
-        status,
-        headers: { 'content-type': 'application/json' },
-      });
-      const asJson = res.json.bind(res);
-      res.json = async () => {
-        const value: unknown = await asJson();
-        consumed[i] = true;
-        return value;
-      };
-      pending[i]?.resolve(res);
-    },
-    reject: (i) => {
-      consumed[i] = true;
-      pending[i]?.reject(new Error('offline'));
-    },
-    read: (i) => consumed[i] === true,
-  };
-}
-
-const mount = (fetchImpl: typeof fetch, liveZone?: { holdWash: (ms: number) => void }) => {
-  const offer = mountMeetingCleanupOffer({
-    docId: 'd-ferry',
-    parent,
-    fetchImpl,
-    // The zone's other members are never reached from here.
-    ...(liveZone ? { liveZone: liveZone as never } : {}),
-  });
-  mounted.push(offer);
-  return offer;
-};
+import { describe, expect, it, vi } from 'vitest';
+import { CLEANUP_WASH_HOLD_MS } from '../src/meeting-cleanup-offer.ts';
+import {
+  deferredFetch,
+  dismissEl,
+  escape,
+  goEl,
+  mount,
+  noteEl,
+  offerEl,
+  reasonsEl,
+  recoveryEl,
+  shiftTab,
+  stubFetch,
+  tab,
+} from './cleanup-offer-harness.ts';
 
 describe('the tidy-up offer', () => {
   it('shows nothing until a recording has ended', () => {
@@ -356,7 +230,7 @@ describe('the tidy-up offer', () => {
     goEl().click();
     await vi.waitFor(() =>
       expect(noteEl().textContent).toBe(
-        'Nothing changed — none of the edits could be made to these notes.',
+        'Nothing changed — none of these edits could be made to the notes.',
       ),
     );
     // The offer is the thing that must survive: one bad pass cannot be what
@@ -377,9 +251,17 @@ describe('the tidy-up offer', () => {
     offer.offer('m-1');
     goEl().click();
     await vi.waitFor(() =>
-      expect(noteEl().textContent).toBe('Nothing changed — the tidy-up found nothing to improve.'),
+      expect(noteEl().textContent).toBe(
+        'Nothing changed — the tidy-up read the whole meeting and found nothing to improve.',
+      ),
     );
     expect(offerEl().hidden).toBe(false);
+    // Nothing to explain and nothing to retry: the pass read the meeting and
+    // found the notes finished, which is a success of the feature.
+    expect(reasonsEl().hidden).toBe(true);
+    expect(recoveryEl().hidden).toBe(true);
+    expect(goEl().disabled).toBe(true);
+    expect(dismissEl().disabled).toBe(false);
   });
 
   it('withdraws when the next recording starts, and dismisses on request', () => {

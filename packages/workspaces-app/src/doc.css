@@ -2918,6 +2918,41 @@ button.lz-speaker:hover .lz-speaker-pill {
   line-height: 1.4;
   color: var(--fg-muted);
 }
+/* THE REPORT: why a pass changed nothing, and what to do about it.
+   One row per RULE with a count, not one per edit — sixteen block ids are
+   sixteen things to read past on the way to the one sentence a reader can
+   act on (2026-09-16; the pass that taught this refused all sixteen and said
+   only that it had). The rule is quoted verbatim from the server, so a rule
+   this build has never heard of still reads as a sentence. */
+.cleanup-offer-reasons {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style-type: none;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+.cleanup-offer-reasons[hidden] {
+  display: none;
+}
+.cleanup-offer-reasons li {
+  margin-top: 5px;
+  /* A rule, not a bullet: the marker would read as a note the tidy-up wrote.
+     The count at the head of each row is what separates them. */
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+/* What to do next, in the page's own foreground rather than the muted grey
+   the reasons take: it is the sentence the reader acts on. */
+.cleanup-offer-recovery {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+.cleanup-offer-recovery[hidden] {
+  display: none;
+}
 .cleanup-offer-actions {
   display: flex;
   justify-content: flex-end;

@@ -19,6 +19,10 @@ import {
   tagAudioFrame,
 } from '../packages/core/src/meeting-streams.ts';
 import { MEETING_AUDIO_ENCODING, meetingSocketPath } from '../packages/core/src/meeting.ts';
+import {
+  cleanupReasonLine,
+  groupCleanupReasons,
+} from '../packages/core/src/notes-cleanup-report.ts';
 import type {
   TranscriptionEngine,
   TranscriptionSession,
@@ -321,18 +325,32 @@ export async function runTidy(
     proposed?: number;
     applied?: number;
     refused?: number;
+    refusals?: readonly string[];
+    failures?: readonly string[];
   };
   const counts: TidyCounts = {
     ok: body.ok === true,
     proposed: body.proposed ?? 0,
     applied: body.applied ?? 0,
     refused: body.refused ?? 0,
+    // EVERY EDIT THIS RUN DID NOT APPLY, WITH THE RULE THAT DROPPED IT. A
+    // rerun whose tidy-up refused everything used to report three zeros and
+    // a count, which says a pass went wrong and nothing about what — the
+    // finding the harness exists to produce. The report groups these by rule.
+    refusals: body.refusals ?? [],
+    failures: body.failures ?? [],
     ...(body.reason !== undefined ? { reason: body.reason } : {}),
   };
   log(
     `tidy-up: ${counts.proposed} proposed, ${counts.applied} applied, ${counts.refused} refused` +
       (counts.ok ? '' : ` (refused: ${counts.reason ?? 'unknown'})`),
   );
+  for (const group of groupCleanupReasons([
+    ...(counts.refusals ?? []),
+    ...(counts.failures ?? []),
+  ])) {
+    log(`  ${cleanupReasonLine(group)}`);
+  }
   return counts;
 }
 

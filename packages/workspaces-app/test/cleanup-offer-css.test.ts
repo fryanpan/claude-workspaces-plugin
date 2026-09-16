@@ -91,6 +91,46 @@ describe('the offer at the end of a finished meeting', () => {
     expect(styleOf(attach('', { tag: 'button' })).borderStyle).not.toBe('solid');
   });
 
+  /**
+   * The report under the question, and the same `[hidden]` trap the scrim
+   * fell into: both of these elements are on the card from the moment it is
+   * built and are shown only for a pass that has something to explain, so a
+   * rule of theirs that outranked the UA's would leave an empty rule and an
+   * empty paragraph under every question the dialog ever asks.
+   */
+  it('paints no reason list and no recovery line until a pass has explained itself', () => {
+    const card = attach('cleanup-offer-card', { parent: scrim() });
+    const reasons = attach('cleanup-offer-reasons', {
+      tag: 'ul',
+      parent: card,
+      attrs: { hidden: '' },
+    });
+    const recovery = attach('cleanup-offer-recovery', {
+      tag: 'p',
+      parent: card,
+      attrs: { hidden: '' },
+    });
+    expect(styleOf(reasons).display).toBe('none');
+    expect(styleOf(recovery).display).toBe('none');
+    // Positive control: the same two elements without the attribute paint.
+    const shown = attach('cleanup-offer-reasons', { tag: 'ul', parent: card });
+    expect(styleOf(shown).display).not.toBe('none');
+  });
+
+  it('sets the reasons apart from the notes behind them, and the recovery apart from the reasons', () => {
+    const card = attach('cleanup-offer-card', { parent: scrim() });
+    const reasons = attach('cleanup-offer-reasons', { tag: 'ul', parent: card });
+    const row = attach('', { tag: 'li', parent: reasons });
+    const recovery = attach('cleanup-offer-recovery', { tag: 'p', parent: card });
+    // A rule down the left, never a bullet: a bullet would read as one of the
+    // notes the tidy-up writes.
+    expect(styleOf(reasons).listStyleType).toBe('none');
+    expect(styleOf(row).borderLeftStyle).toBe('solid');
+    // The recovery is the sentence to act on, so it is not the muted grey the
+    // reasons take.
+    expect(styleOf(recovery).color).not.toBe(styleOf(reasons).color);
+  });
+
   it('lets the two answers wrap rather than shrink at phone width', () => {
     setViewport(PHONE);
     const actions = attach('cleanup-offer-actions', { parent: scrim() });

@@ -21,6 +21,10 @@
  * that failed to look.
  */
 
+import {
+  cleanupReasonLine,
+  groupCleanupReasons,
+} from '../packages/core/src/notes-cleanup-report.ts';
 import { flatBulletRuns, parseNotesTopics } from '../packages/server/src/notes-quality.ts';
 
 /** What the at-stop tidy-up pass did, as its route answers. */
@@ -31,6 +35,20 @@ export interface TidyCounts {
   proposed: number;
   applied: number;
   refused: number;
+  /**
+   * Every edit that did not reach the document, with the rule that dropped
+   * it — `refusals` from the gate, `failures` from the applier.
+   *
+   * THE COUNTS ALONE WERE THE DEAD END. A row reading "16 proposed, 0
+   * applied, 16 refused" is the finding this harness is run to produce and
+   * says nothing about what to change; these are what the report prints
+   * under it. Optional, because a run against a server that predates the
+   * route's two arrays gets none — and an empty list there means "not
+   * reported", not "nothing was refused", which is why the report says so
+   * out loud when the count and the lines disagree.
+   */
+  refusals?: readonly string[];
+  failures?: readonly string[];
 }
 
 /** The seven, plus what the run has to say to be reproducible. */
@@ -126,6 +144,32 @@ function tidyLine(t: TidyCounts): string {
   return t.ok ? counts : `${counts} (refused: ${t.reason ?? 'unknown'})`;
 }
 
+/**
+ * Why the tidy-up did not apply what it proposed, one line per rule.
+ *
+ * NOT IN THE TABLE, because a table cell that holds six lines stops being a
+ * table. It sits under it, and only when there is something to say — a run
+ * whose tidy-up applied everything prints nothing here.
+ *
+ * AND A DISAGREEMENT IS SAID OUT LOUD. `refused` is a count the route has
+ * always sent and the lines are newer, so a run against an older server has
+ * the count with no lines. Printing nothing there would read as "nothing was
+ * refused" on the exact run where the most was.
+ */
+export function tidyReasonLines(t: TidyCounts): string[] {
+  const groups = groupCleanupReasons([...(t.refusals ?? []), ...(t.failures ?? [])]);
+  if (groups.length === 0) {
+    return t.refused > 0
+      ? ['', `Why the tidy-up refused ${t.refused} edit(s): not reported by this server.`]
+      : [];
+  }
+  return [
+    '',
+    'Why the tidy-up did not apply what it proposed:',
+    ...groups.map((g) => `- ${cleanupReasonLine(g)}`),
+  ];
+}
+
 /** The report as the file a person opens. Markdown, one table, no prose the
  *  reader has to join two rows to use. */
 export function renderRerunReport(r: RerunReport): string {
@@ -162,6 +206,7 @@ export function renderRerunReport(r: RerunReport): string {
       r.unpricedModels.length > 0 ? ` — short: no price for ${r.unpricedModels.join(', ')}` : ''
     } |`,
     `| Latency to first note | ${firstNoteLine(r.firstNoteMs)} |`,
+    ...tidyReasonLines(r.tidy),
     '',
     `Notes: \`${r.notesPath}\``,
     `Run log: \`${r.logPath}\``,
