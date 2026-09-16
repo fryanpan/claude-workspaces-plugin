@@ -43,7 +43,7 @@ import {
 } from '@claude-workspaces/core/answer-coverage-prompt';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { resolveKeySlotFrom } from './summarize.ts';
 
 export interface AnswerCoverageInput {
   item: AnswerCoverageItem;
@@ -84,8 +84,9 @@ export function answerCoverageEnabled(env: NodeJS.ProcessEnv = process.env): boo
 /** The real check, or `null` when there is no key or it is switched off. */
 export function haikuAnswerCoverage(opts: HaikuAnswerCoverageOpts = {}): AnswerCoverage | null {
   if (!answerCoverageEnabled()) return null;
-  const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
-  if (!key) return null;
+  const resolved = resolveKeySlotFrom('answer-coverage', opts.apiKey, readKeychainPassword);
+  if (!resolved) return null;
+  const key = resolved.key;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = opts.timeoutMs ?? ANSWER_COVERAGE_TIMEOUT_MS;
   return async (input) => {

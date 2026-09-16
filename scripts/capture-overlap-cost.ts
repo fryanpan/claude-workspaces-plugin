@@ -25,7 +25,7 @@ import {
 } from '../packages/server/src/meeting-task-capture.ts';
 import { withoutSection } from '../packages/server/src/prompt-sections.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
+import { resolveKeySlotFrom } from '../packages/server/src/summarize.ts';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   const flagKey = process.argv.includes('--api-key')
     ? process.argv[process.argv.indexOf('--api-key') + 1]
     : undefined;
-  const key = resolveKeyFrom(flagKey, readKeychainPassword);
+  const key = resolveKeySlotFrom('cost-script', flagKey, readKeychainPassword)?.key ?? null;
 
   // The baseline is the prompt as it was BEFORE the boundary window: no
   // earlier lines, and no standing rule about them either. Both halves are
