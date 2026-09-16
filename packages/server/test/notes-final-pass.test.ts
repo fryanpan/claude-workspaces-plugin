@@ -24,9 +24,14 @@ import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+
 import { asPerson, findSectionSpan } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
+import {
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+  notesItems,
+} from './notes-tick-harness.ts';
 
 /** Everything the composer was handed for a tick, as one string — the cheapest
  *  way to ask "did these words reach the model at all". */
@@ -42,7 +47,7 @@ const transcriptOf = (input: NotesComposeInput): string =>
  */
 function typeInNotes(ydoc: Y.Doc, line: string): void {
   const fragment = prose.getProseFragment(ydoc);
-  const span = findSectionSpan(fragment, MEETING_NOTES_HEADING);
+  const span = findSectionSpan(fragment, SCRIPT_TOPIC);
   if (!span) throw new Error('no notes section to type in');
   asPerson(ydoc, () => {
     fragment.insert(span.endExclusive, prose.parseMarkdownBlocks(`- ${line}`));
@@ -84,7 +89,7 @@ describe('the final pass over a meeting that stopped mid-sentence', () => {
     await h.end();
 
     expect(h.notes()).toContain('a rollback');
-    expect(h.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(h.countHeadings(SCRIPT_TOPIC)).toBe(1);
   });
 
   it('a stop with nothing but an unfinished sentence still writes a note', async () => {
@@ -158,7 +163,7 @@ describe('a person typing in the notes while the meeting runs', () => {
     expect(items).toContain('the sync is the bottleneck');
     // His line survives exactly once, and no second section opened.
     expect(second.markdown.split('MY OWN line, in my words').length).toBe(2);
-    expect(h.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(h.countHeadings(SCRIPT_TOPIC)).toBe(1);
   });
 
   it('and the FINAL pass appends under it too', async () => {
@@ -180,6 +185,6 @@ describe('a person typing in the notes while the meeting runs', () => {
     expect(items).toContain('MY OWN line, in my words');
     expect(items).toContain('rollback before Friday');
     expect(h.markdown().split('MY OWN line, in my words').length).toBe(2);
-    expect(h.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(h.countHeadings(SCRIPT_TOPIC)).toBe(1);
   });
 });

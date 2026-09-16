@@ -75,7 +75,7 @@ import {
   type NotesComposer,
   createStubNotesComposer,
 } from '../packages/server/src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../packages/server/src/notes-doc-access.ts';
+import { notesTopicHashes } from '../packages/server/src/notes-heading-level.ts';
 import { type ServerHandle, createServer } from '../packages/server/src/server.ts';
 import {
   type MockScriptTurn,
@@ -260,7 +260,12 @@ function scriptedComposer(seen: Composed[]): NotesComposer {
       const call = seen.length + 1;
       if (call === BLANK_BULLET_CALL) {
         seen.push({ said, kind: 'blank' });
-        return [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}\n\n- ` }];
+        return [
+          {
+            op: 'insert_at_end',
+            markdown: `${notesTopicHashes(input.outline)} The blank-bullet tick\n\n- `,
+          },
+        ];
       }
       const edits = call === EMPTY_TICK_CALL ? [] : await stub.compose(input);
       seen.push({ said, kind: edits.length > 0 ? 'wrote' : 'empty' });

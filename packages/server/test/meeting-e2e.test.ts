@@ -122,6 +122,11 @@ class AudioClient {
   }
 }
 
+// The headings this meeting opened. There is no reserved section name to
+// count any more, so "the section is replaced, not doubled" means ONE topic
+// heading — at `## `, the level this doc's outline names, under its `# ` title.
+const topicHeadings = (md: string): string[] => md.split('\n').filter((l) => l.startsWith('## '));
+
 const waitFor = async (pred: () => boolean, what: string): Promise<void> => {
   const deadline = Date.now() + 2_000;
   while (!pred()) {
@@ -212,21 +217,21 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
     // must not be.
     client.speak(6);
     await waitFor(() => client.frames.some((f) => String(f.text).includes('sink')), 'the partial');
-    expect(docMarkdown()).not.toContain('Meeting notes');
+    expect(topicHeadings(docMarkdown())).toEqual([]);
     expect(docMarkdown()).not.toContain('sink');
 
     // The turn settles — the correction lands on the strip. Settled is still
     // not paused: the doc stays untouched until the quiet timer fires.
     client.speak(1);
     await waitFor(() => client.finals().length === 1, 'the settled turn');
-    expect(docMarkdown()).not.toContain('Meeting notes');
+    expect(topicHeadings(docMarkdown())).toEqual([]);
 
     // The speaker goes quiet: the first pause, the first notes.
     schedule.fire();
     await waitFor(() => updates.length === 1, 'the first notes update');
     const v1 = docMarkdown();
     expect(v1).toContain('So the sync is the bottleneck.');
-    expect(v1.split('## Meeting notes').length).toBe(2);
+    expect(topicHeadings(v1)).toHaveLength(1);
     // What the engine took back never reached the doc — the correction lived
     // and died on the strip.
     expect(v1).not.toContain('sink');
@@ -245,7 +250,7 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
     const v2 = docMarkdown();
     expect(v2).toContain('So the sync is the bottleneck.');
     expect(v2).toContain("Let's measure it first.");
-    expect(v2.split('## Meeting notes').length).toBe(2);
+    expect(topicHeadings(v2)).toHaveLength(1);
     expect(readerMarkdown().split('So the sync is the bottleneck.').length).toBe(2);
     // And no verbatim record came with them (owner, 2026-09-03): the doc gets
     // the notes, the words go to the JSONL asserted at the end of this test
@@ -283,7 +288,7 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
     const v3 = docMarkdown();
     expect(v3).toContain('then we');
     expect(v3).not.toContain('Then we decide.'); // words never spoken
-    expect(v3.split('## Meeting notes').length).toBe(2);
+    expect(topicHeadings(v3)).toHaveLength(1);
 
     // The durable record kept every settled turn, corrections applied.
     const meetingId = String(client.frames.find((f) => f.type === 'ready')?.meetingId);
@@ -341,7 +346,7 @@ describe('a meeting end to end: pauses become notes, stop/start stays consistent
     // every line it wrote is asserted below, and its authorship was released
     // when this recording started, so an edit naming one arrives as a
     // suggestion.
-    expect(md.split('## Meeting notes').length).toBe(2);
+    expect(topicHeadings(md)).toHaveLength(1);
     // Every note the FIRST meeting wrote is still there, after stop/restart.
     // This is the assertion that mattered, and it did not change.
     expect(md).toContain('So the sync is the bottleneck.');

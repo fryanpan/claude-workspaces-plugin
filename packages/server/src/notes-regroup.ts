@@ -39,7 +39,7 @@
  * nesting. On the eval's ES2002a ledger-haiku slice that took "notes are
  * organised under topics" from 83% to 0%: told at tick 1 that its four
  * homeless bullets were a full topic to group in place, the note-taker nested
- * them and never opened the `###` heading the prompt asks for.
+ * them and never opened the topic heading the prompt asks for.
  *
  * Staying silent there was no better, and the 43-tick ES2002b slice is where
  * that shows: EVERY flat-run failure on it reads `under "(no heading)"`,
@@ -49,7 +49,7 @@
  *
  * So a homeless run gets the remedy that fits it. `homelessRun` names the
  * bullets and the directive asks for the heading they belong under — the
- * prompt's own "open a new `### ` heading" rule, aimed at the blocks that
+ * prompt's own "open a new topic heading" rule, aimed at the blocks that
  * need it — while `regroupTargets` keeps asking for groups under a heading
  * that already exists. One wall, two shapes, and neither instruction can be
  * carried out by doing the other.
@@ -69,6 +69,7 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
+import { notesTopicHashes } from './notes-heading-level.ts';
 import { MAX_FLAT_RUN_BULLETS } from './notes-quality.ts';
 import { notesSectionEnd } from './notes-section-fit.ts';
 
@@ -288,8 +289,8 @@ export function regroupDirective(
       `THIS UPDATE. A list ${bar} bullets long that nothing names is the wall these`,
       'notes exist instead of, and what it is missing is the topic, not a',
       'group: nesting bullets nobody has named leaves them just as homeless.',
-      "Insert the `### ` heading these belong under, then put this speech's",
-      'points under its id on the next update. Where they are two subjects,',
+      `Insert the \`${notesTopicHashes(outline)} \` heading these belong under, then put this`,
+      "speech's points under its id on the next update. Where they are two subjects,",
       'open the heading for the one this speech is about.',
       '',
       'The bullets waiting for a heading:',

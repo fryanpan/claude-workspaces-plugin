@@ -16,7 +16,7 @@ import { describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { applyNotesUpdate, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+
 import {
   LEGACY_TRANSCRIPT_HEADING,
   allowedIn,
@@ -24,7 +24,7 @@ import {
   legacyTranscriptSpan,
 } from '../src/notes-legacy-transcript.ts';
 import { asPerson, oneDocStore } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const DATA_DIR = '/srv/claude-workspaces/data';
 
@@ -43,7 +43,7 @@ function markdownOf(ydoc: Y.Doc): string {
 const AS_THE_OLD_WRITER_LEFT_IT = [
   '# Interview prep',
   '',
-  `## ${MEETING_NOTES_HEADING}`,
+  `## ${SCRIPT_TOPIC}`,
   '',
   '- ask about latency',
   '',
@@ -61,7 +61,7 @@ const AS_THE_OLD_WRITER_LEFT_IT = [
 const A_PERSON_PASTED_IT = [
   '# Interview prep',
   '',
-  `## ${MEETING_NOTES_HEADING}`,
+  `## ${SCRIPT_TOPIC}`,
   '',
   '- ask about latency',
   '',
@@ -133,7 +133,7 @@ describe('legacyTranscriptSpan', () => {
   });
 
   it('is null when there is no such section', () => {
-    const ydoc = docFrom(`# Agenda\n\n## ${MEETING_NOTES_HEADING}\n\n- a point\n`);
+    const ydoc = docFrom(`# Agenda\n\n## ${SCRIPT_TOPIC}\n\n- a point\n`);
     expect(legacyTranscriptSpan(prose.getProseFragment(ydoc))).toBeNull();
   });
 });
@@ -244,7 +244,7 @@ describe('dropLegacyTranscriptSection', () => {
   });
 
   it('does nothing at all to a doc that never had one', () => {
-    const clean = `# Agenda\n\n## ${MEETING_NOTES_HEADING}\n\n- a point\n`;
+    const clean = `# Agenda\n\n## ${SCRIPT_TOPIC}\n\n- a point\n`;
     const ydoc = docFrom(clean);
     expect(dropLegacyTranscriptSection(ydoc)).toBe('absent');
     expect(markdownOf(ydoc)).toBe(markdownOf(docFrom(clean)));
@@ -347,7 +347,12 @@ describe('the kept section is reported once per doc', () => {
     } finally {
       console.log = real;
     }
-    expect(said.filter((line) => line.includes('d-quiet'))).toHaveLength(1);
+    // THE LEGACY LINE ONLY. A meeting writing into this doc logs other
+    // things about it — a note moved under its topic, an edit the guard kept
+    // — and a filter on the doc id alone counted those as repeats of this
+    // one.
+    const kept = said.filter((line) => line.includes('d-quiet') && line.includes('so it stays'));
+    expect(kept).toHaveLength(1);
     // And the section is still there after all three.
     expect(markdownOf(ydoc)).toContain('I pasted this myself from Otter and I need it.');
   });

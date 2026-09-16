@@ -108,6 +108,7 @@
 import type { prose } from '@claude-workspaces/core';
 import { sectionIds } from './notes-cleanup-scope.ts';
 import { correctedNote, correctsIt, ownWords } from './notes-edit-correction.ts';
+import { headingRename } from './notes-heading-rename.ts';
 import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
 
 /** What the guard decided, for the caller to apply and to log. */
@@ -305,6 +306,11 @@ function writesANote(markdown: string): boolean {
   );
 }
 
+/** Whether the outline says this block is a heading. */
+function isHeading(blockId: string, outline: readonly prose.OutlineEntry[] | undefined): boolean {
+  return outline?.find((e) => e.id === blockId)?.kind === 'heading';
+}
+
 /**
  * Filter a tick's edits down to the ones that cannot destroy the section.
  *
@@ -354,16 +360,23 @@ export function guardNotesEdits(
   // destroys nothing); and only a replacement that drops the bullet's own
   // words is an overwrite rather than a revision. Answers the note such a
   // replace would overwrite, which the loop below adds beside it instead.
+  // WITH NO CLAIM, THE MEETING'S NOTES ARE ITS OWN BLOCKS. A meeting whose
+  // topics were all headings the doc already had opens none of its own, so it
+  // never claims a section — and the three rules below all read "the notes of
+  // this meeting", which authorship answers just as well as a span does. They
+  // used to go quiet for such a meeting's whole length.
+  const ours =
+    section?.blocks ??
+    (ctx.authorId === undefined
+      ? undefined
+      : new Set((outline ?? []).filter((e) => e.author === ctx.authorId).map((e) => e.id)));
   const overwrites = (edit: prose.BlockEdit): prose.OutlineEntry | undefined => {
-    if (edit.op !== 'replace_block' || headingId === undefined || edit.blockId === headingId)
-      return undefined;
-    const was = section?.blocks.has(edit.blockId)
-      ? outline?.find((e) => e.id === edit.blockId)
-      : undefined;
+    if (edit.op !== 'replace_block' || edit.blockId === headingId) return undefined;
+    const was = ours?.has(edit.blockId) ? outline?.find((e) => e.id === edit.blockId) : undefined;
     if (was === undefined || was.kind !== 'listItem' || was.author === undefined) return undefined;
-    const own = ownWords(was, outline ?? [], section?.blocks);
+    const own = ownWords(was, outline ?? [], ours);
     return !keepsItsWords(was.text, edit.markdown, own) &&
-      !saidElsewhere(was, outline ?? [], section?.blocks) &&
+      !saidElsewhere(was, outline ?? [], ours) &&
       !correctsIt(own, edit.markdown, ctx.speech ?? [])
       ? was
       : undefined;
@@ -409,19 +422,53 @@ export function guardNotesEdits(
       out.push(edit);
       continue;
     }
+    // A HEADING IS NEVER REWRITTEN IN PLACE, and never deleted.
+    //
+    // A delete takes the section apart and is refused outright. A replace is
+    // a RENAME the reader is asked about: the talk outgrows the heading it
+    // opened under, and the note-taker owns that heading, so ownership —
+    // which decides rewrite-versus-redline everywhere else — would let a
+    // silent reorganisation of somebody's page straight through
+    // (`notes-heading-rename.ts`).
+    const rename = headingRename(edit, outline ?? []);
+    if (rename !== null) {
+      if ('refused' in rename) {
+        refused.push(`${edit.op} on heading ${edit.blockId}: ${rename.refused}`);
+        continue;
+      }
+      out.push(rename.edit);
+      kept.push(
+        `replace_block on heading ${edit.blockId} renames it — filed as a suggestion, ` +
+          'so the reader decides whether the page is re-filed',
+      );
+      continue;
+    }
+    // NO HEADING IS DELETED BY A TICK. Removing one re-files everything under
+    // it, which is a reorganisation of somebody's page — the same thing the
+    // rename above exists to keep out of the note-taker's hands, and the tidy
+    // -up pass is where an empty heading is removed. Ownership is no answer
+    // here: a heading the note-taker wrote is on the reader's page too.
+    if (edit.op === 'delete_block' && isHeading(edit.blockId, outline)) {
+      refused.push(`delete_block on heading ${edit.blockId}: a tick never removes a heading`);
+      continue;
+    }
     if (headingId !== undefined && edit.blockId === ctx.notesHeadingId) {
       refused.push(`${edit.op} on the meeting's own notes heading (${edit.blockId})`);
       continue;
     }
     const was = overwrites(edit);
-    if (was !== undefined && headingId !== undefined && edit.op === 'replace_block') {
-      // Under the bullet's OWN heading when it has one inside this section,
-      // so a note about a topic stays with its topic; under the meeting's
-      // heading otherwise.
-      const under =
-        was.underHeadingId !== undefined && section?.headings.has(was.underHeadingId) === true
-          ? was.underHeadingId
-          : headingId;
+    // Under the bullet's OWN heading — so a note about a topic stays with its
+    // topic — and under the meeting's heading when the bullet sits outside the
+    // section this meeting claimed. NOT GATED ON A CLAIM: a meeting that only
+    // ever wrote under headings the doc already had never opens one, and this
+    // rule is what stops a rewrite erasing an idea. It used to need the claim
+    // only for somewhere to put the note.
+    const under =
+      was?.underHeadingId !== undefined &&
+      (section === undefined || section.headings.has(was.underHeadingId))
+        ? was.underHeadingId
+        : headingId;
+    if (was !== undefined && under !== undefined && edit.op === 'replace_block') {
       // A replace names the list item it lands in, so its markdown may carry
       // no marker; an insert has no item to land in, and would open a bare
       // paragraph in the middle of the notes.

@@ -30,9 +30,14 @@ import { prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+
 import { createNotesHeadingFileStore } from '../src/notes-heading-store.ts';
-import { type NotesTickHarness, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import {
+  type NotesTickHarness,
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+} from './notes-tick-harness.ts';
 
 const DOC = 'd-ferry-doc';
 /** ONE meeting id across both legs — that is what a resume means. */
@@ -98,7 +103,7 @@ async function droppedAndResumed(
 function headingIdOf(harness: NotesTickHarness): string {
   const found = prose
     .readOutline(harness.ydoc)
-    .find((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
+    .find((e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC);
   if (!found) throw new Error('the doc holds no notes section');
   return found.id;
 }
@@ -112,7 +117,7 @@ describe('what a reconnect resets in the note-taker', () => {
     // than starting a second one below it. (The first leg's own first tick
     // carries no heading id: that is the tick that OPENS the section.)
     expect(before.notesHeadingId).toBeUndefined();
-    expect(leg2.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(leg2.countHeadings(SCRIPT_TOPIC)).toBe(1);
     expect(after.notesHeadingId).toBe(headingIdOf(leg2));
 
     // RESET 1: tick numbering. The resuming leg's first tick is tick 1 again,

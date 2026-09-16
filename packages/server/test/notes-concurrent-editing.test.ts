@@ -25,10 +25,10 @@ import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { applyNotesUpdate, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import type { NotesUpdate } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING, type NotesDocStore } from '../src/notes-doc-access.ts';
+import { type NotesDocStore } from '../src/notes-doc-access.ts';
 import { allBullets } from '../src/notes-quality.ts';
 import { asPerson, headingsOf, oneDocStore } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 /** Every top-level element of the doc, which is the level a list lives at. */
 const topLevel = (ydoc: Y.Doc): Y.XmlElement[] =>
@@ -135,7 +135,7 @@ describe('a person editing the notes while the meeting writes them', () => {
     // ONE section, still, under whatever it is now called. The meeting
     // remembers the block ID it opened, so a rename is a non-event.
     expect(sectionHeadings(ydoc)).toEqual(['Tuesday sync']);
-    expect(harness.countHeadings(MEETING_NOTES_HEADING)).toBe(0);
+    expect(harness.countHeadings(SCRIPT_TOPIC)).toBe(0);
 
     // NO LINE TWICE — neither the agent's nor the person's.
     const bullets = allBullets(md);
@@ -171,8 +171,7 @@ describe('a person editing the notes while the meeting writes them', () => {
       const fragment = prose.getProseFragment(ydoc);
       const at = topLevel(ydoc).findIndex(
         (el) =>
-          el.nodeName === 'heading' &&
-          prose.serializeBlockToMarkdown(el).includes(MEETING_NOTES_HEADING),
+          el.nodeName === 'heading' && prose.serializeBlockToMarkdown(el).includes(SCRIPT_TOPIC),
       );
       // The heading and everything after it — the section, as a person would
       // select and delete it.
@@ -186,7 +185,7 @@ describe('a person editing the notes while the meeting writes them', () => {
     // Their agenda is untouched and their line is not under a meeting heading.
     expect(md).toContain('## My own agenda');
     expect(md).toContain('- a line I typed');
-    expect(headingsOf(ydoc).filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
+    expect(headingsOf(ydoc).filter((h) => h === SCRIPT_TOPIC)).toHaveLength(1);
     expect(md).toContain('- Point 2.');
     expect(harness.errors).toEqual([]);
   });

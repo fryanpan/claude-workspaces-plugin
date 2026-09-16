@@ -2,36 +2,31 @@
  * What one tick ASKS the model, built to be cheap to ask again.
  *
  * The prompt is 98% of what a note costs: a tick sends about five and a half
- * thousand tokens and reads back a hundred. So the shape of this file is not
- * a matter of taste — it is the bill. Everything that repeats from tick to
- * tick is assembled first and handed back as one string (`stable`), and
- * everything about the tick in hand follows it (`volatile`), because a prompt
- * cache is a PREFIX match: one volatile line near the front and the whole
- * prompt is billed at full price again.
+ * thousand tokens and reads back a hundred. So the shape of this file is the
+ * bill, not a matter of taste. Everything that repeats tick to tick is
+ * assembled first as one string (`stable`), everything about the tick in hand
+ * follows it (`volatile`), because a prompt cache is a PREFIX match: one
+ * volatile line near the front and the whole prompt is billed again.
  *
- * The two rules that keeps on this file, and neither is enforceable by a
- * type: nothing that changes every tick may be appended to `stable`, and the
- * doc's outline may only GROW at its end. `meeting-notes-composer.ts` is
- * where the cache breakpoints are actually taken, on the boundaries `blocks`
- * names.
+ * The two rules that keeps on this file, neither enforceable by a type:
+ * nothing that changes every tick may be appended to `stable`, and the doc's
+ * outline may only GROW at its end. `meeting-notes-composer.ts` takes the
+ * cache breakpoints, on the boundaries `blocks` names.
  *
  * THERE IS NO WINDOW OVER THE OUTLINE, AND THAT IS WHAT MAKES THE SECOND RULE
- * TRUE. A tick used to be sent the last eighty body blocks
- * (`NOTES_OUTLINE_RECENT_BLOCKS`), let go of forty at a time
- * (`NOTES_OUTLINE_DROP_STEP`) so the head held still between drops. Both are
- * gone (Bryan, 2026-09-15: "I already recommended not keeping an 80 block
- * window, but rather just send the whole doc and improve caching rates"), and
- * the property the step existed to protect is stronger without them: a window
- * that drops from the front rewrites the head of the prompt every time it
- * moves, while a doc nothing is ever dropped from has a head that is
- * byte-identical from the first tick of the meeting to the last.
+ * TRUE. A tick used to be sent the last eighty body blocks, let go of forty
+ * at a time so the head held still between drops. Both are gone (Bryan,
+ * 2026-09-15: "just send the whole doc and improve caching rates"), and the
+ * property the step protected is stronger without them: a window that drops
+ * from the front rewrites the head of the prompt every time it moves, while a
+ * doc nothing is dropped from has a head that is byte-identical from the
+ * first tick of the meeting to the last.
  *
  * THE BIGGER PROMPT IS THE CHEAPER ONE, and the floor is why. Nothing caches
- * at all until the text before a breakpoint clears the model's minimum
- * cacheable prefix — 4,096 tokens on Haiku 4.5, measured against the API on
- * 2026-09-15 rather than taken from the documentation: a 4,063-token prompt
- * marked for caching wrote nothing and read nothing on the repeat, a
- * 4,112-token one wrote and then read. A marker below that floor is ignored
+ * until the text before a breakpoint clears the model's minimum cacheable
+ * prefix — 4,096 tokens on Haiku 4.5, measured against the API on 2026-09-15
+ * rather than read from the docs: a 4,063-token prompt marked for caching
+ * wrote and read nothing on the repeat, a 4,112-token one wrote then read. A marker below that floor is ignored
  * EVEN WHEN THE WHOLE PROMPT IS FAR ABOVE IT — a small first block in front
  * of a large one cached nothing and the repeat read zero — so a prompt paying
  * full price for all of itself is not too big; it is too small.
@@ -39,10 +34,10 @@
  * MEASURED over 348 ticks of one fixture-driven meeting sent to the real
  * model, same doc and speech in every arm (2026-09-15), input-side dollars:
  * the 80-block window cost $1.90 (4,363 input + 3,742 read a tick), the whole
- * doc with the same directive $3.09 (7,517 + 6,780), and the whole doc with
- * `regroupDirective` capped $1.06 (1,715 + 6,769). So this removal ON ITS OWN
- * costs 63% more, and capping the one block nothing can cache more than pays
- * for it — 44% under the window, the model shown all 383 of the doc's blocks
+ * doc with the same directive $3.09, and the whole doc with `regroupDirective`
+ * capped $1.06 (1,715 + 6,769). So this removal ON ITS OWN costs 63% more,
+ * and capping the one block nothing can cache more than pays for it — 44%
+ * under the window, the model shown all 383 of the doc's blocks
  * at the last tick instead of 143. The first cached read lands at tick 82 in
  * every arm: what clears the floor is the notes accumulating.
  *
@@ -69,7 +64,8 @@
  */
 
 import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts';
-import { MEETING_NOTES_HEADING, NOTES_AUTHOR_ID } from './notes-doc-access.ts';
+import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
+import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
 import { regroupDirective } from './notes-regroup.ts';
 
@@ -130,9 +126,6 @@ export const MAX_CACHE_BREAKPOINTS = 4;
  * median tick writes 66 tokens and reads 6,664.
  */
 export const NOTES_OUTLINE_CACHE_STEPS: readonly number[] = [64, 16, 4];
-
-/** The heading a meeting's section is opened under, as one markdown line. */
-const HEADING_LINE = `## ${MEETING_NOTES_HEADING}`;
 
 /** One content block of the user message, and whether a breakpoint ends it. */
 export interface NotesPromptBlock {
@@ -387,9 +380,10 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
     return {
       chunks: [
         [
-          'The doc is empty, and this meeting has no notes section yet.',
-          `Open one with a single insert_at_end carrying "${HEADING_LINE}", then`,
-          'insert_at_end the first notes under it.',
+          'The doc is empty, and nothing here is about this meeting yet.',
+          `Start a topic: one insert_at_end carrying "${topicHeadingLine(input.outline)}",`,
+          'then insert_at_end the first notes under it. A heading naming what is',
+          'being discussed — never a container called "notes" or "minutes".',
         ].join('\n'),
       ],
       tail: '',
@@ -421,11 +415,12 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
   });
   const preamble =
     input.notesHeadingId === undefined
-      ? [
-          'This meeting has NO notes section in the doc below.',
-          `Open one with a single insert_at_end carrying "${HEADING_LINE}".`,
-        ]
-      : [`This meeting's notes are under heading ${input.notesHeadingId}.`];
+      ? ['Nothing in the doc below is this meeting’s yet.', ...topicRoutingLines(input.outline)]
+      : [
+          `This meeting opened heading ${input.notesHeadingId}. That is where it`,
+          'started, not the box its notes go in — the room has moved on since.',
+          ...topicRoutingLines(input.outline),
+        ];
   // Never cut so deep that the first chunk is a preamble with no table under
   // it: a short doc stays whole and the tail is empty, which is the same
   // prompt the whole thing was before.

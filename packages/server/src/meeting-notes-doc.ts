@@ -100,6 +100,7 @@ import { repairNotesEditAddresses } from './notes-edit-address.ts';
 import { bulletNotesEdits } from './notes-edit-bullets.ts';
 import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
+import { notesTopicLevel } from './notes-heading-level.ts';
 import {
   type NotesHeadingStore,
   type NotesSectionClaim,
@@ -116,7 +117,7 @@ import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import { resolveSchemeLinks } from './notes-scheme-links.ts';
-import { lastNotesHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
+import { lastClaimedHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
 import {
   reattributeNotesSection,
@@ -125,7 +126,7 @@ import {
 } from './notes-speaker-tags.ts';
 import { createNotesTimingLog } from './notes-timing.ts';
 
-export { type NotesDocStore, MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+export type { NotesDocStore } from './notes-doc-access.ts';
 export {
   type RelabelNotesResult,
   reattributeNotesSection,
@@ -228,9 +229,9 @@ export interface NotesHeadingMemory {
    * Learn the heading a batch just opened: the one heading in `after` that was
    * not in `before` and that this agent wrote.
    *
-   * Level-capped at 2, because the topic headings a tick writes under the
-   * section (`### Export dialog`) are the agent's own and new as well. The
-   * section heading is the level-2 one.
+   * Level-capped at THE LEVEL THIS DOC WRITES SECTIONS AT, because the
+   * sub-topics a tick writes under its own heading are the agent's and new as
+   * well. The heading this meeting is writing under is the shallow one.
    */
   learn(
     ids: NotesMeetingIds,
@@ -291,11 +292,6 @@ export interface NotesHeadingMemory {
   endMeeting(ids: NotesMeetingIds, at?: number): void;
 }
 
-/** The level a meeting's own section heading is written at. Deeper headings
- *  under it are topics, which the agent also writes and which must never be
- *  mistaken for the section. */
-const NOTES_HEADING_LEVEL = 2;
-
 /**
  * The section this meeting writes under: the one it remembers, else an
  * existing EMPTY one it may take over.
@@ -334,41 +330,27 @@ export function notesSectionForMeeting(
 }
 
 /**
- * The id of the doc's LAST `Meeting notes` heading when new minutes may write
- * into it, else undefined.
+ * The id of the LAST heading a meeting has claimed on this doc, when new
+ * minutes may carry on under it — else undefined, and this meeting starts a
+ * topic of its own.
  *
- * The owner's 2026-08-31 rule — a new recording opens its own section below
- * whatever the last one wrote — is about never replacing MINUTES somebody has
- * read, and the 2026-09-09 rule says what the other case is: new minutes
- * reuse an existing section when its topic fits. `notes-section-fit.ts` is
- * that test, and it reads the body's AUTHORSHIP rather than its emptiness.
- *
- * WIDENED FROM "EMPTY" ON 2026-09-09, because empty was too narrow by exactly
- * one shape: a `Meeting notes` heading somebody typed with their own lines
- * under it. That is not another meeting's record, it is the doc saying where
- * its minutes go — and refusing to adopt it opened a SECOND heading beside
- * it, which took the person's lines out of the notes while leaving them in
- * the doc. Measured on the eval's own seeded doc, which scored "a person's
- * bullet is never edited" at 0% across every meeting while nothing had
- * edited it.
+ * FOUND BY RECORD, NEVER BY WORDS. There is no reserved section to match on
+ * (owner, 2026-09-15), so the only thing that says a heading belongs to the
+ * minutes rather than to the document is that some meeting wrote it down.
+ * `notes-section-fit.ts` is the test of whether that meeting is finished
+ * enough for this one to continue under it.
  *
  * ADOPTION IS WHAT MAKES IT STICK. The caller records the answer in the
- * heading memory, so from the second tick on this meeting knows which section
+ * heading memory, so from the second tick on this meeting knows which heading
  * is its own — without that, the bullets THIS meeting had just written would
- * read as somebody's work on the next tick and it would open a second section
+ * read as somebody's work on the next tick and it would start a second topic
  * anyway.
- *
- * THE LAST ONE, because both readers of a notes section take the last heading
- * with that text (`notesSectionStart` in the client, the finder here) — an
- * earlier section is not where anybody would read the minutes from, so
- * writing into it would strand them exactly as the eager section-open exists
- * to prevent.
  */
 function reusableNotesSection(
   outline: readonly prose.OutlineEntry[],
   claims: ReadonlyMap<string, NotesSectionClaim>,
 ): string | undefined {
-  const at = lastNotesHeadingIndex(outline);
+  const at = lastClaimedHeadingIndex(outline, claims);
   if (at < 0) return undefined;
   return notesSectionFits(outline, claims) ? outline[at]?.id : undefined;
 }
@@ -443,12 +425,16 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       const held = remembered(ids);
       if (held !== undefined && present(held, after)) return;
       const known = new Set(before.map((e) => e.id));
+      // READ OFF THE DOC AS IT WAS BEFORE THE BATCH — the headings the batch
+      // just added are the ones being judged, so letting them vote on the
+      // level would let a sub-topic redefine what a section is.
+      const topic = notesTopicLevel(before.length > 0 ? before : after);
       const opened = after.find(
         (e) =>
           e.kind === 'heading' &&
           !known.has(e.id) &&
           e.author === NOTES_AUTHOR_ID &&
-          (e.level ?? NOTES_HEADING_LEVEL) <= NOTES_HEADING_LEVEL,
+          (e.level ?? topic) <= topic,
       );
       if (opened) {
         byMeeting.set(keyOf(ids), opened.id);
@@ -707,6 +693,12 @@ export function applyNotesUpdate(
   // meant to replace (`notes-edit-dedupe.ts`).
   const deduped = dedupeNotesEdits(guarded.edits, {
     notesHeadingId,
+    // THIS MEETING'S OWN NOTES, WHEREVER THEY LANDED. A meeting whose topics
+    // were all headings the doc already had never opens one, so it holds no
+    // claim and the section set is empty — and a duplicate check scoped to a
+    // section it does not have catches nothing. Authorship answers it with or
+    // without a claim.
+    ownedElsewhere: new Set(full.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id)),
     outline: full,
     speech: update.tick.turns.map((t) => t.text),
     authorId: NOTES_AUTHOR_ID,

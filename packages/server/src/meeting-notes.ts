@@ -63,7 +63,7 @@ import {
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
 import { isQuotaFailure } from './model-quota.ts';
-import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import { notesTopicHashes } from './notes-heading-level.ts';
 import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
 import { appendSuggestions, resolveNoteLinks, suggestionLabel } from './notes-link-intent.ts';
@@ -456,13 +456,33 @@ export interface NotesComposer {
 }
 
 /**
+ * What the stub calls the topic it opens: the first sentence of the first
+ * thing said, trimmed to a heading's length.
+ *
+ * DETERMINISTIC AND DERIVED, which is the whole point of the stub. A fixed
+ * word would be a container under another name, and every pipeline test would
+ * assert that word rather than that a topic was named.
+ */
+function stubTopic(input: NotesComposeInput): string {
+  const first = input.tick.turns[0]?.text?.trim() ?? '';
+  const sentence = first.split(/(?<=[.!?])\s/, 1)[0] ?? first;
+  const topic = sentence
+    .replace(/[.!?]+$/, '')
+    .slice(0, 60)
+    .trim();
+  return topic.length > 0 ? topic : (input.context?.docTitle ?? 'This meeting');
+}
+
+/**
  * The deterministic composer the tests speak to: no network, no randomness —
  * one edit per tick, carrying a bullet per new settled turn. Its determinism
  * is asserted, because a stub that drifted would make every pipeline test
  * assert luck.
  *
- * With no notes heading yet it opens one, exactly as the real composer is
- * asked to; from then on it addresses that heading by id.
+ * With no heading of its own yet it writes a TOPIC heading — named after the
+ * first thing said, at the level the doc writes its sections at — exactly as
+ * the real composer is asked to; from then on it addresses that heading by
+ * id. It opens no reserved section, because there is none to open.
  */
 export function createStubNotesComposer(): NotesComposer {
   return {
@@ -478,7 +498,7 @@ export function createStubNotesComposer(): NotesComposer {
           ? [
               {
                 op: 'insert_at_end',
-                markdown: `## ${MEETING_NOTES_HEADING}\n\n${bullets}`,
+                markdown: `${notesTopicHashes(input.outline)} ${stubTopic(input)}\n\n${bullets}`,
               } satisfies prose.BlockEdit,
             ]
           : [
@@ -1630,107 +1650,29 @@ export function beginNotesSession(
       } catch (err) {
         deps.onError?.(err instanceof Error ? err.message : 'notes heading lookup failed');
       }
-      // OPEN THE SECTION BEFORE THE FIRST BULLET, NEVER ALONGSIDE IT.
+      // NOTHING IS OPENED AHEAD OF THE FIRST BULLET ANY MORE, and the window
+      // that made it necessary is closed by construction.
       //
-      // A meeting that has opened no section yet used to compose anyway, and
-      // the model — shown an outline with somebody's `## Meeting notes`
-      // heading in it — wrote its bullets under that heading. It kept doing
-      // so until some later tick opened a section of its own, and BOTH
-      // readers of a notes section take the LAST heading with that text
-      // (`notesSectionStart` in the client, the server's finder here). So
-      // everything written in that window left the notes at the moment the
-      // second section appeared, while staying in the doc. Measured on AMI
-      // fixture ES2003c: the section grew to 23 bullets over fifteen ticks
-      // and read 0 at tick 16, when the whole doc read 26.
+      // WHAT IT USED TO GUARD. A meeting with no section yet composed anyway,
+      // and the model — shown an outline carrying somebody's `## Meeting
+      // notes` heading — wrote its bullets under that heading. Both readers
+      // of the notes took the LAST heading with those words, so everything
+      // written in that window left the notes the moment a second `Meeting
+      // notes` appeared, while staying in the doc. Measured on AMI fixture
+      // ES2003c: 23 bullets over fifteen ticks, read as 0 at tick 16 while
+      // the whole doc read 26. The fix was to open the section first.
       //
-      // Opening the section first closes the window: there is never a tick
-      // whose bullets go somewhere the notes will later stop being read from.
-      // It is one extra write on the first tick of a meeting and none after.
+      // WHY IT IS GONE. There is no reserved section to open (owner,
+      // 2026-09-15) and no reader that finds one by its words: the notes are
+      // the whole doc, and a heading this meeting writes is found by id. A
+      // tick that writes under a heading somebody else wrote has written
+      // under the topic those words belong to, which is now the point rather
+      // than the bug — and it strands nothing, because no later write can
+      // move where the notes are read from.
       //
-      // THE OWNER'S RULE IS UNTOUCHED. A new recording still opens its own
-      // section below whatever the last one wrote, and the earlier section
-      // keeps every line in it — this changes only WHEN the new section is
-      // opened, from "whenever the model gets round to it" to "before it
-      // writes anything".
-      // ONLY WHEN THE DOC ALREADY HAS A SECTION THIS MEETING DOES NOT OWN.
-      // On a doc with no `Meeting notes` heading at all there is nothing to
-      // be stranded by and nothing to write into by mistake, so the composer
-      // opens the section itself exactly as it always has — the behaviour a
-      // row of tests pins, and the one that lets the model choose where the
-      // section goes. The eager open is for the case that has somewhere
-      // wrong to write.
-      //
-      // AND ONLY WHEN THAT SECTION IS ANOTHER MEETING'S — which is settled
-      // before this line, not here. `notesSectionForMeeting` adopts a
-      // section whose topic fits (`notes-section-fit.ts`) and records it in
-      // the heading memory, so on a doc whose notes section is reusable
-      // `notesHeadingId` is already defined and this never fires. What
-      // reaches here is a doc carrying somebody else's minutes, which is
-      // exactly the case the eager open exists for.
-      const strandingRisk =
-        notesHeadingId === undefined &&
-        outline.some((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
-      if (strandingRisk && deps.readOutline && deps.notesHeadingId) {
-        let opened: boolean;
-        // Kept beside `opened` so the refusal branch below can tell a doc
-        // that refused this open from one that failed it.
-        let openRefused = false;
-        try {
-          const answer = deps.onNotes({
-            docId: ids.docId,
-            meetingId: ids.meetingId,
-            // The tick this write belongs to, carrying no turns: it is the
-            // section being opened, not any speech being noted, and a sink
-            // that reports what a tick wrote must not attribute these words
-            // to the room.
-            tick: { ...tick, turns: [] },
-            edits: [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }],
-          });
-          openRefused = answer === 'refused';
-          opened = answer !== false && !openRefused;
-        } catch (err) {
-          opened = false;
-          deps.onError?.(err instanceof Error ? err.message : 'notes section open failed');
-        }
-        if (!opened) {
-          // THE SECTION DID NOT OPEN, SO NOTHING IS COMPOSED THIS TICK. A
-          // compose that went ahead would write under the section that IS
-          // there — somebody else's — which is the exact window this block
-          // exists to close. Same handling as a refused final write: the
-          // words carry, the surface is told, and a size-independent retry
-          // is scheduled. A sink that threw is a refusal too, and it must
-          // not reject the tick chain that every later tick waits on.
-          carry = [...raw, ...carry];
-          lifecycle(
-            'failed',
-            tick.tick,
-            raw.map((t) => t.turn),
-          );
-          composeFailures++;
-          deps.onError?.(
-            `${ids.docId} meeting ${ids.meetingId} tick ${tick.tick}: notes section not opened`,
-          );
-          report('failed', []);
-          // A REFUSAL IS NOT RETRIED; see {@link NotesWriteRefusal}. An open
-          // the doc refused would be refused again this tick, and the words
-          // are already carried.
-          if (!openRefused) retryAfterFailure(tick);
-          return;
-        }
-        try {
-          outline = deps.readOutline({ docId: ids.docId, meetingId: ids.meetingId });
-          notesHeadingId = deps.notesHeadingId({
-            docId: ids.docId,
-            meetingId: ids.meetingId,
-            outline,
-          });
-        } catch (err) {
-          // Same rule as every other outline read: it informs, it never
-          // fails the tick. With no heading the compose behaves exactly as
-          // it did before this block existed.
-          deps.onError?.(err instanceof Error ? err.message : 'notes outline read failed');
-        }
-      }
+      // One write fewer on the first tick of every meeting, and one fewer
+      // refusal path: the open could itself be refused, which failed the tick
+      // that was only trying to make room for itself.
       // DERIVED FROM THE OUTLINE, not from a section read: a block carrying no
       // author is one this agent did not write, or one a person has since
       // touched — `clearAuthorshipOnPersonEdit` makes those the same answer.

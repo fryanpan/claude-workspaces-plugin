@@ -1,30 +1,26 @@
 /**
  * A batch of block-addressed edits, applied in ONE Yjs transaction.
  *
- * The rest of the edit family is one verb per call, which is right for an
- * agent making one change. It is wrong for an agent that composes a handful
- * of small changes at once — a note-taker adding two bullets and rewriting
- * a third — because each call is a transaction of its own, so a reader
- * watching the doc sees the batch arrive in pieces and a failure halfway
- * leaves half of it applied.
+ * One verb per call is right for an agent making one change and wrong for one
+ * composing a handful at once — a note-taker adding two bullets and rewriting
+ * a third. Each call is its own transaction, so a reader sees the batch in
+ * pieces and a failure halfway leaves half of it applied.
  *
- * So this file takes a list of edits addressed by BLOCK ID (see
- * `prose-outline.ts`) and applies them together. Two rules make the result
- * predictable:
+ * So this file takes edits addressed by BLOCK ID (`prose-outline.ts`) and
+ * applies them together. Two rules make the result predictable:
  *
- * - **Authorship decides direct-vs-proposal.** An edit that replaces or
- *   deletes a block still marked as the caller's own applies directly.
- *   Anything else — a block a person wrote, or one of the caller's that a
- *   person has since touched, which is the same thing after
- *   `clearAuthorshipOnPersonEdit` has run — becomes a block proposal
- *   (`suggest-blocks.ts`): the words struck, the replacement offered as
- *   blocks beside them. Nothing this file does can destroy words the caller
- *   did not write.
+ * - **Authorship decides direct-vs-proposal**, unless the caller asks. An
+ *   edit replacing or deleting a block still marked as the caller's own
+ *   applies directly; anything else — a block a person wrote, or one of the
+ *   caller's a person has since touched, the same thing after
+ *   `clearAuthorshipOnPersonEdit` — becomes a block proposal
+ *   (`suggest-blocks.ts`): the words struck, the replacement offered beside
+ *   them. `propose` on a replace takes that path whoever owns the block.
+ *   Nothing here can destroy words the caller did not write.
  * - **A list is grown, never twinned.** Inserting bullets where the target
  *   already ends in a list of the same type puts the new items INTO that
- *   list. Splicing a second list in beside it is what made the browser's
- *   list-join plugin re-create the agent's own bullets, and re-created
- *   bullets are bullets the agent can no longer find.
+ *   list. Splicing a second list in beside it made the browser's list-join
+ *   plugin re-create the agent's own bullets, which the agent cannot find.
  */
 import * as Y from 'yjs';
 import {
@@ -51,7 +47,10 @@ import type { SuggestionAuthor } from './suggest-ops.ts';
 export type BlockEdit =
   | { op: 'insert_under_heading'; headingId: string; markdown: string }
   | { op: 'insert_at_end'; markdown: string }
-  | { op: 'replace_block'; blockId: string; markdown: string }
+  // `propose` makes a replace a proposal whoever owns the block — for an edit
+  // whose cost to a reader is not what ownership measures. The heading rename
+  // is the one that asked for it (`notes-heading-rename.ts`).
+  | { op: 'replace_block'; blockId: string; markdown: string; propose?: boolean }
   | { op: 'delete_block'; blockId: string }
   | { op: 'nest_blocks'; leadBlockId: string; blockIds: readonly string[] };
 
@@ -436,7 +435,8 @@ export function applyBlockEdits(
           }
           // A block with no words has nothing to protect and nothing a
           // proposal could strike, so it applies directly whoever owns it.
-          if (readBlockAuthor(el) !== opts.author && !holdsNoWords(el)) {
+          const asked = edit.op === 'replace_block' && edit.propose === true;
+          if ((asked || readBlockAuthor(el) !== opts.author) && !holdsNoWords(el)) {
             // Not ours (or no longer ours): propose it, in this transaction,
             // so a reader sees the batch land whole or not at all.
             const res = proposeEdit(fragment, el, replacement, opts);
