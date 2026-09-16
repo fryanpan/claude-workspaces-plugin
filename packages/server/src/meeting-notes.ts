@@ -1085,7 +1085,18 @@ function withSuggestions(
  */
 export function beginNotesSession(
   deps: MeetingNotesDeps,
-  ids: { docId: string; meetingId: string },
+  ids: {
+    docId: string;
+    meetingId: string;
+    /**
+     * Names this doc already has for engine labels, from the meetings before
+     * this one. A session starts knowing the room rather than learning it
+     * again: the engine hands out "A" afresh on every reconnect and every
+     * new recording, and an empty map made every leg after the first write
+     * "Speaker A" over a voice somebody had already named.
+     */
+    speakerNames?: Readonly<Record<string, string>>;
+  },
 ): MeetingNotesSession {
   // Before anything else: whatever a previous recording wrote on this doc is
   // finished writing, and this session must never replace it.
@@ -1132,7 +1143,7 @@ export function beginNotesSession(
    * own try. Neither one is worth a meeting.
    */
   let chain: Promise<void> = Promise.resolve();
-  const names: Record<string, string> = {};
+  const names: Record<string, string> = { ...(ids.speakerNames ?? {}) };
   /**
    * Every engine label this meeting has carried. Kept so a rename can ask
    * whether the name it is replacing belongs to more than one voice — the

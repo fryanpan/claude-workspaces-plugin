@@ -313,6 +313,41 @@ export function listMeetings(dataDir: string, docId: string): MeetingRecord[] {
   return [...byId.values()].sort((a, b) => a.startedAt - b.startedAt);
 }
 
+/**
+ * Every name a person has given a voice ON THIS DOC, oldest meeting first so
+ * the most recent naming wins.
+ *
+ * WHY THE DOC AND NOT THE MEETING. A label is a fact about an engine session
+ * — "A" is handed out afresh — but a VOICE is a fact about the doc: the same
+ * two people sit down, the socket drops, the recording is stopped and
+ * started, and each of those opens a new session that starts naming from "A"
+ * again. Keyed to the meeting, a name given once covered one leg of one
+ * conversation and every later leg read as a new, unnamed voice; a doc's
+ * notes then carried several labels for one person, most of them nameless.
+ * Keyed to the doc, the name a person gave once covers the label wherever it
+ * comes back.
+ *
+ * It is a carry, not a claim about acoustics: nothing here can hear that the
+ * new session's "A" is the same throat as the last one's. What makes it the
+ * right default is which way the two errors fall — a carried name that is
+ * wrong is one a person can see and retype, and an uncarried name is a
+ * transcript nobody can trace at all.
+ */
+export function docSpeakerNames(dataDir: string, docId: string): Record<string, string> {
+  const names: Record<string, string> = {};
+  // The index in WRITE order rather than meeting order: a naming is a
+  // gesture with an instant, and the last one a person made is what they
+  // meant — including a rename addressed to a meeting that has already
+  // ended, which meeting order would let an older line overwrite.
+  for (const row of readJsonl(meetingIndexPath(dataDir, docId))) {
+    if (typeof row.speakers !== 'object' || row.speakers === null) continue;
+    for (const [label, name] of Object.entries(row.speakers as Record<string, unknown>)) {
+      if (typeof name === 'string') names[label] = name;
+    }
+  }
+  return names;
+}
+
 /** One meeting's settled turns, in the order they settled. */
 export function readTranscript(
   dataDir: string,
@@ -386,6 +421,16 @@ export interface ActiveMeeting {
    * line (the engine's end-of-session pass changing its mind).
    */
   recordTurn(turn: number, text: string, speaker?: string): void;
+  /**
+   * Every name this meeting knows for a voice: the ones given during it, and
+   * the ones carried in from earlier meetings on the same doc.
+   *
+   * Read at start by everything that renders a voice — the `ready` frame the
+   * strip fills its cast from, and the notes session that writes the name
+   * into a bullet — so a leg that opens after a drop or a stop names the room
+   * the way the last leg did. See {@link docSpeakerNames}.
+   */
+  readonly speakerNames: Readonly<Record<string, string>>;
   /** "Label `speaker` is `name`" — appended to the index, last word wins. */
   nameSpeaker(speaker: string, name: string): void;
   /**
@@ -791,7 +836,21 @@ export class MeetingStore {
       written.set(turn.turn, { text: turn.text, speaker: turn.speaker });
     // Above everything already recorded, never on top of it — see `turnBase`.
     const turnBase = args.seed.reduce((top, t) => Math.max(top, t.turn + 1), 0);
+    /** Names given in THIS meeting, which is what its own record carries. */
     const speakers: Record<string, string> = {};
+    for (const [label, name] of Object.entries(
+      listMeetings(dataDir, docId).find((m) => m.meetingId === meetingId)?.speakers ?? {},
+    )) {
+      speakers[label] = name;
+    }
+    /**
+     * Names this doc's earlier meetings gave, for labels this one has not
+     * been told about. Written into this meeting's own record the first time
+     * such a voice actually speaks (see `recordTurn`), never at start: a
+     * record that listed the doc's whole cast would claim speakers this
+     * meeting never heard, and the cast is read back off exactly that field.
+     */
+    const carried = docSpeakerNames(dataDir, docId);
     /**
      * Streams currently down, and when each went — the open half of a gap.
      *
@@ -815,8 +874,26 @@ export class MeetingStore {
       docId,
       startedAt,
       turnBase,
+      get speakerNames(): Readonly<Record<string, string>> {
+        // Carried first, so a name given IN this meeting wins over the one it
+        // arrived with — the person is correcting the carry.
+        return { ...carried, ...speakers };
+      },
       recordTurn(turn: number, text: string, speaker?: string): void {
         if (stopped) return;
+        // A voice an earlier meeting on this doc named has just spoken here,
+        // so this meeting's record says what it is called — one line, the
+        // first time, in the same append-only form a person's naming takes.
+        // Written whatever the project keeps: it is a fact about the meeting
+        // rather than a record of what was said in it.
+        if (speaker !== undefined && !(speaker in speakers) && carried[speaker] !== undefined) {
+          const name = carried[speaker] as string;
+          speakers[speaker] = name;
+          appendLine(meetingIndexPath(dataDir, docId), {
+            meetingId,
+            speakers: { [speaker]: name },
+          });
+        }
         // Counted either way — `turns` is how long the meeting was, which the
         // project did not ask to forget — but written only when the project
         // keeps the words. The composer still sees every turn: it is handed

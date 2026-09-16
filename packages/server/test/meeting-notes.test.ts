@@ -780,6 +780,32 @@ describe('notes session', () => {
     ]);
   });
 
+  it('opens already knowing the names an earlier meeting on the doc gave', async () => {
+    // The session a reconnect or a second recording opens is a new engine
+    // session, labelling from "A" again. Seeded with the doc's cast, its very
+    // first tick writes the name the person already typed instead of
+    // reintroducing a voice they have met.
+    const schedule = new ManualScheduler();
+    const inputs: NotesComposeInput[] = [];
+    const composer: NotesComposer = {
+      name: 'capture',
+      compose(input) {
+        inputs.push(input);
+        return Promise.resolve(editsSaying('notes'));
+      },
+    };
+    const session = beginNotesSession(
+      { composer, quietMs: 1000, schedule, onNotes: () => {} },
+      { ...ids, speakerNames: { A: 'Jordan' } },
+    );
+    session.onTurn({ turn: 0, text: 'Where did we land?', final: true, speaker: 'A' });
+    session.onTurn({ turn: 1, text: 'On Thursday.', final: true, speaker: 'B' });
+    await session.end();
+    expect(inputs.map((i) => i.tick.turns.map((t) => t.speaker))).toEqual([
+      ['Jordan', 'Speaker B'],
+    ]);
+  });
+
   it('gives the composer a two-stream voice by its name alone', async () => {
     // The server-side composer is the sixth surface AC1 names. An unnamed
     // voice still says which room it is in — that is what tells two

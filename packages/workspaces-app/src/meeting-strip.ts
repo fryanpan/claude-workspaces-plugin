@@ -660,9 +660,14 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    *  press. */
   let tapToStart = false;
   /**
-   * Engine label → what the person calls that voice. Belongs to ONE meeting:
-   * the engine hands out "A" afresh each session, so the map is emptied when
-   * a meeting starts, never carried into the next.
+   * Engine label → what the person calls that voice.
+   *
+   * Emptied when a meeting starts and then REFILLED from the server's `ready`
+   * frame, which carries every name this doc already has. The engine hands
+   * out "A" afresh each session, so the strip cannot know on its own that the
+   * new session's cast is the same room; the server can, because the naming
+   * is written against the doc. Emptying without the refill is what left the
+   * people in the room nameless after every reconnect.
    */
   let names: Record<string, string> = {};
   /**
@@ -1656,6 +1661,18 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // the person is concerned, so the clock, the state and the zone are
         // left exactly as they are. Only the words the server could not carry
         // on are dealt with here.
+        /**
+         * The names this doc already has, as the server folded them. Applied
+         * after every reset below, so a new session's labels arrive wearing
+         * the names the person gave the last one.
+         */
+        const applyCast = (): void => {
+          for (const [label, name] of Object.entries(msg.speakers ?? {})) {
+            const given = normalizeSpeakerName(name);
+            if (given !== undefined) names[label] = given;
+          }
+          opts.liveZone?.setNames({ ...names });
+        };
         const wasResuming = resuming;
         resuming = false;
         reconnect.succeeded();
@@ -1671,6 +1688,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // The meeting now has a name, so anything keyed to one can hold
         // this meeting's roster rather than nothing.
         opts.onMeetingChange?.(msg.meetingId ?? null);
+        applyCast();
         if (wasResuming && state.kind === 'recording') {
           if (msg.resumed) {
             // Same meeting, same transcript, same section: nothing to say.
@@ -1684,6 +1702,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
             turns = [];
             names = {};
             seen = new Set();
+            // The meeting is new; the room is not. Whatever the doc already
+            // calls these voices comes straight back.
+            applyCast();
             // And the clock restarts with it. This IS a new meeting — its own
             // id, its own transcript, its own notes section — so an elapsed
             // readout still counting from the old one would put a length on
