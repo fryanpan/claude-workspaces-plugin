@@ -289,6 +289,20 @@ trailing comment. Push findings name the commit that wrote each line — the
 remedy is a rewrite only for one this push publishes, a forward commit for one
 already on the remote.
 
+**Write Harborlight, Riverbend or Saltmarsh where a real name would go.** They
+are the house fixture names — invented place-words for a test fixture, a mock
+payload, a doc example, a sample transcript — and the Haiku scanner is told
+about them as placeholders beside Alice and Bob, so a push carrying one is not
+blocked. One list, `HOUSE_FIXTURE_NAMES` in `scripts/scrub_names.py`, which
+`scrub-haiku.py` renders into the prompt: the half that tells you to write them
+and the half that decides whether they may be pushed cannot drift apart. They
+did drift once. A push carrying `Saltmarsh` in a test constant was blocked as a
+surname used as sample data, and because the gate reads every added line of the
+UNPUSHED RANGE a forward commit does not clear it — the branch had to be
+rebuilt as one commit and lost its ordered history. The exemption is those
+three words and nothing wider: any other unfamiliar surname is still a leak in
+a fixture, and `bun run scrub:recall` is what says so rather than this sentence.
+
 Setup once: `git config core.hooksPath .githooks`. Until then the clone is
 unprotected and looks identical to a protected one; `bun install` warns
 (`bun run check:hooks` asks directly). Both hooks share one config source and

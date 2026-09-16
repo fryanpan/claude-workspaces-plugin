@@ -11,16 +11,12 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
+import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 import type { Reading } from './mermaid-strict-driver.ts';
 
-const CHROME = ((): string | null => {
-  try {
-    return resolveChromeBin(undefined);
-  } catch {
-    return null;
-  }
-})();
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
 
 /** One launch, a bundle of mermaid, four renders with their clicks. */
 const BROWSER_CASE_MS = 120_000;

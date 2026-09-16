@@ -31,12 +31,13 @@
 
 import type { prose } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { type ClaudeKeySlot, noteClaudeSlot } from './claude-key-slot.ts';
 import type { NotesComposeInput, NotesComposer } from './meeting-notes.ts';
 import { refusalMessage } from './model-quota.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { buildNotesPrompt } from './notes-prompt-build.ts';
 import { readKeychainPassword } from './share/keychain.ts';
-import { authHeader, resolveCredentialFrom } from './summarize.ts';
+import { authHeader, resolveCredentialSlotFrom } from './summarize.ts';
 
 export const NOTES_MODEL = 'claude-haiku-4-5-20251001';
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -117,6 +118,16 @@ export interface HaikuNotesComposerOpts {
    * still composes, it just cannot be retuned without a deploy.
    */
   instructions?: () => string;
+  /**
+   * The slot `apiKey` came out of, when the caller already resolved it.
+   *
+   * `notes-method-composer.ts` resolves once for both halves and hands the
+   * key down as a string, which would otherwise arrive here as "somebody
+   * typed it" and put `explicit-argument` on every live meeting's ledger
+   * row. The slot travels with the key so the record keeps naming the
+   * Keychain item that will actually be billed.
+   */
+  keySlot?: ClaudeKeySlot;
 }
 
 /** Printed once per process, because the transcript leaving the machine must
@@ -132,8 +143,23 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
   // A key from the Keychain, or a short-lived access token the environment
   // was handed — CI mints one from its OIDC identity so no long-lived secret
   // has to sit in the repository. Either way one header, chosen here once.
-  const cred = resolveCredentialFrom(opts.apiKey, readKeychainPassword, process.env);
-  if (!cred) return null;
+  const resolved = resolveCredentialSlotFrom(
+    'meeting-notes-compose',
+    opts.apiKey,
+    readKeychainPassword,
+    process.env,
+  );
+  if (!resolved) return null;
+  const cred = resolved.credential;
+  // WHICH SLOT PAYS, carried into every measure this composer reports, so a
+  // meeting's own timing rows say what the run picked up rather than what the
+  // config says it should have.
+  const keySlot = opts.keySlot ?? resolved.slot;
+  // Re-noted under the EFFECTIVE slot. Resolution above sees a plain string
+  // when `notes-method-composer.ts` resolved for both halves and handed the
+  // key down, which would otherwise leave the process ledger saying this
+  // path spends an explicit argument while the meeting spends a Keychain item.
+  noteClaudeSlot('meeting-notes-compose', keySlot);
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const model = opts.model ?? NOTES_MODEL;
   const maxTokens = opts.maxTokens ?? MAX_TOKENS;
@@ -154,7 +180,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
       // times out is exactly the one whose prompt size matters, and a report
       // after the await would never reach the log. There is no first-token
       // number to give — this is a single non-streaming request.
-      input.measure?.({ promptChars: system.length + user.length, model });
+      input.measure?.({ promptChars: system.length + user.length, model, keySlot });
       const ctl = new AbortController();
       const timeout = setTimeout(() => ctl.abort(), TIMEOUT_MS);
       try {

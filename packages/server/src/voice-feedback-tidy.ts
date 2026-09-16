@@ -17,7 +17,7 @@
  */
 import { type TokenUsage, type VoiceTarget, dollars } from '@claude-workspaces/core';
 import { readKeychainPassword } from './share/keychain.ts';
-import { authHeader, resolveCredentialFrom } from './summarize.ts';
+import { authHeader, resolveCredentialSlotFrom } from './summarize.ts';
 
 export const TIDY_MODEL = 'claude-haiku-4-5-20251001';
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -150,12 +150,14 @@ export function createHaikuTidy(opts?: {
   env?: Record<string, string | undefined>;
   read?: (service: string) => string | null;
 }): TidyComplete | null {
-  const cred = resolveCredentialFrom(
+  const resolved = resolveCredentialSlotFrom(
+    'voice-feedback-tidy',
     undefined,
     opts?.read ?? readKeychainPassword,
     opts?.env ?? process.env,
   );
-  if (!cred) return null;
+  if (!resolved) return null;
+  const cred = resolved.credential;
   const fetchImpl = opts?.fetchImpl ?? globalThis.fetch;
   return async ({ system, user }) => {
     const ctl = new AbortController();

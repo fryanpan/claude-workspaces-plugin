@@ -62,6 +62,7 @@ import {
   speakerDisplayName,
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
+import type { ClaudeKeySlot } from './claude-key-slot.ts';
 import { isQuotaFailure } from './model-quota.ts';
 import { notesTopicHashes } from './notes-heading-level.ts';
 import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
@@ -779,7 +780,7 @@ export interface MeetingNotesDeps {
      *
      * Sizes and counts only, never the words.
      */
-    measure: (m: { model: string; usage: NotesTokenUsage }) => void;
+    measure: (m: { model: string; usage: NotesTokenUsage; keySlot?: ClaudeKeySlot }) => void;
     /**
      * The turns the PREVIOUS tick's capture saw, so an ask that straddles the
      * boundary between them still files the right row. Marked as already read
@@ -1614,7 +1615,13 @@ export function beginNotesSession(
             meetingId: ids.meetingId,
             turns,
             priorTurns,
-            measure: (m) => recordCall({ call: 'capture', model: m.model, usage: m.usage }),
+            measure: (m) =>
+              recordCall({
+                call: 'capture',
+                model: m.model,
+                usage: m.usage,
+                keySlot: m.keySlot ?? null,
+              }),
           });
           taskLinks = captured.tasks;
           docLinks = captured.docs;
@@ -1785,6 +1792,7 @@ export function beginNotesSession(
                 call: 'compose',
                 model: measured.model ?? deps.composer.name,
                 usage: m.usage,
+                keySlot: measured.keySlot ?? null,
               });
             }
           },

@@ -17,6 +17,7 @@ const call = (
 ): NotesCallUsage => ({
   call: kind,
   model,
+  keySlot: null,
   usage: {
     inputTokens: 0,
     outputTokens: 0,

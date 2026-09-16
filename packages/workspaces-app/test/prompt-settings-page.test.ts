@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as realChunk from '../src/md-composer-chunk.ts';
+import { composerState, setComposerEditorLoader } from '../src/md-composer.ts';
 import { BEFORE_MARKDOWN_LABEL, SAVE_LABEL } from '../src/settings/prompt-editor.ts';
 import type { PromptDetail, PromptRow, PromptsApi } from '../src/settings/prompts-api.ts';
 import { mountPromptsPage, parsePromptsRoute } from '../src/settings/prompts-page.ts';
 import { IPAD, PHONE, installSheets, setViewport, styleOf } from './css-harness.ts';
+import { renderedHtml } from './support/composer.ts';
 
 /**
  * The prompts page, driven rather than read.
@@ -341,6 +344,66 @@ describe('one prompt, open', () => {
   });
 });
 
+/**
+ * The words are markdown, and the page shows them formatted. What is worth
+ * pinning is that it never shows them any OTHER way first: the suite hands
+ * composers their chunk synchronously, so these two put the production shape
+ * back — a chunk that arrives a macrotask late — and ask what is on screen in
+ * the meantime.
+ */
+describe('the first paint of an opened prompt', () => {
+  /** The chunk, a macrotask late, as a network makes it. */
+  function lateChunk(): void {
+    setComposerEditorLoader(
+      () => new Promise((resolve) => setTimeout(() => resolve(realChunk), 0)),
+    );
+  }
+  afterEach(() => setComposerEditorLoader(() => realChunk));
+
+  it('holds the words back until the editor can show them formatted', async () => {
+    lateChunk();
+    const { api } = stubApi({
+      detail: async () => ({ ...NOTES, value: '### Notes\n\nTwo **bullets** per topic.' }),
+    });
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    await mountPromptsPage(root, pageEnv).render();
+    // The read is finished, so the words are on screen — and the box they are
+    // in is the editor, not the textarea that would have shown `###` as `###`.
+    const box = root.querySelector('#prompt-box') as HTMLTextAreaElement;
+    expect(composerState(box)).toBe('live');
+    expect(box.parentElement?.classList.contains('md-composer-live')).toBe(true);
+    expect(renderedHtml(box)).toContain('<strong>bullets</strong>');
+    expect(renderedHtml(box)).toContain('<h3>');
+  });
+
+  it('shows the same prompt nothing at all while the editor is still coming', async () => {
+    lateChunk();
+    const { api } = stubApi();
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    const painted = mountPromptsPage(root, pageEnv).render();
+    // Between the read landing and the chunk landing there is no box of any
+    // kind: an empty pane is honest, a pane full of markdown source is not.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(root.querySelector('#prompt-box')).toBeNull();
+    await painted;
+    expect(root.querySelector('#prompt-box')).not.toBeNull();
+  });
+
+  it('reports a failed read at once rather than waiting on the editor', async () => {
+    // Nothing will be painted into the editor, so there is nothing to hold
+    // back. Waiting anyway would sit on a blank pane for the preload's whole
+    // timeout and then say exactly this.
+    setComposerEditorLoader(() => new Promise(() => {}));
+    const { api } = stubApi({ detail: async () => null });
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    const painted = mountPromptsPage(root, pageEnv).render();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(root.textContent).toContain('Could not read this prompt');
+    await painted;
+  });
+});
+
 describe('moving between the two', () => {
   it('opens a row and comes back to the list', async () => {
     const { api } = stubApi();
@@ -402,4 +465,18 @@ describe('the page at both sizes', () => {
     const save = styleOf(root.querySelector('#prompt-save') as HTMLElement);
     expect(Number.parseInt(save.minHeight, 10)).toBeGreaterThanOrEqual(44);
   });
+
+  // A prompt is ~1,800px of words. Behind the disclosure they used to arrive
+  // in a 190px window — a box to scroll inside a page that already scrolls.
+  // Opened, the default takes the height its words need at both sizes.
+  for (const size of [IPAD, PHONE]) {
+    it(`opens the default at its full height at ${size.width}px`, async () => {
+      await mountAt(size.width, size.height, '/settings/prompts/meeting-notes');
+      const surface = root
+        .querySelector('details.prompt-default-view #prompt-default')
+        ?.parentElement?.querySelector('.md-composer-surface') as HTMLElement;
+      expect(surface).toBeTruthy();
+      expect(styleOf(surface).maxHeight).toBe('none');
+    });
+  }
 });

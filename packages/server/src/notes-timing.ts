@@ -31,6 +31,7 @@ import { dirname } from 'node:path';
  * file repeating it in a different shape would be a second thing to protect.
  */
 import type { TokenUsage } from '@claude-workspaces/core';
+import type { ClaudeKeySlot } from './claude-key-slot.ts';
 
 /** Why the tick fired, as the ticker reported it. */
 export type NotesTimingReason = 'pause' | 'cadence' | 'end';
@@ -264,6 +265,21 @@ export interface NotesCallUsage {
   call: NotesCallKind;
   model: string;
   usage: NotesTokenUsage;
+  /**
+   * WHICH CONFIGURED SLOT PAID FOR THIS CALL — the Keychain item or the
+   * environment variable, and the role it holds, as the RUN resolved them.
+   *
+   * Never the key, never a prefix of it and never a hash of it: a slot is
+   * configuration that is already written down in this repo in plain text,
+   * and anything derived from the value would let somebody look the value up
+   * again. The point of the field is that "eval spend landed on the prod
+   * bill" becomes a question a stored row answers, rather than one that has
+   * to be re-argued from config every time it is asked.
+   *
+   * Null on a call whose adapter reported no slot — a stub composer in a
+   * harness, and any recorded call made before this field existed.
+   */
+  keySlot: ClaudeKeySlot | null;
 }
 
 /** What the composer may report about one compose, if it knows. */
@@ -275,6 +291,9 @@ export interface NotesComposeMeasure {
   /** Absent on a compose that never reached the API, and on one whose reply
    *  carried no usage block. */
   usage?: NotesTokenUsage;
+  /** The slot this composer resolved. Absent on a composer that spends
+   *  nothing — the stub the replay harness uses. */
+  keySlot?: ClaudeKeySlot;
 }
 
 /** Where a composer reports what its call cost. Never given the words. */

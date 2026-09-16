@@ -36,10 +36,15 @@ const REGISTRY_VERSION = 1;
  * material that must not leave the box, and it is enforced as a socket-level
  * refusal rather than a redaction — see `routes/mounts.ts`.
  *
- * Set on the PROJECT, over all its mounts at once. Per-mount privacy was
- * considered and refused: the thing a person knows is "this project is
- * sensitive", and a per-folder switch is a place for one folder to be
- * forgotten.
+ * Settable on the PROJECT, over all its mounts at once, and on ONE MOUNT.
+ * The project setting is still the one to reach for — "this project is
+ * sensitive" is the thing a person knows — and the per-mount one exists for
+ * the case that otherwise has no answer: a project with one folder of an
+ * outside party's material and a dozen harmless ones, which today can only
+ * shut all thirteen. The two are combined by taking the NARROWER, never the
+ * later or the more specific, so marking the project `local-only` can never
+ * be widened back by a mount, and a forgotten folder inherits the project's
+ * answer rather than an open one.
  */
 export type ProjectPrivacy = 'workspace' | 'local-only';
 
@@ -72,6 +77,15 @@ export interface MountRecord {
    *  project's, and a row that vanished would take its files' addresses with
    *  it. Nothing on disk is touched either way. */
   removedAt?: number;
+  /** This folder's own privacy, when it was given one.
+   *
+   *  Absent is the default and means "whatever the project says" — a mount
+   *  nobody has marked behaves exactly as it did before this field existed.
+   *  Present, it is combined with the project's by taking the narrower
+   *  (`MountRegistry.mountPrivacyOf`), so `workspace` here never opens a
+   *  project that is `local-only`. It survives an unmount and a re-mount:
+   *  reviving a row must not quietly drop the restriction on it. */
+  privacy?: ProjectPrivacy;
 }
 
 export interface ProjectRecord {
@@ -176,8 +190,22 @@ function normalizeProject(raw: Partial<ProjectRecord>): ProjectRecord {
     ...(normalizeMeetings(raw.meetings) !== undefined
       ? { meetings: normalizeMeetings(raw.meetings) as MeetingHomeChoice }
       : {}),
-    mounts: Array.isArray(raw.mounts) ? raw.mounts : [],
+    mounts: Array.isArray(raw.mounts) ? raw.mounts.map(normalizeMount) : [],
   };
+}
+
+/**
+ * Fill in what a mount row left out.
+ *
+ * Privacy reads the same way the project's does, and for the same reason: a
+ * value that is present and unrecognised becomes `local-only`, because the
+ * only reason to write anything there is to restrict. The difference is what
+ * ABSENT means — on a project it is the `workspace` default, on a mount it is
+ * "no answer of my own", which the combiner reads as the project's answer.
+ */
+function normalizeMount(raw: MountRecord): MountRecord {
+  if (raw.privacy === undefined) return raw;
+  return { ...raw, privacy: raw.privacy === 'workspace' ? 'workspace' : 'local-only' };
 }
 
 /**
