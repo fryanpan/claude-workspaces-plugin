@@ -100,3 +100,21 @@ export function headingLevelLine(outline: readonly prose.OutlineEntry[]): string
   const topic = notesTopicHashes(outline);
   return `A new topic heading is written "${topic} ", a sub-topic under one "${sub} ".`;
 }
+
+/**
+ * WHERE A NOTE GOES, for the doc in hand.
+ *
+ * Both preambles say this, and they say it the same way: a meeting that has
+ * already opened a topic is not thereby confined to it. Its claim is where it
+ * started, not a box its notes go in — the room moves on, and the note about
+ * what it moved on to belongs under the heading for that, wherever in the
+ * document that heading is.
+ */
+export function topicRoutingLines(outline: readonly prose.OutlineEntry[]): string[] {
+  return [
+    'Put each note under the heading it belongs to, with',
+    'insert_under_heading. When nothing there fits what is being said,',
+    `start a topic: one insert_at_end carrying "${topicHeadingLine(outline)}".`,
+    headingLevelLine(outline),
+  ];
+}

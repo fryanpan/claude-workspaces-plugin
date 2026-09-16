@@ -65,7 +65,7 @@
 
 import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
-import { headingLevelLine, topicHeadingLine } from './notes-heading-level.ts';
+import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
 import { regroupDirective } from './notes-regroup.ts';
 
@@ -415,16 +415,11 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
   });
   const preamble =
     input.notesHeadingId === undefined
-      ? [
-          'Nothing in the doc below is this meeting’s yet.',
-          'Put each note under the heading it belongs to, with',
-          'insert_under_heading. When nothing there fits what is being said,',
-          `start a topic: one insert_at_end carrying "${topicHeadingLine(input.outline)}".`,
-          headingLevelLine(input.outline),
-        ]
+      ? ['Nothing in the doc below is this meeting’s yet.', ...topicRoutingLines(input.outline)]
       : [
-          `This meeting's notes are under heading ${input.notesHeadingId}.`,
-          headingLevelLine(input.outline),
+          `This meeting opened heading ${input.notesHeadingId}. That is where it`,
+          'started, not the box its notes go in — the room has moved on since.',
+          ...topicRoutingLines(input.outline),
         ];
   // Never cut so deep that the first chunk is a preamble with no table under
   // it: a short doc stays whole and the tail is empty, which is the same

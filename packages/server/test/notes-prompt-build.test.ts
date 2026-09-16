@@ -290,9 +290,13 @@ describe('notes prompt', () => {
     expect(volatile).toContain('b1 bullet');
   });
 
-  it('names which heading is this meeting’s, so a bullet has an id to go under', () => {
+  it('names the heading this meeting opened, without making it the box', () => {
+    // The id is still there — a continuing meeting needs somewhere it knows
+    // it may write — but it is named as where the meeting STARTED, beside the
+    // routing every tick gets.
     const { user } = buildNotesPrompt(input);
-    expect(user).toContain('notes are under heading h1.');
+    expect(user).toContain('opened heading h1.');
+    expect(user).toContain('insert_under_heading');
   });
 
   it('a block a person has touched reads as theirs, which is what gates a rewrite', () => {

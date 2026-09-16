@@ -128,3 +128,36 @@ describe('a meeting that writes only under headings the doc already had', () => 
     expect(harness.headings()).toEqual(['Harbour plan', 'Pricing']);
   });
 });
+
+/**
+ * A CLAIM IS NOT A BOX.
+ *
+ * The prompt used to change the moment a meeting opened its first topic: from
+ * "put each note under the heading it belongs to" to "this meeting's notes are
+ * under heading h1". Which is the reserved section again, arriving in words
+ * rather than in markdown — the room moves on, and the note about what it
+ * moved on to is told to go back under the first thing discussed. Raised by
+ * the independent review.
+ */
+describe('the prompt for a meeting that has already opened a topic', () => {
+  const OUTLINE: NotesComposeInput['outline'] = [
+    { id: 'h1', kind: 'heading', nodeName: 'heading', level: 2, text: 'Pricing' },
+    { id: 'b1', kind: 'listItem', nodeName: 'listItem', text: 'three tiers', underHeadingId: 'h1' },
+  ] as unknown as NotesComposeInput['outline'];
+
+  it('still asks for the heading the topic belongs under, and for a new one when none fits', () => {
+    const prompt = buildNotesPrompt({ ...input, notesHeadingId: 'h1', outline: OUTLINE });
+    expect(prompt.user).toContain('insert_under_heading');
+    expect(prompt.user).toContain('start a topic');
+    expect(prompt.user).toContain('h1');
+    // CONTROL: the meeting with no claim gets the same routing, so this is not
+    // asserting a sentence that only ever existed on one branch.
+    const fresh = buildNotesPrompt(homeless(OUTLINE));
+    expect(fresh.user).toContain('start a topic');
+  });
+
+  it('does not tell it that its notes live under that one heading', () => {
+    const prompt = buildNotesPrompt({ ...input, notesHeadingId: 'h1', outline: OUTLINE });
+    expect(prompt.user).not.toMatch(/notes are under heading/i);
+  });
+});
