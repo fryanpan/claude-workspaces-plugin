@@ -27,10 +27,23 @@
  * is still what Save sends and `.disabled` still disables. The read-only
  * words and the default use the same editor, disabled, so all three read
  * alike.
+ *
+ * AND THE READ WAITS FOR THE EDITOR. Every other composer opens empty, so the
+ * plain textarea on screen until the chunk lands shows nothing worth hiding.
+ * These boxes open holding words, and a textarea holding markdown paints the
+ * `###` as `###` — measured at two frames of a staging load before the editor
+ * swapped it. So `refresh` warms the chunk alongside the read and paints only
+ * once both are in: the mount then happens in the microtask after the markup
+ * goes in, and no frame in between reaches the screen. A chunk that is slow
+ * or never arrives falls back to the plain box, as it always did.
  */
 
 import { escapeHtml } from '@claude-workspaces/core';
-import { attachMarkdownComposer, refreshMarkdownComposer } from '../md-composer.ts';
+import {
+  attachMarkdownComposer,
+  preloadComposerEditor,
+  refreshMarkdownComposer,
+} from '../md-composer.ts';
 import type { PromptDetail, PromptsApi } from './prompts-api.ts';
 
 /**
@@ -176,7 +189,10 @@ export function mountPromptEditor(deps: PromptEditorDeps): PromptEditorHandle {
   }
 
   async function refresh(): Promise<void> {
-    const detail = await api.detail(id);
+    // Both, together: the words and the editor that will show them. See the
+    // header — painting the words before the editor exists paints markdown
+    // source, and this page is read far more often than it is typed in.
+    const [detail] = await Promise.all([api.detail(id), preloadComposerEditor()]);
     if (!detail) {
       disable('Could not read this prompt — reload to try again.');
       return;
