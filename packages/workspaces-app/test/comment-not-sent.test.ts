@@ -140,6 +140,40 @@ describe("a doc reply the server refused says so on the card it's in", () => {
     expect(notSent(container)).toBeNull();
   });
 
+  it('the retry sends the words that FAILED, not a sentence typed since', async () => {
+    // A slow refusal while the reader has already started the next comment.
+    // The retry has to mean the one that did not go: the new words are still
+    // theirs to send, and the failed ones are not recoverable anywhere else.
+    plainComposers();
+    const calls: string[] = [];
+    let refuse: (ok: boolean) => void = () => {};
+    const { panel, container } = mountPanel({
+      onReply: (_id, text) => {
+        calls.push(text);
+        return new Promise<boolean>((resolve) => {
+          refuse = resolve;
+        });
+      },
+    });
+    panel.setThreads([makeThread('t1')]);
+    panel.setActive('t1');
+    const ta = container.querySelector<HTMLTextAreaElement>('.thread textarea');
+    if (!ta) throw new Error('no reply box rendered');
+    ta.value = 'the one that failed';
+    container.querySelector<HTMLButtonElement>('.thread-actions button.primary')?.click();
+    await flush();
+    // The reader moves on while the first is still in flight.
+    ta.value = 'a sentence typed since';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    refuse(false);
+    await flush();
+    expect(ta.value, 'the newer draft was taken away').toBe('a sentence typed since');
+    retryButton(container)?.click();
+    await flush();
+    expect(calls).toEqual(['the one that failed', 'the one that failed']);
+    expect(ta.value, 'the retry emptied a box it was not sending').toBe('a sentence typed since');
+  });
+
   it('typing again retires the state — those words are not the ones that failed', async () => {
     const { container, ta } = await refusedReply(() => Promise.resolve(false));
     expect(notSent(container)).not.toBeNull();

@@ -66,6 +66,14 @@ describe('a widget reply the server refused', () => {
     expect(pop.querySelector('.composer-err')?.textContent).toContain('Not sent');
   });
 
+  it('editing the draft retires the note — those words are not the ones that failed', async () => {
+    const { pop, ta } = await replyAndFail(() => Promise.resolve(false));
+    expect(pop.querySelector('.composer-err')).not.toBeNull();
+    ta.value = 'something else entirely';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(pop.querySelector('.composer-err')).toBeNull();
+  });
+
   it('CONTROL: a reply that lands closes the popover and says nothing', async () => {
     const el = widget(() => Promise.resolve(true));
     showThreadPopover(el, thread(), 10, 10);

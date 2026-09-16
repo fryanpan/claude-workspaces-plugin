@@ -368,12 +368,19 @@ function slotB(
   // Every composer is a markdown editor (design point 4); refresh covers
   // the programmatic clear below, which the editor cannot see.
   const refreshComposer = attachMarkdownComposer(ta);
-  const submitReply = () => {
-    const text = ta.value.trim();
+  // `text` is passed in by the retry, so a second attempt sends the words
+  // that failed rather than whatever is in the box by then: a reader who
+  // started the next sentence while the first was in flight would otherwise
+  // find the button posting THAT and the failed one gone for good.
+  const postReply = (text: string) => {
     if (!text) return;
     const posted = host.opts.onReply(t.id, text, answering);
-    ta.value = '';
-    refreshComposer();
+    // Emptied only when the box still holds the words going out — a retry of
+    // an older attempt must not take away a sentence typed since.
+    if (ta.value.trim() === text) {
+      ta.value = '';
+      refreshComposer();
+    }
     // A refused post hands the words back — the chrome's 'try again' toast
     // must never point at an empty box. Only while the box is still empty,
     // though: restoring over words typed since would stomp them. The toast
@@ -390,9 +397,10 @@ function slotB(
           ta.value = text;
           refreshComposer();
         }
-        markNotSent({ near: actions, field: ta, retry: submitReply });
+        markNotSent({ near: actions, field: ta, retry: () => postReply(text) });
       });
   };
+  const submitReply = () => postReply(ta.value.trim());
   ta.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
       ev.preventDefault();
@@ -542,11 +550,12 @@ function compactAnswerField(
   input.className = 'thread-answer-input';
   input.placeholder = `Answer as ${host.opts.currentUser.name}…`;
   input.setAttribute('aria-label', 'Answer this question');
-  const send = () => {
-    const text = input.value.trim();
+  // Same contract as the card's own composer: a retry re-sends the words
+  // that failed, not whatever the field holds by then.
+  const sendText = (text: string) => {
     if (!text) return;
     const posted = host.opts.onReply(t.id, text, answersCommentId);
-    input.value = '';
+    if (input.value.trim() === text) input.value = '';
     // A refused post hands the words back — the chrome's 'try again' toast
     // must never point at an empty box. Only while the box is still empty,
     // though: restoring over words typed since would stomp them. And the
@@ -561,9 +570,10 @@ function compactAnswerField(
         if (input.value === '') input.value = text;
         // Beside the field, not inside it: `.thread-answer-field` is a one-row
         // flex, and a note in it would take the field's width away.
-        markNotSent({ near: wrap, field: input, retry: send });
+        markNotSent({ near: wrap, field: input, retry: () => sendText(text) });
       });
   };
+  const send = () => sendText(input.value.trim());
   input.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.isComposing) {
       ev.preventDefault();

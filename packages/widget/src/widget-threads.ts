@@ -377,7 +377,9 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
       posted = await el.postReply(t.id, text);
     } catch {}
     if (!posted) {
-      composerNote(pop, 'Not sent — tap Reply to retry.');
+      const note = composerNote(pop, 'Not sent — tap Reply to retry.');
+      // Whatever they type next is not what failed, so the note goes with it.
+      ta.addEventListener('input', () => note.remove(), { once: true });
       return;
     }
     pop.remove();
