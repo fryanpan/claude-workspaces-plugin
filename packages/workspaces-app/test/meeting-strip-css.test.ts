@@ -284,6 +284,41 @@ describe('the strip itself: one flex row, blinker · clock · flowing feed', () 
     expect(note.cursor).toBe('pointer');
   });
 
+  /**
+   * And the one line that is NOT a script. A recording that timed itself out
+   * is read once, by whoever comes back to a meeting nobody attended — so it
+   * takes the strip's own chrome size rather than the reading size above,
+   * where it was the loudest text in the strip.
+   */
+  it('sizes the timed-out sentence as a readout, not as the announcement', () => {
+    const bar = strip();
+    const script = styleOf(attach('meeting-note-dismiss', { tag: 'button', parent: bar.el }));
+    const readout = styleOf(
+      attach('meeting-note meeting-note-dismiss meeting-note-ended', {
+        tag: 'button',
+        parent: bar.el,
+      }),
+    );
+    expect(px(readout.fontSize)).toBeLessThan(px(script.fontSize));
+    expect(px(readout.fontSize)).toBe(px(bar.style.fontSize));
+    expect(readout.color).toBe(token('--fg-muted'));
+  });
+
+  it('draws the tidy-up beside it as a control, greyed while the pass runs', () => {
+    const bar = strip();
+    const act = attach('meeting-note-action meeting-note-tidy', { tag: 'button', parent: bar.el });
+    const live = styleOf(act);
+    // A control at rest has to read as one: hover answers nothing on an iPad.
+    expect(live.getPropertyValue('text-decoration')).toContain('underline');
+    expect(live.cursor).toBe('pointer');
+    expect(px(live.marginLeft)).toBeGreaterThan(0);
+    (act as HTMLButtonElement).disabled = true;
+    const busy = styleOf(act);
+    expect(busy.getPropertyValue('text-decoration')).toBe('none');
+    expect(busy.cursor).toBe('default');
+    expect(busy.color).toBe(token('--fg-muted'));
+  });
+
   it('gives a held announcement the room instead of clipping it at the bar height', () => {
     const bar = strip();
     expect(bar.style.getPropertyValue('padding-block')).toBe('');

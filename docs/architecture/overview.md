@@ -1042,6 +1042,13 @@ whether to read the notes once more, plus the POST that press makes. It is
 the client half of `notes-cleanup-pass.ts` on the server, and it is separate
 from the strip because the strip is chrome for a meeting that is HAPPENING
 and this exists only once one has stopped.
+`meeting-tidy-line.ts` joins that view tier beside it and changes no layer
+either: it is the SAME offer for the ending nobody was present for. A
+recording that timed itself out for silence raises no dialog — there is
+nobody there to answer one — so the tidy-up becomes a control on the strip's
+idle line, beside the sentence saying the recording is over. It holds the
+request, the three answers a pass can give, and the small state machine that
+turns them into a label; the strip draws it and owns every side effect.
 `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing

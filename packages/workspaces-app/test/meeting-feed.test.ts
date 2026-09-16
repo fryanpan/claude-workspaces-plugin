@@ -7,6 +7,9 @@ import type { TranscriptTurn } from '../src/meeting-protocol.ts';
 import type { StreamAlarm } from '../src/meeting-stream-health.ts';
 import type { StripState } from '../src/meeting-strip.ts';
 
+/** The control a timed-out recording's sentence can carry beside it. */
+type MeetingFeedAction = { label: string; busy: boolean; press(): void };
+
 /**
  * The transcript feed drives one line, and every state a meeting can be left
  * in has to arrive in it as either words or a sentence. These drive
@@ -32,6 +35,7 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     liveBot: null as MeetingBotStatus | null,
     farewell: null as string | null,
     endedNote: '' as string,
+    endedAction: null as MeetingFeedAction | null,
     named: [] as string[],
     dismissed: 0,
     endedDismissed: 0,
@@ -54,6 +58,7 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     liveBot: () => h.liveBot,
     botFarewell: () => h.farewell,
     endedNote: () => h.endedNote,
+    endedAction: () => h.endedAction,
     nameSpeaker: (label) => h.named.push(label),
     dismissBotNote: () => {
       h.dismissed += 1;
@@ -79,6 +84,7 @@ interface Harness {
   liveBot: MeetingBotStatus | null;
   farewell: string | null;
   endedNote: string;
+  endedAction: MeetingFeedAction | null;
   named: string[];
   dismissed: number;
   endedDismissed: number;
@@ -246,6 +252,44 @@ describe('createMeetingFeed — the notes that stand in for words', () => {
     expect(note?.textContent).toBe('Recording stopped after 15 minutes without speech.');
     note?.click();
     expect(h.endedDismissed).toBe(1);
+  });
+
+  /**
+   * The offer beside that sentence. It is a SIBLING of the dismiss button,
+   * never a child: a control nested inside a button is neither valid markup
+   * nor reachable, and a tap meant for the offer would dismiss the line.
+   */
+  it('draws the tidy-up beside the sentence rather than inside it', () => {
+    const presses: number[] = [];
+    const h = makeFeed();
+    h.endedNote = 'Recording stopped after 15 minutes without speech.';
+    h.endedAction = { label: 'Tidy up the notes', busy: false, press: () => presses.push(1) };
+    h.feed.renderFeed();
+    const note = h.line.querySelector<HTMLButtonElement>('button.meeting-note-dismiss');
+    const act = h.line.querySelector<HTMLButtonElement>('button.meeting-note-tidy');
+    expect(act?.textContent).toBe('Tidy up the notes');
+    expect(note?.contains(act as Node)).toBe(false);
+    act?.click();
+    expect(presses).toEqual([1]);
+    // Pressing the offer is not dismissing the line.
+    expect(h.endedDismissed).toBe(0);
+  });
+
+  it('shows the pass as running and refuses the control while it is', () => {
+    const h = makeFeed();
+    h.endedNote = 'Recording stopped after 15 minutes without speech.';
+    h.endedAction = { label: 'Tidying up these notes…', busy: true, press: () => {} };
+    h.feed.renderFeed();
+    const act = h.line.querySelector<HTMLButtonElement>('button.meeting-note-tidy');
+    expect(act?.textContent).toBe('Tidying up these notes…');
+    expect(act?.disabled).toBe(true);
+  });
+
+  it('draws no control when there is nothing to offer', () => {
+    const h = makeFeed();
+    h.endedNote = 'Recording stopped after 15 minutes without speech.';
+    h.feed.renderFeed();
+    expect(h.line.querySelector('.meeting-note-tidy')).toBe(null);
   });
 
   it('leaves an idle line with nothing to say empty', () => {

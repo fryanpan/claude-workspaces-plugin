@@ -142,6 +142,11 @@ import {
   restoredNote,
   streamAlarm,
 } from './meeting-stream-health.ts';
+import {
+  type MeetingTidyLine,
+  type MeetingTidyOutcome,
+  createMeetingTidyLine,
+} from './meeting-tidy-line.ts';
 import { type TimingSession, createTimingSession } from './meeting-timing-client.ts';
 import type { TrackLossReason } from './meeting-track-watch.ts';
 import type { TranscriptReader } from './meeting-transcript-panel.ts';
@@ -399,6 +404,21 @@ export interface MeetingStripOpts {
    * tidy-up helps most. See `announceEnded`.
    */
   onMeetingEnded?: (meetingId: string) => void;
+  /**
+   * Re-read a finished meeting's notes — the tidy-up, run from the strip's
+   * own line instead of from a dialog.
+   *
+   * This is the path a recording that ended ITSELF takes. `onMeetingEnded`
+   * raises a modal, which is right for a stop somebody pressed and wrong for
+   * a timeout: fifteen minutes of silence means nobody is there, so the card
+   * would sit over a dimmed doc until someone came back and dismissed it. The
+   * notes are still real, so the offer is still made — beside the sentence
+   * that says the recording is over, where the same reader will find it.
+   *
+   * Absent, a timeout leaves the sentence and no offer. See
+   * `meeting-tidy-line.ts`.
+   */
+  tidyUpNotes?: (meetingId: string) => Promise<MeetingTidyOutcome>;
 }
 
 /**
@@ -760,6 +780,26 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * not clear it. A tap dismisses it, and the next recording replaces it.
    */
   let endedNote = '';
+  /**
+   * The offer to re-read the notes of a recording that ended ITSELF, made on
+   * the line beside that sentence rather than in a dialog over a doc nobody
+   * is looking at. Null when this mount was given no way to run a pass.
+   */
+  const tidy: MeetingTidyLine | null = opts.tidyUpNotes
+    ? createMeetingTidyLine({
+        run: (meetingId) =>
+          (opts.tidyUpNotes as (id: string) => Promise<MeetingTidyOutcome>)(meetingId),
+        onChange: () => {
+          if (!disposed) render();
+        },
+        onDone: () => {
+          // The notes themselves are the receipt, so the line has nothing
+          // left to say and the strip goes back to its zero-height row.
+          endedNote = '';
+          if (!disposed) render();
+        },
+      })
+    : null;
 
   // ---- bot presence ---------------------------------------------------------
   /** Whether this mount has seen the bot alive — a terminal state found
@@ -1096,7 +1136,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     names: () => names,
     liveBot,
     botFarewell,
-    endedNote: () => endedNote,
+    // What the last press had to report OUTRANKS the ending's own sentence:
+    // once somebody has asked for a tidy-up, how that went is the news, and
+    // the strip has one line.
+    endedNote: () => tidy?.report() ?? endedNote,
+    endedAction: () => tidy?.view() ?? null,
     nameSpeaker: (label) => nameSpeaker(label),
     dismissBotNote: () => {
       botNoteDismissed = true;
@@ -1104,6 +1148,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     },
     dismissEndedNote: () => {
       endedNote = '';
+      // The whole line goes, the offer with it: a tap that left a control
+      // sitting on an otherwise empty strip would be a dismissal that did not
+      // dismiss.
+      tidy?.withdraw();
       render();
     },
   });
@@ -1818,18 +1866,25 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // Nobody pressed anything, so the strip has to say what happened. Set
         // before the state moves: `setState` renders, and the idle line is
         // where this sentence goes.
-        if (msg.reason === 'silence') endedNote = MEETING_SILENCE_NOTE;
+        if (msg.reason === 'silence') {
+          endedNote = MEETING_SILENCE_NOTE;
+          // Words were said before the room went quiet, so there ARE notes
+          // worth re-reading. The offer goes on this line, where the person
+          // who was not watching will find it, rather than into a dialog that
+          // would be waiting over a dimmed doc when they came back.
+          if (turns.length > 0 && lastMeetingId) tidy?.offer(lastMeetingId);
+        }
         opts.liveZone?.end();
         // The meeting that just ended is the doc's current one: its cast is
         // the right answer again, and it is the record a late rename lands on.
         opts.onMeetingChange?.(lastMeetingId);
-        // A tidy-up is an offer to re-read what the meeting wrote, and a
-        // recording that timed out having heard NOTHING wrote nothing: the
-        // card would ask a question about an empty transcript, on the one
-        // ending the person did not ask for. A timeout after somebody spoke
-        // is an ordinary end and still gets the offer — the words are the
-        // test, not the reason.
-        if (msg.reason !== 'silence' || turns.length > 0) announceEnded();
+        // A TIMEOUT RAISES NO DIALOG, whatever was said. The card is a
+        // question, and the whole meaning of this ending is that nobody is
+        // there to answer one: it would sit over a dimmed doc until somebody
+        // came back and dismissed it before they could read a word. Where
+        // there are notes the offer is still made, on the idle line above —
+        // an affordance that waits, not a question that blocks.
+        if (msg.reason !== 'silence') announceEnded();
         setState({ kind: 'idle' });
         break;
       case 'error':
@@ -1863,8 +1918,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // Where a late rename would have gone. It is this that made a refused
     // press expensive: `postName` is addressed to `lastMeetingId`.
     lastMeetingId = null;
-    // A new recording answers whatever the last one's ending said.
+    // A new recording answers whatever the last one's ending said — and
+    // retires the offer that ending left, for the same reason the dialog is
+    // withdrawn here: the notes to tidy are about to be the new meeting's.
     endedNote = '';
+    tidy?.withdraw();
   }
 
   async function start(auto = false): Promise<void> {

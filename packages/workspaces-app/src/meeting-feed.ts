@@ -102,6 +102,15 @@ export interface MeetingFeedDeps {
    * watching.
    */
   endedNote(): string;
+  /**
+   * The control that sits BESIDE that sentence, or null when there is none.
+   *
+   * Today it is the tidy-up a timed-out recording leaves behind: the notes
+   * are real, so the offer is still worth making, and it is made here rather
+   * than as a modal over a doc nobody is looking at. See
+   * `meeting-tidy-line.ts`.
+   */
+  endedAction(): { label: string; busy: boolean; press(): void } | null;
   /** Ask the person what to call this voice — the strip's, because a name
    *  travels on its socket. */
   nameSpeaker(label: string): void;
@@ -214,11 +223,26 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
         clearTurnSpans();
         const note = document.createElement('button');
         note.type = 'button';
-        note.className = 'meeting-note meeting-note-dismiss';
+        // NOT the dismiss note's own size. `.meeting-note-dismiss` is sized
+        // for a sentence read out loud to a room; this one is a readout for
+        // the one person who comes back to a meeting nobody attended.
+        note.className = 'meeting-note meeting-note-dismiss meeting-note-ended';
         note.textContent = ended;
         note.title = 'Tap to dismiss';
         note.addEventListener('click', () => deps.dismissEndedNote());
         line.append(note);
+        // A SIBLING, not a child: the sentence is itself a button, and a
+        // control nested inside one is neither valid nor reachable.
+        const action = deps.endedAction();
+        if (action) {
+          const act = document.createElement('button');
+          act.type = 'button';
+          act.className = 'meeting-note-action meeting-note-tidy';
+          act.textContent = action.label;
+          act.disabled = action.busy;
+          act.addEventListener('click', () => action.press());
+          line.append(act);
+        }
         return;
       }
       const farewell = deps.botFarewell();
