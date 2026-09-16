@@ -344,6 +344,13 @@ const MEETING_OVER_CAUSES: ReadonlySet<MeetingCloseCause> = new Set<MeetingClose
   // The socket closed the way a page leaving closes it.
   'clean-close',
   'tab-closed',
+  // A RESTART IS TERMINAL HERE even though the browser does try to resume
+  // across one, and the reason is which error is recoverable. The hold is an
+  // in-memory timer in a process that is about to exit, so holding through a
+  // restart loses the item outright if the resume does not land. Filing early
+  // costs at most an item the resumed meeting's own stop then REVISES — one
+  // item either way, and the wrong one is recoverable.
+  'server-restart',
 ]);
 
 /** Whether the browser will try to pick this meeting back up. */

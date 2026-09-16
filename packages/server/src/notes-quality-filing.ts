@@ -148,12 +148,20 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       state.set(key, h);
       // Oldest first: a Map iterates in insertion order, so the first key is
       // the meeting nothing has touched for longest.
-      while (state.size > REMEMBERED_MEETINGS) {
-        const oldest = state.keys().next();
-        if (oldest.done || oldest.value === key) break;
-        const dropped = state.get(oldest.value);
-        if (dropped?.timer !== undefined) schedule.clear(dropped.timer);
-        state.delete(oldest.value);
+      //
+      // NEVER AN ENTRY STILL WAITING TO FILE. The bound exists to cap the
+      // memory of where FINISHED meetings' items went; an entry holding a
+      // reading, or holding a grace that has not fired, is the only copy of
+      // an item nothing can recreate. Dropping one would lose it silently,
+      // which is the failure this whole module exists to avoid, so the map is
+      // allowed over its bound rather than evicting one.
+      let evicted = 0;
+      for (const [oldestKey, oldest] of state) {
+        if (state.size - evicted <= REMEMBERED_MEETINGS) break;
+        if (oldestKey === key) continue;
+        if (oldest.input !== undefined || oldest.timer !== undefined) continue;
+        state.delete(oldestKey);
+        evicted += 1;
       }
     }
     return h;
