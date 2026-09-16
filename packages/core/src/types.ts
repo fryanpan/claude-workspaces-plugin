@@ -586,6 +586,19 @@ export interface Comment {
    */
   edits?: CommentEdit[];
   /**
+   * When the server handed this comment to an agent session holding a live
+   * stream on the doc or its board — the second tick. Absent means only "no
+   * live session has been handed it yet", never "nobody will get it": the
+   * durable comment queue re-offers the row on the next attach, and a
+   * redelivery stamps this the same way a live one does.
+   *
+   * Stored on the comment rather than kept in server memory so the mark
+   * survives a reload, and so every surface that already reads a comment
+   * reads it too. It is written ONCE and never cleared: delivery is a thing
+   * that happened.
+   */
+  deliveredAt?: number;
+  /**
    * Present when this comment DECLARES that it needs a person — the Review
    * Item. Absent on an ordinary comment, which is the overwhelming majority
    * and which no longer enters the review queue at all.
