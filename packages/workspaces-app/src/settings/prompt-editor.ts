@@ -189,14 +189,20 @@ export function mountPromptEditor(deps: PromptEditorDeps): PromptEditorHandle {
   }
 
   async function refresh(): Promise<void> {
-    // Both, together: the words and the editor that will show them. See the
-    // header — painting the words before the editor exists paints markdown
-    // source, and this page is read far more often than it is typed in.
-    const [detail] = await Promise.all([api.detail(id), preloadComposerEditor()]);
+    // Both start together: the words and the editor that will show them. See
+    // the header — painting the words before the editor exists paints
+    // markdown source, and this page is read far more often than it is typed
+    // in.
+    const editorReady = preloadComposerEditor();
+    const detail = await api.detail(id);
+    // A read that failed has no words to hold back, so it says so at once.
+    // Waiting on a chunk nothing will be painted into would sit on a blank
+    // pane for the preload's whole timeout and then report the same failure.
     if (!detail) {
       disable('Could not read this prompt — reload to try again.');
       return;
     }
+    await editorReady;
     paint(detail);
   }
 

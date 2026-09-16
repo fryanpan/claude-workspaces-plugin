@@ -389,6 +389,19 @@ describe('the first paint of an opened prompt', () => {
     await painted;
     expect(root.querySelector('#prompt-box')).not.toBeNull();
   });
+
+  it('reports a failed read at once rather than waiting on the editor', async () => {
+    // Nothing will be painted into the editor, so there is nothing to hold
+    // back. Waiting anyway would sit on a blank pane for the preload's whole
+    // timeout and then say exactly this.
+    setComposerEditorLoader(() => new Promise(() => {}));
+    const { api } = stubApi({ detail: async () => null });
+    const { pageEnv } = env('/settings/prompts/meeting-notes', api);
+    const painted = mountPromptsPage(root, pageEnv).render();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(root.textContent).toContain('Could not read this prompt');
+    await painted;
+  });
 });
 
 describe('moving between the two', () => {
