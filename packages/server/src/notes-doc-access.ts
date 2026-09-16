@@ -41,16 +41,6 @@ export const NOTES_SUGGESTION_AUTHOR: suggestOps.SuggestionAuthor = {
   color: '#7c5cff',
 };
 
-/**
- * The words a meeting's notes section is opened under.
- *
- * NOTHING FINDS THE SECTION BY THIS STRING ANY MORE, and that is the point of
- * the rebuild: a person who renames the heading used to orphan the section and
- * get a second one on the next tick. The heading is addressed by its block id
- * now. This constant is only what gets WRITTEN when a meeting opens a section,
- * so the prompt and the opener say the same thing.
- */
-export const MEETING_NOTES_HEADING = 'Meeting notes';
 
 /** The doc's meta, as much of it as the notes path reads. */
 export interface NotesDocMeta {

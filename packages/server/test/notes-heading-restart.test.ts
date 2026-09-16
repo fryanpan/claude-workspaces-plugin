@@ -23,12 +23,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  MEETING_NOTES_HEADING,
-  NOTES_AUTHOR_ID,
-  NOTES_SUGGESTION_AUTHOR,
-} from '../src/notes-doc-access.ts';
-import { addNotes, createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
+import { NOTES_AUTHOR_ID, NOTES_SUGGESTION_AUTHOR } from '../src/notes-doc-access.ts';
+import { addNotes, createNotesTickHarness, notesItems, SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 const dirs: string[] = [];
 const freshDataDir = (): string => {
@@ -45,7 +41,7 @@ afterAll(() => {
 const sectionIds = (ydoc: Y.Doc): string[] =>
   prose
     .readOutline(ydoc)
-    .filter((e) => e.kind === 'heading' && e.text === MEETING_NOTES_HEADING)
+    .filter((e) => e.kind === 'heading' && e.text === SCRIPT_TOPIC)
     .map((e) => e.id);
 
 describe('a meeting whose server restarted mid-recording', () => {
@@ -61,7 +57,7 @@ describe('a meeting whose server restarted mid-recording', () => {
       compose: (input) => addNotes(input, '- the export dialog forgets the range'),
     });
     await before.speak('the export dialog forgets the range');
-    expect(before.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(before.countHeadings(SCRIPT_TOPIC)).toBe(1);
     const opened = sectionIds(ydoc);
     expect(opened).toHaveLength(1);
 
@@ -78,7 +74,7 @@ describe('a meeting whose server restarted mid-recording', () => {
     // The tick was told to write under the section that was already there.
     expect(tick.input?.notesHeadingId).toBe(opened[0] as string);
     expect(sectionIds(ydoc)).toEqual(opened);
-    expect(after.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(after.countHeadings(SCRIPT_TOPIC)).toBe(1);
 
     // One section, and both meetings' words in it exactly once.
     const lines = notesItems(ydoc);

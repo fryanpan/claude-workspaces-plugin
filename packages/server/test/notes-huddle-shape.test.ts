@@ -178,7 +178,9 @@ describe('notes that are already paragraphs', () => {
   test('count towards the run that asks for a topic heading', async () => {
     let asked: ReturnType<typeof homelessRun> = null;
     const harness = createNotesTickHarness({
-      doc: `## Meeting notes\n\n${PARAGRAPHS.join('\n\n')}\n`,
+      // A wall of paragraphs above every heading — which is what a homeless
+      // run IS, now that no meeting opens a container to sit them in.
+      doc: `${PARAGRAPHS.join('\n\n')}\n`,
       compose: (input) => {
         asked = homelessRun(input.outline, {
           author: NOTES_AUTHOR_ID,

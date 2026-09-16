@@ -27,9 +27,9 @@ import { describe, expect, it } from 'bun:test';
 import { prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+
 import { markdownOfDoc } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 /** The block id of the outline entry whose text holds `needle`. */
 const idOf = (input: { outline: readonly prose.OutlineEntry[] }, needle: string): string => {
@@ -128,13 +128,13 @@ describe('a second meeting recording into one doc', () => {
     await second.speak('a different room');
 
     // Two sections, one per recording.
-    expect(first.countHeadings(MEETING_NOTES_HEADING)).toBe(2);
+    expect(first.countHeadings(SCRIPT_TOPIC)).toBe(2);
 
     await first.speak('point two');
-    expect(first.countHeadings(MEETING_NOTES_HEADING)).toBe(2);
+    expect(first.countHeadings(SCRIPT_TOPIC)).toBe(2);
 
     const outline = prose.readOutline(ydoc);
-    const sections = outline.filter((e) => e.text === MEETING_NOTES_HEADING);
+    const sections = outline.filter((e) => e.text === SCRIPT_TOPIC);
     expect(sections).toHaveLength(2);
     // The first meeting's second tick was told to write under the FIRST
     // section, not the one the other meeting had just opened.
@@ -173,49 +173,42 @@ describe('a tick the composer had nothing to say about', () => {
 });
 
 /**
- * A doc whose LAST `Meeting notes` section is EMPTY.
+ * A DOC THAT ALREADY HAS HEADINGS WHEN A RECORDING STARTS.
  *
- * The 2026-08-31 rule — a new recording opens its own section below whatever
- * the last one wrote — is about not replacing notes somebody has read. An
- * empty section holds none, so opening a second one below it leaves a person
- * looking at two identical headings and nothing under either. That is exactly
- * what a bot meeting left on 2026-09-09: the note-taker opened its section on
- * tick 1 and every later tick composed nothing, and the doc ended as two
- * `## Meeting notes` headings and no words.
- *
- * The owner's newer rule is that new minutes reuse an existing section when it
- * fits the topic, and an empty section fits every topic.
+ * Two questions, and only the record answers either. A heading SOME MEETING
+ * WROTE is the minutes, and a recording started soon after that meeting
+ * stopped carries on under it — the 2026-09-11 rule, from the day Bryan
+ * stopped a recording, started another minutes later, and got a second
+ * heading at the bottom of the page. A heading NOBODY recorded is the
+ * document's own: this meeting leaves it alone and starts a topic of its own,
+ * which is the 2026-09-15 rule that removed the reserved section.
  */
-describe('a meeting arriving at an empty Meeting notes section', () => {
-  it('writes into it rather than opening a second one', async () => {
+describe('a meeting arriving at a doc that already has headings', () => {
+  it('leaves a heading no meeting wrote alone, and starts its own topic', async () => {
     const harness = createNotesTickHarness({
-      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
+      doc: `# Standup\n\n## ${SCRIPT_TOPIC}\n`,
       compose: (input, tick) =>
         addNotes(
           input,
           tick === 1 ? '- the Riverbend import runs twice' : '- and it double-charges Harborlight',
+          'Riverbend import',
         ),
     });
     const first = await harness.speak('the Riverbend import runs twice');
-    // ONE section, and the bullet is under it.
-    expect(first.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
-    expect(first.notes).toContain('the Riverbend import runs twice');
-    // The composer was told which heading to write under, so it never took
-    // the section-open branch at all.
-    expect(first.input?.notesHeadingId).toBeTruthy();
+    // The doc's own heading is untouched; the meeting wrote its own topic.
+    expect(first.headings.filter((h) => h === SCRIPT_TOPIC)).toHaveLength(1);
+    expect(first.headings).toContain('Riverbend import');
+    expect(first.input?.notesHeadingId).toBeUndefined();
 
-    // And it stays that section for the rest of the meeting, now that the
-    // section is no longer empty.
+    // And it keeps that topic for the rest of the meeting rather than opening
+    // a second one on every tick.
     const second = await harness.speak('and it double-charges Harborlight');
-    expect(second.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
-    expect(second.notes).toContain('double-charges Harborlight');
+    expect(second.headings.filter((h) => h === 'Riverbend import')).toHaveLength(1);
+    expect(second.markdown).toContain('double-charges Harborlight');
+    expect(second.input?.notesHeadingId).toBeTruthy();
   });
 
-  it('a section the PREVIOUS RECORDING wrote and stopped is continued', async () => {
-    // The 2026-09-11 rule: he stops a recording and starts another one, and
-    // the second one's notes carry on under the heading that is already
-    // there rather than opening a second `Meeting notes` at the bottom.
-    //
+  it('a heading the PREVIOUS RECORDING wrote and stopped under is continued', async () => {
     // The earlier meeting's words are untouched by it —
     // `releaseNotesAuthorship` has dropped every claim, so the new recording
     // can only propose on them — which is what the 2026-08-31 rule was
@@ -226,7 +219,7 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
       ydoc,
       heading,
       meetingId: 'm-prev',
-      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
+      doc: '# Standup\n',
       compose: (input) => addNotes(input, '- last week: the tunnel flapped'),
     });
     await before.speak('last week the tunnel flapped');
@@ -239,15 +232,15 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
       compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
     });
     const snap = await harness.speak('the Riverbend import runs twice');
-    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
+    expect(snap.headings.filter((h) => h === SCRIPT_TOPIC)).toHaveLength(1);
     expect(snap.notes).toContain('last week: the tunnel flapped');
     expect(snap.notes).toContain('the Riverbend import runs twice');
   });
 
-  it('MUTATION CONTROL: the previous recording still RUNNING keeps its section', async () => {
+  it('MUTATION CONTROL: the previous recording still RUNNING keeps its heading', async () => {
     // The same two meetings, one stop short. A claim says whose the section
     // is while the meeting is going, so a second room recording into the
-    // same doc still opens its own — and that is the only thing separating
+    // same doc still starts its own — and that is the only thing separating
     // the two cases.
     const heading = createNotesHeadingMemory();
     const ydoc = new Y.Doc();
@@ -255,7 +248,7 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
       ydoc,
       heading,
       meetingId: 'm-prev',
-      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n`,
+      doc: '# Standup\n',
       compose: (input) => addNotes(input, '- last week: the tunnel flapped'),
     });
     await before.speak('last week the tunnel flapped');
@@ -267,39 +260,24 @@ describe('a meeting arriving at an empty Meeting notes section', () => {
       compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
     });
     const snap = await harness.speak('the Riverbend import runs twice');
-    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(2);
+    expect(snap.headings.filter((h) => h === SCRIPT_TOPIC)).toHaveLength(2);
     expect(snap.markdown).toContain('last week: the tunnel flapped');
     expect(snap.markdown).toContain('the Riverbend import runs twice');
   });
 
-  it('CONTROL: the same words with no meeting behind them are reused', async () => {
-    // Same doc, same bullet under the same heading — but nobody recorded it,
-    // so it is the doc's own standing section and these minutes join it.
-    // Without this pair the check above would be measuring "a section with
-    // words in it" rather than "a section a meeting claimed".
+  it('MUTATION CONTROL: the same doc with no record behind it is never joined', async () => {
+    // Same markdown, same heading, same bullet — written into the doc rather
+    // than by a meeting. Without this pair the case above would be measuring
+    // "a heading with words under it" rather than "a heading a meeting
+    // claimed".
     const harness = createNotesTickHarness({
-      doc: `# Standup\n\n## ${MEETING_NOTES_HEADING}\n\n- last week: the tunnel flapped\n`,
-      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
+      doc: `# Standup\n\n## ${SCRIPT_TOPIC}\n\n- last week: the tunnel flapped\n`,
+      compose: (input) => addNotes(input, '- the Riverbend import runs twice', 'Riverbend import'),
     });
     const snap = await harness.speak('the Riverbend import runs twice');
-    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(1);
-    expect(snap.notes).toContain('last week: the tunnel flapped');
-    expect(snap.notes).toContain('the Riverbend import runs twice');
-  });
-
-  it('CONTROL: the empty section it adopts is the LAST one, not the first', async () => {
-    const harness = createNotesTickHarness({
-      doc:
-        `# Standup\n\n## ${MEETING_NOTES_HEADING}\n\n- last week: the tunnel flapped\n\n` +
-        `## ${MEETING_NOTES_HEADING}\n`,
-      compose: (input) => addNotes(input, '- the Riverbend import runs twice'),
-    });
-    const snap = await harness.speak('the Riverbend import runs twice');
-    expect(snap.headings.filter((h) => h === MEETING_NOTES_HEADING)).toHaveLength(2);
-    // Under the second heading, below the first meeting's surviving bullet.
+    expect(snap.headings.filter((h) => h === SCRIPT_TOPIC)).toHaveLength(1);
+    expect(snap.headings).toContain('Riverbend import');
     const md = snap.markdown;
     expect(md.indexOf('the tunnel flapped')).toBeLessThan(md.indexOf('Riverbend import'));
-    expect(snap.notes).toContain('the Riverbend import runs twice');
-    expect(snap.notes).not.toContain('the tunnel flapped');
   });
 });

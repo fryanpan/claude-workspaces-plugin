@@ -659,7 +659,7 @@ describe('stub notes composer', () => {
     expect(JSON.stringify(a)).toContain('The sync is the bottleneck.');
   });
 
-  it('opens a section when there is none, and writes under it once there is', async () => {
+  it('starts a TOPIC when it has none, and writes under it once there is', async () => {
     // WHAT CHANGED, AND WHY IT IS THE SAME PROPERTY. The stub used to be
     // asserted to APPEND to `previous` — the whole notes came back each tick,
     // so "did not restate from nothing" meant the new string started with the
@@ -671,7 +671,10 @@ describe('stub notes composer', () => {
     const first = await composer.compose(input);
     expect(first).toHaveLength(1);
     expect(first[0]?.op).toBe('insert_at_end');
-    expect(JSON.stringify(first)).toContain('## Meeting notes');
+    // A heading naming what was said, at the level the doc writes sections
+    // at — never a container.
+    expect(JSON.stringify(first)).toContain('## The sync is the bottleneck\\n');
+    expect(JSON.stringify(first)).not.toContain('Meeting notes');
     expect(JSON.stringify(first)).toContain('The sync is the bottleneck.');
 
     const second = await composer.compose({
@@ -1087,7 +1090,7 @@ describe('notes session', () => {
     expect(edits).toEqual([
       {
         op: 'insert_at_end',
-        markdown: '## Meeting notes\n\n- Jordan: Take it?\n- Sure.',
+        markdown: '## Take it\n\n- Jordan: Take it?\n- Sure.',
       },
     ]);
   });
@@ -1283,12 +1286,17 @@ describe('notes through the audio socket', () => {
     ws.close();
   });
 
-  it('the composed notes are IN the doc, as a replaceable named section', () => {
+  it('the composed notes are IN the doc, under one topic heading of their own', () => {
     const doc = handle.docStore.get('planning');
     expect(doc).toBeDefined();
     const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc!.ydoc));
-    // The end tick's notes replaced the pause tick's — one section, current.
-    expect(md.split('## Meeting notes').length).toBe(2);
+    // ONE heading the meeting wrote, not one per tick — and it is a topic
+    // naming what was said, never a reserved container.
+    const written = prose
+      .readOutline(doc!.ydoc)
+      .filter((e) => e.kind === 'heading' && e.author !== undefined);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.text).not.toContain('Meeting notes');
     expect(md).toContain('So the sync is the bottleneck.');
     expect(md).toContain('# planning'); // the doc's own content survived
   });

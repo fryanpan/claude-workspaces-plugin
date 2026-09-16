@@ -14,18 +14,14 @@
 import { describe, expect, it } from 'bun:test';
 import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import {
-  MEETING_NOTES_HEADING,
-  NOTES_AUTHOR_ID,
-  applyNotesBlockEdits,
-  readNotesOutline,
-} from '../src/notes-doc-access.ts';
+import { NOTES_AUTHOR_ID, applyNotesBlockEdits, readNotesOutline } from '../src/notes-doc-access.ts';
 import { parseNotesEdits } from '../src/notes-edit-parse.ts';
 import {
   appendResearchPlaceholder,
   researchPlaceholderEdits,
 } from '../src/notes-research-placeholder.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
+import { SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 function docFrom(markdown: string): Y.Doc {
   const ydoc = new Y.Doc();
@@ -48,7 +44,7 @@ describe('applyNotesBlockEdits — the note-taker’s one write', () => {
     const ydoc = docFrom('# Huddle\n');
     const docStore = store('d', ydoc);
     const res = applyNotesBlockEdits(docStore, 'd', [
-      { op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}\n\n- the gate moves` },
+      { op: 'insert_at_end', markdown: `## ${SCRIPT_TOPIC}\n\n- the gate moves` },
     ]);
     expect(res.ok).toBe(true);
     const blocks = readNotesOutline(docStore, 'd');

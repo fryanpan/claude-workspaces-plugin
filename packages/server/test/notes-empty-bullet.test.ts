@@ -26,10 +26,10 @@
 import { describe, expect, test } from 'bun:test';
 import { prose, suggestOps } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+
 import { guardNotesEdits } from '../src/notes-edit-guard.ts';
 import { tidyNotesSection } from '../src/notes-section-tidy.ts';
-import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 const AUTHOR = 'notes-agent';
 const WHO = {
@@ -39,7 +39,7 @@ const WHO = {
 
 /** The answer the model gave on the tick that opened the section: the heading,
  *  and a bullet with nothing in it. */
-const OPENED_WITH_A_BLANK = `## ${MEETING_NOTES_HEADING}\n\n- `;
+const OPENED_WITH_A_BLANK = `## ${SCRIPT_TOPIC}\n\n- `;
 
 const FIRST_TURN = 'The Harborlight survey starts on the first Monday of March.';
 const SECOND_TURN = 'Riverbend needs two more boats before the thaw.';
@@ -49,7 +49,7 @@ function sectionDoc(markdown: string): { doc: Y.Doc; headingId: string } {
   const doc = new Y.Doc();
   prose.applyMarkdownToFragment(prose.getProseFragment(doc), '# Survey planning\n');
   prose.applyBlockEdits(doc, [{ op: 'insert_at_end', markdown }], WHO);
-  const heading = prose.readOutline(doc).find((e) => e.text.trim() === MEETING_NOTES_HEADING);
+  const heading = prose.readOutline(doc).find((e) => e.text.trim() === SCRIPT_TOPIC);
   if (!heading) throw new Error('fixture opened no section');
   return { doc, headingId: heading.id };
 }
@@ -78,7 +78,7 @@ describe('a bullet with no words in it is not a note', () => {
     const doc = new Y.Doc();
     prose.applyMarkdownToFragment(prose.getProseFragment(doc), '# Survey planning\n');
     prose.applyBlockEdits(doc, [...guarded.edits], WHO);
-    expect(prose.readOutline(doc).some((e) => e.text === MEETING_NOTES_HEADING)).toBe(false);
+    expect(prose.readOutline(doc).some((e) => e.text === SCRIPT_TOPIC)).toBe(false);
   });
 
   test('a blank bullet beside a real note is dropped and the real note lands', () => {
@@ -86,7 +86,7 @@ describe('a bullet with no words in it is not a note', () => {
       [
         {
           op: 'insert_at_end',
-          markdown: `## ${MEETING_NOTES_HEADING}\n\n- \n- ${FIRST_TURN}`,
+          markdown: `## ${SCRIPT_TOPIC}\n\n- \n- ${FIRST_TURN}`,
         },
       ],
       {},
@@ -170,7 +170,7 @@ describe('the first thing said reaches the notes by the next tick', () => {
     const h = meeting();
     await h.speak(FIRST_TURN);
     await h.speak(SECOND_TURN);
-    expect(h.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(h.countHeadings(SCRIPT_TOPIC)).toBe(1);
   });
 });
 
@@ -179,7 +179,7 @@ describe('an empty bullet already in the section does not stand', () => {
    *  note, which is what a doc carries when a tick wrote the blank before this
    *  rule existed. */
   function sectionWithABlank(): { doc: Y.Doc; headingId: string } {
-    const made = sectionDoc(`## ${MEETING_NOTES_HEADING}\n\n- \n- ${SECOND_TURN}`);
+    const made = sectionDoc(`## ${SCRIPT_TOPIC}\n\n- \n- ${SECOND_TURN}`);
     expect(bullets(made.doc)).toEqual(['', SECOND_TURN]);
     return made;
   }
@@ -204,7 +204,7 @@ describe('an empty bullet already in the section does not stand', () => {
     const { doc, headingId } = sectionDoc(OPENED_WITH_A_BLANK);
     tidyNotesSection(doc, headingId, new Set(), { bulletsAuthoredBy: AUTHOR });
     expect(bullets(doc)).toEqual([]);
-    expect(prose.readOutline(doc).some((e) => e.text === MEETING_NOTES_HEADING)).toBe(true);
+    expect(prose.readOutline(doc).some((e) => e.text === SCRIPT_TOPIC)).toBe(true);
   });
 
   test('a person’s own blank bullet is left alone', () => {
@@ -215,11 +215,11 @@ describe('an empty bullet already in the section does not stand', () => {
     const doc = new Y.Doc();
     prose.applyMarkdownToFragment(
       prose.getProseFragment(doc),
-      `# Survey planning\n\n## ${MEETING_NOTES_HEADING}\n\n- ${SECOND_TURN}\n- \n`,
+      `# Survey planning\n\n## ${SCRIPT_TOPIC}\n\n- ${SECOND_TURN}\n- \n`,
     );
     prose.ensureBlockIds(doc);
     const outline = prose.readOutline(doc);
-    const headingId = outline.find((e) => e.text.trim() === MEETING_NOTES_HEADING)?.id;
+    const headingId = outline.find((e) => e.text.trim() === SCRIPT_TOPIC)?.id;
     if (headingId === undefined) throw new Error('fixture opened no section');
     expect(outline.find((e) => e.kind === 'listItem' && e.text === '')?.author).toBeUndefined();
     tidyNotesSection(doc, headingId, new Set(), { bulletsAuthoredBy: AUTHOR });
@@ -228,7 +228,7 @@ describe('an empty bullet already in the section does not stand', () => {
 
   test('a blank lead bullet with points nested under it survives', () => {
     const { doc, headingId } = sectionDoc(
-      `## ${MEETING_NOTES_HEADING}\n\n- \n  - the ferry timetable slips a week`,
+      `## ${SCRIPT_TOPIC}\n\n- \n  - the ferry timetable slips a week`,
     );
     tidyNotesSection(doc, headingId, new Set(), { bulletsAuthoredBy: AUTHOR });
     expect(prose.readOutline(doc).some((e) => e.text.includes('ferry timetable'))).toBe(true);
@@ -243,11 +243,11 @@ describe('an empty bullet already in the section does not stand', () => {
     const doc = new Y.Doc();
     prose.applyMarkdownToFragment(
       prose.getProseFragment(doc),
-      `# Survey planning\n\n## ${MEETING_NOTES_HEADING}\n\n- ${SECOND_TURN}\n`,
+      `# Survey planning\n\n## ${SCRIPT_TOPIC}\n\n- ${SECOND_TURN}\n`,
     );
     prose.ensureBlockIds(doc);
     const outline = prose.readOutline(doc);
-    const headingId = outline.find((e) => e.text.trim() === MEETING_NOTES_HEADING)?.id;
+    const headingId = outline.find((e) => e.text.trim() === SCRIPT_TOPIC)?.id;
     const theirs = outline.find((e) => e.kind === 'listItem')?.id;
     if (headingId === undefined || theirs === undefined) throw new Error('fixture built nothing');
     // No flag asks for a proposal: a replace of a block the note-taker does

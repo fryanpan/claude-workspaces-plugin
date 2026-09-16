@@ -326,3 +326,59 @@ describe('a batch of proposals', () => {
     expect(origins).toEqual(['agent']);
   });
 });
+
+/**
+ * A REPLACE THE CALLER ASKS TO BE A PROPOSAL, on a block it owns outright.
+ *
+ * Ownership decides this by default, and for a note-taker's own bullets that
+ * is right: it wrote them a moment ago and revising them is the job. A
+ * HEADING is not that. Renaming one changes what every line beneath it is
+ * filed under, and a reader who looks away for ten minutes should not come
+ * back to a page reorganised under a different name. So the note-taker asks
+ * for the rename and the reader decides (`notes-heading-rename.ts`).
+ */
+describe('a replace the caller asked to propose', () => {
+  const DOC = '## Pricing\n\nA line under it.\n';
+
+  it('becomes a suggestion even though the caller owns the block', () => {
+    const doc = docOf(DOC);
+    for (const el of getProseFragment(doc).toArray() as Y.XmlElement[]) claimSubtree(el, AGENT);
+    const before = md(doc);
+    const res = apply(doc, [
+      { op: 'replace_block', blockId: idOf(doc, 'Pricing'), markdown: '## Pricing and packaging' },
+    ]);
+    // MUTATION CONTROL: without the flag the same edit is written straight in.
+    expect(res).toMatchObject({ applied: 1, suggested: 0 });
+    expect(md(doc)).toContain('## Pricing and packaging');
+
+    const asked = docOf(DOC);
+    for (const el of getProseFragment(asked).toArray() as Y.XmlElement[]) claimSubtree(el, AGENT);
+    const out = apply(asked, [
+      {
+        op: 'replace_block',
+        blockId: idOf(asked, 'Pricing'),
+        markdown: '## Pricing and packaging',
+        propose: true,
+      },
+    ]);
+    expect(out).toMatchObject({ applied: 0, suggested: 1, failed: 0 });
+    // The accepted doc — what the file on disk gets — still says Pricing.
+    expect(md(asked)).toBe(before.trimEnd());
+    expect(listSuggestions(asked)).toHaveLength(1);
+    // And accepting it produces what the direct edit produced.
+    const sid = out.outcomes[0]?.suggestionId as string;
+    acceptSuggestion(asked, sid);
+    expect(md(asked)).toContain('## Pricing and packaging');
+  });
+
+  it('a delete asked to propose is a proposal too', () => {
+    const doc = docOf(DOC);
+    for (const el of getProseFragment(doc).toArray() as Y.XmlElement[]) claimSubtree(el, AGENT);
+    const out = apply(doc, [
+      { op: 'replace_block', blockId: idOf(doc, 'A line'), markdown: 'Reworded.', propose: true },
+    ]);
+    expect(out).toMatchObject({ suggested: 1 });
+    rejectSuggestion(doc, out.outcomes[0]?.suggestionId as string);
+    expect(md(doc)).toBe(md(docOf(DOC)).trimEnd());
+  });
+});

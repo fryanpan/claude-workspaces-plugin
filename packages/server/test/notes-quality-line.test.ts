@@ -22,10 +22,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type Ref, type TaskReviewItem, prose } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
-import { MEETING_NOTES_HEADING, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
+import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import { meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
-import { type NotesTickHarness, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { addNotes, createNotesTickHarness, type NotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 const dirs: string[] = [];
 const freshDir = (): string => {
@@ -236,7 +236,7 @@ describe('the end-of-meeting line', () => {
     expect(line).toContain('0 repeated bullets');
     expect(line).not.toContain('BAD');
     // It really is one section: the reading is scoped, not the document.
-    expect(second.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(second.countHeadings(SCRIPT_TOPIC)).toBe(1);
     // MUTATION CONTROL on the scoping: the very same bullets, read for the
     // meeting that wrote them, ARE charged as repeats. Without this pair the
     // check above would pass on a reader that counts nothing at all.

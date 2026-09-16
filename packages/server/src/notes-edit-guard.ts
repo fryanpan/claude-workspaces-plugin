@@ -106,6 +106,7 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
+import { headingRename } from './notes-heading-rename.ts';
 import { sectionIds } from './notes-cleanup-scope.ts';
 import { correctedNote, correctsIt, ownWords } from './notes-edit-correction.ts';
 import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
@@ -407,6 +408,27 @@ export function guardNotesEdits(
     }
     if (edit.op !== 'replace_block' && edit.op !== 'delete_block') {
       out.push(edit);
+      continue;
+    }
+    // A HEADING IS NEVER REWRITTEN IN PLACE, and never deleted.
+    //
+    // A delete takes the section apart and is refused outright. A replace is
+    // a RENAME the reader is asked about: the talk outgrows the heading it
+    // opened under, and the note-taker owns that heading, so ownership —
+    // which decides rewrite-versus-redline everywhere else — would let a
+    // silent reorganisation of somebody's page straight through
+    // (`notes-heading-rename.ts`).
+    const rename = headingRename(edit, outline ?? []);
+    if (rename !== null) {
+      if ('refused' in rename) {
+        refused.push(`${edit.op} on heading ${edit.blockId}: ${rename.refused}`);
+        continue;
+      }
+      out.push(rename.edit);
+      kept.push(
+        `replace_block on heading ${edit.blockId} renames it — filed as a suggestion, ` +
+          'so the reader decides whether the page is re-filed',
+      );
       continue;
     }
     if (headingId !== undefined && edit.blockId === ctx.notesHeadingId) {

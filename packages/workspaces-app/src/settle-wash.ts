@@ -29,11 +29,16 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap';
  * remote Yjs update, so the gate is the conjunction that is true for notes
  * and rarely for anything else: the transaction is REMOTE (carries the
  * y-sync meta — a local keystroke never does), a meeting is live on THIS
- * surface (`isLive`), and the "Meeting notes" section holds lines it did
- * not hold before (`newNoteLines` — a content diff, see there for why the
- * step map cannot be used). A collaborator typing into the notes section during a
- * recording gets tinted too; that is acceptable noise, where tinting every
- * remote edit anywhere would not be.
+ * surface (`isLive`), and the DOC holds lines it did not hold before
+ * (`newNoteLines` — a content diff, see there for why the step map cannot be
+ * used). A collaborator typing during a recording gets tinted too; that is
+ * acceptable noise.
+ *
+ * THE WHOLE DOC, NOT A SECTION. This used to start at the last heading named
+ * "Meeting notes", which is how the server's finder worked at the time. The
+ * server reserves no section any more (2026-09-15) — notes land under the
+ * topic they belong to, anywhere on the page — so a reader scoped to one
+ * heading's words would tint nothing at all on every doc written since.
  *
  * Decorations, never content: the tint must survive nothing and sync
  * nowhere. Each decoration remembers when its line arrived; a re-band
@@ -63,18 +68,6 @@ export interface SettleWashOptions {
   now?: () => number;
 }
 
-/** Doc position where the notes section starts, or null. LAST heading named
- *  "Meeting notes", the same rule the server's section finder follows. */
-export function notesSectionStart(doc: ProseNode): number | null {
-  let at: number | null = null;
-  doc.forEach((node, pos) => {
-    if (node.type.name === 'heading' && node.textContent.trim() === 'Meeting notes') {
-      at = pos;
-    }
-  });
-  return at;
-}
-
 export interface NoteLine {
   from: number;
   to: number;
@@ -82,14 +75,12 @@ export interface NoteLine {
   key: string;
 }
 
-/** The lines the notes section is made of: every textblock (a bullet's
- *  paragraph, a heading, a paragraph) from the section heading to the end of
- *  the doc. A bullet with children is several lines, one per textblock. */
+/** The lines a doc is made of: every textblock (a bullet's paragraph, a
+ *  heading, a paragraph). A bullet with children is several lines, one per
+ *  textblock. */
 export function noteLines(doc: ProseNode): NoteLine[] {
-  const start = notesSectionStart(doc);
-  if (start === null) return [];
   const out: NoteLine[] = [];
-  doc.nodesBetween(start, doc.content.size, (node, pos) => {
+  doc.nodesBetween(0, doc.content.size, (node, pos) => {
     if (node.isTextblock) {
       out.push({ from: pos, to: pos + node.nodeSize, key: JSON.stringify(node.toJSON()) });
       return false;

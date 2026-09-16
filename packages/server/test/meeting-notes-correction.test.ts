@@ -21,14 +21,10 @@ import {
   correctionSpokenOnTick,
   phraseSites,
 } from '../src/meeting-notes-correction.ts';
-import {
-  MEETING_NOTES_HEADING,
-  applyNotesCorrection,
-  applyNotesUpdate,
-  createNotesHeadingMemory,
-} from '../src/meeting-notes-doc.ts';
+import { applyNotesCorrection, applyNotesUpdate, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import type { NotesCorrection, NotesUpdate } from '../src/meeting-notes.ts';
 import { agentNotesDoc, asPerson, oneDocStore } from './notes-doc-helpers.ts';
+import { SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 function docFrom(markdown: string): Y.Doc {
   const ydoc = new Y.Doc();
@@ -36,7 +32,7 @@ function docFrom(markdown: string): Y.Doc {
   return ydoc;
 }
 
-const NOTES = (body: string): string => `# Huddle\n\n## ${MEETING_NOTES_HEADING}\n\n${body}`;
+const NOTES = (body: string): string => `# Huddle\n\n## ${SCRIPT_TOPIC}\n\n${body}`;
 
 function markdownOf(ydoc: Y.Doc): string {
   return prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc));
@@ -59,7 +55,7 @@ function plainTextOf(ydoc: Y.Doc): string {
  * spelled once.
  */
 const agentNote = (body: string): Y.Doc =>
-  agentNotesDoc('# Huddle\n', `## ${MEETING_NOTES_HEADING}\n\n${body}`);
+  agentNotesDoc('# Huddle\n', `## ${SCRIPT_TOPIC}\n\n${body}`);
 
 /** The same section, written by a person: no authorship on anything. */
 const personNote = (body: string): Y.Doc => docFrom(NOTES(body));
@@ -256,7 +252,7 @@ describe('correctNotesSection', () => {
     // note if a person moves it out of the section.
     const ydoc = agentNotesDoc(
       ['# Agenda', '', 'We meet on Tuesday.', ''].join('\n'),
-      `## ${MEETING_NOTES_HEADING}\n\n- Ship on Tuesday.`,
+      `## ${SCRIPT_TOPIC}\n\n- Ship on Tuesday.`,
     );
     asPerson(ydoc, () => {
       const t = new Y.XmlText();
@@ -502,7 +498,7 @@ describe('applyNotesCorrection — through the real notes-doc path', () => {
       notesUpdate('doc-a', 1, [
         {
           op: 'insert_at_end',
-          markdown: `## ${MEETING_NOTES_HEADING}\n\n- Ship the gate on Tuesday.`,
+          markdown: `## ${SCRIPT_TOPIC}\n\n- Ship the gate on Tuesday.`,
         },
       ]),
       memory,
@@ -540,7 +536,7 @@ describe('applyNotesCorrection — through the real notes-doc path', () => {
       notesUpdate('doc-a', 1, [
         {
           op: 'insert_at_end',
-          markdown: `## ${MEETING_NOTES_HEADING}\n\n- Ship the gate on Tuesday.`,
+          markdown: `## ${SCRIPT_TOPIC}\n\n- Ship the gate on Tuesday.`,
         },
       ]),
       createNotesHeadingMemory(),

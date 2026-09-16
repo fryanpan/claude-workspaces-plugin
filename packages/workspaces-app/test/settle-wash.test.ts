@@ -10,7 +10,6 @@ import {
   RECENT_NOTE_MS,
   RECENT_NOTE_STEP_MS,
   noteLines,
-  notesSectionStart,
   recentStep,
   recentTintChanged,
 } from '../src/settle-wash.ts';
@@ -228,54 +227,62 @@ describe('the settle wash', () => {
     expect(washed(parent)).toEqual([]);
   });
 
-  it('a remote insert ABOVE the notes section is never washed', () => {
+  it('a remote insert at the TOP of the doc is washed too', () => {
+    // It used to be ignored, because the reader started at the notes heading
+    // and everything above it was somebody else's part of the page. A meeting
+    // writes under the topic a point belongs to now, and a topic at the top
+    // of the doc is as much this meeting's work as one at the bottom.
     const { view, parent } = mountEditor(DOC, { on: true });
     const { state } = view;
     const p = state.schema.nodes.paragraph.create(null, state.schema.text('remote preamble'));
-    // Position 0: before the title, well above the notes heading.
     view.dispatch(state.tr.insert(0, p).setMeta(ySyncPluginKey, { isChangeOrigin: true }));
-    expect(washed(parent)).toEqual([]);
+    expect(washed(parent)).toEqual(['remote preamble']);
   });
 
-  it('a doc with no "Meeting notes" heading washes nothing', () => {
+  it('a doc with no headings at all is washed the same way', () => {
     const { view, parent } = mountEditor('# Plan\n\nJust prose.\n', { on: true });
+    appendNote(view, 'remote words', true);
+    expect(washed(parent)).toEqual(['remote words']);
+  });
+
+  it('MUTATION CONTROL: the same write with no live meeting washes nothing', () => {
+    // The gate is still the conjunction, not the position: drop `isLive` and
+    // the identical write is ignored.
+    const { view, parent } = mountEditor('# Plan\n\nJust prose.\n', { on: false });
     appendNote(view, 'remote words', true);
     expect(washed(parent)).toEqual([]);
   });
 });
 
-describe('which "Meeting notes" heading the client reads as the section', () => {
+describe('a heading’s words decide nothing', () => {
   /**
-   * The client and the server must answer this identically: both take the
-   * LAST heading with that text. A doc carrying a person's own notes heading
-   * plus a meeting's own is the shape where the two rules would diverge, and
-   * a client that took the FIRST would show a reader lines the server has
-   * stopped treating as notes.
+   * The client used to start reading at the LAST heading named "Meeting
+   * notes", because that is how the server's finder worked. The server
+   * reserves no section any more (2026-09-15), so a reader scoped to those
+   * words would tint nothing at all on every doc written since — and would
+   * still hide half of a legacy doc that happens to carry two of them.
    */
   const TWO =
     '## Meeting notes\n\n- a line under the first heading\n\n## Meeting notes\n\n- a line under the second\n';
 
-  it('takes the last one, so the section is what the server says it is', () => {
+  it('every line of the doc is a line the tint can reach', () => {
     const { view } = mountEditor(TWO, { on: false });
-    const at = notesSectionStart(view.state.doc);
-    expect(at).not.toBeNull();
     const text = noteLines(view.state.doc)
       .map((l) => view.state.doc.textBetween(l.from, l.to, ' '))
       .join(' | ');
+    expect(text).toContain('a line under the first');
     expect(text).toContain('a line under the second');
-    // The first heading's line is ABOVE the section, so it is not in it.
-    expect(text).not.toContain('a line under the first');
   });
 
-  it('MUTATION CONTROL: with one heading, that same line IS the section', () => {
-    // Same words, one heading. If this failed too, the assertion above would
-    // be reading a typo rather than the last-heading rule.
-    const { view } = mountEditor('## Meeting notes\n\n- a line under the first heading\n', {
+  it('MUTATION CONTROL: a doc with no such heading reads its lines just the same', () => {
+    // Same shape, different words. If the reader still keyed on them, this
+    // would come back empty.
+    const { view } = mountEditor('## Ferry timetable\n\n- the harbour run moves\n', {
       on: false,
     });
     const text = noteLines(view.state.doc)
       .map((l) => view.state.doc.textBetween(l.from, l.to, ' '))
       .join(' | ');
-    expect(text).toContain('a line under the first');
+    expect(text).toContain('the harbour run moves');
   });
 });

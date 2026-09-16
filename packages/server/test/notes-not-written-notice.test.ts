@@ -16,9 +16,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
+
 import { NOTES_NOT_WRITTEN_MARK } from '../src/notes-notice.ts';
-import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 /**
  * A meeting whose composer answers tick `from` onward by replacing the
@@ -35,7 +35,7 @@ function stalling(from: number): ReturnType<typeof createNotesTickHarness> {
       if (markdown.length === 0) return [];
       if (tick < from) return addNotes(input, markdown);
       const section = input.outline.find(
-        (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+        (e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC,
       );
       return section === undefined
         ? addNotes(input, markdown)
@@ -55,7 +55,7 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         if (markdown.length === 0) return [];
         if (tick !== 2) return addNotes(input, markdown);
         const section = input.outline.find(
-          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+          (e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC,
         );
         return section === undefined
           ? addNotes(input, markdown)
@@ -119,7 +119,7 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         if (markdown.length === 0) return [];
         if (input.outline.some((e) => e.text.includes(NOTES_NOT_WRITTEN_MARK))) return [];
         const section = input.outline.find(
-          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+          (e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC,
         );
         return section === undefined
           ? addNotes(input, markdown)
@@ -154,7 +154,7 @@ describe('the doc says when the note-taker has stopped taking words', () => {
           return [{ op: 'nest_blocks', leadBlockId: lead?.id ?? 'b-1', blockIds: ['b-gone'] }];
         }
         const section = input.outline.find(
-          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+          (e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC,
         );
         return section === undefined
           ? addNotes(input, markdown)
@@ -185,7 +185,7 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         const markdown = input.tick.turns.map((t) => `- ${t.text}`).join('\n');
         if (markdown.length === 0) return [];
         const section = input.outline.find(
-          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+          (e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC,
         );
         if (section === undefined) return addNotes(input, markdown);
         const refused: prose.BlockEdit = {
@@ -240,7 +240,7 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         if (markdown.length === 0) return [];
         if (tick < 2 || tick > 4) return addNotes(input, markdown);
         const section = input.outline.find(
-          (e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING,
+          (e) => e.kind === 'heading' && e.text.trim() === SCRIPT_TOPIC,
         );
         return section === undefined
           ? addNotes(input, markdown)
