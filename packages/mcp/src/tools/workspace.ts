@@ -614,8 +614,10 @@ export async function handleWorkspaceTool(
     // every path they carry is a host path that belongs to no workspace, and
     // the routes behind them are loopback-only.
     case 'mount_folder': {
-      const { path } = a as { path: string };
-      return ok(await http('POST', '/api/mounts', { path }));
+      const { path, privacy } = a as { path: string; privacy?: string };
+      return ok(
+        await http('POST', '/api/mounts', { path, ...(privacy === undefined ? {} : { privacy }) }),
+      );
     }
     case 'list_mounts': {
       const { path, mountId, after, limit } = a as {
@@ -640,8 +642,14 @@ export async function handleWorkspaceTool(
       return ok(await http('DELETE', '/api/mounts', { path, mountId }));
     }
     case 'set_project_privacy': {
-      const { path, privacy } = a as { path: string; privacy: string };
-      return ok(await http('PUT', '/api/mounts/privacy', { path, privacy }));
+      const { path, privacy, mountId } = a as { path: string; privacy: string; mountId?: string };
+      return ok(
+        await http('PUT', '/api/mounts/privacy', {
+          path,
+          privacy,
+          ...(mountId === undefined ? {} : { mountId }),
+        }),
+      );
     }
     case 'set_project_conventions': {
       const { path, conventionsPath } = a as { path: string; conventionsPath: string };

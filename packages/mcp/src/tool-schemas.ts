@@ -2600,6 +2600,12 @@ export const TOOL_LIST: ListToolsResult = {
             description:
               'Absolute path to the folder. It must be inside a git checkout, because the repo is what gives its files an address that survives a move. A dot-directory is refused.',
           },
+          privacy: {
+            type: 'string',
+            enum: ['workspace', 'local-only'],
+            description:
+              "This folder's own privacy. Omit it and the folder follows the project, which is what every mount did before this field existed. 'local-only' serves this folder's files on the box alone while the project's other mounts stay reachable — use it for one folder of an outside party's material. It never widens: a project set to 'local-only' stays local-only whatever a mount says.",
+          },
         },
         required: ['path'],
       },
@@ -2607,7 +2613,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_mounts',
       description:
-        "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, and where its conventions index lives. Pass `mountId` to page through one mount's files instead. Machine-scoped: no workspaceId.",
+        "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, what each mount's own privacy is and what it is actually served against (`effectivePrivacy`), and where its conventions index lives. Pass `mountId` to page through one mount's files instead. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2655,7 +2661,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_project_privacy',
       description:
-        "Set whether this project's mounted files may leave the machine. It applies to the PROJECT, over all its mounts at once. 'local-only' serves the files to callers on the box alone, not over the tunnel, the tailnet, a share or a collab visitor. 'workspace' is the default and means everyone in the workspace sees them. Machine-scoped: no workspaceId.",
+        "Set whether mounted files may leave the machine. With no `mountId` it applies to the PROJECT, over all its mounts at once; with one it applies to that folder alone, for the project that has one sensitive folder and a dozen harmless ones. 'local-only' serves the files to callers on the box alone, not over the tunnel, the tailnet, a share or a collab visitor. 'workspace' is the default and means everyone in the workspace sees them. The two settings combine by taking the NARROWER, so a project set to 'local-only' cannot be reopened one folder at a time. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2668,6 +2674,11 @@ export const TOOL_LIST: ListToolsResult = {
             enum: ['workspace', 'local-only'],
             description:
               "'local-only' for material that must not leave this machine. 'workspace' otherwise.",
+          },
+          mountId: {
+            type: 'string',
+            description:
+              "One mount's id, from list_mounts or mount_folder, to set that folder alone. Omit to set the whole project.",
           },
         },
         required: ['path', 'privacy'],

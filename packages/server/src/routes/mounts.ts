@@ -1,15 +1,19 @@
 import { mkdirSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { join } from 'node:path';
 import {
   MEETING_RETENTIONS,
   applyMeetingGitignore,
   parseMeetingRetention,
 } from '../meeting-home.ts';
-import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
+import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
-import { fileSandboxHeaders } from '../mockup-frame.ts';
+import type { ProjectPrivacy } from '../mount-registry-file.ts';
 import { isMountableRelPath } from '../mount-scan.ts';
 import type { MountStore } from '../mount-store.ts';
+import { serveMountedFile } from './mount-file.ts';
+import { type MountRouteRequest, type MountRoutesContext } from './mount-routes-context.ts';
+
+export type { MountRoutesContext, MountRouteRequest };
 
 /**
  * Mounted project folders over HTTP: the lead's mount table, and the address
@@ -34,31 +38,16 @@ import type { MountStore } from '../mount-store.ts';
  * **Privacy is what narrows that.** A project marked `local-only` serves its
  * files only to a loopback caller with no `cf-ray` — an agent or a browser on
  * the box itself. Its bytes do not leave the machine even for a signed-in
- * member on Bryan's own iPad, because "must not leave the machine" is a claim
- * about the network and not about who is asking.
+ * member on the owner's own tablet, because "must not leave the machine" is a
+ * claim about the network and not about who is asking.
+ *
+ * One MOUNT can be marked instead, for the project that has one sensitive
+ * folder and a dozen harmless ones. The answer a file is served against is
+ * the narrower of its mount's setting and its project's
+ * (`MountStore.mountPrivacyOf`), never the more specific one — so a project
+ * shut with `local-only` stays shut whatever its mounts say, and a mount
+ * nobody marked behaves exactly as it did before mounts had a setting.
  */
-
-export interface MountRoutesContext {
-  mounts: MountStore;
-  j: (status: number, body: unknown) => Response;
-  safeJson: (req: Request) => Promise<Record<string, unknown> | null>;
-  /** The request's SOCKET address, never a header. */
-  requestAddress: (req: Request) => string | undefined;
-}
-
-export interface MountRouteRequest {
-  req: Request;
-  pathname: string;
-  url: URL;
-  /** The share target this request resolved to, or null for a member. */
-  visitor: ShareTarget | null;
-}
-
-/** Did this request come from this machine, unproxied? */
-function isOnBox(ctx: MountRoutesContext, req: Request): boolean {
-  if (req.headers.has('cf-ray')) return false;
-  return isLoopbackAddress(ctx.requestAddress(req));
-}
 
 /** The refusal the whole `/api/mounts` family shares, or null to proceed. */
 function offBox(ctx: MountRoutesContext, rq: MountRouteRequest): Response | null {
@@ -92,25 +81,23 @@ function readPath(body: Record<string, unknown> | null, field = 'path'): string 
   return path;
 }
 
-/** Content types a mounted file is served as. Anything else is a download. */
-const CT: Readonly<Record<string, string>> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
-  '.txt': 'text/plain; charset=utf-8',
-  '.md': 'text/markdown; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.csv': 'text/csv; charset=utf-8',
-  '.mp3': 'audio/mpeg',
-  '.m4a': 'audio/mp4',
-  '.wav': 'audio/wav',
-  '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
-};
+const PRIVACY_ERROR = "privacy must be 'workspace' or 'local-only'";
+
+/**
+ * A caller-supplied privacy value: the value, `null` when the field is absent,
+ * or `'bad'` when it is present and is neither of the two.
+ *
+ * Absent and wrong are kept apart so that `POST /api/mounts` can treat "no
+ * opinion" as today's behaviour while still refusing a typo. Guessing
+ * `workspace` from an unrecognised string is the one wrong direction — the
+ * only reason to write in this field at all is to restrict.
+ */
+function readPrivacy(body: Record<string, unknown> | null): ProjectPrivacy | null | 'bad' {
+  const raw = body?.privacy;
+  if (raw === undefined) return null;
+  if (raw === 'workspace' || raw === 'local-only') return raw;
+  return 'bad';
+}
 
 /**
  * The mount routes. `undefined` means none matched and the chain continues.
@@ -153,6 +140,12 @@ export async function handleMountRoutes(
             addedAt: m.addedAt,
             removedAt: m.removedAt,
             checkoutRoot: m.checkoutRoot,
+            // Both, because they answer different questions: `privacy` is
+            // what this mount was set to (absent when nobody set it), and
+            // `effectivePrivacy` is what it is actually served against once
+            // the project's answer is folded in.
+            privacy: m.privacy,
+            effectivePrivacy: mounts.mountPrivacyOf(p.repoKey, m.mountId),
             fileCount:
               m.removedAt === undefined
                 ? listing.files.filter((f) => f.mountId === m.mountId).length
@@ -182,8 +175,15 @@ export async function handleMountRoutes(
 
   // --- Mount a folder ---
   if (pathname === '/api/mounts' && req.method === 'POST') {
-    const path = readPath(await safeJson(req));
+    const body = await safeJson(req);
+    const path = readPath(body);
     if (!path) return j(400, { error: 'path must be an absolute filesystem path to a folder' });
+    // Read BEFORE the mount, so a bad value refuses the whole call rather
+    // than leaving a folder mounted at the project's setting while the caller
+    // was told it failed — a mount is exactly the moment a narrower answer is
+    // known, and half of it landing is the wrong half.
+    const wanted = readPrivacy(body);
+    if (wanted === 'bad') return j(400, { error: PRIVACY_ERROR });
     const res = mounts.mount(path);
     if (!res.ok) {
       return j(400, {
@@ -196,6 +196,9 @@ export async function handleMountRoutes(
               : 'that path is not a directory',
       });
     }
+    if (wanted !== null) {
+      mounts.setMountPrivacy(res.project.repoKey, res.mount.mountId, wanted);
+    }
     const listing = mounts.reconcile(res.project.repoKey, true);
     return j(200, {
       ok: true,
@@ -204,6 +207,7 @@ export async function handleMountRoutes(
       relPath: res.mount.relPath,
       created: res.created,
       privacy: mounts.privacyOf(res.project.repoKey),
+      mountPrivacy: mounts.mountPrivacyOf(res.project.repoKey, res.mount.mountId),
       fileCount: listing.files.filter((f) => f.mountId === res.mount.mountId).length,
       // A capped walk is said out loud: the count is a floor, not a total.
       truncated: listing.truncated,
@@ -231,17 +235,37 @@ export async function handleMountRoutes(
     return j(200, { ok: true, repoKey: at.repoKey, mountId, filesLeftOnDisk: true });
   }
 
-  // --- Privacy, over all of a project's mounts at once ---
+  // --- Privacy: the whole project, or one of its mounts ---
+  //
+  // One route for both, because it is one decision asked at two scopes, and a
+  // second route would be a second place for the combining rule to be got
+  // wrong. Naming a `mountId` is what says which scope was meant.
   if (pathname === '/api/mounts/privacy' && req.method === 'PUT') {
     const body = await safeJson(req);
     const path = readPath(body);
-    const privacy = body?.privacy;
+    const privacy = readPrivacy(body);
+    const mountId = body?.mountId;
     if (!path) return j(400, { error: 'path must be an absolute filesystem path' });
-    if (privacy !== 'workspace' && privacy !== 'local-only') {
-      return j(400, { error: "privacy must be 'workspace' or 'local-only'" });
+    if (privacy === null || privacy === 'bad') return j(400, { error: PRIVACY_ERROR });
+    if (mountId !== undefined && typeof mountId !== 'string') {
+      return j(400, { error: 'mountId must be a string' });
     }
     const at = mounts.locate(path);
     if (!at) return j(400, { error: 'not-a-repo', path });
+    if (typeof mountId === 'string') {
+      const mount = mounts.setMountPrivacy(at.repoKey, mountId, privacy);
+      if (!mount) return j(404, { error: 'no-such-mount', mountId });
+      return j(200, {
+        ok: true,
+        repoKey: at.repoKey,
+        mountId: mount.mountId,
+        privacy: mount.privacy,
+        // What it is actually served against — which is the project's answer
+        // when that one is narrower, and saying so is the difference between
+        // a caller believing it opened a folder and knowing it did not.
+        effectivePrivacy: mounts.mountPrivacyOf(at.repoKey, mount.mountId),
+      });
+    }
     const project = mounts.setPrivacy(at.repoKey, privacy);
     return j(200, { ok: true, repoKey: project.repoKey, privacy: project.privacy });
   }
@@ -354,119 +378,4 @@ export async function handleMountRoutes(
   }
 
   return j(405, { error: 'method not allowed' });
-}
-
-/**
- * A mounted file at its address.
- *
- * `GET /mounts/<fileId>` is the metadata and `…/raw` is the bytes. The bytes
- * are streamed with `Bun.file` rather than served through `serveStatic`,
- * which reads the whole file into memory — a mount holds the 23 GB run
- * directories this feature exists for, and one request for one of those would
- * take the server down.
- */
-function serveMountedFile(ctx: MountRoutesContext, rq: MountRouteRequest): Response | undefined {
-  const { mounts, j } = ctx;
-  const { req, pathname, visitor } = rq;
-  const rest = pathname.slice('/mounts/'.length);
-  if (pathname === '/mounts' || rest === '') return j(404, { error: 'no file id in the address' });
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return j(405, { error: 'method not allowed' });
-  }
-  const [rawId, sub, ...extra] = rest.split('/');
-  const fileId = decodeURIComponent(rawId ?? '');
-  if (extra.length > 0 || (sub !== undefined && sub !== 'raw')) {
-    return j(404, { error: 'not a mount address' });
-  }
-
-  // Belt to the admission layer's braces: `/mounts/…` is not on
-  // `shareScopeAllows`, so a visitor is refused before reaching here. The
-  // local refusal is what keeps that true if a prefix is ever widened.
-  if (visitor) return j(403, { error: 'mounted files are not available to share visitors' });
-
-  const found = mounts.resolveFile(fileId);
-  if (!found) return j(404, { error: 'no mounted file at that address', fileId });
-
-  // The project's own rule. `local-only` means the bytes do not leave the
-  // machine, so it is answered against the socket and the edge header rather
-  // than against who the caller is.
-  if (mounts.privacyOf(found.repoKey) === 'local-only' && !isOnBox(ctx, req)) {
-    return j(403, {
-      error: 'this project is local-only — its mounted files are served on the box alone',
-    });
-  }
-
-  if (sub !== 'raw') {
-    return j(200, {
-      fileId,
-      mountId: found.file.mountId,
-      relPath: found.file.relPath,
-      name: basename(found.file.relPath),
-      size: found.file.size,
-      mtimeMs: found.file.mtimeMs,
-      contentType: CT[extname(found.file.relPath).toLowerCase()] ?? 'application/octet-stream',
-      rawUrl: `/mounts/${encodeURIComponent(fileId)}/raw`,
-    });
-  }
-
-  const ext = extname(found.file.relPath).toLowerCase();
-  const headers: Record<string, string> = {
-    'content-type': CT[ext] ?? 'application/octet-stream',
-    // An address serves whatever the file holds NOW — that is the point of an
-    // in-place update — so the browser has to revalidate. The tag is size and
-    // mtime rather than a content hash: hashing 23 GB per request is the
-    // thing this route exists not to do.
-    'cache-control': 'no-cache',
-    etag: `"${found.file.size.toString(16)}-${Math.floor(found.file.mtimeMs).toString(16)}"`,
-    'content-disposition': `${dispositionFor(ext)}; filename="${safeFilename(found.file.relPath)}"`,
-    'x-content-type-options': 'nosniff',
-    // A browser that renders the file anyway (a download it opens, a type
-    // served inline) gets it without scripts and without this origin: an SVG
-    // or HTML file is somebody's markup, not the board's (`mockup-frame.ts`).
-    ...fileSandboxHeaders(found.file.relPath),
-  };
-  if (req.method === 'HEAD') {
-    headers['content-length'] = String(found.file.size);
-    return new Response(null, { headers });
-  }
-  // Streamed, never read whole: the response must not be bounded by memory
-  // when the file is one of the multi-gigabyte ones a mount exists to hold.
-  return new Response(Bun.file(found.abs), { headers });
-}
-
-/**
- * Inline, or a download?
- *
- * A mounted file is served from the SERVER'S OWN ORIGIN, beside every session
- * cookie it holds — so anything the browser would execute as a document has
- * to arrive as an attachment. That is `.svg` (it carries script and renders
- * as a document), `.html` in every spelling, and everything unrecognised,
- * which is the case that matters most: a type nobody listed is a type nobody
- * reasoned about. What stays inline is the set a reviewer opens by clicking —
- * raster images, PDF, plain text and media.
- */
-const INLINE_EXTENSIONS: ReadonlySet<string> = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.webp',
-  '.pdf',
-  '.txt',
-  '.md',
-  '.csv',
-  '.mp3',
-  '.m4a',
-  '.wav',
-  '.mp4',
-  '.webm',
-]);
-
-function dispositionFor(ext: string): 'inline' | 'attachment' {
-  return INLINE_EXTENSIONS.has(ext) ? 'inline' : 'attachment';
-}
-
-/** A filename safe to put inside a quoted header value. */
-function safeFilename(relPath: string): string {
-  return basename(relPath).replace(/[^A-Za-z0-9._-]/g, '_');
 }
