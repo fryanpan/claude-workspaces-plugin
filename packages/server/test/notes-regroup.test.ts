@@ -450,7 +450,7 @@ describe('overgrownTopics', () => {
 });
 
 describe('the three remedies', () => {
-  test('asks a swallowed topic for the next heading, and not for a group', () => {
+  test('asks a swallowed topic to break the stretch, and to place the heading', () => {
     const own = ownHeading('Slipway crane booking');
     const text =
       regroupDirective([own, ...bullets(MAX_TOPIC_NOTES, 'crane')], {
@@ -462,8 +462,28 @@ describe('the three remedies', () => {
     // Both other remedies, spelled at the levels THIS doc writes at.
     expect(text).toContain('### ');
     expect(text).toContain('## ');
-    // Nesting is the remedy it is being told not to reach for.
-    expect(text).not.toContain('GROUP THEM IN THIS UPDATE');
+    // AND THE OP THAT PLACES IT. Without this line the ask names a shape the
+    // edits cannot reach: every other insert lands at an end, so the heading
+    // would arrive under the stretch it is meant to head.
+    expect(text).toContain('insert_before_block');
+  });
+
+  test('asks that topic for the group as well, because the two compose now', () => {
+    const own = ownHeading('Slipway crane booking');
+    const text =
+      regroupDirective([own, ...bullets(MAX_TOPIC_NOTES, 'crane')], {
+        author: NOTES_AUTHOR_ID,
+        notesHeadingId: own.id,
+      }) ?? '';
+    // IT USED TO SAY "do NOT nest these", and that was right for as long as a
+    // heading could only be APPENDED: the ask was then "stop adding here",
+    // and grouping what was already written was its opposite. Placement makes
+    // the split a repair instead, so both remedies apply to the same topic.
+    // Asked for the split alone, a repaired meeting ended with a flat run of
+    // `MAX_TOPIC_NOTES` under its live heading and no ask ever firing on it —
+    // measured in `notes-long-topic.test.ts`.
+    expect(text).toContain('GROUP THEM IN THIS UPDATE');
+    expect(text).not.toContain('do NOT nest these');
   });
 
   test('asks a topic that is merely full for a group — the control', () => {
@@ -474,7 +494,11 @@ describe('the three remedies', () => {
         notesHeadingId: own.id,
       }) ?? '';
     expect(text).toContain('GROUP THEM IN THIS UPDATE');
+    // CONTROL FOR THE PAIR ABOVE: a topic below the per-heading bar is asked
+    // for the group and NOT for a split, so the two asks are still decided
+    // separately — composing them did not collapse them into one.
     expect(text).not.toContain('HAS RUN PAST ONE HEADING');
+    expect(text).not.toContain('insert_before_block');
   });
 
   test("the group ask no longer trades this speech's note for the grouping", () => {
