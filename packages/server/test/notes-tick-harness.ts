@@ -221,6 +221,13 @@ export interface NotesTickHarnessOptions {
    *  end-of-meeting line still carries the counts and files nothing. */
   qualityBoard?: import('../src/notes-quality-review.ts').NotesQualityBoard;
   /**
+   * The filer that decides WHEN a quality item reaches a person. Shared
+   * across two harnesses to model the two recording legs of one meeting,
+   * the same way `heading` is — the memory of where a meeting's one item
+   * went lives there, and a per-leg filer has none.
+   */
+  qualityFiler?: import('../src/notes-quality-filing.ts').NotesQualityFiler;
+  /**
    * How long `tick()` waits for the write. The default suits a scripted
    * composer, which answers in microseconds; `notes-eval.ts` drives a REAL
    * model whose reply grows with the notes, and five seconds is not enough
@@ -264,6 +271,12 @@ export interface NotesTickHarness {
    * already covered.
    */
   end(): Promise<TickSnapshot | null>;
+  /**
+   * The socket owner's own step, after the record is stopped: this leg is
+   * over, and `resumable` says whether a browser will pick the meeting back
+   * up. `meeting-protocol.ts` calls the same sink with the same argument.
+   */
+  legEnded(resumable: boolean): void;
   /**
    * Refs the meeting wrote onto board rows, in order — `[taskId, docId]` per
    * spoken link. The harness stands in for the task store here, so a script
@@ -376,6 +389,7 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
       ...(opts.dataDir ? { dataDir: opts.dataDir } : {}),
       ...(opts.captureBoard ? { captureBoard: () => opts.captureBoard as never } : {}),
       ...(qualityBoard ? { qualityBoard: () => qualityBoard } : {}),
+      ...(opts.qualityFiler ? { qualityFiler: opts.qualityFiler } : {}),
       ...(opts.heading ? { heading: opts.heading } : {}),
     },
   );
@@ -451,6 +465,9 @@ export function createNotesTickHarness(opts: NotesTickHarnessOptions): NotesTick
     },
     nameSpeaker(label, name) {
       session.nameSpeaker(label, name);
+    },
+    legEnded(resumable) {
+      deps.onLegEnded?.({ docId, meetingId }, { resumable });
     },
     sayPartial(text, speaker) {
       const turn = turnNo++;

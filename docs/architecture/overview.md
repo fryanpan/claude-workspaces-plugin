@@ -778,7 +778,12 @@ write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a
 bad one on the task the doc belongs to, or on the doc itself when no task
-links it. `notes-written.ts` joins the pure end of that
+links it. `notes-quality-filing.ts` sits between the pass and that filing and
+is the one arrow worth drawing: the stop of a recording LEG is not the end of
+a meeting (a dropped socket ends a leg and a resume carries the same meeting
+on), so the pass hands its reading there and the filer holds it until the
+socket layer says the meeting is over — one item per meeting, revised rather
+than duplicated when a later reading changes. `notes-written.ts` joins the pure end of that
 family and is the one box worth naming, because it answers WHICH BLOCKS ARE
 THE MEETING'S: the note-taker's authorship marks wherever they sit in the
 doc, union the section it opened. It reads a doc and returns markdown, writes

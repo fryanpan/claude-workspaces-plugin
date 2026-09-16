@@ -70,7 +70,16 @@ async function captureLog(run: () => Promise<void>): Promise<string[]> {
 
 /** The one line a meeting ends with. */
 const summaryLine = (lines: string[], meetingId: string): string =>
-  lines.find((l) => l.includes(`meeting ${meetingId}:`)) ?? '';
+  lines.find((l) => l.includes(`meeting ${meetingId}:`) && !l.includes('quality item')) ?? '';
+
+/**
+ * And the line that says where the item went, printed when the MEETING is
+ * over rather than when the leg stopped — a dropped socket ends a leg and a
+ * resume carries the same meeting on, so the two facts are known at two
+ * different moments (`notes-quality-filing.ts`).
+ */
+const filingLine = (lines: string[], meetingId: string): string =>
+  lines.find((l) => l.includes(`meeting ${meetingId}: quality item`)) ?? '';
 
 /**
  * Put `line` into the notes four more times, as a person pasting it would.
@@ -148,6 +157,8 @@ describe('the end-of-meeting line', () => {
       await harness.speak('Kestrel Lane keeps the winter crew until April.');
       pasteRepeats(harness, repeat);
       await harness.end();
+      // The person pressed Stop: the meeting is over, so the item goes.
+      harness.legEnded(false);
     });
     const line = summaryLine(lines, 'm-repeats');
     // No data dir, so no timing record was written and none could be read.
@@ -157,6 +168,7 @@ describe('the end-of-meeting line', () => {
     expect(line).toContain('BAD');
     expect(line).toContain('repeated bullet');
     expect(board.filed).toEqual(['t-season']);
+    expect(filingLine(lines, 'm-repeats')).toContain('filed on');
   });
 
   it('says a bad meeting was NOT filed when its doc belongs to no row', async () => {
@@ -172,9 +184,11 @@ describe('the end-of-meeting line', () => {
       await harness.speak('Kestrel Lane keeps the winter crew until April.');
       pasteRepeats(harness, repeat);
       await harness.end();
+      // The person pressed Stop: the meeting is over, so the item goes.
+      harness.legEnded(false);
     });
-    const line = summaryLine(lines, 'm-orphan');
-    expect(line).toContain('NOT filed (no-row)');
+    expect(summaryLine(lines, 'm-orphan')).toContain('BAD');
+    expect(filingLine(lines, 'm-orphan')).toContain('NOT filed (no-row)');
     expect(board.filed).toEqual([]);
   });
 
@@ -184,7 +198,7 @@ describe('the end-of-meeting line', () => {
       ...recordingBoard([]),
       fileOnDoc: (docId: string) => {
         onDoc.push(docId);
-        return true;
+        return { threadId: 'th-1', commentId: 'c-1' };
       },
     };
     const repeat = '- Saltmarsh keeps the winter crew until April';
@@ -198,11 +212,13 @@ describe('the end-of-meeting line', () => {
       await harness.speak('Saltmarsh keeps the winter crew until April.');
       pasteRepeats(harness, repeat);
       await harness.end();
+      // The person pressed Stop: the meeting is over, so the item goes.
+      harness.legEnded(false);
     });
-    const line = summaryLine(lines, 'm-unlinked');
-    expect(line).toContain('BAD');
-    expect(line).toContain('filed on the doc');
-    expect(line).not.toContain('NOT filed');
+    expect(summaryLine(lines, 'm-unlinked')).toContain('BAD');
+    const filed = filingLine(lines, 'm-unlinked');
+    expect(filed).toContain('filed on the doc');
+    expect(filed).not.toContain('NOT filed');
     expect(onDoc).toEqual(['d-meeting']);
   });
 

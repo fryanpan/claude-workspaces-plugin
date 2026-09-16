@@ -242,6 +242,24 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   five-reconnect meeting it means most of the minutes stop being editable by
   the hand that wrote them. **Left as measured; changing it is a separate
   decision, not a bug fix.**
+- **Held, since 2026-09-16: the meeting's quality item.** The at-stop quality
+  pass runs at every leg's stop, because `end()` is what runs it — so a
+  reconnecting meeting used to put a "the notes came out badly" item in front
+  of Bryan while he was still in the room, and file a SECOND one at the next
+  leg's stop. The pass no longer files: it hands its reading to
+  `notes-quality-filing.ts`, and the socket layer calls `onLegEnded` once the
+  record is stopped, which is the first moment anything knows how the leg
+  ended. A leg that ended the way a person ends a meeting (Stop, the silence
+  deadline, the tab closing) files at once; a leg that ended the way a network
+  ends one holds the reading for two minutes — the browser's own
+  `RECONNECT_WINDOW_MS` — and a resume inside that window cancels the hold and
+  throws the reading away, because the next stop reads the whole meeting's
+  notes. One meeting therefore files at most one item, after it is over, and a
+  later reading REVISES those words through `reviseReviewItem` (or
+  `reviseCommentReview`, for a doc no row links) rather than raising a second
+  ask. A refused revision leaves the standing item alone; it never becomes a
+  second filing. `notes-quality-timing.test.ts` drives it, and carries the
+  base policy as a live control.
 
 ## A voice keeps its name across every session of a doc (2026-09-16)
 

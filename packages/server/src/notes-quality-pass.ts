@@ -28,7 +28,6 @@
  * the invented-voice check reads.
  */
 
-import { docLookupUrl } from './meeting-lookup.ts';
 import { listMeetings, readTranscript } from './meetings.ts';
 import type { NotesDocStore } from './notes-doc-access.ts';
 import {
@@ -39,10 +38,9 @@ import {
   notesQualityLogLine,
 } from './notes-quality-report.ts';
 import {
-  type NotesQualityBoard,
+  type NotesQualityFileInput,
   type NotesQualityFiling,
-  fileNotesQualityReview,
-  filedItemLink,
+  filingWhere,
 } from './notes-quality-review.ts';
 import { notesQualityRecord, writeNotesQuality } from './notes-quality-store.ts';
 import { readTickWaits } from './notes-tick-timing.ts';
@@ -86,8 +84,19 @@ export function voicesOf(
 /** What this pass needs, all of it optional except the doc it reads. */
 export interface NotesQualityPassDeps {
   docStore: () => NotesDocStore;
-  /** The board a review item would be filed on. Absent, nothing is filed. */
-  board?: () => NotesQualityBoard;
+  /**
+   * Where a reading that crossed a bar goes. Absent, nothing is filed.
+   *
+   * A SINK RATHER THAN A BOARD, because the pass knows what the notes came
+   * out like and knows nothing about whether the meeting is over. It runs at
+   * the end of a recording LEG — a dropped socket ends one and a reconnect
+   * carries the same meeting on — so a pass that filed for itself put an
+   * item in front of a person mid-meeting, and filed a second one at the
+   * leg after that. `notes-quality-filing.ts` is the server's sink and holds
+   * the reading until the meeting is done with; a caller that wants the old
+   * immediate behaviour passes `fileNotesQualityReview` bound to its board.
+   */
+  file?: (input: NotesQualityFileInput) => NotesQualityFiling;
   /** Which board a doc belongs to. */
   boardOf?: (docId: string) => string | undefined;
   /** The server's data dir — where the transcript, the meeting record, the
@@ -174,9 +183,8 @@ export function runNotesQualityPass(
   const workspaceId = deps.boardOf?.(docId);
   let filing: NotesQualityFiling = { filed: false, reason: 'healthy' };
   if (report.flags.length > 0) {
-    const board = deps.board?.();
-    filing = board
-      ? fileNotesQualityReview(board, deps.actor, {
+    filing = deps.file
+      ? deps.file({
           workspaceId,
           docId,
           ...(meeting.docTitle !== undefined ? { docTitle: meeting.docTitle } : {}),
@@ -204,16 +212,8 @@ export function passLine(
 ): string {
   const counts = notesQualityLogLine(report);
   if (report.flags.length === 0) return counts;
-  const where = filing.filed
-    ? 'docId' in filing
-      ? `filed on the doc ${
-          workspaceId !== undefined ? docLookupUrl(workspaceId, filing.docId) : filing.docId
-        }`
-      : `filed on ${
-          workspaceId !== undefined ? filedItemLink(workspaceId, filing.taskId) : filing.taskId
-        }`
-    : `NOT filed (${filing.reason}${
-        'message' in filing && filing.message !== undefined ? `: ${filing.message}` : ''
-      })`;
-  return `${counts}; BAD — ${report.flags.map((f) => f.text).join('; ')}; ${where}`;
+  return `${counts}; BAD — ${report.flags.map((f) => f.text).join('; ')}; ${filingWhere(
+    filing,
+    workspaceId,
+  )}`;
 }

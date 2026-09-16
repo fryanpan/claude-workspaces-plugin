@@ -75,6 +75,7 @@ import {
   type NotesUpdate,
   type NotesWriteNoWords,
   type NotesWriteRefusal,
+  type TickScheduler,
 } from './meeting-notes.ts';
 import {
   type ResearchFiled,
@@ -112,6 +113,7 @@ import {
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
 import { readNotesMethod } from './notes-method-store.ts';
+import { type NotesQualityFiler, createNotesQualityFiler } from './notes-quality-filing.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
@@ -1207,6 +1209,16 @@ export function withServerNotesSinks(
     /** Who a filed quality item is attributed to. Defaults to the note-taker
      *  itself, which is the hand that wrote the notes being reported on. */
     qualityActor?: { id: string; name: string; kind?: string };
+    /**
+     * The resume grace the quality filer holds a dropped leg's reading for,
+     * and the clock it runs on. Tests fire the clock by hand; the server
+     * takes the defaults.
+     */
+    qualityGraceMs?: number;
+    qualityGraceSchedule?: TickScheduler;
+    /** Tests: a filer they can share across two harnesses to model the two
+     *  recording legs of one meeting. */
+    qualityFiler?: NotesQualityFiler;
   },
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
@@ -1232,6 +1244,18 @@ export function withServerNotesSinks(
     createNotesHeadingMemory(
       deps.dataDir !== undefined ? createNotesHeadingFileStore(deps.dataDir) : undefined,
     );
+  // ONE FILER PER WIRING, i.e. per server, for the reason the heading memory
+  // above is: it is keyed by doc and meeting and it has to outlive a socket,
+  // because the leg that drops and the leg that ends the meeting are two
+  // sessions of one recording.
+  const qualityFiler =
+    deps.qualityFiler ??
+    createNotesQualityFiler({
+      ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+      actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
+      ...(deps.qualityGraceMs !== undefined ? { graceMs: deps.qualityGraceMs } : {}),
+      ...(deps.qualityGraceSchedule ? { schedule: deps.qualityGraceSchedule } : {}),
+    });
   const boardOf = (docId: string): string | undefined => {
     const doc = deps.docStore().get(docId);
     return doc?.meta.setId ?? deps.boardOf?.(docId);
@@ -1270,7 +1294,8 @@ export function withServerNotesSinks(
       return runNotesQualityPass(
         {
           docStore: deps.docStore,
-          ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+          file: (input) =>
+            qualityFiler.file({ docId: summary.docId, meetingId: summary.meetingId }, input),
           boardOf,
           ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
           headingIdOf: (docId, meetingId) =>
@@ -1502,10 +1527,21 @@ export function withServerNotesSinks(
       // lands in.
       releaseNotesAuthorship(deps.docStore(), ids.docId);
       heading.beginMeeting(ids);
+      // A leg of this meeting is running again. Whatever reading the drop
+      // left is about half a meeting, and the grace that would have filed it
+      // is cancelled — the next stop reads the whole of it.
+      qualityFiler.legBegan(ids);
       titler?.onSessionStart(ids.docId);
       reviewAsked.delete(ids.docId);
       spentCues.delete(ids.docId);
       options.onSessionStart?.(ids);
+    },
+    // The socket owner, once it knows how the leg ended. This is where a
+    // quality item becomes a thing a person can see: never inside `end()`,
+    // which runs while the meeting may still be picked back up.
+    onLegEnded: (ids, opts): void => {
+      qualityFiler.legEnded(ids, opts);
+      options.onLegEnded?.(ids, opts);
     },
     resolveContext: (docId: string): NotesProjectContext | undefined => {
       const gathered: NotesProjectContext = {};

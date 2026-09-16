@@ -908,6 +908,21 @@ export interface MeetingNotesDeps {
    * so the frames reach the one client whose meeting it is.
    */
   onTickLifecycle?: (event: NotesTickLifecycle) => void;
+  /**
+   * A recording LEG of this meeting ended, called by whoever owns the socket
+   * AFTER the meeting record has been stopped — which is the first moment
+   * anybody knows how it ended.
+   *
+   * `resumable` is true for the endings a browser reconnects from, and those
+   * are not the end of the meeting: the same recording is picked back up
+   * under the same id. The server sink uses it to decide when a quality item
+   * may reach a person; a caller that never resumes a meeting passes false.
+   *
+   * NOT emitted from `end()`, deliberately. `end()` runs before the record is
+   * stopped and before the close code has been classified, so a sink called
+   * from there cannot tell a person pressing Stop from a Wi-Fi drop.
+   */
+  onLegEnded?: (ids: { docId: string; meetingId: string }, opts: { resumable: boolean }) => void;
 }
 
 /**
