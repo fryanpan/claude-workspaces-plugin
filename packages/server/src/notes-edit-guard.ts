@@ -306,6 +306,11 @@ function writesANote(markdown: string): boolean {
   );
 }
 
+/** Whether the outline says this block is a heading. */
+function isHeading(blockId: string, outline: readonly prose.OutlineEntry[] | undefined): boolean {
+  return outline?.find((e) => e.id === blockId)?.kind === 'heading';
+}
+
 /**
  * Filter a tick's edits down to the ones that cannot destroy the section.
  *
@@ -436,6 +441,15 @@ export function guardNotesEdits(
         `replace_block on heading ${edit.blockId} renames it — filed as a suggestion, ` +
           'so the reader decides whether the page is re-filed',
       );
+      continue;
+    }
+    // NO HEADING IS DELETED BY A TICK. Removing one re-files everything under
+    // it, which is a reorganisation of somebody's page — the same thing the
+    // rename above exists to keep out of the note-taker's hands, and the tidy
+    // -up pass is where an empty heading is removed. Ownership is no answer
+    // here: a heading the note-taker wrote is on the reader's page too.
+    if (edit.op === 'delete_block' && isHeading(edit.blockId, outline)) {
+      refused.push(`delete_block on heading ${edit.blockId}: a tick never removes a heading`);
       continue;
     }
     if (headingId !== undefined && edit.blockId === ctx.notesHeadingId) {

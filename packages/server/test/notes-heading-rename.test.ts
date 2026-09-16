@@ -200,3 +200,56 @@ describe('a rename the reader accepts', () => {
     expect(harness.errors).toEqual([]);
   });
 });
+
+/**
+ * AND NO TICK DELETES A HEADING.
+ *
+ * The rename exists so the page is never silently re-filed. A delete does the
+ * same damage by another route — everything under the heading joins the one
+ * above it — and ownership is no answer, because a heading the note-taker
+ * wrote is on the reader's page too. Raised by the independent review.
+ */
+describe('a tick that tries to remove a heading', () => {
+  it('is refused, and the notes beside it still land', async () => {
+    const harness = createNotesTickHarness({
+      compose: (input, tick) => {
+        if (tick === 1) return addNotes(input, '- three tiers on the table', 'Pricing');
+        const heading = input.outline.find((e) => e.kind === 'heading');
+        return heading === undefined
+          ? []
+          : [
+              { op: 'delete_block' as const, blockId: heading.id },
+              ...addNotes(input, '- and onboarding moves with it'),
+            ];
+      },
+    });
+    await harness.speak('three tiers on the table');
+    await harness.speak('and onboarding moves with it');
+    await harness.end();
+    expect(harness.headings()).toEqual(['Pricing']);
+    expect(harness.markdown()).toContain('onboarding moves with it');
+  });
+
+  it('MUTATION CONTROL: the same delete on a BULLET goes through', async () => {
+    // Identical op, identical position in the batch. If this were refused too,
+    // the case above would be measuring "a tick cannot delete" rather than
+    // "a tick cannot delete a HEADING".
+    const harness = createNotesTickHarness({
+      compose: (input, tick) => {
+        if (tick === 1) return addNotes(input, '- three tiers on the table', 'Pricing');
+        const bullet = input.outline.find((e) => e.kind === 'listItem');
+        return bullet === undefined
+          ? []
+          : [
+              { op: 'delete_block' as const, blockId: bullet.id },
+              ...addNotes(input, '- and onboarding moves with it'),
+            ];
+      },
+    });
+    await harness.speak('three tiers on the table');
+    await harness.speak('and onboarding moves with it');
+    await harness.end();
+    expect(harness.markdown()).not.toContain('three tiers on the table');
+    expect(harness.markdown()).toContain('onboarding moves with it');
+  });
+});
