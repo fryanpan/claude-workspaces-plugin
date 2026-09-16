@@ -152,3 +152,114 @@ describe('why a meeting socket closed', () => {
     expect(meetingCloseCause(4999)).toBe('code-4999');
   });
 });
+
+/**
+ * The cause surviving the two places it used to be dropped.
+ *
+ * The `socket closed` line above is only half the pair: `[meeting] ended`
+ * carries an `endedBy=` in the same vocabulary, so one grep answers both
+ * halves of a meeting that went wrong. Two paths reached that line with the
+ * cause already gone, and both printed `endedBy=client-stop` over a network
+ * drop — the single most misleading thing this vocabulary could say, because
+ * it names the one ending nobody needs to investigate.
+ *
+ * All fixtures are synthetic; the repo is public.
+ */
+describe('the cause of a close that did not take the ordinary path', () => {
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  function createClient(docId: string): MeetingClient {
+    return { data: { docId }, send() {} };
+  }
+
+  /** The `endedBy=` field of the newest `ended` line, or null. */
+  function endedByOf(lines: string[]): string | null {
+    const line = [...lines].reverse().find((l) => l.includes('[meeting] ended'));
+    return line?.match(/endedBy=(\S+)/)?.[1] ?? null;
+  }
+
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cw-meeting-close-cause-'));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('survives a socket that closed while the handshake was still out', async () => {
+    // The engine takes its time opening. The socket dies in that window, so
+    // `stop` finds the connection still `opening`, stashes the ask and
+    // returns — and the deferred stop that runs when the handshake lands is
+    // the one that writes the line.
+    const open: { finish: (() => void) | null } = { finish: null };
+    const slowEngine: TranscriptionEngine = {
+      name: 'mock',
+      open: () =>
+        new Promise((resolve) => {
+          open.finish = () => resolve({ send: () => {}, close: () => Promise.resolve() });
+        }),
+    };
+    const lines: string[] = [];
+    const relay = new MeetingRelay({
+      store: new MeetingStore(dir),
+      engines: [slowEngine],
+      notes: null,
+      broadcast: () => {},
+      log: (line) => lines.push(line),
+    });
+    const ws = createClient('close-midhandshake');
+    relay.onOpen(ws);
+    relay.onText(ws, JSON.stringify({ type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' }));
+    await settle();
+    relay.onClose(ws, 1006);
+    await settle();
+    expect(open.finish).not.toBeNull();
+    open.finish?.();
+    await settle();
+    await settle();
+    expect(endedByOf(lines)).toBe('network-drop');
+  });
+
+  it('is not the last meeting’s, on a socket whose restart was refused', async () => {
+    // A socket can be told `already_recording` — which is exactly what a
+    // resume racing the dropped socket's teardown gets — and that refusal
+    // returns before the reset that clears the previous meeting's ending.
+    // Left set, the person's earlier Stop labels a drop that had nothing to
+    // do with them.
+    const lines: string[] = [];
+    const relay = new MeetingRelay({
+      store: new MeetingStore(dir),
+      engines: [mockEngine()],
+      notes: null,
+      broadcast: () => {},
+      log: (line) => lines.push(line),
+    });
+    const first = createClient('close-refused');
+    relay.onOpen(first);
+    relay.onText(
+      first,
+      JSON.stringify({ type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' }),
+    );
+    await settle();
+    relay.onText(first, JSON.stringify({ type: 'stop' }));
+    await settle();
+
+    // Somebody else has the doc by the time this socket tries again.
+    const other = createClient('close-refused');
+    relay.onOpen(other);
+    relay.onText(
+      other,
+      JSON.stringify({ type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' }),
+    );
+    await settle();
+    relay.onText(
+      first,
+      JSON.stringify({ type: 'start', sampleRate: 16_000, encoding: 'pcm_s16le' }),
+    );
+    await settle();
+
+    relay.onClose(first, 1006);
+    await settle();
+    expect(causeOf(lines)).toBe('network-drop');
+  });
+});

@@ -131,6 +131,7 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
     // Same shape as a speaker name: trimmed, bounded, dropped when empty.
     const participant =
       typeof m.participant === 'string' ? m.participant.trim().slice(0, MAX_SPEAKER_NAME) : '';
+    const held = resume !== undefined ? parseHeldMs(m.heldMs) : undefined;
     return {
       type: 'start',
       sampleRate: Math.round(rate),
@@ -167,9 +168,7 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       // window — a client claiming to have carried an hour would silently
       // erase a real gap from the record — and a value that is not a finite
       // number at all is simply absent, which reads as "nothing carried".
-      ...(resume !== undefined && parseHeldMs(m.heldMs) !== undefined
-        ? { heldMs: parseHeldMs(m.heldMs) }
-        : {}),
+      ...(held !== undefined ? { heldMs: held } : {}),
     };
   }
   return null;

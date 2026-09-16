@@ -127,13 +127,13 @@ export const RESUME_FAILED_NOTE =
  *
  * - The outages measured on the meeting this fix comes from ran 3 to 8
  *   seconds. The cap covers the whole measured band and nothing beyond it.
- * - It is the sum of the backoff's own first rungs — 1s + 2s + 4s is the wait
- *   before the fourth attempt — so an outage the reconnect resolves early is
- *   covered, and one still failing after that is past the point where a burst
- *   is the right answer anyway.
+ * - It covers the 1 + 2 + 4 = 7 seconds the backoff waits before its fourth
+ *   attempt, with a second to spare — so an outage the reconnect resolves
+ *   early is covered, and one still failing after that is past the point
+ *   where a burst is the right answer anyway.
  * - It fits inside the server's own pre-handshake buffer with room to spare.
  *   That buffer holds 256 frames — 12.8 seconds at this frame size — and the
- *   replay goes out before the handshake finishes, so a cap of 160 frames
+ *   replay goes out before the handshake finishes, so `AUDIO_HOLD_FRAMES`
  *   leaves 4.8 seconds of handshake headroom before the far end would start
  *   dropping what this end just carefully kept.
  *
@@ -142,6 +142,26 @@ export const RESUME_FAILED_NOTE =
  * middle of, not the one before the network died.
  */
 export const AUDIO_HOLD_MS = 8_000;
+
+/**
+ * And the same bound counted in FRAMES, which is the one that binds when a
+ * meeting is carrying more than one capture.
+ *
+ * `meeting-capture-set.ts` forwards the microphone and the Mac's own audio
+ * through a single `onFrame`, so a mic+system meeting banks two frames every
+ * 50 ms: eight seconds of it is ~320 frames against the 256 the server's
+ * pre-handshake buffer holds. Overflowing that buffer is the worst shape this
+ * whole change has, because the far end drops the NEWEST frames — the seam,
+ * the part the hold exists to keep — while the start frame goes on claiming
+ * the full `heldMs`, and the server then shortens the gap over audio it threw
+ * away. A record that understates a loss is the thing being fixed here, so
+ * the hold cannot be the thing that causes one.
+ *
+ * 160 is therefore the SHARED budget however many captures fill it: eight
+ * seconds of one capture, four of two. `heldMs` stays honest either way
+ * because it is measured from the oldest frame still held, not from the cap.
+ */
+export const AUDIO_HOLD_FRAMES = 160;
 
 /** What a hold hands back when it is read. */
 export interface HeldAudio {
@@ -168,7 +188,7 @@ export interface HeldAudio {
  * however many captures are open.
  */
 export interface AudioHold {
-  /** Bank one frame. Anything older than the cap is dropped. */
+  /** Bank one frame. Anything past either cap — age or count — is dropped. */
   push(frame: ArrayBufferView, at: number): void;
   /**
    * Everything still inside the cap, WITHOUT emptying the hold.
@@ -187,15 +207,19 @@ export interface AudioHold {
   clear(): void;
 }
 
-export function createAudioHold(opts: { capMs?: number } = {}): AudioHold {
+export function createAudioHold(opts: { capMs?: number; capFrames?: number } = {}): AudioHold {
   const capMs = opts.capMs ?? AUDIO_HOLD_MS;
+  const capFrames = opts.capFrames ?? AUDIO_HOLD_FRAMES;
   let frames: Array<{ frame: ArrayBufferView; at: number }> = [];
-  /** Drop what is now older than the cap, measured back from `at`. */
+  /** Drop what is now past either cap, measured back from `at`. */
   const expire = (at: number): void => {
     // A linear scan from the front rather than a filter: frames arrive in
     // time order, so everything to drop is at the head.
     let first = 0;
     while (first < frames.length && at - (frames[first]?.at ?? at) > capMs) first += 1;
+    // Then the count, from the same end: whichever bound bites first, what
+    // goes is the oldest audio and what stays is the seam.
+    first = Math.max(first, frames.length - capFrames);
     if (first > 0) frames = frames.slice(first);
   };
   return {

@@ -234,9 +234,11 @@ interface Conn {
    *
    * `closedAt` rides along for the same reason it rides through `stop`: a
    * socket that went mid-handshake stopped being heard then, not when the
-   * handshake it was waiting on finally settled.
+   * handshake it was waiting on finally settled. `cause` rides along for the
+   * same reason again — dropped here, the `ended` line falls through to its
+   * `client-stop` default and names the one ending nobody investigates.
    */
-  pendingStop: { reply: boolean; closedAt?: number } | null;
+  pendingStop: { reply: boolean; closedAt?: number; cause?: MeetingCloseCause } | null;
   /**
    * Cancels this meeting's silence deadline, or null when none is armed.
    *
@@ -863,6 +865,13 @@ export class MeetingRelay {
     resume?: { meetingId: string; heldMs?: number },
   ): Promise<void> {
     if (conn.state !== 'idle') return;
+    // Before any refusal below can return: a socket may start a SECOND
+    // meeting after a stop, and the last meeting's ending is not this one's.
+    // Left set — which is what happened while this sat after the
+    // `already_recording` return, the refusal a resume racing a dropped
+    // socket's teardown actually gets — the person's earlier Stop labels a
+    // drop that had nothing to do with them.
+    conn.endedCause = null;
     const docId = ws.data.docId;
     // No name means the first configured engine — the server's default, and
     // exactly what every client sent before the choice existed. A name the
@@ -938,10 +947,6 @@ export class MeetingRelay {
     conn.state = 'opening';
     conn.heardBytes = 0;
     conn.reportedNoAudio = false;
-    // A socket may start a SECOND meeting after a stop or a refused
-    // handshake, and the last meeting's ending is not this one's: left set,
-    // a `client-stop` would label the next close whatever actually happened.
-    conn.endedCause = null;
     conn.resumed = resumed !== null;
     conn.meeting = meeting;
     conn.engineName = engine.name;
@@ -1155,7 +1160,7 @@ export class MeetingRelay {
     const asked = conn.pendingStop;
     if (asked) {
       conn.pendingStop = null;
-      await this.stop(ws, conn, asked.reply, undefined, undefined, asked.closedAt);
+      await this.stop(ws, conn, asked.reply, undefined, asked.cause, asked.closedAt);
       return;
     }
     this.send(ws, {
@@ -1189,7 +1194,11 @@ export class MeetingRelay {
   ): Promise<void> {
     if (conn.state === 'opening') {
       // The handshake is still out; `start` finishes the job when it lands.
-      conn.pendingStop = { reply, ...(closedAt !== undefined ? { closedAt } : {}) };
+      conn.pendingStop = {
+        reply,
+        ...(closedAt !== undefined ? { closedAt } : {}),
+        ...(cause !== undefined ? { cause } : {}),
+      };
       return;
     }
     if (conn.state !== 'live') return;

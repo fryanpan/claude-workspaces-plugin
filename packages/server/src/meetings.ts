@@ -446,12 +446,26 @@ function gapStreamsFor(source: MeetingSource): readonly string[] {
  *
  * Two append-only lines per stream, opened by one and closed by the other,
  * exactly as `recordGap` writes them — a gap is not a new kind of row here.
+ *
+ * EXCEPT on a stream that was already down. A capture the browser reported
+ * dying before the socket went has an open gap of its own, and the outage
+ * lost nothing there that gap does not already claim. Written anyway, the two
+ * overlap: the companion says "the Mac's audio stopped and never came back"
+ * in one block and "the Mac's audio stopped for 30s" in the next, about the
+ * same silence.
  */
 function appendReconnectGap(
   dataDir: string,
   docId: string,
   meetingId: string,
-  outage: { droppedAt?: number; resumedAt: number; heldMs?: number; source: MeetingSource },
+  outage: {
+    droppedAt?: number;
+    resumedAt: number;
+    heldMs?: number;
+    source: MeetingSource;
+    /** Streams whose own gap was still open when the socket went. */
+    alreadyDown?: readonly string[];
+  },
 ): void {
   const { droppedAt, resumedAt } = outage;
   // No end on the previous leg is a meeting nothing stopped — a server that
@@ -467,7 +481,9 @@ function appendReconnectGap(
   // for and will not find.
   if (lostUntil <= droppedAt) return;
   const path = meetingIndexPath(dataDir, docId);
+  const alreadyDown = new Set(outage.alreadyDown ?? []);
   for (const stream of gapStreamsFor(outage.source)) {
+    if (alreadyDown.has(stream)) continue;
     appendLine(path, {
       meetingId,
       gapStream: stream,
@@ -699,6 +715,9 @@ export class MeetingStore {
       resumedAt,
       ...(args.heldMs !== undefined ? { heldMs: args.heldMs } : {}),
       source: args.source ?? record.source ?? 'mic',
+      // Folded from this same index a line ago: a gap with no end is a
+      // capture that had already stopped when the socket did.
+      alreadyDown: (record.gaps ?? []).filter((g) => g.to === null).map((g) => g.stream),
     });
     return this.open({
       docId,

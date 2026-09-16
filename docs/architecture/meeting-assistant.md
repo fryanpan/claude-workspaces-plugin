@@ -133,8 +133,18 @@ true` when the server took it.
   cap outlasts the retries that land; and 160 frames of 50ms sits inside the
   server's 256-frame (12.8s) pre-handshake buffer with headroom for the
   handshake, so the replay is never truncated at the far end nor marks the
-  ledger untrusted. The hold is a ring trimmed by age on every push, flushed
-  on the resuming socket's `open` — BEFORE `ready`, so the server's in-order
+  ledger untrusted. **`AUDIO_HOLD_FRAMES` is that 160, and it is the SHARED
+  budget however many captures fill it** — eight seconds of one, four of two.
+  A mic+system meeting forwards both captures through the one `onFrame`
+  (`meeting-capture-set.ts`), so an age-only cap banked ~320 frames and
+  overran the far end's 256; what that buffer drops on overflow is the NEWEST
+  frames — the seam the hold exists to keep — while the start frame went on
+  claiming the whole `heldMs`, so the server shortened the gap over audio it
+  had thrown away. A record that understates a loss is the thing this change
+  exists to fix, so the hold cannot be what causes one. `heldMs` stays honest
+  under either bound because it is measured from the oldest frame still held,
+  never from the cap. The hold is a ring trimmed by age and by count on every
+  push, flushed on the resuming socket's `open` — BEFORE `ready`, so the server's in-order
   pre-handshake buffer keeps the replayed frames ahead of any live one. It is
   READ rather than emptied there, and only a `ready` empties it: the resuming
   socket can still die during its handshake, and an `already_recording`

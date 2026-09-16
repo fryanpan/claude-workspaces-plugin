@@ -1971,8 +1971,13 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       // Taken HERE, before the start frame is built, because the frame has to
       // carry how much of the outage this connection is about to cover — the
       // server subtracts it from the gap it would otherwise record as lost.
-      // A first start takes nothing and empties the hold: audio banked
+      // A FIRST start takes nothing and empties the hold: audio banked
       // against a meeting nobody is resuming belongs to no recording.
+      // A resume the server then REFUSES is the other case, and its frames
+      // have already gone — they land at the head of the new recording the
+      // refusal opens. Deliberately: they are the last few seconds of the
+      // same room, and the alternative is holding the replay until `ready`,
+      // which the ordering note below rules out.
       // READ AND KEPT, not taken: this socket can still die before `ready`,
       // and the retry after that needs the same frames. The hold is emptied
       // where the resume is confirmed instead.

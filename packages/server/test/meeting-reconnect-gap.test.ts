@@ -148,12 +148,18 @@ describe('a reconnect records the stretch it lost', () => {
     });
     if (!again) throw new Error('the resume was refused');
     const gaps = listMeetings(dir, 'd1').find((m) => m.meetingId === meetingId)?.gaps ?? [];
-    // The capture that died is still open; both reconnect gaps are closed.
+    // The capture that died is still open, and the reconnect did not touch it.
     const stillOpen = gaps.filter((g) => g.to === null);
     expect(stillOpen.length).toBe(1);
     expect(stillOpen[0]?.stream).toBe('system');
     expect(stillOpen[0]?.reason).toBe('ended');
-    expect(gaps.filter((g) => g.reason === 'reconnect').length).toBe(2);
+    // ONE reconnect gap, on the microphone. The Mac's audio was already down
+    // when the socket went, so the outage lost nothing there that the open
+    // gap above does not already claim — and two overlapping losses on one
+    // stream read in the companion as "it stopped and never came back" in one
+    // block and "it stopped for 30s" in the next, about the same silence.
+    const reconnects = gaps.filter((g) => g.reason === 'reconnect');
+    expect(reconnects.map((g) => g.stream)).toEqual(['mic']);
   });
 });
 
