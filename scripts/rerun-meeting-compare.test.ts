@@ -119,6 +119,28 @@ describe('finding the run to compare against', () => {
     expect(() => loadRerunReport(dir)).toThrow(/not a rerun report/);
   });
 
+  it('refuses a report missing a measure the table reads, and names it', () => {
+    // A half-report renders a row of `undefined` and then throws partway
+    // down the table on `billedUsd.toFixed`, which is a worse way to learn
+    // the file was wrong.
+    const dir = freshDir();
+    const { billedUsd: _dropped, ...half } = report();
+    writeFileSync(join(dir, REPORT_JSON), JSON.stringify(half));
+    expect(() => loadRerunReport(dir)).toThrow(/billedUsd/);
+  });
+
+  it('refuses one whose tidy counts are missing', () => {
+    const dir = freshDir();
+    writeFileSync(join(dir, REPORT_JSON), JSON.stringify({ ...report(), tidy: { ok: true } }));
+    expect(() => loadRerunReport(dir)).toThrow(/tidy/);
+  });
+
+  it('reads a report whose latency is the null the harness writes for “never”', () => {
+    const dir = freshDir();
+    writeFileSync(join(dir, REPORT_JSON), JSON.stringify(report({ firstNoteMs: null })));
+    expect(loadRerunReport(dir).firstNoteMs).toBeNull();
+  });
+
   it('reads back every measure the table prints', () => {
     const dir = freshDir();
     writeFileSync(join(dir, REPORT_JSON), JSON.stringify(report()));

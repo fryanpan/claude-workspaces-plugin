@@ -20,8 +20,9 @@
  * which is the same rule the report itself follows.
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { RerunReport } from './rerun-meeting-report.ts';
 
 /** Where a run's machine-readable report sits, beside the one people read. */
@@ -56,11 +57,44 @@ export function resolveComparePath(target: string): string {
   return hit;
 }
 
-/** One measure of one run is a number or a string; nothing else is a report. */
-function isReport(raw: unknown): raw is RerunReport {
-  if (typeof raw !== 'object' || raw === null) return false;
-  const r = raw as Partial<RerunReport>;
-  return typeof r.method === 'string' && typeof r.ideasVoiced === 'number';
+/** Every field the table reads, so a file that is JSON but not a report is
+ *  refused here rather than rendering a row of `undefined` — or throwing on
+ *  `billedUsd.toFixed` halfway down the table. A report from a build with a
+ *  measure this one does not have still loads: extra fields are ignored, and
+ *  a MISSING one is the thing that cannot be rendered. */
+const NUMBERS = [
+  'audioMs',
+  'ideasVoiced',
+  'ideasCovered',
+  'sectionIdeasVoiced',
+  'sectionIdeasCovered',
+  'bulletsWritten',
+  'bullets',
+  'topicHeadings',
+  'longestFlatRun',
+  'unnamedVoiceBullets',
+  'billedUsd',
+] as const satisfies readonly (keyof RerunReport)[];
+const STRINGS = [
+  'method',
+  'engine',
+  'docShape',
+  'commit',
+] as const satisfies readonly (keyof RerunReport)[];
+
+/** What a report is missing, in the order the table would have read it.
+ *  Empty for one this can render. */
+function missingFields(raw: unknown): string[] {
+  if (typeof raw !== 'object' || raw === null) return ['(not an object)'];
+  const r = raw as Record<string, unknown>;
+  const missing = [
+    ...STRINGS.filter((key) => typeof r[key] !== 'string'),
+    ...NUMBERS.filter((key) => typeof r[key] !== 'number'),
+  ] as string[];
+  if (!(typeof r.firstNoteMs === 'number' || r.firstNoteMs === null)) missing.push('firstNoteMs');
+  const tidy = r.tidy as Record<string, unknown> | undefined;
+  if (typeof tidy?.applied !== 'number' || typeof tidy.proposed !== 'number') missing.push('tidy');
+  return missing;
 }
 
 /** The earlier run, read back. Throws {@link CompareTargetError} for a file
@@ -73,8 +107,14 @@ export function loadRerunReport(target: string): RerunReport {
   } catch (err) {
     throw new CompareTargetError(`--compare ${path}: ${(err as Error).message}`);
   }
-  if (!isReport(raw)) throw new CompareTargetError(`--compare ${path} is not a rerun report`);
-  return raw;
+  const missing = missingFields(raw);
+  if (missing.length > 0) {
+    throw new CompareTargetError(
+      `--compare ${path} is not a rerun report this build can read: no ${missing.join(', ')}. ` +
+        'A run from before a measure existed cannot be compared on it — rerun that audio.',
+    );
+  }
+  return raw as RerunReport;
 }
 
 /** One row: what it counts, and the two runs' readings of it. */
@@ -185,4 +225,24 @@ export function renderComparison(before: RerunReport, after: RerunReport): strin
       ? []
       : ['', `Not a clean comparison: ${uneven.join('; ')}. Read every row against that.`]),
   ];
+}
+
+/**
+ * The commit the code this run measured itself on came from.
+ *
+ * Here rather than in the run, because it exists for the comparison: a row
+ * saying 19 of 24 means nothing without which build produced it, and "old
+ * code against new on the same audio" is the whole claim a before/after
+ * table makes. `unknown` for a checkout git cannot answer about — a worse
+ * report, never a failed run.
+ */
+export function headCommit(): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: dirname(new URL(import.meta.url).pathname),
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    return 'unknown';
+  }
 }

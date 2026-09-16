@@ -38,7 +38,6 @@
  * ceiling anyway.
  */
 
-import { execFileSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -76,7 +75,7 @@ import {
   checkDocEdits,
   pcmDurationMs,
 } from './rerun-meeting-args.ts';
-import { REPORT_JSON, loadRerunReport } from './rerun-meeting-compare.ts';
+import { REPORT_JSON, headCommit, loadRerunReport } from './rerun-meeting-compare.ts';
 import {
   STOP_TIMEOUT_MS,
   bySegment,
@@ -273,6 +272,11 @@ export async function runRerun(
   if (!budget.ok) throw new UsageError(budget.line);
   checkDocEdits(doc.edits, audioMs);
   checkStreams(target);
+  // THE COMPARISON TARGET IS READ BEFORE ANYTHING BILLS. A typo in
+  // `--compare` used to surface after the whole recording had been replayed,
+  // which spends the ceiling and then writes no report at all — the same
+  // reason `--spend-usd` is judged up here rather than at the first compose.
+  const before = args.compare === undefined ? undefined : loadRerunReport(args.compare);
 
   const dataDir = mkdtempSync(join(tmpdir(), 'cw-meeting-rerun-data-'));
   const runDir = makeRunDir(args.out, Date.now());
@@ -410,7 +414,6 @@ export async function runRerun(
       written,
     });
     const reportPath = join(runDir, 'report.md');
-    const before = args.compare === undefined ? undefined : loadRerunReport(args.compare);
     writeFileSync(reportPath, renderRerunReport(report, before));
     // The machine-readable half, so the NEXT run can be compared against this
     // one without parsing a table back out of markdown.
@@ -480,19 +483,5 @@ function readTranscriptSafely(
     return readTranscript(dataDir, docId, meetingId);
   } catch {
     return [];
-  }
-}
-
-/** The commit this run's code came from, so a comparison says which build
- *  each row was measured on. `unknown` for a checkout git cannot answer
- *  about — a worse report, never a failed run. */
-function headCommit(): string {
-  try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      cwd: dirname(new URL(import.meta.url).pathname),
-      encoding: 'utf8',
-    }).trim();
-  } catch {
-    return 'unknown';
   }
 }
