@@ -18,6 +18,7 @@ import { describe, expect, test } from 'bun:test';
 import { findSpeakerTags, type prose } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
+import { waitFor } from './wait-for.ts';
 
 /** How many names the section prints. */
 function tags(notes: string): number {
@@ -106,6 +107,44 @@ describe('a replayed meeting', () => {
     expect(harness.notes()).toContain('07:40 sailing back');
     expect(harness.notes()).toContain('ramp is the real cost');
     expect(harness.notes()).toContain('ask the operator for numbers');
+    expect(harness.errors).toEqual([]);
+  });
+
+  test('folds the NAME the notes carried, and a later rename still reaches it', async () => {
+    const harness = createNotesTickHarness({
+      compose: (input, tick) =>
+        tick === 1
+          ? addNotes(
+              input,
+              '- Ferry timetable\n' +
+                '    - [@Devi](speaker:B) wants the 07:40 sailing back\n' +
+                '    - [@Devi](speaker:B) says the ramp is the real cost',
+            )
+          : [],
+    });
+    // The voice has a name before a word is composed, so the tags the notes
+    // carry are rendered from the names map rather than from the placeholder.
+    harness.nameSpeaker('B', 'Devi');
+    harness.say({ speaker: 'B', text: 'Can we have the 07:40 sailing back on the timetable?' });
+    harness.say({ speaker: 'C', text: 'Say more about the timetable.' });
+    await harness.tick();
+
+    // The fold takes its words from the tag it is folding, so the lead bullet
+    // shows the same name the notes showed — never the placeholder.
+    expect(harness.notes()).toContain('[@Devi](speaker:B?');
+    expect(harness.notes()).not.toContain('Speaker B');
+    expect(tags(harness.notes())).toBe(1);
+
+    // And the rename pass still finds it after the fold: it is keyed on the
+    // LABEL and reaches every block, so a name given later reaches a mention
+    // that has moved up a line.
+    // The rewrite rides the compose chain, so it lands after the call returns.
+    harness.nameSpeaker('B', 'Devi Raman');
+    await waitFor(() => harness.notes().includes('[@Devi Raman](speaker:B?'), {
+      describe: 'the rename to reach the folded lead bullet',
+    });
+    expect(harness.notes()).toContain('&g=2');
+    expect(tags(harness.notes())).toBe(1);
     expect(harness.errors).toEqual([]);
   });
 
