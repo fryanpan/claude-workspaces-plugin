@@ -21,6 +21,7 @@ import {
   type Thread,
   type User,
   type VoiceNote,
+  type DeliveryStamp,
   type WebhookPayload,
   type WriteVia,
   contentKind,
@@ -2710,6 +2711,16 @@ export class DocStore {
   ): () => void {
     this.reviewAnsweredListeners.add(listener);
     return () => this.reviewAnsweredListeners.delete(listener);
+  }
+
+  /** @see DocThreads.markCommentDelivered */
+  markCommentDelivered(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    at: number,
+  ): DeliveryStamp {
+    return this.docThreads.markCommentDelivered(docId, threadId, commentId, at);
   }
 
   /** Replace a posted comment's words, keeping the old ones on its trail. */

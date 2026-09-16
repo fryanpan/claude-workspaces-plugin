@@ -1,5 +1,6 @@
 import {
   type Anchor,
+  type DeliveryStamp,
   type ReviewAnswerUndone,
   type ReviewItemJudgement,
   type ReviewPayload,
@@ -15,6 +16,7 @@ import {
   reinstateReview,
   reviewAnswered,
   reviewPayloadVersion,
+  setCommentDelivered,
   postReply as schemaPostReply,
   replaceAnchor as schemaReplaceAnchor,
   setStatus as schemaSetStatus,
@@ -419,6 +421,32 @@ export class DocThreads {
     }
     const after = this.getThread(docId, threadId);
     return after ? { ok: true, thread: after } : { ok: false, error: 'not-found' };
+  }
+
+  /**
+   * Record that a live agent session was handed this comment — the second
+   * tick the comment's author sees.
+   *
+   * `residentDoc` rather than a hydrating lookup, deliberately: this runs
+   * from the broadcast path of a comment that was just written, so the doc is
+   * resident by construction, and paging a doc back in to stamp a receipt
+   * would make a cosmetic mark the reason for a disk read. A doc that has
+   * somehow gone costs a tick, which is the right price.
+   *
+   * Fires no event of its own. The write lands on the same ydoc every open
+   * editor is synced to, so a doc page repaints from the sync; the BOARD
+   * reads its discussion over REST and is told separately, by the
+   * `comment.delivered` frame the caller broadcasts.
+   */
+  markCommentDelivered(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    at: number,
+  ): DeliveryStamp {
+    const doc = this.p.residentDoc(docId);
+    if (!doc) return 'gone';
+    return setCommentDelivered(doc.ydoc, threadId, commentId, at);
   }
 
   /**
