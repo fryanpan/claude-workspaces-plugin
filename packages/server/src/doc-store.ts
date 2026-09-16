@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   type Anchor,
   type Comment,
+  type DeliveryStamp,
   type DocMeta,
   type DocOriginRepo,
   type DocTitleSource,
@@ -21,7 +22,6 @@ import {
   type Thread,
   type User,
   type VoiceNote,
-  type DeliveryStamp,
   type WebhookPayload,
   type WriteVia,
   contentKind,

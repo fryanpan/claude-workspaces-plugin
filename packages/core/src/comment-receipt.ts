@@ -44,7 +44,8 @@ export interface ReceiptComment {
   deliveredAt?: number;
 }
 
-const norm = (s: string | undefined): string => (typeof s === 'string' ? s.trim().toLowerCase() : '');
+const norm = (s: string | undefined): string =>
+  typeof s === 'string' ? s.trim().toLowerCase() : '';
 
 /**
  * Is this the same person?

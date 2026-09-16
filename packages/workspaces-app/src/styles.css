@@ -2453,7 +2453,7 @@ body.composer-open #editor > .ProseMirror ::selection {
   opacity: 0;
   transition: opacity 0.22s ease;
 }
-.cw-receipt[data-receipt='received'] .cw-tick-back {
+.cw-receipt[data-receipt="received"] .cw-tick-back {
   opacity: 1;
 }
 /* The thread card's head is a grid of named slots; the mark rides beside

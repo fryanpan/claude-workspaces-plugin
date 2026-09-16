@@ -105,9 +105,7 @@ describe('the board discussion stream', () => {
   const row = (over: Record<string, unknown> = {}) => ({
     threadId: 'th-1',
     comment: { id: 'bc-1', author: 'Reader', text: 'anyone there?', ts: NOW - 1000, ...over },
-    siblings: [
-      { id: 'bc-1', author: 'Reader', text: 'anyone there?', ts: NOW - 1000, ...over },
-    ],
+    siblings: [{ id: 'bc-1', author: 'Reader', text: 'anyone there?', ts: NOW - 1000, ...over }],
   });
 
   it('marks the reader own comment sent', () => {
@@ -144,9 +142,9 @@ describe('the board discussion stream', () => {
       siblings: [...base.siblings, { id: 'bc-3', author: 'Reader', text: 'and also', ts: NOW }],
     };
     expect(
-      commentRow(more, undefined, NOW, 'Reader').querySelector('.cw-receipt')?.getAttribute(
-        'data-receipt',
-      ),
+      commentRow(more, undefined, NOW, 'Reader')
+        .querySelector('.cw-receipt')
+        ?.getAttribute('data-receipt'),
     ).toBe('received');
   });
 });

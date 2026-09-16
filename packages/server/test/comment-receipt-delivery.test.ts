@@ -69,7 +69,9 @@ describe('a comment is stamped delivered when a watching session is live', () =>
 
   /** Open a thread and answer with the id of the comment that opened it. */
   async function openThread(author: User, text: string): Promise<string> {
-    const body = (await (await post(`/docs/${docId}/threads`, { author, text, anchor })).json()) as {
+    const body = (await (
+      await post(`/docs/${docId}/threads`, { author, text, anchor })
+    ).json()) as {
       thread: { comments: Array<{ id: string }> };
     };
     const first = body.thread.comments[0];

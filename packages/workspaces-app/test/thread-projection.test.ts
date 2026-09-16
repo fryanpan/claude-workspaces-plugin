@@ -9,12 +9,7 @@
  * first shipped broken (docs/process/learnings.md). Every assertion below
  * drives `createThreadProjection` directly and reads what came out.
  */
-import {
-  createThread,
-  postReply,
-  setCommentDelivered,
-  summaryHash,
-} from '@claude-workspaces/core';
+import { createThread, postReply, setCommentDelivered, summaryHash } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { createSeenTracker } from '../src/comment-seen.ts';

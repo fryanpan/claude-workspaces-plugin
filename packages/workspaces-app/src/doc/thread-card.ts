@@ -19,9 +19,9 @@ import {
   type Thread,
   type User,
   authorLabel,
-  receiptState,
   formatTime,
   pendingDeclaration,
+  receiptState,
   reviewAnswered,
   reviewItemBodyMarkdown,
   reviewWithdrawn,
@@ -232,9 +232,7 @@ function head(
   // the mark to the detail face would mean the one state a reader glances at
   // — the card they just wrote, still folded — was the state without it.
   const opening = t.comments[0];
-  const openingReceipt = opening
-    ? receiptState(opening, t.comments, host.opts.currentUser)
-    : null;
+  const openingReceipt = opening ? receiptState(opening, t.comments, host.opts.currentUser) : null;
   if (openingReceipt) head.appendChild(receiptMark(openingReceipt));
 
   // As far from ✓ Resolve as the card allows: the two were a thumb-width
