@@ -31,6 +31,7 @@ import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-m
 import { currentWorkspaceId, docIdFromPathOrNull } from '../doc-path.ts';
 import { threadDecision } from '../long-thread.ts';
 import { attachMarkdownComposer } from '../md-composer.ts';
+import { clearNotSent, markNotSent } from '../not-sent.ts';
 import { reviewItemSeen } from '../review-item-seen.ts';
 import { threadGlyph, threadKind } from '../thread-kind.ts';
 import { isFoldingTap, syncFaceVisibility } from '../thread-morph.ts';
@@ -375,14 +376,21 @@ function slotB(
     refreshComposer();
     // A refused post hands the words back — the chrome's 'try again' toast
     // must never point at an empty box. Only while the box is still empty,
-    // though: restoring over words typed since would stomp them.
+    // though: restoring over words typed since would stomp them. The toast
+    // is not the report: it is gone in seconds, and a plain reply never got
+    // one at all, so the card says so beside the draft until it is sent.
     void Promise.resolve(posted)
       .catch(() => false)
       .then((ok) => {
-        if (ok === false && ta.value === '') {
+        if (ok !== false) {
+          clearNotSent(reply);
+          return;
+        }
+        if (ta.value === '') {
           ta.value = text;
           refreshComposer();
         }
+        markNotSent({ near: actions, field: ta, retry: submitReply });
       });
   };
   ta.addEventListener('keydown', (ev) => {
@@ -541,11 +549,19 @@ function compactAnswerField(
     input.value = '';
     // A refused post hands the words back — the chrome's 'try again' toast
     // must never point at an empty box. Only while the box is still empty,
-    // though: restoring over words typed since would stomp them.
+    // though: restoring over words typed since would stomp them. And the
+    // folded face says it in place, because the toast has already gone.
     void Promise.resolve(posted)
       .catch(() => false)
       .then((ok) => {
-        if (ok === false && input.value === '') input.value = text;
+        if (ok !== false) {
+          clearNotSent(wrap.parentElement ?? wrap);
+          return;
+        }
+        if (input.value === '') input.value = text;
+        // Beside the field, not inside it: `.thread-answer-field` is a one-row
+        // flex, and a note in it would take the field's width away.
+        markNotSent({ near: wrap, field: input, retry: send });
       });
   };
   input.addEventListener('keydown', (ev) => {

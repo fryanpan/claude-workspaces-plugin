@@ -2392,6 +2392,37 @@ body.composer-open #editor > .ProseMirror ::selection {
   }
 }
 
+/* ================= NOT SENT (a draft the server never took) =================
+   One control that is both the state and the way out of it: the words are
+   still in the box above, and this says so and sends them again. Every
+   surface that can post a comment draws the same one (not-sent.ts), so
+   "did that land" has one answer everywhere. Deliberately quiet — a red
+   word, not a red box: nothing has been lost, and a banner over a kept
+   draft would say otherwise. */
+
+.not-sent {
+  margin: 0 0 6px;
+}
+.not-sent-retry {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--red);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  /* A finger's worth of target without a finger's worth of box: the note
+     sits inside a composer, where 44px of padding would push the Send
+     button off a phone's fold. */
+  min-height: 24px;
+}
+.not-sent-retry:hover,
+.not-sent-retry:focus-visible {
+  color: var(--red-strong);
+}
+
 /* ================= TOAST ================= */
 
 #toast {

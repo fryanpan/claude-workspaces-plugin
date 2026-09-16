@@ -19,6 +19,7 @@ import {
   blurMarkdownComposer,
   focusMarkdownComposer,
 } from '../md-composer.ts';
+import { clearNotSent, markNotSent } from '../not-sent.ts';
 import type { ReviewSurface } from '../review-surface.ts';
 import type { ThreadPanel } from '../threads.ts';
 import { type ChromeSelection, anchorBody } from './anchor-body.ts';
@@ -306,6 +307,7 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
       });
       if (!res.ok) throw new Error('post failed');
       const body = (await res.json()) as { thread: { id: string } };
+      clearNotSent(composer);
       hideComposer();
       opts.onPosted?.();
       showToast('✓ Comment posted');
@@ -321,6 +323,14 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
       }, 150);
     } catch {
       showToast('Failed to post comment');
+      // The toast is gone in seconds and the box stays open holding the
+      // words — which is indistinguishable from a comment never sent. The
+      // note stands until the comment goes.
+      markNotSent({
+        near: composer.querySelector('.composer-inner') ?? composerText,
+        field: composerText,
+        retry: () => void submitComposer(),
+      });
     } finally {
       submitBtn.disabled = false;
       composerText.disabled = false;

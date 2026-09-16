@@ -19,6 +19,7 @@
 import type { RefObject } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { attachMarkdownComposer, focusMarkdownComposer } from '../md-composer.ts';
+import { clearNotSent, markNotSent } from '../not-sent.ts';
 import { type TaskDiscussion } from './board-detail-render.ts';
 import { commentRow, composerTarget, discussionStream } from './board-discussion-render.ts';
 import type { BoardReviewItem } from './board-model.ts';
@@ -106,8 +107,7 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
   // second tap, and a form can still be submitted around them (Enter in the
   // field, a programmatic submit). The guard has to be on the handler.
   let busy = false;
-  const onSubmit = (ev: Event): void => {
-    ev.preventDefault();
+  const attempt = (): void => {
     const cur = latest();
     const text = ta.value.trim();
     if (!text) {
@@ -131,14 +131,22 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
     // a repaint, so "the live box" and "this box" are the same element.
     ta.value = '';
     refreshComposer();
+    // Put the words back AND say the send did not happen. The words alone
+    // were the whole report until now, and a box holding your sentence is
+    // exactly what a box you never sent from looks like.
     const putBack = (): void => {
-      if (ta.value.trim() !== '') return;
-      ta.value = text;
-      refreshComposer();
+      if (ta.value.trim() === '') {
+        ta.value = text;
+        refreshComposer();
+      }
+      markNotSent({ near: submit, field: ta, retry: attempt });
     };
     void Promise.resolve(cur.onSubmit(text))
       .then((ok) => {
         if (cur.refused(ok)) putBack();
+        // A send that landed retires whatever the last one said about
+        // itself, so a stale "Not sent" never stands over a posted comment.
+        else clearNotSent(form);
       })
       .catch(() => {
         putBack();
@@ -149,6 +157,10 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
         submit.disabled = false;
         latest().onBusy?.(false);
       });
+  };
+  const onSubmit = (ev: Event): void => {
+    ev.preventDefault();
+    attempt();
   };
   form.addEventListener('submit', onSubmit);
   // Cmd+Enter sends (Ctrl+Enter off a Mac). The listener sits on the textarea

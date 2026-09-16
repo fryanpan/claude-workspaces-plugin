@@ -435,6 +435,22 @@ items ride the doc record the page already reads — `linkedItems` on
 adds no fetch. The bar's measured height is `--doc-dock-h`, which `doc.css`
 takes out of `#shell` and adds to the composer, toast and phone comment sheet.
 
+**A comment that never reached the server says so, on the comment.** Every
+composer on every surface already handed the words back when a post was
+refused; none of them left anything standing to say why, so a box holding your
+sentence looked exactly like one you had never sent from.
+`workspaces-app/src/not-sent.ts` is the one affordance all of them now draw —
+a button reading "Not sent — tap to retry", beside the draft, clearing on a
+retry, on a send that lands, or on the next keystroke. It joins no data flow
+and reads no state: the four call sites (the board's `ComposerForm`, the doc
+card's reply and its folded answer field, the doc's new-comment composer) hand
+it the box, the control to sit beside, and the same send to run again. The
+widget says it in its own `composerNote`, for the bundle's sake. The server
+half is `server/src/comment-log.ts`, one stamped `[comment]` line per write
+through `docStore.postComment` — the choke point all three write paths share —
+carrying the doc, the thread, the author and the LENGTH of the text, never the
+text. Between them, the next lost comment can be told from one nobody sent.
+
 **The comment card stands where its comment will live.** In comment mode the
 composer is a card fixed to the right edge of the viewport at its element's
 height, joined to the element by a faint line, and on post it becomes the saved
