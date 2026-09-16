@@ -268,6 +268,28 @@ describe('a regroup the move cannot make says why, instead of counting itself fa
     expect(markdownNow()).toBe(before);
   });
 
+  it('refuses a nest that names no bullets at all', async () => {
+    const { store, markdownNow } = docStoreFrom(MIXED, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the crew.' }]);
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          { op: 'nest_blocks', leadBlockId: idOf(store, 'harbour run'), blockIds: [] },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.refusals[0]).toContain('names no bullets to move');
+    expect(markdownNow()).toBe(before);
+  });
+
   it("names the applier's verdict for a bullet in a list of the other kind", async () => {
     const { store, markdownNow } = docStoreFrom(MIXED, ['Meeting notes']);
     const dataDir = freshDir();

@@ -365,6 +365,15 @@ export function boundByAuthorship(
    * the lists beside it, so a bullet one level deeper is not reachable from
    * the lead however legible the edit looks — it comes back moved nowhere.
    * Asking here turns that into a refusal a reader can act on.
+   *
+   * AND DEPTH IS WHERE THIS GATE STOPS, deliberately. Two bullets at depth
+   * one under different parents, and a bullet in an ordered list beside a
+   * bulleted lead, are equally out of reach and this cannot see either: the
+   * outline carries neither the enclosing list's id nor its kind. Closing
+   * that needs the write path's own walk, and a second copy of a rule is how
+   * a gate starts refusing edits the document would have accepted — the
+   * failure this whole file was rewritten to end. Those cases reach the
+   * applier instead, whose verdict the pass now prints (`whyEditsFailed`).
    */
   const atLeadDepth = (lead: string, id: string): boolean =>
     scope.listItems.get(id) === scope.listItems.get(lead);
@@ -424,7 +433,12 @@ export function boundByAuthorship(
       case 'nest_blocks': {
         const lead = edit.leadBlockId;
         const reaches = (id: string): boolean => nestable(id) && atLeadDepth(lead, id);
-        if (nestable(lead) && edit.blockIds.every(reaches)) kept.push(edit);
+        // A NEST THAT NAMES NOBODY. `every` is true of an empty list, so this
+        // was kept and then came back `nothing-to-nest` — a failure whose
+        // cause is the edit itself rather than the document.
+        if (edit.blockIds.length === 0) {
+          reasons.push(why(edit.op, lead, 'the nest names no bullets to move'));
+        } else if (nestable(lead) && edit.blockIds.every(reaches)) kept.push(edit);
         else {
           const bad = [lead, ...edit.blockIds].find((id) => !reaches(id)) ?? lead;
           reasons.push(why(edit.op, bad, nestRule(bad)));
