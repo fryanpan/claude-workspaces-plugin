@@ -74,6 +74,17 @@ export interface LibraryRouteRequest {
   visitor: ShareTarget | null;
 }
 
+/**
+ * Is `relPath` inside the mounted folder `dir`?
+ *
+ * Both are repo-relative and POSIX. The empty string is the repo root, which
+ * every path is inside. The separator is required, so `docs/riverbend-notes`
+ * is not inside `docs/riverbend`.
+ */
+function under(relPath: string, dir: string): boolean {
+  return dir === '' || relPath === dir || relPath.startsWith(`${dir}/`);
+}
+
 /** A relative path longer than this is not one a repo listing produced. */
 const MAX_PATH_CHARS = 1024;
 
@@ -127,7 +138,20 @@ function sourcesFor(
   // the docs already filed on the board, exactly as `/mounts/<id>` refuses
   // its bytes.
   const hidden = (repoKey: string): boolean => mounts.privacyOf(repoKey) === 'local-only' && !onBox;
+  // The same rule one folder at a time. A project may be open while one of
+  // its mounts is not, and off the box that mount's files are not listed and
+  // its folder is not named — the listing is where a name would leave the
+  // machine first, and `openableFiles` is built from it, so a path that is
+  // not offered is a path `library/open` refuses to bind.
+  const mountHidden = (repoKey: string, mountId: string): boolean =>
+    mounts.mountPrivacyOf(repoKey, mountId) === 'local-only' && !onBox;
   const projectKey = projectRepoKey(docs, (docId) => docStore.repos.primaryKeyFor(docId));
+  const hiddenFolders = projectKey
+    ? mounts.registry
+        .liveMounts(projectKey)
+        .filter((m) => mountHidden(projectKey, m.mountId))
+        .map((m) => m.relPath)
+    : [];
   return {
     workspaceId: scope.workspaceId,
     docs,
@@ -147,7 +171,14 @@ function sourcesFor(
     fileMtime: (docId) => statOf(docId)?.mtimeMs,
     fileBirth: (docId) => birthOf(statOf(docId) ?? { birthtimeMs: 0 }).createdMs,
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
-    markdownFiles: ctx.markdownFiles,
+    // The project's own git listing is a SECOND way a hidden folder's names
+    // could leave: a markdown file under a local-only mount is listed by
+    // `git ls-files` whether or not the mount offers it. So the same folders
+    // are dropped here too, and the two sources agree.
+    markdownFiles: (root) =>
+      hiddenFolders.length === 0
+        ? ctx.markdownFiles(root)
+        : ctx.markdownFiles(root).filter((f) => !hiddenFolders.some((d) => under(f.relPath, d))),
     mountedFiles: (repoKey) => {
       // Each file's birth time is read in the checkout its MOUNT was made
       // from, which may be a worktree the project root is not.
@@ -159,7 +190,10 @@ function sourcesFor(
         }
         return roots.get(mountId) ?? null;
       };
-      return mounts.listFiles(repoKey, { limit: MAX_MOUNTED_FILES }).files.map((f) => {
+      const files = mounts
+        .listFiles(repoKey, { limit: MAX_MOUNTED_FILES })
+        .files.filter((f) => !mountHidden(repoKey, f.mountId));
+      return files.map((f) => {
         const root = rootOf(f.mountId);
         const st = root ? statBound(join(root, f.relPath)) : undefined;
         const born = st ? birthOf(st) : {};
@@ -171,7 +205,12 @@ function sourcesFor(
     placing: {
       storageRoots: storageRootsOf(dataDir),
       meetingsFolder: projectKey ? mounts.meetingsOf(projectKey)?.relPath : undefined,
-      mountFolders: projectKey ? mounts.registry.liveMounts(projectKey).map((m) => m.relPath) : [],
+      mountFolders: projectKey
+        ? mounts.registry
+            .liveMounts(projectKey)
+            .filter((m) => !mountHidden(projectKey, m.mountId))
+            .map((m) => m.relPath)
+        : [],
       projectNameOf: (repoKey) => {
         if (hidden(repoKey)) return null;
         const root = mounts.rootFor(repoKey);
@@ -319,8 +358,8 @@ function heldOnBoard(
  * the ones this board would offer to open and the ones its docs hold, and
  * whether one has been opened. Read as a member on the box sees it, because
  * the item lands on the board's own queue — except that a local-only
- * project's files are never offered, so their names never reach an item a
- * share visitor can read. It walks the project afresh rather than reading the
+ * project's files, and a local-only mount's, are never offered, so their
+ * names never reach an item a share visitor can read. It walks the project afresh rather than reading the
  * page's short-lived cache: a scan taken just before a late write would hide
  * that file, and a run is looked at only once.
  */

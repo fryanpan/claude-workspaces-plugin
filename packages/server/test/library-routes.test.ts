@@ -361,6 +361,52 @@ describe('library routes', () => {
       // And the verb refuses what the listing no longer offers.
       expect((await ask(ctxFor('100.64.0.7'), 'library/open', null))?.status).toBe(404);
     });
+
+    /**
+     * Names are the first thing a local-only folder would leak, and one
+     * folder's are hidden without hiding the project's others.
+     */
+    it('hides a local-only mount\u2019s file names off the box and keeps the rest listed', async () => {
+      mkdirSync(join(repo, 'riverbend'));
+      writeFileSync(join(repo, 'riverbend', 'brief.md'), '# Riverbend brief\n');
+      mkdirSync(join(repo, 'harborlight'));
+      writeFileSync(join(repo, 'harborlight', 'notes.md'), '# Harborlight notes\n');
+      const mountAt = async (rel: string): Promise<string> => {
+        const r = await at('/api/mounts', {
+          method: 'POST',
+          body: JSON.stringify({ path: join(repo, rel) }),
+        });
+        expect(r.status).toBe(200);
+        return ((await r.json()) as { mountId: string }).mountId;
+      };
+      await mountAt('riverbend');
+      const shut = await mountAt('harborlight');
+
+      const namesOffBox = async (): Promise<string[]> => {
+        const lib = (await (await ask(ctxFor('100.64.0.7'), 'library/items', null))?.json()) as
+          | LibraryPayload
+          | undefined;
+        return (lib?.files ?? []).map((f) => f.name);
+      };
+      // The control: with nothing marked, both mounts' files are listed.
+      expect(await namesOffBox()).toContain('notes.md');
+      expect(await namesOffBox()).toContain('brief.md');
+
+      const priv = await at('/api/mounts/privacy', {
+        method: 'PUT',
+        body: JSON.stringify({ path: repo, mountId: shut, privacy: 'local-only' }),
+      });
+      expect(priv.status).toBe(200);
+
+      const after = await namesOffBox();
+      expect(after).not.toContain('notes.md');
+      expect(after).toContain('brief.md');
+      // On the box the marked folder is listed as it always was.
+      const onBox = (await (await ask(ctxFor('127.0.0.1'), 'library/items', null))?.json()) as
+        | LibraryPayload
+        | undefined;
+      expect((onBox?.files ?? []).map((f) => f.name)).toContain('notes.md');
+    });
   });
 
   it('refuses a path the listing does not offer', async () => {

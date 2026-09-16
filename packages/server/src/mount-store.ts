@@ -380,6 +380,19 @@ export class MountStore {
     return this.registry.setPrivacy(repoKey, privacy);
   }
 
+  /** One mount's effective privacy: the narrower of its own and its project's. */
+  mountPrivacyOf(repoKey: string, mountId: string): ProjectPrivacy {
+    return this.registry.mountPrivacyOf(repoKey, mountId);
+  }
+
+  setMountPrivacy(
+    repoKey: string,
+    mountId: string,
+    privacy: ProjectPrivacy,
+  ): MountRecord | undefined {
+    return this.registry.setMountPrivacy(repoKey, mountId, privacy);
+  }
+
   /**
    * The project's conventions index: where it is, and what it says.
    *

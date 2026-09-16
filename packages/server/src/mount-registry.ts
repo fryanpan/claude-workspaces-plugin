@@ -221,6 +221,40 @@ export class MountRegistry {
     return project;
   }
 
+  /**
+   * Whether ONE mount's files may leave the machine: the narrower of the
+   * project's answer and the mount's own.
+   *
+   * The narrower wins rather than the more specific, so a project marked
+   * `local-only` cannot be reopened a folder at a time — the restriction a
+   * person set over everything stays set over everything. A mount with no
+   * answer of its own, and a mountId this project does not know, both read as
+   * the project's answer: the second is what keeps a stale or guessed id from
+   * being a way to ask a more permissive question.
+   */
+  mountPrivacyOf(repoKey: string, mountId: string): ProjectPrivacy {
+    const project = this.privacyOf(repoKey);
+    if (project === 'local-only') return 'local-only';
+    return this.mountById(repoKey, mountId)?.privacy ?? project;
+  }
+
+  /**
+   * Give one mount its own privacy. Answers undefined when the project has no
+   * such mount — retired rows included, because a retired mount can be
+   * revived and the setting has to be there when it is.
+   */
+  setMountPrivacy(
+    repoKey: string,
+    mountId: string,
+    privacy: ProjectPrivacy,
+  ): MountRecord | undefined {
+    const mount = this.projectFor(repoKey)?.mounts.find((m) => m.mountId === mountId);
+    if (!mount) return undefined;
+    mount.privacy = privacy;
+    this.persist();
+    return mount;
+  }
+
   conventionsPathOf(repoKey: string): string {
     return this.projectFor(repoKey)?.conventionsPath ?? DEFAULT_CONVENTIONS_PATH;
   }
@@ -284,6 +318,11 @@ export class MountRegistry {
         relPath: existing.relPath,
         addedAt: existing.addedAt,
         ...(nextRoot === undefined ? {} : { checkoutRoot: nextRoot }),
+        // Carried across explicitly, because this row is REBUILT rather than
+        // edited: a field left out here is a restriction silently lifted by
+        // an unmount and a re-mount, which is the one direction this must
+        // never move.
+        ...(existing.privacy === undefined ? {} : { privacy: existing.privacy }),
       };
       project.mounts[index] = revivedMount;
       this.persist();
