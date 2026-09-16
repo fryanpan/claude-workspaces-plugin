@@ -1844,24 +1844,49 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     }
   }
 
+  /**
+   * Let go of the meeting that is over, because a new one has just begun.
+   *
+   * Called from the ONE place that knows a meeting has begun — where a
+   * capture has actually opened. The engine hands out "A" afresh each
+   * session, so the old labels name nobody here; `ready` then refills the
+   * names from the doc's own record, which is how the same room keeps its
+   * names across sessions.
+   *
+   * Everything it drops belongs to the last meeting and nothing to this
+   * press, which is the whole point: a press that never opens a microphone
+   * never calls it, and costs the last meeting nothing.
+   */
+  function forgetLastMeeting(): void {
+    names = {};
+    seen = new Set();
+    // Where a late rename would have gone. It is this that made a refused
+    // press expensive: `postName` is addressed to `lastMeetingId`.
+    lastMeetingId = null;
+    // A new recording answers whatever the last one's ending said.
+    endedNote = '';
+  }
+
   async function start(auto = false): Promise<void> {
     if (state.kind === 'requesting' || state.kind === 'recording') return;
     const attempt = ++generation;
     turns = [];
-    names = {};
-    // The engine hands out "A" afresh each session: the old cast, and the
-    // meeting a late rename would have been addressed to, belong to the
-    // meeting that is over.
-    seen = new Set();
-    lastMeetingId = null;
+    // NOTHING ABOUT THE LAST MEETING IS FORGOTTEN HERE. Its cast, the meeting
+    // a late rename is addressed to and its ending's sentence are dropped
+    // where the microphone actually opens (`forgetLastMeeting`, below), for
+    // the same reason the tidy-up offer is withdrawn there: until a stream is
+    // running there is no new meeting, and a press the browser refuses must
+    // cost the last one nothing.
+    //
+    // The rolling transcript window above is the exception on purpose: it is
+    // this strip's own line, cleared the moment a press is made so the words
+    // of the last recording are not read as the words of this one.
+    //
     // A new meeting is never a retry of the last one: whatever was waiting to
     // reconnect is called off, and the backoff starts from the top.
     cancelReconnect();
     liveMeetingId = null;
     standingNote = '';
-    // A new recording answers whatever the last one's ending said.
-    endedNote = '';
-    forgetStreamLosses();
     // Whatever the last meeting left banked is that meeting's. This one gets
     // its own id, its own section and its own bill, and the words before it
     // belong to the recording they were spoken in.
@@ -1943,17 +1968,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // microphone, a prompt dismissed, a mis-tap — took the LAST meeting's
     // offer off the screen for good, over a recording that never started.
     // Nothing above this line has written to the doc or the wire, so what a
-    // blocked start now leaves alone is THE OFFER.
-    //
-    // AND ONLY THE OFFER — the reset block at the top of this function still
-    // runs on a false start. `names`, `seen` and `lastMeetingId` are cleared
-    // before the microphone is ever asked for, so a refused press still costs
-    // the last meeting's rename target: `postName` is addressed to
-    // `lastMeetingId`, and after a blocked start there is none. That is the
-    // same fault in a second place, and moving that block is work nothing
-    // here tests — deliberately not done with this fix rather than
-    // overlooked. See `meeting-tidy-offer-false-start.test.ts`, which asserts
-    // the offer and says nothing about the cast.
+    // blocked start now leaves alone is THE OFFER — and, since the cast reset
+    // moved down here beside it, the last meeting's SPEAKERS too. Both are
+    // dropped on the same line for the same reason.
+    // `meeting-false-start-cast.test.ts` holds that line from the cast's side,
+    // `meeting-tidy-offer-false-start.test.ts` from the offer's.
+    forgetLastMeeting();
     opts.onMeetingChange?.(null);
     // What is RUNNING, which is what the record and the wire have to name — a
     // meeting that asked for two streams and got one is a one-stream meeting.
