@@ -98,6 +98,7 @@ import {
 import { panelReviewQueue } from './board-review-render.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { DoneWhenList } from './done-when-list.tsx';
+import { GateHoldLine, GateLessSpecificNote, GateUnjudgedBadge } from './review-gate-note.tsx';
 import { markPhrase } from './review-item-phrase.ts';
 import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
@@ -368,6 +369,9 @@ function ReviewCard(props: {
             item is back in the queue and says so, beside its kind rather than
             instead of it — the walkthrough's own treatment. */}
         {item.revision && <span class="board-decide-k board-decide-k-revised">Revised</span>}
+        {/* Nobody judged these words good — the gate ran out of holds and
+            stopped holding. The walkthrough's own treatment. */}
+        <GateUnjudgedBadge gate={item.gate} prefix="board-decide" />
         {!(echoesTitle && bodyMarkdown !== '') && (
           <p class="board-decide-headline">{item.headline}</p>
         )}
@@ -381,6 +385,14 @@ function ReviewCard(props: {
       {item.revision?.question !== undefined && (
         <blockquote class="board-decide-question">{`You asked: “${item.revision.question}”`}</blockquote>
       )}
+      {/* How these words got here: how often the gate held them, and the
+          filer's own note when that is what let them through. */}
+      <GateHoldLine gate={item.gate} prefix="board-decide" />
+      <GateLessSpecificNote
+        gate={item.gate}
+        prefix="board-decide"
+        {...(item.askedBy ? { who: item.askedBy } : {})}
+      />
       {bodyMarkdown !== '' && (
         <div
           class="board-decide-body"

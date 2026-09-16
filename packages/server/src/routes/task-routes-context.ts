@@ -131,12 +131,17 @@ export interface TaskRoutesContext {
     task: Task,
     item: TaskReviewItem,
     author: { id: string; name: string; kind?: string },
+    /** `lessSpecific`: the filer's own reason why the honest answer is less
+     *  specific than a standing hold asked for. Acted on only when the item
+     *  is held. */
+    runOpts?: { lessSpecific?: string },
   ) => Promise<ReviewGate>;
   /** The same gate for a ticket that IS a decision; `undefined` when the
    *  ticket is not one, so a caller cannot report a judgement never made. */
   judgeTaskDecision: (
     task: Task,
     author: { id: string; name: string; kind?: string },
+    runOpts?: { lessSpecific?: string },
   ) => Promise<ReviewGate | undefined>;
   /** One hold out of a filed item's and the ticket decision's. */
   mergedHold: (

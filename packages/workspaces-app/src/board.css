@@ -1266,6 +1266,46 @@ body.board-body {
   color: #1f7a3a;
   background: rgba(45, 164, 78, 0.12);
 }
+/* The quality gate stopped holding these words rather than passing them: the
+   reader is about to answer something nobody judged good. A decision's
+   weight, because it is a warning about the words and not a label for a kind
+   of ask. */
+.board-walk-k-unjudged {
+  color: var(--warn-fg, #b25e09);
+  background: var(--warn-wash, #fff4e5);
+}
+/* One quiet line: how many times the gate held these words before the reader
+   got them, and how they got through. Drawn only when there was at least one
+   hold - the ordinary item says nothing, because nothing happened to it. */
+.board-walk-gate {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+/* The filer's own words for why the honest answer is less specific than the
+   gate asked for. Quoted, not paraphrased: the reader is being told what a
+   source supports by the person who read the source. */
+.board-walk-gate-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-hover);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.board-walk-gate-note-who {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  margin-bottom: 2px;
+}
 /* The head's top-right meta — "Asked by Harbor agent 2 days ago". A
    SENTENCE now, not the bare duration it replaced, so it must be allowed to
    wrap: nowrap pushed it out of a 430px head row. */
@@ -5835,6 +5875,40 @@ label.board-sched-chip:hover {
 .board-decide-k-revised {
   color: #1f7a3a;
   background: rgba(45, 164, 78, 0.12);
+}
+/* Admitted without a passing verdict - the same warning, and the same
+   tokens, as `.board-walk-k-unjudged` on the walkthrough's card. */
+.board-decide-k-unjudged {
+  color: var(--warn-fg, #b25e09);
+  background: var(--warn-wash, #fff4e5);
+}
+/* The hold count, and the filer's note when that is how the item got
+   through. The walkthrough's two rules, on the panel's card. */
+.board-decide-gate {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.board-decide-gate-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-hover);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.board-decide-gate-note-who {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  margin-bottom: 2px;
 }
 /* A revised item's question, quoted under the head — the walkthrough's
    `.board-walk-question-text`, on the panel's card. */

@@ -40,6 +40,7 @@ import {
   threadReviewItemId,
 } from '@claude-workspaces/core';
 import { withPartialNote } from '@claude-workspaces/core/answer-coverage-prompt';
+import { type ReviewGateNote, gateNoteOf } from '@claude-workspaces/core/review-hold';
 import { classifyActor } from './actor-identity.ts';
 import { asksPerson, extractAsk } from './ask-detection.ts';
 
@@ -175,6 +176,10 @@ export interface ReviewThreadItem {
    */
   revisedAt?: number;
   revisedRange?: { start: number; end: number };
+  /** What the quality gate did to this item before the reader saw it, when
+   *  it did anything — see `ReviewGateNote`. Absent on the ordinary item,
+   *  whose card then carries no gate furniture at all. */
+  gate?: ReviewGateNote;
 }
 
 /**
@@ -210,6 +215,11 @@ export interface ReviewTaskItem {
    * `reviewItemState`.
    */
   state: Exclude<ReviewItemState, 'waiting' | 'answered'>;
+  /** The gate's mark on this item — see `ReviewGateNote`. It rides the ROW
+   *  rather than the payload because a ticket item keeps its verdict on the
+   *  wrapper, and the card must read one field whichever surface it came
+   *  from. */
+  gate?: ReviewGateNote;
   /** On a revised row: when, what the reader had asked (the anchored
    *  thread's first comment), where that thread is, and which span of the
    *  new detail changed — everything the card needs to show "Revised". */
@@ -453,6 +463,11 @@ export function reviewThreadItems(args: {
           since: declaring.ts,
           direct: true,
           askedAt: declaring.ts,
+          // A comment-borne item keeps its verdict ON the payload, so the
+          // note comes off the stored declaration rather than off a wrapper.
+          ...(gateNoteOf(declaring.review.judge)
+            ? { gate: gateNoteOf(declaring.review.judge) }
+            : {}),
         });
         continue;
       }
@@ -577,6 +592,7 @@ export function taskReviewItems(tasks: ReviewTaskRef[]): ReviewTaskItem[] {
         since: item.createdAt,
         direct: true,
         askedAt: item.createdAt,
+        ...(gateNoteOf(item.judge) ? { gate: gateNoteOf(item.judge) } : {}),
       });
     }
   }

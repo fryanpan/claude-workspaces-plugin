@@ -216,6 +216,7 @@ export function panelReviewQueue(
       ...(decisionAskedBy(task) !== undefined ? { askedBy: decisionAskedBy(task) } : {}),
       since: task.createdAt,
       asked: true,
+      ...(task.decisionGate ? { gate: task.decisionGate } : {}),
       // Came back revised after the reader asked: say so, quote the question,
       // and aim the focus-scroll at the thread — as a ticket item does.
       ...(task.decisionRevision
@@ -257,6 +258,7 @@ export function panelReviewQueue(
         reviewItemId: a.reviewItemId,
         declared: true,
         asked: true,
+        ...(a.gate ? { gate: a.gate } : {}),
         // A REVISED item keeps what the server said about the revision, and
         // the thread that asked — so the card can say "this came back
         // changed" and the focus-scroll can aim at it. A fresh item carries
@@ -294,6 +296,7 @@ export function panelReviewQueue(
       threadId: a.threadId,
       docId: a.docId,
       ...(a.commentId !== undefined ? { commentId: a.commentId } : {}),
+      ...(a.gate ? { gate: a.gate } : {}),
       declared: r !== undefined,
       // A declaration is an ask; an inferred item only measured one.
       asked: r !== undefined || a.direct === true,

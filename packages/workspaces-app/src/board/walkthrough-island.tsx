@@ -74,6 +74,7 @@ import {
   revisedPhrase,
 } from './board-review-model.ts';
 import { requireText } from './board-review-render.ts';
+import { GateHoldLine, GateLessSpecificNote, GateUnjudgedBadge } from './review-gate-note.tsx';
 import { markPhrase, unmarkPhrase } from './review-item-phrase.ts';
 import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
@@ -502,6 +503,10 @@ function WalkCardHead(props: { item: ReviewItem; now: number }) {
           item is back in the queue and says so, beside its kind rather than
           instead of it. */}
       {item.revision && <span class="board-walk-k board-walk-k-revised">Revised</span>}
+      {/* Nobody judged these words good — the gate ran out of holds and
+          stopped holding. Beside the kind badge, because it is a warning
+          about the words rather than a kind of ask. */}
+      <GateUnjudgedBadge gate={item.gate} prefix="board-walk" />
       {/* The QUESTION, not the subject — the same title the queue row shows, so
           tapping a row and stepping onto it cannot read as two different items.
           A DECLARED headline is already a heading and goes through untouched —
@@ -902,6 +907,15 @@ function WalkCard(props: {
           going through the queue must not mean leaving the queue on every
           item — but a comment sometimes only makes sense in place. */}
         <WalkWhere item={item} handlers={handlers} />
+        {/* How these words got here: how often the gate held them, and the
+            filer's own note when that is what let them through. Absent on an
+            item the gate simply passed, which is most of them. */}
+        <GateHoldLine gate={item.gate} prefix="board-walk" />
+        <GateLessSpecificNote
+          gate={item.gate}
+          prefix="board-walk"
+          {...(item.thread?.askedBy ? { who: item.thread.askedBy } : {})}
+        />
 
         {row ? (
           <Fragment>

@@ -23,6 +23,7 @@ import {
   formatEffortSeconds,
   ratioForGoal,
 } from '@claude-workspaces/core/goal-effort';
+import type { ReviewGateNote } from '@claude-workspaces/core/review-hold';
 import { blockableStatus } from '@claude-workspaces/core/task-blocked';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
 import { cachedLinkTitle, fetchLinkInfos } from '../link-titles.ts';
@@ -1352,6 +1353,13 @@ export interface PanelReviewItem {
    * item. The Home walkthrough renders the same note (`ReviewRevisionNote`).
    */
   revision?: { at: number; question?: string };
+  /**
+   * What the quality gate did to these words before the reader saw them —
+   * how many times it held them, and how they got through if it never passed
+   * them. Absent on an item it simply passed, which is most of them: a gate
+   * line on every card is a line nobody reads.
+   */
+  gate?: ReviewGateNote;
   /** An agent DECLARED this — it carries a `review` payload — rather than the
    *  queue inferring it from who spoke last. It ranks above an inferred item,
    *  and it is half of what makes the answer route legal; the other half is a

@@ -17173,7 +17173,7 @@ var TOOL_LIST = {
     },
     {
       name: "revise_review_item",
-      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again.",
+      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again. When the source cannot support what a hold asked for, answer with lessSpecific rather than inventing a specific.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17213,6 +17213,10 @@ var TOOL_LIST = {
             description: "Which span of the NEW detail changed, as character offsets, for when the diff would not show it well. Omitted, the changed span is derived.",
             properties: { start: { type: "number" }, end: { type: "number" } },
             required: ["start", "end"]
+          },
+          lessSpecific: {
+            type: "string",
+            description: "Your answer to a hold when the source does not support what it asked for: why the honest answer is less specific, in your own words. Pass it alongside the revision you can honestly make. The revision is judged as usual, but the gap you answered is not raised against you again, and your note is shown to the reader on the item card. Never invent a figure, a name or a mechanism to satisfy a hold - say this instead. Ignored when the item is not currently held."
           }
         },
         required: ["workspaceId"]
@@ -18996,13 +19000,15 @@ async function handleTaskTool(name, a, ctx) {
         detail,
         options,
         reply,
-        revisedRange
+        revisedRange,
+        lessSpecific
       } = a;
       const patch = {
         ...headline !== undefined ? { headline } : {},
         ...detail !== undefined ? { detail } : {},
         ...options !== undefined ? { options } : {},
         ...revisedRange !== undefined ? { revisedRange } : {},
+        ...lessSpecific !== undefined ? { lessSpecific } : {},
         author: AUTHOR
       };
       if (docId !== undefined || threadId !== undefined || commentId !== undefined) {
@@ -20060,7 +20066,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.236";
+var PLUGIN_VERSION = "0.1.237";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
