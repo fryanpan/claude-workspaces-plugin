@@ -195,6 +195,19 @@ export function ownership(
 /**
  * The blocks inside a section some OTHER meeting has claimed.
  *
+ * WHAT IT STILL CANNOT SEE, and why the answer is not a bigger set here. A
+ * block carrying the mark but sitting inside NO claimed section — another
+ * meeting's bullet that a person dragged out of its section, or whose heading
+ * was deleted — reads as this meeting's. Reaching it needs per-meeting
+ * PROVENANCE, and the document holds none: one `NOTES_AUTHOR_ID` is what the
+ * live tick writes, what a person's edit clears and what the suggestion path
+ * reads, so telling two meetings apart is a change to that model rather than
+ * a wider query here. The preconditions are narrow — a second meeting must
+ * have recorded on this doc AFTER this one started (an earlier one's marks
+ * were released when it did), its notes must then have been displaced from
+ * its own section, and no third recording may have started since — and the
+ * blast radius is one displaced bullet. Named rather than fixed.
+ *
  * `mine` is this meeting's own heading, skipped; a claim naming a heading the
  * document no longer holds contributes nothing, because {@link sectionIds}
  * answers the empty set for one it cannot find. No claims — a test driving
