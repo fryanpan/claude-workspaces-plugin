@@ -215,4 +215,34 @@ describe('an unfiled wait that ages goes past its lead', () => {
     expect(ours).toBeDefined();
     expect(reviewWithdrawn(ours?.review as ReviewPayload)).toBe(true);
   });
+
+  it('an anchor task that closes does not retire the waits the item named', () => {
+    // The item has to hang on SOME ticket, and the one it picked can be
+    // finished while the others are still waiting. Archiving it takes the
+    // item off the reader's queue without anybody having read the list, so
+    // the finding has to come back on a ticket that is still open.
+    const { store, ws, ids } = boardWith(['Cut the release branch', 'Draft the rollout note']);
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW });
+    const rows = [
+      waitingRow(ids[0] as string, 'Cut the release branch'),
+      waitingRow(ids[1] as string, 'Draft the rollout note'),
+    ];
+    escalations.onTick([snapshot(ws, rows)], START);
+    escalations.onTick([snapshot(ws, rows)], START + WINDOW);
+    const first = boardFiledItems(store, [ws]);
+    expect(first).toHaveLength(1);
+    const anchor = first[0]?.taskId as string;
+
+    const archived = store.archiveTask(anchor, {
+      actor: { id: LEAD.id, name: LEAD.name, kind: 'agent' },
+    });
+    expect(archived.ok).toBe(true);
+
+    // The still-open task is still waiting, so it is still a finding.
+    const stillDue = rows.filter((r) => r.id !== anchor);
+    escalations.onTick([snapshot(ws, stillDue)], START + WINDOW + MIN);
+    const refiled = boardFiledItems(store, [ws]).filter((i) => i.taskId !== anchor);
+    expect(refiled).toHaveLength(1);
+    expect(refiled[0]?.detail).toContain(stillDue[0]?.id as string);
+  });
 });

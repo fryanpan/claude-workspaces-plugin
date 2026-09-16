@@ -327,9 +327,16 @@ export class WaitingUnfiledEscalations {
       return;
     }
     if (filed) {
-      // Answered, withdrawn, or its anchor closed. The owner has seen the
-      // tasks it named; those are not asked about again this stretch.
-      if (item) this.sidecar.seenByOwner = union(this.sidecar.seenByOwner ?? [], filed.keys);
+      // Two ways to stop standing, and only one of them means the owner saw
+      // it. ANSWERED or WITHDRAWN is a person having read the list, so those
+      // tasks are not asked about again this stretch. An anchor that CLOSED
+      // took the item off the queue without anybody reading it — marking its
+      // tasks seen there would retire a live fleet-wide finding on the
+      // strength of one ticket being completed, so the keys stay unseen and
+      // the next few lines re-file against a due task that is still open.
+      if (item && this.anchorReachable(filed)) {
+        this.sidecar.seenByOwner = union(this.sidecar.seenByOwner ?? [], filed.keys);
+      }
       this.sidecar.filed = undefined;
     }
     const unseen = due.filter(
