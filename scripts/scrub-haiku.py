@@ -137,7 +137,7 @@ SYSTEM_PROMPT = """You are a sensitive-content scanner. You will be shown a git 
   verified is on the remote and redacted before you saw the diff
 - Public technical references (Anthropic, Claude, GitHub URLs to known public repos, well-known libraries)
 - Generic placeholders: <user>, <your-tailnet>, your-username/example, my-project, the user
-- The conventional placeholder people, used as sample data: Alice, Bob, Carol, Dave, Eve, Mallory, Trent, John Doe, Jane Doe, Jane Roe, Foo, Bar, Baz, Qux — and long-dead figures used as stock examples, such as Ada Lovelace, Grace Hopper, Alan Turing. Every test suite in the world names these, and a scanner that flags them is a scanner the next person turns off. This is the whole list: a name that is not on it is not a placeholder merely because it appears in a test
+- The conventional placeholder people, used as sample data: Alice, Bob, Carol, Dave, Eve, Mallory, Trent, John Doe, Jane Doe, Jane Roe, Foo, Bar, Baz, Qux — and long-dead figures used as stock examples, such as Ada Lovelace, Grace Hopper, Alan Turing. Every test suite in the world names these, and a scanner that flags them is a scanner the next person turns off. This list and the house fixture names below are the whole of it: a name on neither is not a placeholder merely because it appears in a test
 - Function/variable/class names, programming jargon, code comments about the code itself — **but a quoted string is not an identifier.** Text between quotes is content: it is what the program shows somebody, or what a test says the program shows. A name inside a string literal is a name, and a file full of `expect(...).toContain("...")` is a file full of content. "This is test code" is a statement about the file, not about the strings in it, and it is not a reason to stop reading them
 - Standard package descriptions ("a Python module that does X")
 - **Anything on a line that is not being ADDED.** A line being removed by this
@@ -259,7 +259,36 @@ def system_prompt(maintainers: "set[str] | None" = None) -> str:
             "Every OTHER real person's name is still a leak, including a "
             "co-author, a colleague, a reviewer, or anyone quoted or thanked."
         )
-    return f"{SYSTEM_PROMPT}\n\n**This repository's maintainers:**\n{listed}"
+    return (f"{SYSTEM_PROMPT}\n\n**This repository's maintainers:**\n{listed}"
+            f"\n\n{_house_names_block()}")
+
+
+def _house_names_block() -> str:
+    """The three invented words this repository writes instead of a real name.
+
+    Kept beside the maintainer block rather than inside SYSTEM_PROMPT so the
+    words themselves live in one place — `scrub_names.HOUSE_FIXTURE_NAMES` —
+    which is the same place the written convention points at. It is a closed
+    list of three, not a rule about fixtures: see that constant's comment.
+    """
+    listed = "\n".join(f"- {n}" for n in scrub_names.HOUSE_FIXTURE_NAMES)
+    return (
+        "**This repository's house fixture names:**\n"
+        f"{listed}\n\n"
+        "These are invented place-words, not people. This repository's own "
+        "convention tells whoever writes a fixture, a mock payload, a doc "
+        "example or a sample transcript to reach for one of them INSTEAD of a "
+        "real name, so finding one is the convention working rather than a "
+        "leak. Treat each exactly as you treat Alice and Bob: cross it off the "
+        "sweep as a placeholder wherever it appears, in any position — a "
+        "quoted string, a speaker label, a test constant, a company, a town, a "
+        "surname.\n\n"
+        "This is a closed list of three words and it widens nothing else. Any "
+        "OTHER word beside one of them is judged on its own merits exactly as "
+        "it would be if the house name were not there, and an unfamiliar "
+        "surname is still a leak in a test fixture — sitting in sample data "
+        "has never been a reason to let a name through, and it is not one now."
+    )
 
 
 # Overridable for the same reason as API_URL: the self-test points it at a
