@@ -94,6 +94,8 @@ export interface ApplyBlockEditsOptions {
   transactionOrigin?: unknown;
   /** How every edit's markdown parses: `{ mdx: true }` for an `.mdx` doc. */
   parse?: MarkdownParseOptions;
+  /** Structure only — `NestBlocksOptions.moveOthers` is why, and who passes it. */
+  moveOthers?: boolean;
 }
 
 /** Give an id to anything in `fragment` that has none. Called from INSIDE
@@ -414,7 +416,7 @@ export function applyBlockEdits(
           break;
         }
         case 'nest_blocks': {
-          outcomes.push(nestBlocksOutcome(fragment, edit, opts.author));
+          outcomes.push(nestBlocksOutcome(fragment, edit, opts.author, opts.moveOthers === true));
           break;
         }
         case 'replace_block':

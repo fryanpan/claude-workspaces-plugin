@@ -204,6 +204,24 @@ describe('regroupDirective', () => {
     );
   });
 
+  test('names only the two topics nearest the live end of a long meeting', () => {
+    // Five full topics, the shape a whole-doc outline reaches an hour into a
+    // meeting. The directive is the part of the prompt nothing can cache, so
+    // it names what this update can act on and nothing else.
+    const outline: prose.OutlineEntry[] = [];
+    for (let i = 0; i < 5; i++) {
+      outline.push(heading(`Topic ${i}`), ...bullets(MAX_FLAT_RUN_BULLETS, `t${i}`));
+    }
+    const text = regroupDirective(outline, { author: NOTES_AUTHOR_ID }) ?? '';
+    expect(text).toContain('Topic 4');
+    expect(text).toContain('Topic 3');
+    // CONTROL: the earlier topics are just as full — the bar has not changed,
+    // only how many of them one update is asked about.
+    expect(regroupTargets(outline, { author: NOTES_AUTHOR_ID })).toHaveLength(5);
+    expect(text).not.toContain('Topic 2');
+    expect(text).not.toContain('Topic 0');
+  });
+
   test('asks a run nobody has named for a heading, never for nesting', () => {
     const run = bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless');
     const text = regroupDirective(run, { author: NOTES_AUTHOR_ID });

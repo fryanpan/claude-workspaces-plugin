@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
-import { commentedBlockIds, confineToSection } from '../src/notes-cleanup-scope.ts';
+import { boundByAuthorship, commentedBlockIds } from '../src/notes-cleanup-scope.ts';
 import {
   DOC,
   MEETING,
@@ -70,6 +70,53 @@ describe('a bullet somebody has commented on', () => {
     return String(start?.type).slice(start?.index, end?.index);
   };
 
+  it('survives the pass MOVING it, once the snippet sweep has run', async () => {
+    // WHAT A MOVE REALLY DOES TO AN ANCHOR, measured rather than asserted.
+    // Yjs has no move primitive, so `nest_blocks` clones the element and
+    // deletes the original (`prose-nest.ts`) — the relative position stops
+    // resolving the instant it lands, and it is `autoReanchorDoc` that puts
+    // the thread back on its own words, by a snippet that is still exactly
+    // the text it was. The server runs that sweep on a debounce after every
+    // prose transaction (`live-doc-fanout.ts`); this fixture has no fanout,
+    // so it runs it by hand and asserts both halves.
+    //
+    // It is driven on a PERSON'S bullet on purpose. The gate has always let a
+    // nest reach a commented block; since 2026-09-15 it lets one reach a
+    // block the pass does not own, so the case that needs proving is both at
+    // once.
+    const { store, ydoc } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
+    const needle = 'The winter crew keeps the Saltmarsh run';
+    const thread = commentOn(ydoc, needle);
+    expect(anchoredText(ydoc, thread)).toBe(needle);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'Saltmarsh run')],
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(0);
+    expect(result.applied).toBe(1);
+    // The clone-and-delete really does break the position — this is the half
+    // the comment above would be a guess without.
+    expect(anchoredText(ydoc, thread)).not.toBe(needle);
+    const swept = prose.autoReanchorDoc(ydoc);
+    expect(swept.reanchored).toBe(1);
+    expect(swept.stillOrphan).toBe(0);
+    // And it points at their own words, which is the whole claim.
+    expect(anchoredText(ydoc, thread)).toBe(needle);
+  });
+
   it('is named by commentedBlockIds', () => {
     const { store, ydoc } = docStoreFrom(NOTES, ['Meeting notes']);
     commentOn(ydoc, 'harbour run moves');
@@ -85,11 +132,15 @@ describe('a bullet somebody has commented on', () => {
     const scope = {
       blocks: new Set(['h1', 'b1', 'b2']),
       headings: new Set(['h1']),
+      listItems: new Map([
+        ['b1', 0],
+        ['b2', 0],
+      ]),
       owned: new Set(['b1', 'b2']),
       headingId: 'h1',
       commented: new Set(['b1']),
     };
-    const { kept, refused } = confineToSection(
+    const { kept, refused } = boundByAuthorship(
       [
         { op: 'replace_block', blockId: 'b1', markdown: '- rewritten' },
         { op: 'delete_block', blockId: 'b1' },
@@ -102,7 +153,7 @@ describe('a bullet somebody has commented on', () => {
     expect(refused).toBe(2);
     // Nesting keeps each block's own text, so it rides along with the anchor.
     expect(
-      confineToSection([{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }], scope).kept,
+      boundByAuthorship([{ op: 'nest_blocks', leadBlockId: 'b1', blockIds: ['b2'] }], scope).kept,
     ).toHaveLength(1);
   });
 

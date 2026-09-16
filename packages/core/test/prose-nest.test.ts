@@ -318,3 +318,117 @@ describe('nest_blocks', () => {
     ]);
   });
 });
+
+/**
+ * `moveOthers` — the privileged move the at-stop tidy-up is given, and the
+ * only caller that gets it. A tick never passes it, so each case here is a
+ * pair: the same nest refused without it and applied with it, on the same doc.
+ */
+describe('nest_blocks with moveOthers', () => {
+  /** A topic whose bullets are the note-taker's, a second heading after it,
+   *  and a bullet under that second heading that nobody has claimed. */
+  function twoTopics(): Y.Doc {
+    const doc = new Y.Doc();
+    getProseFragment(doc).push(
+      parseMarkdownBlocks(
+        [
+          '### First topic',
+          '',
+          '- ours one',
+          '- ours two',
+          '',
+          '### Second topic',
+          '',
+          '- theirs',
+        ].join('\n') + '\n',
+      ),
+    );
+    for (const entry of readOutline(doc)) {
+      if (!entry.text.startsWith('ours')) continue;
+      const el = getProseFragment(doc)
+        .toArray()
+        .flatMap((n) => (n instanceof Y.XmlElement ? n.toArray() : []))
+        .find(
+          (n): n is Y.XmlElement =>
+            n instanceof Y.XmlElement && n.getAttribute('cwId') === entry.id,
+        );
+      el?.setAttribute('cwAuthor', AGENT);
+    }
+    return doc;
+  }
+
+  function nest(doc: Y.Doc, moveOthers: boolean) {
+    return applyBlockEdits(
+      doc,
+      [
+        {
+          op: 'nest_blocks',
+          leadBlockId: idOf(doc, 'ours one'),
+          blockIds: [idOf(doc, 'ours two'), idOf(doc, 'theirs')],
+        },
+      ],
+      { author: AGENT, suggestionAuthor: SUGGESTER, ...(moveOthers ? { moveOthers: true } : {}) },
+    );
+  }
+
+  it("reaches past a heading and takes a person's bullet with it", () => {
+    // CONTROL: the same nest without the capability. The bullet under the
+    // next heading is neither reachable nor claimable, so only the two that
+    // are the note-taker's own and on its own list move.
+    const plain = twoTopics();
+    expect(nest(plain, false).outcomes[0]?.status).toBe('applied');
+    expect(md(plain)).toBe(
+      [
+        '### First topic',
+        '',
+        '- ours one',
+        '  - ours two',
+        '',
+        '### Second topic',
+        '',
+        '- theirs',
+      ].join('\n'),
+    );
+
+    // THE MEASUREMENT: with it, the heading is not a wall and the bullet's
+    // author is not a veto — structure is free, which is the whole rule.
+    const privileged = twoTopics();
+    expect(nest(privileged, true).outcomes[0]?.status).toBe('applied');
+    expect(md(privileged)).toBe(
+      [
+        '### First topic',
+        '',
+        '- ours one',
+        '  - ours two',
+        '  - theirs',
+        '',
+        '### Second topic',
+      ].join('\n'),
+    );
+  });
+
+  it("nests under a person's own bullet as the lead, which is refused without it", () => {
+    const plain = twoTopics();
+    const before = md(plain);
+    const lead = (doc: Y.Doc, moveOthers: boolean) =>
+      applyBlockEdits(
+        doc,
+        [
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(doc, 'theirs'),
+            blockIds: [idOf(doc, 'ours two')],
+          },
+        ],
+        { author: AGENT, suggestionAuthor: SUGGESTER, ...(moveOthers ? { moveOthers: true } : {}) },
+      );
+    expect(lead(plain, false).outcomes).toEqual([
+      { op: 'nest_blocks', status: 'failed', error: 'not-yours' },
+    ]);
+    expect(md(plain)).toBe(before);
+
+    const privileged = twoTopics();
+    expect(lead(privileged, true).outcomes[0]?.status).toBe('applied');
+    expect(md(privileged)).toContain('  - ours two');
+  });
+});
