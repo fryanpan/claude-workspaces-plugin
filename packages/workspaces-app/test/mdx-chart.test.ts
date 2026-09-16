@@ -217,6 +217,27 @@ describe('a chart block on the doc page', () => {
     }
   });
 
+  it('keeps three crowded end labels apart, and ticks the x range every series reaches', () => {
+    const near = (label: string, last: number) =>
+      `{ label: "${label}", values: [{ x: 1, y: 10 }, { x: 2, y: ${last} }] }`;
+    mount(
+      `<LineChart series={[${near('Riverbend', 100)}, ${near('Harborlight', 101)}, ${near('Saltmarsh', 102)}]} />\n`,
+    );
+    const svg = views()[0]?.querySelector('svg.mdx-chart[data-chart="line"]');
+    const ys = [...(svg?.querySelectorAll('.mdx-end-label') ?? [])]
+      .map((l) => Number(l.getAttribute('y')))
+      .sort((a, b) => a - b);
+    expect(ys).toHaveLength(3);
+    for (let i = 1; i < ys.length; i++) {
+      expect((ys[i] ?? 0) - (ys[i - 1] ?? 0)).toBeGreaterThanOrEqual(14);
+    }
+    // A short series that reaches past the first still gets ticks out there.
+    mount(
+      '<LineChart series={[{ label: "A", values: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }, { label: "B", values: [{ x: 1, y: 1 }, { x: 9, y: 3 }] }]} />\n',
+    );
+    expect(texts(views()[1], '.mdx-x-axis text')).toContain('9');
+  });
+
   it('draws the band as a stretch of x over the whole plot, and keeps it out of the y axis', () => {
     mount(`${LINE}\n\n${LINE.replace(/\s*band=\{\{[^}]*\}\}\n/, '\n')}\n`);
     const [withBand, without] = views().map((v) =>

@@ -168,7 +168,9 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
 
   // A year is not a quantity, so an x tick never takes a thousands separator,
   // and a short series is ticked at its own points — both as the site does.
-  const own = [...new Set(chart.series[0]?.points.map((p) => p.x) ?? [])].sort((a, b) => a - b);
+  // Every series' x values, not the first one's: a second series can reach
+  // past the first, and that stretch of the axis still needs its ticks.
+  const own = [...new Set(xs)].sort((a, b) => a - b);
   const xTicks =
     chart.xTickLabels?.filter((t) => t.x >= x0 && t.x <= x1) ??
     (own.length > 1 && own.length <= 8
@@ -231,13 +233,14 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
 
   // Each line's own name at its end, in its colour: what lets the chart drop
   // the legend the published post does not have.
-  const placed = ends
-    .map((e) => ({ ...e, y: sy(e.point.y) }))
-    .sort((a, b) => a.y - b.y)
-    .map((e, k, list) => {
-      const above = list[k - 1];
-      return above && e.y - above.y < END_GAP ? { ...e, y: above.y + END_GAP } : e;
-    });
+  const placed = ends.map((e) => ({ ...e, y: sy(e.point.y) })).sort((a, b) => a.y - b.y);
+  // Each label is pushed off the one ALREADY placed above it, so a third that
+  // crowds a pushed second is pushed clear of where that second ended up.
+  for (let k = 1; k < placed.length; k++) {
+    const above = placed[k - 1];
+    const here = placed[k];
+    if (above && here && here.y - above.y < END_GAP) here.y = above.y + END_GAP;
+  }
   for (const e of placed) {
     const g = el('g', { class: 'mdx-end-labels' }, svg);
     const x = Math.min(sx(e.point.x) + 8, w - 2);
