@@ -69,7 +69,7 @@ describe('running a pass', () => {
     expect(markdownNow()).toContain('The slipway closes in October');
   });
 
-  it("leaves the doc's own body alone, and files no redline there either", async () => {
+  it("never rewrites the doc's own body — it OFFERS on it", async () => {
     const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'Something about the slipway.' }]);
@@ -83,13 +83,15 @@ describe('running a pass', () => {
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    // Outside the meeting's own section nothing is offered on either: the
-    // pass has no business redlining the doc's prose. Inside the section a
-    // person's line DOES get an offer — see the suggestion cases below, which
-    // is what makes this zero a boundary rather than a blanket.
-    expect(result.refused).toBe(1);
-    expect(result.touched).toBe(0);
-    expect(result.suggested).toBe(0);
+    // THE BOUNDARY MOVED, AND THE PROTECTION DID NOT (Bryan, 2026-09-15). The
+    // gate used to drop this for being outside the meeting's section, so the
+    // doc's prose got no offer at all; it is bounded by AUTHORSHIP now, so
+    // the line is reachable and what reaches it is a redline. The thing the
+    // case has always been about — their words do not change — is asserted on
+    // the document below, and it holds either way.
+    expect(result.refused).toBe(0);
+    expect(result.suggested).toBe(1);
+    expect(result.applied).toBe(0);
     const after = markdownNow();
     expect(after).toContain('My own line about the slipway, which nobody may rewrite.');
     expect(after).not.toContain('Rewritten by a robot');
@@ -169,7 +171,12 @@ describe('running a pass', () => {
     expect(result.reason).toBe('transcript-too-long');
   });
 
-  it("does not reach an earlier meeting's notes on the same doc", async () => {
+  it("does not delete an earlier meeting's notes on the same doc", async () => {
+    // THE PROTECTION IS OWNERSHIP NOW, NOT LOCATION, and the fixture had to
+    // change to say so honestly: `releaseNotesAuthorship` drops the previous
+    // meeting's marks the moment this recording starts, so by the time this
+    // pass runs the older bullet is UNMARKED. That is the state production
+    // leaves, and it is what puts a delete of it out of reach.
     const two = [
       '## Meeting notes',
       '- last week: the crew rota was agreed',
@@ -177,7 +184,7 @@ describe('running a pass', () => {
       '## Meeting notes',
       '- today: the timetable moves',
     ].join('\n');
-    const { store, markdownNow } = docStoreFrom(two, ['Meeting notes']);
+    const { store, markdownNow } = docStoreFrom(two, ['Meeting notes'], ['crew rota']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The timetable moves.' }]);
     const outline = store.readOutline(DOC)?.blocks ?? [];
@@ -231,10 +238,10 @@ describe('a doc whose marks have all been lost', () => {
     expect(prose.readOutline(reparsed(ydoc)).some((b) => b.author !== undefined)).toBe(false);
   });
 
-  it('never deletes a bullet in its own section, and never moves one', async () => {
-    // Both were admitted while an unmarked block counted as nobody's. Neither
-    // is an improvement to a line somebody may have written, and neither can
-    // be offered as a redline, so both are dropped.
+  it('never deletes a bullet in its own section', async () => {
+    // A delete was admitted while an unmarked block counted as nobody's. It
+    // is not an improvement to a line somebody may have written and it cannot
+    // be offered as a redline, so it is dropped.
     const { store, markdownNow } = docStoreFrom(NOTES, []);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
@@ -242,12 +249,32 @@ describe('a doc whose marks have all been lost', () => {
     const result = await runNotesCleanupPass(
       depsFor(
         store,
+        stubComposer([{ op: 'delete_block', blockId: idOf(store, 'Saltmarsh run') }]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(1);
+    expect(result.touched).toBe(0);
+    expect(markdownNow()).toBe(before);
+  });
+
+  it('but DOES move one — structure is free whoever wrote the line', async () => {
+    // The other half of the same rule, and the control on the case above: the
+    // same unmarked bullet, an op that changes none of its words, and it
+    // lands. Until 2026-09-15 both were dropped together.
+    const { store, markdownNow } = docStoreFrom(NOTES, []);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
         stubComposer([
-          { op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') },
           {
             op: 'nest_blocks',
             leadBlockId: idOf(store, 'harbour run'),
-            blockIds: [idOf(store, 'Kestrel Lane')],
+            blockIds: [idOf(store, 'Saltmarsh run')],
           },
         ]),
         dataDir,
@@ -255,9 +282,11 @@ describe('a doc whose marks have all been lost', () => {
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.refused).toBe(2);
-    expect(result.touched).toBe(0);
-    expect(markdownNow()).toBe(before);
+    expect(result.refused).toBe(0);
+    expect(result.applied).toBe(1);
+    expect(markdownNow()).toContain(
+      '- The harbour run moves to the half hour from April\n  - The winter crew keeps the Saltmarsh run',
+    );
   });
 
   it('tells the model those lines are not its own, and claims none of them', async () => {
@@ -286,7 +315,7 @@ describe('a doc whose marks have all been lost', () => {
     expect(seenLive.seen[0]?.claimed?.has(idOf(live.store, 'harbour run'))).toBe(true);
   });
 
-  it("still leaves the doc's own body alone, outside the meeting's section", async () => {
+  it("still never REWRITES the doc's own body, on a doc with no marks at all", async () => {
     const { store, markdownNow } = docStoreFrom(NOTES, []);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'Something about the slipway.' }]);
@@ -305,8 +334,11 @@ describe('a doc whose marks have all been lost', () => {
       ),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.refused).toBe(1);
-    expect(result.suggested).toBe(0);
+    // An offer, not a rewrite — the same answer the section's own lines get
+    // on this doc, which is the point of a boundary drawn on authorship.
+    expect(result.refused).toBe(0);
+    expect(result.suggested).toBe(1);
+    expect(result.applied).toBe(0);
     const after = markdownNow();
     expect(after).toContain('My own line about the slipway, which nobody may rewrite.');
     expect(after).not.toContain('Rewritten by a robot');

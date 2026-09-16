@@ -4,7 +4,7 @@
  *
  * SPLIT OUT OF `notes-cleanup-pass.ts` because it is not one rule but the
  * composition of two, and the composition is the part that was wrong.
- * `confineToSection` (`notes-cleanup-scope.ts`) answers "may this pass touch
+ * `boundByAuthorship` (`notes-cleanup-scope.ts`) answers "may this pass touch
  * that block"; `dedupeNotesEdits` (`notes-edit-dedupe.ts`) answers "is this
  * note already in the section". Each is right on its own. Running them in the
  * wrong order is what let a refused edit change the document.
@@ -17,11 +17,11 @@
  * replaces it. Those two only make sense together.
  *
  * Handed the model's answer directly, it will do that for an insert aimed
- * ANYWHERE — `insert_under_heading` naming a heading outside this meeting's
- * section is still a destination as far as the dedupe is concerned. The gate
- * then refuses the insert, for exactly the reason it exists, and keeps the
- * delete, because the delete names the pass's own uncommented bullet inside
- * its own section and there is nothing wrong with it in isolation. The note
+ * ANYWHERE — `insert_under_heading` naming a block that is not a heading at
+ * all is still a destination as far as the dedupe is concerned. The gate then
+ * refuses the insert, for exactly the reason it exists, and keeps the delete,
+ * because the delete names the pass's own uncommented bullet and there is
+ * nothing wrong with it in isolation. The note
  * is gone and nothing has replaced it. Measured 2026-09-15 on a one-note
  * section: one copy before, none after, the log reading "1 refused, 1 blocks
  * touched".
@@ -37,17 +37,11 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
-import { confineToSection } from './notes-cleanup-scope.ts';
+import { type NotesEditScope, boundByAuthorship } from './notes-cleanup-scope.ts';
 import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 
-/** Which blocks this pass may touch: `confineToSection`'s scope. */
-export interface CleanupScope {
-  blocks: Set<string>;
-  headings: Set<string>;
-  owned: Set<string>;
-  headingId: string;
-  commented?: Set<string>;
-}
+/** Which blocks this pass may touch: `boundByAuthorship`'s scope. */
+export type CleanupScope = NotesEditScope;
 
 /** What the dedupe needs beyond the scope: the doc as it stands, the words
  *  the pass composed from, and whose notes may be moved. */
@@ -79,12 +73,17 @@ export function cleanupWriteSet(
   scope: CleanupScope,
   dedupe: CleanupDedupeInput,
 ): CleanupWriteSet {
-  const addressed = confineToSection(edits, scope);
+  const addressed = boundByAuthorship(edits, scope);
   const deduped = dedupeNotesEdits(addressed.kept, {
     notesHeadingId: scope.headingId,
+    // The pass's own notes wherever they landed, not only the ones the
+    // section reaches — see `NotesDedupeContext.ownedElsewhere`. Without it a
+    // gate bounded by authorship would admit an insert restating a note the
+    // doc already carries under another heading.
+    ownedElsewhere: scope.owned,
     ...dedupe,
   });
-  const written = confineToSection(deduped.edits, scope);
+  const written = boundByAuthorship(deduped.edits, scope);
   return {
     kept: written.kept,
     refused: addressed.refused + written.refused,

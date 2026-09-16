@@ -2,12 +2,18 @@
  * A tidy-up whose every edit is REFUSED, through the real route and the real
  * gate — and what the reply has to say so the offer can stay on screen.
  *
- * This is the 15 September shape, driven rather than described: the pass
- * proposed edits naming blocks outside the meeting's own notes section,
- * `confineToSection` dropped every one of them, nothing reached the doc, and
- * the route answered `ok: true` with no field a reader could tell the
- * difference by. The dialog read that as a success and closed over notes it
- * had not touched.
+ * This is the 15 September shape, driven rather than described: every edit
+ * the pass proposed was dropped by the gate, nothing reached the doc, and the
+ * route answered `ok: true` with no field a reader could tell the difference
+ * by. The dialog read that as a success and closed over notes it had not
+ * touched.
+ *
+ * THE REFUSAL THAT DRIVES IT CHANGED (2026-09-15), THE ANSWER DID NOT. On the
+ * day, the edits were refused for naming blocks OUTSIDE the meeting's notes
+ * section; the gate is bounded by authorship now (`boundByAuthorship`), so
+ * the refusal this case needs is one that still exists — a proposed DELETE of
+ * a line the pass does not own, which is never offered and never applied.
+ * What is asserted is unchanged: a pass that touched nothing says so.
  *
  * NOTHING HERE STUBS THE REFUSAL. The composer proposes edits the way the
  * model did — by naming block ids it read off the outline it was handed — and
@@ -32,29 +38,22 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const MEETING = 'm-harborlight-1';
-/** The one line of the doc that is NOT in the meeting's notes section. */
+/** A line of the doc the note-taker does not own — a person wrote it. */
 const OUTSIDE = 'A paragraph I wrote myself.';
 
 /**
- * The composer as it behaved on the meeting this test is about: it reads the
- * outline it was given and proposes a better wording for lines that are not
- * in the section it may write in. Every edit is well-formed; every one is out
- * of bounds, which is the only thing the gate gets to decide.
+ * A composer every one of whose edits the gate drops: it reads the outline it
+ * was given and proposes STRIKING OUT a line it does not own. Every edit is
+ * well-formed; every one is out of bounds, which is the only thing the gate
+ * gets to decide.
  */
-const composerNamingBlocksOutsideTheSection = (): NotesComposer => ({
-  name: 'outside-the-section',
+const composerProposingRefusedEdits = (): NotesComposer => ({
+  name: 'refused-edits',
   compose: (input) =>
     Promise.resolve(
       input.outline
         .filter((e) => e.text === OUTSIDE)
-        .map(
-          (e) =>
-            ({
-              op: 'replace_block',
-              blockId: e.id,
-              markdown: `${OUTSIDE} It was a Tuesday.`,
-            }) satisfies prose.BlockEdit,
-        ),
+        .map((e) => ({ op: 'delete_block', blockId: e.id }) satisfies prose.BlockEdit),
     ),
 });
 
@@ -75,7 +74,7 @@ beforeAll(async () => {
   handle = createServer({
     port: 0,
     dataDir,
-    meetingNotes: { composer: composerNamingBlocksOutsideTheSection() },
+    meetingNotes: { composer: composerProposingRefusedEdits() },
   });
   base = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(base);
