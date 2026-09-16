@@ -1,7 +1,7 @@
 import { options, render } from 'preact';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Discussion } from '../src/board/detail-parts.tsx';
 import type { TaskDiscussion } from '../src/board/board-detail-render.ts';
+import { Discussion } from '../src/board/detail-parts.tsx';
 import { type ComposerEditorModule, setComposerEditorLoader } from '../src/md-composer.ts';
 
 /**
@@ -30,10 +30,7 @@ function mount(onComment: (text: string) => Promise<boolean>) {
   setComposerEditorLoader(() => new Promise<ComposerEditorModule>(() => {}));
   const host = document.createElement('div');
   document.body.append(host);
-  render(
-    <Discussion rowId="t-1" discussion={discussion} onComment={onComment} now={NOW} />,
-    host,
-  );
+  render(<Discussion rowId="t-1" discussion={discussion} onComment={onComment} now={NOW} />, host);
   const form = host.querySelector('form.board-comment-form') as HTMLFormElement;
   const ta = form.querySelector('textarea') as HTMLTextAreaElement;
   return {
