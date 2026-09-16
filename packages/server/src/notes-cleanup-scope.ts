@@ -213,19 +213,27 @@ export function ownership(outline: readonly prose.OutlineEntry[]): { owned: Set<
  * `nest_blocks` moves list items and nothing else, so a paragraph or a table
  * named as one is refused HERE with a reason rather than kept and failed in
  * the write path.
+ *
+ * IT IS A MAP AND NOT A SET BECAUSE DEPTH DECIDES THE SAME QUESTION.
+ * `nestBlocksUnderLead` gathers from the lead's OWN list and from lists
+ * reachable beside it; a bullet one level in sits in a different list
+ * altogether, so an edit naming it was kept by a gate that asked only "is it
+ * a list item" and then found nothing to move — a failure with no reason in
+ * it, which is the exact shape this gate exists to stop. The depth is what
+ * the outline already knows, so the mirror question is asked here.
  */
 export function docIds(outline: readonly prose.OutlineEntry[]): {
   blocks: Set<string>;
   headings: Set<string>;
-  listItems: Set<string>;
+  listItems: Map<string, number>;
 } {
   const blocks = new Set<string>();
   const headings = new Set<string>();
-  const listItems = new Set<string>();
+  const listItems = new Map<string, number>();
   for (const entry of outline) {
     blocks.add(entry.id);
     if (entry.kind === 'heading') headings.add(entry.id);
-    if (entry.kind === 'listItem') listItems.add(entry.id);
+    if (entry.kind === 'listItem') listItems.set(entry.id, entry.depth ?? 0);
   }
   return { blocks, headings, listItems };
 }
@@ -309,8 +317,9 @@ function why(op: prose.BlockEditOp, id: string, rule: string): string {
  */
 export interface NotesEditScope {
   blocks: Set<string>;
-  /** Which of `blocks` are list items — the only kind a nest may name. */
-  listItems: Set<string>;
+  /** Which of `blocks` are list items, and how deeply nested each one is —
+   *  the only kind a nest may name, and only at one depth at a time. */
+  listItems: Map<string, number>;
   headings: Set<string>;
   owned: Set<string>;
   headingId: string;
@@ -349,6 +358,16 @@ export function boundByAuthorship(
    * says what the model got wrong and one that says only that something did.
    */
   const nestable = (id: string): boolean => addressable(id) && scope.listItems.has(id);
+  /**
+   * The members of one nest have to sit at the LEAD'S OWN DEPTH.
+   *
+   * The write path gathers candidates from the list the lead is in and from
+   * the lists beside it, so a bullet one level deeper is not reachable from
+   * the lead however legible the edit looks — it comes back moved nowhere.
+   * Asking here turns that into a refusal a reader can act on.
+   */
+  const atLeadDepth = (lead: string, id: string): boolean =>
+    scope.listItems.get(id) === scope.listItems.get(lead);
   /** Why a block is out of reach, asked in the order the rules are asked. */
   const blockRule = (id: string): string =>
     !scope.blocks.has(id)
@@ -371,7 +390,9 @@ export function boundByAuthorship(
         ? "the block is the meeting's own section heading"
         : scope.headings.has(id)
           ? 'the block is a heading, and a heading is not moved under a bullet'
-          : 'the block is not a bullet, and only bullets are moved under a bullet';
+          : !scope.listItems.has(id)
+            ? 'the block is not a bullet, and only bullets are moved under a bullet'
+            : 'the block is nested under another bullet, out of the lead’s reach';
   for (const edit of edits) {
     switch (edit.op) {
       case 'insert_under_heading':
@@ -400,14 +421,16 @@ export function boundByAuthorship(
       // — see {@link nestable} for why a heading is not one. Ownership is not
       // asked, and neither is a comment: the move keeps the block's words, so
       // the snippet sweep re-anchors the thread onto them (see the header).
-      case 'nest_blocks':
-        if (nestable(edit.leadBlockId) && edit.blockIds.every(nestable)) kept.push(edit);
+      case 'nest_blocks': {
+        const lead = edit.leadBlockId;
+        const reaches = (id: string): boolean => nestable(id) && atLeadDepth(lead, id);
+        if (nestable(lead) && edit.blockIds.every(reaches)) kept.push(edit);
         else {
-          const bad =
-            [edit.leadBlockId, ...edit.blockIds].find((id) => !nestable(id)) ?? edit.leadBlockId;
+          const bad = [lead, ...edit.blockIds].find((id) => !reaches(id)) ?? lead;
           reasons.push(why(edit.op, bad, nestRule(bad)));
         }
         break;
+      }
       // A cleanup has a section already; writing at the end of the doc is the
       // one way to grow a second one.
       case 'insert_at_end':

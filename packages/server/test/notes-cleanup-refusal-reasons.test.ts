@@ -35,7 +35,10 @@ afterEach(dropFreshDirs);
 const scope = {
   blocks: new Set(['h1', 'b1', 'b2']),
   headings: new Set(['h1']),
-  listItems: new Set(['b1', 'b2']),
+  listItems: new Map([
+    ['b1', 0],
+    ['b2', 0],
+  ]),
   owned: new Set(['h1', 'b1']),
   headingId: 'h1',
 };

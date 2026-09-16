@@ -79,7 +79,11 @@ describe('what the gate refuses', () => {
   const scope = {
     blocks: new Set(['h1', 'b1', 'b2', 'h2', 'b3']),
     headings: new Set(['h1', 'h2']),
-    listItems: new Set(['b1', 'b2', 'b3']),
+    listItems: new Map([
+      ['b1', 0],
+      ['b2', 0],
+      ['b3', 0],
+    ]),
     owned: new Set(['h1', 'b1', 'b3']),
     headingId: 'h1',
   };

@@ -216,13 +216,19 @@ describe('a nest names bullets, and says so when it does not', () => {
 
 describe('a regroup the move cannot make says why, instead of counting itself failed', () => {
   /**
-   * THE GATE CANNOT PREDICT THE WRITE PATH, and teaching it to would be a
-   * second copy of the rule. `nestBlocksUnderLead` gathers members from the
+   * TWO ADDRESSABLE BULLETS THE MOVE STILL CANNOT TAKE, AND THEY ARE ANSWERED
+   * IN DIFFERENT PLACES. `nestBlocksUnderLead` gathers members from the
    * lead's own list and the same-kind lists it can reach, so a bullet nested
-   * one level down, and a bullet in a list of the other kind, are both
-   * perfectly addressable blocks the move still cannot take. Before this the
-   * pass said "1 failed" and named nothing, which is the same unexplainable
-   * shape as the sixteen refusals.
+   * one level down and a bullet in a list of the other kind are both perfect
+   * block ids that come back moved nowhere. Before this the pass said "1
+   * failed" and named nothing, which is the same unexplainable shape as the
+   * sixteen refusals.
+   *
+   * DEPTH THE GATE CAN SEE, so it refuses it there: the outline carries a
+   * list item's depth, the rule is "the lead's own depth", and the reader
+   * gets a refusal naming the block. WHICH LIST A BULLET IS IN the outline
+   * does NOT carry, so that one still reaches the applier — and the applier's
+   * verdict is now printed rather than counted, which is the other half.
    */
   const MIXED = [
     '# Riverbend ferry review',
@@ -236,39 +242,61 @@ describe('a regroup the move cannot make says why, instead of counting itself fa
     '1. A bullet in a list of the other kind',
   ].join('\n');
 
-  for (const [what, needle] of [
-    ['a bullet nested one level down', 'one level down'],
-    ['a bullet in a list of the other kind', 'other kind'],
-  ] as const) {
-    it(`names the applier's verdict for ${what}`, async () => {
-      const { store, markdownNow } = docStoreFrom(MIXED, ['Meeting notes']);
-      const dataDir = freshDir();
-      writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the crew.' }]);
-      const before = markdownNow();
-      const result = await runNotesCleanupPass(
-        depsFor(
-          store,
-          stubComposer([
-            {
-              op: 'nest_blocks',
-              leadBlockId: idOf(store, 'harbour run'),
-              blockIds: [idOf(store, needle)],
-            },
-          ]),
-          dataDir,
-          idOf(store, 'Meeting notes'),
-        ),
-        { docId: DOC, meetingId: MEETING },
-      );
-      // The gate KEPT it — the block is addressable, and it is a bullet — so
-      // the reason has to come from the applier or from nowhere.
-      expect(result.refused).toBe(0);
-      expect(result.failed).toBe(1);
-      expect(result.failures).toEqual(['nest_blocks: nothing-to-nest']);
-      expect(result.line).toContain('1 failed (nest_blocks: nothing-to-nest)');
-      expect(markdownNow()).toBe(before);
-    });
-  }
+  it('refuses a bullet nested one level down, naming it', async () => {
+    const { store, markdownNow } = docStoreFrom(MIXED, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the crew.' }]);
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'one level down')],
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    expect(result.refused).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.refusals[0]).toContain('nested under another bullet');
+    expect(markdownNow()).toBe(before);
+  });
+
+  it("names the applier's verdict for a bullet in a list of the other kind", async () => {
+    const { store, markdownNow } = docStoreFrom(MIXED, ['Meeting notes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the crew.' }]);
+    const before = markdownNow();
+    const result = await runNotesCleanupPass(
+      depsFor(
+        store,
+        stubComposer([
+          {
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'other kind')],
+          },
+        ]),
+        dataDir,
+        idOf(store, 'Meeting notes'),
+      ),
+      { docId: DOC, meetingId: MEETING },
+    );
+    // The gate KEPT it — the block is addressable, it is a bullet, and it is
+    // at the lead's own depth — so the reason has to come from the applier or
+    // from nowhere.
+    expect(result.refused).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(result.failures).toEqual(['nest_blocks: nothing-to-nest']);
+    expect(result.line).toContain('1 failed (nest_blocks: nothing-to-nest)');
+    expect(markdownNow()).toBe(before);
+  });
 });
 
 describe('a meeting whose notes landed in an EARLIER meeting’s section is still tidied', () => {
