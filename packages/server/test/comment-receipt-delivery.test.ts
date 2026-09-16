@@ -247,4 +247,68 @@ describe('a comment parked for a session that attaches later', () => {
     expect(at).toBeGreaterThan(0);
     await stream.close();
   });
+
+  /**
+   * A guard rather than a proof, and the difference is worth writing down: the
+   * stamp reads through the hydrate that binds nothing, and this case passes
+   * with the older resident-only lookup too, because `taskStore.heartbeat`
+   * pages the doc back in before the hand-over below reaches it. So the
+   * accessor is defence against an ordering nobody here relies on, and this
+   * case is what would notice if that incidental rehydrate went away.
+   */
+  it('is stamped even when the doc was evicted while the comment waited', async () => {
+    const created = (await (
+      await send('/workspaces', { name: 'Evicted', goal: 'Ship it.' })
+    ).json()) as { workspace: { id: string } };
+    const ws = created.workspace.id;
+    await send(`/workspaces/${ws}/agents`, { agentId: 'agent-gone', runtime: 'claude-code-local' });
+
+    const file = join(srcDir, 'evicted.md');
+    writeFileSync(file, '# Evicted\n\nsome text\n');
+    const doc = (await (
+      await send(`/workspaces/${ws}/docs`, { docId: 'evicted-doc', sourceUrl: file, title: 'Ev' })
+    ).json()) as { docId: string };
+    const opened = (await (
+      await send(`/workspaces/${ws}/docs/${doc.docId}/threads`, {
+        author: reader,
+        text: 'still waiting on this',
+        anchor,
+      })
+    ).json()) as { thread: { comments: Array<{ id: string }> } };
+    const commentId = opened.thread.comments[0]?.id as string;
+
+    await waitFor(() => (handle.tasks.listQueuedComments(ws).length > 0 ? true : undefined), {
+      describe: 'the comment to be parked',
+    });
+
+    const stream = await openWorkspaceStream(base, ws, {}, 'agent-gone');
+    stops.push(() => void stream.close());
+
+    // The doc goes out of memory while the comment sits on the queue — what
+    // an idle evening, or a restart, does to it. The `.ydoc` is the record,
+    // and the hand-over below is the first thing to reach for the doc since.
+    // Evicted AFTER the stream is up because opening a workspace stream reads
+    // the board and pages its docs back in.
+    expect(handle.docStore.evictDoc(doc.docId)).toBe(true);
+    expect(handle.docStore.peek(doc.docId)).toBeUndefined();
+
+    await send(`/workspaces/${ws}/agents/agent-gone/heartbeat`, {});
+
+    const at = await waitFor(
+      async () => {
+        const body = (await (
+          await fetch(`${base}/workspaces/${ws}/docs/${doc.docId}/threads`)
+        ).json()) as {
+          threads?: Array<{ comments?: Array<{ id: string; deliveredAt?: number }> }>;
+        };
+        for (const t of body.threads ?? []) {
+          for (const c of t.comments ?? []) if (c.id === commentId) return c.deliveredAt;
+        }
+        return undefined;
+      },
+      { describe: 'the evicted doc comment to be stamped on hand-over' },
+    );
+    expect(at).toBeGreaterThan(0);
+    await stream.close();
+  });
 });

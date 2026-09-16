@@ -427,11 +427,18 @@ export class DocThreads {
    * Record that a live agent session was handed this comment — the second
    * tick the comment's author sees.
    *
-   * `residentDoc` rather than a hydrating lookup, deliberately: this runs
-   * from the broadcast path of a comment that was just written, so the doc is
-   * resident by construction, and paging a doc back in to stamp a receipt
-   * would make a cosmetic mark the reason for a disk read. A doc that has
-   * somehow gone costs a tick, which is the right price.
+   * `docForRead` — the hydrate that binds NOTHING — and neither of the two
+   * neighbouring lookups, for one reason each. `residentDoc` was wrong
+   * because the caller that sets most receipts is the heartbeat handing a
+   * PARKED comment to a session that attached late, by which time the doc may
+   * have been evicted or the server restarted: the stamp silently did nothing
+   * and the author kept one tick forever. And `doc` (the full hydrate) is
+   * wrong because re-arming a file binding is how a heartbeat comes to open a
+   * cloud-synced file and block on it; a receipt is not worth that. Nothing
+   * here needs the binding: `deliveredAt` is thread metadata that never
+   * reaches the markdown, so it wants the `.ydoc` in memory and no file at
+   * all. A doc whose `.ydoc` is genuinely gone costs a tick, which is the
+   * right price.
    *
    * Fires no event of its own. The write lands on the same ydoc every open
    * editor is synced to, so a doc page repaints from the sync; the BOARD
@@ -444,7 +451,7 @@ export class DocThreads {
     commentId: string,
     at: number,
   ): DeliveryStamp {
-    const doc = this.p.residentDoc(docId);
+    const doc = this.p.docForRead(docId);
     if (!doc) return 'gone';
     return setCommentDelivered(doc.ydoc, threadId, commentId, at);
   }
