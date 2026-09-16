@@ -28,12 +28,16 @@
  */
 import { haikuAnswerCoverage } from '../packages/server/src/answer-coverage.ts';
 import {
+  CLAUDE_CALL_PATHS,
+  type ClaudeCallPath,
+  type ClaudeKeyRole,
   type ClaudeSlotUse,
   claudeSlotTrace,
   describeSlotUse,
   resetClaudeSlotTrace,
 } from '../packages/server/src/claude-key-slot.ts';
 import {
+  ACCESS_TOKEN_ENV,
   EVAL_KEYCHAIN_SERVICE,
   KEYCHAIN_SERVICE,
   LAUNCHD_JOB_ENV,
@@ -97,7 +101,40 @@ function costScriptResolution(): void {
   resolveKeySlotFrom('cost-script', undefined, readThroughOverrideOnly, process.env);
 }
 
-function pass(label: string, prodMarker: boolean): readonly ClaudeSlotUse[] {
+/**
+ * Every feature switch that decides whether an adapter is BUILT AT ALL.
+ *
+ * A path whose feature is off resolves nothing and drops out of the trace, so
+ * a run under `CW_REVIEW_GATE=0` would otherwise report eleven happy paths
+ * and never say which one it stopped looking at. The trace turns each of them
+ * on for its own process only.
+ */
+const FEATURE_SWITCHES = [
+  'CW_SUMMARIES',
+  'CW_MEETING_NOTES',
+  'CW_MEETING_TASKS',
+  'CW_MEETING_TITLES',
+  'CW_REVIEW_GATE',
+  'CW_EFFORT_ESTIMATE',
+  'CW_ANSWER_COVERAGE',
+] as const;
+
+/**
+ * What each path MUST resolve to, per pass. Anything else — a `ci-token` from
+ * an access token in the environment, an `explicit` argument, a path that
+ * resolved nothing, or a path missing from the trace altogether — is a
+ * failure, because the claim being checked is "this exact slot paid", not
+ * "at least it was not the other one".
+ *
+ * `notes-eval` is the one deliberate exception: it strips the prod marker on
+ * purpose, so the eval harness bills the eval key wherever it runs.
+ */
+function expectedRole(path: ClaudeCallPath, prodMarker: boolean): ClaudeKeyRole {
+  if (path === 'notes-eval') return 'eval';
+  return prodMarker ? 'prod' : 'eval';
+}
+
+function pass(label: string, prodMarker: boolean): readonly string[] {
   resetClaudeSlotTrace();
   if (prodMarker) process.env[LAUNCHD_JOB_ENV] = PROD_SERVICE_LABEL;
   else Reflect.deleteProperty(process.env, LAUNCHD_JOB_ENV);
@@ -105,27 +142,42 @@ function pass(label: string, prodMarker: boolean): readonly ClaudeSlotUse[] {
   const trace = claudeSlotTrace();
   console.log(`\n== ${label} ==`);
   for (const use of trace) console.log(`  ${describeSlotUse(use)}`);
-  return trace;
+
+  const seen = new Map<string, ClaudeSlotUse>(trace.map((u) => [u.path, u]));
+  const problems: string[] = [];
+  for (const path of CLAUDE_CALL_PATHS) {
+    const use = seen.get(path);
+    if (use === undefined) {
+      problems.push(`${path}: never resolved — the path did not run in this pass`);
+      continue;
+    }
+    const want = expectedRole(path, prodMarker);
+    if (use.slot === null) problems.push(`${path}: no credential, expected the ${want} slot`);
+    else if (use.slot.role !== want) {
+      problems.push(`${path}: read ${use.slot.name} (${use.slot.role}), expected ${want}`);
+    }
+  }
+  return problems;
 }
 
 // Both slots resolve through the override, so `security` is never spawned and
 // no real key exists in this process at any point.
 process.env[overrideVarFor(EVAL_KEYCHAIN_SERVICE)] = PLACEHOLDER;
 process.env[overrideVarFor(KEYCHAIN_SERVICE)] = PLACEHOLDER;
+// Every adapter has to be BUILT for its resolution to be traceable, and an
+// access token in the environment would shadow both Keychain slots — which is
+// a real answer for a CI job and the wrong question for this trace.
+for (const flag of FEATURE_SWITCHES) process.env[flag] = '1';
+Reflect.deleteProperty(process.env, ACCESS_TOKEN_ENV);
 
-const off = pass('no launchd prod marker — terminal, staging, CI, dev server', false);
-const on = pass('launchd prod marker present — the prod service', true);
-
-const leaked = off.filter((u) => u.slot?.role === 'prod');
-console.log(
-  leaked.length === 0
-    ? `\nOK: all ${off.length} paths read the eval slot outside the prod service.`
-    : `\nFAIL: ${leaked.map((u) => u.path).join(', ')} read a prod slot outside prod.`,
-);
-const strays = on.filter((u) => u.slot?.role === 'eval' && u.path !== 'notes-eval');
-console.log(
-  strays.length === 0
-    ? `OK: all ${on.length} paths read the prod slot inside the prod service (the eval harness excepted, by design).`
-    : `FAIL: ${strays.map((u) => u.path).join(', ')} read the eval slot inside prod.`,
-);
-process.exit(leaked.length === 0 && strays.length === 0 ? 0 : 1);
+const problems = [
+  ...pass('no launchd prod marker — terminal, staging, CI, dev server', false),
+  ...pass('launchd prod marker present — the prod service', true),
+];
+if (problems.length === 0) {
+  console.log(`\nOK: all ${CLAUDE_CALL_PATHS.length} paths read the expected slot in both passes.`);
+  process.exit(0);
+}
+console.log(`\nFAIL: ${problems.length} path(s) did not read the slot they must:`);
+for (const p of problems) console.log(`  ${p}`);
+process.exit(1);

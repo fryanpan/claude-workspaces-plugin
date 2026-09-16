@@ -91,20 +91,29 @@ export function claudeKeySlots(env: EnvLike): readonly ClaudeKeySlot[] {
  * A closed union, so a path that resolves a credential has to name itself
  * here before it compiles, and the trace below can be read as a list of
  * paths rather than as whatever strings happened to be passed.
+ *
+ * The VALUES are exported too, and the type is derived from them, because a
+ * trace that only rejects wrong answers passes a run where a path is missing
+ * entirely — a feature switched off by an environment variable builds no
+ * adapter, resolves nothing, and drops out of the list silently. Checking a
+ * run against this array is what turns an absence into a failure.
  */
-export type ClaudeCallPath =
-  | 'thread-summary'
-  | 'meeting-notes-compose'
-  | 'meeting-notes-ledger'
-  | 'meeting-task-capture'
-  | 'meeting-namer'
-  | 'voice-complete'
-  | 'voice-feedback-tidy'
-  | 'effort-estimate'
-  | 'review-gate'
-  | 'answer-coverage'
-  | 'notes-eval'
-  | 'cost-script';
+export const CLAUDE_CALL_PATHS = [
+  'thread-summary',
+  'meeting-notes-compose',
+  'meeting-notes-ledger',
+  'meeting-task-capture',
+  'meeting-namer',
+  'voice-complete',
+  'voice-feedback-tidy',
+  'effort-estimate',
+  'review-gate',
+  'answer-coverage',
+  'notes-eval',
+  'cost-script',
+] as const;
+
+export type ClaudeCallPath = (typeof CLAUDE_CALL_PATHS)[number];
 
 /** One path's answer: the slot it resolved, or null for "it found none". */
 export interface ClaudeSlotUse {
