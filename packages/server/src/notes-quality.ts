@@ -287,6 +287,18 @@ export function nestedBullets(markdown: string): NestedBullet[] {
 const SPEAKER_TAG = /\[@[^\]]+\]\(speaker:[^)]+\)/;
 
 /**
+ * A speaker tag that SPEAKS FOR THE NOTES UNDER ITS BULLET — the `g=` marker
+ * `notes-group-tags.ts` writes when it folds a single-voice run's tags onto
+ * the bullet above them.
+ *
+ * Only this kind attributes anything below itself. An ordinary tag on a lead
+ * bullet is that bullet's own attribution — the voice that opened the topic —
+ * and treating it as covering the notes under it would pass an unattributed
+ * decision from somebody else as attributed.
+ */
+const GROUP_SPEAKER_TAG = /\[@[^\]]+\]\(speaker:[^)]*[?&]g=\d+[^)]*\)/;
+
+/**
  * Bullets that record a decision or an open question without saying whose.
  *
  * The two kinds are spotted by the words a note-taker uses to write them,
@@ -315,7 +327,7 @@ export function decisionsWithoutSpeaker(markdown: string): string[] {
   const walk = (bullets: NestedBullet[], inherited: boolean): void => {
     for (const bullet of bullets) {
       const claims = DECISION_WORDS.test(bullet.text) || QUESTION_WORDS.test(bullet.text);
-      const here = SPEAKER_TAG.test(bullet.text);
+      const here = GROUP_SPEAKER_TAG.test(bullet.text);
       if (claims && !inherited && !attributedSomewhere(bullet)) out.push(bullet.text);
       walk(bullet.children, inherited || here);
     }
@@ -327,13 +339,17 @@ export function decisionsWithoutSpeaker(markdown: string): string[] {
 /**
  * True when this bullet, or anything indented under it, names a speaker.
  *
- * AND A BULLET ABOVE IT COUNTS TOO — `inherited` in the walk. A run of notes
- * from one voice carries its tag on the lead bullet rather than on every line
- * (`notes-group-tags.ts`), so a decision one line under that tag IS
- * attributed: the reader sees whose it is without scrolling. Reading only
+ * AND A GROUP TAG ABOVE IT COUNTS TOO — `inherited` in the walk. A run of
+ * notes from one voice carries its tag on the lead bullet rather than on
+ * every line (`notes-group-tags.ts`), so a decision one line under that tag
+ * IS attributed: the reader sees whose it is without scrolling. Reading only
  * downwards reported every such decision as unattributed, which would have
  * shown this bar falling on exactly the change that made the notes easier to
  * read.
+ *
+ * Only the GROUP marker inherits. An ordinary tag on a lead bullet names the
+ * voice that opened the topic, and letting it cover the notes underneath
+ * would pass somebody else's unattributed decision as attributed.
  */
 function attributedSomewhere(bullet: NestedBullet): boolean {
   return (

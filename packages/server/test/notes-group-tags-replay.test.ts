@@ -100,7 +100,7 @@ describe('a replayed meeting', () => {
     // on the bullet above them.
     expect(nested(harness.notes())).toHaveLength(3);
     expect(tags(harness.notes())).toBe(1);
-    expect(harness.notes()).toContain('&g=1');
+    expect(harness.notes()).toContain('&g=3');
     expect(harness.notes().split('\n')[0]).toContain('Ferry timetable');
     // Every note kept its words.
     expect(harness.notes()).toContain('07:40 sailing back');
@@ -133,7 +133,7 @@ describe('a replayed meeting', () => {
     expect(nested(harness.notes())).toHaveLength(2);
     expect(tags(harness.notes())).toBe(2);
     expect(voices(harness.notes())).toEqual(['B', 'C']);
-    expect(harness.notes()).not.toContain('&g=1');
+    expect(harness.notes()).not.toContain('&g=');
     expect(harness.errors).toEqual([]);
   });
 });

@@ -102,8 +102,8 @@ export const SPEAKER_TAG_TURNS_PARAM = 't';
 export const SPEAKER_TAG_UNSURE_PARAM = 'unsure';
 
 /**
- * The href parameter marking a mention that STANDS FOR THE NOTES UNDER IT —
- * `speaker:B?t=10,12&g=1`.
+ * The href parameter marking a mention that STANDS FOR THE NOTES UNDER IT,
+ * and saying HOW MANY of them — `speaker:B?t=10,12&g=3`.
  *
  * A group whose every note came from one voice used to carry the same tag on
  * every line, which reads as a column of identical names down the left edge
@@ -118,6 +118,14 @@ export const SPEAKER_TAG_UNSURE_PARAM = 'unsure';
  * pass took a tag off. A lead bullet the composer itself tagged is somebody
  * introducing a topic; handing its name to the untagged notes beneath it
  * would attribute words to a person who did not say them.
+ *
+ * AND THE COUNT IS WHY IT IS A NUMBER RATHER THAN A FLAG. The instructions
+ * let the note-taker write a note about the ROOM, with no tag at all, and
+ * one of those landing in a folded group would sit under a name that never
+ * claimed it. The count says how many notes the mention was folded from, so
+ * a group holding more untagged notes than that is one this pass no longer
+ * recognises — and the answer there is to take the mention off rather than
+ * to hand its name to a note nobody attributed.
  */
 export const SPEAKER_TAG_GROUP_PARAM = 'g';
 
@@ -155,9 +163,9 @@ export interface SpeakerTagRef {
   /** A revision moved some of `turns` and not others, so which voice this
    *  mention belongs to is no longer known. */
   unsure: boolean;
-  /** This mention stands for the notes nested under its bullet as well as
-   *  for the bullet itself. See {@link SPEAKER_TAG_GROUP_PARAM}. */
-  group: boolean;
+  /** How many notes nested under this bullet this mention speaks for; 0 for
+   *  an ordinary mention. See {@link SPEAKER_TAG_GROUP_PARAM}. */
+  group: number;
 }
 
 /** Turn ids as the href carries them: ascending, deduped, whole and
@@ -208,9 +216,9 @@ export interface SpeakerTagRefInit {
    * provenance and had none readable; nothing else needs it.
    */
   claimsTurns?: boolean;
-  /** Write the group marker: this tag speaks for the notes under its bullet.
-   *  See {@link SPEAKER_TAG_GROUP_PARAM}. */
-  group?: boolean;
+  /** Write the group marker: how many notes under this bullet the tag speaks
+   *  for. See {@link SPEAKER_TAG_GROUP_PARAM}. */
+  group?: number;
 }
 
 /** `"B"` → `"speaker:B"`, and `"B"` plus turns → `"speaker:B?t=10,12"`. */
@@ -222,7 +230,10 @@ export function speakerTagHref(label: string, ref?: SpeakerTagRefInit): string {
   // Only meaningful beside a turn list — it says those turns disagree — so a
   // flag with nothing to be unsure ABOUT is dropped rather than written.
   if (ref?.unsure === true && turns.length > 0) params.push(`${SPEAKER_TAG_UNSURE_PARAM}=1`);
-  if (ref?.group === true) params.push(`${SPEAKER_TAG_GROUP_PARAM}=1`);
+  const speaksFor = ref?.group ?? 0;
+  if (Number.isInteger(speaksFor) && speaksFor > 0) {
+    params.push(`${SPEAKER_TAG_GROUP_PARAM}=${speaksFor}`);
+  }
   const base = `${SPEAKER_TAG_SCHEME}${label}`;
   return params.length > 0 ? `${base}?${params.join('&')}` : base;
 }
@@ -245,7 +256,7 @@ export function parseSpeakerTagHref(href: string): SpeakerTagRef | null {
   let turns: readonly number[] = [];
   let claimsTurns = false;
   let unsure = false;
-  let group = false;
+  let group = 0;
   if (q >= 0) {
     for (const part of rest.slice(q + 1).split('&')) {
       const eq = part.indexOf('=');
@@ -255,7 +266,7 @@ export function parseSpeakerTagHref(href: string): SpeakerTagRef | null {
         claimsTurns = true;
         turns = parseTurnList(value);
       } else if (key === SPEAKER_TAG_UNSURE_PARAM) unsure = value === '1';
-      else if (key === SPEAKER_TAG_GROUP_PARAM) group = value === '1';
+      else if (key === SPEAKER_TAG_GROUP_PARAM) group = /^\d+$/.test(value) ? Number(value) : 0;
     }
   }
   return { label, turns, claimsTurns, unsure: unsure && turns.length > 0, group };
@@ -349,8 +360,9 @@ export interface SpeakerTagMatch {
   claimsTurns: boolean;
   /** A revision moved some of `turns` and not others. */
   unsure: boolean;
-  /** The tag stands for the notes nested under its bullet too. */
-  group: boolean;
+  /** How many notes nested under its bullet this tag speaks for; 0 for an
+   *  ordinary mention. */
+  group: number;
   /** The tag's visible text, sigil included and UNESCAPED — what a reader
    *  sees, and what a caller compares against a display name. */
   text: string;

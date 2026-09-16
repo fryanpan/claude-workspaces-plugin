@@ -33,11 +33,22 @@
  * THE MOVE IS REVERSIBLE, AND THAT IS WHAT THE MARKER IS FOR. A group that
  * gains a second voice needs a tag on every note again, and the only notes
  * that may be handed the lead bullet's voice are the ones this pass took a
- * tag off. So a hoisted tag is written with `g=1`
- * ({@link SPEAKER_TAG_GROUP_PARAM}) and nothing else in the pipeline writes
- * that parameter. A lead bullet the composer tagged itself is left alone
- * entirely — reversing it would mean handing its name to notes that never
- * carried one, which is attributing words to somebody who did not say them.
+ * tag off. So a hoisted tag is written with `g=<how many notes it was folded
+ * from>` ({@link SPEAKER_TAG_GROUP_PARAM}) and nothing else in the pipeline
+ * writes that parameter. A lead bullet the composer tagged itself is left
+ * alone entirely — reversing it would mean handing its name to notes that
+ * never carried one, which is attributing words to somebody who did not say
+ * them.
+ *
+ * AND THE COUNT IS WHAT KEEPS THAT TRUE AS THE GROUP GROWS. The instructions
+ * let the note-taker write a note about the ROOM, with no tag at all. One of
+ * those landing in a folded group leaves the mention above standing over a
+ * line nobody attributed, and the marker cannot say which notes it was
+ * folded from — only how many. So a group with more untagged notes than the
+ * count is UNFOLDED: the lead mention comes off and every note says exactly
+ * what it says. That loses the attribution the fold was carrying, which is
+ * the cheaper mistake — the other one puts a person's name on words somebody
+ * else said.
  *
  * WHAT IT WILL NOT TOUCH:
  *  - **Anything a person wrote or edited.** Every block in the group — the
@@ -78,9 +89,12 @@ export interface NotesGroupTagResult {
   cleared: number;
   /** Notes handed their tag back because their group gained a second voice. */
   restored: number;
+  /** Groups whose lead mention came off because an untagged note arrived that
+   *  the fold cannot account for. */
+  unfolded: number;
 }
 
-const NOTHING: NotesGroupTagResult = { hoisted: 0, cleared: 0, restored: 0 };
+const NOTHING: NotesGroupTagResult = { hoisted: 0, cleared: 0, restored: 0, unfolded: 0 };
 
 /** The fewest notes under one bullet that can read as a column of names. */
 export const MIN_GROUP_NOTES = 2;
@@ -180,7 +194,7 @@ export function retagNotesGroups(
   const start = top.findIndex((el) => prose.readBlockId(el) === headingId);
   if (start < 0) return NOTHING;
   const openLevel = levelOf(top[start] as Y.XmlElement) ?? 2;
-  const out = { hoisted: 0, cleared: 0, restored: 0 };
+  const out: NotesGroupTagResult = { hoisted: 0, cleared: 0, restored: 0, unfolded: 0 };
   for (let i = start + 1; i < top.length; i++) {
     const el = top[i] as Y.XmlElement;
     const level = levelOf(el);
@@ -228,16 +242,36 @@ function retagGroup(
   // anything, and not pushed anywhere either.
   if ([...leadTags, ...noteTags.flat()].some((tag) => tag.ref.unsure)) return;
 
-  const groupTag = leadTags.length === 1 && leadTags[0]?.ref.group === true ? leadTags[0] : null;
+  const groupTag = leadTags.length === 1 && (leadTags[0]?.ref.group ?? 0) > 0 ? leadTags[0] : null;
   if (groupTag === null) {
     if (leadTags.length > 0) return; // a tag the composer wrote: its business.
     hoist(ydoc, leadLine, noteTags, out);
     return;
   }
+  // A NOTE THE FOLD DID NOT MAKE. The marker says how many untagged notes
+  // this mention was folded from; more than that means one arrived with no
+  // tag of its own — a note about the room, which the instructions allow —
+  // and the mention up top is now standing over a line nobody attributed.
+  // Neither claiming it nor guessing which notes were cleared is honest, so
+  // the mention comes off and every note is left saying exactly what it
+  // says. Rare by construction, and never a wrong name.
+  const bare = noteTags.filter((tags) => tags.length === 0).length;
+  if (bare > groupTag.ref.group) {
+    dropGroupTag(ydoc, groupTag);
+    out.unfolded++;
+    return;
+  }
   const label = groupTag.ref.label;
   const foreign = noteTags.flat().some((tag) => tag.ref.label !== label);
   if (foreign) pushDown(ydoc, groupTag, notes, noteTags, out);
-  else grow(ydoc, groupTag, noteTags, out);
+  else grow(ydoc, groupTag, noteTags, bare, out);
+}
+
+/** Take a group mention off its lead bullet, words and all. */
+function dropGroupTag(ydoc: Y.Doc, groupTag: SpeakerTagSite & { node: Y.XmlText }): void {
+  rewriteTagsInTextNodes(ydoc, [groupTag.node], (tag) =>
+    tag.href === groupTag.href && tag.ref.group > 0 ? { text: '', href: null } : null,
+  );
 }
 
 /** A group whose every note names one voice: the voice moves up. */
@@ -254,7 +288,7 @@ function hoist(
   // A NOTE THAT IS ITSELF A HOISTED GROUP KEEPS ITS TAG. Its mention speaks
   // for the notes under it, and folding it into the tag above would leave
   // that sub-group with nothing to hand back if IT gains a second voice.
-  if (noteTags.flat().some((tag) => tag.ref.group)) return;
+  if (noteTags.flat().some((tag) => tag.ref.group > 0)) return;
   const tags = noteTags.map((t) => t[0] as SpeakerTagSite & { node: Y.XmlText });
   const label = tags[0]?.ref.label;
   if (label === undefined) return;
@@ -270,7 +304,9 @@ function hoist(
     head.insert(0, ': ');
     prose.insertTextWithMarks(head, 0, text, {
       attributes: {
-        link: { href: speakerTagHref(label, { turns, claimsTurns: claimed, group: true }) },
+        link: {
+          href: speakerTagHref(label, { turns, claimsTurns: claimed, group: tags.length }),
+        },
       },
     });
   }, 'agent');
@@ -284,18 +320,24 @@ function grow(
   ydoc: Y.Doc,
   groupTag: SpeakerTagSite & { node: Y.XmlText },
   noteTags: ReadonlyArray<ReadonlyArray<SpeakerTagSite & { node: Y.XmlText }>>,
+  bare: number,
   out: NotesGroupTagResult,
 ): void {
   // A sub-group's own hoisted mention is left where it is, for the reason
   // {@link hoist} gives.
-  const tags = noteTags.flat().filter((tag) => !tag.ref.group);
+  const tags = noteTags.flat().filter((tag) => tag.ref.group === 0);
   if (tags.length === 0) return;
   const { turns, claimed } = unionTurns([groupTag.ref, ...tags.map((tag) => tag.ref)]);
   out.cleared += clearNoteTags(ydoc, tags);
-  // The lead bullet's mention now speaks for those turns as well, so it says
-  // so — a later revision of any of them finds the mention that stands for
-  // the note it moved.
-  const href = speakerTagHref(groupTag.ref.label, { turns, claimsTurns: claimed, group: true });
+  // The lead bullet's mention now speaks for those turns — and for those
+  // notes — as well, so it says so: a later revision of any of them finds the
+  // mention that stands for the note it moved, and the count stays the number
+  // of untagged notes the fold is answerable for.
+  const href = speakerTagHref(groupTag.ref.label, {
+    turns,
+    claimsTurns: claimed,
+    group: bare + tags.length,
+  });
   if (href === groupTag.href) return;
   rewriteTagsInTextNodes(ydoc, [groupTag.node], (tag) =>
     tag.href === groupTag.href ? { text: tag.text, href } : null,
@@ -307,9 +349,11 @@ function grow(
  *
  * The notes handed one back are the ones with NO tag — those are exactly the
  * notes a hoist took a tag off, because the lead bullet's mention is
- * group-marked and nothing else writes that marker. The lead bullet's
- * mention then goes: it was never a note about the topic, only a stand-in
- * for the run below it, and the run no longer speaks with one voice.
+ * group-marked, nothing else writes that marker, and the caller has already
+ * checked that there are no more untagged notes than the marker counts. The
+ * lead bullet's mention then goes: it was never a note about the topic, only
+ * a stand-in for the run below it, and the run no longer speaks with one
+ * voice.
  *
  * The restored mention carries NO turn handle. The lead bullet's mention
  * holds the group's turns pooled together, and there is nothing in the doc
@@ -336,9 +380,7 @@ function pushDown(
       out.restored++;
     }
   }, 'agent');
-  rewriteTagsInTextNodes(ydoc, [groupTag.node], (tag) =>
-    tag.href === groupTag.href && tag.ref.group ? { text: '', href: null } : null,
-  );
+  dropGroupTag(ydoc, groupTag);
 }
 
 /** Take the named mentions off the notes that carry them, node by node so

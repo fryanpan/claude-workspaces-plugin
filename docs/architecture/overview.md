@@ -710,9 +710,10 @@ speaker tag on the bullet ABOVE them rather than on every line, and that is a
 fact about the whole group, which is built across several ticks and so cannot
 be decided from the one block an edit carries. It moves tags and never notes —
 grouping stays by topic, which is `notes-regroup.ts`'s business — and the move
-is reversible: a hoisted tag is written with the `g=1` marker
+is reversible: a hoisted tag is written with the `g=<count>` marker
 (`core/speaker-tags.ts`) that nothing else writes, so a group gaining a second
-voice can hand every note its own tag back. Like the tidy, it writes the
+voice can hand every note its own tag back, and a group that has gained an
+untagged note the fold cannot account for is unfolded rather than guessed at. Like the tidy, it writes the
 document directly, and like the tidy it reads no transcript and composes
 nothing.
 

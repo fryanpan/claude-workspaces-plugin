@@ -129,7 +129,7 @@ describe('a single-voice group', () => {
     const after = notesOf(written(before));
     expect(tagCount(after)).toBe(1);
     // On the LEAD bullet, and the notes under it keep every word.
-    expect(lines(after)[1]).toBe('- [@Devi](speaker:B?t=1,2,3&g=1): Ferry timetable');
+    expect(lines(after)[1]).toBe('- [@Devi](speaker:B?t=1,2,3&g=3): Ferry timetable');
     expect(after).toContain('Wants the 07:40 back');
     expect(after).toContain('Says the ramp is the problem');
     expect(after).toContain('Will ask the operator');
@@ -200,7 +200,7 @@ describe('a group whose voices change', () => {
     const after = notesOf(
       written(`${HEADING}
 
-- [@Devi](speaker:B?t=1,2&g=1): Ferry timetable
+- [@Devi](speaker:B?t=1,2&g=2): Ferry timetable
     - Wants the 07:40 back
     - Says the ramp is the problem
     - [@Wren](speaker:C?t=5) says the slipway costs more
@@ -219,7 +219,7 @@ describe('a group whose voices change', () => {
     const after = notesOf(
       written(`${HEADING}
 
-- [@Devi](speaker:B?t=1,2&g=1): Ferry timetable
+- [@Devi](speaker:B?t=1,2&g=2): Ferry timetable
     - Wants the 07:40 back
     - [@Devi](speaker:B?t=7) adds that the ramp is the problem
 `),
@@ -227,7 +227,71 @@ describe('a group whose voices change', () => {
     expect(tagCount(after)).toBe(1);
     // The lead bullet's mention now speaks for turn 7 as well, so a later
     // revision of that turn can still find the words it moved.
-    expect(lines(after)[1]).toBe('- [@Devi](speaker:B?t=1,2,7&g=1): Ferry timetable');
+    expect(lines(after)[1]).toBe('- [@Devi](speaker:B?t=1,2,7&g=2): Ferry timetable');
+  });
+});
+
+describe('a note nobody attributed, landing in a folded group', () => {
+  test('takes the lead mention off rather than claiming the note', () => {
+    const after = notesOf(
+      written(`${HEADING}
+
+- [@Devi](speaker:B?t=1,2&g=2): Ferry timetable
+    - Wants the 07:40 sailing back
+    - Says the ramp is the real cost
+    - The room agreed to ask the operator
+`),
+    );
+    // The marker counted two folded notes and there are three untagged ones,
+    // so one arrived that the fold never took a tag off. The mention cannot
+    // say which, and a guess would put Devi's name on a note about the room.
+    expect(tagCount(after)).toBe(0);
+    expect(lines(after)).toEqual([
+      HEADING,
+      '- Ferry timetable',
+      '  - Wants the 07:40 sailing back',
+      '  - Says the ramp is the real cost',
+      '  - The room agreed to ask the operator',
+    ]);
+  });
+
+  test('is never handed the group voice when a second voice arrives', () => {
+    const after = notesOf(
+      written(`${HEADING}
+
+- [@Devi](speaker:B?t=1,2&g=2): Ferry timetable
+    - Wants the 07:40 sailing back
+    - Says the ramp is the real cost
+    - The room agreed to ask the operator
+    - [@Wren](speaker:C?t=5) says the slipway costs more
+`),
+    );
+    // The push-down would have given all three untagged notes Devi's name.
+    expect(after).not.toContain('[@Devi]');
+    expect(tagCount(after)).toBe(1);
+    expect(after).toContain('The room agreed to ask the operator');
+  });
+});
+
+describe('the attribution bar', () => {
+  test('inherits from a group tag but not from an ordinary one', () => {
+    const grouped = `${HEADING}
+
+- [@Devi](speaker:B?t=1,2&g=2): Ferry timetable
+    - Says the ramp is the real cost
+    - We will move the 07:40 sailing
+`;
+    expect(decisionsWithoutSpeaker(grouped)).toEqual([]);
+
+    // The same shape with an ORDINARY mention on the lead bullet: that names
+    // whoever opened the topic, and says nothing about who decided.
+    const opened = `${HEADING}
+
+- [@Devi](speaker:B?t=1) opened the ferry timetable
+    - Says the ramp is the real cost
+    - We will move the 07:40 sailing
+`;
+    expect(decisionsWithoutSpeaker(opened)).toEqual(['We will move the 07:40 sailing']);
   });
 });
 
@@ -276,6 +340,7 @@ describe('what the pass will not touch', () => {
       hoisted: 0,
       cleared: 0,
       restored: 0,
+      unfolded: 0,
     });
     expect(notesOf(edited)).toBe(was);
     expect(notesOf(edited)).toContain('\u2014 and the tide');

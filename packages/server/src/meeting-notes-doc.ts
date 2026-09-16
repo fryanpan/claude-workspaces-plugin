@@ -844,12 +844,14 @@ export function applyNotesUpdate(
     // (`notes-group-tags.ts`). After the tidy, so a group whose last empty
     // bullet has just been removed is judged at the size it now is.
     const retagged = retagNotesGroups(doc.ydoc, section, { author: NOTES_AUTHOR_ID });
-    if (retagged.hoisted + retagged.cleared + retagged.restored > 0) {
+    const moved = retagged.hoisted + retagged.cleared + retagged.restored + retagged.unfolded;
+    if (moved > 0) {
       console.log(
         `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
           `${retagged.cleared} note tag${retagged.cleared === 1 ? '' : 's'} folded into ` +
           `${retagged.hoisted} newly tagged lead bullet${retagged.hoisted === 1 ? '' : 's'}, ` +
-          `${retagged.restored} note given its own tag back`,
+          `${retagged.restored} note given its own tag back, ` +
+          `${retagged.unfolded} group unfolded`,
       );
     }
   }

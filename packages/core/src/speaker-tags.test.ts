@@ -45,7 +45,7 @@ describe('findSpeakerTags', () => {
         turns: [],
         claimsTurns: false,
         unsure: false,
-        group: false,
+        group: 0,
         text: '@Devi',
         raw: '[@Devi](speaker:B)',
       },
@@ -230,14 +230,14 @@ describe('provenance in the href', () => {
       turns: [10, 12],
       claimsTurns: true,
       unsure: false,
-      group: false,
+      group: 0,
     });
     expect(parseSpeakerTagHref('speaker:B?t=10,12&unsure=1')).toEqual({
       label: 'B',
       turns: [10, 12],
       claimsTurns: true,
       unsure: true,
-      group: false,
+      group: 0,
     });
     // The group marker a hoisted mention carries: a tag that speaks for the
     // notes nested under its bullet (`server/notes-group-tags.ts`).
@@ -246,9 +246,9 @@ describe('provenance in the href', () => {
       turns: [10],
       claimsTurns: true,
       unsure: false,
-      group: true,
+      group: 1,
     });
-    expect(speakerTagHref('B', { turns: [10], group: true })).toBe('speaker:B?t=10&g=1');
+    expect(speakerTagHref('B', { turns: [10], group: 1 })).toBe('speaker:B?t=10&g=1');
   });
 
   it('still answers the only question most callers ask', () => {
