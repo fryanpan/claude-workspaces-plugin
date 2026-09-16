@@ -41,7 +41,6 @@ export const NOTES_SUGGESTION_AUTHOR: suggestOps.SuggestionAuthor = {
   color: '#7c5cff',
 };
 
-
 /** The doc's meta, as much of it as the notes path reads. */
 export interface NotesDocMeta {
   type: DocType;

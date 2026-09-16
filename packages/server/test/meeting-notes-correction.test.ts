@@ -21,7 +21,11 @@ import {
   correctionSpokenOnTick,
   phraseSites,
 } from '../src/meeting-notes-correction.ts';
-import { applyNotesCorrection, applyNotesUpdate, createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
+import {
+  applyNotesCorrection,
+  applyNotesUpdate,
+  createNotesHeadingMemory,
+} from '../src/meeting-notes-doc.ts';
 import type { NotesCorrection, NotesUpdate } from '../src/meeting-notes.ts';
 import { agentNotesDoc, asPerson, oneDocStore } from './notes-doc-helpers.ts';
 import { SCRIPT_TOPIC } from './notes-tick-harness.ts';

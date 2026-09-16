@@ -26,7 +26,12 @@ import * as Y from 'yjs';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 
 import { asPerson, findSectionSpan } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness, notesItems, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import {
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+  notesItems,
+} from './notes-tick-harness.ts';
 
 /** Everything the composer was handed for a tick, as one string — the cheapest
  *  way to ask "did these words reach the model at all". */

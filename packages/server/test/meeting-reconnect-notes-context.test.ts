@@ -32,7 +32,12 @@ import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 
 import { createNotesHeadingFileStore } from '../src/notes-heading-store.ts';
-import { addNotes, createNotesTickHarness, type NotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import {
+  type NotesTickHarness,
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+} from './notes-tick-harness.ts';
 
 const DOC = 'd-ferry-doc';
 /** ONE meeting id across both legs — that is what a resume means. */

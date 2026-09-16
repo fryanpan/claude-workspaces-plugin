@@ -29,7 +29,7 @@ import * as Y from 'yjs';
 
 import { guardNotesEdits } from '../src/notes-edit-guard.ts';
 import { tidyNotesSection } from '../src/notes-section-tidy.ts';
-import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const AUTHOR = 'notes-agent';
 const WHO = {

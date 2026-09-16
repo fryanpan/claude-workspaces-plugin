@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { type prose as proseTypes, prose, suggestOps } from '@claude-workspaces/core';
+import { prose, type prose as proseTypes, suggestOps } from '@claude-workspaces/core';
 import { headingRename } from '../src/notes-heading-rename.ts';
 import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 

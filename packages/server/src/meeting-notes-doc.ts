@@ -100,6 +100,7 @@ import { repairNotesEditAddresses } from './notes-edit-address.ts';
 import { bulletNotesEdits } from './notes-edit-bullets.ts';
 import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
+import { notesTopicLevel } from './notes-heading-level.ts';
 import {
   type NotesHeadingStore,
   type NotesSectionClaim,
@@ -116,7 +117,6 @@ import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
 import { resolveSchemeLinks } from './notes-scheme-links.ts';
-import { notesTopicLevel } from './notes-heading-level.ts';
 import { lastClaimedHeadingIndex, notesSectionFits } from './notes-section-fit.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
 import {
@@ -126,7 +126,7 @@ import {
 } from './notes-speaker-tags.ts';
 import { createNotesTimingLog } from './notes-timing.ts';
 
-export { type NotesDocStore } from './notes-doc-access.ts';
+export type { NotesDocStore } from './notes-doc-access.ts';
 export {
   type RelabelNotesResult,
   reattributeNotesSection,
@@ -291,7 +291,6 @@ export interface NotesHeadingMemory {
    */
   endMeeting(ids: NotesMeetingIds, at?: number): void;
 }
-
 
 /**
  * The section this meeting writes under: the one it remembers, else an

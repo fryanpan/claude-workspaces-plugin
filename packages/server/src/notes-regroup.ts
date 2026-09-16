@@ -69,8 +69,8 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
-import { MAX_FLAT_RUN_BULLETS } from './notes-quality.ts';
 import { notesTopicHashes } from './notes-heading-level.ts';
+import { MAX_FLAT_RUN_BULLETS } from './notes-quality.ts';
 import { notesSectionEnd } from './notes-section-fit.ts';
 
 /** One topic that has filled up, and the bullets it filled up with. */

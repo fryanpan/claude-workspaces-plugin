@@ -31,7 +31,12 @@ import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
 import { readNotesOutline } from '../src/notes-doc-access.ts';
 import { createNotesHeadingFileStore } from '../src/notes-heading-store.ts';
 import { markdownOfDoc, oneDocStore } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness, notesItems, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import {
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+  notesItems,
+} from './notes-tick-harness.ts';
 
 const DOC = 'd-riverbend';
 const FIRST = 'm-1760000000000';

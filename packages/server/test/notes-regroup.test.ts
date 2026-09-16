@@ -10,6 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
+import { notesTopicHashes } from '../src/notes-heading-level.ts';
 import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { MAX_FLAT_RUN_BULLETS } from '../src/notes-quality.ts';
 import { homelessRun, regroupDirective, regroupTargets } from '../src/notes-regroup.ts';
@@ -226,12 +227,26 @@ describe('regroupDirective', () => {
     const run = bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless');
     const text = regroupDirective(run, { author: NOTES_AUTHOR_ID });
     expect(text).toContain('UNDER NO HEADING');
-    expect(text).toContain('### ');
+    // The LEVEL comes from the doc, never from this module: a run with no
+    // headings above it is a topic at `## `.
+    expect(text).toContain(`${notesTopicHashes(run)} `);
+    expect(text).toContain('## ');
     // The remedy for a homeless wall is the heading. Offering to nest as well
     // is what taught the note-taker to nest INSTEAD, and cost the "organised
     // under topics" bar a measured 83% to 0% on ES2002a x ledger-haiku.
     expect(text).not.toContain('nest_blocks');
     for (const b of run) expect(text).toContain(b.id);
+  });
+
+  test('asks at the level the DOC uses, not a level this module picked', () => {
+    // Same homeless run, but the page it sits on is titled and its topics are
+    // `### `-level under a `# ` title, so a topic opened now is `### ` too. A
+    // build that hardcoded a level would give the same answer to both docs.
+    const run = bullets(MAX_FLAT_RUN_BULLETS + 2, 'homeless');
+    const deep = [...run, heading('The page', 1), heading('A topic', 3)];
+    const text = regroupDirective(deep, { author: NOTES_AUTHOR_ID }) ?? '';
+    expect(text).toContain('### ');
+    expect(text).not.toContain('\n## ');
   });
 
   test('is null on a short run nobody has named — the control', () => {

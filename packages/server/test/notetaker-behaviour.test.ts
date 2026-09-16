@@ -113,7 +113,9 @@ describe('the notetaking instructions', () => {
     // Headings used to wait until the discussion had "genuinely moved to a
     // different topic", which leaves an idea about a new subject with no
     // heading to sit under — and an idea with nowhere to go is dropped.
-    expect(system).toContain('If no heading covers the topic, add a "### " heading');
+    // The LEVEL is not in the instruction any more — it is the document's,
+    // and the prompt's own section names it for the doc in hand.
+    expect(system).toContain('If no heading covers the topic, add one for it');
     expect(system).toContain('Do not make a second heading for a topic that has one.');
     expect(system).not.toMatch(/genuinely moved to a different topic/i);
   });

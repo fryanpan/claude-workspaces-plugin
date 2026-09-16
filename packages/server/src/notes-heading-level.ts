@@ -54,7 +54,8 @@ export function notesTopicLevel(outline: readonly prose.OutlineEntry[]): number 
   if (first === undefined) return NOTES_DEFAULT_TOPIC_LEVEL;
   const levels = headings.map(levelOf);
   const shallowest = Math.min(...levels);
-  const title = shallowest === 1 && levelOf(first) === 1 && levels.filter((l) => l === 1).length === 1;
+  const title =
+    shallowest === 1 && levelOf(first) === 1 && levels.filter((l) => l === 1).length === 1;
   if (!title) return shallowest;
   const under = levels.filter((l) => l !== 1);
   return under.length > 0 ? Math.min(...under) : NOTES_DEFAULT_TOPIC_LEVEL;

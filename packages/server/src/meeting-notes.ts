@@ -466,7 +466,10 @@ export interface NotesComposer {
 function stubTopic(input: NotesComposeInput): string {
   const first = input.tick.turns[0]?.text?.trim() ?? '';
   const sentence = first.split(/(?<=[.!?])\s/, 1)[0] ?? first;
-  const topic = sentence.replace(/[.!?]+$/, '').slice(0, 60).trim();
+  const topic = sentence
+    .replace(/[.!?]+$/, '')
+    .slice(0, 60)
+    .trim();
   return topic.length > 0 ? topic : (input.context?.docTitle ?? 'This meeting');
 }
 

@@ -25,7 +25,12 @@ import type { Task } from '@claude-workspaces/core/task-wire';
 import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import { meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
-import { addNotes, createNotesTickHarness, type NotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import {
+  type NotesTickHarness,
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+} from './notes-tick-harness.ts';
 
 const dirs: string[] = [];
 const freshDir = (): string => {

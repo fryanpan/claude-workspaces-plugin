@@ -46,7 +46,9 @@ function seededDoc(): Y.Doc {
 }
 
 function headingIdIn(doc: Y.Doc, text: string): string {
-  const found = prose.readOutline(doc).filter((e) => e.kind === 'heading' && e.text.trim() === text);
+  const found = prose
+    .readOutline(doc)
+    .filter((e) => e.kind === 'heading' && e.text.trim() === text);
   const last = found[found.length - 1];
   if (!last) throw new Error(`no heading ${text}`);
   return last.id;

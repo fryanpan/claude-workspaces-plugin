@@ -28,7 +28,7 @@ import type { NotesUpdate } from '../src/meeting-notes.ts';
 import { type NotesDocStore } from '../src/notes-doc-access.ts';
 import { allBullets } from '../src/notes-quality.ts';
 import { asPerson, headingsOf, oneDocStore } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 /** Every top-level element of the doc, which is the level a list lives at. */
 const topLevel = (ydoc: Y.Doc): Y.XmlElement[] =>
@@ -171,8 +171,7 @@ describe('a person editing the notes while the meeting writes them', () => {
       const fragment = prose.getProseFragment(ydoc);
       const at = topLevel(ydoc).findIndex(
         (el) =>
-          el.nodeName === 'heading' &&
-          prose.serializeBlockToMarkdown(el).includes(SCRIPT_TOPIC),
+          el.nodeName === 'heading' && prose.serializeBlockToMarkdown(el).includes(SCRIPT_TOPIC),
       );
       // The heading and everything after it — the section, as a person would
       // select and delete it.

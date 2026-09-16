@@ -29,7 +29,7 @@ import * as Y from 'yjs';
 import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 
 import { markdownOfDoc } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 /** The block id of the outline entry whose text holds `needle`. */
 const idOf = (input: { outline: readonly prose.OutlineEntry[] }, needle: string): string => {

@@ -24,7 +24,12 @@ import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { NOTES_AUTHOR_ID, NOTES_SUGGESTION_AUTHOR } from '../src/notes-doc-access.ts';
-import { addNotes, createNotesTickHarness, notesItems, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import {
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+  notesItems,
+} from './notes-tick-harness.ts';
 
 const dirs: string[] = [];
 const freshDataDir = (): string => {

@@ -14,7 +14,11 @@
 import { describe, expect, it } from 'bun:test';
 import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { NOTES_AUTHOR_ID, applyNotesBlockEdits, readNotesOutline } from '../src/notes-doc-access.ts';
+import {
+  NOTES_AUTHOR_ID,
+  applyNotesBlockEdits,
+  readNotesOutline,
+} from '../src/notes-doc-access.ts';
 import { parseNotesEdits } from '../src/notes-edit-parse.ts';
 import {
   appendResearchPlaceholder,

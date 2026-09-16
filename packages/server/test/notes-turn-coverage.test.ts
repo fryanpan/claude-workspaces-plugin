@@ -30,7 +30,12 @@ import { describe, expect, it } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
 
-import { addNotes, createNotesTickHarness, notesItems, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import {
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+  notesItems,
+} from './notes-tick-harness.ts';
 
 /** One thing said, and what the notes owe it. */
 interface Line {

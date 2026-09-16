@@ -247,9 +247,9 @@ describe('the section a meeting adopts, end to end', () => {
     const memory = createNotesHeadingMemory();
     memory.adopt(earlier, headingId(store, 'Ferry timetable'));
     memory.endMeeting(earlier, Date.now() - 12 * 60_000);
-    expect(
-      notesSectionForMeeting(memory, ids, readNotesOutline(store, ids.docId), store),
-    ).toBe(headingId(store, 'Ferry timetable'));
+    expect(notesSectionForMeeting(memory, ids, readNotesOutline(store, ids.docId), store)).toBe(
+      headingId(store, 'Ferry timetable'),
+    );
   });
 
   test('MUTATION CONTROL: the same heading under a meeting still recording is not', () => {

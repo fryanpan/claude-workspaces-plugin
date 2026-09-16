@@ -24,7 +24,7 @@ import {
   legacyTranscriptSpan,
 } from '../src/notes-legacy-transcript.ts';
 import { asPerson, oneDocStore } from './notes-doc-helpers.ts';
-import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 const DATA_DIR = '/srv/claude-workspaces/data';
 

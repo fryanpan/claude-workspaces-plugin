@@ -18,7 +18,7 @@ import { describe, expect, test } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
 
 import { NOTES_NOT_WRITTEN_MARK } from '../src/notes-notice.ts';
-import { addNotes, createNotesTickHarness, SCRIPT_TOPIC } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC, addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
 /**
  * A meeting whose composer answers tick `from` onward by replacing the
@@ -59,7 +59,10 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         );
         return section === undefined
           ? addNotes(input, markdown)
-          : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+          : // A LEVEL CHANGE, so the guard refuses it outright. At the same
+            // level this is a rename the guard files as a suggestion, and the
+            // tick would no longer be the failure this test is about.
+            [{ op: 'replace_block', blockId: section.id, markdown: `#### ${markdown}` }];
       },
     });
     // EVERY TICK, NOT THE END STATE. A notice that appeared and was retracted
@@ -123,7 +126,10 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         );
         return section === undefined
           ? addNotes(input, markdown)
-          : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+          : // A LEVEL CHANGE, so the guard refuses it outright. At the same
+            // level this is a rename the guard files as a suggestion, and the
+            // tick would no longer be the failure this test is about.
+            [{ op: 'replace_block', blockId: section.id, markdown: `#### ${markdown}` }];
       },
     });
     const seen: boolean[] = [];
@@ -158,7 +164,10 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         );
         return section === undefined
           ? addNotes(input, markdown)
-          : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+          : // A LEVEL CHANGE, so the guard refuses it outright. At the same
+            // level this is a rename the guard files as a suggestion, and the
+            // tick would no longer be the failure this test is about.
+            [{ op: 'replace_block', blockId: section.id, markdown: `#### ${markdown}` }];
       },
     });
     const seen: boolean[] = [];
@@ -244,7 +253,10 @@ describe('the doc says when the note-taker has stopped taking words', () => {
         );
         return section === undefined
           ? addNotes(input, markdown)
-          : [{ op: 'replace_block', blockId: section.id, markdown: `## ${markdown}` }];
+          : // A LEVEL CHANGE, so the guard refuses it outright. At the same
+            // level this is a rename the guard files as a suggestion, and the
+            // tick would no longer be the failure this test is about.
+            [{ op: 'replace_block', blockId: section.id, markdown: `#### ${markdown}` }];
       },
     });
     const seen: boolean[] = [];

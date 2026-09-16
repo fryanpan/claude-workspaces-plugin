@@ -106,9 +106,9 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
-import { headingRename } from './notes-heading-rename.ts';
 import { sectionIds } from './notes-cleanup-scope.ts';
 import { correctedNote, correctsIt, ownWords } from './notes-edit-correction.ts';
+import { headingRename } from './notes-heading-rename.ts';
 import { IDEA_CARRIED_SHARE, contentWords, negates } from './notes-idea-coverage.ts';
 
 /** What the guard decided, for the caller to apply and to log. */
