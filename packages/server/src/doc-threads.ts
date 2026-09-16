@@ -83,6 +83,13 @@ function displacedAnswer(prior: ReviewPayload, ts: number, by: string): ReviewAn
 export interface DocThreadPersistence {
   /** Resolve an alias and hydrate if needed — the normal door. */
   doc(docId: string): LiveDoc | undefined;
+  /**
+   * The same resolve for a caller that only READS threads, which arms no
+   * file binding. Threads live in the `.ydoc`, and the thread listing is
+   * what a board's fan-outs walk every doc for — binding on a read is how
+   * ~7,000 of them woke every dormant binding on the server (2026-09-16).
+   */
+  docForRead(docId: string): LiveDoc | undefined;
   /** Only a doc that is ALREADY resident. Some verbs use this on purpose:
    *  acting on a review must not page in a doc nobody has open. */
   residentDoc(docId: string): LiveDoc | undefined;
@@ -850,14 +857,14 @@ export class DocThreads {
   }
 
   listThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {
-    const doc = this.p.doc(docId);
+    const doc = this.p.docForRead(docId);
     if (!doc) return [];
     const all = listThreads(doc.ydoc);
     return filter?.status ? all.filter((t) => t.status === filter.status) : all;
   }
 
   getThread(docId: string, threadId: string): Thread | null {
-    const doc = this.p.doc(docId);
+    const doc = this.p.docForRead(docId);
     if (!doc) return null;
     return listThreads(doc.ydoc).find((t) => t.id === threadId) ?? null;
   }

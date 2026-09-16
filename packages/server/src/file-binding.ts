@@ -55,7 +55,7 @@ import { statStampSync } from './file-stamp.ts';
 import { showFile } from './git-diff.ts';
 import { gitConflictHint } from './git-provenance.ts';
 import { isWithinRoot } from './safe-path.ts';
-import { boundFiles, isDataless } from './slow-fs.ts';
+import { boundFiles, isDataless, redactBoundPath } from './slow-fs.ts';
 
 /**
  * Per-doc binding to a markdown file on disk. Maintained by
@@ -200,6 +200,19 @@ interface FileBinding {
    *  editable File view). Absent/false = classic read-only code binding. */
   writeBack?: boolean;
   /**
+   * Doc→disk is OFF for this binding, and the sentence saying why.
+   *
+   * One writer per path. Two doc-sets can end up bound to the same file — a
+   * refreshed diff review over a repo another, older review still covers —
+   * and the older one keeps a live binding long after its set stops
+   * answering the API. Waking it (a threads read is enough) then flushed a
+   * weeks-old `.ydoc` over the file the newer set is showing, which is the
+   * 2026-09-16 incident. The NEWER doc keeps the write-back; the older one
+   * is suspended here: its content still serves from the `.ydoc`, it still
+   * reads disk→doc, and it writes nothing.
+   */
+  writeBackSuspended?: string;
+  /**
    * True when this binding watches a MOCKUP's source HTML.
    *
    * A mockup's doc holds no content surface (`contentKind` is `none`) — its
@@ -216,6 +229,27 @@ interface FileBinding {
    *  Kept so a re-attach can unobserve it (same stacking hazard as
    *  `observer` above). */
   contentObserver?: (event: Y.YTextEvent, tr: Y.Transaction) => void;
+}
+
+/**
+ * Does this binding ever write doc→disk?
+ *
+ * Only a writer can hold a path against another writer. A read-only code
+ * member (`attachFlatFile` without `writeBack`) and a mockup's source watcher
+ * are disk→doc only, so counting them as owners would suspend the one
+ * binding that actually edits the file, chosen by nothing more than which
+ * hydrated first.
+ */
+interface PathClaim {
+  /** Set when a NEWER binding already owns the path: this doc must not write. */
+  refusal?: string;
+  /** Set when a loser we just suspended had a write already at the pool. */
+  contested?: boolean;
+}
+
+function bindingWrites(binding: FileBinding): boolean {
+  if (binding.mockup === true) return false;
+  return binding.observer !== undefined || binding.writeBack === true;
 }
 
 /**
@@ -405,6 +439,18 @@ function parseOptsFor(path: string): prose.MarkdownParseOptions {
 }
 
 /** Yjs origin for the private-meta guard's own deletes, so it never
+
+/**
+ * How long a `liveWins` write-back claim stays believable (24h).
+ *
+ * See `fileOutlivedClaim`. A write owed at shutdown is carried out by the
+ * next boot; a claim still outstanding a day after the file moved on belongs
+ * to a doc-set nobody runs any more, and carrying it out is the 2026-09-16
+ * clobber. Generous on purpose — a weekend of downtime is not staleness, and
+ * the cost of believing a claim one hour too long is nil while the cost of
+ * refusing a real one is a lost edit.
+ */
+const STALE_CLAIM_AFTER_MS = 24 * 60 * 60 * 1000;
 
 /** How often the shared mtime sweep runs — the cadence the old per-binding
  *  interval ran at, kept so external-edit latency is unchanged for a doc
@@ -764,6 +810,13 @@ export class FileBindings {
       diskSource: seedText,
     };
     this.bindings.set(docId, binding);
+    // Before anything below can arm a flush: one writer per path.
+    const claim = this.claimPathOwnership(docId, abs);
+    if (claim.refusal) this.suspendWriteBack(docId, binding, claim.refusal);
+    else if (claim.contested) this.reassertAfterContest(docId, binding);
+    // A re-attach that MOVES this doc leaves its old path behind; whoever it
+    // was suspending there is now free to write again.
+    if (existing && existing.path !== abs) this.rearbitratePath(existing.path);
     // sourceUrl records the bound path. It stays OUT of the CRDT (an absolute
     // host path is exactly what a share visitor must not sync) — the sidecar
     // is its home, and saveToDisk is what persists it.
@@ -797,6 +850,37 @@ export class FileBindings {
           // typical doc). Accepted: the alternative was rewriting ~every
           // never-edited bound file on each restart.
           const diskNormalized = prose.normalizeMarkdown(md, parseOptsFor(abs));
+          // Who is newer AT REST, asked once so the reassert branch and the
+          // refusal below cannot reach two different answers.
+          const diskNewer = this.diskNewerThanState(docId, abs, pre?.mtimeMs);
+          // A `liveWins` claim that the CLOCK contradicts.
+          //
+          // `liveWins` means "the live doc holds content disk has never
+          // held", and at boot it is read off the doc's index row — a row
+          // that survives for as long as the `.ydoc` does. A doc-set that
+          // went dormant mid-write keeps that claim for WEEKS, and the first
+          // read that hydrates it would flush its weeks-old content over a
+          // file a person has edited since (2026-09-16: three tracked files
+          // in another repo rewritten from a 3-week-old doc).
+          //
+          // The claim cannot outrank a file that is demonstrably newer than
+          // the `.ydoc` the content came from. Refuse the flush, say so on
+          // the doc, drop the row's claim so the next hydrate does not
+          // re-make it, and let disk win below — which snapshots the live
+          // side into `clobber-backups/` first, so nothing is unrecoverable.
+          if (
+            prior === undefined &&
+            opts.liveWins === true &&
+            this.fileOutlivedClaim(docId, abs, pre?.mtimeMs)
+          ) {
+            const message =
+              'the bound file on disk is newer than this doc’s last saved state, so the ' +
+              'held write-back was refused and the file was read in instead; the version this ' +
+              'doc held is in clobber-backups/';
+            console.warn(`[doc-store] ${docId}: ${message} (${redactBoundPath(abs)})`);
+            binding.lastSyncError = { message, at: Date.now() };
+            this.p.clearPendingFileWrite(docId);
+          }
           if (diskNormalized === currentSerialized) {
             // Pure normalization drift: disk parses to exactly the live
             // doc's content, the bytes just differ in formatting the
@@ -833,7 +917,7 @@ export class FileBindings {
             else this.reconcileFromDisk(doc, binding);
           } else if (
             prior === undefined &&
-            (opts.liveWins || !this.diskNewerThanState(docId, abs, pre?.mtimeMs))
+            ((opts.liveWins && !this.fileOutlivedClaim(docId, abs, pre?.mtimeMs)) || !diskNewer)
           ) {
             // Fresh attach with NO bookkeeping (post-restart hydrate) and the
             // .md is OLDER than the persisted .ydoc: the crash happened inside
@@ -842,8 +926,10 @@ export class FileBindings {
             // startup (codex P1). Reassert the live doc to disk instead —
             // snapshotting the disk version first, symmetric with the apply
             // branch below (this is the one writer that replaces content the
-            // server never wrote). `liveWins` reaches the same branch on the
-            // caller's knowledge instead of the clock — see `AttachOpts`.
+            // server never wrote). `liveWins` used to reach this branch on
+            // the caller's knowledge INSTEAD of the clock; it no longer
+            // overrides a file the clock says is newer — see the refusal
+            // above and `AttachOpts`.
             this.backupExternalVersion(docId, md);
             binding.lastWritten = md;
             this.scheduleFileWrite(doc, binding);
@@ -977,12 +1063,31 @@ export class FileBindings {
     // when the doc wins, back up the losing disk version and reassert below.
     // The 'file-watch' origin routes a disk apply through the same reanchor
     // sweep as a live edit.
+    //
+    // One writer per path first, for the same reason as in `attachFile`: a
+    // superseded diff set binds the same working-tree files a newer one
+    // does, and the reassert below is a write.
+    const claim = opts.writeBack ? this.claimPathOwnership(docId, abs) : {};
+    const pathRefusal = claim.refusal;
     let reassertDoc = false;
     if (fileExists() && text !== content.toString()) {
+      const diskNewer = this.diskNewerThanState(docId, abs, pre?.mtimeMs);
+      // The same refusal `attachFile` makes, on the same evidence: a
+      // `liveWins` claim read off an index row cannot outrank a file that is
+      // newer than the `.ydoc` the claim describes. See the long note there.
+      const claimOutlived = this.fileOutlivedClaim(docId, abs, pre?.mtimeMs);
+      if (opts.writeBack && content.length > 0 && opts.liveWins === true && claimOutlived) {
+        console.warn(
+          `[doc-store] ${docId}: the bound file is newer than this doc’s last saved state; ` +
+            `the held write-back was refused and the file read in (${redactBoundPath(abs)})`,
+        );
+        this.p.clearPendingFileWrite(docId);
+      }
       if (
         opts.writeBack &&
         content.length > 0 &&
-        (opts.liveWins || !this.diskNewerThanState(docId, abs, pre?.mtimeMs))
+        ((opts.liveWins && !claimOutlived) || !diskNewer) &&
+        pathRefusal === undefined
       ) {
         this.backupExternalVersion(docId, text);
         reassertDoc = true;
@@ -1007,6 +1112,11 @@ export class FileBindings {
       lastWritten: reassertDoc ? text : content.toString(),
     };
     this.bindings.set(docId, binding);
+    if (pathRefusal) this.suspendWriteBack(docId, binding, pathRefusal);
+    else if (claim.contested) this.reassertAfterContest(docId, binding);
+    // A re-attach that MOVES this doc leaves its old path behind; whoever it
+    // was suspending there is now free to write again.
+    if (existing && existing.path !== abs) this.rearbitratePath(existing.path);
     if (!doc.meta.sourceUrl) {
       // Sidecar, not CRDT — see attachFile above.
       doc.meta.sourceUrl = abs;
@@ -1218,6 +1328,9 @@ export class FileBindings {
   retargetHomeBinding(doc: LiveDoc, absPath: string, opts: AttachOpts = {}): void {
     const docId = doc.docId;
     const old = this.bindings.get(docId);
+    // The path this doc is leaving may still hold a binding this doc's
+    // presence had suspended. Settled below, once the new attach is done.
+    const vacated = old && old.path !== absPath ? old.path : undefined;
     if (old) {
       if (old.writeTimer) clearTimeout(old.writeTimer);
       if (old.readTimer) clearTimeout(old.readTimer);
@@ -1254,6 +1367,7 @@ export class FileBindings {
     // attachFile only records sourceUrl when absent; a retarget must repoint.
     doc.meta.sourceUrl = absPath;
     this.attachFile(docId, absPath, attachOpts);
+    if (vacated) this.rearbitratePath(vacated);
     this.p.schedulePersist(doc);
     console.log(`[doc-store] ${docId}: home binding now at ${absPath}`);
   }
@@ -2000,6 +2114,10 @@ export class FileBindings {
   }
 
   private scheduleFileWrite(doc: LiveDoc, binding: FileBinding): void {
+    // One writer per path (see `writeBackSuspended`). Checked here rather
+    // than at each caller so every doc→disk route — the observer, the
+    // attach-time reassert, a retarget — is covered by one line.
+    if (binding.writeBackSuspended) return;
     // A pending flush makes the binding active (see `bindingIsActive`), so the
     // sweep must be running to see it — it may have stopped itself while the
     // doc was idle.
@@ -2038,6 +2156,9 @@ export class FileBindings {
       // export) or re-armed one on the new binding; parked means the bytes
       // stay in the live doc.
       if (this.originRepoGuard(doc, binding) !== 'ok') return;
+      // And the suspension again, because `flush()` calls this directly: a
+      // shutdown must not carry out the write the scheduler refused.
+      if (binding.writeBackSuspended) return;
       // Held while the file has not been read since the attach — see
       // `unreadAtAttach`. Marked failed rather than dropped: the `.ydoc` keeps
       // the edit, the index row says a write is owed, and the re-attach that
@@ -2478,6 +2599,53 @@ export class FileBindings {
    * path even when the read had been prewarmed. The `.ydoc` is server-owned
    * local state and never on a sync folder, so its stat stays synchronous.
    */
+  /**
+   * Has the bound file outlived the write-back claim being made over it?
+   *
+   * `liveWins` says "the live doc holds content disk has never held". At
+   * boot it is read off the doc's INDEX ROW, and that row lasts as long as
+   * the `.ydoc`: a doc-set that went dormant mid-write still claimed a write
+   * three weeks later, and the read that finally woke it flushed August's
+   * content over files a person had edited since (2026-09-16).
+   *
+   * What separates the two is not which side is newer — a crash fixture and
+   * a dormant set both leave the file later than the `.ydoc`, by
+   * milliseconds in one case and by weeks in the other. It is how long the
+   * claim has been outstanding. A write owed at shutdown is carried out by
+   * the next boot, minutes or hours later; a file that has moved on a whole
+   * day past the doc's last save belongs to a set nobody is running any
+   * more. So the claim is given a lifetime instead of an unbounded one, and
+   * `STALE_CLAIM_AFTER_MS` is that lifetime — the one number here that is a
+   * judgement rather than a fact.
+   *
+   * Errs toward the CLAIM when a stat fails: with no evidence, a veto has
+   * nothing to stand on.
+   */
+  private fileOutlivedClaim(docId: string, filePath: string, knownMtimeMs?: number): boolean {
+    try {
+      const ydocPath = this.p.ydocPath(docId);
+      if (!existsSync(ydocPath)) return false;
+      const stateMtime = statSync(ydocPath).mtimeMs;
+      const fileMtime =
+        knownMtimeMs ??
+        (boundFiles.quarantined(filePath) ? undefined : statStampSync(filePath).mtimeMs);
+      if (fileMtime === undefined) return false;
+      // A claim only ever loses to a file that has actually moved past it.
+      if (fileMtime <= stateMtime) return false;
+      // Two ways to be too old, and BOTH are needed. The gap between the two
+      // writes catches a file edited long after the doc's last save. The
+      // claim's own elapsed age catches the other order — a file edited a
+      // minute after the save, on a doc nobody opened again for a month —
+      // where the gap stays small forever.
+      return (
+        fileMtime - stateMtime > STALE_CLAIM_AFTER_MS ||
+        Date.now() - stateMtime > STALE_CLAIM_AFTER_MS
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private diskNewerThanState(docId: string, filePath: string, knownMtimeMs?: number): boolean {
     try {
       const ydocPath = this.p.ydocPath(docId);
@@ -2489,6 +2657,92 @@ export class FileBindings {
     } catch {
       return true;
     }
+  }
+
+  /**
+   * Settle which doc may write to `abs`, now that `docId` is binding it.
+   *
+   * Two doc-sets over one path is not an error — a refreshed diff review
+   * binds the same files the set it supersedes bound — but two WRITERS is.
+   * The newer doc (by `createdAt`) keeps the write-back; every older one
+   * bound to the same path is suspended, and a newcomer that is itself the
+   * older side is handed back the sentence to suspend ITSELF with, so the
+   * verdict does not depend on which order the two hydrated in.
+   *
+   * Returns the reason this attach must not write, or `undefined` when it
+   * owns the path.
+   */
+  /**
+   * The winner of a contested path writes its own content once the loser's
+   * in-flight write has had its chance to land.
+   *
+   * Bumping the loser's sequence stops its bookkeeping but not its rename, so
+   * without this the last bytes on disk can be the superseded doc's — the
+   * exact failure this arbitration exists to end. Scheduling is enough: the
+   * write-back debounce is longer than a pool write's turnaround, and a
+   * second identical write is a no-op the reconcile treats as in-sync.
+   */
+  private reassertAfterContest(docId: string, binding: FileBinding): void {
+    const doc = this.p.residentDoc(docId);
+    if (doc) this.scheduleFileWrite(doc, binding);
+  }
+
+  private claimPathOwnership(docId: string, abs: string): PathClaim {
+    const mine = this.p.residentDoc(docId)?.meta.createdAt ?? 0;
+    const claim: PathClaim = {};
+    for (const [otherId, other] of this.bindings) {
+      if (otherId === docId || other.path !== abs) continue;
+      // Only WRITERS can break the one-writer rule. A read-only code member,
+      // a pinned diff and a watched mockup never write doc→disk, so counting
+      // them here would silently disable the only editable binding on a path
+      // depending on which hydrated first (codex P2).
+      if (!bindingWrites(other)) continue;
+      const theirs = this.p.residentDoc(otherId)?.meta.createdAt ?? 0;
+      if (theirs > mine) {
+        claim.refusal =
+          `a newer doc (${otherId}) is bound to this file, so this doc no longer writes to it; ` +
+          'content is served from the .ydoc';
+      } else {
+        // Its write may already be at the pool, past every check — the rename
+        // lands whatever we do here. Tell the caller, so the winner writes
+        // after it and disk ends on the winner's bytes.
+        if (other.writeInFlight) claim.contested = true;
+        this.suspendWriteBack(
+          otherId,
+          other,
+          `a newer doc (${docId}) is bound to this file, so this doc no longer writes to it; ` +
+            'content is served from the .ydoc',
+        );
+      }
+    }
+    return claim;
+  }
+
+  /** Turn one binding's doc→disk direction off, dropping any flush it had
+   *  already armed. Idempotent: the same reason twice says nothing twice. */
+  private suspendWriteBack(docId: string, binding: FileBinding, reason: string): void {
+    if (binding.writeBackSuspended === reason) return;
+    binding.writeBackSuspended = reason;
+    if (binding.writeTimer) {
+      clearTimeout(binding.writeTimer);
+      binding.writeTimer = null;
+    }
+    // And the PERSISTED claim with it. Cancelling only the timer leaves
+    // `pendingFileWrite` on the index row — the `.ydoc` save records that
+    // marker at 200ms, ahead of the write-back's own debounce — and the next
+    // boot's reassert opens this doc ALONE, with no newer binding resident to
+    // suspend it again. The write we just refused would land then instead.
+    this.failedWrites.delete(docId);
+    this.p.clearPendingFileWrite(docId);
+    // A write already handed to the pool cannot be recalled. Bumping the
+    // sequence makes its completion take the "somebody else wrote too"
+    // branch — it claims no `lastWritten` and clears no marker — and the
+    // caller re-arms the WINNER so the last bytes on disk are the winner's.
+    // The residual window is real and narrow: between the loser's rename and
+    // the winner's, disk holds the loser's content.
+    if (binding.writeInFlight) binding.writeSeq = (binding.writeSeq ?? 0) + 1;
+    binding.lastSyncError = { message: reason, at: Date.now() };
+    console.warn(`[doc-store] ${docId}: write-back suspended — ${reason}`);
   }
 
   /**
@@ -2696,6 +2950,54 @@ export class FileBindings {
     binding.readTimer = null;
     binding.pollArmed = false;
     this.bindings.delete(docId);
+    this.rearbitratePath(binding.path);
+  }
+
+  /**
+   * A binding on `path` has gone away — settle who writes to it now.
+   *
+   * Without this, suspending is one-way: archive or evict the newer doc and
+   * the older one keeps taking edits and silently writing none of them, even
+   * though it is the only writer left. The rule is the one `claimPathOwnership`
+   * applies, re-run over whoever remains, so there is one answer to "who owns
+   * this path" rather than two that can disagree.
+   */
+  private rearbitratePath(path: string): void {
+    const holders = [...this.bindings].filter(([, b]) => b.path === path && bindingWrites(b));
+    if (holders.length === 0) return;
+    let newestId = '';
+    let newestAt = Number.NEGATIVE_INFINITY;
+    for (const [id] of holders) {
+      const at = this.p.residentDoc(id)?.meta.createdAt ?? 0;
+      if (at > newestAt) {
+        newestAt = at;
+        newestId = id;
+      }
+    }
+    for (const [id, b] of holders) {
+      if (id === newestId) {
+        if (b.writeBackSuspended !== undefined) {
+          b.writeBackSuspended = undefined;
+          console.warn(
+            `[doc-store] ${id}: write-back resumed — it is the only doc bound to its file`,
+          );
+          // Every edit made while it was suspended returned from
+          // `scheduleFileWrite` having armed nothing, so without this they
+          // reach disk only if somebody edits again (codex P1). The doc is
+          // the right thing to write: disk→doc never stopped, so it already
+          // holds whatever the winner wrote while it was out.
+          const doc = this.p.residentDoc(id);
+          if (doc) this.scheduleFileWrite(doc, b);
+        }
+        continue;
+      }
+      this.suspendWriteBack(
+        id,
+        b,
+        `a newer doc (${newestId}) is bound to this file, so this doc no longer writes to it; ` +
+          'content is served from the .ydoc',
+      );
+    }
   }
 
   /** Stop the shared mtime sweep — part of `DocStore.stop()`. */
