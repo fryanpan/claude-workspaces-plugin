@@ -248,6 +248,14 @@ describe('ownerCheckReview', () => {
     expect(headline).toBe('Check: On the phone the app page shows the comment button');
   });
 
+  it('does not end the headline at an abbreviation', () => {
+    const { headline } = ownerCheckReview(task, {
+      id: 'd-1',
+      text: 'Works on your phones, e.g. Mobile Safari, at 430 wide.',
+    });
+    expect(headline).toBe('Check: Works on your phones, e.g. Mobile Safari, at 430 wide');
+  });
+
   it('opens with the link on its own line, and never puts a paragraph in the label', () => {
     const { detail } = ownerCheckReview(task, {
       id: 'd-1',

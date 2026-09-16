@@ -112,11 +112,26 @@ function clipWords(text: string, max: number): string {
   return `${kept.replace(/[\s,;:.]+$/, '')}\u2026`;
 }
 
+/** A full stop that ends a word nobody means as a sentence: an abbreviation
+ *  or an initial. Without this, "Works on iOS, e.g. Mobile Safari" headlines
+ *  as "Check: Works on iOS, e.g" (codex review). */
+const ABBREVIATION = /(?:\be\.g|\bi\.e|\betc|\bvs|\bcf|\bal|\bapprox|\bfig|\bno|\s[A-Za-z])\.$/i;
+
+/** Shorter than this and a "sentence" is a fragment, so the next one is
+ *  taken with it rather than a headline reading "Check: Yes". */
+const MIN_SENTENCE = 24;
+
 /** The first sentence of a line — what the headline says when the line itself
- *  is a paragraph. */
+ *  is a paragraph. Sentences are taken together until one ends somewhere a
+ *  reader would stop. */
 function firstSentence(text: string): string {
   const one = text.replace(/\s+/g, ' ').trim();
-  return /^(.+?[.!?])\s+[A-Z(\[]/.exec(one)?.[1] ?? one;
+  let acc = '';
+  for (const part of one.split(/(?<=[.!?])\s+(?=[A-Z(\[])/)) {
+    acc = acc === '' ? part : `${acc} ${part}`;
+    if (acc.length >= MIN_SENTENCE && !ABBREVIATION.test(acc)) return acc;
+  }
+  return one;
 }
 
 /** `text` ending in sentence punctuation, so a quoted note does not read as
