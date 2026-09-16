@@ -36,6 +36,16 @@ export interface TidyCounts {
   applied: number;
   refused: number;
   /**
+   * Edits the gate KEPT that the applier could not make.
+   *
+   * Counted apart from `refused` for the reason the route counts them apart:
+   * one is an edit the pass may not make and the other one it tried to. Both
+   * are edits that did not reach the notes, so both belong in the reasons
+   * below — and a run whose only losses were failures used to print no
+   * explanation at all, reading exactly like a clean pass.
+   */
+  failed?: number;
+  /**
    * Every edit that did not reach the document, with the rule that dropped
    * it — `refusals` from the gate, `failures` from the applier.
    *
@@ -159,8 +169,12 @@ function tidyLine(t: TidyCounts): string {
 export function tidyReasonLines(t: TidyCounts): string[] {
   const groups = groupCleanupReasons([...(t.refusals ?? []), ...(t.failures ?? [])]);
   if (groups.length === 0) {
-    return t.refused > 0
-      ? ['', `Why the tidy-up refused ${t.refused} edit(s): not reported by this server.`]
+    // EVERY EDIT THAT DID NOT LAND, not only the refused ones. A server that
+    // predates the two arrays still sends both COUNTS, and a pass whose
+    // losses were all in the applier would otherwise print nothing.
+    const lost = t.refused + (t.failed ?? 0);
+    return lost > 0
+      ? ['', `Why the tidy-up did not apply ${lost} edit(s): not reported by this server.`]
       : [];
   }
   return [

@@ -191,7 +191,21 @@ describe('renderRerunReport', () => {
     const text = renderRerunReport(
       buildRerunReport(input({ tidy: { ok: true, proposed: 16, applied: 0, refused: 16 } })),
     );
-    expect(text).toContain('Why the tidy-up refused 16 edit(s): not reported by this server.');
+    expect(text).toContain(
+      'Why the tidy-up did not apply 16 edit(s): not reported by this server.',
+    );
+  });
+
+  it('counts an applier failure among the unreported losses, not only a refusal', () => {
+    // Against an older server a pass whose only losses were in the APPLIER
+    // sends `failed` and no lines. Keying the sentence on `refused` alone
+    // printed nothing there, which reads as a pass that applied everything.
+    const text = renderRerunReport(
+      buildRerunReport(
+        input({ tidy: { ok: true, proposed: 3, applied: 1, refused: 0, failed: 2 } }),
+      ),
+    );
+    expect(text).toContain('Why the tidy-up did not apply 2 edit(s): not reported by this server.');
   });
 
   it('says nothing about reasons for a tidy-up that applied what it proposed', () => {

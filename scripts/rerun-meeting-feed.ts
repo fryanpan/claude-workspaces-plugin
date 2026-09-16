@@ -325,6 +325,7 @@ export async function runTidy(
     proposed?: number;
     applied?: number;
     refused?: number;
+    failed?: number;
     refusals?: readonly string[];
     failures?: readonly string[];
   };
@@ -333,6 +334,7 @@ export async function runTidy(
     proposed: body.proposed ?? 0,
     applied: body.applied ?? 0,
     refused: body.refused ?? 0,
+    failed: body.failed ?? 0,
     // EVERY EDIT THIS RUN DID NOT APPLY, WITH THE RULE THAT DROPPED IT. A
     // rerun whose tidy-up refused everything used to report three zeros and
     // a count, which says a pass went wrong and nothing about what — the
