@@ -412,6 +412,11 @@ export type MeetingServerMessage =
        * happened and can say so.
        */
       resumed?: boolean;
+      /** Every voice this DOC already has a name for. A label is per engine
+       *  session and a reconnect or a fresh recording hands out "A" again to
+       *  the same room, so the server sends the cast rather than leaving the
+       *  strip to remember it. Absent where nothing has been named. */
+      speakers?: Record<string, string>;
     }
   /** No words will follow. The socket stays open so the strip can say why. */
   | { type: 'unavailable'; reason: MeetingUnavailableReason; message: string }

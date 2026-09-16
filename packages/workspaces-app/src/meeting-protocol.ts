@@ -130,6 +130,19 @@ export function parseMeetingServerMessage(raw: unknown): MeetingServerMessage | 
         // older server sends and what a refused resume sends, and both mean
         // the same thing: this is a new meeting.
         ...(m.resumed === true ? { resumed: true } : {}),
+        // The doc's cast, so a session that labels from "A" again still shows
+        // the names the person gave. Read field by field rather than taken
+        // whole: this is a map a server put on the wire, and only string
+        // names for string labels can be rendered.
+        ...(() => {
+          const raw = m.speakers;
+          if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+          const speakers: Record<string, string> = {};
+          for (const [label, name] of Object.entries(raw as Record<string, unknown>)) {
+            if (label && typeof name === 'string' && name) speakers[label] = name;
+          }
+          return Object.keys(speakers).length > 0 ? { speakers } : {};
+        })(),
       };
     case 'unavailable': {
       const reason = m.reason;

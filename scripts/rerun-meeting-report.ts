@@ -21,7 +21,42 @@
  * that failed to look.
  */
 
+import { normalizeSpeakerName } from '../packages/core/src/speaker-name.ts';
 import { flatBulletRuns, parseNotesTopics } from '../packages/server/src/notes-quality.ts';
+
+/** A speaker tag as the notes carry it in markdown: `[@Devi](speaker:A)`. */
+const SPEAKER_TAG = /\[@([^\]]+)\]\(speaker:([^)\s]+)\)/g;
+
+/**
+ * Bullets attributed to a voice NOBODY HAS NAMED, and the labels they point
+ * at.
+ *
+ * The measure the speaker-continuity work is read against: on the meeting
+ * that prompted it, 87 of 140 attributed bullets pointed at one label that
+ * was never named, because every reconnect and every stop-and-start opened an
+ * engine session that labelled the same room from "A" again. A tag reading
+ * "Speaker A" (or "Room Speaker A") is the placeholder, which
+ * `normalizeSpeakerName` is the one place that recognises.
+ *
+ * To grep for the same thing by hand in a notes file:
+ * `grep -oE '\[@(Room |Remote )?Speaker [^]]*\]' <notes.md> | sort | uniq -c`
+ */
+export function unnamedVoiceBullets(document: string): { bullets: number; labels: string[] } {
+  const labels = new Set<string>();
+  let bullets = 0;
+  for (const topic of parseNotesTopics(document)) {
+    for (const bullet of topic.bullets) {
+      let unnamed = false;
+      for (const [, text, label] of bullet.matchAll(SPEAKER_TAG)) {
+        if (normalizeSpeakerName(text) !== undefined) continue;
+        unnamed = true;
+        labels.add(label ?? '');
+      }
+      if (unnamed) bullets++;
+    }
+  }
+  return { bullets, labels: [...labels].sort() };
+}
 
 /** What the at-stop tidy-up pass did, as its route answers. */
 export interface TidyCounts {
@@ -76,13 +111,25 @@ export interface RerunReport {
   unpricedModels: readonly string[];
   /** 7. `null` when no note ever reached the doc. */
   firstNoteMs: number | null;
+  /** 8. Bullets pointing at a voice nobody named, and which labels they are.
+   *  See {@link unnamedVoiceBullets} for why this is a measure at all. */
+  unnamedVoiceBullets: number;
+  unnamedVoiceLabels: readonly string[];
   /** Where the reader goes next. */
   notesPath: string;
   logPath: string;
 }
 
 export interface RerunReportInput
-  extends Omit<RerunReport, 'topicHeadings' | 'longestFlatRun' | 'bullets' | 'bulletsInSection'> {
+  extends Omit<
+    RerunReport,
+    | 'topicHeadings'
+    | 'longestFlatRun'
+    | 'bullets'
+    | 'bulletsInSection'
+    | 'unnamedVoiceBullets'
+    | 'unnamedVoiceLabels'
+  > {
   /** The whole document the meeting left behind, as markdown. */
   document: string;
   /** The section this meeting opened — a slice of the above. */
@@ -104,8 +151,11 @@ export function buildRerunReport(input: RerunReportInput): RerunReport {
   // section" when the question was "did it group what it heard".
   const topics = parseNotesTopics(document);
   const runs = flatBulletRuns(document);
+  const unnamed = unnamedVoiceBullets(document);
   return {
     ...rest,
+    unnamedVoiceBullets: unnamed.bullets,
+    unnamedVoiceLabels: unnamed.labels,
     topicHeadings: topics.filter((t) => t.heading.length > 0).length,
     longestFlatRun: runs.reduce((worst, r) => Math.max(worst, r.bullets.length), 0),
     bullets: topics.reduce((n, t) => n + t.bullets.length, 0),
@@ -162,6 +212,9 @@ export function renderRerunReport(r: RerunReport): string {
       r.unpricedModels.length > 0 ? ` — short: no price for ${r.unpricedModels.join(', ')}` : ''
     } |`,
     `| Latency to first note | ${firstNoteLine(r.firstNoteMs)} |`,
+    `| Bullets on an unnamed voice | ${r.unnamedVoiceBullets} of ${r.bullets} bullet(s)${
+      r.unnamedVoiceLabels.length > 0 ? ` — ${r.unnamedVoiceLabels.join(', ')}` : ''
+    } |`,
     '',
     `Notes: \`${r.notesPath}\``,
     `Run log: \`${r.logPath}\``,

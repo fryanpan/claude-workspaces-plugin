@@ -854,6 +854,30 @@ describe('the speaker menu states the facts settled at start', () => {
       .filter((m) => m.type === 'name_speaker');
     expect(named).toEqual([{ type: 'name_speaker', speaker: 'A', name: 'Jordan' }]);
   });
+
+  it('opens a new session already calling the room what the person called it', async () => {
+    // The strip empties its cast when a meeting starts, because a label
+    // belongs to an engine session. The server knows better — the naming is
+    // written against the DOC — so it sends the cast back on `ready`, and a
+    // reconnect or a second recording tags its very first turn with the name
+    // the person gave rather than reintroducing a stranger.
+    const h = mount();
+    h.pressStart();
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm2',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'conversation',
+      speakers: { A: 'Jordan' },
+    });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'Hi.', final: true, speaker: 'A' });
+    expect(h.tags()).toEqual(['Jordan']);
+    h.record().click();
+    expect(h.popNames()).toEqual(['Jordan']);
+  });
 });
 
 describe('the strip when no words are coming', () => {
