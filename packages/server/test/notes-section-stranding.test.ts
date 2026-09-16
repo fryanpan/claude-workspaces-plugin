@@ -1,29 +1,31 @@
-import { describe, expect, test } from 'bun:test';
 /**
- * The stranding this file pins is the one that cost the most measured ideas,
- * and it is not a delete: nothing is ever removed from the doc.
+ * THE STRANDING IS GONE, AND THIS FILE IS WHAT SAYS SO.
  *
- * On a doc that already carries a `## Meeting notes` heading, a meeting that
- * has opened no section of its own writes its bullets under the heading that
- * is there. When it later opens its own section, both readers of a notes
- * section — `notesSectionStart` in the client and the server's finder — take
- * the LAST heading with that text, so everything written in that window stops
- * being in the notes while staying in the doc.
+ * WHAT IT WAS. A doc already carrying a `## Meeting notes` heading, and a
+ * meeting that had opened no section of its own, wrote its bullets under the
+ * heading that was there. When it later opened its own, both readers of a
+ * notes section took the LAST heading with that text, so everything written
+ * in that window stopped being in the notes while staying in the doc. Traced
+ * on AMI fixture ES2003c: the section grew to 23 bullets over fifteen ticks
+ * and read 0 at tick 16 while the whole doc read 26. The fix was to open the
+ * section before the first bullet.
  *
- * Traced on AMI fixture ES2003c under `scripts/notes-eval.ts`: the section
- * grew to 23 bullets over fifteen ticks, and at tick 16 it read 0 while the
- * whole doc read 26.
+ * WHY IT CANNOT HAPPEN NOW. There is no reserved section (owner, 2026-09-15)
+ * and no reader that finds one by its words: the notes are the whole doc, and
+ * a heading a meeting writes is addressed by block id. A second heading with
+ * the same words moves nothing and hides nothing, because nothing is looking
+ * for those words.
  *
- * The MUTATION CONTROL is the first test in each pair. It replays the traced
- * tick order against a doc with the seeded heading and asserts the strand
- * happens, so the guarded assertions below are not passing vacuously.
+ * So the eager open is gone with the failure it guarded, and what is pinned
+ * here is the guarantee underneath it: a bullet stays under the heading it
+ * was written under, for the life of the doc.
+ *
+ * All fixtures are synthetic. The repo is public.
  */
+import { describe, expect, test } from 'bun:test';
 import { prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
-import { type NotesUpdate, beginNotesSession } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
-import { sectionBody } from './notes-doc-helpers.ts';
-import { ManualScheduler } from './notes-tick-harness.ts';
+import { SCRIPT_TOPIC } from './notes-tick-harness.ts';
 
 const AUTHOR = 'notes-agent';
 const WHO = {
@@ -32,23 +34,23 @@ const WHO = {
 };
 const HUMAN_LINE = 'my own note: check this against the brief before we commit';
 
-/** A doc as a meeting finds it: somebody's notes heading, and their line. */
+/** A doc as a meeting finds it: somebody's heading, and their line. */
 function seededDoc(): Y.Doc {
   const doc = new Y.Doc();
   prose.applyMarkdownToFragment(
     prose.getProseFragment(doc),
-    `## ${MEETING_NOTES_HEADING}\n\n- ${HUMAN_LINE}\n`,
+    `## ${SCRIPT_TOPIC}\n\n- ${HUMAN_LINE}\n`,
   );
   prose.ensureBlockIds(doc);
   return doc;
 }
 
-function headingIdIn(doc: Y.Doc): string {
+function headingIdIn(doc: Y.Doc, text: string): string {
   const found = prose
     .readOutline(doc)
-    .filter((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
+    .filter((e) => e.kind === 'heading' && e.text.trim() === text);
   const last = found[found.length - 1];
-  if (!last) throw new Error('no notes heading');
+  if (!last) throw new Error(`no heading ${text}`);
   return last.id;
 }
 
@@ -56,19 +58,32 @@ function apply(doc: Y.Doc, edits: readonly prose.BlockEdit[]): void {
   prose.applyBlockEdits(doc, [...edits], WHO);
 }
 
-/** How many bullets a reader of the notes would see. */
-function notesBullets(doc: Y.Doc): number {
-  return sectionBody(doc, MEETING_NOTES_HEADING)
-    .split('\n')
-    .filter((l) => l.trim().startsWith('-')).length;
+function markdown(doc: Y.Doc): string {
+  return prose.serializeFragmentToMarkdown(prose.getProseFragment(doc));
 }
 
 /** How many bullets are anywhere in the doc. */
 function docBullets(doc: Y.Doc): number {
-  return prose
-    .serializeFragmentToMarkdown(prose.getProseFragment(doc))
+  return markdown(doc)
     .split('\n')
     .filter((l) => l.trim().startsWith('-')).length;
+}
+
+/** The bullets between `heading` and the next heading of its level or above —
+ *  what a reader sees under it, read by POSITION rather than by any text. */
+function bulletsUnder(doc: Y.Doc, headingId: string): string[] {
+  const outline = prose.readOutline(doc);
+  const at = outline.findIndex((e) => e.id === headingId);
+  if (at < 0) throw new Error('no such heading');
+  const level = outline[at]?.level ?? 2;
+  const out: string[] = [];
+  for (let i = at + 1; i < outline.length; i++) {
+    const entry = outline[i];
+    if (entry === undefined) continue;
+    if (entry.kind === 'heading' && (entry.level ?? 0) <= level) break;
+    if (entry.kind === 'listItem') out.push(entry.text);
+  }
+  return out;
 }
 
 /** Fifteen ticks of bullets written under whatever heading is offered. */
@@ -80,132 +95,41 @@ function writeFifteenTicks(doc: Y.Doc, headingId: string): void {
   }
 }
 
-describe('a meeting that writes before it opens its own section', () => {
-  test('MUTATION CONTROL: the bullets leave the notes when the second section appears', () => {
+describe('a meeting that writes under a heading somebody else wrote', () => {
+  test('every bullet stays under that heading, and a later topic moves none of them', () => {
     const doc = seededDoc();
-    // The window: fifteen ticks written under the heading that was there.
-    writeFifteenTicks(doc, headingIdIn(doc));
-    expect(notesBullets(doc)).toBe(16); // fifteen, plus the person's line
-    // Tick sixteen opens the meeting's own section, exactly as the composer
-    // is asked to when it has none.
-    apply(doc, [
-      {
-        op: 'insert_at_end',
-        markdown: `## ${MEETING_NOTES_HEADING}\n\n- point 16 from the meeting`,
-      },
-    ]);
-    // Nothing was deleted — the doc still holds every line.
+    const theirs = headingIdIn(doc, SCRIPT_TOPIC);
+    writeFifteenTicks(doc, theirs);
+    expect(bulletsUnder(doc, theirs)).toHaveLength(16); // fifteen, plus the person's line
+
+    // The meeting then starts a topic of its own, which is what it does when
+    // nothing there fits what is being said any more.
+    apply(doc, [{ op: 'insert_at_end', markdown: '## Ferry timetable\n\n- point 16' }]);
+
+    // Nothing moved and nothing was deleted.
     expect(docBullets(doc)).toBe(17);
-    // And the notes hold one of them.
-    expect(notesBullets(doc)).toBe(1);
-    // Including the person's own line, which is now invisible to every reader.
-    expect(sectionBody(doc, MEETING_NOTES_HEADING)).not.toContain(HUMAN_LINE);
+    expect(bulletsUnder(doc, theirs)).toHaveLength(16);
+    expect(bulletsUnder(doc, theirs)).toContain(HUMAN_LINE);
+    expect(bulletsUnder(doc, headingIdIn(doc, 'Ferry timetable'))).toEqual(['point 16']);
   });
 
-  test('opening the section FIRST leaves nothing behind to strand', () => {
+  test('MUTATION CONTROL: a SECOND heading with the same words still moves nothing', () => {
+    // The old failure's exact shape. It was never a delete — the bullets
+    // stayed where they were — and what made it a loss was a reader that
+    // found the notes by those words. There is no such reader now, so this
+    // doc reads exactly as the one above.
     const doc = seededDoc();
-    // What the fix does: the section is opened before the first bullet.
-    apply(doc, [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }]);
-    const own = headingIdIn(doc);
-    writeFifteenTicks(doc, own);
-    // Every bullet the meeting wrote is in the notes a reader sees.
-    expect(notesBullets(doc)).toBe(15);
-    expect(docBullets(doc)).toBe(16);
-    // A later tick opening nothing changes nothing.
-    apply(doc, [{ op: 'insert_under_heading', headingId: own, markdown: '- point 16' }]);
-    expect(notesBullets(doc)).toBe(16);
+    const theirs = headingIdIn(doc, SCRIPT_TOPIC);
+    writeFifteenTicks(doc, theirs);
+    apply(doc, [{ op: 'insert_at_end', markdown: `## ${SCRIPT_TOPIC}\n\n- point 16` }]);
+    expect(docBullets(doc)).toBe(17);
+    expect(bulletsUnder(doc, theirs)).toHaveLength(16);
+    expect(bulletsUnder(doc, theirs)).toContain(HUMAN_LINE);
   });
 
-  test('the person’s earlier section keeps every line it had', () => {
-    // The owner's rule: a new recording never replaces what is already
-    // written. It does not, and this is the assertion that says so.
+  test('the person’s line is never replaced, whatever else is written', () => {
     const doc = seededDoc();
-    apply(doc, [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }]);
-    writeFifteenTicks(doc, headingIdIn(doc));
-    expect(prose.serializeFragmentToMarkdown(prose.getProseFragment(doc))).toContain(HUMAN_LINE);
+    writeFifteenTicks(doc, headingIdIn(doc, SCRIPT_TOPIC));
+    expect(markdown(doc)).toContain(HUMAN_LINE);
   });
-
-  test('two sections still read as two, so nothing here hides a restart', () => {
-    const doc = seededDoc();
-    apply(doc, [{ op: 'insert_at_end', markdown: `## ${MEETING_NOTES_HEADING}` }]);
-    const sections = prose
-      .readOutline(doc)
-      .filter((e) => e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING);
-    expect(sections).toHaveLength(2);
-  });
-});
-
-describe('a section that did not open is a tick that did not compose', () => {
-  // The eager open is only worth having if a refusal of it stops the
-  // compose: a compose that went ahead would write under the section that IS
-  // there — the previous meeting's — which is the window the open exists to
-  // close. And a sink that THROWS on the open must not reject the tick chain
-  // every later tick waits on.
-  const ids = { docId: 'd-strand', meetingId: 'm-strand-1' };
-  const foreignOutline: readonly prose.OutlineEntry[] = [
-    { id: 'h-theirs', kind: 'heading', level: 2, text: MEETING_NOTES_HEADING, author: 'someone' },
-    // AUTHORED, which is what marks it as another meeting's record rather
-    // than the doc's own standing section. This session is built with no
-    // heading store, so authorship is the only signal `notes-section-fit.ts`
-    // has here — the durable one is the heading record.
-    {
-      id: 'b-theirs',
-      kind: 'bullet',
-      level: 0,
-      text: 'Maya: the survey lands first',
-      author: AUTHOR,
-    },
-  ] as unknown as readonly prose.OutlineEntry[];
-
-  function session(open: 'refuse' | 'throw') {
-    const schedule = new ManualScheduler();
-    const errors: string[] = [];
-    let composes = 0;
-    const writes: NotesUpdate[] = [];
-    const s = beginNotesSession(
-      {
-        composer: {
-          name: 'counting',
-          compose() {
-            composes++;
-            return Promise.resolve([{ op: 'insert_at_end', markdown: '- a bullet' }]);
-          },
-        },
-        quietMs: 1000,
-        schedule,
-        now: () => 1_000,
-        readOutline: () => foreignOutline,
-        notesHeadingId: () => undefined,
-        onNotes: (u) => {
-          writes.push(u);
-          if (open === 'throw') throw new Error('sink down');
-          return false;
-        },
-        onError: (m) => {
-          errors.push(m);
-        },
-      },
-      ids,
-    );
-    return { s, schedule, errors, writes, composes: () => composes };
-  }
-
-  for (const mode of ['refuse', 'throw'] as const) {
-    test(`an open the sink ${mode}s carries the words and composes nothing`, async () => {
-      const h = session(mode);
-      h.s.onTurn({ turn: 0, text: 'One.', final: true });
-      h.schedule.fire();
-      await h.s.end();
-      // Every write the sink saw was the section being opened — never a bullet.
-      expect(h.writes.length).toBeGreaterThan(0);
-      for (const w of h.writes) {
-        expect(w.edits.map((e) => e.op)).toEqual(['insert_at_end']);
-        expect(w.edits[0] && 'markdown' in w.edits[0] ? w.edits[0].markdown : '').toBe(
-          `## ${MEETING_NOTES_HEADING}`,
-        );
-      }
-      expect(h.composes()).toBe(0);
-      expect(h.errors.some((m) => m.includes('notes section not opened'))).toBe(true);
-    });
-  }
 });

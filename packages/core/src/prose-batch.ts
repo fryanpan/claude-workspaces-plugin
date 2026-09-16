@@ -1,30 +1,26 @@
 /**
  * A batch of block-addressed edits, applied in ONE Yjs transaction.
  *
- * The rest of the edit family is one verb per call, which is right for an
- * agent making one change. It is wrong for an agent that composes a handful
- * of small changes at once — a note-taker adding two bullets and rewriting
- * a third — because each call is a transaction of its own, so a reader
- * watching the doc sees the batch arrive in pieces and a failure halfway
- * leaves half of it applied.
+ * One verb per call is right for an agent making one change and wrong for one
+ * composing a handful at once — a note-taker adding two bullets and rewriting
+ * a third. Each call is its own transaction, so a reader sees the batch in
+ * pieces and a failure halfway leaves half of it applied.
  *
- * So this file takes a list of edits addressed by BLOCK ID (see
- * `prose-outline.ts`) and applies them together. Two rules make the result
- * predictable:
+ * So this file takes edits addressed by BLOCK ID (`prose-outline.ts`) and
+ * applies them together. Two rules make the result predictable:
  *
- * - **Authorship decides direct-vs-proposal.** An edit that replaces or
- *   deletes a block still marked as the caller's own applies directly.
- *   Anything else — a block a person wrote, or one of the caller's that a
- *   person has since touched, which is the same thing after
- *   `clearAuthorshipOnPersonEdit` has run — becomes a block proposal
- *   (`suggest-blocks.ts`): the words struck, the replacement offered as
- *   blocks beside them. Nothing this file does can destroy words the caller
- *   did not write.
+ * - **Authorship decides direct-vs-proposal**, unless the caller asks. An
+ *   edit replacing or deleting a block still marked as the caller's own
+ *   applies directly; anything else — a block a person wrote, or one of the
+ *   caller's a person has since touched, the same thing after
+ *   `clearAuthorshipOnPersonEdit` — becomes a block proposal
+ *   (`suggest-blocks.ts`): the words struck, the replacement offered beside
+ *   them. `propose` on a replace takes that path whoever owns the block.
+ *   Nothing here can destroy words the caller did not write.
  * - **A list is grown, never twinned.** Inserting bullets where the target
  *   already ends in a list of the same type puts the new items INTO that
- *   list. Splicing a second list in beside it is what made the browser's
- *   list-join plugin re-create the agent's own bullets, and re-created
- *   bullets are bullets the agent can no longer find.
+ *   list. Splicing a second list in beside it made the browser's list-join
+ *   plugin re-create the agent's own bullets, which the agent cannot find.
  */
 import * as Y from 'yjs';
 import {
@@ -51,7 +47,10 @@ import type { SuggestionAuthor } from './suggest-ops.ts';
 export type BlockEdit =
   | { op: 'insert_under_heading'; headingId: string; markdown: string }
   | { op: 'insert_at_end'; markdown: string }
-  | { op: 'replace_block'; blockId: string; markdown: string }
+  // `propose` makes a replace a proposal whoever owns the block — for an edit
+  // whose cost to a reader is not what ownership measures. The heading rename
+  // is the one that asked for it (`notes-heading-rename.ts`).
+  | { op: 'replace_block'; blockId: string; markdown: string; propose?: boolean }
   | { op: 'delete_block'; blockId: string }
   | { op: 'nest_blocks'; leadBlockId: string; blockIds: readonly string[] };
 
@@ -274,6 +273,27 @@ function insertAfterList(
  * matched nothing on a multi-line string and the `- ` markers survived into
  * the item's text: an empty bullet with the whole replacement nested under
  * it, reported as `applied`.
+ *
+ * AND THE BLOCK KEEPS ITS ADDRESS. Yjs has no in-place rewrite, so a replace
+ * is a delete and an insert — which used to mean the rewritten block came
+ * back with a NEW id, and every edit that still named the old one was
+ * answered `unknown-block`. Inside a single batch that is the caller's own
+ * earlier edit invalidating its later ones: edits resolve against the doc as
+ * the ones before them left it, so "correct this bullet, then nest these
+ * under it", "rename this heading, then insert under it" and "rewrite this
+ * bullet, then rewrite it again" all lost their second half, on blocks that
+ * were demonstrably on the page when the batch was composed. The words a
+ * note-taker could not put back are the ones this cost
+ * (`packages/server/src/notes-edit-address.ts` measured the recovery).
+ *
+ * So the FIRST element written in `'replace'` mode inherits the replaced
+ * block's id. One block is replaced by one address — a replacement that
+ * parses to several blocks gives the extras ids of their own at
+ * `mintMissingIds`, so no two blocks ever share one. `'after'` mode copies
+ * nothing: the original is still in the doc there, and a proposal offered
+ * beside it must never wear its address. This is the same law `prose-nest.ts`
+ * already holds a MOVE to — "it keeps its block id, so an edit that named it
+ * a tick ago still names it" — extended to a rewrite.
  */
 function writeReplacement(
   fragment: Y.XmlFragment,
@@ -286,6 +306,9 @@ function writeReplacement(
   const idx = (parent.toArray() as unknown[]).indexOf(el);
   if (idx < 0) return 'unknown-block';
   const at = mode === 'replace' ? idx : idx + 1;
+  // READ BEFORE THE DELETE, and only for a replace: the attribute has to come
+  // off the element while it is still integrated.
+  const keepId = mode === 'replace' ? readBlockId(el) : undefined;
   if (el.nodeName === 'listItem') {
     const split = splitLeadingListItems(markdown);
     const items = (split ? split.items : [markdown.replace(LIST_LINE, '$3')])
@@ -294,6 +317,7 @@ function writeReplacement(
     if (items.length === 0) return 'parse-failed';
     if (mode === 'replace') parent.delete(idx, 1);
     const created = insertParsed(parent, at, items);
+    inheritBlockId(created, keepId);
     // Whatever followed the run of items is still the caller's words, and a
     // paragraph cannot live between two list items — it goes after the list.
     if (split && split.rest.trim().length > 0) {
@@ -304,7 +328,17 @@ function writeReplacement(
   const blocks = parseMarkdownBlocks(markdown, parse);
   if (blocks.length === 0) return 'parse-failed';
   if (mode === 'replace') parent.delete(idx, 1);
-  return insertParsed(parent, at, blocks);
+  const written = insertParsed(parent, at, blocks);
+  inheritBlockId(written, keepId);
+  return written;
+}
+
+/** Give the first block written by an in-place rewrite the address the block
+ *  it replaced was known by. A no-op when there is nothing to inherit. */
+function inheritBlockId(written: readonly Y.XmlElement[], keepId: string | undefined): void {
+  const first = written[0];
+  if (keepId === undefined || first === undefined) return;
+  first.setAttribute(BLOCK_ID_ATTR, keepId);
 }
 
 const ALREADY_PROPOSED =
@@ -436,7 +470,8 @@ export function applyBlockEdits(
           }
           // A block with no words has nothing to protect and nothing a
           // proposal could strike, so it applies directly whoever owns it.
-          if (readBlockAuthor(el) !== opts.author && !holdsNoWords(el)) {
+          const asked = edit.op === 'replace_block' && edit.propose === true;
+          if ((asked || readBlockAuthor(el) !== opts.author) && !holdsNoWords(el)) {
             // Not ours (or no longer ours): propose it, in this transaction,
             // so a reader sees the batch land whole or not at all.
             const res = proposeEdit(fragment, el, replacement, opts);

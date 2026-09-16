@@ -1,54 +1,35 @@
 /**
- * WHETHER NEW MINUTES MAY WRITE INTO THE `Meeting notes` SECTION THAT IS
- * ALREADY THERE, or have to open their own.
+ * WHETHER A RECORDING MAY CARRY ON UNDER THE HEADING A MEETING ALREADY WROTE,
+ * or has to start a topic of its own.
  *
- * The owner's rule (2026-09-09): new minutes REUSE an existing Meeting notes
- * section when its topic fits, and open their own when it does not. This is
- * the "fits" half, as one function over values.
+ * THERE IS NO RESERVED SECTION ANY MORE (owner, 2026-09-15: notes land under
+ * the topic they belong to, and a doc with nowhere to put them gets a topic
+ * heading, not a container). So the question this file used to ask — "is the
+ * doc's `Meeting notes` heading free" — cannot be asked: there is no such
+ * heading and nothing matches on its words. What is left is the question that
+ * was always the real one, and it is answered from the RECORD rather than
+ * from any text:
  *
- * WHAT "FITS" MEANS, OPERATIONALLY. A doc can carry a `Meeting notes` heading
- * for two quite different reasons, and only one of them is somebody else's:
+ *   A heading SOME MEETING HAS CLAIMED is a meeting's; anything else is the
+ *   document's own and this recording never writes into it.
  *
- * - A PREVIOUS MEETING'S MINUTES. Writing today's meeting under yesterday's
- *   heading is what the owner's 2026-08-31 rule forbids, so these minutes
- *   open their own section below it and the earlier one keeps every line.
- * - THE DOC'S OWN STANDING SECTION — a heading somebody typed, holding their
- *   own notes or nothing at all. That is not another meeting's record, it is
- *   this doc saying where its minutes go. Opening a SECOND heading beside it
- *   is what strands the person's lines: both readers of a notes section take
- *   the LAST heading with that text (`notesSectionStart` in the client, the
- *   server's own finder), so everything above the new heading leaves the
- *   notes while staying in the doc.
- *
- * MEASURED, not supposed. The eval seeds exactly the second shape — a
- * `Meeting notes` heading with one human bullet under it — and every tick of
- * every meeting reported the person's bullet gone from the notes: the doc
- * held two headings, the reader took the second, and the bullet sat above it.
- * `bun run notes:eval` scored "a person's bullet is never edited" at 0% while
- * nothing had edited it.
- *
- * AUTHORSHIP IS NOT THE TEST, AND THE FIRST VERSION OF THIS FILE GOT THAT
- * WRONG. `releaseNotesAuthorship` drops the note-taker's claim on every block
- * when a recording STARTS — deliberately, so the new meeting cannot rewrite
- * the old one's bullets — so by the time this question is asked a previous
- * meeting's minutes are authorless and look exactly like a person's own
- * notes. Judging on authorship adopted the previous meeting's section and
- * merged two conversations under one heading; `notes-heading-restart.test.ts`
- * and `notes-second-meeting.test.ts` both caught it.
- *
- * WHAT IS DURABLE IS THE HEADING RECORD. Every meeting that opens or adopts a
- * section writes that block id down beside its own transcript
- * (`notes-heading-store.ts`), and that record outlives the meeting, the
- * authorship and the process. So the first half of the test is: a heading
- * SOME MEETING HAS CLAIMED is a meeting's section, and anything else is the
- * doc's own.
+ * `claims` is that record: every heading a meeting has taken on this doc, by
+ * block id — the in-process memory's own adoptions plus whatever the heading
+ * store holds from earlier meetings and earlier processes — each carrying the
+ * moment its meeting stopped, where one was recorded. It outlives the
+ * meeting, the authorship and the process, which is exactly what authorship
+ * does not: `releaseNotesAuthorship` drops the note-taker's claim on every
+ * block when a recording STARTS, so by the time this question is asked a
+ * previous meeting's minutes are authorless and look like a person's notes.
+ * Judging on authorship merged two conversations under one heading;
+ * `notes-heading-restart.test.ts` and `notes-second-meeting.test.ts` both
+ * caught it.
  *
  * AND THE SECOND HALF IS WHETHER THAT MEETING IS OVER (2026-09-11). A claim
- * alone refused every second recording on a doc, which is what Bryan saw:
- * he stopped a recording, started another one minutes later, and the notes
- * opened a second `## Meeting notes` at the bottom of the page while the
- * section from minutes earlier sat above it. One conversation, two headings,
- * and the reader's own `notesSectionStart` takes only the last of them.
+ * alone refused every second recording on a doc, which is what Bryan saw: he
+ * stopped a recording, started another minutes later, and the notes opened a
+ * second heading at the bottom of the page while the one from minutes earlier
+ * sat above it. One conversation, two headings.
  *
  * A claim therefore says whose the section is while the meeting is RUNNING —
  * two recordings live on one doc still keep their sections apart, which is
@@ -65,7 +46,7 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
-import { MEETING_NOTES_HEADING } from './notes-doc-access.ts';
+import { notesTopicLevel } from './notes-heading-level.ts';
 import type { NotesSectionClaim } from './notes-heading-store.ts';
 
 /**
@@ -82,36 +63,43 @@ import type { NotesSectionClaim } from './notes-heading-store.ts';
 export const NOTES_CONTINUATION_WINDOW_MS = 4 * 60 * 60 * 1000;
 
 /**
- * Where the section both readers would use starts, or `-1` for a doc with no
- * `Meeting notes` heading at all.
+ * Where the section both readers would use starts, or `-1` for a doc no
+ * meeting has written a heading into.
  *
- * THE LAST ONE, because that is the one the client's `notesSectionStart` and
- * the server's finder both take. A "fits" answer about any other heading
- * would be an answer about a section nobody reads.
+ * THE LAST CLAIMED ONE. A doc may carry several meetings' headings by now;
+ * the one a new recording could continue is the newest, because writing into
+ * an earlier one would put today's words above a previous meeting's.
  */
-export function lastNotesHeadingIndex(outline: readonly prose.OutlineEntry[]): number {
+export function lastClaimedHeadingIndex(
+  outline: readonly prose.OutlineEntry[],
+  claims: ReadonlyMap<string, NotesSectionClaim>,
+): number {
   let at = -1;
   outline.forEach((e, i) => {
-    if (e.kind === 'heading' && e.text.trim() === MEETING_NOTES_HEADING) at = i;
+    if (e.kind === 'heading' && claims.has(e.id)) at = i;
   });
   return at;
 }
 
 /**
- * Where the notes section STOPS: the first heading at the notes heading's own
+ * Where a meeting's section STOPS: the first heading at that heading's own
  * level or above, or the end of the doc.
  *
  * THE LEVEL IS THE WHOLE RULE, and neither "the next heading" nor "the end of
- * the doc" is right on its own. Every topic heading a meeting writes lives
- * INSIDE the section — the instructions ask for `###` under the `## Meeting
- * notes` — so stopping at the next heading of any level would read a full set
- * of minutes as an empty section and reuse it. Running to the end of the doc
- * instead reads whatever section comes AFTER the notes as though it were part
- * of them, so one authored paragraph in an unrelated section three headings
- * later refuses a notes section that is genuinely free.
+ * the doc" is right on its own. A topic heading the meeting wrote under its
+ * own is deeper, so stopping at the next heading of any level would read a
+ * full set of minutes as an empty section and reuse it. Running to the end of
+ * the doc instead reads whatever section comes AFTER the notes as though it
+ * were part of them, so one authored paragraph in an unrelated section three
+ * headings later refuses a section that is genuinely free.
+ *
+ * THE LEVEL IS NEVER ASSUMED. An entry with no level of its own is read at
+ * the level THIS DOC writes its sections at (`notes-heading-level.ts`), not
+ * at two — a doc whose sections are `###` had every one of its headings read
+ * as deeper than a section and swallowed.
  */
 export function notesSectionEnd(outline: readonly prose.OutlineEntry[], at: number): number {
-  const level = outline[at]?.level ?? 2;
+  const level = outline[at]?.level ?? notesTopicLevel(outline);
   for (let i = at + 1; i < outline.length; i++) {
     const entry = outline[i];
     if (entry?.kind === 'heading' && (entry.level ?? 0) <= level) return i;
@@ -119,53 +107,34 @@ export function notesSectionEnd(outline: readonly prose.OutlineEntry[], at: numb
   return outline.length;
 }
 
-/** Whether anything at all sits under the doc's last notes heading. An empty
- *  section fits every topic, which is the case that shipped first. */
-export function notesSectionIsEmpty(outline: readonly prose.OutlineEntry[]): boolean {
-  const at = lastNotesHeadingIndex(outline);
-  if (at < 0) return false;
-  return notesSectionEnd(outline, at) === at + 1;
-}
-
 /**
- * Whether the doc's existing notes section is one new minutes may write into.
- *
- * `claims` is every section a meeting has recorded on this doc, by heading
- * block id — the in-process memory's own adoptions plus whatever the heading
- * store holds from earlier meetings and earlier processes — each carrying the
- * moment its meeting stopped, where one was recorded. A caller with no such
- * record passes an empty map, which is the honest state for a note-taker
- * built without a store: it can only see the doc.
+ * Whether the last claimed section is one new minutes may carry on under.
  *
  * `now` is only ever compared against a recorded stop, so a test says how
  * long ago a meeting ended by writing the record, not by moving a clock.
  *
- * `true` on a doc with NO notes heading as well: there is nothing to be
- * stranded by and nothing to write into by mistake, so the composer opens the
- * section itself exactly as it always has.
+ * `true` on a doc with NO claimed heading as well: there is nothing to be
+ * stranded by and nothing to write into by mistake, so the meeting starts a
+ * topic of its own exactly as a meeting on a fresh doc does.
  */
 export function notesSectionFits(
   outline: readonly prose.OutlineEntry[],
   claims: ReadonlyMap<string, NotesSectionClaim> = new Map(),
   now: number = Date.now(),
 ): boolean {
-  const at = lastNotesHeadingIndex(outline);
+  const at = lastClaimedHeadingIndex(outline, claims);
   if (at < 0) return true;
   // Where this section ends. Everything past it belongs to some other part of
   // the doc and says nothing about whether these minutes may be written here.
   const end = notesSectionEnd(outline, at);
   // NOTHING UNDER IT FITS EVERY TOPIC, AND THIS IS ASKED FIRST — before the
-  // claim, deliberately. A meeting that opened a section and then wrote
+  // claim, deliberately. A meeting that opened a heading and then wrote
   // nothing beneath it (it was cut short, every tick was refused, the room
   // said nothing worth a bullet) leaves a claimed but empty heading. Asked
   // the other way round, the claim rejected it and the next meeting opened a
-  // SECOND `Meeting notes` heading directly under an identical empty one —
-  // which is precisely the duplicate-heading shape this whole rule exists to
-  // prevent, arrived at from the other side.
-  //
-  // Nothing is lost by adopting it: an empty section holds no minutes to
-  // merge two conversations into, so the 2026-08-31 rule has nothing to
-  // protect here.
+  // SECOND heading directly under an identical empty one — which is precisely
+  // the duplicate-heading shape this whole rule exists to prevent, arrived at
+  // from the other side.
   if (end === at + 1) return true;
   const id = outline[at]?.id;
   const claim = id === undefined ? undefined : claims.get(id);
@@ -177,19 +146,11 @@ export function notesSectionFits(
   // Once it has stopped, the section is the doc's minutes, and a recording
   // started inside the window is the same conversation continuing into them.
   // A meeting with no stop recorded is still running as far as anything on
-  // disk can say — including one the process died under, where opening a
-  // section of its own is the older behaviour and the safe one.
-  if (claim !== undefined) {
-    return claim.endedAt !== undefined && now - claim.endedAt <= NOTES_CONTINUATION_WINDOW_MS;
-  }
-  for (let i = at + 1; i < end; i++) {
-    const entry = outline[i];
-    if (!entry) continue;
-    // Authorship is a WEAKER signal than the record and is kept only for the
-    // window where it is still true: a meeting writing right now, on a
-    // note-taker with no heading store. It never fires for a meeting that has
-    // stopped, because starting the next one releases every claim.
-    if (entry.author !== undefined) return false;
-  }
-  return true;
+  // disk can say — including one the process died under, where starting a
+  // topic of its own is the older behaviour and the safe one.
+  // A claimed heading with no claim behind it means the doc changed under the
+  // caller between the two reads. Treat it as the document's own — the answer
+  // that writes nowhere rather than the one that writes into somebody's page.
+  if (claim === undefined) return false;
+  return claim.endedAt !== undefined && now - claim.endedAt <= NOTES_CONTINUATION_WINDOW_MS;
 }

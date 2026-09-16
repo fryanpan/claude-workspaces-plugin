@@ -16,7 +16,9 @@
  * numbers a chunk, bounded at about two minutes, in memory, never serialized
  * — so what "costs nothing when off" now means is that nothing reaches the
  * client, not that nothing is allocated. Its arithmetic is only valid while
- * one stream feeds it; the relay's `ledgerTrusted` is where that is tracked.
+ * one stream feeds it, so the relay keeps ONE LEDGER PER STREAM rather than one
+ * per meeting; `ledgerTrusted` is where a connection that has since dropped a
+ * frame — and so counts different audio from the client — is tracked.
  *
  * TIMINGS ONLY, NEVER CONTENT. Every field below is a number. No transcript
  * text, no doc id, no title, no path crosses this module, and the CSV it

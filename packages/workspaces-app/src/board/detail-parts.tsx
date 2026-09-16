@@ -19,6 +19,7 @@
 import type { RefObject } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { attachMarkdownComposer, focusMarkdownComposer } from '../md-composer.ts';
+import { clearNotSent, markNotSent } from '../not-sent.ts';
 import { type TaskDiscussion } from './board-detail-render.ts';
 import { commentRow, composerTarget, discussionStream } from './board-discussion-render.ts';
 import type { BoardReviewItem } from './board-model.ts';
@@ -106,10 +107,13 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
   // second tap, and a form can still be submitted around them (Enter in the
   // field, a programmatic submit). The guard has to be on the handler.
   let busy = false;
-  const onSubmit = (ev: Event): void => {
-    ev.preventDefault();
+  // `retryText` is the words a failed attempt is re-sending. Without it a
+  // retry would post whatever the box holds by then — which, for a reader who
+  // started the next sentence while the first was in flight, is not the one
+  // that failed.
+  const attempt = (retryText?: string): void => {
     const cur = latest();
-    const text = ta.value.trim();
+    const text = retryText ?? ta.value.trim();
     if (!text) {
       // Not a silent no-op. An empty submit used to do literally nothing —
       // enabled button, no message — which reads as a broken control rather
@@ -129,16 +133,28 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
     // since, which is why the guard is about what is IN the box rather than
     // about which node it is. Under the island this box KEEPS ITS NODE across
     // a repaint, so "the live box" and "this box" are the same element.
-    ta.value = '';
-    refreshComposer();
-    const putBack = (): void => {
-      if (ta.value.trim() !== '') return;
-      ta.value = text;
+    // Emptied only when the box still holds the words going out. A RETRY of
+    // an older attempt must not take away a sentence typed since.
+    if (ta.value.trim() === text) {
+      ta.value = '';
       refreshComposer();
+    }
+    // Put the words back AND say the send did not happen. The words alone
+    // were the whole report until now, and a box holding your sentence is
+    // exactly what a box you never sent from looks like.
+    const putBack = (): void => {
+      if (ta.value.trim() === '') {
+        ta.value = text;
+        refreshComposer();
+      }
+      markNotSent({ near: submit, field: ta, retry: () => attempt(text) });
     };
     void Promise.resolve(cur.onSubmit(text))
       .then((ok) => {
         if (cur.refused(ok)) putBack();
+        // A send that landed retires whatever the last one said about
+        // itself, so a stale "Not sent" never stands over a posted comment.
+        else clearNotSent(form);
       })
       .catch(() => {
         putBack();
@@ -149,6 +165,10 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
         submit.disabled = false;
         latest().onBusy?.(false);
       });
+  };
+  const onSubmit = (ev: Event): void => {
+    ev.preventDefault();
+    attempt();
   };
   form.addEventListener('submit', onSubmit);
   // Cmd+Enter sends (Ctrl+Enter off a Mac). The listener sits on the textarea

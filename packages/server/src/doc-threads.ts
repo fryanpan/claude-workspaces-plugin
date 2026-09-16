@@ -1,5 +1,6 @@
 import {
   type Anchor,
+  type DeliveryStamp,
   type ReviewAnswerUndone,
   type ReviewItemJudgement,
   type ReviewPayload,
@@ -18,6 +19,7 @@ import {
   postReply as schemaPostReply,
   replaceAnchor as schemaReplaceAnchor,
   setStatus as schemaSetStatus,
+  setCommentDelivered,
   setCommentReview,
   setCommentText,
   storedJudgement,
@@ -419,6 +421,39 @@ export class DocThreads {
     }
     const after = this.getThread(docId, threadId);
     return after ? { ok: true, thread: after } : { ok: false, error: 'not-found' };
+  }
+
+  /**
+   * Record that a live agent session was handed this comment — the second
+   * tick the comment's author sees.
+   *
+   * `docForRead` — the hydrate that binds NOTHING — and neither of the two
+   * neighbouring lookups, for one reason each. `residentDoc` was wrong
+   * because the caller that sets most receipts is the heartbeat handing a
+   * PARKED comment to a session that attached late, by which time the doc may
+   * have been evicted or the server restarted: the stamp silently did nothing
+   * and the author kept one tick forever. And `doc` (the full hydrate) is
+   * wrong because re-arming a file binding is how a heartbeat comes to open a
+   * cloud-synced file and block on it; a receipt is not worth that. Nothing
+   * here needs the binding: `deliveredAt` is thread metadata that never
+   * reaches the markdown, so it wants the `.ydoc` in memory and no file at
+   * all. A doc whose `.ydoc` is genuinely gone costs a tick, which is the
+   * right price.
+   *
+   * Fires no event of its own. The write lands on the same ydoc every open
+   * editor is synced to, so a doc page repaints from the sync; the BOARD
+   * reads its discussion over REST and is told separately, by the
+   * `comment.delivered` frame the caller broadcasts.
+   */
+  markCommentDelivered(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    at: number,
+  ): DeliveryStamp {
+    const doc = this.p.docForRead(docId);
+    if (!doc) return 'gone';
+    return setCommentDelivered(doc.ydoc, threadId, commentId, at);
   }
 
   /**

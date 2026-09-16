@@ -92,6 +92,7 @@ export function createBoardDiscussion(deps: BoardDiscussionDeps): BoardDiscussio
           author?: { name?: string };
           text?: string;
           ts?: number;
+          deliveredAt?: number;
           review?: ReviewPayload;
         }>;
       }>;
@@ -112,6 +113,9 @@ export function createBoardDiscussion(deps: BoardDiscussionDeps): BoardDiscussio
         author: c.author?.name ?? 'Someone',
         text: c.text ?? '',
         ts: c.ts ?? Date.now(),
+        // The receipt the row draws. Absent from an older server's payload,
+        // and the row then shows one tick rather than a mark it cannot justify.
+        ...(typeof c.deliveredAt === 'number' ? { deliveredAt: c.deliveredAt } : {}),
         // Forwarded, not re-validated: the server refuses a malformed
         // declaration at the write, and re-deciding here would be a second
         // copy of one rule free to drift from the first.

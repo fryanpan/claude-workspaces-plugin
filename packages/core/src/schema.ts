@@ -207,12 +207,18 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
         const edits = readCommentEdits(c.get('edits'));
         const voice = readVoiceNote(c.get('voice'));
         const via = readWriteVia(c.get('via'));
+        // Written by the server alone, and read as defensively as everything
+        // else on this map: a non-number degrades to "not delivered yet",
+        // which is the state a renderer can always draw.
+        const deliveredRaw = c.get('deliveredAt');
+        const deliveredAt = typeof deliveredRaw === 'number' ? deliveredRaw : undefined;
         comments.push({
           id,
           author,
           text,
           ts,
           ...(via ? { via } : {}),
+          ...(deliveredAt !== undefined ? { deliveredAt } : {}),
           ...(voice ? { voice } : {}),
           ...(review ? { review } : {}),
           ...(edits ? { edits } : {}),

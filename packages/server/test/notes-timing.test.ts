@@ -44,6 +44,7 @@ const row = (over: Partial<NotesTickTiming> = {}): NotesTickTiming => ({
   edits: 1,
   blocks: 1,
   merged: 1,
+  dropped: [],
   outcome: 'written',
   settledToWrittenMs: 2000,
   spokenToWrittenMs: null,

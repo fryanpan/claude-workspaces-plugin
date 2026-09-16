@@ -1,5 +1,7 @@
 export * from './types.ts';
 export * from './schema.ts';
+export * from './comment-receipt.ts';
+export * from './comment-delivery.ts';
 export * from './identity.ts';
 export * from './lcs.ts';
 export * from './markdown-blocks.ts';

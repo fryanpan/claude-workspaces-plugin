@@ -77,8 +77,11 @@ const DEFERRALS: ReadonlyArray<Deferral> = [
   { re: /\b(?:tell|show)\s+me\s+(?:which|what|whether|if)\b/i, phrase: 'tell me which' },
   { re: /\bsay\s+(?:if|whether)\b/i, phrase: 'say if', selfAddressed: true },
   { re: /\bif you (?:disagree|object|;d rather|'d rather|prefer)\b/i, phrase: 'if you disagree' },
-  { re: /\byours to (?:do|call|decide|overrule|answer|run|send)\b/i, phrase: 'yours to do' },
-  { re: /\bon your queue\b/i, phrase: 'on your queue' },
+  {
+    re: /\byours to (?:do|call|decide|overrule|answer|run|send|take|rate|open|pick|choose)\b/i,
+    phrase: 'yours to do',
+  },
+  { re: /\b(?:on|in)\s+your\s+queue\b/i, phrase: 'on your queue' },
   { re: /\bneeds?\s+your\b/i, phrase: 'needs your' },
   {
     re: /\b(?:decision|answer|call|approval|input|ruling|word|steer)s?\s+from\s+you\b/i,
@@ -113,7 +116,7 @@ const OFFERED = /\b(?:want|shall|should|can|could|may|do)\s+(?:i|we|me|us)\b|\bw
  * Both are tested on the sentence the phrase sits in, and both only ever
  * SUPPRESS: a message with a second, real ask still counts on that one.
  */
-const NEGATED = /\b(?:nothing|nobody|none of|not asking)\b/i;
+const NEGATED = /\b(?:nothing|nobody|none of|not asking|not an ask)\b/i;
 const REPORTED = /\b(?:I|we)(?:'ve| have)?\s+(?:told|reminded|asked|answered|relayed|reported)\b/i;
 
 /**
@@ -162,10 +165,20 @@ export function proseOf(text: string): string {
  * care runs under.
  */
 function ownerPattern(owners: readonly string[]): RegExp | null {
-  const parts = owners
-    .map((o) => o.trim())
-    .filter((o) => o.length >= 2 && o.length <= 60)
-    .map((o) => o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const spellings = new Set<string>();
+  for (const owner of owners) {
+    const full = owner.trim();
+    if (full.length < 2 || full.length > 60) continue;
+    spellings.add(full);
+    // A lead writing a wait uses the name they SAY, which for a two-part
+    // name is the first part: measured on 157 closing notes, "waiting on
+    // <first name>'s answer" was the single commonest miss. Only the leading
+    // token, only when it is long enough to be a name rather than an
+    // initial — a one- or two-letter token would match half the prose.
+    const first = full.split(/\s+/)[0] ?? '';
+    if (first.length >= 3 && first !== full) spellings.add(first);
+  }
+  const parts = [...spellings].map((o) => o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   return parts.length === 0 ? null : new RegExp(`\\b(?:${parts.join('|')})(?:'s|’s)?\\b`, 'i');
 }
 

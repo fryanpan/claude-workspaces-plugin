@@ -25,7 +25,8 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 - Use only the `blockId` or `headingId` values that you get in the *document* in the return result
 - Edit only blocks marked "yours". An edit to a "theirs" block becomes a suggestion to the person. Do this only to correct an error.
 - Write one edit for each idea in the new speech. There is no maximum. Do not change notes that the new speech did not touch.
-- Put a note under the heading of its topic. If no heading covers the topic, add a "### " heading under the notes heading of this meeting. Do not make a second heading for a topic that has one.
+- Put a note under the heading of its topic, wherever in the document that heading is. If no heading covers the topic, add one for it, at the level the *document* section names. Do not make a second heading for a topic that has one.
+- If a heading no longer names what is under it, send `replace_block` on that heading with a better name. It reaches the person as a suggestion to accept. Never rewrite a heading to reorganize the page.
 - If the new speech CONTINUES something you already noted, write a NEW note for it. Most new speech continues something.
 - Replace a note only when the new speech CORRECTS it. Do not add a second note that disagrees.
 - A replacement is still one point of the same length. Never grow one note into a summary of the meeting so far.

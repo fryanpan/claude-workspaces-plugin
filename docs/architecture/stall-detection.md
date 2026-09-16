@@ -143,12 +143,51 @@ Home queue's own predicate (`isReviewItemOnQueue` for ticket items,
 `pendingDeclaration` minus a gated payload for comment-borne ones), so an
 answered, withdrawn, held or reader-asked-back item excuses nothing. A task
 whose status says the owner is waiting with nothing filed is
-`blocked-on-owner-unfiled`; a task whose NOTE says "waiting on Bryan" with
-nothing filed is a plain stall, and the lead hears about it on the ordinary
-clock. Between 2026-09-04 and 2026-09-08 a prose reader (`note-ask.ts`, a
+`blocked-on-owner-unfiled`. Between 2026-09-04 and 2026-09-08 a prose reader (`note-ask.ts`, a
 prefilter plus a Haiku confirmation) tried to recover the unfiled ask from
 the note itself; it was removed because a wait that has to be guessed from
 prose is a wait nobody filed, and the fix for that is to file it.
+
+**An unfiled wait may not EXCUSE the clock — which is not the same as
+inferring one.** This is the distinction the 2026-09-08 decision turns on, and
+the two directions are not symmetric.
+
+- *Inferring a wait to excuse a task* reads prose and PARKS the row: the clock
+  stops, nobody is woken, and if the reading was wrong the task dies quietly.
+  That is what was removed, and it stays removed. No bucket is ever set from
+  prose.
+- *Refusing an unfiled wait its movement credit* reads the same prose and
+  takes nothing but the note's own claim to be progress. The task keeps
+  running on the ordinary clock it was already on, and the worst a wrong
+  reading can do is tell the lead about a task that was fine. A wrong guess
+  costs one line in a frame the lead was already getting, not a lost task.
+
+So a note whose words ask a person, with nothing filed on that person's queue,
+does not reset the stall clock: the clock reads from the newest note that is
+NOT asking, which usually means the task reads as quiet since it was claimed.
+The same fix covers the second path a note has into the clock — `appendNote`
+sets `task.updatedAt` to the poster's own time, and `stall-wiring.ts` feeds
+every row's `updatedAt` into the event clock, so an asking note is excluded
+there too, the way an escalation's own write already was.
+
+Past the quiet window the task becomes a finding on the gate's `unfiled` list
+under its own bucket, `waiting-unfiled`, distinct from a plain stall because
+the remedy is different: somebody has to file the ask, not restart the work.
+The reader is `waiting-unfiled.ts`, and the judgement of "this asks" is
+`detectAsk` in `unfiled-ask.ts` — the same one the filing nudge uses, never a
+second reader.
+
+The same note WITH an open item filed on the task changes nothing: the note
+keeps its credit, the task is `blocked-on-owner`, and it is on no finding
+list. Filing is the whole difference.
+
+**The finding ages.** An unfiled wait the lead was told about and nobody filed
+goes up the ladder the README already has, a window later
+(`waiting-unfiled-escalation.ts`): Team Lead first, as ONE fleet-wide frame
+naming every such task; the owner's own queue only when Team Lead cannot be
+reached, and then as ONE review item listing every due task across every
+board, never one item per task. The item is revised in place as the list
+changes and withdraws itself once the last wait is filed.
 
 Known gap, deliberately open: nothing ages review items sitting unanswered
 on the owner's queue. That is a different signal (ask-aging, not

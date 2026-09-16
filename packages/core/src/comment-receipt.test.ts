@@ -1,0 +1,81 @@
+import { describe, expect, it } from 'vitest';
+import { type ReceiptComment, receiptHtml, receiptState } from './comment-receipt.ts';
+
+const mine = (over: Partial<ReceiptComment> = {}): ReceiptComment => ({
+  id: 'c1',
+  ts: 1000,
+  author: { id: 'u-bryan', name: 'Bryan' },
+  ...over,
+});
+
+const theirs = (over: Partial<ReceiptComment> = {}): ReceiptComment => ({
+  id: 'c2',
+  ts: 2000,
+  author: { id: 'agent-harborlight', name: 'Harborlight' },
+  ...over,
+});
+
+const reader = { id: 'u-bryan', name: 'Bryan' };
+
+describe('receiptState', () => {
+  it('marks the reader own comment sent once it is in the thread', () => {
+    expect(receiptState(mine(), [mine()], reader)).toBe('sent');
+  });
+
+  it('marks it received once the server stamped a delivery', () => {
+    const c = mine({ deliveredAt: 1500 });
+    expect(receiptState(c, [c], reader)).toBe('received');
+  });
+
+  it('draws nothing on somebody else comment', () => {
+    expect(receiptState(theirs(), [mine(), theirs()], reader)).toBeNull();
+  });
+
+  it('draws nothing for a reader who is nobody', () => {
+    expect(receiptState(mine(), [mine()], undefined)).toBeNull();
+  });
+
+  it('goes away once a reply from somebody else lands after it', () => {
+    const c = mine({ deliveredAt: 1500 });
+    expect(receiptState(c, [c, theirs()], reader)).toBeNull();
+  });
+
+  it('stays while the only later comment is the reader own', () => {
+    const c = mine({ deliveredAt: 1500 });
+    const second = mine({ id: 'c3', ts: 3000 });
+    expect(receiptState(c, [c, second], reader)).toBe('received');
+  });
+
+  it('stays when somebody else spoke BEFORE it — a reply is what comes after', () => {
+    const c = mine({ ts: 5000 });
+    expect(receiptState(c, [theirs(), c], reader)).toBe('sent');
+  });
+
+  it('identifies the reader by name when neither side carries an id', () => {
+    const c: ReceiptComment = { id: 'c1', ts: 1, author: { name: ' bryan ' } };
+    expect(receiptState(c, [c], { name: 'Bryan' })).toBe('sent');
+  });
+
+  it('trusts the id over the name when both sides carry one', () => {
+    const c: ReceiptComment = { id: 'c1', ts: 1, author: { id: 'agent-x', name: 'Bryan' } };
+    expect(receiptState(c, [c], reader)).toBeNull();
+  });
+});
+
+describe('receiptHtml', () => {
+  it('titles the two states the way the reader reads them', () => {
+    expect(receiptHtml('sent')).toContain('title="Sent"');
+    expect(receiptHtml('received')).toContain('title="Received"');
+  });
+
+  it('carries the state on the element, so one stylesheet rule shows the second tick', () => {
+    expect(receiptHtml('received')).toContain('data-receipt="received"');
+  });
+
+  it('draws both ticks in both states, so the time beside it never moves', () => {
+    for (const state of ['sent', 'received'] as const) {
+      const html = receiptHtml(state);
+      expect(html.match(/<path /g)).toHaveLength(2);
+    }
+  });
+});

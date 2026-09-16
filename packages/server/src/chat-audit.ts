@@ -83,6 +83,46 @@ export interface ChatAuditPublishInput {
   entries: ChatAuditEntryInput[];
 }
 
+/**
+ * How old the newest row about an agent may be before a read stops answering
+ * "how are you doing" and starts answering "nobody has looked".
+ *
+ * Forty-eight hours, which is two runs of a daily audit: one missed run is a
+ * blip, two is the job being down. It matters because the failure mode here
+ * is SILENT — the audit's launchd job failed every day for three weeks in
+ * 2026 and a session reading its count got `today: null` back and read that
+ * as a clean sheet. A number nobody has refreshed in nineteen days is not a
+ * zero, and this constant is what lets the read say so.
+ */
+export const AUDIT_STALE_AFTER_MS = 48 * 60 * 60_000;
+
+/**
+ * What the read knows about how fresh its own answer is.
+ *
+ * `current` — a row inside the window, so the counts mean something today.
+ * `stale` — rows exist but the newest is older than the window; the counts
+ * are a historical record, not a statement about now.
+ * `none` — nothing has ever been published about this agent, which is the
+ * same could-not-look answer wearing a different cause.
+ */
+export type ChatAuditCoverage = 'current' | 'stale' | 'none';
+
+/** What one agent reads about itself, freshness included. */
+export interface ChatAuditRead {
+  today: ChatAuditRow | null;
+  latest: ChatAuditRow | null;
+  /** Whether anybody has looked recently. */
+  coverage: ChatAuditCoverage;
+  /** TRUE for `stale` and `none` alike — the one field a caller has to read
+   *  to know the number in front of it is not an answer. */
+  couldNotLook: boolean;
+  /** How old the newest row is, in ms. Absent when there is none. */
+  latestAgeMs?: number;
+  /** The window `coverage` was judged against, so a reader need not know the
+   *  constant to explain the verdict. */
+  staleAfterMs: number;
+}
+
 /** Case/whitespace-insensitive agent-name key. */
 export function normalizeAgent(name: string): string {
   return name.trim().toLowerCase();
@@ -312,14 +352,18 @@ export class ChatAudit {
   }
 
   /**
-   * What one agent reads about itself: its latest published row, and the
-   * latest row whose audited day is `today` (null when no audit has covered
-   * today yet — a real answer, not a failure).
+   * What one agent reads about itself: its latest published row, the latest
+   * row whose audited day is `today`, AND how fresh that is.
+   *
+   * The freshness is the load-bearing part. `today: null` with `latest: null`
+   * used to be the whole answer for an agent nobody had ever audited, and for
+   * one whose audit job had been dead for three weeks — indistinguishable
+   * from a clean sheet, and read as one. `coverage` separates "the count is
+   * zero" from "nobody looked", and `couldNotLook` is the single field a
+   * caller has to read to tell them apart. The old two fields are unchanged,
+   * so nothing that reads them today has to move.
    */
-  readFor(
-    agent: string,
-    today: string,
-  ): { today: ChatAuditRow | null; latest: ChatAuditRow | null } {
+  readFor(agent: string, today: string): ChatAuditRead {
     const key = normalizeAgent(agent);
     let latest: ChatAuditRow | null = null;
     let todayRow: ChatAuditRow | null = null;
@@ -328,6 +372,18 @@ export class ChatAudit {
       if (!latest || row.ts >= latest.ts) latest = row;
       if (row.day === today && (!todayRow || row.ts >= todayRow.ts)) todayRow = row;
     }
-    return { today: todayRow, latest };
+    const base = { today: todayRow, latest, staleAfterMs: AUDIT_STALE_AFTER_MS };
+    if (!latest) return { ...base, coverage: 'none', couldNotLook: true };
+    // An unparseable `ts` reads as infinitely old rather than as fresh: a row
+    // this store cannot date is a row it cannot vouch for.
+    const at = Date.parse(latest.ts);
+    const ageMs = Number.isNaN(at) ? Number.POSITIVE_INFINITY : Math.max(0, this.now() - at);
+    const stale = ageMs > AUDIT_STALE_AFTER_MS;
+    return {
+      ...base,
+      coverage: stale ? 'stale' : 'current',
+      couldNotLook: stale,
+      ...(Number.isFinite(ageMs) ? { latestAgeMs: ageMs } : {}),
+    };
   }
 }

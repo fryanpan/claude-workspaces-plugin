@@ -14,6 +14,7 @@
     "./anchor/context": "./src/anchor/context.ts",
     "./prose": "./src/prose.ts",
     "./asset-manifest": "./src/asset-manifest.ts",
+    "./comment-receipt": "./src/comment-receipt.ts",
     "./done-when": "./src/done-when.ts",
     "./env-names": "./src/env-names.ts",
     "./machine-paths": "./src/machine-paths.ts",

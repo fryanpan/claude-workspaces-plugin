@@ -120,11 +120,24 @@ function takeNotes(docStore: DocStore, docId: string, markdown = NOTES): void {
  * external change these tests are about. `in-sync` is the binding saying the
  * bookkeeping caught up.
  */
+/**
+ * Longer than the 4s default, and the reason is the SHARD rather than the
+ * write-back. Every wait here is a poll, so on a quiet machine it costs
+ * nothing; what it buys is the case surviving a chunk that happens to hold
+ * several server-starting files. The suite's chunks are decided by a hash of
+ * the file list, so ADDING a test file anywhere reshuffles which files share
+ * a process with this one — this case failed on exactly that, with nothing in
+ * its own subsystem changed. The per-case timeouts below exist to let this
+ * one be bigger than bun's 5s default.
+ */
+const SETTLE_MS = 15_000;
+
 async function settled(docStore: DocStore, docId: string, path: string): Promise<void> {
-  await waitForFile(path, (text) => text.includes('Meeting notes'));
+  await waitForFile(path, (text) => text.includes('Meeting notes'), { timeout: SETTLE_MS });
   try {
     await waitFor(() => docStore.reconcileNow(docId) === 'in-sync', {
       describe: `${docId} write-back bookkeeping to catch up`,
+      timeout: SETTLE_MS,
     });
   } catch (err) {
     // A quarantined path cannot answer a reconcile at all, and the backoff
@@ -182,7 +195,7 @@ describe('a bound file that comes back short', () => {
     const err = docStore.getSyncError('d-short');
     expect(err?.message).toContain('no longer holds');
     expect(err?.message).toContain('clobber-backups');
-  });
+  }, 45_000);
 
   it('brings the section back when the backup is restored over the file', async () => {
     const { docStore, dataDir, path } = bind('d-restore');
@@ -200,7 +213,7 @@ describe('a bound file that comes back short', () => {
     expect(live(docStore, 'd-restore')).toContain(
       'The harbourmaster owns the re-tender, by Friday.',
     );
-  });
+  }, 45_000);
 
   it('keeps the copy when the section is SWAPPED rather than removed', async () => {
     const { docStore, dataDir, path } = bind('d-swap');
@@ -218,7 +231,7 @@ describe('a bound file that comes back short', () => {
     const kept = backups(dataDir);
     expect(kept).toHaveLength(1);
     expect(kept[0]).toContain('The harbourmaster owns the re-tender, by Friday.');
-  });
+  }, 45_000);
 
   it('keeps the copy when reparse_from_disk force-pulls over un-flushed notes', () => {
     const { docStore, dataDir, path } = bind('d-reparse');
@@ -233,7 +246,7 @@ describe('a bound file that comes back short', () => {
     expect(kept).toHaveLength(1);
     expect(kept[0]).toContain('The slipway quote came back at twice the budget.');
     expect(docStore.getSyncError('d-reparse')?.message).toContain('no longer holds');
-  });
+  }, 45_000);
 
   it('never refuses reparse_from_disk, whatever it drops', () => {
     // The verb documents the caller as declaring disk the winner, and is one
@@ -243,7 +256,7 @@ describe('a bound file that comes back short', () => {
     takeNotes(docStore, 'd-declared');
     expect(docStore.reparseFromDisk('d-declared')).toEqual({ ok: true });
     expect(readFileSync(path, 'utf8')).toContain('The slipway is the only item');
-  });
+  }, 45_000);
 
   it('rotates the oldest copies out rather than growing without bound', async () => {
     // The cap, driven for real: a directory already full of this doc's own
@@ -271,7 +284,7 @@ describe('a bound file that comes back short', () => {
     );
     expect(names).not.toContain(seeded(0));
     expect(names).toContain(seeded(24));
-  });
+  }, 45_000);
 
   it('keeps one copy, not two, when the same content is dropped twice', async () => {
     const { docStore, dataDir, path } = bind('d-twice');
@@ -288,7 +301,7 @@ describe('a bound file that comes back short', () => {
     expect(docStore.reconcileNow('d-twice')).toBe('apply');
 
     expect(backups(dataDir)).toHaveLength(1);
-  });
+  }, 45_000);
 });
 
 describe('an ordinary external edit raises no alarm', () => {
@@ -317,7 +330,7 @@ describe('an ordinary external edit raises no alarm', () => {
     // And nothing is raised at the person either.
     expect(docStore.getSyncError('d-edit')).toBeUndefined();
     expect(docStore.getDocStatus('d-edit')?.syncError).toBeUndefined();
-  });
+  }, 45_000);
 
   it('keeps nothing at all when the edit adds a whole new block', async () => {
     const { docStore, dataDir, path } = bind('d-add');
@@ -332,7 +345,7 @@ describe('an ordinary external edit raises no alarm', () => {
     expect(live(docStore, 'd-add')).toContain('The pontoon needs a survey');
     expect(backups(dataDir)).toHaveLength(0);
     expect(docStore.getSyncError('d-add')).toBeUndefined();
-  });
+  }, 45_000);
 
   it('keeps nothing when a bullet is appended, though that rewrites the list block', async () => {
     // Worth pinning because comparing BLOCKS makes this a removal: a list is
@@ -349,7 +362,7 @@ describe('an ordinary external edit raises no alarm', () => {
     expect(live(docStore, 'd-bullet')).toContain('the pontoon needs a survey');
     expect(backups(dataDir)).toHaveLength(0);
     expect(docStore.getSyncError('d-bullet')).toBeUndefined();
-  });
+  }, 45_000);
 
   it('keeps nothing at all when a reparse changes nothing', async () => {
     const { docStore, dataDir, path } = bind('d-noop');
@@ -360,7 +373,7 @@ describe('an ordinary external edit raises no alarm', () => {
     expect(live(docStore, 'd-noop')).toContain('Meeting notes');
     expect(backups(dataDir)).toHaveLength(0);
     expect(docStore.getSyncError('d-noop')).toBeUndefined();
-  });
+  }, 45_000);
 });
 
 describe('keeping a copy does not cost another', () => {
@@ -387,7 +400,7 @@ describe('keeping a copy does not cost another', () => {
     expect(live(docStore, 'd-stale')).not.toContain('Meeting notes');
     expect(docStore.getSyncError('d-stale')).toBeUndefined();
     expect(docStore.getDocStatus('d-stale')?.syncError).toBeUndefined();
-  });
+  }, 45_000);
 
   it('never lets one recovery copy overwrite another written the same millisecond', async () => {
     const { docStore, dataDir, path } = bind('d-collide');
@@ -416,7 +429,7 @@ describe('keeping a copy does not cost another', () => {
     expect(kept.some((t) => t.includes('The gate needs a new hinge'))).toBe(true);
     // And the names still sort oldest-first, which the rotation relies on.
     expect(backupNames(dataDir)).toEqual([...backupNames(dataDir)].sort());
-  });
+  }, 45_000);
 
   it('forgets a doc\u2019s de-dup entry when the doc is let go', async () => {
     const { docStore, dataDir, path } = bind('d-forget');
@@ -442,5 +455,5 @@ describe('keeping a copy does not cost another', () => {
     expect(docStore.reconcileNow('d-forget')).toBe('apply');
 
     expect(backups(dataDir)).toHaveLength(beforeSecondDrop + 1);
-  });
+  }, 45_000);
 });

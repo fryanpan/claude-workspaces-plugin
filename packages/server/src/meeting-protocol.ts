@@ -200,17 +200,22 @@ interface Conn {
    *  correlatable — that is `ledgerTrusted`. */
   wantsTiming: boolean;
   /**
-   * Whether an offset into the engine's stream can still be resolved against
-   * this connection's ledger.
+   * Whether an offset into an engine's stream can still be resolved against
+   * this connection's ledgers.
    *
-   * False for the two shapes that break the correlation: a combined capture,
-   * whose two engines each number audio from their own byte zero while one
-   * ledger counts both, and a connection that dropped a buffered frame, after
-   * which the two sides count different audio. It gates BOTH readers — the
-   * client's timing block and the notes pipeline's spoken clock — because the
-   * arithmetic they share is the thing that stopped being true. Refuse to
-   * measure rather than measure wrongly: null is the honest answer, and a
-   * number that is wrong by minutes is not.
+   * False for the shape that breaks the correlation: a connection that
+   * dropped a buffered frame, after which the two sides count different
+   * audio. It gates BOTH readers — the client's timing block and the notes
+   * pipeline's spoken clock — because the arithmetic they share is the thing
+   * that stopped being true. Refuse to measure rather than measure wrongly:
+   * null is the honest answer, and a number that is wrong by minutes is not.
+   *
+   * A COMBINED CAPTURE IS NO LONGER ONE OF THOSE SHAPES. It used to be, and
+   * that is why every mic + Mac-audio meeting recorded before this change has
+   * a null spoken clock on every tick: one ledger counted the bytes of both
+   * streams while each engine numbered audio from its own byte zero. The
+   * ledgers are now per stream (`ledgers` below), so each one counts exactly
+   * the audio its own engine was fed and the origins coincide again.
    */
   ledgerTrusted: boolean;
   /**
@@ -224,8 +229,19 @@ interface Conn {
    * `tagAudioFrame` in core.
    */
   tagged: boolean;
-  /** What was forwarded and when, once the meeting is live. */
-  ledger: AudioChunkLedger | null;
+  /**
+   * What was forwarded to each stream's engine and when, once the meeting is
+   * live — ONE LEDGER PER STREAM.
+   *
+   * Per stream and not per meeting because a ledger's whole arithmetic is
+   * "the engine counts audio milliseconds from the start of ITS stream, and
+   * we count the bytes we forwarded to it". A combined capture opens an
+   * engine session per stream, so one shared counter would be the sum of two
+   * streams against an offset into one of them — which is the bug this map
+   * exists to close. A single-stream meeting has one entry and is byte-for-byte
+   * what it always was.
+   */
+  ledgers: Map<MeetingStreamId, AudioChunkLedger> | null;
   /**
    * A stop that arrived while the handshake was still out, carrying whether
    * the socket is still there to be answered. Held as its own field rather
@@ -310,6 +326,37 @@ export type MeetingCloseCause =
   /** The transport reported no code — nothing to classify. */
   | 'unknown'
   | `code-${number}`;
+
+/**
+ * The endings that mean the MEETING is over rather than one leg of it.
+ *
+ * Everything not listed is treated as a drop the browser may reconnect from,
+ * which is the safe direction for the one reader of this set: a quality item
+ * held a little longer than it needed to be is a delay, and one filed while
+ * the person is still in the room is the failure the hold exists to prevent.
+ * `meeting-reconnect.ts` gives the window up after two minutes either way.
+ */
+const MEETING_OVER_CAUSES: ReadonlySet<MeetingCloseCause> = new Set<MeetingCloseCause>([
+  // The person pressed Stop.
+  'client-stop',
+  // The server timed the recording out for silence.
+  'silence',
+  // The socket closed the way a page leaving closes it.
+  'clean-close',
+  'tab-closed',
+  // A RESTART IS TERMINAL HERE even though the browser does try to resume
+  // across one, and the reason is which error is recoverable. The hold is an
+  // in-memory timer in a process that is about to exit, so holding through a
+  // restart loses the item outright if the resume does not land. Filing early
+  // costs at most an item the resumed meeting's own stop then REVISES — one
+  // item either way, and the wrong one is recoverable.
+  'server-restart',
+]);
+
+/** Whether the browser will try to pick this meeting back up. */
+export function legIsResumable(cause: MeetingCloseCause | undefined): boolean {
+  return cause === undefined ? false : !MEETING_OVER_CAUSES.has(cause);
+}
 
 /**
  * RFC 6455's codes, plus 1005/1006 which are never sent on the wire and are
@@ -453,7 +500,7 @@ export class MeetingRelay {
       ledgerTrusted: true,
       engineName: null,
       tagged: false,
-      ledger: null,
+      ledgers: null,
       pendingStop: null,
       cancelSilence: null,
       heardBytes: 0,
@@ -686,7 +733,7 @@ export class MeetingRelay {
     conn.meeting?.recordAudio(chunk, stream);
     // Recorded BEFORE the send: an engine may answer inside it, and the turn
     // it answers with has to find this chunk already in the ledger.
-    conn.ledger?.record(chunk.byteLength, recvMs, Date.now());
+    conn.ledgers?.get(stream)?.record(chunk.byteLength, recvMs, Date.now());
     conn.streams?.send(stream, chunk);
   }
 
@@ -951,15 +998,6 @@ export class MeetingRelay {
     conn.meeting = meeting;
     conn.engineName = engine.name;
     conn.tagged = streams.length > 1;
-    // ONE LEDGER CANNOT MEASURE TWO STREAMS. It correlates a turn to the chunk
-    // it ended in by an offset into the ENGINE's own stream, and a combined
-    // capture opens one engine per stream, each numbering audio from its own
-    // byte zero, while this ledger counts the bytes of both. So an offset
-    // resolves to about half the elapsed time and the error grows without
-    // bound over the meeting. Neither reader may use it: not the client's
-    // block, and not the spoken clock, which would otherwise report a word as
-    // spoken minutes before it was.
-    if (conn.tagged) conn.ledgerTrusted = false;
     // The notes pipeline exists for exactly the meeting's lifetime. Created
     // before the handshake so the closure below can feed it, but it holds no
     // resource until a turn arrives — abandoning it on a failed handshake
@@ -986,7 +1024,14 @@ export class MeetingRelay {
               notesDeps.onTickLifecycle?.(e);
             },
           },
-          { docId, meetingId: meeting.meetingId },
+          {
+            docId,
+            meetingId: meeting.meetingId,
+            // So the first bullet of a resumed leg reads the name the person
+            // already gave, rather than "Speaker A" for the rest of the
+            // meeting. Seeded, not replayed: nothing written is rewritten.
+            speakerNames: { ...meeting.speakerNames },
+          },
         )
       : null;
     conn.notes = notes;
@@ -1002,8 +1047,10 @@ export class MeetingRelay {
     // and cannot be an opt-in on a number that has to be true of ordinary
     // meetings. It is a bounded ring of four numbers a chunk, about two
     // minutes deep.
-    const ledger = new AudioChunkLedger(sampleRate);
-    conn.ledger = ledger;
+    const ledgers = new Map<MeetingStreamId, AudioChunkLedger>(
+      streams.map((stream) => [stream, new AudioChunkLedger(sampleRate)]),
+    );
+    conn.ledgers = ledgers;
     /**
      * When the last word of a frame was said, on this server's clock.
      *
@@ -1014,9 +1061,12 @@ export class MeetingRelay {
      * word offsets or the chunk has aged out of the ring — the notes timing
      * record then says it does not know, rather than guessing.
      */
-    const spokenAtOf = (audioEndMs: number | undefined): number | undefined => {
+    const spokenAtOf = (
+      stream: MeetingStreamId,
+      audioEndMs: number | undefined,
+    ): number | undefined => {
       if (audioEndMs === undefined || !conn.ledgerTrusted) return undefined;
-      const chunk = ledger.chunkAt(audioEndMs);
+      const chunk = ledgers.get(stream)?.chunkAt(audioEndMs);
       if (!chunk) return undefined;
       // `chunkAt` clamps an offset past the newest chunk to that chunk, so an
       // engine whose stream clock runs ahead of our byte count would
@@ -1068,7 +1118,7 @@ export class MeetingRelay {
             // handshake is awaited, and audio dropped during that wait
             // withdraws the permission after the fact.
             ...timingFor(
-              conn.wantsTiming && conn.ledgerTrusted ? ledger : null,
+              conn.wantsTiming && conn.ledgerTrusted ? (ledgers.get(turn.stream) ?? null) : null,
               turn.audioEndMs,
               turn.engineMs,
             ),
@@ -1087,7 +1137,7 @@ export class MeetingRelay {
           // progress, which is exactly the evidence that defers a pause tick.
           // Under the meeting's numbering, not the session's: the ids it
           // reports back on `notes_progress` are the ones the strip has.
-          notes?.onTurn({ ...turn, turn: turnId }, spokenAtOf(turn.audioEndMs));
+          notes?.onTurn({ ...turn, turn: turnId }, spokenAtOf(turn.stream, turn.audioEndMs));
         },
         onError: (message) => {
           // Scrubbed first: the vendor wrote this text, not us.
@@ -1113,7 +1163,7 @@ export class MeetingRelay {
       // append-only transcript.
       conn.pending = [];
       conn.pendingRecv = [];
-      conn.ledger = null;
+      conn.ledgers = null;
       conn.pendingStop = null;
       this.clearSilence(conn);
       this.log(
@@ -1175,6 +1225,13 @@ export class MeetingRelay {
       // What was actually opened, so the strip reports the session being
       // billed rather than the one it asked for.
       mode,
+      // The cast this doc already has names for, carried in whether this is
+      // a resume, a new meeting after a resume was refused, or an ordinary
+      // stop-and-start. The strip empties its own map when a meeting opens,
+      // so the server is the one place that can say the room is the same one.
+      ...(Object.keys(meeting.speakerNames).length > 0
+        ? { speakers: { ...meeting.speakerNames } }
+        : {}),
     });
   }
 
@@ -1217,7 +1274,7 @@ export class MeetingRelay {
     conn.tagged = false;
     conn.pending = [];
     conn.pendingRecv = [];
-    conn.ledger = null;
+    conn.ledgers = null;
     // Closing the session is what flushes the turn in progress, so the last
     // sentence of a meeting reaches `onTurn` — and therefore the file —
     // before the record is stopped.
@@ -1263,5 +1320,13 @@ export class MeetingRelay {
       turns: record.turns ?? 0,
       ...(reason !== undefined ? { reason } : {}),
     });
+    // AFTER the record is stopped, and only here: this is the first moment
+    // anything knows whether the conversation is over or whether a browser is
+    // about to reconnect to it. The notes sink holds a bad meeting's review
+    // item until this says the meeting is done with.
+    this.deps.notes?.onLegEnded?.(
+      { docId: meeting.docId, meetingId: record.meetingId },
+      { resumable: legIsResumable(cause ?? conn.endedCause ?? 'client-stop') },
+    );
   }
 }

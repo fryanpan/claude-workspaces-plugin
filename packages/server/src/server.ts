@@ -7,6 +7,7 @@ import {
   agentIdForName,
   attachmentIdOf,
   contentKind,
+  hashToColor,
   isReviewPayloadGated,
   parseThreadReviewItemId,
   pendingDeclaration,
@@ -486,6 +487,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
             backlinksFor: (ref) => taskStore.backlinksFor(ref),
             addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
             fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(docStore, docId, review, actor),
+            // A meeting that crosses another bar after its item exists
+            // rewrites those words rather than raising a second ask. The
+            // same two revise paths every other server-filed item uses.
+            reviseReviewItem: (taskId, itemId, patch, o) =>
+              taskStore.reviseReviewItem(taskId, itemId, patch, o),
+            reviseOnDoc: (docId, threadId, commentId, patch, actor) =>
+              docStore.reviseCommentReview(docId, threadId, commentId, patch, {
+                // Only the NAME reaches the revision stamp; the rest is the
+                // `User` shape the doc side takes.
+                actor: {
+                  id: actor.id,
+                  name: actor.name,
+                  kind: 'known',
+                  color: hashToColor(actor.name),
+                },
+              }),
           }),
           // Where "pull up last week's notes" looks. Board docs and when
           // each last carried a meeting; the meeting's own doc is dropped

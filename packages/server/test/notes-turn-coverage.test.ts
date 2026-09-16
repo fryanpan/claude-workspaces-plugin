@@ -29,8 +29,13 @@
 import { describe, expect, it } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
 import type { NotesComposeInput } from '../src/meeting-notes.ts';
-import { MEETING_NOTES_HEADING } from '../src/notes-doc-access.ts';
-import { addNotes, createNotesTickHarness, notesItems } from './notes-tick-harness.ts';
+
+import {
+  SCRIPT_TOPIC,
+  addNotes,
+  createNotesTickHarness,
+  notesItems,
+} from './notes-tick-harness.ts';
 
 /** One thing said, and what the notes owe it. */
 interface Line {
@@ -293,7 +298,7 @@ describe('turn coverage over a scripted three-minute meeting', () => {
       LINES.filter((l) => l.note === null).length,
     );
     expect(h.errors).toEqual([]);
-    expect(h.countHeadings(MEETING_NOTES_HEADING)).toBe(1);
+    expect(h.countHeadings(SCRIPT_TOPIC)).toBe(1);
   });
 
   it('the last sentence of the meeting is one of the mapped turns', async () => {

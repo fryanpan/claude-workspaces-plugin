@@ -55,7 +55,7 @@ flowchart TB
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
-    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · keep-moving<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
+    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>keep-moving · waiting-unfiled<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts · server-starts.ts"]
@@ -439,6 +439,44 @@ items ride the doc record the page already reads — `linkedItems` on
 adds no fetch. The bar's measured height is `--doc-dock-h`, which `doc.css`
 takes out of `#shell` and adds to the composer, toast and phone comment sheet.
 
+**A comment that never reached the server says so, on the comment.** Every
+composer on every surface already handed the words back when a post was
+refused; none of them left anything standing to say why, so a box holding your
+sentence looked exactly like one you had never sent from.
+`workspaces-app/src/not-sent.ts` is the one affordance all of them now draw —
+a button reading "Not sent — tap to retry", beside the draft, clearing on a
+retry, on a send that lands, or on the next keystroke. It joins no data flow
+and reads no state: the four call sites (the board's `ComposerForm`, the doc
+card's reply and its folded answer field, the doc's new-comment composer) hand
+it the box, the control to sit beside, and the same send to run again. The
+widget says it in its own `composerNote`, for the bundle's sake. The server
+half is `server/src/comment-log.ts`, one stamped `[comment]` line per write
+through `docStore.postComment` — the choke point all three write paths share —
+carrying the doc, the thread, the author and the LENGTH of the text, never the
+text. Between them, the next lost comment can be told from one nobody sent.
+
+**And a comment that DID reach somebody says that too, on the comment.** The
+other half of the same question: one grey tick means the server has it, two
+mean a session watching the doc was handed it, and both disappear once a reply
+lands. The decision is `core/src/comment-receipt.ts` — pure, DOM-free, so the
+board, the review editor and (one day) the widget cannot come to disagree
+about what a tick means — and the durable fact is a write-once `deliveredAt`
+on the comment itself, stamped through `core/src/comment-delivery.ts` so it
+syncs, survives a reload and rides the REST threads payload the board already
+reads. The judgement is `server/src/comment-receipt.ts`, dependency-injected
+over `SseBus.agentsOn` because delivery means a LIVE stream, never a line in
+`agent-watches.json`; `stall-wiring.ts` calls it where it already knows a
+comment's board channels, and `recordDelivery` writes the stamp once and
+broadcasts a transient `comment.delivered` to pages on every channel the
+comment travelled. Its other caller is the heartbeat route's hand-over of a
+PARKED comment (`routes/workspace-attachments.ts`), which is where most second
+ticks are set: a comment written while nobody was listening reaches a session
+when that session attaches, and no doc event fires for it. On the client every app surface now draws its comment header
+through `workspaces-app/src/comment-view.ts`, one module owning the structure
+and the mark's position with a class-name variant per stylesheet — because a
+feature added to "comments" that reaches one surface out of four is the
+failure that module exists to make impossible.
+
 **The comment card stands where its comment will live.** In comment mode the
 composer is a card fixed to the right edge of the viewport at its element's
 height, joined to the element by a faint line, and on post it becomes the saved
@@ -670,6 +708,19 @@ write has had the last word: the tick path in `meeting-notes-doc.ts` (topic
 headings only) and `notes-cleanup-pass.ts` (both). It reads no transcript and
 composes nothing.
 
+`notes-group-tags.ts` sits beside it, in the same after-the-write position and
+for the same reason: a run of notes that all came from one voice carries its
+speaker tag on the bullet ABOVE them rather than on every line, and that is a
+fact about the whole group, which is built across several ticks and so cannot
+be decided from the one block an edit carries. It moves tags and never notes —
+grouping stays by topic, which is `notes-regroup.ts`'s business — and the move
+is reversible: a hoisted tag is written with the `g=<count>` marker
+(`core/speaker-tags.ts`) that nothing else writes, so a group gaining a second
+voice can hand every note its own tag back, and a group that has gained an
+untagged note the fold cannot account for is unfolded rather than guessed at. Like the tidy, it writes the
+document directly, and like the tidy it reads no transcript and composes
+nothing.
+
 `notes-cleanup-pass.ts` joins the same `notes-*` family and moves nothing in
 the picture either: it is the at-stop tidy-up, and it is deliberately not a
 second note-taking path — it reuses `NotesComposer`, the shared
@@ -744,7 +795,18 @@ write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a
 bad one on the task the doc belongs to, or on the doc itself when no task
-links it. Nothing under `routes/` is added: the
+links it. `notes-quality-filing.ts` sits between the pass and that filing and
+is the one arrow worth drawing: the stop of a recording LEG is not the end of
+a meeting (a dropped socket ends a leg and a resume carries the same meeting
+on), so the pass hands its reading there and the filer holds it until the
+socket layer says the meeting is over — one item per meeting, revised rather
+than duplicated when a later reading changes. `notes-written.ts` joins the pure end of that
+family and is the one box worth naming, because it answers WHICH BLOCKS ARE
+THE MEETING'S: the note-taker's authorship marks wherever they sit in the
+doc, union the section it opened. It reads a doc and returns markdown, writes
+nothing, and both the quality pass and the rerun harness address the notes
+through it — whole-doc note-taking means a heading id no longer names a
+meeting's output. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
 
@@ -761,8 +823,17 @@ the room is talking is honoured by the next tick and nothing in
 first pass — a cheap extract that enumerates a tick's points so the compose
 is handed a checklist — and every failure in it degrades to the original
 rather than to no notes. `notes-section-fit.ts` is the DOMAIN-tier rule for
-whether new minutes may write into the `Meeting notes` section that is
-already there; it sits beside `notes-edit-guard.ts` in the row below.
+whether new minutes may write into the section a meeting already owns — which
+it finds by the CLAIM the meeting recorded, not by a reserved heading name:
+there is no `Meeting notes` container any more, and notes land under the topic
+heading they belong to. Two modules joined that tier with it.
+`notes-heading-level.ts` derives the level a topic heading is written at from
+the document's own outline, so nothing in the notes path hardcodes `##`, and
+`notes-heading-rename.ts` decides whether a `replace_block` on a heading is a
+rename worth proposing — it comes out as a SUGGESTION whoever owns the block,
+via the `propose` flag on `prose.applyBlockEdits`, because renaming the page's
+furniture is a reader's call. All three sit beside `notes-edit-guard.ts` in
+the row below, which is where the rename is wired in.
 `notes-regroup.ts` joins that DOMAIN tier too, and is arithmetic rather than
 policy: it reads the outline a tick is about to be composed against, finds the
 topics whose flat run has reached the bar `notes-quality.ts` scores, and writes
@@ -827,7 +898,7 @@ owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `waiting-unfiled.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -1183,6 +1254,7 @@ the client module is chrome-free measurement with no UI of its own.
 - [meeting-assistant.md](meeting-assistant.md) — live transcription and notes on a pause-or-cadence clock.
 - [stall-check/](stall-check/README.md) — the stall check's design, what "working" means, and per-module criteria; [stall-detection.md](stall-detection.md) is the mechanics as they run today and why each layer exists.
 - [goal-projection.md](goal-projection.md) — the goal bar, the remainder, and when a goal lands.
+- [stall-detection.md](stall-detection.md) — gains two top-level modules and no new shape. `waiting-unfiled.ts` is pure: given a task's notes and the board's owner names it says which note the stall clock may read, so it sits in the domain tier beside `keep-moving.ts` and `stall-gate.ts` and calls `detectAsk` rather than reading prose itself. `waiting-unfiled-escalation.ts` is the aging half, a sibling of `stall-escalation.ts` in the same keep-moving box, sharing its `TeamLeadReach` and its filing actor; `stall-nudge.ts` calls it once per tick with the boards it has just read. Neither adds an edge the picture did not already draw.
 - [unfiled-ask.md](unfiled-ask.md) — the two top-level modules `unfiled-ask.ts` and `unfiled-ask-filing.ts`, which judge whether a closing message asked the board's owner something with nothing filed. They join the services tier beside `chat-audit.ts` and move nothing in the picture: one is pure text, the other one walk of the task store, and only `routes/dispatch-and-notes.ts` calls either. The doc carries the measured false-positive and false-negative rates, because the count they feed is unreadable without them.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
 - [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.

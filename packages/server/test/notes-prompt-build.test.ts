@@ -290,9 +290,13 @@ describe('notes prompt', () => {
     expect(volatile).toContain('b1 bullet');
   });
 
-  it('names which heading is this meeting’s, so a bullet has an id to go under', () => {
+  it('names the heading this meeting opened, without making it the box', () => {
+    // The id is still there — a continuing meeting needs somewhere it knows
+    // it may write — but it is named as where the meeting STARTED, beside the
+    // routing every tick gets.
     const { user } = buildNotesPrompt(input);
-    expect(user).toContain('notes are under heading h1.');
+    expect(user).toContain('opened heading h1.');
+    expect(user).toContain('insert_under_heading');
   });
 
   it('a block a person has touched reads as theirs, which is what gates a rewrite', () => {
@@ -308,14 +312,17 @@ describe('notes prompt', () => {
     expect(user).not.toContain('b9 bullet yours');
   });
 
-  it('asks for a section to be opened when the meeting has none', () => {
+  it('asks for a TOPIC heading when the meeting has none of its own', () => {
     const { user } = buildNotesPrompt({
       ...input,
       outline: [{ id: 'p1', kind: 'block', nodeName: 'paragraph', text: 'agenda' }],
       notesHeadingId: undefined,
     });
-    expect(user).toContain('NO notes section');
-    expect(user).toContain('## Meeting notes');
+    // The note goes under the heading it belongs to first; a topic is what a
+    // meeting starts when nothing there fits. No container either way.
+    expect(user).toContain('insert_under_heading');
+    expect(user).toContain('## <the topic in a few words>');
+    expect(user).not.toContain('Meeting notes');
   });
 
   it('an empty doc says so rather than rendering an empty table', () => {

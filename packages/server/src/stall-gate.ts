@@ -59,6 +59,7 @@ import {
   classifyOpenTasks,
 } from './keep-moving.ts';
 import { externalWaitActive } from './task-wait.ts';
+import { WAITING_UNFILED_BUCKET } from './waiting-unfiled.ts';
 
 /**
  * Twenty minutes (Bryan, 2026-08-27: "Detect at 20 minutes").
@@ -213,7 +214,14 @@ export interface StallUndeterminedRow {
 export interface StallVerdict {
   /** Work that should be moving and is not, quietest first. */
   stalled: StalledRow[];
-  /** Rows waiting on a person with no question filed where they would see it. */
+  /**
+   * Rows waiting on a person with no question filed where they would see it.
+   * Two ways in, told apart by `StalledRow.bucket`:
+   * `blocked-on-owner-unfiled` — the BOARD says a person owns the row —
+   * and `waiting-unfiled` — the row's own agent said so in its closing words
+   * (`waiting-unfiled.ts`). Same remedy, so one list; different evidence, so
+   * two words.
+   */
   unfiled: StalledRow[];
   /** Rows waiting on a person WITH the question filed — by address. Listed
    *  so the wait is checkable, not so anyone is woken. */
@@ -279,6 +287,13 @@ export interface EvaluateStallsInput {
    *  thread reads as abandoned. */
   threadActivity?: Map<string, number>;
   /**
+   * What each row's newest notes say (`waiting-unfiled.ts`), by row id. The
+   * caller does the reading; this gate and the classifier only consume the
+   * verdict. Absent leaves every note counting as movement, exactly as before
+   * the check existed.
+   */
+  noteClocks?: Map<string, import('./waiting-unfiled.ts').NoteClock>;
+  /**
    * Rows with an OPEN dispatch whose worktree watcher is WATCHING — and only
    * those. The caller must exclude a dispatch whose watcher failed to arm or
    * died: such a row's activity cannot be seen, so it keeps the ordinary
@@ -337,6 +352,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     quietMs,
     input.bands,
     input.threadActivity,
+    input.noteClocks,
   );
 
   // Which runnable rows the cap leaves out of reach — see `parallelismCap` on
@@ -400,7 +416,23 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // instead of hunting for someone to claim the row.
     const dispatched = watchingDispatches.has(row.id);
     let namedStalled = false;
-    if (row.stalled && dispatched) {
+    // Checked before every stall reading, because it is a DIFFERENT finding
+    // about the same silence and the lead's act differs. The row's own agent
+    // has said, in its closing words, that it is waiting on a person, and
+    // nothing is filed where that person reads — so the remedy is one call to
+    // file the ask (or one line saying there was no ask), not a hunt for
+    // somebody to pick the row up. It joins the `unfiled` list, which is the
+    // list whose whole meaning is "a person is being waited on and cannot
+    // see it", under its own bucket word so the frame says which of the two
+    // ways a row got there.
+    //
+    // On the ordinary quiet window, and the builder's doubled one does not
+    // apply: a dispatch says somebody is working, and an unfiled ask is a
+    // protocol breach whether or not work is happening around it.
+    if (row.waitingUnfiled && row.sinceActivityMs > quietMs) {
+      unfiled.push({ ...named, bucket: WAITING_UNFILED_BUCKET });
+      namedStalled = true;
+    } else if (row.stalled && dispatched) {
       if (row.sinceActivityMs > builderQuietMs) {
         stalled.push({ ...named, bucket: BUILDER_SILENT_BUCKET });
         namedStalled = true;

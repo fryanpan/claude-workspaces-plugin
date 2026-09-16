@@ -174,7 +174,9 @@ describe('which landed writes put words in', () => {
       ?.blocks.find((b) => b.kind === 'heading' && b.text.trim() === 'Meeting notes');
     if (section === undefined) throw new Error('fixture has no notes section');
     const got = landedWords(fixture, [
-      { op: 'replace_block', blockId: section.id, markdown: '## the pier needs a permit' },
+      // A heading replace at a DIFFERENT LEVEL: the guard refuses it outright
+      // rather than filing it as a rename, so nothing of it reaches the doc.
+      { op: 'replace_block', blockId: section.id, markdown: '#### the pier needs a permit' },
       { op: 'nest_blocks', leadBlockId: bullets[0]!, blockIds: [bullets[1]!] },
     ]);
     // A success for everything that asks whether the doc took the batch…
@@ -185,6 +187,23 @@ describe('which landed writes put words in', () => {
     );
     expect(store.readOutline('d')?.blocks.map((b) => b.text)).toContain('Meeting notes');
     expect(got.words).toBe(false);
+  });
+
+  // CONTROL FOR THE ONE ABOVE: the same shape of edit, at the SAME level, is a
+  // rename the guard files as a suggestion — it reaches the doc, so it is
+  // words. Without this, the case above would pass on a build that had
+  // stopped counting heading writes at all.
+  test('a rename filed as a suggestion IS words', () => {
+    const fixture = notesDoc('## Meeting notes\n\n### Topic\n\n- one\n- two\n- three\n');
+    const section = fixture.store
+      .readOutline('d')
+      ?.blocks.find((b) => b.kind === 'heading' && b.text.trim() === 'Meeting notes');
+    if (section === undefined) throw new Error('fixture has no notes section');
+    const got = landedWords(fixture, [
+      { op: 'replace_block', blockId: section.id, markdown: '## The pier permit' },
+    ]);
+    expect(got.skip).toBeNull();
+    expect(got.words).toBe(true);
   });
 
   // THE OUTCOME, NOT THE BATCH THE GUARD PASSED. A rewrite with nothing to

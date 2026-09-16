@@ -242,6 +242,70 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   five-reconnect meeting it means most of the minutes stop being editable by
   the hand that wrote them. **Left as measured; changing it is a separate
   decision, not a bug fix.**
+- **Held, since 2026-09-16: the meeting's quality item.** The at-stop quality
+  pass runs at every leg's stop, because `end()` is what runs it — so a
+  reconnecting meeting used to put a "the notes came out badly" item in front
+  of Bryan while he was still in the room, and file a SECOND one at the next
+  leg's stop. The pass no longer files: it hands its reading to
+  `notes-quality-filing.ts`, and the socket layer calls `onLegEnded` once the
+  record is stopped, which is the first moment anything knows how the leg
+  ended. A leg that ended the way a person ends a meeting (Stop, the silence
+  deadline, the tab closing) files at once; a leg that ended the way a network
+  ends one holds the reading for two minutes — the browser's own
+  `RECONNECT_WINDOW_MS` — and a resume inside that window cancels the hold and
+  throws the reading away, because the next stop reads the whole meeting's
+  notes. One meeting therefore files at most one item, after it is over, and a
+  later reading REVISES those words through `reviseReviewItem` (or
+  `reviseCommentReview`, for a doc no row links) rather than raising a second
+  ask. A refused revision leaves the standing item alone; it never becomes a
+  second filing. `notes-quality-timing.test.ts` drives it, and carries the
+  base policy as a live control.
+
+## A voice keeps its name across every session of a doc (2026-09-16)
+
+A diarization label belongs to an ENGINE SESSION: every session hands out "A"
+again, and a meeting now opens several — a reconnect, a stop and a restart, a
+two-stream capture, the three-hour chain. The name a person types belongs to
+the PEOPLE, and it used to be stored per meeting, so it covered exactly one
+leg. Measured on a two-person meeting of 15 September: four labels, two of
+them never named, and 87 of 140 attributed bullets pointing at a single
+nameless voice holding 63% of the words.
+
+- **The name map is the DOC's.** `docSpeakerNames` folds every `{meetingId,
+  speakers}` line of a doc's index in WRITE order, last word winning — write
+  order rather than meeting order so a rename addressed to a meeting that has
+  already ended is not overwritten by an older line of a newer meeting.
+- **A meeting opens knowing it.** `MeetingStore.open` carries those names into
+  every meeting, fresh or resumed, and `ActiveMeeting.speakerNames` is what the
+  relay reads: `ready` carries it to the strip, and `beginNotesSession` is
+  seeded with it so the first bullet of a new leg reads the name rather than
+  "Speaker A".
+- **A carried name is written down only when that voice speaks.** Seeding the
+  record at start would make it claim a cast the meeting never heard, and the
+  reassign roster is read off exactly that field. So `recordTurn` appends the
+  one `speakers` line the first time a carried label settles a turn — the same
+  append-only form a person's own naming takes.
+- **The strip no longer believes the cast dies with the meeting.** It still
+  empties its map when a meeting starts, because it cannot know on its own
+  that the new session's "A" is the same room; the server can, and refills it
+  on `ready` (and again after a refused resume, which clears the map a second
+  time).
+- **It is a carry, not a claim about acoustics.** Nothing here hears that a new
+  session's "A" is the same throat as the last one's. What settles the default
+  is which way the two errors fall: a carried name that is wrong is one a
+  person can see and retype, and an uncarried name is a transcript nobody can
+  trace at all.
+- **What this does NOT fix: a split INSIDE one leg.** A tuning-aware client's
+  Advanced Options default the speaker cap to UNCAPPED (Bryan's approved mock,
+  round 1 — `maxSpeakersFromTuning`), so the legacy `DEFAULT_ROOM_SPEAKERS = 2`
+  no longer applies to captures started from that panel, and an unbounded
+  diarizer on one far-field microphone is free to answer a change of posture
+  with a new letter. That is a product default and moving it is the owner's
+  call; the carry above cannot name a label the engine invented mid-leg.
+- **How a run is scored.** `bun run meeting:rerun` reports "Bullets on an
+  unnamed voice" beside its other measures, with the labels named
+  (`unnamedVoiceBullets`, `scripts/rerun-meeting-report.ts`). By hand:
+  `grep -oE '\[@(Room |Remote )?Speaker [^]]*\]' <notes.md> | sort | uniq -c`.
 
 ## A recording with nothing in it ends itself (2026-09-12)
 
@@ -1278,6 +1342,22 @@ carries a sentence that by definition never settled.
 meeting started`. It holds ids and a duration only. The tick timings start at
 the first pause, so until this line a slow first note looked the same as a
 quick one.
+
+**The notes a meeting is judged on are the blocks it WROTE, not a section.**
+Whole-doc note-taking files each note under the heading for its topic,
+wherever that heading already is, so a meeting on a prepared document opens no
+section of its own. Every reading keyed on a heading id then reads the tail
+and misses the rest: a real run on 2026-09-16 read 4 bullets and skipped the
+182 the same meeting had written elsewhere, and reported coverage over the 4.
+The address is now `notes-written.ts` — the note-taker's own authorship marks
+anywhere in the doc, union the section it opened, with the heading each note
+sits under brought along so the structure checks still see topics. The union's
+two halves cover each other: the marks find notes under somebody else's
+headings, and the section finds notes whose mark a person's edit or a markdown
+round trip took off. The at-stop quality pass and the tidy-up's
+"(unconfirmed)" scan both read the notes this way, and the rerun report prints
+the coverage reading over each slice so the change of definition is visible
+beside the change in the notes.
 
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw
@@ -2751,9 +2831,11 @@ sweep for the window closing silently and for dropping docs nobody has open.
 ## Measuring the latency (`?timing=1`)
 
 **How long a spoken word takes to become a word on the screen, and which hop
-spent it.** Off by default and costing nothing when off: without the flag the
-server allocates no ledger, reads no clock per audio chunk, and the wire is
-what it always was. Add `?timing=1` to a doc's address, start a meeting, and
+spent it.** Off by default, and nothing reaches the client when it is off: the
+wire is what it always was. The LEDGERS are not the readout and are built
+either way — the notes pipeline's spoken clock reads them on every ordinary
+meeting, and a latency figure that only existed on instrumented meetings would
+be no claim about the rest. Add `?timing=1` to a doc's address, start a meeting, and
 talk; a readout appears under the strip with the running p50/p95 and a CSV
 button. Nothing is sent anywhere — the samples live in the tab until someone
 downloads them, and no transcript text, doc id or path enters a sample, a
@@ -3035,10 +3117,20 @@ what is still running, because a line that only says what failed reads as a
 meeting that did not start. Only with nothing at all granted does the strip
 block, and then it carries both reasons.
 
-**Stage timing is off for a combined capture.** `AudioChunkLedger` correlates
-a turn to the chunk it ended in by an offset into ONE engine's stream, and two
-engines have two of those. `?timing=1` on a two-stream meeting is refused
-rather than measured against whichever stream wrote the ledger last.
+**Each stream carries its own ledger** (2026-09-16). `AudioChunkLedger`
+correlates a turn to the chunk it ended in by an offset into ONE engine's
+stream, and two engines have two of those — so the relay keeps one ledger per
+stream and resolves a turn against the ledger of the stream whose engine
+produced it. It used to keep one per meeting, counting the bytes of both
+streams against an offset into either, and rather than publish a number wrong
+by minutes it published none: `?timing=1` was refused on a two-stream meeting,
+and, far more expensively, the notes pipeline's SPOKEN CLOCK was null on every
+tick of every mic + Mac-audio meeting. That is the clock the ten-second
+last-word-to-note goal is written against, so the goal could be checked on
+solo meetings only — measured as null on 3 of 3 conversations recorded before
+the fix and populated on 10 of 10 mic-only ones. Both readers now answer on a
+combined capture; `packages/server/test/meeting-two-stream-spoken-clock.test.ts`
+drives the socket and reads the clock back out of the timing file.
 
 **Cost doubles per meeting-hour** while both streams run: two billed streaming
 sessions, each with its own diarization surcharge on a `conversation`.

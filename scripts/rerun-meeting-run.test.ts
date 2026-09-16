@@ -11,6 +11,9 @@
  * compose and for the spoken-ask capture on every tick; a cap that watched
  * only the composer let a run reach about twice the ceiling it was given.
  */
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { NotesMethod } from '../packages/core/src/notes-method.ts';
 import type { NotesComposeInput, NotesComposer } from '../packages/server/src/meeting-notes.ts';
@@ -22,12 +25,14 @@ import type { NotesComposeMeasure } from '../packages/server/src/notes-timing.ts
 import type { ReplayInput, ReplayTarget } from './replay-meeting-lib.ts';
 import type { RerunArgs } from './rerun-meeting-args.ts';
 import { bySegment, checkStreams, scheduleEdit, streamsOf } from './rerun-meeting-feed.ts';
+import type { RerunDeps } from './rerun-meeting-run.ts';
 import {
   audioLengthMs,
   billedTotals,
   makeRunDir,
   methodReader,
   runFolderName,
+  runRerun,
 } from './rerun-meeting-run.ts';
 import { SpendCapReached, createSpendMeter } from './rerun-meeting-spend.ts';
 import { engineFor, requireCapture } from './rerun-meeting.ts';
@@ -463,5 +468,72 @@ describe('the spoken-ask capture pass', () => {
   it('is handed straight back when it is there', () => {
     const extractor = { name: 'stub', extract: async () => [] } as unknown as TaskCaptureExtractor;
     expect(requireCapture(extractor)).toBe(extractor);
+  });
+});
+
+describe('a --compare that names nothing readable', () => {
+  /** A one-segment recording on disk, so the run gets as far as it can get
+   *  before anything bills. */
+  function recording(): ReplayTarget {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-rerun-compare-guard-'));
+    const path = join(dir, 'segment-1-mic.pcm');
+    writeFileSync(path, Buffer.alloc(32_000));
+    return {
+      dir,
+      docId: 'd-riverbend',
+      docName: 'Riverbend ferry review',
+      inputs: [
+        {
+          segment: 1,
+          stream: 'mic',
+          path,
+          sampleRate: 16_000,
+          startedAt: 0,
+          mode: 'conversation',
+          source: 'mic',
+        },
+      ],
+    };
+  }
+
+  it('is refused before the replay, not after it has billed for one', async () => {
+    // The refusal that matters is the one that happens before the money. A
+    // typo used to surface after the whole recording had been replayed, which
+    // spends the ceiling and then writes no report at all.
+    const reached: string[] = [];
+    await expect(
+      runRerun(
+        {
+          target: 'x',
+          method: 'original',
+          engine: 'mock',
+          doc: 'empty',
+          out: join(tmpdir(), 'cw-rerun-never'),
+          spendUsd: 50,
+          chunkMs: 20,
+          port: 0,
+          keep: false,
+          engineSpendOk: false,
+          compare: join(tmpdir(), 'cw-no-such-rerun-folder'),
+        } satisfies RerunArgs,
+        recording(),
+        { shape: 'empty', markdown: '', edits: [] },
+        {
+          composer: () => {
+            reached.push('composer');
+            throw new Error('the note-taker must not be built');
+          },
+          transcription: {
+            name: 'mock',
+            open: () => {
+              reached.push('engine');
+              throw new Error('the engine must not open');
+            },
+          } as unknown as RerunDeps['transcription'],
+          log: () => {},
+        },
+      ),
+    ).rejects.toThrow(/--compare/);
+    expect(reached).toEqual([]);
   });
 });
