@@ -102,6 +102,26 @@ export const SPEAKER_TAG_TURNS_PARAM = 't';
 export const SPEAKER_TAG_UNSURE_PARAM = 'unsure';
 
 /**
+ * The href parameter marking a mention that STANDS FOR THE NOTES UNDER IT —
+ * `speaker:B?t=10,12&g=1`.
+ *
+ * A group whose every note came from one voice used to carry the same tag on
+ * every line, which reads as a column of identical names down the left edge
+ * rather than as attribution. So the tag moves up onto the group's lead
+ * bullet and comes off the notes under it, and this parameter is what says
+ * the tag up there is doing that job.
+ *
+ * It has to be written down rather than inferred, because the move is
+ * REVERSIBLE and the reversal must not touch a tag nobody moved. A second
+ * voice joining the group means every note needs its own tag again, and the
+ * only notes that may be given the lead bullet's voice are the ones this
+ * pass took a tag off. A lead bullet the composer itself tagged is somebody
+ * introducing a topic; handing its name to the untagged notes beneath it
+ * would attribute words to a person who did not say them.
+ */
+export const SPEAKER_TAG_GROUP_PARAM = 'g';
+
+/**
  * The most turns a single mention is stamped with.
  *
  * A tick's turns for one voice are a handful; the cap exists for the tick
@@ -135,6 +155,9 @@ export interface SpeakerTagRef {
   /** A revision moved some of `turns` and not others, so which voice this
    *  mention belongs to is no longer known. */
   unsure: boolean;
+  /** This mention stands for the notes nested under its bullet as well as
+   *  for the bullet itself. See {@link SPEAKER_TAG_GROUP_PARAM}. */
+  group: boolean;
 }
 
 /** Turn ids as the href carries them: ascending, deduped, whole and
@@ -185,6 +208,9 @@ export interface SpeakerTagRefInit {
    * provenance and had none readable; nothing else needs it.
    */
   claimsTurns?: boolean;
+  /** Write the group marker: this tag speaks for the notes under its bullet.
+   *  See {@link SPEAKER_TAG_GROUP_PARAM}. */
+  group?: boolean;
 }
 
 /** `"B"` → `"speaker:B"`, and `"B"` plus turns → `"speaker:B?t=10,12"`. */
@@ -196,6 +222,7 @@ export function speakerTagHref(label: string, ref?: SpeakerTagRefInit): string {
   // Only meaningful beside a turn list — it says those turns disagree — so a
   // flag with nothing to be unsure ABOUT is dropped rather than written.
   if (ref?.unsure === true && turns.length > 0) params.push(`${SPEAKER_TAG_UNSURE_PARAM}=1`);
+  if (ref?.group === true) params.push(`${SPEAKER_TAG_GROUP_PARAM}=1`);
   const base = `${SPEAKER_TAG_SCHEME}${label}`;
   return params.length > 0 ? `${base}?${params.join('&')}` : base;
 }
@@ -218,6 +245,7 @@ export function parseSpeakerTagHref(href: string): SpeakerTagRef | null {
   let turns: readonly number[] = [];
   let claimsTurns = false;
   let unsure = false;
+  let group = false;
   if (q >= 0) {
     for (const part of rest.slice(q + 1).split('&')) {
       const eq = part.indexOf('=');
@@ -227,9 +255,10 @@ export function parseSpeakerTagHref(href: string): SpeakerTagRef | null {
         claimsTurns = true;
         turns = parseTurnList(value);
       } else if (key === SPEAKER_TAG_UNSURE_PARAM) unsure = value === '1';
+      else if (key === SPEAKER_TAG_GROUP_PARAM) group = value === '1';
     }
   }
-  return { label, turns, claimsTurns, unsure: unsure && turns.length > 0 };
+  return { label, turns, claimsTurns, unsure: unsure && turns.length > 0, group };
 }
 
 /**
@@ -320,6 +349,8 @@ export interface SpeakerTagMatch {
   claimsTurns: boolean;
   /** A revision moved some of `turns` and not others. */
   unsure: boolean;
+  /** The tag stands for the notes nested under its bullet too. */
+  group: boolean;
   /** The tag's visible text, sigil included and UNESCAPED — what a reader
    *  sees, and what a caller compares against a display name. */
   text: string;
@@ -352,6 +383,7 @@ export function findSpeakerTags(markdown: string): SpeakerTagMatch[] {
       turns: ref.turns,
       claimsTurns: ref.claimsTurns,
       unsure: ref.unsure,
+      group: ref.group,
       text: unescapeTagText(m[1] ?? ''),
       raw: m[0],
     });
@@ -603,6 +635,10 @@ export function normalizeSpeakerTags(
         // turns the mention into a bare tag and the NEXT one stamps it.
         claimsTurns: claims,
         unsure: tag.unsure,
+        // The marker rides through every re-render for the same reason the
+        // label does: it says what this mention IS, and canonicalizing a
+        // name is no reason to forget that it speaks for the notes under it.
+        group: tag.group,
       });
       if (want === tag.raw) return null;
       // Three reasons a tag gets rewritten, and only two of them are worth
@@ -654,7 +690,11 @@ export function renameSpeakerTags(
     // provenance rides through untouched — including an `unsure` flag, which
     // says something about where the words came from rather than about the
     // name and is not answered by giving the voice a new one.
-    const want = renderSpeakerTag(label, names, { turns: tag.turns, unsure: tag.unsure });
+    const want = renderSpeakerTag(label, names, {
+      turns: tag.turns,
+      unsure: tag.unsure,
+      group: tag.group,
+    });
     return tag.raw === want ? null : want;
   });
   return { markdown: next, replaced: changed };
@@ -741,12 +781,16 @@ export function reattributeSpeakerTags(
         return DROP_TAG;
       }
       moved++;
-      return renderSpeakerTag(only, opts.names, { turns: tag.turns });
+      return renderSpeakerTag(only, opts.names, { turns: tag.turns, group: tag.group });
     }
     // Already flagged by an earlier revision: nothing further to say.
     if (tag.unsure) return null;
     unsure++;
-    return renderSpeakerTag(tag.label, opts.names, { turns: tag.turns, unsure: true });
+    return renderSpeakerTag(tag.label, opts.names, {
+      turns: tag.turns,
+      unsure: true,
+      group: tag.group,
+    });
   });
   return { markdown: next, moved, unwrapped, unsure };
 }

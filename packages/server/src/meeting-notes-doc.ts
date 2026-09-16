@@ -101,6 +101,7 @@ import { repairNotesEditAddresses } from './notes-edit-address.ts';
 import { bulletNotesEdits } from './notes-edit-bullets.ts';
 import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
+import { retagNotesGroups } from './notes-group-tags.ts';
 import { notesTopicLevel } from './notes-heading-level.ts';
 import {
   type NotesHeadingStore,
@@ -835,6 +836,20 @@ export function applyNotesUpdate(
       console.log(
         `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
           `${tidied.emptied} topic heading with nothing under it removed`,
+      );
+    }
+    // A RUN OF NOTES FROM ONE VOICE CARRIES ONE NAME, ON THE BULLET ABOVE
+    // THEM. Run here rather than on the composed edits because a group is
+    // built across ticks and the decision needs the whole of it
+    // (`notes-group-tags.ts`). After the tidy, so a group whose last empty
+    // bullet has just been removed is judged at the size it now is.
+    const retagged = retagNotesGroups(doc.ydoc, section, { author: NOTES_AUTHOR_ID });
+    if (retagged.hoisted + retagged.cleared + retagged.restored > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${retagged.cleared} note tag${retagged.cleared === 1 ? '' : 's'} folded into ` +
+          `${retagged.hoisted} newly tagged lead bullet${retagged.hoisted === 1 ? '' : 's'}, ` +
+          `${retagged.restored} note given its own tag back`,
       );
     }
   }

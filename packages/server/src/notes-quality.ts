@@ -312,18 +312,29 @@ const QUESTION_WORDS =
 
 export function decisionsWithoutSpeaker(markdown: string): string[] {
   const out: string[] = [];
-  const walk = (bullets: NestedBullet[]): void => {
+  const walk = (bullets: NestedBullet[], inherited: boolean): void => {
     for (const bullet of bullets) {
       const claims = DECISION_WORDS.test(bullet.text) || QUESTION_WORDS.test(bullet.text);
-      if (claims && !attributedSomewhere(bullet)) out.push(bullet.text);
-      walk(bullet.children);
+      const here = SPEAKER_TAG.test(bullet.text);
+      if (claims && !inherited && !attributedSomewhere(bullet)) out.push(bullet.text);
+      walk(bullet.children, inherited || here);
     }
   };
-  walk(nestedBullets(markdown));
+  walk(nestedBullets(markdown), false);
   return out;
 }
 
-/** True when this bullet, or anything indented under it, names a speaker. */
+/**
+ * True when this bullet, or anything indented under it, names a speaker.
+ *
+ * AND A BULLET ABOVE IT COUNTS TOO — `inherited` in the walk. A run of notes
+ * from one voice carries its tag on the lead bullet rather than on every line
+ * (`notes-group-tags.ts`), so a decision one line under that tag IS
+ * attributed: the reader sees whose it is without scrolling. Reading only
+ * downwards reported every such decision as unattributed, which would have
+ * shown this bar falling on exactly the change that made the notes easier to
+ * read.
+ */
 function attributedSomewhere(bullet: NestedBullet): boolean {
   return (
     SPEAKER_TAG.test(bullet.text) || bullet.children.some((child) => attributedSomewhere(child))

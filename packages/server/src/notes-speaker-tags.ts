@@ -95,7 +95,7 @@ export function retagSpeakerInNotes(
  * One speaker tag as the DOC holds it: a contiguous run of delta ops sharing
  * one link href, plus what the href parses to.
  */
-interface SpeakerTagRun {
+export interface SpeakerTagRun {
   href: string;
   ref: SpeakerTagRef;
   /** The run's text, sigil included. */
@@ -104,7 +104,7 @@ interface SpeakerTagRun {
 
 /** What a caller wants a tag to become. `href: null` takes the link mark off
  *  entirely, which is how a claim is withdrawn while the words stay. */
-interface SpeakerTagRewrite {
+export interface SpeakerTagRewrite {
   text: string;
   href: string | null;
 }
@@ -132,87 +132,128 @@ function rewriteSpeakerTagRuns(
   for (const top of fragment.toArray()) {
     if (top instanceof Y.XmlElement) collectTextNodesWithin(top, within, nodes);
   }
-  if (nodes.length === 0) return { replaced: 0 };
+  return rewriteTagsInTextNodes(ydoc, nodes, decide);
+}
 
+/**
+ * The same rewrite over text nodes a caller has already chosen, rather than
+ * over a set of blocks.
+ *
+ * The grouping pass picks its nodes far more precisely than a block set can:
+ * it wants a bullet's OWN line and not the notes nested under it, which live
+ * inside the same block. Everything below the choice of nodes — the run
+ * accumulation, the marks each site carries, closing the gap a withdrawn
+ * mention leaves behind — is the same work, so it is this function and both
+ * callers reach it.
+ */
+export function rewriteTagsInTextNodes(
+  ydoc: Y.Doc,
+  nodes: readonly Y.XmlText[],
+  decide: (tag: SpeakerTagRun) => SpeakerTagRewrite | null,
+): { replaced: number } {
+  if (nodes.length === 0) return { replaced: 0 };
   let replaced = 0;
   ydoc.transact(() => {
     for (const node of nodes) {
-      const edits: Array<{
-        offset: number;
-        length: number;
-        attributes: Record<string, unknown>;
-        rewrite: SpeakerTagRewrite;
-      }> = [];
-      let run: {
-        offset: number;
-        length: number;
-        attributes: Record<string, unknown>;
-        text: string;
-        href: string;
-      } | null = null;
-      const flush = () => {
-        if (run) {
-          const ref = parseSpeakerTagHref(run.href);
-          if (ref) {
-            const rewrite = decide({ href: run.href, ref, text: run.text });
-            if (rewrite) {
-              edits.push({
-                offset: run.offset,
-                length: run.length,
-                attributes: run.attributes,
-                rewrite,
-              });
-            }
-          }
-        }
-        run = null;
-      };
-      let offset = 0;
-      for (const op of node.toDelta() as YTextOp[]) {
-        // A non-string insert is an embed: one position wide, and never a
-        // speaker tag. Counted so later offsets stay true.
-        if (typeof op.insert !== 'string') {
-          flush();
-          offset += 1;
-          continue;
-        }
-        const length = op.insert.length;
-        const attributes = op.attributes;
-        const href = (attributes?.link as { href?: unknown } | undefined)?.href;
-        if (typeof href === 'string' && run?.href === href) {
-          run.length += length;
-          run.text += op.insert;
-        } else {
-          flush();
-          if (typeof href === 'string') {
-            // The FIRST op's marks carry the whole replacement: the text is
-            // being written anew, so emphasis that covered part of the old
-            // spelling has nothing left to cover. The link mark, which is
-            // the one that matters, is on every op of the run by definition.
-            run = { offset, length, attributes: attributes ?? {}, text: op.insert, href };
-          }
-        }
-        offset += length;
+      const edits: Array<{ site: SpeakerTagSite; rewrite: SpeakerTagRewrite }> = [];
+      for (const site of tagSitesIn(node)) {
+        const rewrite = decide(site);
+        if (rewrite) edits.push({ site, rewrite });
       }
-      flush();
       // Descending, so every offset not yet used is still valid: an edit
       // only ever changes text at or after the site it lands on.
       for (let i = edits.length - 1; i >= 0; i--) {
-        const edit = edits[i]!;
-        node.delete(edit.offset, edit.length);
-        const text = edit.rewrite.text;
+        const { site, rewrite } = edits[i]!;
+        node.delete(site.offset, site.length);
+        const text = rewrite.text;
         if (text.length > 0) {
-          prose.insertTextWithMarks(node, edit.offset, text, {
-            attributes: attributesFor(edit.attributes, edit.rewrite.href),
+          prose.insertTextWithMarks(node, site.offset, text, {
+            attributes: attributesFor(site.attributes, rewrite.href),
           });
         } else {
-          closeTheGap(node, edit.offset);
+          closeTheGap(node, site.offset);
         }
         replaced++;
       }
     }
   }, 'agent');
   return { replaced };
+}
+
+/** A tag run plus where in its node it sits, and the marks the site carries. */
+export interface SpeakerTagSite extends SpeakerTagRun {
+  offset: number;
+  length: number;
+  /**
+   * The FIRST op's marks, which carry the whole replacement: the text is
+   * being written anew, so emphasis that covered part of the old spelling
+   * has nothing left to cover. The link mark, which is the one that matters,
+   * is on every op of the run by definition.
+   */
+  attributes: Record<string, unknown>;
+}
+
+/**
+ * Every speaker tag in one text node, in reading order.
+ *
+ * THE UNIT IS A RUN, NOT AN OP. A tag is not always one delta op: bold half
+ * a tag's name and Yjs carries it as two ops sharing the link href, and a
+ * loop treating each op as a whole tag writes the new name once per op. So
+ * contiguous ops with the SAME href accumulate into one run and the run is
+ * what gets replaced. (Two tags for one voice written back to back with
+ * nothing between them merge into one — markdown that says the same name
+ * twice in a row with no words between it.)
+ */
+export function tagSitesIn(node: Y.XmlText): SpeakerTagSite[] {
+  const out: SpeakerTagSite[] = [];
+  let run: {
+    offset: number;
+    length: number;
+    attributes: Record<string, unknown>;
+    text: string;
+    href: string;
+  } | null = null;
+  const flush = (): void => {
+    if (run) {
+      const ref = parseSpeakerTagHref(run.href);
+      if (ref) {
+        out.push({
+          href: run.href,
+          ref,
+          text: run.text,
+          offset: run.offset,
+          length: run.length,
+          attributes: run.attributes,
+        });
+      }
+    }
+    run = null;
+  };
+  let offset = 0;
+  for (const op of node.toDelta() as YTextOp[]) {
+    // A non-string insert is an embed: one position wide, and never a
+    // speaker tag. Counted so later offsets stay true.
+    if (typeof op.insert !== 'string') {
+      flush();
+      offset += 1;
+      continue;
+    }
+    const length = op.insert.length;
+    const attributes = op.attributes;
+    const href = (attributes?.link as { href?: unknown } | undefined)?.href;
+    if (typeof href === 'string' && run?.href === href) {
+      run.length += length;
+      run.text += op.insert;
+    } else {
+      flush();
+      if (typeof href === 'string') {
+        run = { offset, length, attributes: attributes ?? {}, text: op.insert, href };
+      }
+    }
+    offset += length;
+  }
+  flush();
+  return out;
 }
 
 /** The plain words of a `Y.XmlText`, embeds counted one position wide so an
