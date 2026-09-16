@@ -62,7 +62,22 @@ import { REVIEW_GATE_RELEASE_MS, type ReviewGateAddress } from './review-gate.ts
 import { DoneWhenReadyNudger } from './review-items/done-when-ready.ts';
 import { isReviewItemOnQueue, pendingQuestionOf } from './review-items/queries.ts';
 import type { SseBus } from './sse.ts';
-import { STALL_ESCALATION_ACTOR, StallEscalations } from './stall-escalation.ts';
+import {
+  STALL_ESCALATION_ACTOR,
+  StallEscalations,
+  type TeamLeadReach,
+} from './stall-escalation.ts';
+import { WaitingUnfiledEscalations } from './waiting-unfiled-escalation.ts';
+import { noteClocks as buildNoteClocks, ownerNamesFrom } from './waiting-unfiled.ts';
+
+/**
+ * How far apart a note's own timestamp and the `updatedAt` its arrival
+ * stamped may be and still be ONE action. The note carries the poster's clock
+ * and the stamp the store's, so they differ by the request's flight time.
+ * Five seconds, the same number and the same argument as
+ * `EVENT_TICK_EPSILON_MS` in `keep-moving.ts`.
+ */
+const NOTE_STAMP_EPSILON_MS = 5_000;
 import {
   type AskedBackRow,
   HELD_ITEM_DEFAULT_MS,
@@ -483,6 +498,17 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
             goals.map((g) => g.id).filter((id) => !ownerBand.has(id) && !triageGoals.has(id)),
           );
 
+    // What each row's newest notes say. Read HERE, once per board per tick,
+    // for the same reason the review items are: the gate and the classifier
+    // stay pure over state this wiring gathered. The owner names come off the
+    // board itself — whoever has moved a task on it as a person — so a wait
+    // written in the third person ("waiting on <name>'s read") is seen
+    // without this repo ever naming anybody.
+    const noteClocks = buildNoteClocks(tasks, ownerNamesFrom(tasks));
+    const askStampedUpdate = (t: Task): boolean => {
+      const askedAt = noteClocks.get(t.id)?.askedAt;
+      return askedAt !== undefined && Math.abs(t.updatedAt - askedAt) <= NOTE_STAMP_EPSILON_MS;
+    };
     const rows = tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -498,7 +524,18 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       // very row the item was filed about, withdraw the item, and file it
       // again a window later. The row's other clocks are untouched: a real
       // edit after ours moves `updatedAt` past this and counts as it should.
-      ...(escalationWroteAt(t).has(t.updatedAt) ? {} : { updatedAt: t.updatedAt }),
+      // …and unless the last thing to bump it was the row's own ASKING note.
+      // `appendNote` stamps `updatedAt` deliberately (the actor's work clock),
+      // so a note reaches this clock twice: once as a note, once as a row
+      // edit. Refusing the first and not the second would leave the wait
+      // resetting the stall clock exactly as it did before, which is the bug.
+      // Same shape as the escalation exclusion above, with a tolerance
+      // because the note carries the POSTER's clock and the stamp carries the
+      // store's; `EVENT_TICK_EPSILON_MS` in keep-moving.ts calls the same gap
+      // one action seen twice, for the same reason.
+      ...(escalationWroteAt(t).has(t.updatedAt) || askStampedUpdate(t)
+        ? {}
+        : { updatedAt: t.updatedAt }),
       ...(t.schedule !== undefined ? { schedule: t.schedule } : {}),
       ...(t.bodyWrittenAt !== undefined ? { bodyWrittenAt: t.bodyWrittenAt } : {}),
       ...(t.titleWrittenAt !== undefined ? { titleWrittenAt: t.titleWrittenAt } : {}),
@@ -610,6 +647,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       tasks: rows,
       events,
       reviewItems,
+      ...(noteClocks.size > 0 ? { noteClocks } : {}),
       bands: { dispatchable, ownerBand, triage: triageGoals },
       unreadableReviewTaskIds,
       now,
@@ -1040,23 +1078,25 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * (`stall-escalation.ts`). Driven by the nudger's tick because it reads the
    * same snapshot the wake does, on the same clock.
    */
+  /** How Team Lead is reached, built once: both escalations address the same
+   *  session on the same board, or neither does. */
+  const teamLeadReach: TeamLeadReach | undefined =
+    ctx.spawnerAgentId === undefined
+      ? undefined
+      : {
+          agentId: ctx.spawnerAgentId,
+          boards: () => taskStore.listWorkspaces().map((w) => w.id),
+          // The same addressed delivery the wake rides — `agentsOn` rather
+          // than `count`, for the reason the nudger below gives.
+          canReach: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+          send: (workspaceId, agentId, frame) =>
+            sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+        };
   const escalations = new StallEscalations({
     store: taskStore,
     dataDir,
     ...(ctx.stallEscalateMs !== undefined ? { escalateMs: ctx.stallEscalateMs } : {}),
-    ...(ctx.spawnerAgentId !== undefined
-      ? {
-          teamLead: {
-            agentId: ctx.spawnerAgentId,
-            boards: () => taskStore.listWorkspaces().map((w) => w.id),
-            // The same addressed delivery the wake rides — `agentsOn` rather
-            // than `count`, for the reason the nudger below gives.
-            canReach: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
-            send: (workspaceId, agentId, frame) =>
-              sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
-          },
-        }
-      : {}),
+    ...(teamLeadReach !== undefined ? { teamLead: teamLeadReach } : {}),
   });
   /**
    * The measurement (`keep-moving-verdict.ts`), fed the SAME snapshots the
@@ -1094,6 +1134,20 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     taskUrl: (workspaceId, taskId) =>
       `${ctx.externalBaseUrl?.() ?? ''}${taskDeepLink(workspaceId, taskId)}`,
   });
+  /**
+   * The aging half of the unfiled-wait check: a task whose agent said it is
+   * waiting on a person, that its lead was told about a window ago and nobody
+   * has filed, goes to Team Lead and then — only if Team Lead cannot be
+   * reached — onto the owner's queue, as ONE item for the whole server
+   * (`waiting-unfiled-escalation.ts`). Same Team Lead reach the dead-board
+   * escalation uses, built once so the two cannot address different sessions.
+   */
+  const waitingUnfiled = new WaitingUnfiledEscalations({
+    store: taskStore,
+    dataDir,
+    ...(ctx.stallNudgeQuietMs !== undefined ? { agingMs: ctx.stallNudgeQuietMs } : {}),
+    ...(teamLeadReach !== undefined ? { teamLead: teamLeadReach } : {}),
+  });
   const stallNudger = new StallNudger({
     snapshot: () => {
       const snapshots = taskStore.listWorkspaces().map(stallSnapshot);
@@ -1126,6 +1180,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // missed check-in.
     ...(ctx.checkInMs !== undefined ? { checkInRepeatMs: ctx.checkInMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
+    escalateFleet: (boards, now) => waitingUnfiled.onTick(boards, now),
     // Prod restarts at every merge; without this each deploy would re-fire one
     // wake per board over rows their leads had already been told about.
     stampFile: join(dataDir, STALL_NUDGE_STAMP_FILENAME),

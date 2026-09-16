@@ -23,6 +23,7 @@ import { normalizeAgent } from './chat-audit.ts';
 import { isReviewItemOnQueue } from './review-items/queries.ts';
 import type { TaskStatus, TaskStore } from './tasks.ts';
 import type { FilingState } from './unfiled-ask.ts';
+import { OWNER_NAMES_CAP } from './waiting-unfiled.ts';
 
 /** Tasks whose review items can still be waiting on somebody. A done task's
  *  item is not on anybody's queue, and archived tasks are off the board. */
@@ -32,9 +33,6 @@ const OPEN_STATUSES: ReadonlyArray<TaskStatus> = ['triage', 'todo', 'in-progress
  *  open first: a person whose tasks are all finished is still a person, but
  *  when the cap below bites it should drop them rather than somebody active. */
 const NAMING_STATUSES: ReadonlyArray<TaskStatus> = [...OPEN_STATUSES, 'done'];
-
-/** How many people's names the third-person wait check knows. */
-const OWNER_NAMES_CAP = 8;
 
 /**
  * What `agent` has filed on this board: an item still open on the owner's

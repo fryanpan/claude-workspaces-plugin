@@ -99,6 +99,8 @@ export interface EscalatedRow {
  *  not there, and `ready-unpicked` is vocabulary from a different audience. */
 const BUCKET_WORDS: Record<string, string> = {
   'blocked-on-owner-unfiled': 'waiting on a person, with no question filed anywhere they read',
+  'waiting-unfiled':
+    'its agent said it is waiting on a person, with no question filed anywhere they read',
   'blocked-on-owner': 'waiting on a person',
   'blocked-on-dependency': 'waiting on another row',
   'in-progress': 'claimed by somebody who has gone quiet',

@@ -30,14 +30,18 @@ check that serves none of them is weight.
 | --- | --- | --- |
 | A task is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
 | A task waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
+| An agent's own closing note says it is waiting on a person, with nothing filed on that person's queue | The lead | Same frame, `unfiled`, bucket `waiting-unfiled` — the note also loses its movement credit, so the task's clock never stopped |
+| Such a wait still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item naming every such task across every board |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
 | A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
 | An in-progress task has every line met except those written as needing a person (`needs: 'owner'`), and its builder has not reported one of them ready | The task's agent, else the lead | `workspace.done_when_ready`, one per such line, once while it stands (`review-items/done-when-ready.ts`) — never the person, who is asked only once the builder reports the line `owner` |
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 
-The owner is the addressee of exactly one line of that table, and only when
-Team Lead cannot be reached either. A task waiting on the owner with a filed
+The owner is the addressee of exactly two lines of that table, and each only
+when Team Lead cannot be reached either. Both of those lines file ONE item,
+not one per task: a fleet-wide problem that arrives as eleven separate cards
+is a fleet-wide problem nobody reads. A task waiting on the owner with a filed
 item is already on their queue and is never re-announced.
 
 Every line of that table is said again while it stands: the board's repeat
@@ -68,10 +72,13 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    the task links — and whether an item still excuses the task is the Home
    queue's own predicate (`isReviewItemOnQueue`, `pendingDeclaration`), so a
    held, answered, withdrawn or reader-asked-back item excuses nothing. A
-   note saying "waiting on Bryan" with nothing filed is a plain stall to the
-   lead. The note reader (`note-ask.ts`), its Haiku confirmation and the
+   note saying "waiting on Bryan" with nothing filed sets no bucket at all.
+   The note reader (`note-ask.ts`), its Haiku confirmation and the
    `waiting-on-you` prompt are gone; the snapshot and the verdict carry a
    `waiting` list so every excused wait is traceable to its item.
+   **Amended by step 6**, which does not reverse this: a wait is still never
+   inferred to EXCUSE a task, but an unfiled one no longer excuses the clock
+   either.
 3. **Escalation is on liveness only** (PR 803). A board is dead when no
    session on it is deliverable — no stream open, nobody observed inside the
    delivery window — and none has written to it or heartbeated on it for the
@@ -115,6 +122,23 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    of those, and was wrong six times out of six; the story, and why the check
    now says nothing at all about a task with no diff to read, are in
    [criteria.md](criteria.md).
+6. **An unfiled wait cannot excuse the clock** (this PR). Step 2 made a wait
+   something a task DECLARES; it left a hole in the other direction, because
+   a note still counted as movement whatever it said. An agent that closed
+   every turn with "waiting on <person>" and filed nothing reset its own
+   task's clock forever, and the task never stalled. Now a note whose words
+   ask a person, with nothing filed on that person's queue, loses its
+   movement credit on both paths into the clock (`task.notes` and the
+   `updatedAt` the note's own append stamps), and past the quiet window the
+   task is named in the lead's frame on the `unfiled` list under its own
+   bucket, `waiting-unfiled`. This sets no bucket from prose and parks
+   nothing: the only thing a wrong reading can cost is one line in a frame
+   the lead was already getting. Still unfiled a window later, it goes up the
+   existing ladder — Team Lead first as ONE fleet-wide frame, the owner's
+   queue only if Team Lead is unreachable, and then as ONE review item naming
+   every such task across every board. The judgement of "this asks" is
+   `detectAsk`, the filing nudge's own reader, re-measured over three days of
+   real closing notes when this shipped (`unfiled-ask.md`).
 
 ## How to read the verdict
 

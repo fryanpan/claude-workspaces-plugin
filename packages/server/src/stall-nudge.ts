@@ -473,6 +473,18 @@ export interface StallNudgerOptions {
    * replaced.
    */
   escalate?: (board: StallSnapshot, now: number) => void;
+  /**
+   * The FLEET pass, run once after every board's wake and escalation, over
+   * the same snapshots they read (declared waits already taken off, as the
+   * per-board readers see them). It exists for the one finding that is not
+   * about a board: an unfiled wait still unfiled a window after its lead was
+   * told, which is reported once for the whole server rather than once per
+   * board (`waiting-unfiled-escalation.ts`).
+   *
+   * Omitted → nothing ages, which is the behaviour every test that is not
+   * about it wants.
+   */
+  escalateFleet?: (boards: readonly StallSnapshot[], now: number) => void;
 }
 
 /** The stamp file's shape. Versioned so a later format change can recognise an
@@ -682,6 +694,10 @@ export class StallNudger {
     }
     const now = this.now();
     const live = new Set<string>();
+    // The boards as the per-board readers saw them, kept for the fleet pass
+    // below: it must judge the same rows the lead was woken about, not the
+    // raw snapshot with declared waits still on it.
+    const read: StallSnapshot[] = [];
     for (const snapshot of boards) {
       live.add(snapshot.workspaceId);
       // Both readers below see the board with its declared waits taken off
@@ -689,12 +705,19 @@ export class StallNudger {
       // whole, because the keep-moving measurement reads it too.
       const { board, waited } = withoutStandingWaits(snapshot);
       this.forgetWhileWaiting(board.workspaceId, waited);
+      read.push(board);
       this.considerBoard(board, now);
       // After the wake, so a row told for the first time on this very tick is
       // measured from now and cannot escalate in the same pass. Isolated: a
       // filer that throws must cost its own board, never the boards behind it.
       this.escalate(board, now);
     }
+    // The one finding that belongs to no board: an unfiled wait the lead was
+    // told about a window ago and still nobody has filed. After every board,
+    // so a task named for the first time on this tick starts its clock now
+    // and cannot age in the same pass. Isolated for the same reason the
+    // per-board escalation is.
+    this.escalateFleet(read, now);
     // Forget boards that are gone, so neither map outlives what it describes.
     // The pruning has to reach the FILE too, or the durable copy grows for the
     // life of the install while the in-memory one stays bounded.
@@ -749,6 +772,16 @@ export class StallNudger {
     const rows = this.told.get(workspaceId);
     if (!rows) return;
     for (const id of waited) rows.delete(id);
+  }
+
+  private escalateFleet(boards: readonly StallSnapshot[], now: number): void {
+    const hook = this.opts.escalateFleet;
+    if (!hook) return;
+    try {
+      hook(boards, now);
+    } catch (err) {
+      console.error('[stall] fleet escalation failed:', err);
+    }
   }
 
   private escalate(board: StallSnapshot, now: number): void {

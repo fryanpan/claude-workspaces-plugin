@@ -113,6 +113,64 @@ One tuning pass raised precision to 96% by requiring a wait word near the
 `your <noun>` family. It also cut unfiled-ask recall from 15% to 3%, and was
 removed. A false positive costs one turn; a miss costs the whole point.
 
+## The 2026-09-15 re-measurement
+
+Re-run when the stall clock began reading the same detector, because a reader
+two features now depend on is worth a fresh number rather than an inherited
+one.
+
+**Corpus.** Every end-of-turn note posted on any board of this server between
+14 and 16 September 2026: **157 notes** across five boards with owners on
+them, read through the REST task surfaces only (`GET /workspaces`, then the
+per-board task list and each candidate task's `/detail`). The prod data
+directory was never read; a per-task notes GET does not exist, and the
+per-agent ring held only 16 rows, so `/detail` is what the numbers rest on.
+Candidates were every task whose `updatedAt` was on or after 14 September,
+which is every task that could carry a note in the window, since appending one
+stamps it.
+
+**Label.** One label this time, by hand over all 157: does the note put a
+question, a decision or a wait on a PERSON — including "waiting on <owner>",
+"in your queue", "yours to rate". 36 of the 157 were asks by that reading.
+
+The filed/unfiled split of the 2026-09-10 run could NOT be reproduced
+honestly. Reconstructing, per note, whether an answerable item stood on the
+owner's queue at that moment needs review-item history the readable surfaces
+do not carry, and guessing it would have produced a number that looked like
+the old one and meant something else. So the figures below are recall on ASKS,
+against the older run's 35% on the same quantity; the 15% unfiled-ask recall
+is not restated because it was not re-measured.
+
+| Figure | Before | After |
+| --- | --- | --- |
+| Notes | 157 | 157 |
+| Hand-labelled asks | 36 | 36 |
+| Detector positives | 11 | 16 |
+| True positives | 11 | 15 |
+| **Recall, asks** | **31%** | **42%** |
+| **Precision** | **100%** | **94%** |
+
+**What the tuning was.** Three narrow changes, each aimed at a miss the
+corpus made common, none of them a new family of phrase:
+
+- A lead writes the name they SAY. The board learns owners from transitions,
+  where a person appears under a full name; every wait in the corpus used the
+  first name alone. `ownerPattern` now also accepts the leading token of a
+  multi-word owner name, and only when it is three characters or more — a
+  two-letter token would match inside ordinary prose.
+- `on your queue` became `on|in your queue`.
+- `yours to do` gained `take`, `rate`, `open`, `pick` and `choose`.
+
+The widened queue phrase created one false positive — a note whose first words
+were "Not an ask", naming the items it had already filed — so `not an ask`
+joined the suppressors, which is a negation of exactly the kind already there.
+
+**Precision was not bought at recall's expense**, and the single remaining
+false positive says why the trade is the right way round: it is a note
+reporting that a wait on the owner had been ANSWERED and executed. Telling a
+lead about a task that is fine costs one line in a frame they were already
+getting. Missing one costs the task.
+
 ## Two things this deliberately does not do
 
 **It does not file anything.** The nudge is a `decision: "block"` back to the
