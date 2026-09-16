@@ -21,9 +21,11 @@
  *   doc it is shown in slices holds on 2% to 17% of ticks, and the fix is for
  *   the server to do the counting and name the ids.
  * - AND ON THAT MEETING NO CLEANUP EDIT COULD LAND AT ALL. Every note had
- *   been written outside the meeting's own section, so `confineToSection`
- *   dropped all sixteen edits the pass proposed. No wording of any clause
- *   reaches a doc through a gate that is refusing everything.
+ *   been written outside the meeting's own section, and the gate tested
+ *   LOCATION, so it dropped all sixteen edits the pass proposed. No wording
+ *   of any clause reaches a doc through a gate that is refusing everything.
+ *   That half is fixed elsewhere: `boundByAuthorship` bounds the pass by
+ *   whose words change rather than by where a block sits.
  *
  * So this module does the two halves the clause could not: it finds the
  * marked notes in the section and names them by id, and it is read again

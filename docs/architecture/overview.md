@@ -1073,15 +1073,19 @@ flush had written one onto a single line, the doc and its file serialized
 alike, so the attach never re-read it. The attach now re-types each such
 paragraph in place into the block the grammar makes, with the same text, so
 the file does not change.
-The editor draws that block through three client modules beside
+The editor draws that block through four client modules beside
 `mermaid-code-block.ts`, and they do not move the picture either.
 `mdx-flow-block.ts` is the node view and the plugin that makes the block
 read-only. `mdx-preview.ts` reads a component's props with a literal parser,
 never by running them, and shows a component's title and words.
-`mdx-chart.ts` takes those props by shape rather than by component name — a
-`series` of x/y points draws lines with axes, a legend and a band, a `data`
-list of label/value rows draws bars — as SVG whose every string is a text
-node.
+`mdx-chart-props.ts` takes those props by shape rather than by component
+name — a `series` of x/y points is lines, a `data` list of label/value rows is
+bars — and `mdx-chart.ts` draws what it returns as SVG whose every string is a
+text node. The two were one file until the drawing had to follow the published
+site's chart: a band shades a stretch of x over the whole plot rather than a
+y range, each line carries its name and last value at its own end instead of a
+legend below, an indexed chart's reference line is drawn and labelled, and the
+component's own `width` decides the drawing's width.
 
 `prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
 document-model tier, and together they are how an agent addresses a block

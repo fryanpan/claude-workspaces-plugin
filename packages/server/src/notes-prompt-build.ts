@@ -11,9 +11,44 @@
  *
  * The two rules that keeps on this file, and neither is enforceable by a
  * type: nothing that changes every tick may be appended to `stable`, and the
- * doc's outline may only GROW at its end — which is what
- * `NOTES_OUTLINE_DROP_STEP` is for. `meeting-notes-composer.ts` is where the
- * cache breakpoints are actually taken, on the boundaries `blocks` names.
+ * doc's outline may only GROW at its end. `meeting-notes-composer.ts` is
+ * where the cache breakpoints are actually taken, on the boundaries `blocks`
+ * names.
+ *
+ * THERE IS NO WINDOW OVER THE OUTLINE, AND THAT IS WHAT MAKES THE SECOND RULE
+ * TRUE. A tick used to be sent the last eighty body blocks
+ * (`NOTES_OUTLINE_RECENT_BLOCKS`), let go of forty at a time
+ * (`NOTES_OUTLINE_DROP_STEP`) so the head held still between drops. Both are
+ * gone (Bryan, 2026-09-15: "I already recommended not keeping an 80 block
+ * window, but rather just send the whole doc and improve caching rates"), and
+ * the property the step existed to protect is stronger without them: a window
+ * that drops from the front rewrites the head of the prompt every time it
+ * moves, while a doc nothing is ever dropped from has a head that is
+ * byte-identical from the first tick of the meeting to the last.
+ *
+ * THE BIGGER PROMPT IS THE CHEAPER ONE, and the floor is why. Nothing caches
+ * at all until the text before a breakpoint clears the model's minimum
+ * cacheable prefix — 4,096 tokens on Haiku 4.5, measured against the API on
+ * 2026-09-15 rather than taken from the documentation: a 4,063-token prompt
+ * marked for caching wrote nothing and read nothing on the repeat, a
+ * 4,112-token one wrote and then read. A marker below that floor is ignored
+ * EVEN WHEN THE WHOLE PROMPT IS FAR ABOVE IT — a small first block in front
+ * of a large one cached nothing and the repeat read zero — so a prompt paying
+ * full price for all of itself is not too big; it is too small.
+ *
+ * MEASURED over 348 ticks of one fixture-driven meeting sent to the real
+ * model, same doc and speech in every arm (2026-09-15), input-side dollars:
+ * the 80-block window cost $1.90 (4,363 input + 3,742 read a tick), the whole
+ * doc with the same directive $3.09 (7,517 + 6,780), and the whole doc with
+ * `regroupDirective` capped $1.06 (1,715 + 6,769). So this removal ON ITS OWN
+ * costs 63% more, and capping the one block nothing can cache more than pays
+ * for it — 44% under the window, the model shown all 383 of the doc's blocks
+ * at the last tick instead of 143. The first cached read lands at tick 82 in
+ * every arm: what clears the floor is the notes accumulating.
+ *
+ * AND NOT SLOWER IN ANY WAY A MEETING FEELS, which is what the window was
+ * for: over the last twelve ticks the compose ran a median 2,140ms with it
+ * and 2,524ms without, worst 3,654ms, against a 20s timeout.
  *
  * ONE BREAKPOINT WAS THE WRONG NUMBER, AND THE BILL SAID SO. A cached prefix
  * that GROWS is not a cheap prefix: measured against the API on 2026-09-10, a
@@ -37,39 +72,6 @@ import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts
 import { MEETING_NOTES_HEADING, NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
 import { regroupDirective } from './notes-regroup.ts';
-
-/**
- * How much of the doc's body the outline may carry into one prompt.
- *
- * Headings are never dropped by the cap (`prose.readOutline`), so the model
- * can always see every topic and put a point under the right one; what this
- * bounds is the BULLETS, counted from the end of the doc. That is what keeps a
- * tick's prompt the size of the recent conversation rather than the size of
- * the meeting — the exact thing that made late ticks slow and then refused.
- * Eighty is generous against what a tick needs: a pause covers a minute or two
- * of speech and lands two or three bullets, so eighty is most of the last
- * half-hour of notes, and a point older than that belongs under a heading
- * rather than folded into a bullet the model can no longer see.
- */
-export const NOTES_OUTLINE_RECENT_BLOCKS = 80;
-
-/**
- * How many of those bullets the window lets go of at a time.
- *
- * A window that keeps exactly the last eighty drops its oldest line every
- * time the note-taker writes a new one, which means the doc block of the
- * prompt begins with different words on every tick — and a prompt cache is a
- * prefix match, so that alone is enough to make every tick pay full price for
- * the whole prompt. Dropping forty at once instead leaves the front of the
- * table untouched for forty bullets' worth of ticks, growing at the end,
- * which is exactly the shape a cache is cheap on.
- *
- * FORTY, not eighty and not five. The window holds between eighty and a
- * hundred and nineteen bullets, so the model is never shown less than it was
- * before and at most half as much again — and the front moves about once
- * every twenty ticks of an ordinary meeting rather than every one.
- */
-export const NOTES_OUTLINE_DROP_STEP = 40;
 
 /**
  * How many blocks at the live end of the doc stay OUT of the cached half.
@@ -115,17 +117,17 @@ export const MAX_CACHE_BREAKPOINTS = 4;
  * writes sixty-four, and one in sixty-four writes the lot.
  *
  * 64/16/4, priced offline and then billed for real. The sweep over EN2001a's
- * 306 recorded ticks is flat between 64/12/4 and 64/24/8 (all within a cent
- * of $0.79) and falls off either side: 128/16/4 costs $1.04 because the
- * coarse anchor is so rarely reached, and one step alone costs $1.33.
+ * 306 recorded ticks is flat between 64/12/4 and 64/24/8 (within a cent of
+ * $0.79) and falls off either side: 128/16/4 costs $1.04, one step $1.33.
  *
  * What it then BILLED, driving the real model through the same three
  * meeting-hours on 2026-09-10: $1.03 / $1.01 / $0.92 against $1.76 / $1.81 /
  * $2.49, the read-to-write ratio going from 1.15, 0.73 and 0.79 to 4.35,
  * 3.86 and 20.80. Above the offline price because a live run revises deeper
  * than the recorded one did, and because NOTHING caches until the prompt
- * clears the model's 4096-token minimum — about the first forty ticks of a
- * meeting. Past that point the median tick writes 66 tokens and reads 6,664.
+ * clears the model's 4,096-token minimum — the first 81 ticks of the
+ * fixture-driven meeting measured in the header above. Past that point the
+ * median tick writes 66 tokens and reads 6,664.
  */
 export const NOTES_OUTLINE_CACHE_STEPS: readonly number[] = [64, 16, 4];
 
@@ -192,9 +194,10 @@ const DEFAULT_TRANSCRIPT_LABEL = 'New transcript since the last update';
  * biggest block in the prompt, and one that grows by a bullet or two a tick
  * rather than being rewritten — moved from last-but-one to second, ahead of
  * every block that is about this tick alone. Nothing was added or removed;
- * one block changed places, and `NOTES_OUTLINE_RECENT_BLOCKS`' window learned
- * to jump in steps rather than slide by one (`prose.readOutline`), because a
- * window that drops its oldest line every tick has no stable prefix to cache.
+ * one block changed places. The recency window that used to sit over the
+ * outline is gone for the same reason it once learned to jump in steps: a
+ * front that moves has no stable prefix to cache, and a front that is never
+ * dropped from cannot move at all.
  */
 export function buildNotesPrompt(
   input: NotesComposeInput,
@@ -430,9 +433,8 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
   const head = [
     ...preamble,
     '',
-    'The doc, block by block — "id kind whose | text". Only the most recent',
-    'blocks are listed; every heading is. A "sub-bullet" sits under the',
-    '"bullet" above it.',
+    'The doc, block by block — "id kind whose | text". This is the whole doc,',
+    'every block of it. A "sub-bullet" sits under the "bullet" above it.',
   ].join('\n');
   const chunks: string[] = [];
   let from = 0;

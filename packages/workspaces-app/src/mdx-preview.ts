@@ -10,7 +10,7 @@
  * call, a spread. Every string reaches the DOM through `textContent`.
  */
 
-import { type MdxChart, chartOf, drawChart, seriesColor } from './mdx-chart.ts';
+import { type MdxChart, chartOf, drawChart } from './mdx-chart.ts';
 
 export type MdxKind = 'esm' | 'expr' | 'jsx';
 
@@ -293,31 +293,13 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary, width?:
   }
   if (head.childElementCount > 0) host.appendChild(head);
   const { chart } = summary;
-  if (chart) {
-    if (chart.type === 'line' && chart.series.some((s) => s.label)) {
-      host.appendChild(legendOf(chart.series));
-    }
-    host.appendChild(drawChart(chart, width || host.clientWidth || DEFAULT_WIDTH));
-  }
+  // No legend: each line carries its own name at its end, inside the plot,
+  // exactly as the published chart does.
+  if (chart) host.appendChild(drawChart(chart, width || host.clientWidth || DEFAULT_WIDTH));
   if (summary.children) {
     const kids = document.createElement('div');
     kids.className = 'mdx-children';
     kids.textContent = summary.children;
     host.appendChild(kids);
   }
-}
-
-function legendOf(series: Array<{ label?: string; dashed: boolean }>): HTMLElement {
-  const legend = document.createElement('div');
-  legend.className = 'mdx-legend';
-  series.forEach((s, i) => {
-    const item = document.createElement('span');
-    item.className = 'mdx-legend-item';
-    const swatch = document.createElement('span');
-    swatch.className = s.dashed ? 'mdx-swatch is-dashed' : 'mdx-swatch';
-    swatch.style.borderTopColor = seriesColor(i);
-    item.append(swatch, s.label ?? `Series ${i + 1}`);
-    legend.appendChild(item);
-  });
-  return legend;
 }

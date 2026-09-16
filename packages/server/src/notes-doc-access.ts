@@ -24,7 +24,7 @@ import { contentKind, prose } from '@claude-workspaces/core';
 import type { suggestOps } from '@claude-workspaces/core';
 import type { DocType } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
-import type { BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
+import type { BlockEditsPowers, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 
 /** The agent id every block the note-taker writes is stamped with. */
 export const NOTES_AUTHOR_ID = 'meeting-notes';
@@ -75,7 +75,7 @@ export interface NotesDocStore {
   applyBlockEdits(
     docId: string,
     edits: prose.BlockEdit[],
-    who: { author: string; authorName?: string; authorColor?: string },
+    who: { author: string; authorName?: string; authorColor?: string } & BlockEditsPowers,
   ): BlockEditsResult;
   /** The file this doc is bound to, when it is bound to one. Read only by the
    *  legacy-transcript removal, which must not touch a `Raw transcript`
@@ -87,17 +87,46 @@ export interface NotesDocStore {
 /**
  * Apply a batch as the note-taker, with its identity filled in. The one
  * helper, so no caller has to remember which of the three ids goes where.
+ *
+ * `powers` is what a batch may do beyond naming its author — today only
+ * `moveOthers`, which the end-of-meeting tidy-up passes so a `nest_blocks`
+ * may move a block the note-taker does not own. A tick leaves it absent and
+ * writes exactly as it always did.
  */
 export function applyNotesBlockEdits(
   docStore: NotesDocStore,
   docId: string,
   edits: readonly prose.BlockEdit[],
+  powers?: BlockEditsPowers,
 ): BlockEditsResult {
   return docStore.applyBlockEdits(docId, [...edits], {
     author: NOTES_AUTHOR_ID,
     authorName: NOTES_SUGGESTION_AUTHOR.name,
     authorColor: NOTES_SUGGESTION_AUTHOR.color,
+    ...powers,
   });
+}
+
+/**
+ * Why each edit in a write did not land, in the applier's own words.
+ *
+ * WHY THE CALLER CANNOT WORK IT OUT ITSELF. A cleanup gate says why it
+ * DROPPED an edit, and then reported only how many of the ones it kept failed
+ * — "1 failed", naming nothing, which is the same unexplainable shape as a
+ * pass whose every edit was refused. No gate can predict this either:
+ * `nestBlocksUnderLead` gathers members from the lead's own list and the
+ * same-kind lists it can reach, so a bullet nested a level down, or one in a
+ * list of the other kind, is a perfectly addressable block the move still
+ * cannot take. Copying that rule into a gate would give it a second home;
+ * reading the verdict back says what happened whatever the rule becomes.
+ *
+ * Empty for a write that was refused outright, and for one where nothing
+ * failed.
+ */
+export function whyEditsFailed(written: BlockEditsResult | null): string[] {
+  return (written !== null && 'outcomes' in written ? written.outcomes : [])
+    .filter((o) => o.status === 'failed')
+    .map((o) => `${o.op}: ${o.reason ?? o.error ?? 'no reason given'}`);
 }
 
 /** The doc's outline, or an empty one for a doc that is gone or is not prose.
