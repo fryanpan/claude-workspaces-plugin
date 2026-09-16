@@ -1075,8 +1075,12 @@ export class FileBindings {
       // The same refusal `attachFile` makes, on the same evidence: a
       // `liveWins` claim read off an index row cannot outrank a file that is
       // newer than the `.ydoc` the claim describes. See the long note there.
-      const claimOutlived = this.fileOutlivedClaim(docId, abs, pre?.mtimeMs);
-      if (opts.writeBack && content.length > 0 && opts.liveWins === true && claimOutlived) {
+      // Lazily: it is two synchronous stats on the main thread, and only a
+      // `liveWins` attach can be outranked by them.
+      let outlived: boolean | undefined;
+      const claimOutlived = (): boolean =>
+        (outlived ??= this.fileOutlivedClaim(docId, abs, pre?.mtimeMs));
+      if (opts.writeBack && content.length > 0 && opts.liveWins === true && claimOutlived()) {
         console.warn(
           `[doc-store] ${docId}: the bound file is newer than this doc’s last saved state; ` +
             `the held write-back was refused and the file read in (${redactBoundPath(abs)})`,
@@ -1086,7 +1090,7 @@ export class FileBindings {
       if (
         opts.writeBack &&
         content.length > 0 &&
-        ((opts.liveWins && !claimOutlived) || !diskNewer) &&
+        ((opts.liveWins && !claimOutlived()) || !diskNewer) &&
         pathRefusal === undefined
       ) {
         this.backupExternalVersion(docId, text);

@@ -56,6 +56,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
 import { DocStore } from '../src/doc-store.ts';
+import { boundFiles } from '../src/slow-fs.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
 import { waitFor, waitForFile } from './wait-for.ts';
@@ -121,9 +122,25 @@ function takeNotes(docStore: DocStore, docId: string, markdown = NOTES): void {
  */
 async function settled(docStore: DocStore, docId: string, path: string): Promise<void> {
   await waitForFile(path, (text) => text.includes('Meeting notes'));
-  await waitFor(() => docStore.reconcileNow(docId) === 'in-sync', {
-    describe: `${docId} write-back bookkeeping to catch up`,
-  });
+  try {
+    await waitFor(() => docStore.reconcileNow(docId) === 'in-sync', {
+      describe: `${docId} write-back bookkeeping to catch up`,
+    });
+  } catch (err) {
+    // A quarantined path cannot answer a reconcile at all, and the backoff
+    // (6s under the test scale) outlasts bun's per-test budget — so no wait
+    // here can recover from one. Say so: a loaded runner missing the 300ms
+    // bound-read deadline reads as "the bookkeeping never caught up", and
+    // that sentence sent one CI failure looking for a cause in the
+    // write-back that was in the pool.
+    if (boundFiles.quarantined(path)) {
+      throw new Error(
+        `${docId}: the bound path was QUARANTINED by slow-fs — the runner missed the bound-read deadline, and nothing the doc does can answer until the backoff lapses`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
 }
 
 function live(docStore: DocStore, docId: string): string {
