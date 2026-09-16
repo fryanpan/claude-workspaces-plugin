@@ -11,15 +11,15 @@
  * - a repeat of a note the document already carries is DROPPED, never lifted
  *   out of wherever it sits;
  * - a nest names bullets, and says so when what it named is not one;
- * - another meeting's section on the same doc is out of reach entirely,
- *   because one author id cannot tell two meetings apart.
+ * - a nest the write path cannot make says WHY, instead of counting itself
+ *   failed and naming nothing.
  *
  * All notes and all speech here are invented and every name is fictional.
  * The repo is public.
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { prose, suggestOps } from '@claude-workspaces/core';
+import { prose } from '@claude-workspaces/core';
 import { runNotesCleanupPass } from '../src/notes-cleanup-pass.ts';
 import {
   DOC,
@@ -37,7 +37,7 @@ import {
 afterEach(dropFreshDirs);
 
 /** Their line, typed into the middle of the note-taker's own section. */
-const THEIRS = 'Kestrel Lane keeps the winter crew';
+const THEIRS = 'The winter crew keeps the Saltmarsh run';
 /** The note-taker's own bullet beside it. */
 const OURS = 'The harbour run moves to the half hour from April';
 
@@ -64,7 +64,7 @@ const TWO_TOPICS = [
 
 describe('a heading between them is not a wall to a move, and is not a thing to move', () => {
   it('brings their bullet in from under another topic’s heading', async () => {
-    const { store, markdownNow } = docStoreFrom(TWO_TOPICS, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, markdownNow } = docStoreFrom(TWO_TOPICS, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the winter crew.' }]);
     // CONTROL: they really are under different headings to begin with — the
@@ -78,7 +78,7 @@ describe('a heading between them is not a wall to a move, and is not a thing to 
           {
             op: 'nest_blocks',
             leadBlockId: idOf(store, 'harbour run'),
-            blockIds: [idOf(store, 'Kestrel Lane')],
+            blockIds: [idOf(store, 'Saltmarsh run')],
           },
         ]),
         dataDir,
@@ -99,7 +99,7 @@ describe('a heading between them is not a wall to a move, and is not a thing to 
   });
 
   it('refuses a nest that names a heading, with the reason, instead of failing it', async () => {
-    const { store, markdownNow } = docStoreFrom(TWO_TOPICS, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, markdownNow } = docStoreFrom(TWO_TOPICS, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the winter crew.' }]);
     const before = markdownNow();
@@ -154,7 +154,7 @@ describe('the wider set of its own notes drops a repeat; it never moves one', ()
   it('leaves the other section’s bullet exactly where it is', async () => {
     const { store, markdownNow } = docStoreFrom(OTHER_SECTION, ['Meeting notes']);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     // CONTROL: the other section's bullet carries the note-taker's mark, so
     // the wider set really does reach it — an unmarked one would prove
     // nothing about the clause under test.
@@ -188,7 +188,7 @@ describe('the wider set of its own notes drops a repeat; it never moves one', ()
 
 describe('a nest names bullets, and says so when it does not', () => {
   it('refuses one naming a paragraph, with the reason, instead of failing it', async () => {
-    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the slipway.' }]);
     const before = markdownNow();
@@ -214,63 +214,107 @@ describe('a nest names bullets, and says so when it does not', () => {
   });
 });
 
-describe('another meeting’s section on the same doc is out of reach', () => {
+describe('a regroup the move cannot make says why, instead of counting itself failed', () => {
   /**
-   * ONE AUTHOR ID FOR EVERY MEETING, so the mark says a meeting wrote a block
-   * and never which one. A second recording releases every claim in the doc
-   * when it STARTS, so the blocks still carrying the mark when this pass runs
-   * are the LATER meeting's and this one's own are bare. Without the
-   * subtraction that reads as "all of this is mine to rewrite".
+   * THE GATE CANNOT PREDICT THE WRITE PATH, and teaching it to would be a
+   * second copy of the rule. `nestBlocksUnderLead` gathers members from the
+   * lead's own list and the same-kind lists it can reach, so a bullet nested
+   * one level down, and a bullet in a list of the other kind, are both
+   * perfectly addressable blocks the move still cannot take. Before this the
+   * pass said "1 failed" and named nothing, which is the same unexplainable
+   * shape as the sixteen refusals.
    */
-  const TWO_MEETINGS = [
+  const MIXED = [
     '# Riverbend ferry review',
     '',
     '## Meeting notes',
     '',
     `- ${OURS}`,
+    '- A bullet with one beneath it',
+    '  - The bullet one level down',
     '',
-    '## The later recording',
-    '',
-    `- ${THEIRS}`,
+    '1. A bullet in a list of the other kind',
   ].join('\n');
 
-  it('refuses a rewrite of its bullet, and says which section it is in', async () => {
-    const { store, ydoc, markdownNow } = docStoreFrom(TWO_MEETINGS, ['The later recording']);
-    const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew until May.' }]);
-    const before = markdownNow();
-    const theirs = idOf(store, 'Kestrel Lane');
-    // CONTROL: their block really does carry this pass's own author id — the
-    // subtraction, not a missing mark, is what has to hold it back.
-    expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBe('meeting-notes');
+  for (const [what, needle] of [
+    ['a bullet nested one level down', 'one level down'],
+    ['a bullet in a list of the other kind', 'other kind'],
+  ] as const) {
+    it(`names the applier's verdict for ${what}`, async () => {
+      const { store, markdownNow } = docStoreFrom(MIXED, ['Meeting notes']);
+      const dataDir = freshDir();
+      writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the crew.' }]);
+      const before = markdownNow();
+      const result = await runNotesCleanupPass(
+        depsFor(
+          store,
+          stubComposer([
+            {
+              op: 'nest_blocks',
+              leadBlockId: idOf(store, 'harbour run'),
+              blockIds: [idOf(store, needle)],
+            },
+          ]),
+          dataDir,
+          idOf(store, 'Meeting notes'),
+        ),
+        { docId: DOC, meetingId: MEETING },
+      );
+      // The gate KEPT it — the block is addressable, and it is a bullet — so
+      // the reason has to come from the applier or from nowhere.
+      expect(result.refused).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(result.failures).toEqual(['nest_blocks: nothing-to-nest']);
+      expect(result.line).toContain('1 failed (nest_blocks: nothing-to-nest)');
+      expect(markdownNow()).toBe(before);
+    });
+  }
+});
 
+describe('a meeting whose notes landed in an EARLIER meeting’s section is still tidied', () => {
+  /**
+   * THE TRADE THAT WAS MEASURED AND REVERSED. A first attempt at keeping one
+   * meeting out of another's notes subtracted every section any meeting had
+   * claimed on the doc. On a recurring notes doc — the same doc week after
+   * week — this meeting's own notes had landed under a previous meeting's
+   * heading, and every edit came back refused: "2 proposed, 2 refused, 0
+   * blocks touched", the exact shape this work exists to end. Narrowing a
+   * rare cross-meeting case is not worth refusing the common one, so the
+   * subtraction is gone; `ownership`'s header carries what that leaves open.
+   */
+  const RECURRING = [
+    '# Riverbend ferry review',
+    '',
+    '## Week one minutes',
+    '',
+    `- ${OURS}`,
+    `- ${THEIRS}`,
+    '',
+    '## Meeting notes',
+  ].join('\n');
+
+  it('reaches its own bullets under the older heading', async () => {
+    const { store, markdownNow } = docStoreFrom(RECURRING, ['Week one minutes']);
+    const dataDir = freshDir();
+    writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run and the winter crew.' }]);
     const result = await runNotesCleanupPass(
       depsFor(
         store,
         stubComposer([
           {
-            op: 'replace_block',
-            blockId: theirs,
-            markdown: `- ${THEIRS} until May`,
+            op: 'nest_blocks',
+            leadBlockId: idOf(store, 'harbour run'),
+            blockIds: [idOf(store, 'Saltmarsh run')],
           },
         ]),
         dataDir,
         idOf(store, 'Meeting notes'),
-        [idOf(store, 'The later recording')],
       ),
       { docId: DOC, meetingId: MEETING },
     );
-
-    // REFUSED, not offered. A redline would be the kinder answer and there is
-    // no way to ask for one: `applyBlockEdits` reads the block's own mark and
-    // every meeting writes the same id, so an edit that reaches the write
-    // path lands as a direct rewrite. The other meeting's minutes are
-    // byte-identical and nothing is pending against them.
-    expect(result.applied).toBe(0);
-    expect(result.suggested).toBe(0);
-    expect(result.refused).toBe(1);
-    expect(result.refusals[0]).toContain('another meeting\u2019s section');
-    expect(suggestOps.listSuggestions(ydoc)).toHaveLength(0);
-    expect(markdownNow()).toBe(before);
+    expect(result.refused).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(result.applied).toBe(1);
+    expect(markdownNow()).toContain(`- ${OURS}\n  - ${THEIRS}`);
   });
 });

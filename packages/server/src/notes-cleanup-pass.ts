@@ -65,7 +65,6 @@ import {
   claimable,
   commentedBlockIds,
   docIds,
-  heldByOtherMeetings,
   ownership,
   sectionIds,
 } from './notes-cleanup-scope.ts';
@@ -74,6 +73,7 @@ import {
   type NotesDocStore,
   applyNotesBlockEdits,
   readNotesOutline,
+  whyEditsFailed,
 } from './notes-doc-access.ts';
 import { tidyNotesSection } from './notes-section-tidy.ts';
 import { unconfirmedDirective, unconfirmedNotes } from './notes-unconfirmed.ts';
@@ -141,6 +141,9 @@ export interface NotesCleanupResult {
    *  rather than as a rewrite of it. */
   suggested: number;
   failed: number;
+  /** Why each edit the gate KEPT did not land, in the applier's own words —
+   *  see where this is built. Empty when nothing failed. */
+  failures: string[];
   /**
    * Blocks the doc actually changed — the restraint number, and the one the
    * measurement in the PR body reports. `applied` counts edits; a batch whose
@@ -202,10 +205,6 @@ export interface NotesCleanupDeps {
    * — a test driving the pass alone — reads as nothing recording.
    */
   recordingNow?: (docId: string) => boolean;
-  /** Every section heading SOME meeting on this doc has claimed — see
-   *  `heldByOtherMeetings`, which is what the pass asks this for. Absent
-   *  reads as no other meeting, which is what a doc with one meeting holds. */
-  claimedHeadings?: (docId: string) => Iterable<string>;
 }
 
 /** The meeting's transcript as the composer reads turns: the name a person
@@ -253,6 +252,7 @@ const refusal = (reason: NotesCleanupRefusal, line: string): NotesCleanupResult 
   applied: 0,
   suggested: 0,
   failed: 0,
+  failures: [],
   touched: 0,
   turns: 0,
   unconfirmed: 0,
@@ -308,11 +308,7 @@ export async function runNotesCleanupPass(
     return refusal('no-section', 'notes cleanup: the notes section is no longer in the doc');
   }
   const turns = cleanupTurns(transcript, namesOf(deps.dataDir, docId, meetingId));
-  // ANOTHER MEETING'S SECTION IS NOT THIS PASS'S — see `heldByOtherMeetings`
-  // for why one shared author id makes that a question location still answers.
-  const others = (o: readonly prose.OutlineEntry[]): Set<string> =>
-    heldByOtherMeetings(o, deps.claimedHeadings?.(docId) ?? [], headingId);
-  const shown = ownership(outline, others(outline));
+  const shown = ownership(outline);
   const ours = claimable(shown);
   // WHAT THE MODEL IS TOLD AND WHAT THE GATE ENFORCES ARE ONE ANSWER, drawn
   // from one predicate. `claimed` is the pass's own work — the lines it may
@@ -393,16 +389,15 @@ export async function runNotesCleanupPass(
   // dedupe below can, and a MOVE is the shape that bites: it deletes the
   // earlier copy and inserts the note under its topic, so a delete refused
   // for being "outside the section" leaves the insert standing and rebuilds
-  // the duplicate this whole path exists to prevent. Headings were never
-  // windowed (`readOutline` drops body entries only), so it is only ever the
-  // body ids and the ownership marks that were short.
+  // the duplicate this path exists to prevent. Headings were never windowed
+  // (`readOutline` drops body entries only), so only the body ids and the
+  // ownership marks were ever short.
   const now = readNotesOutline(docStore, docId);
-  // EACH NOTE ONCE, AND A REFUSED EDIT CHANGES NOTHING. The gate, the
-  // dedupe and the gate again are one answer, composed in `cleanupWriteSet`
-  // (`notes-cleanup-gate.ts`) because the ORDER is the load-bearing part: the
-  // dedupe rewrites a batch, so handed an edit the gate would refuse it can
-  // emit an authorised delete beside the refused insert and take the section's
-  // only copy of a note with it.
+  // EACH NOTE ONCE, AND A REFUSED EDIT CHANGES NOTHING. Gate, dedupe and gate
+  // again are one answer, composed in `cleanupWriteSet`
+  // (`notes-cleanup-gate.ts`) because the ORDER is load-bearing: the dedupe
+  // rewrites a batch, so handed an edit the gate would refuse it can emit an
+  // authorised delete beside the refused insert and take the only copy.
   const { kept, refused, reasons, alreadyWritten } = cleanupWriteSet(
     edits,
     {
@@ -410,8 +405,7 @@ export async function runNotesCleanupPass(
       // boundary is authorship; `headingId` is still passed because the
       // meeting's own section heading is the one block the pass may not touch.
       ...docIds(now),
-      ...ownership(now, others(now)),
-      heldByOthers: others(now),
+      ...ownership(now),
       headingId,
       commented: commentedBlockIds(doc.ydoc),
     },
@@ -439,9 +433,9 @@ export async function runNotesCleanupPass(
   // last read of these notes anybody has asked for, and the three shapes it
   // repairs — a blank line under the heading, the same topic heading twice in
   // a row, an empty bullet of the note-taker's own — are ones no wording of
-  // the prompt above prevents and no block edit could remove (a delete on an
-  // unmarked blank arrives as a redline on it). It runs even for a pass that proposed nothing: a section can reach
-  // this point already carrying both.
+  // the prompt prevents and no block edit could remove (a delete on an
+  // unmarked blank arrives as a redline on it). It runs even for a pass that
+  // proposed nothing: a section can reach here already carrying both.
   const tidied = tidyNotesSection(doc.ydoc, headingId, commentedBlockIds(doc.ydoc), {
     bulletsAuthoredBy: NOTES_AUTHOR_ID,
   });
@@ -450,13 +444,10 @@ export async function runNotesCleanupPass(
   // settled nothing, and a count taken from the batch would say it had.
   // NO `commented` FILTER HERE, unlike the ask above, and the difference is
   // the whole point of the two numbers. `marked` is what the pass may be
-  // ASKED to settle, and a bullet somebody is discussing is out of its reach.
-  // This is what a READER is left holding, and a marker survives being
-  // commented on. Filtering both the same way let a section whose every
-  // guess carried a thread report zero still marked.
-  // AND THE WHOLE DOC AGAIN, for the same reason the gate reads it: a marker
-  // the window dropped is one a reader is still left holding, and counting it
-  // off the prompt's budget reported a long section as settled.
+  // ASKED to settle, and a bullet somebody is discussing is out of its reach;
+  // this is what a READER is left holding, and a marker survives being
+  // commented on. AND THE WHOLE DOC AGAIN, for the reason the gate reads it:
+  // a marker the window dropped is still one a reader holds.
   const unconfirmedLeft = unconfirmedNotes(readNotesOutline(docStore, docId), {
     headingId,
     author: NOTES_AUTHOR_ID,
@@ -465,6 +456,7 @@ export async function runNotesCleanupPass(
     written !== null && 'applied' in written
       ? { applied: written.applied, suggested: written.suggested, failed: written.failed }
       : { applied: 0, suggested: 0, failed: written === null ? 0 : kept.length };
+  const failures = whyEditsFailed(written);
   const touched = result.applied + result.suggested;
   return {
     ok: true,
@@ -475,6 +467,7 @@ export async function runNotesCleanupPass(
     applied: result.applied,
     suggested: result.suggested,
     failed: result.failed,
+    failures,
     touched,
     turns: turns.length,
     unconfirmed: marked.length,
@@ -490,7 +483,9 @@ export async function runNotesCleanupPass(
       // see `NotesCleanupResult.refusals`.
       (reasons.length > 0 ? ` (${reasons.join('; ')})` : '') +
       (result.suggested > 0 ? `, ${result.suggested} offered as suggestions` : '') +
-      (result.failed > 0 ? `, ${result.failed} failed` : '') +
+      (result.failed > 0
+        ? `, ${result.failed} failed` + (failures.length > 0 ? ` (${failures.join('; ')})` : '')
+        : '') +
       (tidied.blanks > 0 ? `, ${tidied.blanks} blank lines removed` : '') +
       (tidied.merged > 0 ? `, ${tidied.merged} repeated topics merged` : '') +
       (marked.length > 0 || unconfirmedLeft > 0

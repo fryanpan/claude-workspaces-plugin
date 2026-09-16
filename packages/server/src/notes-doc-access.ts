@@ -107,6 +107,28 @@ export function applyNotesBlockEdits(
   });
 }
 
+/**
+ * Why each edit in a write did not land, in the applier's own words.
+ *
+ * WHY THE CALLER CANNOT WORK IT OUT ITSELF. A cleanup gate says why it
+ * DROPPED an edit, and then reported only how many of the ones it kept failed
+ * — "1 failed", naming nothing, which is the same unexplainable shape as a
+ * pass whose every edit was refused. No gate can predict this either:
+ * `nestBlocksUnderLead` gathers members from the lead's own list and the
+ * same-kind lists it can reach, so a bullet nested a level down, or one in a
+ * list of the other kind, is a perfectly addressable block the move still
+ * cannot take. Copying that rule into a gate would give it a second home;
+ * reading the verdict back says what happened whatever the rule becomes.
+ *
+ * Empty for a write that was refused outright, and for one where nothing
+ * failed.
+ */
+export function whyEditsFailed(written: BlockEditsResult | null): string[] {
+  return (written !== null && 'outcomes' in written ? written.outcomes : [])
+    .filter((o) => o.status === 'failed')
+    .map((o) => `${o.op}: ${o.reason ?? o.error ?? 'no reason given'}`);
+}
+
 /** The doc's outline, or an empty one for a doc that is gone or is not prose.
  *  Every notes reader wants the same answer for those two cases: nothing to
  *  address. */

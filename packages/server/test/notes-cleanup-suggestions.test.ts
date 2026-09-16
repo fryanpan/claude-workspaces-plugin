@@ -58,20 +58,20 @@ afterEach(dropFreshDirs);
  * where only `claimable` stands between it and a rewrite.
  */
 describe("a person's bullet inside the section, on a doc whose marks are live", () => {
-  const THEIRS = 'Kestrel Lane keeps the winter crew';
+  const THEIRS = 'The winter crew keeps the Saltmarsh run';
 
   it('reaches them as a suggestion, and their words do not change until they answer', async () => {
     // THE CASE BRYAN ANSWERED ON 2026-09-10: "do not rewrite human text. But
     // if you spot an improvement, use the suggest and edit tool to suggest an
     // edit." Dropping the edit and rewriting the line are both wrong; the
     // third answer is the one this proves.
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [
-      { turn: 0, text: 'Kestrel Lane keeps the winter crew until April.', speaker: 'B' },
+      { turn: 0, text: 'The winter crew keeps the Saltmarsh run until April.', speaker: 'B' },
     ]);
     const before = markdownNow();
-    const theirs = idOf(store, 'Kestrel Lane');
+    const theirs = idOf(store, 'Saltmarsh run');
     const result = await runNotesCleanupPass(
       depsFor(
         store,
@@ -79,7 +79,7 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
           {
             op: 'replace_block',
             blockId: theirs,
-            markdown: '- Kestrel Lane keeps the winter crew until April',
+            markdown: '- The winter crew keeps the Saltmarsh run until April',
           },
         ]),
         dataDir,
@@ -98,7 +98,7 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
     const pending = suggestOps.listSuggestions(ydoc);
     expect(pending).toHaveLength(1);
     expect(pending[0]?.deletedText).toBe(THEIRS);
-    expect(pending[0]?.insertedText).toBe('Kestrel Lane keeps the winter crew until April');
+    expect(pending[0]?.insertedText).toBe('The winter crew keeps the Saltmarsh run until April');
     // And the block is still unclaimed, so their next edit of it is theirs
     // and the next pass offers rather than rewrites all over again.
     expect(prose.readOutline(ydoc).find((b) => b.id === theirs)?.author).toBeUndefined();
@@ -118,14 +118,14 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
     // THE NEST IS NO LONGER PAIRED WITH IT. Moving their bullet changes none
     // of their words and is allowed now (Bryan, 2026-09-15) —
     // `notes-cleanup-authorship.test.ts` is where it lands on a document.
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     const before = markdownNow();
     const result = await runNotesCleanupPass(
       depsFor(
         store,
-        stubComposer([{ op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') }]),
+        stubComposer([{ op: 'delete_block', blockId: idOf(store, 'Saltmarsh run') }]),
         dataDir,
         idOf(store, 'Meeting notes'),
       ),
@@ -142,17 +142,17 @@ describe("a person's bullet inside the section, on a doc whose marks are live", 
     // A gate the prompt contradicts is only half a rule. The model is told
     // the same thing the gate enforces, so it does not spend a pass proposing
     // edits that will be dropped.
-    const { store } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     const composer = stubComposer([]);
     await runNotesCleanupPass(depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')), {
       docId: DOC,
       meetingId: MEETING,
     });
     const input = composer.seen[0];
-    expect(input?.humanNotes).toContain('Kestrel Lane keeps the winter crew');
-    expect(input?.claimed?.has(idOf(store, 'Kestrel Lane'))).toBe(false);
+    expect(input?.humanNotes).toContain('The winter crew keeps the Saltmarsh run');
+    expect(input?.claimed?.has(idOf(store, 'Saltmarsh run'))).toBe(false);
     // And the note-taker's own bullet beside it IS claimed.
     expect(input?.claimed?.has(idOf(store, 'harbour run'))).toBe(true);
   });
@@ -243,9 +243,9 @@ describe('a block that changes hands while the compose is in flight', () => {
  */
 describe('a meeting that starts while the pass is composing', () => {
   it('writes nothing at all, and says which of the two it is', async () => {
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     const before = markdownNow();
     let recording = false;
     const deps = {
@@ -262,8 +262,8 @@ describe('a meeting that starts while the pass is composing', () => {
             return Promise.resolve([
               {
                 op: 'replace_block' as const,
-                blockId: idOf(store, 'Kestrel Lane'),
-                markdown: '- Kestrel Lane keeps the winter crew until April',
+                blockId: idOf(store, 'Saltmarsh run'),
+                markdown: '- The winter crew keeps the Saltmarsh run until April',
               },
             ]);
           },
@@ -283,9 +283,9 @@ describe('a meeting that starts while the pass is composing', () => {
   it('runs normally when nothing started — the control', async () => {
     // The same doc, the same edit, and nothing recording. The pass runs and
     // files its offer, which is what makes the refusal above the meeting.
-    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     const result = await runNotesCleanupPass(
       {
         ...depsFor(
@@ -293,8 +293,8 @@ describe('a meeting that starts while the pass is composing', () => {
           stubComposer([
             {
               op: 'replace_block',
-              blockId: idOf(store, 'Kestrel Lane'),
-              markdown: '- Kestrel Lane keeps the winter crew until April',
+              blockId: idOf(store, 'Saltmarsh run'),
+              markdown: '- The winter crew keeps the Saltmarsh run until April',
             },
           ]),
           dataDir,
@@ -306,7 +306,7 @@ describe('a meeting that starts while the pass is composing', () => {
     );
     expect(result.ok).toBe(true);
     expect(result.suggested).toBe(1);
-    expect(markdownNow()).toContain('Kestrel Lane keeps the winter crew');
+    expect(markdownNow()).toContain('The winter crew keeps the Saltmarsh run');
   });
 });
 

@@ -84,12 +84,12 @@ describe('a bullet somebody has commented on', () => {
     // nest reach a commented block; since 2026-09-15 it lets one reach a
     // block the pass does not own, so the case that needs proving is both at
     // once.
-    const { store, ydoc } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
-    const needle = 'Kestrel Lane keeps the winter crew';
+    const { store, ydoc } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
+    const needle = 'The winter crew keeps the Saltmarsh run';
     const thread = commentOn(ydoc, needle);
     expect(anchoredText(ydoc, thread)).toBe(needle);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     const result = await runNotesCleanupPass(
       depsFor(
         store,
@@ -97,7 +97,7 @@ describe('a bullet somebody has commented on', () => {
           {
             op: 'nest_blocks',
             leadBlockId: idOf(store, 'harbour run'),
-            blockIds: [idOf(store, 'Kestrel Lane')],
+            blockIds: [idOf(store, 'Saltmarsh run')],
           },
         ]),
         dataDir,

@@ -98,9 +98,13 @@ describe('an edit the gate will refuse', () => {
     // up once, under the topic the model filed it under.
     const withTopic = NOTES.replace(
       '## Other business',
-      ['### Crew rota', '', '- Kestrel Lane keeps the winter crew', '', '## Other business'].join(
-        '\n',
-      ),
+      [
+        '### Crew rota',
+        '',
+        '- The winter crew keeps the Saltmarsh run',
+        '',
+        '## Other business',
+      ].join('\n'),
     );
     const { store, markdownNow } = docStoreFrom(withTopic, ['Meeting notes']);
     const dataDir = freshDir();

@@ -38,19 +38,19 @@ import {
 afterEach(dropFreshDirs);
 
 /** Their line, typed into the middle of the note-taker's own section. */
-const THEIRS = 'Kestrel Lane keeps the winter crew';
+const THEIRS = 'The winter crew keeps the Saltmarsh run';
 /** The note-taker's own bullet beside it. */
 const OURS = 'The harbour run moves to the half hour from April';
 
 describe('structure is free — the pass may reorder a person’s bullets', () => {
   it('nests their bullet under the note-taker’s lead, and their words come through unchanged', async () => {
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [
       { turn: 0, text: 'The harbour run moves to the half hour from April.' },
-      { turn: 1, text: 'Kestrel Lane keeps the winter crew.' },
+      { turn: 1, text: 'The winter crew keeps the Saltmarsh run.' },
     ]);
-    const theirs = idOf(store, 'Kestrel Lane');
+    const theirs = idOf(store, 'Saltmarsh run');
     // CONTROL: the doc records the block as nobody's — a person typed it, or
     // edited one of the note-taker's. If it were the pass's own this case
     // would prove nothing about reaching somebody else's line.
@@ -83,16 +83,16 @@ describe('structure is free — the pass may reorder a person’s bullets', () =
   });
 
   it('takes their bullet as the LEAD too — the write path used to refuse that outright', async () => {
-    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
-    writeTranscript(dataDir, [{ turn: 0, text: 'Kestrel Lane keeps the winter crew.' }]);
+    writeTranscript(dataDir, [{ turn: 0, text: 'The winter crew keeps the Saltmarsh run.' }]);
     const result = await runNotesCleanupPass(
       depsFor(
         store,
         stubComposer([
           {
             op: 'nest_blocks',
-            leadBlockId: idOf(store, 'Kestrel Lane'),
+            leadBlockId: idOf(store, 'Saltmarsh run'),
             blockIds: [idOf(store, 'harbour run')],
           },
         ]),
@@ -109,13 +109,13 @@ describe('structure is free — the pass may reorder a person’s bullets', () =
 
 describe('words are not — a reword of a person’s bullet comes back as a suggestion', () => {
   it('leaves their words byte-identical and files a redline they answer', async () => {
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [
-      { turn: 0, text: 'Kestrel Lane keeps the winter crew until April.' },
+      { turn: 0, text: 'The winter crew keeps the Saltmarsh run until April.' },
     ]);
     const before = markdownNow();
-    const theirs = idOf(store, 'Kestrel Lane');
+    const theirs = idOf(store, 'Saltmarsh run');
     const result = await runNotesCleanupPass(
       depsFor(
         store,
@@ -149,7 +149,7 @@ describe('words are not — a reword of a person’s bullet comes back as a sugg
   it('but revises its OWN bullet outright, with no offer to answer', async () => {
     // The control that says the suggestion above is about authorship and not
     // about the verb: the same op, on the note-taker's own line.
-    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Kestrel Lane']);
+    const { store, ydoc, markdownNow } = docStoreFrom(NOTES, ['Meeting notes'], ['Saltmarsh run']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [{ turn: 0, text: 'The harbour run moves to the half hour.' }]);
     const result = await runNotesCleanupPass(
@@ -190,13 +190,13 @@ describe('a meeting whose notes landed outside the heading it opened', () => {
       '## Ferry timetable',
       '',
       '- The harbour run moves to the half hour from April',
-      '- Kestrel Lane keeps the winter crew',
+      '- The winter crew keeps the Saltmarsh run',
     ].join('\n');
     const { store, markdownNow } = docStoreFrom(doc, ['Ferry timetable']);
     const dataDir = freshDir();
     writeTranscript(dataDir, [
       { turn: 0, text: 'The harbour run moves to the half hour from April.' },
-      { turn: 1, text: 'Kestrel Lane keeps the winter crew, and the slipway work slips.' },
+      { turn: 1, text: 'The winter crew keeps the Saltmarsh run, and the slipway work slips.' },
     ]);
     const outside = idOf(store, 'harbour run');
     const result = await runNotesCleanupPass(
@@ -206,7 +206,7 @@ describe('a meeting whose notes landed outside the heading it opened', () => {
           // The nest goes FIRST: a `replace_block` re-creates the element it
           // names, so a nest naming the same lead afterwards would be naming
           // a block id that no longer exists.
-          { op: 'nest_blocks', leadBlockId: outside, blockIds: [idOf(store, 'Kestrel Lane')] },
+          { op: 'nest_blocks', leadBlockId: outside, blockIds: [idOf(store, 'Saltmarsh run')] },
           {
             op: 'replace_block',
             blockId: outside,
@@ -231,7 +231,7 @@ describe('a meeting whose notes landed outside the heading it opened', () => {
     const after = markdownNow();
     expect(after).toContain('from 1 April');
     expect(after).toContain('The slipway work slips');
-    expect(after).toContain('  - Kestrel Lane keeps the winter crew');
+    expect(after).toContain('  - The winter crew keeps the Saltmarsh run');
   });
 
   it('does not restate a note it already wrote out there', async () => {

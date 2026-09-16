@@ -151,7 +151,7 @@ export const NOTES = [
   '### Ferry timetable',
   '',
   '- The harbour run moves to the half hour from April',
-  '- Kestrel Lane keeps the winter crew',
+  '- The winter crew keeps the Saltmarsh run',
 ].join('\n');
 
 export const idOf = (store: NotesDocStore, needle: string): string => {
@@ -165,13 +165,9 @@ export const depsFor = (
   composer: NotesComposer | null,
   dataDir: string,
   headingId: string,
-  /** Sections other meetings hold on this doc. A doc with one meeting has
-   *  none, which is what every case that omits it is. */
-  claimedHeadings: readonly string[] = [],
 ) => ({
   docStore: () => store,
   composer,
   dataDir,
   headingIdOf: () => headingId,
-  claimedHeadings: () => [headingId, ...claimedHeadings],
 });

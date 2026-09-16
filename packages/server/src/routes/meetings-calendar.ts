@@ -363,11 +363,6 @@ export async function handleMeetingCalendarRoutes(
         dataDir,
         headingIdOf: (doc, meeting) =>
           createNotesHeadingFileStore(dataDir).read({ docId: doc, meetingId: meeting }),
-        // Every section any meeting on this doc has claimed. The pass
-        // subtracts the ones that are not this meeting's, because one author
-        // id cannot tell two meetings apart — `heldByOtherMeetings`.
-        claimedHeadings: (doc) =>
-          (createNotesHeadingFileStore(dataDir).claimsIn?.(doc) ?? []).map((c) => c.headingId),
         recordingNow: (doc) => meetingStore.active(doc) !== undefined,
       },
       { docId, meetingId },

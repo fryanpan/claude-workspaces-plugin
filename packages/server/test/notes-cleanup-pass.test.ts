@@ -249,7 +249,7 @@ describe('a doc whose marks have all been lost', () => {
     const result = await runNotesCleanupPass(
       depsFor(
         store,
-        stubComposer([{ op: 'delete_block', blockId: idOf(store, 'Kestrel Lane') }]),
+        stubComposer([{ op: 'delete_block', blockId: idOf(store, 'Saltmarsh run') }]),
         dataDir,
         idOf(store, 'Meeting notes'),
       ),
@@ -274,7 +274,7 @@ describe('a doc whose marks have all been lost', () => {
           {
             op: 'nest_blocks',
             leadBlockId: idOf(store, 'harbour run'),
-            blockIds: [idOf(store, 'Kestrel Lane')],
+            blockIds: [idOf(store, 'Saltmarsh run')],
           },
         ]),
         dataDir,
@@ -285,7 +285,7 @@ describe('a doc whose marks have all been lost', () => {
     expect(result.refused).toBe(0);
     expect(result.applied).toBe(1);
     expect(markdownNow()).toContain(
-      '- The harbour run moves to the half hour from April\n  - Kestrel Lane keeps the winter crew',
+      '- The harbour run moves to the half hour from April\n  - The winter crew keeps the Saltmarsh run',
     );
   });
 
