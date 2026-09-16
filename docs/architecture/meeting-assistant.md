@@ -2751,9 +2751,11 @@ sweep for the window closing silently and for dropping docs nobody has open.
 ## Measuring the latency (`?timing=1`)
 
 **How long a spoken word takes to become a word on the screen, and which hop
-spent it.** Off by default and costing nothing when off: without the flag the
-server allocates no ledger, reads no clock per audio chunk, and the wire is
-what it always was. Add `?timing=1` to a doc's address, start a meeting, and
+spent it.** Off by default, and nothing reaches the client when it is off: the
+wire is what it always was. The LEDGERS are not the readout and are built
+either way — the notes pipeline's spoken clock reads them on every ordinary
+meeting, and a latency figure that only existed on instrumented meetings would
+be no claim about the rest. Add `?timing=1` to a doc's address, start a meeting, and
 talk; a readout appears under the strip with the running p50/p95 and a CSV
 button. Nothing is sent anywhere — the samples live in the tab until someone
 downloads them, and no transcript text, doc id or path enters a sample, a
@@ -3035,10 +3037,20 @@ what is still running, because a line that only says what failed reads as a
 meeting that did not start. Only with nothing at all granted does the strip
 block, and then it carries both reasons.
 
-**Stage timing is off for a combined capture.** `AudioChunkLedger` correlates
-a turn to the chunk it ended in by an offset into ONE engine's stream, and two
-engines have two of those. `?timing=1` on a two-stream meeting is refused
-rather than measured against whichever stream wrote the ledger last.
+**Each stream carries its own ledger** (2026-09-16). `AudioChunkLedger`
+correlates a turn to the chunk it ended in by an offset into ONE engine's
+stream, and two engines have two of those — so the relay keeps one ledger per
+stream and resolves a turn against the ledger of the stream whose engine
+produced it. It used to keep one per meeting, counting the bytes of both
+streams against an offset into either, and rather than publish a number wrong
+by minutes it published none: `?timing=1` was refused on a two-stream meeting,
+and, far more expensively, the notes pipeline's SPOKEN CLOCK was null on every
+tick of every mic + Mac-audio meeting. That is the clock the ten-second
+last-word-to-note goal is written against, so the goal could be checked on
+solo meetings only — measured as null on 3 of 3 conversations recorded before
+the fix and populated on 10 of 10 mic-only ones. Both readers now answer on a
+combined capture; `packages/server/test/meeting-two-stream-spoken-clock.test.ts`
+drives the socket and reads the clock back out of the timing file.
 
 **Cost doubles per meeting-hour** while both streams run: two billed streaming
 sessions, each with its own diarization surcharge on a `conversation`.
