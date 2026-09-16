@@ -273,6 +273,27 @@ function insertAfterList(
  * matched nothing on a multi-line string and the `- ` markers survived into
  * the item's text: an empty bullet with the whole replacement nested under
  * it, reported as `applied`.
+ *
+ * AND THE BLOCK KEEPS ITS ADDRESS. Yjs has no in-place rewrite, so a replace
+ * is a delete and an insert — which used to mean the rewritten block came
+ * back with a NEW id, and every edit that still named the old one was
+ * answered `unknown-block`. Inside a single batch that is the caller's own
+ * earlier edit invalidating its later ones: edits resolve against the doc as
+ * the ones before them left it, so "correct this bullet, then nest these
+ * under it", "rename this heading, then insert under it" and "rewrite this
+ * bullet, then rewrite it again" all lost their second half, on blocks that
+ * were demonstrably on the page when the batch was composed. The words a
+ * note-taker could not put back are the ones this cost
+ * (`packages/server/src/notes-edit-address.ts` measured the recovery).
+ *
+ * So the FIRST element written in `'replace'` mode inherits the replaced
+ * block's id. One block is replaced by one address — a replacement that
+ * parses to several blocks gives the extras ids of their own at
+ * `mintMissingIds`, so no two blocks ever share one. `'after'` mode copies
+ * nothing: the original is still in the doc there, and a proposal offered
+ * beside it must never wear its address. This is the same law `prose-nest.ts`
+ * already holds a MOVE to — "it keeps its block id, so an edit that named it
+ * a tick ago still names it" — extended to a rewrite.
  */
 function writeReplacement(
   fragment: Y.XmlFragment,
@@ -285,6 +306,9 @@ function writeReplacement(
   const idx = (parent.toArray() as unknown[]).indexOf(el);
   if (idx < 0) return 'unknown-block';
   const at = mode === 'replace' ? idx : idx + 1;
+  // READ BEFORE THE DELETE, and only for a replace: the attribute has to come
+  // off the element while it is still integrated.
+  const keepId = mode === 'replace' ? readBlockId(el) : undefined;
   if (el.nodeName === 'listItem') {
     const split = splitLeadingListItems(markdown);
     const items = (split ? split.items : [markdown.replace(LIST_LINE, '$3')])
@@ -293,6 +317,7 @@ function writeReplacement(
     if (items.length === 0) return 'parse-failed';
     if (mode === 'replace') parent.delete(idx, 1);
     const created = insertParsed(parent, at, items);
+    inheritBlockId(created, keepId);
     // Whatever followed the run of items is still the caller's words, and a
     // paragraph cannot live between two list items — it goes after the list.
     if (split && split.rest.trim().length > 0) {
@@ -303,7 +328,17 @@ function writeReplacement(
   const blocks = parseMarkdownBlocks(markdown, parse);
   if (blocks.length === 0) return 'parse-failed';
   if (mode === 'replace') parent.delete(idx, 1);
-  return insertParsed(parent, at, blocks);
+  const written = insertParsed(parent, at, blocks);
+  inheritBlockId(written, keepId);
+  return written;
+}
+
+/** Give the first block written by an in-place rewrite the address the block
+ *  it replaced was known by. A no-op when there is nothing to inherit. */
+function inheritBlockId(written: readonly Y.XmlElement[], keepId: string | undefined): void {
+  const first = written[0];
+  if (keepId === undefined || first === undefined) return;
+  first.setAttribute(BLOCK_ID_ATTR, keepId);
 }
 
 const ALREADY_PROPOSED =

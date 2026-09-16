@@ -81,6 +81,7 @@ import { type MeetingSpend, meetingSpend } from './notes-spend.ts';
 import {
   type NotesCallUsage,
   type NotesComposeMeasure,
+  type NotesDroppedEdit,
   type NotesTickTiming,
   type NotesTimingLog,
   type NotesTokenUsage,
@@ -543,6 +544,22 @@ export interface NotesUpdate {
    * given must not have every link in the batch judged as invented.
    */
   linkSources?: NotesLinkSources;
+  /**
+   * Called by the write path with every edit of this batch the doc would not
+   * take where it was addressed, and whether its words were re-homed anyway.
+   *
+   * IT RIDES THE UPDATE for the same reason `linkSources` does, in the other
+   * direction: only the TICK can put these on the record. `onNotes` answers
+   * one value — landed, refused, or no-words — and a tick that wrote four
+   * notes and dropped its correction answers `true` on every one of them. The
+   * session passes this down with the batch and reads it back into the
+   * timing row (`NotesTickTiming.dropped`), so a correction that did not
+   * happen is stated rather than inferred from silence.
+   *
+   * Optional, and absent means the caller is not recording — the direct
+   * callers in the tests are all in that position.
+   */
+  onDropped?: (dropped: readonly NotesDroppedEdit[]) => void;
 }
 
 /**
@@ -1506,6 +1523,11 @@ export function beginNotesSession(
         tickCalls.push(c);
         meetingCalls.push(c);
       };
+      // WHAT THE DOC WOULD NOT TAKE, filled in by the write path while the
+      // batch is being applied and read back by `report` below. Per tick, so
+      // a tick whose batch landed whole records an empty list rather than the
+      // previous tick's.
+      let droppedEdits: readonly NotesDroppedEdit[] = [];
       const report = (outcome: NotesTickTiming['outcome'], edits: readonly prose.BlockEdit[]) => {
         if (timing === undefined) return;
         const end = clock();
@@ -1536,6 +1558,7 @@ export function beginNotesSession(
           edits: edits.length,
           blocks: blocks.size,
           merged: mergeCount(tick),
+          dropped: droppedEdits,
           outcome,
           settledToWrittenMs: outcome === 'written' && settledAt !== null ? end - settledAt : null,
           spokenToWrittenMs: outcome === 'written' && spokenAt !== null ? end - spokenAt : null,
@@ -1832,6 +1855,9 @@ export function beginNotesSession(
           // is about to be WRITTEN would strip it the moment the doc no
           // longer carried the earlier question.
           linkSources: notesLinkSources({ ...input, ...input.tick }),
+          onDropped: (d) => {
+            droppedEdits = d;
+          },
         });
         const written = answer !== false && answer !== 'refused';
         applyMs = clock() - applyStart;
