@@ -22,11 +22,19 @@
  * the only thread. Verified by mutation: restoring the synchronous fallback
  * in `DocStore.prereadFor` hangs this file rather than failing it.
  *
- * The criterion behind this file asks for a scan "under 100ms". It is
- * asserted here as a COUNT — a pool read outstanding when the scan returns —
- * because testing-standards §3 bans elapsed-time assertions, and because the
- * count is the stronger claim: a scan that skipped the doc would also be
- * fast.
+ * WHAT THE SCAN COSTS NOW: nothing on the file at all. Since 2026-09-16 a
+ * thread listing resolves its doc WITHOUT arming a file binding — a fan-out
+ * over a board woke ~2,500 dormant bindings and they flushed weeks-old
+ * content over files on disk — so the scan reads the `.ydoc` and never opens
+ * the bound path. The wedge property this file was written for is therefore
+ * stronger than it was: there is no read to park on, sick folder or not.
+ *
+ * The anti-vacuity assertion is what changed with it. It used to be a pool
+ * read outstanding when the scan returned, which proved the scan had reached
+ * the doc through the async door. With no read at all, what proves the scan
+ * reached the doc is that the doc is RESIDENT and UNBOUND: in memory from
+ * its `.ydoc`, holding no binding. A scan that skipped the doc leaves it
+ * neither.
  *
  * The board, the doc and the paths here are invented.
  */
@@ -109,49 +117,51 @@ describe('the stall scan over a board holding an unreadable doc', () => {
     rmSync(scratch, { recursive: true, force: true });
   });
 
-  it('finishes a pass in well under 100ms and parks the doc it could not read', async () => {
+  it('finishes a pass without opening the doc it could not read', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     // The doc is COLD: neither boot pass opens it (nothing had an un-flushed
     // write, and its `.ydoc` already has an index row), so the scan below is
     // the first thing to ask for it.
     expect(handle.docStore.boundPathOf(DOC_ID)).toBeUndefined();
 
+    // A DELTA, not a total: `boundFiles` is one module-level pool shared by
+    // every test in this process, so a neighbouring file's read in flight
+    // makes the total whatever it likes. What this scan costs is the change.
+    const inflightBefore = boundFiles.stats().inflight;
     handle.nudgeStalls();
 
-    // The scan RETURNED, and it returned with a read still outstanding on the
-    // thread pool. That pair is the whole property: it went through the async
-    // door rather than opening the file itself. Asserting it as a count
-    // rather than as an elapsed time is required by testing-standards §3 (a
-    // wall-clock assertion fails on a loaded runner and passes on a broken
-    // fast path), and it is also the stronger claim — "fast" would still be
-    // true of a scan that skipped the doc entirely.
-    expect(boundFiles.stats().inflight).toBeGreaterThan(0);
+    // The scan RETURNED, and it started no read of its own: a thread listing
+    // no longer opens the bound file at all.
+    expect(boundFiles.stats().inflight).toBe(inflightBefore);
 
-    // Not a vacuous pass. Without this the test would also go green on a scan
-    // that never looked at the doc at all — which is the other way to be fast.
-    // A park reason means the scan reached this doc, decided against opening
-    // it on the main thread, and said so.
-    const status = handle.docStore.getDocStatus(DOC_ID);
-    expect(status?.bound).toBe(false);
-    expect(status?.sourceParked?.reason).toContain('.ydoc');
+    // Not a vacuous pass. The doc is in memory — so the scan did reach it —
+    // and it holds no binding, which is the whole of what the read may cost.
+    expect(handle.docStore.peek(DOC_ID)).toBeDefined();
+    expect(handle.docStore.getDocStatus(DOC_ID)?.bound).toBe(false);
 
     // And the file is untouched: a doc that binds without having read its file
     // overwrites that file on the next write-back.
     expect(statSync(boundPath).isFIFO()).toBe(true);
   });
 
-  it('positive control: the same scan binds the doc when the file answers', async () => {
+  it('positive control: a readable file is not what was stopping it, and a content read still binds', async () => {
     // Same board, same pass, with the FIFO swapped back for a real file.
-    // Without this the test above would pass on a server that had simply
-    // stopped hydrating board docs at all.
+    // Two things to prove, and the second is what keeps the case above
+    // honest.
     unlinkSync(boundPath);
     writeFileSync(boundPath, '# Design\n\nA readable first version.\n');
 
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     handle.nudgeStalls();
 
-    // The bind is deferred onto the pool even on the happy path, so give the
-    // read a turn to land before asking.
+    // One: the scan binds nothing even when the file would answer happily,
+    // so the case above measured the rule and not the sick folder.
+    expect(handle.docStore.boundPathOf(DOC_ID)).toBeUndefined();
+    expect(handle.docStore.peek(DOC_ID)).toBeDefined();
+
+    // Two: binding still works in this fixture. A read of the doc's CONTENT
+    // arms it, deferred onto the pool, so give the read a turn to land.
+    handle.docStore.get(DOC_ID);
     for (let i = 0; i < 50 && handle.docStore.boundPathOf(DOC_ID) === undefined; i++) {
       await new Promise((r) => setTimeout(r, 20));
     }

@@ -589,6 +589,7 @@ export class DocStore {
   private docThreadPersistence(): DocThreadPersistence {
     return {
       doc: (docId) => this.resolveDoc(docId),
+      docForRead: (docId) => this.resolveDocForRead(docId),
       residentDoc: (docId) => this.docs.get(docId),
       fireThreadEvent: (doc, event, thread, comment, opts, actor) =>
         this.fanout.fireEvent(doc, event, thread, comment, opts, actor),
@@ -735,6 +736,8 @@ export class DocStore {
     this.hydratedAt.delete(docId);
     // A park describes THIS live doc; the next hydrate decides afresh.
     this.parkedSources.delete(docId);
+    // And the read-only-hydrate marker, for the same reason.
+    this.unboundReads.delete(docId);
     // The row written above carries the marker now, so the in-memory copy has
     // done its job; a doc that comes back re-derives it from its own binding.
     this.bindings.forgetFailedWrite(docId);
@@ -1319,6 +1322,7 @@ export class DocStore {
     this.lastTouchedAt.delete(docId);
     this.hydratedAt.delete(docId);
     this.parkedSources.delete(docId);
+    this.unboundReads.delete(docId);
     this.fanout.forgetDoc(doc);
     doc.disposeAuthorship?.();
     doc.disposeAuthorship = null;
@@ -1578,8 +1582,16 @@ export class DocStore {
    */
   private hydrateDoc(
     docId: string,
-    opts: { blocking?: boolean; liveWins?: boolean } = {},
+    opts: { blocking?: boolean; liveWins?: boolean; bind?: false } = {},
   ): boolean {
+    if (opts.bind === false) {
+      // A read-only hydrate: the `.ydoc` comes into memory and NOTHING is
+      // bound — no file read, no poll, no write-back, no park verdict. See
+      // `getForRead`. The park is left exactly as it was, because this
+      // hydrate reached no conclusion about the file to replace it with.
+      this.getOrCreate(docId, undefined, { authority: 'server' });
+      return false;
+    }
     const bound = this.hydrateDocInner(docId, opts);
     if (bound) this.parkedSources.delete(docId);
     return bound;
@@ -2145,11 +2157,67 @@ export class DocStore {
    */
   private resolveDoc(docId: string): LiveDoc | undefined {
     const resident = this.peek(docId);
-    if (resident) return resident;
+    if (resident) {
+      // A doc that came in through `getForRead` has no binding. This caller
+      // is about to read or write CONTENT, so it gets the full hydrate the
+      // read path deliberately skipped — otherwise a doc whose first visitor
+      // was a threads read would serve forever without ever writing back.
+      if (this.unboundReads.delete(resident.docId)) this.hydrateDoc(resident.docId);
+      return resident;
+    }
     const target = this.aliases.get(docId) ?? docId;
     if (!existsSync(this.pathFor(target))) return undefined;
     this.hydrateDoc(target);
     return this.docs.get(target);
+  }
+
+  /**
+   * Docs hydrated for a READ, whose file binding was never armed.
+   *
+   * Cleared the moment anything asks for the doc through `get` (which binds
+   * it properly) and when it leaves memory.
+   */
+  private readonly unboundReads = new Set<string>();
+
+  /**
+   * A doc for a request that only READS it — the threads listing, and
+   * nothing that edits.
+   *
+   * The difference from `get` is that this arms no file binding: no bound
+   * file is read, no mtime poll joins the sweep, no write-back observer is
+   * installed, and no attach-time arbitration can decide to reassert the
+   * `.ydoc` over the file. Threads live in the CRDT, so the `.ydoc` alone
+   * answers the question.
+   *
+   * That matters because reading is FANNED OUT: the home queue walks every
+   * doc on a board. On 2026-09-16 ~7,000 read-only threads GETs hydrated
+   * every dormant binding on the server — residentDocs 2,246→7,114, bindings
+   * 586→3,134, 281MB RSS, ~95s not answering — and the bindings they woke
+   * flushed weeks-old content over files on disk. A read should cost the
+   * `.ydoc` and nothing else.
+   *
+   * Does not `touchDoc` either, for the reason `peek` documents: a fan-out is
+   * not somebody reaching for a doc.
+   */
+  getForRead(docId: string): LiveDoc | undefined {
+    return this.resolveDocForRead(docId);
+  }
+
+  /**
+   * `resolveDoc`'s read-only twin: the `.ydoc` comes into memory, no binding
+   * is armed, and a doc that is already resident is left exactly as it is —
+   * including one an earlier read left unbound, which is what keeps a fan-out
+   * over a board from binding on its second pass instead of its first.
+   */
+  private resolveDocForRead(docId: string): LiveDoc | undefined {
+    const resident = this.peek(docId);
+    if (resident) return resident;
+    const target = this.aliases.get(docId) ?? docId;
+    if (!existsSync(this.pathFor(target))) return undefined;
+    this.hydrateDoc(target, { bind: false });
+    const doc = this.docs.get(target);
+    if (doc) this.unboundReads.add(target);
+    return doc;
   }
 
   /**
@@ -2745,7 +2813,11 @@ export class DocStore {
     // workspace listing, the archive route and the stall scan each walk EVERY
     // docId on a board, none of which reaches a URL for the request prewarm
     // to find. One bad file among them used to park the whole server.
-    this.resolveDoc(docId);
+    //
+    // And it costs no BINDING either: the read-only resolve leaves the file
+    // alone entirely, so a walk over a board's docs can no longer wake every
+    // dormant binding on it (2026-09-16 — see `getForRead`).
+    this.resolveDocForRead(docId);
     return this.docThreads.listThreads(docId, filter);
   }
 

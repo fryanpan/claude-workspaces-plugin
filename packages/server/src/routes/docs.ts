@@ -615,7 +615,14 @@ export async function handleDocResourceRoutes(
   const addressed = decodeURIComponent(docMatch[1] ?? '');
   const rest = docMatch[2] ?? '';
   if (!isValidDocId(addressed)) return j(400, { error: 'bad docId' });
-  const doc = docStore.get(addressed);
+  // Reading a doc's THREADS binds nothing. Threads live in the `.ydoc`, and
+  // this is the request the home queue fans out over every doc on a board —
+  // ~7,000 of them on 2026-09-16 woke every dormant file binding on the
+  // server, which then flushed weeks-old content over files on disk. Every
+  // other subroute below can edit, so every other subroute takes the binding
+  // hydrate. See `DocStore.getForRead`.
+  const readOnly = rq.req.method === 'GET' && (rest === 'threads' || rest.startsWith('threads/'));
+  const doc = readOnly ? docStore.getForRead(addressed) : docStore.get(addressed);
   if (!doc) return j(404, { error: 'doc not found' });
   // Canonicalize ONCE, here, and the ~30 subroutes below inherit both
   // halves of the alias contract: a readable name resolves, and
