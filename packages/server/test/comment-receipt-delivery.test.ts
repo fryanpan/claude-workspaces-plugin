@@ -154,3 +154,97 @@ describe('a comment is stamped delivered when a watching session is live', () =>
     }
   });
 });
+
+/**
+ * The path most second ticks will actually take: nobody was listening when the
+ * comment was written, and a session picked the work up afterwards.
+ *
+ * The live stamp cannot see this — no doc event fires when a parked row is
+ * handed over — so without its own wiring the queue path leaves a comment that
+ * demonstrably reached an agent showing one tick forever. Driven through the
+ * real heartbeat route, because the hand-over IS that route.
+ */
+describe('a comment parked for a session that attaches later', () => {
+  let handle: ServerHandle;
+  let dataDir: string;
+  let srcDir: string;
+  let base: string;
+  const stops: Array<() => void> = [];
+
+  beforeAll(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'feedback-receipt-late-'));
+    srcDir = mkdtempSync(join(tmpdir(), 'feedback-receipt-late-src-'));
+    handle = createServer({ port: 0, dataDir });
+    base = `http://127.0.0.1:${handle.port}`;
+  });
+
+  afterAll(async () => {
+    for (const stop of stops.splice(0)) stop();
+    await handle.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(srcDir, { recursive: true, force: true });
+  });
+
+  const send = (path: string, body: unknown): Promise<Response> =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('is stamped by the hand-over, and not before it', async () => {
+    const created = (await (
+      await send('/workspaces', { name: 'Late attach', goal: 'Ship it.' })
+    ).json()) as { workspace: { id: string } };
+    const ws = created.workspace.id;
+    // Attaching makes this agent the lead, which is what puts a comment on
+    // the queue addressed to it. Its stream stays SHUT until the last step.
+    const att = await send(`/workspaces/${ws}/agents`, {
+      agentId: 'agent-late',
+      runtime: 'claude-code-local',
+    });
+    expect(att.status).toBe(200);
+
+    const file = join(srcDir, 'late.md');
+    writeFileSync(file, '# Late\n\nsome text\n');
+    const doc = (await (
+      await send(`/workspaces/${ws}/docs`, { docId: 'late-doc', sourceUrl: file, title: 'Late' })
+    ).json()) as { docId: string };
+
+    const opened = (await (
+      await send(`/workspaces/${ws}/docs/${doc.docId}/threads`, {
+        author: reader,
+        text: 'is anyone picking this up?',
+        anchor,
+      })
+    ).json()) as { thread: { id: string; comments: Array<{ id: string }> } };
+    const commentId = opened.thread.comments[0]?.id as string;
+
+    const stamp = async (): Promise<number | undefined> => {
+      const body = (await (
+        await fetch(`${base}/workspaces/${ws}/docs/${doc.docId}/threads`)
+      ).json()) as {
+        threads?: Array<{ comments?: Array<{ id: string; deliveredAt?: number }> }>;
+      };
+      for (const t of body.threads ?? []) {
+        for (const c of t.comments ?? []) if (c.id === commentId) return c.deliveredAt;
+      }
+      return undefined;
+    };
+
+    // Parked, and unstamped: the row exists, nothing has reached anybody.
+    await waitFor(() => (handle.tasks.listQueuedComments(ws).length > 0 ? true : undefined), {
+      describe: 'the comment to be parked for the absent agent',
+    });
+    expect(await stamp()).toBeUndefined();
+
+    // The session comes back, and the heartbeat hands the row over.
+    const stream = await openWorkspaceStream(base, ws, {}, 'agent-late');
+    stops.push(() => void stream.close());
+    await send(`/workspaces/${ws}/agents/agent-late/heartbeat`, {});
+
+    const at = await waitFor(stamp, { describe: 'the parked comment to be stamped on hand-over' });
+    expect(at).toBeGreaterThan(0);
+    await stream.close();
+  });
+});

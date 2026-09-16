@@ -462,8 +462,12 @@ syncs, survives a reload and rides the REST threads payload the board already
 reads. The judgement is `server/src/comment-receipt.ts`, dependency-injected
 over `SseBus.agentsOn` because delivery means a LIVE stream, never a line in
 `agent-watches.json`; `stall-wiring.ts` calls it where it already knows a
-comment's board channels, and broadcasts a transient `comment.delivered` to
-pages only. On the client every app surface now draws its comment header
+comment's board channels, and `recordDelivery` writes the stamp once and
+broadcasts a transient `comment.delivered` to pages on every channel the
+comment travelled. Its other caller is the heartbeat route's hand-over of a
+PARKED comment (`routes/workspace-attachments.ts`), which is where most second
+ticks are set: a comment written while nobody was listening reaches a session
+when that session attaches, and no doc event fires for it. On the client every app surface now draws its comment header
 through `workspaces-app/src/comment-view.ts`, one module owning the structure
 and the mark's position with a class-name variant per stylesheet — because a
 feature added to "comments" that reaches one surface out of four is the

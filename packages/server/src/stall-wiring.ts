@@ -42,7 +42,7 @@ import {
 import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
-import { commentOfEvent, handedToAgent } from './comment-receipt.ts';
+import { commentOfEvent, handedToAgent, recordDelivery } from './comment-receipt.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
 import type { DocStore } from './doc-store.ts';
 import { changedFilesInWorktree } from './git-diff.ts';
@@ -1298,18 +1298,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       isAuthor: (agentId) => commentAuthorIs(agentId, comment.author),
     });
     if (!delivered) return;
-    const at = Date.now();
-    if (docStore.markCommentDelivered(docId, threadId, comment.id, at) !== 'stamped') return;
-    const frame = {
-      event: 'comment.delivered',
-      docId,
-      threadId,
-      commentId: comment.id,
-      deliveredAt: at,
-    };
-    for (const channel of channels) {
-      sse.broadcastTransient(channel, frame, { skipAgentStreams: true });
-    }
+    recordDelivery(
+      { docId, threadId, commentId: comment.id, channels, at: Date.now() },
+      {
+        markDelivered: (d, t, c, at) => docStore.markCommentDelivered(d, t, c, at),
+        announce: (channel, frame) =>
+          sse.broadcastTransient(channel, frame, { skipAgentStreams: true }),
+      },
+    );
   };
 
   const onLiveDocEvent = (docId: string, payload: WebhookPayload): void => {
@@ -1340,7 +1336,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // `shareWorkspacesOf` spells out, so what an agent HEARS about a review
     // and what a share visitor may OPEN in it cannot drift apart.
     const attachmentId = attachmentIdOf(docStore.peekMeta(docId) ?? {});
-    for (const board of boardsForDoc(docId)) {
+    // Every board this doc hangs on, gathered BEFORE the stamp: the write is
+    // write-once, so stamping inside the loop would announce to whichever
+    // board came first and leave every other board's open pages on one tick
+    // until they reloaded.
+    const boards = [...boardsForDoc(docId)];
+    for (const board of boards) {
       const rows = queueCommentRows(board, docId, payload);
       // doc-store.ts already broadcast on the review's own channel; a second
       // send here would deliver the same comment twice to one listener. The
@@ -1353,8 +1354,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         });
       }
       markCommentRowsEmitted(board, rows);
-      stampReceipt(docId, payload, [docId, `ws~${board}`]);
     }
+    stampReceipt(docId, payload, [docId, ...boards.map((b) => `ws~${b}`)]);
   };
 
   return {

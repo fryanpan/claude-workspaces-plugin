@@ -77,3 +77,89 @@ export function commentOfEvent<C>(payload: {
   const comments = payload.thread?.comments;
   return comments?.[comments.length - 1];
 }
+
+/** The frame a page needs to turn one tick into two without a reload. */
+export interface DeliveredFrame {
+  event: 'comment.delivered';
+  docId: string;
+  threadId: string;
+  commentId: string;
+  deliveredAt: number;
+  [k: string]: unknown;
+}
+
+/** Where a delivery is written down, and who is told about it. */
+export interface ReceiptSink {
+  /** Write-once: `already` for a comment that has a stamp, `gone` for one
+   *  whose doc or thread is no longer resident. */
+  markDelivered(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    at: number,
+  ): 'stamped' | 'already' | 'gone';
+  /** One channel's worth of "this landed", for pages only. */
+  announce(channel: string, frame: DeliveredFrame): void;
+}
+
+/**
+ * Stamp a comment delivered and tell every channel it travelled on.
+ *
+ * Two callers, and they are not variations on one path: a comment handed
+ * straight to a session that was already listening, and one handed over on the
+ * heartbeat that follows a session attaching LATE. The second is the common
+ * case — a person comments on a board nobody is watching and an agent picks
+ * the work up minutes later — so a receipt that only the first path could set
+ * would leave the second tick permanently missing from ordinary use.
+ *
+ * ALL the channels are announced on, from the one stamp. The write is
+ * write-once, so a per-channel stamp-then-announce tells only whichever
+ * channel happened to be asked first and leaves every other open page on one
+ * tick until it reloads.
+ */
+export function recordDelivery(
+  args: {
+    docId: string;
+    threadId: string;
+    commentId: string;
+    channels: readonly string[];
+    at: number;
+  },
+  sink: ReceiptSink,
+): boolean {
+  if (sink.markDelivered(args.docId, args.threadId, args.commentId, args.at) !== 'stamped') {
+    return false;
+  }
+  const frame: DeliveredFrame = {
+    event: 'comment.delivered',
+    docId: args.docId,
+    threadId: args.threadId,
+    commentId: args.commentId,
+    deliveredAt: args.at,
+  };
+  for (const channel of new Set(args.channels)) sink.announce(channel, frame);
+  return true;
+}
+
+/**
+ * The comment id inside a queue row's replayed payload.
+ *
+ * The row records the doc and the thread but not the comment — it is a
+ * delivery record, and the words live in the ydoc. The payload it replays is
+ * the original broadcast, so the comment is read back out of it with the same
+ * rule the live path uses. `unknown` in, because a row read off disk is
+ * whatever the file said.
+ */
+export function commentIdOfReplay(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const shaped = payload as { event?: unknown; comment?: unknown; thread?: unknown };
+  if (typeof shaped.event !== 'string') return undefined;
+  const comment = commentOfEvent<{ id?: unknown }>({
+    event: shaped.event,
+    ...(shaped.comment !== undefined ? { comment: shaped.comment as { id?: unknown } } : {}),
+    ...(typeof shaped.thread === 'object' && shaped.thread !== null
+      ? { thread: shaped.thread as { comments?: Array<{ id?: unknown }> } }
+      : {}),
+  });
+  return typeof comment?.id === 'string' ? comment.id : undefined;
+}
