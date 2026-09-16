@@ -613,6 +613,47 @@ def check_maintainer_names(tmp: str) -> None:
     expect("maintainer prompt: nobody is named when nobody resolved",
            0 if "Scrub Selftest" not in empty else 1, 0)
 
+    check_house_fixture_names()
+
+
+def check_house_fixture_names() -> None:
+    """The names builders are told to write are the names the scanner permits.
+
+    The convention has two halves and they used to disagree: a push carrying
+    one of these words in a fixture was blocked as a surname used as sample
+    data, and a push-range block is not clearable by a forward commit. These
+    cases hold the halves together, and hold the exemption to three words.
+    """
+    house = scrub_names.HOUSE_FIXTURE_NAMES
+    expect("house names: the list is the three the convention names",
+           0 if set(house) == {"Harborlight", "Riverbend", "Saltmarsh"} else 1, 0,
+           f"got {house!r}")
+
+    for maintainers in ({"Scrub Selftest"}, set()):
+        who = "with a maintainer" if maintainers else "with nobody resolved"
+        prompt = haiku.system_prompt(maintainers)
+        for name in house:
+            expect(f"house names: {name} is named to the scanner {who}",
+                   0 if f"- {name}" in prompt else 1, 0)
+        expect(f"house names: ...as a placeholder, not a leak ({who})",
+               0 if "house fixture names" in prompt
+               and "cross it off the sweep as a placeholder" in prompt else 1, 0)
+        expect(f"house names: ...and nothing else is widened ({who})",
+               0 if "closed list of three words" in prompt
+               and "still a leak in a test fixture" in prompt else 1, 0)
+
+    # The prompt renders the constant rather than carrying its own copy, which
+    # is what makes scrub_names.HOUSE_FIXTURE_NAMES the one place the two
+    # halves of the convention meet. Swap the constant; the prompt must follow.
+    saved = scrub_names.HOUSE_FIXTURE_NAMES
+    try:
+        scrub_names.HOUSE_FIXTURE_NAMES = ("Tidewater",)
+        swapped = haiku.system_prompt({"Scrub Selftest"})
+    finally:
+        scrub_names.HOUSE_FIXTURE_NAMES = saved
+    expect("house names: the prompt reads the constant, not a copy of it",
+           0 if "- Tidewater" in swapped and "- Saltmarsh" not in swapped else 1, 0)
+
 
 # --- The Haiku layer's three ways of not running ---------------------------
 #

@@ -40,7 +40,7 @@ import { type ReviewPayload, isReviewItemOpen } from '@claude-workspaces/core';
 import type { EnvLike } from '@claude-workspaces/core/env-names';
 import { type AnswerCoverage, threadOpenParts, ticketOpenParts } from './answer-coverage.ts';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { resolveKeySlotFrom } from './summarize.ts';
 import { resolveAssignee } from './task-owner.ts';
 import { taskBodyDocId, taskIdOfBodyDoc } from './task-projection.ts';
 import type { Task, TaskStore, VoiceRoute } from './tasks.ts';
@@ -1369,14 +1369,15 @@ export function haikuVoiceComplete(opts?: {
   // Same two-name resolution as the summarizer: a machine set up before the
   // rename holds only the legacy entry, and reading just the new name left
   // the fast path silently off while summaries kept working.
-  const key = resolveKeyFrom(
+  const resolved = resolveKeySlotFrom(
+    'voice-complete',
     opts?.apiKey,
     opts?.readKey ?? readKeychainPassword,
     opts?.env ?? process.env,
   );
-  if (!key) return null;
+  if (!resolved) return null;
   const fetchImpl = opts?.fetchImpl ?? globalThis.fetch;
-  const resolvedKey = key;
+  const resolvedKey = resolved.key;
   return async ({ system, user }) => {
     const ctl = new AbortController();
     const timeout = setTimeout(() => ctl.abort(), TIMEOUT_MS);

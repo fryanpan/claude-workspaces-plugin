@@ -35,7 +35,15 @@ import {
   parseSummaryResponse,
 } from '@claude-workspaces/core/summary-prompt';
 import type { Thread } from '@claude-workspaces/core/types';
-import { ACCESS_TOKEN_ENV, claudeKeyAddHint, claudeKeyServices } from './claude-key-source.ts';
+import {
+  ACCESS_TOKEN_SLOT,
+  type ClaudeCallPath,
+  type ClaudeKeySlot,
+  EXPLICIT_SLOT,
+  claudeKeySlots,
+  noteClaudeSlot,
+} from './claude-key-slot.ts';
+import { ACCESS_TOKEN_ENV, claudeKeyAddHint } from './claude-key-source.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -107,22 +115,67 @@ export interface ScheduleArgs {
  * review comments and anchored source lines off-machine without anyone
  * choosing it. Adding the dedicated entry is the act of consent; a key that
  * happens to be in the environment for other reasons is not.
+ *
+ * IT RECORDS NOTHING, and neither does `resolveCredentialFrom` below. A
+ * caller that resolves through either does not appear in the slot trace and
+ * cannot be asked which key it spent, so an adapter that reaches the API goes
+ * through `resolveKeySlotFrom` / `resolveCredentialSlotFrom` instead. What is
+ * left here is the shape tests and value-only callers already had.
  */
 export function resolveKeyFrom(
   explicit: string | null | undefined,
   read: (service: string) => string | null,
   env: EnvLike = process.env,
 ): string | null {
-  if (explicit !== undefined) return explicit || null;
-  for (const service of claudeKeyServices(env)) {
+  return lookupKeySlot(explicit, read, env)?.key ?? null;
+}
+
+/** A resolved key and the configured slot it came out of. */
+export interface ResolvedClaudeKey {
+  readonly key: string;
+  readonly slot: ClaudeKeySlot;
+}
+
+/**
+ * The lookup above, except that it also says WHICH slot answered.
+ *
+ * The slot is decided by which name was consulted, never by inspecting what
+ * came back: the loop below knows the answer before the value exists, and
+ * nothing here may turn a value into an identifier of any kind.
+ */
+function lookupKeySlot(
+  explicit: string | null | undefined,
+  read: (service: string) => string | null,
+  env: EnvLike,
+): ResolvedClaudeKey | null {
+  if (explicit !== undefined) return explicit ? { key: explicit, slot: EXPLICIT_SLOT } : null;
+  for (const slot of claudeKeySlots(env)) {
     try {
-      const key = read(service);
-      if (key) return key;
+      const key = read(slot.name);
+      if (key) return { key, slot };
     } catch {
       // A missing entry throws; try the next name before giving up.
     }
   }
   return null;
+}
+
+/**
+ * Resolve a key AND record which slot paid, under the call path's own name.
+ *
+ * Every adapter that spends the Claude bill goes through this rather than
+ * `resolveKeyFrom`, so a run can be asked what it picked up instead of the
+ * question being answered from the config that was meant to decide it.
+ */
+export function resolveKeySlotFrom(
+  path: ClaudeCallPath,
+  explicit: string | null | undefined,
+  read: (service: string) => string | null,
+  env: EnvLike = process.env,
+): ResolvedClaudeKey | null {
+  const resolved = lookupKeySlot(explicit, read, env);
+  noteClaudeSlot(path, resolved?.slot ?? null);
+  return resolved;
 }
 
 /**
@@ -168,11 +221,45 @@ export function resolveCredentialFrom(
   read: (service: string) => string | null,
   env: Record<string, string | undefined>,
 ): SummaryCredential | null {
-  if (explicit !== undefined) return explicit ? { kind: 'key', value: explicit } : null;
+  return lookupCredentialSlot(explicit, read, env)?.credential ?? null;
+}
+
+/** A resolved credential and the configured slot it came out of. */
+export interface ResolvedClaudeCredential {
+  readonly credential: SummaryCredential;
+  readonly slot: ClaudeKeySlot;
+}
+
+function lookupCredentialSlot(
+  explicit: string | null | undefined,
+  read: (service: string) => string | null,
+  env: Record<string, string | undefined>,
+): ResolvedClaudeCredential | null {
+  if (explicit !== undefined) {
+    return explicit ? { credential: { kind: 'key', value: explicit }, slot: EXPLICIT_SLOT } : null;
+  }
   const token = env[ACCESS_TOKEN_ENV]?.trim();
-  if (token) return { kind: 'token', value: token };
-  const key = resolveKeyFrom(undefined, read, env);
-  return key ? { kind: 'key', value: key } : null;
+  if (token) return { credential: { kind: 'token', value: token }, slot: ACCESS_TOKEN_SLOT };
+  const resolved = lookupKeySlot(undefined, read, env);
+  return resolved
+    ? { credential: { kind: 'key', value: resolved.key }, slot: resolved.slot }
+    : null;
+}
+
+/**
+ * Resolve a credential AND record which slot paid, under the path's own name.
+ * The credential counterpart of `resolveKeySlotFrom`, and the same rule: the
+ * slot is which name was consulted, never anything read out of the value.
+ */
+export function resolveCredentialSlotFrom(
+  path: ClaudeCallPath,
+  explicit: string | null | undefined,
+  read: (service: string) => string | null,
+  env: Record<string, string | undefined>,
+): ResolvedClaudeCredential | null {
+  const resolved = lookupCredentialSlot(explicit, read, env);
+  noteClaudeSlot(path, resolved?.slot ?? null);
+  return resolved;
 }
 
 /**
@@ -182,7 +269,7 @@ export function resolveCredentialFrom(
  * nothing.
  */
 function resolveKey(explicit?: string | null): string | null {
-  return resolveKeyFrom(explicit, readKeychainPassword);
+  return resolveKeySlotFrom('thread-summary', explicit, readKeychainPassword)?.key ?? null;
 }
 
 /** Process-wide so the key hint / on notice appear once, not once per server. */

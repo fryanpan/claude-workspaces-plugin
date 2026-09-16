@@ -24,7 +24,7 @@
 
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { resolveKeySlotFrom } from './summarize.ts';
 
 /**
  * The seam: notes in, a title out, or `null` for "no usable title" — a down
@@ -127,8 +127,9 @@ function warnOnce(cause: string, line: string): void {
 /** The real namer, or `null` when there is no key or naming is off. */
 export function haikuMeetingNamer(opts: HaikuMeetingNamerOpts = {}): MeetingNamer | null {
   if (!meetingNamerEnabled()) return null;
-  const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
-  if (!key) return null;
+  const resolved = resolveKeySlotFrom('meeting-namer', opts.apiKey, readKeychainPassword);
+  if (!resolved) return null;
+  const key = resolved.key;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = opts.timeoutMs ?? MEETING_NAMER_TIMEOUT_MS;
   return async ({ notes }) => {

@@ -1,4 +1,5 @@
 import {
+  REVIEW_LIMITS,
   type TaskReviewItem,
   isReviewItemHeld,
   readTaskReviewItem,
@@ -30,7 +31,7 @@ import {
  * open linked item gets nothing, which is what makes the boot backfill safe to
  * run on every start.
  */
-import type { DoneWhenLine } from '@claude-workspaces/core/done-when';
+import type { DoneWhenLine, DoneWhenProof } from '@claude-workspaces/core/done-when';
 import type { StoredReviewItem, Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from '../actor-identity.ts';
 
@@ -85,37 +86,155 @@ function isHttp(url: string | undefined): url is string {
   return url !== undefined && /^https?:\/\//.test(url);
 }
 
+/** The headline budget every hand-written item is advised by. A generated
+ *  item HOLDS to it: the card clamps at that width on a phone, and the first
+ *  generated items shipped a whole acceptance criterion as their title —
+ *  209 characters on the reader's queue (measured 2026-09-15). */
+const HEADLINE_MAX = REVIEW_LIMITS.headline;
+
+/** How long a link's words may run before the label is derived from the URL
+ *  instead. A label is a thing to tap, not a paragraph to read. */
+const LABEL_MAX = 60;
+
+/** How much of a proof's own words the card carries as context. Past this it
+ *  is a document, and the link is right there. */
+const NOTE_MAX = 400;
+
+/** `text` on one line, cut at the last word boundary that fits, with an
+ *  ellipsis. Word-boundary rather than mid-word: a clipped headline is the
+ *  only thing a reader sees in a list, and a cut word reads as a bug. */
+function clipWords(text: string, max: number): string {
+  const one = text.replace(/\s+/g, ' ').trim();
+  if (one.length <= max) return one;
+  const cut = one.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  const kept = space > max / 2 ? cut.slice(0, space) : cut;
+  return `${kept.replace(/[\s,;:.]+$/, '')}\u2026`;
+}
+
+/** A full stop that ends a word nobody means as a sentence: an abbreviation
+ *  or an initial. Without this, "Works on iOS, e.g. Mobile Safari" headlines
+ *  as "Check: Works on iOS, e.g" (codex review). */
+const ABBREVIATION = /(?:\be\.g|\bi\.e|\betc|\bvs|\bcf|\bal|\bapprox|\bfig|\bno|\s[A-Za-z])\.$/i;
+
+/** Shorter than this and a "sentence" is a fragment, so the next one is
+ *  taken with it rather than a headline reading "Check: Yes". */
+const MIN_SENTENCE = 24;
+
+/** The first sentence of a line — what the headline says when the line itself
+ *  is a paragraph. Sentences are taken together until one ends somewhere a
+ *  reader would stop. */
+function firstSentence(text: string): string {
+  const one = text.replace(/\s+/g, ' ').trim();
+  let acc = '';
+  for (const part of one.split(/(?<=[.!?])\s+(?=[A-Z(\[])/)) {
+    acc = acc === '' ? part : `${acc} ${part}`;
+    if (acc.length >= MIN_SENTENCE && !ABBREVIATION.test(acc)) return acc;
+  }
+  return one;
+}
+
+/** `text` ending in sentence punctuation, so a quoted note does not read as
+ *  cut off and the template never doubles a full stop. */
+function sentence(text: string): string {
+  return /[.!?\u2026]$/.test(text) ? text : `${text}.`;
+}
+
+/** Trailing sentence punctuation removed, so the template adds its own. */
+function unpunctuated(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!?\u2026]+$/, '');
+}
+
+/**
+ * What the reader decides, in one line they can act on from a list on a
+ * phone: the line's first sentence, clipped to the same budget a hand-written
+ * headline is advised by. The whole line is still in the detail, so nothing a
+ * clip drops is lost.
+ */
+export function ownerCheckHeadline(line: DoneWhenLine): string {
+  const prefix = 'Check: ';
+  return `${prefix}${clipWords(unpunctuated(firstSentence(line.text)), HEADLINE_MAX - prefix.length)}`;
+}
+
+/** What a link to this URL is, in the reader's words, when the proof's own
+ *  text is too long to be a label. Read off the address and nothing else —
+ *  a generated line invents no specifics. */
+function labelForUrl(url: string): string {
+  if (/\/mockups?\//.test(url)) return 'the mock';
+  if (/\/docs?\//.test(url)) return 'the doc';
+  if (/[?&]task=/.test(url) || /\/tasks\//.test(url)) return 'the task';
+  const pr = /github\.com\/[^/]+\/[^/]+\/pull\/(\d+)/.exec(url);
+  if (pr) return `PR ${pr[1]}`;
+  return 'the link';
+}
+
+/** Square brackets removed so a label cannot close its own markdown link. */
+function plain(text: string): string {
+  return text.replace(/[[\]]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** The words a proof's link wears: its own text when that is short enough to
+ *  be a label, else what the URL says it is. A multi-sentence note is never a
+ *  label — the first generated mock items put a whole paragraph between the
+ *  brackets, and the reader was handed a wall of text to tap. */
+function linkLabel(proof: DoneWhenProof): string {
+  const words = plain(proof.text);
+  const oneSentence = firstSentence(words) === words;
+  if (words !== '' && words.length <= LABEL_MAX && oneSentence) return words;
+  return labelForUrl(proof.url ?? '');
+}
+
+/** One proof as a phrase: a link when it has one, else its words. */
+function attachment(proof: DoneWhenProof): string {
+  const words = plain(proof.text);
+  if (isHttp(proof.url)) return `[${linkLabel(proof)}](${proof.url})`;
+  return clipWords(words, LABEL_MAX * 2);
+}
+
 /**
  * The item for one owner line: the existing decision card with two options.
  *
- * The detail LEADS WITH THE LINK. The reader's first act is to open the thing
- * being checked, and the first owner items put the proof in a trailing
- * "Proof:" list, or had none — "Where's the mock? … Link the mock from the
- * review item" (owner, 2026-09-14). Then one sentence says what to check and
- * one says what each answer does, so the card needs nothing else open.
+ * The detail LEADS WITH THE LINK, on its own line. The reader's first act is
+ * to open the thing being checked, and the first owner items put the proof in
+ * a trailing "Proof:" list, or had none — "Where's the mock? \u2026 Link the mock
+ * from the review item" (owner, 2026-09-14). Then the line itself, the proof's
+ * own words as the context somebody away from the work needs, and one sentence
+ * saying what each answer does. Nothing here is invented: every specific comes
+ * from the line, its proof or the task's title.
  */
 export function ownerCheckReview(
   task: Task,
   line: DoneWhenLine,
 ): { shape: 'decision'; headline: string; detail: string; options: unknown[] } {
   const proofs = (line.proof ?? []).slice(0, 3);
-  const label = (text: string) => text.replace(/[[\]]/g, '');
   const lead = proofs.find((p) => isHttp(p.url));
-  const check = line.text.trim().replace(/[.!?]+$/, '');
+  const check = unpunctuated(line.text);
   const opening = lead
-    ? `Open [${label(lead.text)}](${lead.url}) and check: ${check}.`
-    : `Nothing is linked to open, so find it first and check: ${check}.`;
-  const also = proofs
-    .filter((p) => p !== lead)
-    .map((p) => (isHttp(p.url) ? `[${label(p.text)}](${p.url})` : label(p.text)));
+    ? `Open [${linkLabel(lead)}](${lead.url}).`
+    : 'Nothing is linked to open, so find it first.';
+  // The lead proof's own words, unless the label already said them. Not
+  // possessive on the reporter's name: half the fleet's names end in s.
+  const leadWords = lead ? plain(lead.text) : '';
+  const note =
+    lead !== undefined && leadWords !== '' && leadWords !== linkLabel(lead)
+      ? ` The note attached with it: \u201c${sentence(clipWords(leadWords, NOTE_MAX))}\u201d`
+      : '';
+  const also = proofs.filter((p) => p !== lead).map(attachment);
   const detail = [
     opening,
-    ` Looks right marks this line of “${task.title}” met, and the task closes once every line is; Not met sends it back to ${line.by || 'the builder'} with your words.`,
-    also.length > 0 ? ` Also attached: ${also.join('; ')}.` : '',
-  ].join('');
+    '',
+    `Check: ${check}.${note}`,
+    '',
+    `Looks right marks this line of \u201c${task.title}\u201d met, and the task closes once every line is; Not met sends it back to ${line.by || 'the builder'} with your words.${
+      also.length > 0 ? ` Also attached: ${also.join('; ')}.` : ''
+    }`,
+  ].join('\n');
   return {
     shape: 'decision',
-    headline: clip(`Check: ${line.text}`, 500),
+    headline: ownerCheckHeadline(line),
     detail,
     options: [
       {

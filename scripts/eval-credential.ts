@@ -27,7 +27,7 @@
  * That order is exactly what every non-prod SERVER resolves too, since the
  * rule became "the eval key for all local development and CI" (2026-09-11).
  * So this is not a second resolver: it is the server's own
- * `resolveCredentialFrom` with the prod marker stripped from the environment,
+ * `resolveCredentialSlotFrom` with the prod marker stripped from the environment,
  * which makes the eval non-prod wherever it runs (`claude-key-source.ts`).
  *
  * Nothing here logs, returns or formats a credential VALUE. It answers a
@@ -39,7 +39,10 @@ import {
   EVAL_KEY_ENV,
   withoutProdMarker,
 } from '../packages/server/src/claude-key-source.ts';
-import { type SummaryCredential, resolveCredentialFrom } from '../packages/server/src/summarize.ts';
+import {
+  type SummaryCredential,
+  resolveCredentialSlotFrom,
+} from '../packages/server/src/summarize.ts';
 
 /** The Keychain item the eval reads, and its env override. Prod's is a
  *  different name on purpose. */
@@ -90,5 +93,8 @@ export function resolveEvalCredentialFrom(
 ): SummaryCredential | null {
   // Null means "not configured", and the caller prints `EVAL_CREDENTIAL_HELP`
   // for it — there is nowhere else to look, by design.
-  return resolveCredentialFrom(explicit, read, withoutProdMarker(env));
+  return (
+    resolveCredentialSlotFrom('notes-eval', explicit, read, withoutProdMarker(env))?.credential ??
+    null
+  );
 }
