@@ -9,13 +9,13 @@
  * and the next tick's compose input is asked whether it carries their words.
  *
  * It passes on the code as it stands, so the claim is false as stated —
- * `readNotesOutlineForTick` reads the WHOLE doc. What is sliced is the
- * RECENCY WINDOW (`NOTES_OUTLINE_RECENT_BLOCKS`), which counts from the end
- * of the document and knows nothing about sections or about who wrote what.
- * The second and third tests measure that instead, and they are what makes
- * the first test's pass mean something: the same person's block, in the same
- * place, is visible while the doc is short and gone once the note-taker's own
- * bullets have pushed it past the window.
+ * `readNotesOutlineForTick` reads the WHOLE doc. What USED to be sliced was
+ * the recency window, which counted body blocks from the end of the document
+ * and knew nothing about sections or about who wrote what: a person's line
+ * was visible while the doc was short and gone once the note-taker's own
+ * bullets had pushed it past eighty. That window is gone, and the second and
+ * third tests are what say so — the same block, in the same place, in a doc
+ * far longer than the window ever allowed, is still in the tick's view.
  *
  * All fixtures are synthetic. The repo is public.
  */
@@ -25,7 +25,6 @@ import { type DocType, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { readNotesOutlineForTick } from '../src/meeting-notes-doc.ts';
 import { sectionIds } from '../src/notes-cleanup-scope.ts';
-import { NOTES_OUTLINE_DROP_STEP, NOTES_OUTLINE_RECENT_BLOCKS } from '../src/notes-prompt-build.ts';
 import { asPerson, oneDocStore } from './notes-doc-helpers.ts';
 import { addNotes, createNotesTickHarness } from './notes-tick-harness.ts';
 
@@ -35,7 +34,6 @@ const THEIR_LINE = 'My own note: the harbour run needs its own budget line.';
 /** Put a bullet in the doc as a person would, immediately ABOVE the meeting's
  *  section — the placement the claim is about. Returns its block id. */
 function typeAboveTheSection(ydoc: Y.Doc, text: string): string {
-  let id = '';
   asPerson(ydoc, () => {
     const fragment = prose.getProseFragment(ydoc);
     const top = fragment.toArray() as Y.XmlElement[];
@@ -47,8 +45,7 @@ function typeAboveTheSection(ydoc: Y.Doc, text: string): string {
   // one at all.
   const entry = prose.readOutline(ydoc).find((e) => e.text === text);
   if (entry === undefined) throw new Error('the person’s block is not in the doc');
-  id = entry.id;
-  return id;
+  return entry.id;
 }
 
 describe('the note-taker’s view of a document it shares with a person', () => {
@@ -88,37 +85,35 @@ describe('the note-taker’s view of a document it shares with a person', () => 
     expect(outline.some((e) => e.kind === 'listItem' && e.author !== undefined)).toBe(true);
   }, 20_000);
 
-  it('drops that same bullet once the note-taker’s own notes push it past the recency window', () => {
-    // The window counts BODY blocks from the end of the doc and drops in
-    // whole steps, so it bites at `recent + step` rather than at `recent`.
-    const pastTheWindow = NOTES_OUTLINE_RECENT_BLOCKS + NOTES_OUTLINE_DROP_STEP;
+  it('keeps that same bullet however many notes the note-taker writes after it', () => {
+    // The window this replaces held eighty body blocks and let go of forty at
+    // a time, so it bit at a hundred and twenty. Both sides of where it bit
+    // are measured here, and a doc ten times longer after them.
     const short = docWithNotes(10);
-    const long = docWithNotes(pastTheWindow);
+    const pastTheOldWindow = docWithNotes(120);
+    const muchLonger = docWithNotes(1_200);
 
-    // CONTROL: the same block, in the same place, in a doc the window does
-    // not bite on. Visible.
+    // CONTROL: a doc the old window never bit on. Visible then, visible now.
     expect(seesTheirLine(short)).toBe(true);
     // THE MEASUREMENT: nothing about the section changed — only the number of
-    // the note-taker's own bullets after it.
-    expect(seesTheirLine(long)).toBe(false);
+    // the note-taker's own bullets after it — and the line is still there.
+    expect(seesTheirLine(pastTheOldWindow)).toBe(true);
+    expect(seesTheirLine(muchLonger)).toBe(true);
   });
 
-  it('drops it however far from the meeting’s section it sits — the window is not a section walk', () => {
-    const pastTheWindow = NOTES_OUTLINE_RECENT_BLOCKS + NOTES_OUTLINE_DROP_STEP;
-    const long = docWithNotes(pastTheWindow);
-    const outline = prose.readOutline(long);
-    const heading = outline.find((e) => e.kind === 'heading' && e.text === 'Meeting notes');
-    expect(heading).toBeDefined();
-    // Every block the window dropped is a BODY block, and the first to go is
-    // the one nearest the top of the doc — the person's. Headings survive
-    // whatever their section, which is what says the window is a count and
-    // not a walk.
+  it('shows the tick every block of the doc, not a tail of it', () => {
+    const long = docWithNotes(1_200);
+    const whole = prose.readOutline(long);
     const tick = readNotesOutlineForTick(
       oneDocStore('d', { ydoc: long, meta: { type: 'markdown' as DocType } }),
       'd',
     );
+    // Every id in the doc, in the doc's own order. A tail — however generous
+    // — would be short of the front, and a reordering would break a prefix
+    // cache even when nothing was missing.
+    expect(tick.map((e) => e.id)).toEqual(whole.map((e) => e.id));
     expect(tick.some((e) => e.kind === 'heading' && e.text === 'Meeting notes')).toBe(true);
-    expect(tick.some((e) => e.text === THEIR_LINE)).toBe(false);
+    expect(tick.some((e) => e.text === THEIR_LINE)).toBe(true);
   });
 });
 

@@ -111,7 +111,6 @@ import {
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
 import { readNotesMethod } from './notes-method-store.ts';
-import { NOTES_OUTLINE_DROP_STEP, NOTES_OUTLINE_RECENT_BLOCKS } from './notes-prompt-build.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
@@ -914,18 +913,22 @@ export function notesWriteSkipDetail(
   return `nothing landed — ${[...why].map(([k, n]) => (n > 1 ? `${k} x${n}` : k)).join(', ')}`;
 }
 
-/** The doc as the composer addresses it, capped so a tick's prompt is the size
- *  of the recent conversation rather than of the meeting — and dropped in
- *  steps rather than one at a time, so the head of it is the same text tick
- *  after tick and the prompt cache can take it (`NOTES_OUTLINE_DROP_STEP`). */
+/**
+ * The doc as the composer addresses it: THE WHOLE OF IT, every tick.
+ *
+ * It used to be capped to the last eighty body blocks, dropped forty at a
+ * time. The cap was not free in either direction — the model could not revise
+ * or regroup a bullet it could no longer see — and it did not buy what it
+ * looked like it bought: a prompt cache is a prefix match, so a front that
+ * moves at all is a front that is billed again, and a doc nothing is ever
+ * dropped from has a front that never moves. The prompt is bigger and the
+ * bill is smaller; `notes-prompt-build.ts`'s header has the measurement.
+ */
 export function readNotesOutlineForTick(
   docStore: NotesDocStore,
   docId: string,
 ): readonly prose.OutlineEntry[] {
-  return readNotesOutline(docStore, docId, {
-    recentBlocks: NOTES_OUTLINE_RECENT_BLOCKS,
-    recentBlocksStep: NOTES_OUTLINE_DROP_STEP,
-  });
+  return readNotesOutline(docStore, docId);
 }
 
 /**

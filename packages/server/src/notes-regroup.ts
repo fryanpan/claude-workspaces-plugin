@@ -232,6 +232,32 @@ export function homelessRun(
 const SUGGESTED_GROUP_SIZE = 3;
 
 /**
+ * How many full topics one directive names.
+ *
+ * THE DIRECTIVE IS THE ONE PART OF THE PROMPT NOTHING CAN CACHE — it is
+ * recomputed every tick and turns on and off, so it sits after the last cache
+ * breakpoint and is paid at the full rate on every tick of the meeting. It
+ * used to name every full topic in the section, which cost nothing while the
+ * outline was a window over the last eighty blocks and became the largest
+ * thing in the prompt the moment the whole doc was sent: measured over 348
+ * ticks of a fixture-driven meeting on 2026-09-15, the directive reached
+ * 37,000 characters by the last tick and averaged 18,800 — about nineteen
+ * twentieths of everything the tick paid full price for — and it took the
+ * whole-doc prompt from $1.90 to $3.09 over those 348 ticks, where capping it
+ * takes the same prompt to $1.06.
+ *
+ * TWO, AND THE LAST TWO. The ask is "group these IN THIS UPDATE", and an
+ * update writes a handful of edits: a list of twelve topics is not a bigger
+ * ask, it is an ask nobody can carry out, and the topics at the top of it are
+ * the ones the room stopped talking about half an hour ago. Document order is
+ * chronological, so the last two are the topic this speech is about and the
+ * one before it — the two a tick can actually add a bullet to. A topic left
+ * unnamed is not forgotten: it is still full on the next tick, and it is
+ * named as soon as it is one of the two nearest the live end.
+ */
+const REGROUP_TOPICS_NAMED = 2;
+
+/**
  * The directive as it reaches the prompt, or `null` when nothing has filled
  * up — which is the overwhelmingly common tick, and the one this must cost
  * nothing.
@@ -250,7 +276,9 @@ export function regroupDirective(
   outline: readonly prose.OutlineEntry[],
   opts: RegroupOptions,
 ): string | null {
-  const { targets, homeless } = scanRuns(outline, opts);
+  const { targets: full, homeless } = scanRuns(outline, opts);
+  // The last few only — see `REGROUP_TOPICS_NAMED`.
+  const targets = full.slice(-REGROUP_TOPICS_NAMED);
   if (targets.length === 0 && homeless === null) return null;
   const bar = opts.bar ?? MAX_FLAT_RUN_BULLETS;
   const lines: string[] = [];
