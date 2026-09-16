@@ -136,6 +136,28 @@ describe('set_task_schedule says what the rule writes', () => {
     expect(body.output?.note).toContain('review item');
   });
 
+  it('says nothing about an output folder when the call cleared the rule', async () => {
+    // `rule: null` removes the schedule, and a line about a removed rule's
+    // output folder describes something that is not there. The stub answers
+    // a task with no schedule, which is what the store returns after a clear.
+    const cleared = await startBundle((r) =>
+      r.method === 'POST' && r.path.endsWith('/schedule') ? { task: { id: 't-stub' } } : {},
+    );
+    try {
+      const res = await cleared.call('set_task_schedule', {
+        workspaceId: 'w-stub',
+        taskId: 't-stub',
+        rule: null,
+      });
+      const body = res.json as { output?: unknown; schedule?: unknown; taskId?: string };
+      expect(body.taskId).toBe('t-stub');
+      expect(body.schedule).toBeNull();
+      expect(body.output).toBeUndefined();
+    } finally {
+      await cleared.stop();
+    }
+  }, 60_000);
+
   it('points at the field in the declaration a client reads', async () => {
     const decl = mounted.tool('set_task_schedule');
     expect(decl?.description).toContain('output');

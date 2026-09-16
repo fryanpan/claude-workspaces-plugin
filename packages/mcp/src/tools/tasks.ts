@@ -1183,7 +1183,9 @@ export async function handleTaskTool(
         // it declares none. In the answer rather than in a document because
         // a document is the reason the field went unused: nobody declared one
         // until they were told by hand (`schedule-output-line.ts`).
-        output: scheduleOutputLine(schedule),
+        // Absent when the call CLEARED the rule: a line about a removed
+        // rule's output folder describes something that is not there.
+        ...(scheduleOutputLine(schedule) !== null ? { output: scheduleOutputLine(schedule) } : {}),
       });
     }
     case 'import_tasks_markdown': {

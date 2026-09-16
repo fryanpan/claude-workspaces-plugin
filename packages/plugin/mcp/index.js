@@ -18552,7 +18552,9 @@ function nextOccurrence(schedule, cursor = {}) {
 // packages/mcp/src/schedule-output-line.ts
 var NONE = 'This rule declares no output folder. Pass output: {folder: "digests"} and every ' + "run that writes files there files ONE review item on Home linking them, which the " + "next run replaces. Without it a run that writes files tells nobody it did.";
 function scheduleOutputLine(schedule) {
-  const folder = schedule?.output?.folder;
+  if (schedule === null || schedule === undefined)
+    return null;
+  const folder = schedule.output?.folder;
   if (typeof folder !== "string" || folder.trim() === "")
     return { folder: null, note: NONE };
   return {
@@ -19165,7 +19167,7 @@ async function handleTaskTool(name, a, ctx) {
         taskId,
         schedule,
         ...nextAt !== undefined ? { nextAt, nextAtIso: new Date(nextAt).toISOString() } : { nextAt: null },
-        output: scheduleOutputLine(schedule)
+        ...scheduleOutputLine(schedule) !== null ? { output: scheduleOutputLine(schedule) } : {}
       });
     }
     case "import_tasks_markdown": {

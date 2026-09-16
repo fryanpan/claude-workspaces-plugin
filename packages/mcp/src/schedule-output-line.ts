@@ -32,11 +32,17 @@ const NONE =
 /**
  * Build the line. Takes the schedule the store handed back, so the answer
  * describes what is ARMED rather than what the caller sent.
+ *
+ * `null` when there is no schedule at all — the `rule: null` clear. Saying
+ * "this rule declares no output folder" about a rule that was just removed
+ * describes something that no longer exists, so the field is absent instead
+ * (codex review).
  */
 export function scheduleOutputLine(
   schedule: { output?: { folder?: string } | null } | null | undefined,
-): ScheduleOutputLine {
-  const folder = schedule?.output?.folder;
+): ScheduleOutputLine | null {
+  if (schedule === null || schedule === undefined) return null;
+  const folder = schedule.output?.folder;
   if (typeof folder !== 'string' || folder.trim() === '') return { folder: null, note: NONE };
   return {
     folder,
