@@ -62,3 +62,69 @@ describe('a meeting opens a topic, not a container', () => {
     expect(md).toContain('- last week: the sync is slow');
   });
 });
+
+/**
+ * A MEETING THAT NEVER OPENS A HEADING OF ITS OWN.
+ *
+ * The doc already has the topic the room is on, so the note-taker writes under
+ * it and opens nothing. That meeting holds NO CLAIM — and two protections used
+ * to be scoped to the claimed section, so a meeting without one lost both for
+ * its whole length: the duplicate check had an empty set to compare against,
+ * and the rule that turns an erasing rewrite into an extra note had nowhere to
+ * put the note, so the rewrite went straight through. Raised by the
+ * independent review; both drive the real tick path here.
+ */
+describe('a meeting that writes only under headings the doc already had', () => {
+  const DOC = '# Harbour plan\n\n## Pricing\n\n- the tiers are drafted\n';
+  /** Insert under the first heading the doc came with, never opening one. */
+  const underTheirs = (i: NotesComposeInput, markdown: string) => {
+    const theirs = i.outline.find((e) => e.kind === 'heading' && e.text.trim() === 'Pricing');
+    return theirs === undefined
+      ? []
+      : [{ op: 'insert_under_heading' as const, headingId: theirs.id, markdown }];
+  };
+
+  it('still drops a note the doc already carries', async () => {
+    const harness = createNotesTickHarness({
+      doc: DOC,
+      compose: (i) => underTheirs(i, '- support hours split out of the top tier'),
+    });
+    await harness.speak('support hours come out of the top tier');
+    await harness.speak('so support hours come out of the top tier');
+    await harness.end();
+    // The meeting opened nothing, so it holds no claim…
+    expect(harness.headings()).toEqual(['Harbour plan', 'Pricing']);
+    // …and the note it composed twice is in the doc once.
+    const md = harness.markdown();
+    expect(md.split('support hours split out of the top tier')).toHaveLength(2);
+  });
+
+  it('still turns a rewrite that would erase an idea into a second note', async () => {
+    const harness = createNotesTickHarness({
+      doc: DOC,
+      compose: (i, tick) => {
+        if (tick === 1) return underTheirs(i, '- support hours split out of the top tier');
+        const mine = i.outline.find(
+          (e) => e.kind === 'listItem' && e.text.includes('support hours'),
+        );
+        return mine === undefined
+          ? []
+          : // Words the bullet never said: a rewrite here LOSES the first idea.
+            [
+              {
+                op: 'replace_block' as const,
+                blockId: mine.id,
+                markdown: '- onboarding moves too',
+              },
+            ];
+      },
+    });
+    await harness.speak('support hours come out of the top tier');
+    await harness.speak('and onboarding moves with it');
+    await harness.end();
+    const md = harness.markdown();
+    expect(md).toContain('support hours split out of the top tier');
+    expect(md).toContain('onboarding moves too');
+    expect(harness.headings()).toEqual(['Harbour plan', 'Pricing']);
+  });
+});

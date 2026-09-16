@@ -693,6 +693,12 @@ export function applyNotesUpdate(
   // meant to replace (`notes-edit-dedupe.ts`).
   const deduped = dedupeNotesEdits(guarded.edits, {
     notesHeadingId,
+    // THIS MEETING'S OWN NOTES, WHEREVER THEY LANDED. A meeting whose topics
+    // were all headings the doc already had never opens one, so it holds no
+    // claim and the section set is empty — and a duplicate check scoped to a
+    // section it does not have catches nothing. Authorship answers it with or
+    // without a claim.
+    ownedElsewhere: new Set(full.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id)),
     outline: full,
     speech: update.tick.turns.map((t) => t.text),
     authorId: NOTES_AUTHOR_ID,
