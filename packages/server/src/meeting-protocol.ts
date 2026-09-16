@@ -231,8 +231,14 @@ interface Conn {
    * the socket is still there to be answered. Held as its own field rather
    * than as a fifth state so the decision survives the await: the state is
    * what the connection IS, this is what it has been asked to become.
+   *
+   * `closedAt` rides along for the same reason it rides through `stop`: a
+   * socket that went mid-handshake stopped being heard then, not when the
+   * handshake it was waiting on finally settled. `cause` rides along for the
+   * same reason again — dropped here, the `ended` line falls through to its
+   * `client-stop` default and names the one ending nobody investigates.
    */
-  pendingStop: { reply: boolean } | null;
+  pendingStop: { reply: boolean; closedAt?: number; cause?: MeetingCloseCause } | null;
   /**
    * Cancels this meeting's silence deadline, or null when none is armed.
    *
@@ -254,6 +260,86 @@ interface Conn {
   resumed: boolean;
   /** A `no_audio` report was already logged for this connection. */
   reportedNoAudio: boolean;
+  /**
+   * Why this meeting ended, when something OTHER than the transport decided
+   * it: the person's `stop` frame, or the server's own silence deadline.
+   *
+   * Held on the connection rather than passed along because the two events
+   * are separated by the close that follows them — a browser sends `stop` and
+   * then closes the socket tidily, and a 1000 read on its own would report
+   * the person's Stop as a connection that happened to end neatly. Null is
+   * the ordinary state, and then the close code is the whole answer.
+   */
+  endedCause: MeetingCloseCause | null;
+}
+
+/**
+ * Why a meeting socket closed, in one word for the log.
+ *
+ * A meeting that ends writes one line, and until now that line said the same
+ * thing for a person pressing Stop, a tab closing, and a network that went
+ * away mid-sentence. A run of five drops inside one real meeting therefore
+ * needed an investigation before the investigation could start: nothing on
+ * the server distinguished them, and the only evidence was the shape of the
+ * transcript afterwards.
+ *
+ * These are the reasons the server can actually SEE, which is a smaller set
+ * than the reasons there are. It sees the close code the transport reported,
+ * and it sees the two endings it was told about directly — the client's
+ * `stop` frame and its own silence deadline. It cannot see the Wi-Fi.
+ */
+export type MeetingCloseCause =
+  /** The person pressed Stop: a `stop` frame arrived before the close. */
+  | 'client-stop'
+  /** The server ended it — fifteen minutes with nothing said. */
+  | 'silence'
+  | 'clean-close'
+  | 'tab-closed'
+  | 'protocol-error'
+  | 'unsupported'
+  | 'no-status'
+  /** No close frame at all: the connection went away. THE reconnect case. */
+  | 'network-drop'
+  | 'policy'
+  | 'too-big'
+  | 'extension-failed'
+  | 'server-error'
+  | 'server-restart'
+  | 'try-again'
+  | 'tls-failed'
+  /** The transport reported no code — nothing to classify. */
+  | 'unknown'
+  | `code-${number}`;
+
+/**
+ * RFC 6455's codes, plus 1005/1006 which are never sent on the wire and are
+ * synthesised by the receiving end — 1006 being the one this whole diagnosis
+ * turns on, since it is what a connection that simply vanished looks like.
+ */
+const CLOSE_CODE_CAUSES: Readonly<Record<number, MeetingCloseCause>> = {
+  1000: 'clean-close',
+  1001: 'tab-closed',
+  1002: 'protocol-error',
+  1003: 'unsupported',
+  1005: 'no-status',
+  1006: 'network-drop',
+  1008: 'policy',
+  1009: 'too-big',
+  1010: 'extension-failed',
+  1011: 'server-error',
+  1012: 'server-restart',
+  1013: 'try-again',
+  1015: 'tls-failed',
+};
+
+/**
+ * One close code as a word. An unlisted code keeps its number rather than
+ * becoming "unknown": a code nobody here has seen before is still a fact, and
+ * flattening it would hide exactly the novelty worth reading.
+ */
+export function meetingCloseCause(code: number | undefined): MeetingCloseCause {
+  if (code === undefined) return 'unknown';
+  return CLOSE_CODE_CAUSES[code] ?? `code-${code}`;
 }
 
 /**
@@ -373,6 +459,7 @@ export class MeetingRelay {
       heardBytes: 0,
       resumed: false,
       reportedNoAudio: false,
+      endedCause: null,
     });
   }
 
@@ -433,7 +520,12 @@ export class MeetingRelay {
           msg.tuning,
           msg.participant,
           msg.source,
-          msg.resume,
+          // The resume and what it says it carried travel together, because
+          // neither means anything without the other: `heldMs` is a claim
+          // about an outage, and only a resume has one.
+          msg.resume !== undefined
+            ? { meetingId: msg.resume, ...(msg.heldMs !== undefined ? { heldMs: msg.heldMs } : {}) }
+            : undefined,
         ),
       );
       return;
@@ -527,6 +619,10 @@ export class MeetingRelay {
       conn.notes?.nameSpeaker(msg.speaker, msg.name);
       return;
     }
+    // The person asked. Remembered on the connection so the close that
+    // follows says the person ended it rather than reading its own tidy 1000
+    // as the whole story.
+    conn.endedCause = 'client-stop';
     this.track(this.stop(ws, conn, true));
   }
 
@@ -594,12 +690,42 @@ export class MeetingRelay {
     conn.streams?.send(stream, chunk);
   }
 
-  /** The socket went away. Whatever it was holding ends here. */
-  onClose(ws: MeetingClient): void {
+  /**
+   * The socket went away. Whatever it was holding ends here — and the log
+   * says WHY it went.
+   *
+   * `code` and `reason` are what the transport reported, passed straight
+   * through from Bun's close handler. They are the only evidence that
+   * distinguishes a tab closing from a network that vanished, and without
+   * them a run of drops inside one meeting is indistinguishable from a person
+   * pressing Stop five times.
+   *
+   * The ids are read BEFORE the teardown: `stop()` detaches the connection's
+   * meeting before it awaits the engine's flush, so a line built afterwards
+   * would name no meeting on exactly the closes worth reading.
+   */
+  onClose(ws: MeetingClient, code?: number, reason?: string): void {
     const conn = this.conns.get(ws);
     if (!conn) return;
     this.conns.delete(ws);
-    this.track(this.stop(ws, conn, false));
+    // Something that is not the transport already decided this ending: the
+    // person's `stop` frame, or the silence deadline. Either outranks the
+    // code, which by then is only describing how the browser tidied up.
+    const cause = conn.endedCause ?? meetingCloseCause(code);
+    const recording = conn.state === 'opening' || conn.state === 'live';
+    this.log(
+      `[meeting] socket closed doc=${ws.data.docId} meeting=${conn.meeting?.meetingId ?? 'none'} ` +
+        `cause=${cause} code=${code ?? 'none'} recording=${recording ? 'yes' : 'no'} ` +
+        `audioBytes=${conn.heardBytes}` +
+        // The peer wrote this text, so it goes through the same scrubber an
+        // engine's error does: one line, no payload, nothing forgeable.
+        (reason ? ` detail=${engineErrorForLog(reason)}` : ''),
+    );
+    // The close is the instant this meeting stopped being heard. Closing the
+    // engine session and flushing the notes are both awaited below it, so the
+    // clock `stop()` reads by default can be seconds later — seconds a
+    // reconnect would then count as recorded. See `MeetingRecord.endedAt`.
+    this.track(this.stop(ws, conn, false, undefined, cause, Date.now()));
   }
 
   private track(work: Promise<void>): void {
@@ -690,6 +816,7 @@ export class MeetingRelay {
       // Down the same path a person's Stop takes — the engine flushes, the
       // notes land, the record is stopped — carrying the reason so the record
       // and the strip can both say why nobody pressed anything.
+      conn.endedCause = 'silence';
       this.track(this.stop(ws, conn, true, 'silence'));
     });
   }
@@ -735,9 +862,16 @@ export class MeetingRelay {
     rawTuning?: Record<string, unknown>,
     participant?: string,
     source?: MeetingCaptureSource,
-    resume?: string,
+    resume?: { meetingId: string; heldMs?: number },
   ): Promise<void> {
     if (conn.state !== 'idle') return;
+    // Before any refusal below can return: a socket may start a SECOND
+    // meeting after a stop, and the last meeting's ending is not this one's.
+    // Left set — which is what happened while this sat after the
+    // `already_recording` return, the refusal a resume racing a dropped
+    // socket's teardown actually gets — the person's earlier Stop labels a
+    // drop that had nothing to do with them.
+    conn.endedCause = null;
     const docId = ws.data.docId;
     // No name means the first configured engine — the server's default, and
     // exactly what every client sent before the choice existed. A name the
@@ -792,7 +926,15 @@ export class MeetingRelay {
     // Silently starting a new meeting under the old id's name is the one
     // thing this must never do: the transcript is append-only.
     const resumed =
-      resume !== undefined ? this.deps.store.resume({ ...opening, meetingId: resume }) : null;
+      resume !== undefined
+        ? this.deps.store.resume({
+            ...opening,
+            meetingId: resume.meetingId,
+            // Shortens the gap this resume writes by the audio about to be
+            // replayed on this very socket. See `appendReconnectGap`.
+            ...(resume.heldMs !== undefined ? { heldMs: resume.heldMs } : {}),
+          })
+        : null;
     const meeting = resumed ?? this.deps.store.start(opening);
     if (!meeting) {
       this.send(ws, {
@@ -1018,7 +1160,7 @@ export class MeetingRelay {
     const asked = conn.pendingStop;
     if (asked) {
       conn.pendingStop = null;
-      await this.stop(ws, conn, asked.reply);
+      await this.stop(ws, conn, asked.reply, undefined, asked.cause, asked.closedAt);
       return;
     }
     this.send(ws, {
@@ -1047,10 +1189,16 @@ export class MeetingRelay {
     conn: Conn,
     reply: boolean,
     reason?: MeetingStopReason,
+    cause?: MeetingCloseCause,
+    closedAt?: number,
   ): Promise<void> {
     if (conn.state === 'opening') {
       // The handshake is still out; `start` finishes the job when it lands.
-      conn.pendingStop = { reply };
+      conn.pendingStop = {
+        reply,
+        ...(closedAt !== undefined ? { closedAt } : {}),
+        ...(cause !== undefined ? { cause } : {}),
+      };
       return;
     }
     if (conn.state !== 'live') return;
@@ -1087,9 +1235,15 @@ export class MeetingRelay {
     }
     conn.state = 'idle';
     if (!meeting) return;
-    const record = meeting.stop(reason);
+    const record = meeting.stop(reason, closedAt);
     this.log(
-      `[meeting] ended doc=${meeting.docId} meeting=${record.meetingId} audioBytes=${conn.heardBytes} turns=${record.turns ?? 0}${conn.resumed ? ' resumed=true' : ''}`,
+      `[meeting] ended doc=${meeting.docId} meeting=${record.meetingId} ` +
+        // The same vocabulary the `socket closed` line uses, so one grep
+        // answers both halves of a meeting that went wrong. `client-stop`
+        // when nothing else claimed it: reaching here with no cause at all
+        // means a `stop` frame took the ordinary path.
+        `endedBy=${cause ?? conn.endedCause ?? 'client-stop'} ` +
+        `audioBytes=${conn.heardBytes} turns=${record.turns ?? 0}${conn.resumed ? ' resumed=true' : ''}`,
     );
     if (reply) {
       this.send(ws, {

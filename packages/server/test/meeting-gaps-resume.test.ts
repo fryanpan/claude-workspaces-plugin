@@ -47,6 +47,11 @@ describe('the outages a resumed leg has to work out for itself', () => {
   const STARTED = T0 - 600_000;
   const ENDED_ONE = T0 - 250_000;
   const RESUMED = T0 - 200_000;
+  // A SECOND reconnect, so a continuation block can be asked whether it
+  // reprints the first one's outage. 30 seconds rather than 50, so the two
+  // bullets are told apart by what they say.
+  const ENDED_TWO = T0 - 150_000;
+  const RESUMED_TWO = T0 - 120_000;
 
   /** A line on the meeting index, in the shape the server appends them. */
   function writeIndexLine(dir: string, meetingId: string, row: Record<string, unknown>): void {
@@ -112,8 +117,11 @@ describe('the outages a resumed leg has to work out for itself', () => {
     secondLeg(store, meetingId).stop();
 
     const seg = readMeetingJson(dir, 'd1')?.segments.find((s) => s.meetingId === meetingId);
-    expect(seg?.gaps?.map((g) => g.stream)).toEqual(['mic']);
-    expect(seg?.gaps?.[0]?.to).toBeNull();
+    // The resume's own gap for the outage between the legs rides along in the
+    // same list; the loss this case is about is the one still OPEN, because
+    // the capture was dead for the whole leg and never came back.
+    const open = (seg?.gaps ?? []).filter((g) => g.to === null);
+    expect(open.map((g) => g.stream)).toEqual(['mic']);
   });
 
   it('appends a continuation block for a leg whose only news is the outage', () => {
@@ -127,6 +135,43 @@ describe('the outages a resumed leg has to work out for itself', () => {
     secondLeg(store, meetingId).stop();
 
     expect(transcript(dir)).toContain('the microphone stopped here and did not come back');
+  });
+
+  it('does not reprint an earlier reconnect’s outage in a later leg’s block', () => {
+    // THE MEETING THIS WHOLE BRANCH COMES FROM RECONNECTED FIVE TIMES, so the
+    // second reconnect is not an edge case here, it is the ordinary case. Each
+    // continuation block owns the outage that opened it and no other: the
+    // block before it already stated the earlier ones, and a loss printed
+    // twice reads as two losses that never happened.
+    const dir = dataDir();
+    const { store, meetingId } = firstLeg(dir);
+
+    const second = secondLeg(store, meetingId);
+    second.recordTurn(1, 'Back for a moment.');
+    second.stop();
+    // Same correction the first leg needs, and for the same reason: `stop()`
+    // stamps the real now, which is after every timestamp this fixture places.
+    writeIndexLine(dir, meetingId, { endedAt: ENDED_TWO });
+
+    const third = store.resume({
+      docId: 'd1',
+      meetingId,
+      engine: 'mock',
+      sampleRate: 16_000,
+      mode: 'conversation',
+      now: RESUMED_TWO,
+    });
+    if (!third) throw new Error('the second resume was refused');
+    third.recordTurn(2, 'And back again.');
+    third.stop();
+
+    // The two outages are different lengths so that each bullet names which
+    // one it is: 50 seconds between the first pair of legs, 30 between the
+    // second. Each belongs to exactly one block.
+    const text = transcript(dir);
+    const count = (needle: string) => text.split(needle).length - 1;
+    expect(count('stopped for 50s')).toBe(1);
+    expect(count('stopped for 30s')).toBe(1);
   });
 
   it('states the recovery the block before the restart could not know about', () => {
@@ -181,7 +226,9 @@ describe('the outages a resumed leg has to work out for itself', () => {
     again.stop();
 
     const text = transcript(dir);
-    expect(text.split('nothing from it was recorded').length - 1).toBe(1);
+    // Counted on THIS stream: the resume writes its own gap for the outage
+    // between the legs, on `mic`, and the loss under test is the Mac's audio.
+    expect(text.split("this Mac's audio stopped for").length - 1).toBe(1);
     // And it is not restated as a RECOVERY either. An outage that both opened
     // and closed before the restart is wholly the business of the block above;
     // carried into the continuation it becomes a second ending for a loss that

@@ -182,7 +182,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       }
       onMessage(doc, typed, data);
     },
-    close(ws) {
+    close(ws, code, reason) {
       if (ws.data.kind === 'recall') {
         // NOT the end of the meeting — see RecallMeetingRelay.onSocketClose.
         if (ws.data.token) recallRelay.onSocketClose(ws.data.token);
@@ -194,7 +194,11 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       }
       if (ws.data.kind === 'audio') {
         docStore.untrackShareSocket(ws);
-        meetingRelay.onClose(ws);
+        // The code and the peer's reason are the ONLY evidence that tells a
+        // tab closing from a network that went away, and the relay's log is
+        // where a run of drops is read back. Nothing else on this server sees
+        // them, so they are passed straight through rather than summarised.
+        meetingRelay.onClose(ws, code, reason);
         return;
       }
       onClose(ws as unknown as FeedbackWs);

@@ -27,6 +27,7 @@ import {
   type MeetingStopReason,
   normalizeSpeakerName,
   parseCaptureMode,
+  streamsForSource,
 } from '@claude-workspaces/core';
 import {
   DEFAULT_MEETING_RETENTION,
@@ -135,6 +136,16 @@ export interface MeetingRecord {
    */
   retention?: MeetingRetention;
 }
+
+/**
+ * What a gap the RECONNECT wrote says, where a browser-reported one says
+ * `ended` or `muted`.
+ *
+ * Spelled once and read in two places — `meetings.ts` writes it and
+ * `meeting-raw.ts` decides which block a gap belongs to — because those two
+ * disagreeing is the drift that puts one outage in the file twice.
+ */
+export const RECONNECT_GAP_REASON = 'reconnect';
 
 /** One stretch of a meeting during which one capture delivered nothing. */
 export interface MeetingGap {
@@ -398,8 +409,91 @@ export interface ActiveMeeting {
    *
    * `reason` is set only when the SERVER ended it rather than a person, and
    * is written into the index line so the record says why.
+   *
+   * `endedAt` is the instant the meeting actually stopped being heard, for a
+   * caller that knows one the clock no longer does — a socket that closed
+   * before the engine and the notes were flushed. Everything after that
+   * instant is teardown, and a reconnect measuring its outage from the stamp
+   * would claim those seconds were recorded. Defaults to now.
    */
-  stop(reason?: MeetingStopReason): MeetingRecord;
+  stop(reason?: MeetingStopReason, endedAt?: number): MeetingRecord;
+}
+
+/**
+ * The captures a resumed meeting was carrying, for the gap its outage leaves.
+ *
+ * A bot meeting has no audio streams on this server at all — Recall runs the
+ * engine on its own side and sends words — and it never reaches `resume`
+ * either, since a bot's socket is a delivery route rather than the meeting.
+ * Answering with nothing rather than inventing a `bot` stream is what keeps
+ * that true if it ever does.
+ */
+function gapStreamsFor(source: MeetingSource): readonly string[] {
+  return source === 'bot' ? [] : streamsForSource(source);
+}
+
+/**
+ * Write the outage a reconnect crossed, as a closed gap on every stream.
+ *
+ * WHY THE SERVER AND NOT THE BROWSER. A gap used to be written only when the
+ * browser reported one of its own captures dying or muting — which is a fact
+ * only the browser holds — so the one outage nobody reported was the one where
+ * the browser could not reach the server at all. A meeting that dropped its
+ * socket five times therefore read back as complete while half a minute of
+ * talk was never heard. The two ends of that outage are the two facts this
+ * server keeps by itself: the leg it stopped, and the leg that picked the
+ * meeting up.
+ *
+ * Two append-only lines per stream, opened by one and closed by the other,
+ * exactly as `recordGap` writes them — a gap is not a new kind of row here.
+ *
+ * EXCEPT on a stream that was already down. A capture the browser reported
+ * dying before the socket went has an open gap of its own, and the outage
+ * lost nothing there that gap does not already claim. Written anyway, the two
+ * overlap: the companion says "the Mac's audio stopped and never came back"
+ * in one block and "the Mac's audio stopped for 30s" in the next, about the
+ * same silence.
+ */
+function appendReconnectGap(
+  dataDir: string,
+  docId: string,
+  meetingId: string,
+  outage: {
+    droppedAt?: number;
+    resumedAt: number;
+    heldMs?: number;
+    source: MeetingSource;
+    /** Streams whose own gap was still open when the socket went. */
+    alreadyDown?: readonly string[];
+  },
+): void {
+  const { droppedAt, resumedAt } = outage;
+  // No end on the previous leg is a meeting nothing stopped — a server that
+  // died mid-recording. There is no instant to measure from, and guessing one
+  // would put a length on a hole nobody can bound.
+  if (typeof droppedAt !== 'number' || resumedAt <= droppedAt) return;
+  // The hold covers the END of the outage: the browser keeps the most recent
+  // few seconds and replays them, so what was lost is everything BEFORE that.
+  const held = Math.max(0, Math.min(outage.heldMs ?? 0, resumedAt - droppedAt));
+  const lostUntil = resumedAt - held;
+  // Nothing was lost. A zero-length gap would read in the raw companion as
+  // "the microphone stopped for 0s", which is a hole a reader goes looking
+  // for and will not find.
+  if (lostUntil <= droppedAt) return;
+  const path = meetingIndexPath(dataDir, docId);
+  const alreadyDown = new Set(outage.alreadyDown ?? []);
+  for (const stream of gapStreamsFor(outage.source)) {
+    if (alreadyDown.has(stream)) continue;
+    appendLine(path, {
+      meetingId,
+      gapStream: stream,
+      gapFrom: droppedAt,
+      // The word `formatGapBullet` will read, and the word that tells this
+      // gap apart from a capture the browser reported dying.
+      gapReason: RECONNECT_GAP_REASON,
+    });
+    appendLine(path, { meetingId, gapStream: stream, gapTo: lostUntil });
+  }
 }
 
 /**
@@ -578,6 +672,19 @@ export class MeetingStore {
     source?: MeetingSource;
     participant?: string;
     now?: number;
+    /**
+     * How many milliseconds of audio from the END of the outage the browser
+     * banked and is about to replay (`AUDIO_HOLD_MS`, `meeting-reconnect.ts`).
+     *
+     * It shortens the gap this resume writes, and only that. Absent — every
+     * client that predates the hold, and every resume nothing was held for —
+     * means the whole outage was lost, which is what the record said before
+     * a hold existed and is the safe direction: a gap claimed over audio that
+     * WAS recorded reads as a hole a reader will go looking for, and a gap
+     * missing over audio that was not is a record that lies about being
+     * complete.
+     */
+    heldMs?: number;
   }): ActiveMeeting | null {
     const { docId, meetingId } = args;
     if (this.live.has(docId)) return null;
@@ -596,6 +703,22 @@ export class MeetingStore {
     // again, which `listMeetings` reads as undoing the end its last stop
     // wrote. Nothing already on disk is touched.
     appendLine(meetingIndexPath(dataDir, docId), { meetingId, resumedAt });
+    // BEFORE `open()`, because `open` seeds its map of still-down captures by
+    // folding the index: the pair below has to be on disk by then, or the
+    // reconnect's own gap is invisible to the seeding and a capture that was
+    // genuinely down before the drop can have its gap closed by the wrong
+    // line.
+    appendReconnectGap(dataDir, docId, meetingId, {
+      // `null` is a meeting the fold reads as still running — a leg nothing
+      // stopped, which is the same "no instant to measure from" as absent.
+      ...(typeof record.endedAt === 'number' ? { droppedAt: record.endedAt } : {}),
+      resumedAt,
+      ...(args.heldMs !== undefined ? { heldMs: args.heldMs } : {}),
+      source: args.source ?? record.source ?? 'mic',
+      // Folded from this same index a line ago: a gap with no end is a
+      // capture that had already stopped when the socket did.
+      alreadyDown: (record.gaps ?? []).filter((g) => g.to === null).map((g) => g.stream),
+    });
     return this.open({
       docId,
       meetingId,
@@ -772,12 +895,12 @@ export class MeetingStore {
         }
         sink.write(chunk);
       },
-      stop(reason?: MeetingStopReason): MeetingRecord {
+      stop(reason?: MeetingStopReason, endedAt?: number): MeetingRecord {
         const record: MeetingRecord = {
           meetingId,
           docId,
           startedAt,
-          endedAt: Date.now(),
+          endedAt: endedAt ?? Date.now(),
           engine,
           sampleRate,
           mode,
