@@ -125,8 +125,7 @@ class AudioClient {
 // The headings this meeting opened. There is no reserved section name to
 // count any more, so "the section is replaced, not doubled" means ONE topic
 // heading — at `## `, the level this doc's outline names, under its `# ` title.
-const topicHeadings = (md: string): string[] =>
-  md.split('\n').filter((l) => l.startsWith('## '));
+const topicHeadings = (md: string): string[] => md.split('\n').filter((l) => l.startsWith('## '));
 
 const waitFor = async (pred: () => boolean, what: string): Promise<void> => {
   const deadline = Date.now() + 2_000;
