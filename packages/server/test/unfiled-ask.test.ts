@@ -155,3 +155,49 @@ describe('nudgeLine', () => {
     );
   });
 });
+
+/**
+ * The 2026-09-15 re-measurement over three days of closing notes read three
+ * misses so common they were most of the recall gap, and each fix is here
+ * with the near-miss it must not swallow.
+ *
+ * Fixtures are synthetic; the names are invented. The repo is public.
+ */
+describe('detectAsk — what the 2026-09-15 re-measurement added', () => {
+  const OWNERS = ['Harborlight Vance'];
+
+  it('reads the name a lead actually writes, not only the name on the board', () => {
+    // The board learns "Harborlight Vance" from a transition; every wait in
+    // the corpus was written with the first name alone.
+    expect(asks('Branch is cut. Waiting on Harborlight for the release window.', OWNERS)).toBe(
+      true,
+    );
+    expect(asks('Branch is cut. Waiting on Harborlight Vance for the window.', OWNERS)).toBe(true);
+  });
+
+  it('does not turn a short first name into a wildcard', () => {
+    // A two-letter leading token would match inside ordinary prose, so it is
+    // never added as a spelling of its own.
+    expect(asks('Waiting on jo to finish the upstream rebase.', ['Jo Marchetti'])).toBe(false);
+    // And a one-word owner name is unchanged: no first-name variant exists.
+    expect(asks('Waiting on the nightly to go green.', ['Harborlight'])).toBe(false);
+  });
+
+  it('counts a decision sitting in the reader queue, whichever preposition', () => {
+    expect(asks('Both decisions are in your queue and neither is answered.')).toBe(true);
+    expect(asks('Both decisions are on your queue and neither is answered.')).toBe(true);
+  });
+
+  it('counts the verbs a lead uses for handing work over', () => {
+    expect(asks('The re-review request is yours to take; I have not touched it.')).toBe(true);
+    expect(asks('All fifty cards are rebuilt and the list is yours to rate.')).toBe(true);
+  });
+
+  it('control: a message that says it is not an ask is not one', () => {
+    // The commonest false positive the widened queue phrase created: a note
+    // that names its own filed items and says so.
+    expect(asks('Not an ask — those are the two items I filed, already in your queue.')).toBe(
+      false,
+    );
+  });
+});

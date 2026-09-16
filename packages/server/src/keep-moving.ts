@@ -13,10 +13,14 @@
  * carries the ADDRESS of that item (`Classified.waitingOn`). Whether an item
  * is open is the Home queue's own predicate, read by the caller that builds
  * `reviewItems`; this module never reads prose. The note reader that used to
- * guess from an agent's end-of-turn text was removed with that step.
+ * guess from an agent's end-of-turn text was removed with that step, and
+ * nothing here restored it: `noteClocks` arrives already judged, and the only
+ * thing it can do is take a note's movement credit AWAY (`waiting-unfiled.ts`
+ * for why that direction is safe when the other was not).
  */
 
 import type { ExternalWait } from '@claude-workspaces/core/task-wire';
+import type { NoteClock } from './waiting-unfiled.ts';
 
 export interface TaskRow {
   id: string;
@@ -136,6 +140,19 @@ export interface Classified {
    *  head. The owner cannot see it on the Home queue, so it counts toward FAIL
    *  (7 of 10 "blocked-on-owner" rows on the 08-27 "PASS" board were this). */
   unfiledAsk: boolean;
+  /**
+   * TRUE means the task's own newest words ASK a person for something and
+   * nothing is filed on that person's queue — the wait an agent declared in
+   * chat and nowhere else (`waiting-unfiled.ts`).
+   *
+   * It is not a bucket, and that is deliberate: a bucket is a claim about
+   * what the BOARD knows, and prose is not that. What it does is refuse the
+   * note the movement credit it would otherwise get — such a note is left out
+   * of `sinceActivityMs` above — so the task reaches the ordinary quiet
+   * window instead of being reset every turn by the agent saying it is stuck.
+   * The gate names it under its own bucket word from there.
+   */
+  waitingUnfiled: boolean;
 }
 
 /** A ticket's own clock: when it entered its current status. */
@@ -194,6 +211,15 @@ export function classifyOpenTasks(
    * means somebody actually changed the content.)
    */
   threadActivity?: Map<string, number>,
+  /**
+   * What each task's newest notes say, by id (`waiting-unfiled.ts`). The
+   * caller reads the prose; this module only ever consumes the verdict, so
+   * the rule that no bucket here is set from an agent's words still holds.
+   *
+   * Absent — every caller that does not compute it — reads exactly as it did
+   * before: every note counts as movement and nothing is `waitingUnfiled`.
+   */
+  noteClocks?: Map<string, NoteClock>,
 ): Classified[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   // Presence in askedTaskIds is what "an ask is FILED" means; newestAskAt
@@ -247,13 +273,22 @@ export function classifyOpenTasks(
       return d !== undefined && d.status !== 'done';
     });
     const ageMs = now - enteredStatusAt(t);
+    // Read before the clock, because it decides what the clock may count: an
+    // asking note is refused its movement credit only while nothing is filed.
+    // With an ask on the person's queue the task is `blocked-on-owner` below
+    // and never stalls anyway, so leaving the note counted there keeps one
+    // fewer surprise for the tick after the item is answered.
+    const hasPendingAsk = askedTaskIds.has(t.id);
+    const clock = noteClocks?.get(t.id);
+    const waitingNote = !hasPendingAsk && clock?.askedAt !== undefined;
+    const noteAt = waitingNote ? (clock?.newestPlainAt ?? 0) : newestNoteAt(t);
     const sinceActivityMs =
       now -
       Math.max(
         enteredStatusAt(t),
         lastEventByTask.get(t.id) ?? 0,
         threadActivity?.get(t.id) ?? 0,
-        newestNoteAt(t),
+        noteAt,
       );
     // A deliberately-deferred row does not reach this loop at all: parking
     // moves it to `triage` (2026-08-27), and the status filter above keeps
@@ -271,15 +306,14 @@ export function classifyOpenTasks(
     // counts toward FAIL (the owner's 08-27 review: 7 of 10 "blocked-on-owner"
     // rows were invisible on his queue).
     //
-    // Those are the ONLY two ways a row reads as waiting on a person. A note
-    // saying "waiting on Bryan" with nothing filed is not a third: the note
-    // is movement like any other, and once it is a window old the row is a
-    // plain stall to the lead, whose remedy is to file the ask. A reader
-    // that guessed from such prose was here from 2026-09-04 to 2026-09-08
-    // and was removed because it could only ever be wrong in one of two
-    // directions — a missed phrasing left a silent stall, a matched one woke
-    // the lead over a row whose ask WAS filed where the reader did not look.
-    const hasPendingAsk = askedTaskIds.has(t.id);
+    // Those are the ONLY two ways a row reads as waiting on a person, and a
+    // note saying "waiting on Bryan" is still not a third — no bucket here is
+    // set from prose, and the reader that guessed one was removed 2026-09-08.
+    // What such a note does lose is its movement credit (`waitingNote`
+    // above): it may not EXCUSE the row's clock, so the row reaches the quiet
+    // window and the gate names it `waiting-unfiled`. Excusing a row needs to
+    // be right about the wait; refusing to be quietened by one does not.
+    // `waiting-unfiled.ts` carries the argument in full.
     const boardSaysOwnerWaits = t.ownerKind === 'person' || bands.ownerBand.has(t.goal ?? '');
     let bucket: Bucket;
     // A rule row first: whatever else is true of it, it is not work anyone
@@ -314,6 +348,11 @@ export function classifyOpenTasks(
         ? { waitingOn: waitingOnFor(t.id) }
         : {}),
       unfiledAsk: bucket === 'blocked-on-owner-unfiled',
+      // Only on a task that would otherwise read as work in flight. A task
+      // the BOARD already says waits on a person with nothing filed is the
+      // `blocked-on-owner-unfiled` finding, and naming the same failure twice
+      // under two words would hand the lead one action wearing two hats.
+      waitingUnfiled: waitingNote && (bucket === 'in-progress' || bucket === 'ready-unpicked'),
     });
   }
   // Second pass: attribute each dependency chain to its TERMINAL blocker —
