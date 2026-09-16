@@ -100,8 +100,42 @@ describe('buildRerunReport', () => {
   });
 });
 
+describe('the unnamed-voice measure', () => {
+  const document = [
+    '## Meeting notes',
+    '',
+    '- [@Riverbend](speaker:room:A) wants the crane booked this week',
+    '- [@Room Speaker B](speaker:room:B) asked who signs it off',
+    '- [@Speaker C](speaker:C) said the quote expires Friday',
+    '- Nobody in particular said the office is copied',
+    '',
+  ].join('\n');
+
+  it('counts the bullets pointing at a voice nobody named, and names the labels', () => {
+    const report = buildRerunReport(input({ document, section: document }));
+    // Three tagged bullets, one of them named: the two placeholders are what
+    // a reader cannot trace back to a person.
+    expect(report.unnamedVoiceBullets).toBe(2);
+    expect(report.unnamedVoiceLabels).toEqual(['C', 'room:B']);
+  });
+
+  it('reads a fully named set of notes as nothing to answer for', () => {
+    const named = document
+      .replaceAll('Room Speaker B', 'Harborlight')
+      .replaceAll('Speaker C', 'Saltmarsh');
+    const report = buildRerunReport(input({ document: named, section: named }));
+    expect(report.unnamedVoiceBullets).toBe(0);
+    expect(report.unnamedVoiceLabels).toEqual([]);
+  });
+
+  it('puts the count in the rendered table beside the labels', () => {
+    const text = renderRerunReport(buildRerunReport(input({ document, section: document })));
+    expect(text).toContain('| Bullets on an unnamed voice | 2 of 4 bullet(s) — C, room:B |');
+  });
+});
+
 describe('renderRerunReport', () => {
-  it('fills all seven measures', () => {
+  it('fills all eight measures', () => {
     const text = renderRerunReport(buildRerunReport(input()));
     expect(text).toContain('| Ideas voiced | 24 |');
     expect(text).toContain('| Ideas covered | 19 of 24 (79%) |');
@@ -116,7 +150,8 @@ describe('renderRerunReport', () => {
       const cells = row.split('|').slice(1, -1);
       for (const cell of cells) expect(cell.trim().length).toBeGreaterThan(0);
     }
-    expect(rows).toHaveLength(8); // the header plus the seven
+    expect(text).toContain('| Bullets on an unnamed voice | 0 of 6 bullet(s) |');
+    expect(rows).toHaveLength(9); // the header plus the eight
   });
 
   it('says when the coverage figure read only the section, not the whole doc', () => {

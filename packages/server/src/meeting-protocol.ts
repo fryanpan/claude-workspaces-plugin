@@ -993,7 +993,14 @@ export class MeetingRelay {
               notesDeps.onTickLifecycle?.(e);
             },
           },
-          { docId, meetingId: meeting.meetingId },
+          {
+            docId,
+            meetingId: meeting.meetingId,
+            // So the first bullet of a resumed leg reads the name the person
+            // already gave, rather than "Speaker A" for the rest of the
+            // meeting. Seeded, not replayed: nothing written is rewritten.
+            speakerNames: { ...meeting.speakerNames },
+          },
         )
       : null;
     conn.notes = notes;
@@ -1187,6 +1194,13 @@ export class MeetingRelay {
       // What was actually opened, so the strip reports the session being
       // billed rather than the one it asked for.
       mode,
+      // The cast this doc already has names for, carried in whether this is
+      // a resume, a new meeting after a resume was refused, or an ordinary
+      // stop-and-start. The strip empties its own map when a meeting opens,
+      // so the server is the one place that can say the room is the same one.
+      ...(Object.keys(meeting.speakerNames).length > 0
+        ? { speakers: { ...meeting.speakerNames } }
+        : {}),
     });
   }
 

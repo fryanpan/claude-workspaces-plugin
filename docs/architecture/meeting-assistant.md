@@ -243,6 +243,52 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   the hand that wrote them. **Left as measured; changing it is a separate
   decision, not a bug fix.**
 
+## A voice keeps its name across every session of a doc (2026-09-16)
+
+A diarization label belongs to an ENGINE SESSION: every session hands out "A"
+again, and a meeting now opens several — a reconnect, a stop and a restart, a
+two-stream capture, the three-hour chain. The name a person types belongs to
+the PEOPLE, and it used to be stored per meeting, so it covered exactly one
+leg. Measured on a two-person meeting of 15 September: four labels, two of
+them never named, and 87 of 140 attributed bullets pointing at a single
+nameless voice holding 63% of the words.
+
+- **The name map is the DOC's.** `docSpeakerNames` folds every `{meetingId,
+  speakers}` line of a doc's index in WRITE order, last word winning — write
+  order rather than meeting order so a rename addressed to a meeting that has
+  already ended is not overwritten by an older line of a newer meeting.
+- **A meeting opens knowing it.** `MeetingStore.open` carries those names into
+  every meeting, fresh or resumed, and `ActiveMeeting.speakerNames` is what the
+  relay reads: `ready` carries it to the strip, and `beginNotesSession` is
+  seeded with it so the first bullet of a new leg reads the name rather than
+  "Speaker A".
+- **A carried name is written down only when that voice speaks.** Seeding the
+  record at start would make it claim a cast the meeting never heard, and the
+  reassign roster is read off exactly that field. So `recordTurn` appends the
+  one `speakers` line the first time a carried label settles a turn — the same
+  append-only form a person's own naming takes.
+- **The strip no longer believes the cast dies with the meeting.** It still
+  empties its map when a meeting starts, because it cannot know on its own
+  that the new session's "A" is the same room; the server can, and refills it
+  on `ready` (and again after a refused resume, which clears the map a second
+  time).
+- **It is a carry, not a claim about acoustics.** Nothing here hears that a new
+  session's "A" is the same throat as the last one's. What settles the default
+  is which way the two errors fall: a carried name that is wrong is one a
+  person can see and retype, and an uncarried name is a transcript nobody can
+  trace at all.
+- **What this does NOT fix: a split INSIDE one leg.** A tuning-aware client's
+  Advanced Options default the speaker cap to UNCAPPED (Bryan's approved mock,
+  round 1 — `maxSpeakersFromTuning`), so the legacy `DEFAULT_ROOM_SPEAKERS = 2`
+  no longer applies to captures started from that panel, and an unbounded
+  diarizer on one far-field microphone is free to answer a change of posture
+  with a new letter. That is a product default and moving it is the owner's
+  call; the carry above cannot name a label the engine invented mid-leg.
+- **How a run is scored.** `bun run meeting:rerun` reports "Bullets on an
+  unnamed voice" beside its other measures, with the labels named
+  (`unnamedVoiceBullets`, `scripts/rerun-meeting-report.ts`). By hand:
+  `grep -oE '\[@(Room |Remote )?Speaker [^]]*\]' <notes.md> | sort | uniq -c`.
+
 ## A recording with nothing in it ends itself (2026-09-12)
 
 A meeting used to run until somebody noticed it. The socket is the meeting, the
