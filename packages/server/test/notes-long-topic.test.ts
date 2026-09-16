@@ -209,3 +209,205 @@ describe('a meeting that stays on one subject', () => {
     expect(duplicateTopics(notes)).toEqual([]);
   }, 30_000);
 });
+
+/**
+ * THE WALL THAT IS ALREADY THERE — the state the 16 September meeting was
+ * actually in, and the one the first fix above never reaches.
+ *
+ * The test above proves the ask fires in time to stop a wall FORMING. It says
+ * nothing about a wall that has already formed, and that is the case Bryan
+ * asked about: sixty-five bullets were on the page, and no edit the note-taker
+ * had could break them up. Every insert landed at an END — `insert_at_end` at
+ * the end of the document, `insert_under_heading` at the end of the named
+ * section — so a heading could be written but never PLACED, and the twenty-nine
+ * minutes above it stayed one block whatever the model was told. That is a gap
+ * in the EDITS, not in the prompt: no wording reaches a position the ops cannot
+ * express.
+ *
+ * So this drives the two halves separately. The note-taker spends the first
+ * sixty ticks ignoring every ask — which is what the old one did, and is the
+ * only way to build the state under test — and the wall is MEASURED before
+ * anything is asked to repair it. Then it starts obeying, and the question is
+ * whether what it is now offered can take the wall apart.
+ *
+ * THE OBEDIENT HALF STILL EXERCISES NO JUDGEMENT. Told to put a heading in
+ * front of the note a new part starts at, it applies a mechanical rule — the
+ * new part starts after the first `MAX_FLAT_RUN_BULLETS` notes of the topic —
+ * so what the numbers below measure is the reach of the op and the ask, with
+ * the model's reading of the meeting taken out of it.
+ */
+describe('a meeting that has already built a wall', () => {
+  test('breaks the wall up once the note-taker can place a heading', async () => {
+    const WALL_TICKS = 60;
+    const REPAIR_TICKS = 24;
+    let obeying = false;
+
+    /** The note the ask hands over: the first top-level bullet of the topic
+     *  the room is under, `MAX_FLAT_RUN_BULLETS` in. */
+    const newPartStartsAt = (outline: readonly prose.OutlineEntry[]): string | undefined => {
+      const headingId = currentHeading(outline);
+      const under = outline.filter(
+        (e) => e.kind === 'listItem' && e.depth === 0 && e.underHeadingId === headingId,
+      );
+      return under[MAX_FLAT_RUN_BULLETS]?.id;
+    };
+
+    const harness = createNotesTickHarness({
+      compose: (input, tick) => {
+        const headingId = currentHeading(input.outline);
+        const bullet = `- Crane booking consideration number ${tick}.`;
+        if (tick === 1) {
+          return [{ op: 'insert_at_end', markdown: `## Slipway crane booking\n\n${bullet}` }];
+        }
+        // THE OLD NOTE-TAKER, for as long as the wall is being built: every
+        // ask ignored, a flat bullet every tick. Nothing here is a claim
+        // about what a model does — it is the shape of the notes that were
+        // on the page on 16 September, reproduced so it can be repaired.
+        if (!obeying || headingId === undefined) {
+          return [{ op: 'insert_under_heading', headingId: headingId ?? '', markdown: bullet }];
+        }
+        // BOTH ASKS, WHEN BOTH ARE THERE. The directive stopped forbidding the
+        // nest once a heading could be PLACED rather than only appended, so a
+        // note-taker that carries out one and drops the other is not obeying
+        // it. Split first: placing a heading changes no id and no depth,
+        // where nesting a bullet would move the one the split names out of
+        // reach.
+        const prompt = buildNotesPrompt(input).user;
+        const edits: prose.BlockEdit[] = [];
+        const splitAt = prompt.includes('HAS RUN PAST ONE HEADING')
+          ? newPartStartsAt(input.outline)
+          : undefined;
+        if (splitAt !== undefined) {
+          edits.push({
+            op: 'insert_before_block',
+            blockId: splitAt,
+            markdown: `${notesSubTopicHashes(input.outline)} Booking detail from note ${tick}`,
+          });
+        }
+        const nest = prompt.match(/\{"op":"nest_blocks"[^}]*\}/);
+        if (nest) edits.push(JSON.parse(nest[0]) as prose.BlockEdit);
+        // THIS SPEECH GOES UNDER THE PART THAT IS NOW LIVE, which is the one
+        // the heading was just placed in front of — the end of the doc.
+        // Sending it to the heading the split names puts it back on the
+        // stretch being broken up, one bullet at a time.
+        edits.push(
+          splitAt === undefined
+            ? { op: 'insert_under_heading', headingId, markdown: bullet }
+            : { op: 'insert_at_end', markdown: bullet },
+        );
+        return edits;
+      },
+    });
+
+    for (let i = 0; i < WALL_TICKS; i++) await harness.speak(`Crane point ${i}.`);
+    const built = harness.markdown();
+    const wall = longestRun(built);
+    console.log(
+      `[already-built] after ${WALL_TICKS} ticks: longest run ${wall}, ` +
+        `largest topic ${largestTopic(built)}, ` +
+        `${parseNotesTopics(built).filter((t) => t.heading).length} topics`,
+    );
+    // The state under test, asserted rather than assumed: one heading, and
+    // everything the meeting said in one unbroken list beneath it.
+    expect(wall).toBeGreaterThanOrEqual(WALL_TICKS - 1);
+    expect(parseNotesTopics(built).filter((t) => t.heading)).toHaveLength(1);
+
+    obeying = true;
+    for (let i = 0; i < REPAIR_TICKS; i++) await harness.speak(`Further crane point ${i}.`);
+    const fixed = harness.markdown();
+
+    const runs = flatBulletRuns(fixed).map((r) => r.bullets.length);
+    const topics = parseNotesTopics(fixed).filter((t) => t.heading).length;
+    console.log(
+      `[already-built] after ${REPAIR_TICKS} more: longest run ${longestRun(fixed)}, ` +
+        `largest topic ${largestTopic(fixed)}, ${topics} topics, ` +
+        `${allBullets(fixed).length} notes, ` +
+        `${duplicateTopics(fixed).length} duplicate headings, runs ${runs.join(',')}`,
+    );
+
+    expect(longestRun(fixed)).toBeLessThanOrEqual(MAX_FLAT_RUN_BULLETS);
+    // AND THE HEADING NO LONGER STANDS OVER THE STRETCH. This is the bar the
+    // run alone does not carry: the control below brings the run down by
+    // nesting and leaves all sixty notes under one heading, which is the
+    // defect exactly. A topic within its own bar is the proof the stretch was
+    // broken rather than folded.
+    expect(largestTopic(fixed)).toBeLessThanOrEqual(MAX_TOPIC_NOTES);
+    // BROKEN BY HEADINGS, not by nesting: the wall was flat, so a run that
+    // has come down while the heading count has not is a run that was folded
+    // out of sight rather than named.
+    expect(topics).toBeGreaterThan(1);
+    // AND NOTHING WAS LOST DOING IT. The repair moves no text — a heading
+    // placed in front of a note re-parents it by arriving — so every bullet
+    // the meeting wrote is still a bullet in the notes.
+    expect(allBullets(fixed)).toHaveLength(WALL_TICKS + REPAIR_TICKS);
+    expect(duplicateTopics(fixed)).toEqual([]);
+    // AND NOT BY TURNING THE NOTES INTO A TABLE OF CONTENTS. Breaking a wall
+    // sixty bullets long needs a lot of headings — it cannot need more than
+    // one per bar's worth of notes, or the repair has traded a stretch nobody
+    // can read for a list of headings nobody can read.
+    expect(topics).toBeLessThanOrEqual(allBullets(fixed).length / MAX_FLAT_RUN_BULLETS);
+  }, 60_000);
+
+  /**
+   * THE CONTROL, and the reason it is in this file rather than in a note: the
+   * same wall, the same directive, the same obedient note-taker — and the
+   * only heading placement the old vocabulary had. `insert_at_end` appends,
+   * so the heading lands BELOW the stretch it was meant to head and the sixty
+   * bullets above it stay one run for the rest of the meeting, whatever the
+   * model is told. Without this the test above proves only that the notes
+   * came out tidy; with it, it proves what made them tidy.
+   */
+  test('CONTROL: appending the heading leaves the wall exactly where it was', async () => {
+    const WALL_TICKS = 60;
+    const REPAIR_TICKS = 24;
+    let obeying = false;
+
+    const harness = createNotesTickHarness({
+      compose: (input, tick) => {
+        const headingId = currentHeading(input.outline);
+        const bullet = `- Crane booking consideration number ${tick}.`;
+        if (tick === 1) {
+          return [{ op: 'insert_at_end', markdown: `## Slipway crane booking\n\n${bullet}` }];
+        }
+        if (!obeying || headingId === undefined) {
+          return [{ op: 'insert_under_heading', headingId: headingId ?? '', markdown: bullet }];
+        }
+        const prompt = buildNotesPrompt(input).user;
+        const edits: prose.BlockEdit[] = [];
+        if (prompt.includes('HAS RUN PAST ONE HEADING')) {
+          edits.push({
+            op: 'insert_at_end',
+            markdown: `${notesSubTopicHashes(input.outline)} Booking detail from note ${tick}`,
+          });
+        }
+        const nest = prompt.match(/\{"op":"nest_blocks"[^}]*\}/);
+        if (nest) edits.push(JSON.parse(nest[0]) as prose.BlockEdit);
+        edits.push({ op: 'insert_at_end', markdown: bullet });
+        return edits;
+      },
+    });
+
+    for (let i = 0; i < WALL_TICKS; i++) await harness.speak(`Crane point ${i}.`);
+    const wall = longestRun(harness.markdown());
+    obeying = true;
+    for (let i = 0; i < REPAIR_TICKS; i++) await harness.speak(`Further crane point ${i}.`);
+    const after = harness.markdown();
+
+    console.log(
+      `[already-built CONTROL] wall ${wall} -> longest run ${longestRun(after)}, ` +
+        `largest topic ${largestTopic(after)}, ` +
+        `${parseNotesTopics(after).filter((t) => t.heading).length} topics`,
+    );
+
+    // AND WHAT IT PROVES IS SHARPER THAN EXPECTED. Nesting does bring the
+    // flat RUN down — the old vocabulary could fold sixty bullets into groups
+    // — so a test that watched only the run would have called this fixed.
+    // What it cannot do is move the heading: all sixty notes are still under
+    // the one the meeting opened, which is the defect in Bryan's words, "one
+    // heading swallowed half an hour". The reader meets the same stretch, now
+    // in groups. That is why the bar this branch adds is the TOPIC size and
+    // not only the run.
+    expect(largestTopic(after)).toBeGreaterThanOrEqual(WALL_TICKS);
+    expect(parseNotesTopics(after).filter((t) => t.heading).length).toBeLessThanOrEqual(2);
+  }, 60_000);
+});

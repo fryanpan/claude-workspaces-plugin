@@ -13,11 +13,11 @@ import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import { notesTopicHashes } from '../src/notes-heading-level.ts';
 import { buildNotesPrompt } from '../src/notes-prompt-build.ts';
 import { MAX_FLAT_RUN_BULLETS } from '../src/notes-quality.ts';
+import { regroupDirective } from '../src/notes-regroup-ask.ts';
 import {
   MAX_TOPIC_NOTES,
   homelessRun,
   overgrownTopics,
-  regroupDirective,
   regroupTargets,
 } from '../src/notes-regroup.ts';
 

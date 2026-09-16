@@ -445,6 +445,25 @@ export function boundByAuthorship(
         }
         break;
       }
+      // STRUCTURE IS FREE, AND THIS IS THE OP THAT SPENDS IT. A heading placed
+      // in front of a run re-parents every note below it and rewrites none of
+      // them, so it asks only that the block named is one this pass may stand
+      // in front of. The meeting's own section heading is the exception: a
+      // heading written above THAT would push the whole section out from
+      // under it.
+      //
+      // THE SWITCH HAS NO `default`, so a new op with no case here is neither
+      // kept nor refused — it is dropped, silently, with no line in `reasons`
+      // saying so. That is why this case exists rather than being left to a
+      // later pass.
+      case 'insert_before_block':
+        if (edit.blockId === scope.headingId) {
+          reasons.push(
+            why(edit.op, edit.blockId, "the block is the meeting's own section heading"),
+          );
+        } else if (scope.blocks.has(edit.blockId)) kept.push(edit);
+        else reasons.push(why(edit.op, edit.blockId, 'the block is not in the document'));
+        break;
       // A cleanup has a section already; writing at the end of the doc is the
       // one way to grow a second one.
       case 'insert_at_end':
