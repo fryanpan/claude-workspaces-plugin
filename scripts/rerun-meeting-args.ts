@@ -50,6 +50,11 @@ export const USAGE = `usage: bun run meeting:rerun <meeting folder | segment-N-<
   --mode <m>          solo | conversation (default: what the original asked).
   --port <n>          Bind the harness server here (default: an ephemeral one).
   --keep              Keep the throwaway data dir.
+  --compare <target>  An earlier rerun to print beside this one: its folder,
+                      its report.json, or a report.md with one beside it. The
+                      report then carries a before/after table over the two,
+                      with what each measure counts named in it. Compare runs
+                      of the SAME audio; the table says so when they are not.
 
 It is not a gate. It calls a real model for every tick of a real recording,
 so nothing in \`bun run verify\` runs it and nothing should add it.`;
@@ -96,6 +101,8 @@ export interface RerunArgs {
   mode?: 'solo' | 'conversation';
   port: number;
   keep: boolean;
+  /** An earlier run to print beside this one. */
+  compare?: string;
 }
 
 function positive(flag: string, raw: string): number {
@@ -118,6 +125,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
   let port = 0;
   let keep = false;
   let engineSpendOk = false;
+  let compare: string | undefined;
   const next = (flag: string, i: number): string => {
     const v = argv[i + 1];
     if (v === undefined || v.startsWith('--')) throw new UsageError(`${flag} needs a value`);
@@ -160,7 +168,8 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
         throw new UsageError('--port must be a port number between 0 and 65535');
       }
       port = n;
-    } else if (a === '--keep') keep = true;
+    } else if (a === '--compare') compare = next(a, i++);
+    else if (a === '--keep') keep = true;
     else if (a === '--help' || a === '-h') throw new UsageError(USAGE);
     else if (a.startsWith('--')) throw new UsageError(`unknown flag ${a}`);
     else if (target === undefined) target = a;
@@ -200,6 +209,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
     port,
     keep,
     engineSpendOk,
+    ...(compare !== undefined ? { compare } : {}),
     ...(mockScript !== undefined ? { mockScript } : {}),
     ...(segment !== undefined ? { segment } : {}),
     ...(mode ? { mode } : {}),

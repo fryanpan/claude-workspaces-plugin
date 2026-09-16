@@ -16,18 +16,18 @@
  * failure degrades to a log line. A quality report is worth strictly less
  * than the notes it is about.
  *
- * READING THE SECTION IS THE PART THAT NEEDED CARE. The notes are addressed
- * by the BLOCK ID of the heading the meeting opened, not by heading text —
- * a person renaming it must not orphan the reading — and they are read as
- * MARKDOWN rather than as outline text, because the outline flattens a
- * block's marks away and the speaker tags are exactly what the invented-voice
- * check reads. So the walk is over the prose fragment itself: the heading's
- * own element, then its siblings, stopping at the next heading of its level
- * or above.
+ * READING THE NOTES IS THE PART THAT NEEDED CARE, and what it reads changed
+ * with whole-doc note-taking. The notes are no longer a section: a meeting on
+ * a prepared doc writes under the document's own headings and opens no
+ * section at all, so a reading keyed on a heading id read four bullets of a
+ * real meeting's 186 and reported coverage over the four. The address is now
+ * the note-taker's own authorship marks, wherever they sit, UNION its section
+ * — `notes-written.ts` holds that walk and the reasons for both halves. The
+ * blocks are read as MARKDOWN rather than as outline text, because the
+ * outline flattens a block's marks away and the speaker tags are exactly what
+ * the invented-voice check reads.
  */
 
-import { prose } from '@claude-workspaces/core';
-import * as Y from 'yjs';
 import { docLookupUrl } from './meeting-lookup.ts';
 import { listMeetings, readTranscript } from './meetings.ts';
 import type { NotesDocStore } from './notes-doc-access.ts';
@@ -46,99 +46,9 @@ import {
 } from './notes-quality-review.ts';
 import { notesQualityRecord, writeNotesQuality } from './notes-quality-store.ts';
 import { readTickWaits } from './notes-tick-timing.ts';
+import { readMeetingNotesMarkdown } from './notes-written.ts';
 
-/** Whether this block is a list container — the element that serializes its
- *  children WITH their bullet markers. */
-function isList(el: Y.XmlElement): boolean {
-  return el.nodeName === 'bulletList' || el.nodeName === 'orderedList';
-}
-
-/** The addressable children of a list container, by block id. */
-function childBlockIds(el: Y.XmlElement): string[] {
-  const out: string[] = [];
-  for (const child of el.toArray()) {
-    if (!(child instanceof Y.XmlElement)) continue;
-    const id = prose.readBlockId(child);
-    if (id !== undefined) out.push(id);
-  }
-  return out;
-}
-
-/**
- * The markdown of one section: the block `headingId` names, then every block
- * after it until a heading at that level or above.
- *
- * Empty for a heading id nothing matches — a doc that is gone, a heading a
- * person deleted, or a meeting that never opened a section at all. Empty is
- * the honest reading of every one of those: the meeting produced no notes
- * this pass can find, and a coverage check over empty notes reports exactly
- * that.
- */
-export function readSectionMarkdown(
-  docStore: NotesDocStore,
-  docId: string,
-  headingId: string | undefined,
-  skip: ReadonlySet<string> = new Set(),
-): string {
-  if (headingId === undefined) return '';
-  const doc = docStore.get(docId);
-  if (!doc) return '';
-  let blocks: ReturnType<typeof prose.addressableBlocks>;
-  try {
-    blocks = prose.addressableBlocks(prose.getProseFragment(doc.ydoc));
-  } catch {
-    return '';
-  }
-  const all = [...blocks];
-  const start = all.findIndex((el) => prose.readBlockId(el) === headingId);
-  if (start < 0) return '';
-  const levelOf = (el: (typeof all)[number]): number | undefined => {
-    if (el.nodeName !== 'heading') return undefined;
-    const raw = el.getAttribute('level');
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 1;
-  };
-  const openLevel = levelOf(all[start]!) ?? 2;
-  const out: string[] = [];
-  // A BLOCK INSIDE ONE ALREADY WRITTEN OUT IS NOT WRITTEN AGAIN. The walk
-  // returns a list, its items, and every list nested in them, and a list
-  // serializes all of it — so each nested bullet used to come out twice, and
-  // a meeting that grouped its notes was reported, and filed, as repeating
-  // them (2026-09-14: a replayed meeting read 8 repeated bullets of 23 in
-  // notes that held 15 bullets and no repeat).
-  const emitted = new Set<unknown>();
-  const insideEmitted = (el: Y.XmlElement): boolean => {
-    for (let p = el.parent; p !== null; p = p.parent) if (emitted.has(p)) return true;
-    return false;
-  };
-  for (let i = start; i < all.length; i++) {
-    const el = all[i]!;
-    const level = levelOf(el);
-    if (i > start && level !== undefined && level <= openLevel) break;
-    const id = prose.readBlockId(el);
-    if (i > start && id !== undefined && skip.has(id)) continue;
-    if (insideEmitted(el)) continue;
-    // A LIST HOLDING ANY SKIPPED ITEM IS DROPPED, AND ITS SURVIVORS CARRY
-    // THEIR OWN MARKERS. The walk returns a list AND the items inside it, and
-    // only the list serializes its children with the `- ` a bullet check
-    // reads — so a meeting that appended its notes to a list the previous
-    // recording opened would otherwise have that recording's bullets counted
-    // as its own (the list emits every child) or its own counted as none (the
-    // items emit bare lines). Dropping the container and marking what is left
-    // is the only split that gives each recording its own bullets.
-    if (isList(el) && childBlockIds(el).some((child) => skip.has(child))) continue;
-    const orphaned =
-      el.nodeName === 'listItem' &&
-      el.parent instanceof Y.XmlElement &&
-      isList(el.parent) &&
-      childBlockIds(el.parent).some((child) => skip.has(child));
-    emitted.add(el);
-    out.push(
-      orphaned ? `- ${prose.serializeBlockToMarkdown(el)}` : prose.serializeBlockToMarkdown(el),
-    );
-  }
-  return out.join('\n');
-}
+export { readMeetingNotesMarkdown, readSectionMarkdown } from './notes-written.ts';
 
 /** Who a meeting had, read off its own record and its transcript. */
 export function voicesOf(
@@ -234,7 +144,7 @@ export function runNotesQualityPass(
   const { docId, meetingId } = meeting;
   const now = deps.now?.() ?? Date.now();
 
-  const notes = readSectionMarkdown(
+  const notes = readMeetingNotesMarkdown(
     deps.docStore(),
     docId,
     deps.headingIdOf(docId, meetingId),

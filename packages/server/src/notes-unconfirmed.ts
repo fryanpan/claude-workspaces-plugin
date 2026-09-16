@@ -56,8 +56,10 @@ export interface UnconfirmedNote {
 }
 
 export interface UnconfirmedScope {
-  /** The meeting's own notes heading. */
-  headingId: string;
+  /** The meeting's own notes heading, when it opened one. A meeting that
+   *  wrote under the document's own headings opened none, and `author` is
+   *  then the whole of the scope. */
+  headingId?: string | undefined;
   /** Only this author's notes. A person's own "(unconfirmed)" is theirs to
    *  keep, and the pass may not rewrite it anyway. */
   author?: string | undefined;
@@ -66,17 +68,29 @@ export interface UnconfirmedScope {
   commented?: ReadonlySet<string>;
 }
 
-/** Every marked note inside the meeting's section, in document order. */
+/**
+ * Every marked note this meeting wrote, in document order.
+ *
+ * WHEREVER IT SITS, not only inside the section. Whole-doc note-taking files
+ * a note under the document's own heading for its topic, so a scope that was
+ * a heading range named none of the guesses a real meeting left — the same
+ * "the notes are not where the code believes" that cost the earlier fix its
+ * edits. A block the document records as `author`'s is in scope wherever it
+ * is; the section is read as well, for the notes whose mark a person's edit
+ * or a markdown round trip took off.
+ */
 export function unconfirmedNotes(
   outline: readonly prose.OutlineEntry[],
   scope: UnconfirmedScope,
 ): UnconfirmedNote[] {
-  const { blocks } = sectionIds(outline, scope.headingId);
-  if (blocks.size === 0) return [];
+  const blocks =
+    scope.headingId === undefined ? new Set<string>() : sectionIds(outline, scope.headingId).blocks;
   const out: UnconfirmedNote[] = [];
   for (const entry of outline) {
     if (entry.kind === 'heading') continue;
-    if (!blocks.has(entry.id) || entry.id === scope.headingId) continue;
+    if (entry.id === scope.headingId) continue;
+    const ours = scope.author !== undefined && entry.author === scope.author;
+    if (!ours && !blocks.has(entry.id)) continue;
     if (scope.author !== undefined && entry.author !== scope.author) continue;
     if (scope.commented?.has(entry.id) === true) continue;
     if (!UNCONFIRMED.test(entry.text)) continue;

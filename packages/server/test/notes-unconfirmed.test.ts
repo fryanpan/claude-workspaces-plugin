@@ -33,8 +33,12 @@ import {
 
 afterEach(dropFreshDirs);
 
-/** A finished meeting whose section carries two guesses and one settled note,
- *  with a marked line outside the section that is none of the pass's business. */
+/**
+ * A finished meeting with three guesses of its own — two in the section it
+ * opened and one filed under a heading that was already in the document,
+ * which is where whole-doc note-taking puts most of them — and one marked
+ * line the person typed, which is none of the pass's business.
+ */
 const MARKED_NOTES = [
   '# Riverbend ferry review',
   '',
@@ -57,7 +61,11 @@ describe('which notes are named', () => {
   const store = docStoreFrom(MARKED_NOTES, ['Meeting notes']).store;
   const outline = (): readonly prose.OutlineEntry[] => store.readOutline(DOC)?.blocks ?? [];
 
-  it("names only the note-taker's own marked notes inside the section", () => {
+  it("names the note-taker's own marked notes, wherever in the doc they sit", () => {
+    // The Agenda bullet is OUTSIDE the meeting's section and is the
+    // note-taker's own — the shape whole-doc note-taking produces, and the
+    // one a heading-range scope named none of. The person's line at the top
+    // of the doc is theirs and stays out.
     const found = unconfirmedNotes(outline(), {
       headingId: idOf(store, 'Meeting notes'),
       author: NOTES_AUTHOR_ID,
@@ -65,7 +73,18 @@ describe('which notes are named', () => {
     expect(found.map((n) => n.text)).toEqual([
       'The crane booking may slip to May (unconfirmed)',
       'Kestrel Lane keeps the winter crew (unconfirmed)',
+      'The pontoon survey is overdue (unconfirmed)',
     ]);
+    expect(found.map((n) => n.text).join(' ')).not.toContain('My own line about the slipway');
+  });
+
+  it('names them for a meeting that opened no section of its own', () => {
+    // Whole-doc note-taking on a prepared document: every note went under a
+    // heading that was already there, so there is no section id to scope by
+    // and authorship is the whole of the answer.
+    const found = unconfirmedNotes(outline(), { author: NOTES_AUTHOR_ID });
+    expect(found).toHaveLength(3);
+    expect(unconfirmedDirective(found)).toContain('The pontoon survey is overdue');
   });
 
   it('leaves a commented note out — the pass cannot rewrite one', () => {
@@ -76,7 +95,7 @@ describe('which notes are named', () => {
       commented: new Set([marked]),
     });
     expect(found.map((n) => n.id)).not.toContain(marked);
-    expect(found).toHaveLength(1);
+    expect(found).toHaveLength(2);
   });
 
   it('a section with no guesses in it asks for nothing', () => {
@@ -127,18 +146,23 @@ describe('a pass counts the guesses it left behind', () => {
         blockId: idOf(store, 'Kestrel Lane'),
         markdown: '- Kestrel Lane keeps the winter crew',
       },
+      {
+        op: 'replace_block',
+        blockId: idOf(store, 'pontoon survey'),
+        markdown: '- The pontoon survey is booked for the spring',
+      },
     ]);
     const result = await runNotesCleanupPass(
       depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.unconfirmed).toBe(2);
+    expect(result.unconfirmed).toBe(3);
     expect(result.unconfirmedLeft).toBe(0);
-    // The two outside the section are untouched: a person's own line and the
-    // agenda are not the pass's to settle.
+    // The person's own marked line is untouched: it is not the pass's to
+    // settle, wherever it sits.
     const after = markdownNow();
     expect(after).toContain('My own line about the slipway (unconfirmed)');
-    expect(after).toContain('The pontoon survey is overdue (unconfirmed)');
+    expect(after).not.toContain('The pontoon survey is overdue (unconfirmed)');
   });
 
   it('a pass that settles nothing says so instead of assuming it did', async () => {
@@ -149,9 +173,9 @@ describe('a pass counts the guesses it left behind', () => {
       depsFor(store, stubComposer([]), dataDir, idOf(store, 'Meeting notes')),
       { docId: DOC, meetingId: MEETING },
     );
-    expect(result.unconfirmed).toBe(2);
-    expect(result.unconfirmedLeft).toBe(2);
-    expect(result.line).toContain('2 still marked');
+    expect(result.unconfirmed).toBe(3);
+    expect(result.unconfirmedLeft).toBe(3);
+    expect(result.line).toContain('3 still marked');
   });
 
   it('the composer is handed the ids, not left to find them', async () => {
@@ -166,8 +190,9 @@ describe('a pass counts the guesses it left behind', () => {
     const prompt = composer.seen[0]?.extraPrompt ?? '';
     expect(prompt).toContain(idOf(store, 'crane booking'));
     expect(prompt).toContain(idOf(store, 'Kestrel Lane'));
-    // And not the ones outside the section.
-    expect(prompt).not.toContain(idOf(store, 'pontoon survey'));
+    // Including the one filed outside the meeting's own section, which a
+    // heading-range scope named none of.
+    expect(prompt).toContain(idOf(store, 'pontoon survey'));
   });
 });
 
@@ -211,12 +236,13 @@ describe('a commented guess is not asked about and is still counted', () => {
       depsFor(store, composer, dataDir, idOf(store, 'Meeting notes')),
       { docId: DOC, meetingId: MEETING },
     );
-    // Asked about one — the uncommented one.
-    expect(result.unconfirmed).toBe(1);
+    // Asked about the two uncommented ones.
+    expect(result.unconfirmed).toBe(2);
     expect(composer.seen[0]?.extraPrompt ?? '').not.toContain(idOf(store, 'crane booking'));
-    // And the commented one is still marked, which the count and the line say.
-    expect(result.unconfirmedLeft).toBe(1);
-    expect(result.line).toContain('1 still marked');
+    // The commented one and the one the composer left alone are still marked,
+    // which the count and the line say.
+    expect(result.unconfirmedLeft).toBe(2);
+    expect(result.line).toContain('2 still marked');
     expect(markdownNow()).toContain('The crane booking may slip to May (unconfirmed)');
   });
 });
