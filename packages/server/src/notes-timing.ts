@@ -35,6 +35,26 @@ import type { TokenUsage } from '@claude-workspaces/core';
 /** Why the tick fired, as the ticker reported it. */
 export type NotesTimingReason = 'pause' | 'cadence' | 'end';
 
+/**
+ * One edit the doc would not take where it was addressed.
+ *
+ * `recovered` is the difference between a note that is somewhere in the doc
+ * and one that is nowhere: the address repair re-homes a failed note under
+ * this meeting's own section (`notes-edit-address.ts`), so its words ARE in
+ * the notes — under the section rather than under its topic, and for a
+ * rewrite, BESIDE the wording it was meant to replace rather than over it. A
+ * move or a removal carries no words, so nothing can be re-homed and the edit
+ * simply did not happen.
+ */
+export interface NotesDroppedEdit {
+  /** The edit's op, as `prose.BlockEdit` names it. */
+  op: string;
+  /** The applier's verdict — `unknown-block`, `not-a-heading`, `empty`, … */
+  why: string;
+  /** Whether the words it carried were re-homed into the notes anyway. */
+  recovered: boolean;
+}
+
 /** How the tick ended: the note reached the doc, or it did not. */
 export type NotesTimingOutcome = 'written' | 'failed' | 'empty';
 
@@ -129,6 +149,32 @@ export interface NotesTickTiming {
   blocks: number;
   /** How many ticks' words this one carried, when ticks coalesced. */
   merged: number;
+  /**
+   * EVERY EDIT THIS TICK COMPOSED THAT THE DOC DID NOT TAKE WHERE IT WAS
+   * ADDRESSED — one entry per failed edit, and an empty list when the batch
+   * landed whole.
+   *
+   * WHY THE ROW CARRIES IT. `outcome` is the tick's verdict, and a tick that
+   * wrote four notes and dropped a fifth reads `written`, exactly as one that
+   * wrote all five does. The fifth was usually a CORRECTION — a rewrite or a
+   * removal of a bullet the note-taker had already written — and those are
+   * the edits a stale address costs, because they are the only ones that name
+   * a block at all. Dropped with no row, the doc keeps the wording the
+   * note-taker decided was wrong and the meeting's own record says the tick
+   * was fine. So: either the correction is in the notes, or this list says it
+   * is not and why.
+   *
+   * COUNTS AND VERDICTS, NEVER WORDS — the same rule as every other field in
+   * this file. `op` is the edit's own name and `why` the applier's error
+   * code; the words are in the transcript beside this file.
+   *
+   * It is the APPLIER's verdicts. A batch the edit guard or the dedupe pass
+   * emptied never reached the applier; those refusals are named on the
+   * `[meeting-notes]` log lines `notes-edit-guard.ts` and
+   * `notes-edit-dedupe.ts` write, and the tick's own `outcome` carries the
+   * `guard-refused` case.
+   */
+  dropped: readonly NotesDroppedEdit[];
   outcome: NotesTimingOutcome;
   /** THE NUMBER: settling to in-the-doc. Null when nothing settled. */
   settledToWrittenMs: number | null;
@@ -304,6 +350,12 @@ export function createNotesTimingLog(opts: NotesTimingLogOpts = {}): NotesTiming
       const spokenMid = spoken.length > 0 ? (median(spoken) ?? 0) : null;
       const spokenWorst = spoken.length > 0 ? Math.max(...spoken) : null;
       const failed = rows.filter((r) => r.outcome === 'failed').length;
+      // THE EDITS THAT NEVER LANDED WHERE THEY WERE AIMED, over the whole
+      // meeting. Counted apart from `failed`, which is ticks: the case this
+      // exists for is a tick that wrote its notes and dropped its correction,
+      // and that tick is not a failure by any other number here.
+      const dropped = rows.reduce((n, r) => n + r.dropped.length, 0);
+      const lost = rows.reduce((n, r) => n + r.dropped.filter((d) => !d.recovered).length, 0);
       const line =
         `[notes-timing] ${rows.length} tick(s): settled-to-written median ` +
         `${Math.round(mid)}ms, worst ${Math.round(worst)}ms` +
@@ -311,7 +363,11 @@ export function createNotesTimingLog(opts: NotesTimingLogOpts = {}): NotesTiming
           ? `; spoken-to-written median ${Math.round(spokenMid)}ms, worst ` +
             `${Math.round(spokenWorst ?? 0)}ms over ${spoken.length} tick(s)`
           : '') +
-        (failed > 0 ? `, ${failed} write(s) skipped` : '');
+        (failed > 0 ? `, ${failed} write(s) skipped` : '') +
+        (dropped > 0
+          ? `, ${dropped} edit(s) the doc would not take where they were addressed ` +
+            `(${lost} whose words are nowhere in the notes)`
+          : '');
       append(
         JSON.stringify({
           summary: true,
@@ -322,6 +378,8 @@ export function createNotesTimingLog(opts: NotesTimingLogOpts = {}): NotesTiming
           spokenWorstMs: spokenWorst,
           spokenTicks: spoken.length,
           failed,
+          droppedEdits: dropped,
+          lostEdits: lost,
         }),
       );
       return line;

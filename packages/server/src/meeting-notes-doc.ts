@@ -124,7 +124,7 @@ import {
   relabelNotesSection,
   retagSpeakerInNotes,
 } from './notes-speaker-tags.ts';
-import { createNotesTimingLog } from './notes-timing.ts';
+import { type NotesDroppedEdit, createNotesTimingLog } from './notes-timing.ts';
 
 export type { NotesDocStore } from './notes-doc-access.ts';
 export {
@@ -773,11 +773,26 @@ export function applyNotesUpdate(
   // batch, and only ever for a batch that already failed something.
   const repair = repairNotesEditAddresses(linked.edits, res.outcomes, section);
   let recovered = 0;
+  // Which of the batch's own edits ended up SOMEWHERE, so the record can tell
+  // a correction that landed in the wrong place from one that landed nowhere.
+  const rehomed = new Set<number>();
   if (repair.edits.length > 0) {
     const again = applyNotesBlockEdits(docStore, update.docId, repair.edits);
     recovered = again.ok ? again.applied + again.suggested : 0;
+    if (again.ok) {
+      for (const [j, out] of again.outcomes.entries()) {
+        const source = repair.sources[j];
+        if (out.status !== 'failed' && source !== undefined) rehomed.add(source);
+      }
+    }
     noteAddressRepair(update.docId, update.meetingId, repair.repaired, recovered);
   }
+  // NOTHING THE DOC REFUSED GOES UNSAID. A batch that landed four notes and
+  // dropped a fifth answers `null` below and used to say nothing at all —
+  // and the fifth is nearly always the tick's correction or removal, because
+  // those are the only edits that name a block. Reported to the meeting's own
+  // record, and logged once for the tick (`NotesDroppedEdit`).
+  reportDroppedEdits(update, res.outcomes, rehomed);
   // A TOPIC OPENED TWICE IS FOLDED IN THE TICK THAT OPENED IT. A tick is
   // shown a slice of the doc, so it can open a `### ` heading the section
   // already carries a little further up — which is what put `Note-taker
@@ -849,6 +864,45 @@ export function applyNotesUpdate(
   }
   if (res.applied + res.suggested + recovered > 0) return null;
   return failedCarryingWords(res.outcomes) ? 'all-edits-failed' : null;
+}
+
+/**
+ * Say what the doc would not take, to the meeting's own record and to the log.
+ *
+ * ONE LINE PER TICK, AND ONLY WHEN THERE IS SOMETHING TO SAY. A batch that
+ * landed whole is the overwhelmingly common case and costs nothing here.
+ *
+ * WHY THE LOG LINE IS NOT ENOUGH ON ITS OWN, and the record is the point: the
+ * skip line next door fires only when the WHOLE batch failed, so a tick that
+ * wrote its bullets and dropped its correction has always read as a clean
+ * tick everywhere a person or a script can look. `update.onDropped` puts the
+ * verdicts on the tick's timing row, which is the file that survives the
+ * meeting.
+ */
+function reportDroppedEdits(
+  update: NotesUpdate,
+  outcomes: readonly prose.BlockEditOutcome[],
+  rehomed: ReadonlySet<number>,
+): void {
+  const dropped: NotesDroppedEdit[] = [];
+  for (const [i, out] of outcomes.entries()) {
+    if (out.status !== 'failed') continue;
+    dropped.push({ op: out.op, why: out.error ?? 'unknown', recovered: rehomed.has(i) });
+  }
+  if (dropped.length === 0) return;
+  update.onDropped?.(dropped);
+  const lost = dropped.filter((d) => !d.recovered);
+  console.warn(
+    `[meeting-notes] ${update.docId} meeting ${update.meetingId} tick ${update.tick.tick}: ` +
+      `${dropped.length} edit${dropped.length === 1 ? '' : 's'} the doc would not take where ` +
+      `${dropped.length === 1 ? 'it was' : 'they were'} addressed — ` +
+      `${dropped.map((d) => `${d.op}/${d.why}${d.recovered ? ' (re-homed)' : ''}`).join(', ')}` +
+      (lost.length > 0
+        ? `; ${lost.length} carried no words this pipeline could put back, so ${
+            lost.length === 1 ? 'that change' : 'those changes'
+          } did not happen`
+        : ''),
+  );
 }
 
 /** Whether any edit that failed was one that would have PUT WORDS in the doc. */
