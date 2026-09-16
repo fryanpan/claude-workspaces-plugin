@@ -997,8 +997,12 @@ body.has-set .doc-switcher-caret {
   margin-top: 8px;
   overflow: visible;
 }
+/* `:not([fill])` so a label that carries its series' colour keeps it: a
+   presentation attribute loses to any rule that names the property. */
 #editor > .ProseMirror .mdx-chart text {
   font: 12px / 1 var(--sans);
+}
+#editor > .ProseMirror .mdx-chart text:not([fill]) {
   fill: var(--fg-muted);
 }
 #editor > .ProseMirror .mdx-grid line {
@@ -1007,12 +1011,14 @@ body.has-set .doc-switcher-caret {
   stroke-dasharray: 2 3;
 }
 #editor > .ProseMirror .mdx-x-axis line,
-#editor > .ProseMirror .mdx-baseline {
+#editor > .ProseMirror line.mdx-baseline {
   stroke: var(--border-strong);
   stroke-width: 1;
 }
+/* Neutral, like the published chart's: the band marks a stretch of time, not
+   a selection, so it must not read as the accent. */
 #editor > .ProseMirror .mdx-band rect {
-  fill: var(--accent-subtle);
+  fill: var(--bg-hover);
 }
 #editor > .ProseMirror .mdx-chart .mdx-band-label,
 #editor > .ProseMirror .mdx-chart .mdx-axis-unit {
@@ -1020,6 +1026,7 @@ body.has-set .doc-switcher-caret {
 }
 /* A line may cross the band's label; a halo in the block's ground keeps it legible. */
 #editor > .ProseMirror .mdx-chart .mdx-band-label {
+  font-style: italic;
   paint-order: stroke;
   stroke: var(--bg-panel);
   stroke-width: 3px;
@@ -1035,25 +1042,24 @@ body.has-set .doc-switcher-caret {
   fill: var(--fg);
   font-weight: 600;
 }
-#editor > .ProseMirror .mdx-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 6px;
-  font: 12px / 1.4 var(--sans);
-  color: var(--fg-muted);
+/* Each line's own name and last value, at its end inside the plot: the site's
+   chart labels its lines there instead of carrying a legend. */
+#editor > .ProseMirror .mdx-chart .mdx-end-label {
+  font-size: 12px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--bg-panel);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
-#editor > .ProseMirror .mdx-legend-item {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
+/* The reference line an indexed chart is read against. */
+#editor > .ProseMirror .mdx-chart .mdx-baseline line {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
 }
-#editor > .ProseMirror .mdx-swatch {
-  width: 18px;
-  border-top: 2px solid;
-}
-#editor > .ProseMirror .mdx-swatch.is-dashed {
-  border-top-style: dashed;
+#editor > .ProseMirror .mdx-chart .mdx-baseline-label {
+  font-size: 11px;
 }
 #editor > .ProseMirror .mdx-head + .mdx-children {
   margin-top: 4px;
