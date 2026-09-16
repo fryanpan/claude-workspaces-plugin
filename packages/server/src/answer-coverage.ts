@@ -35,6 +35,7 @@ import {
  */
 import {
   type AnswerCoverageItem,
+  blanketAnswer,
   buildAnswerCoveragePrompt,
   parseAnswerCoverageResponse,
   questionsAsked,
@@ -180,6 +181,13 @@ function coverageStamp(item: CoveredItem): string {
  * judge that throws, an item still changing on the second try. That is the
  * fail-open rule — the answer closes the item, as it did before the check
  * existed.
+ *
+ * And `[]`, without a call at all, for an answer that accepts or refuses the
+ * ask bodily (`blanketAnswer`). "No, don't give these tips" answers all three
+ * tips, and the model — asked for the words that answer each question by name
+ * — read one of them as unanswered and sent the item back to a reader who had
+ * already settled it (2026-09-16). A whole-ask answer is decided here, where
+ * the rule can be stated rather than inferred, and the call is saved.
  */
 export async function openPartsAfter(
   coverage: AnswerCoverage | undefined,
@@ -189,6 +197,7 @@ export async function openPartsAfter(
   retries = 1,
 ): Promise<string[]> {
   if (!coverage) return [];
+  if (blanketAnswer(text)) return [];
   const { review } = item;
   const before = coverageStamp(item);
   const earlier = standingPartials(item.partialAnswers, item.revisions?.at(-1)?.at);

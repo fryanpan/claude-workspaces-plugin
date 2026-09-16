@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   OPEN_PARTS_MAX,
   OPEN_PART_MAX,
+  blanketAnswer,
   buildAnswerCoveragePrompt,
   parseAnswerCoverageResponse,
   partialAnswerNote,
@@ -148,5 +149,44 @@ describe('partial answers read back off a stored item', () => {
       { text: '04:00.', by: 'Reader', ts: 20, open: ['Alert whom?'] },
     ]);
     expect(item?.answer).toBeUndefined();
+  });
+});
+
+describe('blanketAnswer — one reply that settles the whole ask', () => {
+  it('reads a whole-ask refusal or acceptance as answering every part', () => {
+    for (const reply of [
+      "No, don't give these tips.",
+      'No — skip them.',
+      'Yes, go ahead with all of them.',
+      'no to all',
+      'All fine.',
+      'Do whatever you think.',
+      'Your call.',
+      'Skip it.',
+      'No.',
+      'Yes please',
+    ]) {
+      expect([reply, blanketAnswer(reply)]).toEqual([reply, true]);
+    }
+  });
+
+  it('leaves a reply that speaks to one part to the model', () => {
+    for (const reply of [
+      'No, don’t send the alert.',
+      'Use the Harborlight window.',
+      'Run it at 04:00.',
+      'Leave archived rows out; alert the on-call.',
+      'Yes to the first one.',
+      'No to these, but keep the Saltmarsh banner and move the Riverbend header up a line.',
+      '1. No\n2. Yes',
+      'Which of these ships first?',
+    ]) {
+      expect([reply, blanketAnswer(reply)]).toEqual([reply, false]);
+    }
+  });
+
+  it('stops reading a long reply as a blanket one', () => {
+    const long = `No, drop these ${'and the rest of the wording too '.repeat(8)}`;
+    expect(blanketAnswer(long)).toBe(false);
   });
 });
