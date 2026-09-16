@@ -1,150 +1,20 @@
 /**
- * A chart an `.mdx` component describes with literal props, read by shape and
- * drawn as SVG. Nothing depends on the component's name: a `series` of x/y
- * `values` (or `data`), or a `data` list of x/y points, draws lines; a `data`
- * list of `label`/`value` rows draws bars. So another post's chart with the
- * same shape draws too.
+ * A chart drawn as SVG, one user unit per CSS pixel, from the props
+ * `mdx-chart-props.ts` read. What it draws follows the published site's own
+ * chart component: a band is a shaded x-range spanning the plot's full height,
+ * each line carries its name and last value at its own end inside the plot
+ * rather than in a legend below, and an indexed chart's reference line is
+ * drawn and labelled on the plot.
  *
- * Props arrive already read by `mdx-preview.ts`'s literal parser, so nothing
- * here runs the source. Every string reaches the page as an SVG text node or
- * `textContent`, and a bar's `color` is kept only when it is a plain colour.
+ * Every string reaches the page as an SVG text node or `textContent`, and a
+ * bar's `color` was already narrowed to a plain colour.
  */
 
-export interface ChartPoint {
-  x: number;
-  y: number;
-}
+import type { BarChart, ChartPoint, LineChart, MdxChart } from './mdx-chart-props.ts';
 
-export interface LineSeries {
-  label?: string;
-  points: ChartPoint[];
-  dashed: boolean;
-}
+export type { ChartPoint, LineSeries, LineChart, BarChart, MdxChart } from './mdx-chart-props.ts';
+export { chartOf } from './mdx-chart-props.ts';
 
-export interface LineChart {
-  type: 'line';
-  series: LineSeries[];
-  unit?: string;
-  band?: { from: number; to: number; label?: string };
-  zeroBaseline: boolean;
-  yTickFormat: 'plain' | 'thousands';
-  xTickLabels?: Array<{ x: number; label: string }>;
-}
-
-export interface BarChart {
-  type: 'bar';
-  bars: Array<{ label: string; value: number; color?: string }>;
-  orientation: 'horizontal' | 'vertical';
-  unit?: string;
-  highlightIndex?: number;
-}
-
-export type MdxChart = LineChart | BarChart;
-
-type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.isArray(v);
-const numOf = (v: unknown): number | undefined =>
-  typeof v === 'number' && Number.isFinite(v) ? v : undefined;
-const strOf = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-
-/** The chart `props` describe, or undefined when they describe none. */
-export function chartOf(props: Map<string, unknown>): MdxChart | undefined {
-  const unit = strOf(props.get('unit'));
-  const data = props.get('data');
-  const bars = barsOf(data);
-  if (bars) {
-    const chart: BarChart = {
-      type: 'bar',
-      bars,
-      orientation: props.get('orientation') === 'horizontal' ? 'horizontal' : 'vertical',
-    };
-    if (unit) chart.unit = unit;
-    const hi = numOf(props.get('highlightIndex'));
-    if (hi !== undefined && Number.isInteger(hi) && hi >= 0 && hi < bars.length) {
-      chart.highlightIndex = hi;
-    }
-    return chart;
-  }
-  const single = pointsOf(data);
-  const series = seriesOf(props.get('series')) ?? (single && [{ points: single, dashed: false }]);
-  // Every series has a point, and a lone point draws as a dot, so any series draws.
-  if (!series) return undefined;
-  const chart: LineChart = {
-    type: 'line',
-    series,
-    zeroBaseline: props.get('zeroBaseline') !== false,
-    yTickFormat: props.get('yTickFormat') === 'thousands' ? 'thousands' : 'plain',
-  };
-  if (unit) chart.unit = unit;
-  const band = props.get('band');
-  if (isRec(band)) {
-    const from = numOf(band.from);
-    const to = numOf(band.to);
-    if (from !== undefined && to !== undefined) {
-      chart.band = { from: Math.min(from, to), to: Math.max(from, to) };
-      const label = strOf(band.label);
-      if (label) chart.band.label = label;
-    }
-  }
-  const ticks = props.get('xTickLabels');
-  if (isRec(ticks)) {
-    const labels = Object.keys(ticks)
-      .map((k) => ({ x: Number(k), label: strOf(ticks[k]) }))
-      .filter((t): t is { x: number; label: string } => Number.isFinite(t.x) && !!t.label)
-      .sort((a, b) => a.x - b.x);
-    if (labels.length > 0) chart.xTickLabels = labels;
-  }
-  return chart;
-}
-
-function pointsOf(value: unknown): ChartPoint[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const out: ChartPoint[] = [];
-  for (const p of value) {
-    if (!isRec(p)) return undefined;
-    const x = numOf(p.x);
-    const y = numOf(p.y);
-    if (x === undefined || y === undefined) return undefined;
-    out.push({ x, y });
-  }
-  return out;
-}
-
-function seriesOf(value: unknown): LineSeries[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const out: LineSeries[] = [];
-  for (const s of value) {
-    if (!isRec(s)) continue;
-    const points = pointsOf(s.values) ?? pointsOf(s.data);
-    if (!points) continue;
-    const line: LineSeries = { points, dashed: s.dashed === true };
-    const label = strOf(s.label) ?? strOf(s.name);
-    if (label) line.label = label;
-    out.push(line);
-  }
-  return out.length > 0 ? out : undefined;
-}
-
-function barsOf(value: unknown): BarChart['bars'] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const out: BarChart['bars'] = [];
-  for (const b of value) {
-    if (!isRec(b)) return undefined;
-    const label = strOf(b.label);
-    const v = numOf(b.value);
-    if (label === undefined || v === undefined) return undefined;
-    const bar: BarChart['bars'][number] = { label, value: v };
-    const color = strOf(b.color);
-    if (color && PLAIN_COLOR.test(color)) bar.color = color;
-    out.push(bar);
-  }
-  return out;
-}
-
-/** A hex, a named colour or an rgb()/hsl() of numbers: nothing that can load a URL. */
-const PLAIN_COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20}|(?:rgb|hsl)a?\([\d\s.,%/-]+\))$/i;
-
-// ---- drawing ----------------------------------------------------------------
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /** The reference categorical palette, in its fixed order (light surface). */
@@ -210,9 +80,10 @@ function fmt(v: number, style: 'plain' | 'thousands', unit?: string): string {
 
 const isSymbolUnit = (unit: string): boolean => unit.length <= 2;
 
-/** The chart as an SVG `width` user units wide, one unit per CSS pixel. */
+/** The chart as an SVG, one user unit per CSS pixel: the width the chart's own
+ *  `width` prop asked for, else `width`. */
 export function drawChart(chart: MdxChart, width: number): SVGSVGElement {
-  const w = Math.max(240, Math.round(width));
+  const w = Math.max(240, Math.round(chart.width ?? width));
   return chart.type === 'line' ? drawLines(chart, w) : drawBars(chart, w);
 }
 
@@ -228,17 +99,27 @@ function frame(w: number, h: number, type: string): SVGSVGElement {
   return svg;
 }
 
+/** The name and last value each labelled line carries at its own end. Two that
+ *  would land on each other are pushed apart, as the site's chart does. */
+const END_GAP = 28;
+
 function drawLines(chart: LineChart, w: number): SVGSVGElement {
   const h = w < 520 ? 220 : 280;
   const all = chart.series.flatMap((s) => s.points);
   const xs = all.map((p) => p.x);
   const ys = all.map((p) => p.y);
-  if (chart.band) ys.push(chart.band.from, chart.band.to);
+  // The band is an x-range, so it says nothing about the y axis: the extent is
+  // the series' own, exactly as the published chart's is.
   if (chart.zeroBaseline) ys.push(0);
   let y0 = Math.min(...ys);
   let y1 = Math.max(...ys);
   if (y0 === y1) [y0, y1] = [y0 - 1, y1 + 1];
   const yTicks = niceTicks(y0, y1);
+  // A reference line the reader cannot read a number off is just a stripe.
+  if (chart.baseline !== undefined && chart.baseline >= y0 && chart.baseline <= y1) {
+    if (!yTicks.some((v) => Math.abs(v - chart.baseline!) < 1e-9)) yTicks.push(chart.baseline);
+    yTicks.sort((a, b) => a - b);
+  }
   y0 = Math.min(y0, yTicks[0] ?? y0);
   y1 = Math.max(y1, yTicks[yTicks.length - 1] ?? y1);
   // Points that share one x sit mid-plot, not against the y axis.
@@ -249,8 +130,18 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
   const unitCaption = chart.unit && !isSymbolUnit(chart.unit) ? chart.unit : undefined;
   const yLabels = yTicks.map((v) => fmt(v, chart.yTickFormat, chart.unit));
   const left = Math.ceil(Math.max(...yLabels.map((l) => l.length)) * CH) + 10;
-  const top = unitCaption ? 22 : 8;
-  const right = 12;
+  // A band's label captions the plot from above, so it takes its own strip.
+  const top = (unitCaption ? 22 : 8) + (chart.band?.label ? 14 : 0);
+  const ends = chart.series
+    .map((s, i) => {
+      const last = [...s.points].sort((a, b) => a.x - b.x).at(-1);
+      if (!s.label || !last) return undefined;
+      return { label: s.label, value: fmt(last.y, chart.yTickFormat, chart.unit), point: last, i };
+    })
+    .filter((e): e is { label: string; value: string; point: ChartPoint; i: number } => !!e);
+  // Room at the right for those labels, never more than a third of the chart.
+  const wanted = Math.max(0, ...ends.map((e) => Math.max(e.label.length, e.value.length))) * CH + 14;
+  const right = ends.length > 0 ? Math.max(12, Math.min(Math.round(w * 0.34), wanted)) : 12;
   const bottom = 24;
   const pw = w - left - right;
   const ph = h - top - bottom;
@@ -260,10 +151,12 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
   const svg = frame(w, h, 'line');
   if (unitCaption) text(svg, unitCaption, { class: 'mdx-axis-unit', x: 0, y: 12 });
 
+  // A vertical region over the whole plot: the band names a stretch of x.
   if (chart.band) {
     const g = el('g', { class: 'mdx-band' }, svg);
-    const yt = sy(chart.band.to);
-    el('rect', { x: left, y: yt, width: pw, height: Math.max(1, sy(chart.band.from) - yt) }, g);
+    const xa = Math.max(left, Math.min(left + pw, sx(chart.band.from)));
+    const xb = Math.max(left, Math.min(left + pw, sx(chart.band.to)));
+    el('rect', { x: xa, y: top, width: Math.max(1, xb - xa), height: ph }, g);
   }
 
   const grid = el('g', { class: 'mdx-grid' }, svg);
@@ -286,9 +179,11 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
   xTicks.forEach((t, i) => {
     if (i % every !== 0) return;
     const x = sx(t.x);
-    const anchor = x - widest / 2 < 0 ? 'start' : x + widest / 2 > w ? 'end' : 'middle';
+    const anchor = x - widest / 2 < 0 ? 'start' : x + widest / 2 > left + pw ? 'end' : 'middle';
     text(axis, t.label, { x, y: h - 6, 'text-anchor': anchor });
   });
+
+  drawBaseline(svg, chart, { sx, sy, x0, x1 });
 
   let tips = 0;
   chart.series.forEach((s, i) => {
@@ -327,15 +222,66 @@ function drawLines(chart: LineChart, w: number): SVGSVGElement {
       );
     }
   });
+
+  // Each line's own name at its end, in its colour: what lets the chart drop
+  // the legend the published post does not have.
+  const placed = ends
+    .map((e) => ({ ...e, y: sy(e.point.y) }))
+    .sort((a, b) => a.y - b.y)
+    .map((e, k, list) => {
+      const above = list[k - 1];
+      return above && e.y - above.y < END_GAP ? { ...e, y: above.y + END_GAP } : e;
+    });
+  for (const e of placed) {
+    const g = el('g', { class: 'mdx-end-labels' }, svg);
+    const x = Math.min(sx(e.point.x) + 8, w - 2);
+    const t = text(g, '', { x, y: e.y, class: 'mdx-end-label', fill: seriesColor(e.i) });
+    el('tspan', { x, dy: -2 }, t).textContent = clip(e.label, right - 12);
+    el('tspan', { x, dy: 13 }, t).textContent = e.value;
+  }
+
   // Over the lines, so its halo keeps it legible where a line crosses it.
   if (chart.band?.label) {
+    const mid = Math.max(left, Math.min(left + pw, sx((chart.band.from + chart.band.to) / 2)));
     text(el('g', { class: 'mdx-band' }, svg), chart.band.label, {
-      x: left + 6,
-      y: sy(chart.band.to) + 14,
+      x: mid,
+      y: top - 4,
+      'text-anchor': 'middle',
       class: 'mdx-band-label',
     });
   }
   return svg;
+}
+
+/** The reference line an indexed chart is read against, labelled at whichever
+ *  end of the plot the series leave more room, on the side of the rule they
+ *  are not using. */
+function drawBaseline(
+  svg: SVGSVGElement,
+  chart: LineChart,
+  scale: { sx: (x: number) => number; sy: (y: number) => number; x0: number; x1: number },
+): void {
+  const { baseline } = chart;
+  if (baseline === undefined) return;
+  const g = el('g', { class: 'mdx-baseline' }, svg);
+  const y = scale.sy(baseline);
+  el('line', { x1: scale.sx(scale.x0), x2: scale.sx(scale.x1), y1: y, y2: y }, g);
+  const sorted = chart.series.map((s) => [...s.points].sort((a, b) => a.x - b.x));
+  const atStart = startRoom(sorted, baseline);
+  const ends = sorted.map((p) => (atStart ? p[0] : p.at(-1)));
+  const below = ends.some((p) => (p?.y ?? baseline) > baseline);
+  text(g, chart.baselineLabel ?? fmt(baseline, chart.yTickFormat, chart.unit), {
+    x: atStart ? scale.sx(scale.x0) + 4 : scale.sx(scale.x1) - 4,
+    y: y + (below ? 14 : -6),
+    'text-anchor': atStart ? 'start' : 'end',
+    class: 'mdx-baseline-label',
+  });
+}
+
+function startRoom(sorted: ChartPoint[][], baseline: number): boolean {
+  const room = (pick: (p: ChartPoint[]) => ChartPoint | undefined) =>
+    Math.min(...sorted.map((p) => Math.abs((pick(p)?.y ?? baseline) - baseline)));
+  return room((p) => p[0]) >= room((p) => p.at(-1));
 }
 
 function drawBars(chart: BarChart, w: number): SVGSVGElement {
