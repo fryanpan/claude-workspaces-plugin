@@ -203,7 +203,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_threads',
       description:
-        'List the comment threads on a doc. Pass status to return only the threads in that state.',
+        'List the comment threads on a doc. Pass status to return only the threads in that state. Safe to call freely on any doc, including a file-bound one: threads live in the CRDT, so this binds no file — it never reads, polls or writes back the doc on disk, and auditing comments cannot clobber anything. Bounded, not free: a doc not already in memory is loaded and stays resident, so read the docs you have a reason to read rather than enumerating every doc on the server.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -220,7 +220,8 @@ export const TOOL_LIST: ListToolsResult = {
     },
     {
       name: 'get_thread',
-      description: 'Read one thread by id, with all of its comments.',
+      description:
+        'Read one thread by id, with all of its comments. Binds no file, exactly like list_threads.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -397,7 +398,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'get_doc',
       description:
-        "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape.",
+        "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape. Unlike list_threads this reaches for CONTENT, so it binds the doc's file and puts it in the file poll's fast lane — right for a doc you are about to work on, and the reason to use list_threads when comments are all you want.",
       inputSchema: {
         type: 'object',
         properties: {
