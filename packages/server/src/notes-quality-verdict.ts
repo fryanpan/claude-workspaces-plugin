@@ -121,6 +121,11 @@ export function verdictChanged(filed: NotesQualityVerdict, next: NotesQualityVer
       if (to !== from) return true;
       continue;
     }
+    // STRICTLY GREATER, deliberately: a move of exactly the band does not
+    // revise. "More than its own band" is the rule, the band is a noise
+    // floor rather than a boundary anything real sits on, and the tie going
+    // to the reader's quiet is the direction this whole module leans. On the
+    // record so it reads as a decision rather than an off-by-one.
     if (Math.abs(to - from) > REVISE_RATIO_BAND) return true;
   }
   return false;

@@ -96,6 +96,27 @@ describe('whether a reading says something the item does not', () => {
     expect(verdictChanged(atShare(1000, 550), atShare(1000, 550 + band * 10 + 1))).toBe(true);
   });
 
+  it('holds a move of EXACTLY the band, which is the decision on the record', () => {
+    // Hand-built rather than built from two reports, because no pair of real
+    // shares lands on the band exactly: 0.65 - 0.55 is 0.09999999999999998 in
+    // binary floating point, which is inside the band whichever comparison is
+    // used and so proves nothing about it. 0.1 - 0 is exactly 0.1, and it is
+    // the only arrangement that tells `>` from `>=`.
+    //
+    // The rule is "more than its own band", so a move of exactly the band
+    // does NOT revise: the band is a noise floor rather than a boundary
+    // anything real sits on, and the tie goes to the reader's quiet.
+    const at = (share: number) => ({
+      kinds: ['coverage' as const],
+      counts: {},
+      ratios: { coverage: share },
+    });
+    expect(verdictChanged(at(0), at(REVISE_RATIO_BAND))).toBe(false);
+    // And a hair past it does revise, so the case above cannot pass on a
+    // comparison that has stopped firing altogether.
+    expect(verdictChanged(at(0), at(REVISE_RATIO_BAND * 1.5))).toBe(true);
+  });
+
   /* ===== A count moving is the meeting talking ===== */
 
   it('reports a count that moved by one', () => {
