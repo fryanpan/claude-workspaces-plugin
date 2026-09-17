@@ -14137,6 +14137,7 @@ function capClause(cap, now2, style) {
   }
   return style === "ready" ? ` (cap ${cap.value}${setter})` : ` of ${cap.value}${setter ? `${setter.replace(/, was (\d+)$/, " (was $1)")},` : ""}`;
 }
+var NOTE_INFERRED_UNFILED = "waiting-unfiled";
 function truncate4(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
@@ -14283,9 +14284,15 @@ function stalledLine(p) {
     parts.push(`${subject} stopped moving${denominator}${list}. Drive each one: read its thread, ` + "then unblock it, hand it to somebody, or park it with a reason.");
   }
   const unfiled = p.unfiled ?? [];
-  if (unfiled.length > 0) {
-    const noun = unfiled.length === 1 ? "task is" : "tasks are";
-    parts.push(`${unfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(unfiled)}. File the ask where they will see it, or the wait is invisible.`);
+  const declaredUnfiled = unfiled.filter((r) => r.bucket !== NOTE_INFERRED_UNFILED);
+  const saidUnfiled = unfiled.filter((r) => r.bucket === NOTE_INFERRED_UNFILED);
+  if (declaredUnfiled.length > 0) {
+    const noun = declaredUnfiled.length === 1 ? "task is" : "tasks are";
+    parts.push(`${declaredUnfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(declaredUnfiled)}. File the ask where they will see it, or the wait is invisible.`);
+  }
+  if (saidUnfiled.length > 0) {
+    const noun = saidUnfiled.length === 1 ? "task's own closing note reads" : "tasks’ own closing notes read";
+    parts.push(`${saidUnfiled.length} ${noun} as an ask to a person, with nothing filed on the row — ` + `${stalledRowsClause(saidUnfiled)}. This is NOT the board saying a person owns the row — ` + "it is a regex over the agent’s own words, wrong about one message in six. Read the note, " + "then file the ask where they will see it, or say in one line that there was none.");
   }
   const waits = p.declaredWaits ?? [];
   const standing = waits.filter((w) => w.lapsed !== true);
@@ -20095,7 +20102,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.243";
+var PLUGIN_VERSION = "0.1.244";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
