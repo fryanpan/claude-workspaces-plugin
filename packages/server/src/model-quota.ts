@@ -15,18 +15,36 @@
  * So a 400 is classified by reading its body, and nothing else about the
  * body is kept.
  *
- * NOTHING FROM THE BODY IS EVER RE-EMITTED. `classify` answers a boolean and
- * the callers build their own message from the status. A refusal body can
- * carry request echoes, and a message assembled out of one is a message that
- * eventually carries a credential into a log or a doc.
+ * NOTHING FROM THE BODY IS EVER RE-EMITTED. The classification answers with
+ * OUR OWN CONSTANT or with nothing, and the callers build their own message
+ * from the status. A refusal body can carry request echoes, and a message
+ * assembled out of one is a message that eventually carries a credential into
+ * a log or a doc. `quotaPhrase` returns a member of `QUOTA_PHRASES` — a
+ * string this file wrote, chosen by the body rather than taken from it — so
+ * naming it in a message keeps that property exactly.
+ *
+ * WHY NAME IT AT ALL. "Out of quota" collapses three account failures that
+ * want three different responses from a person: a spend cap somebody can
+ * raise, a billing problem somebody must fix, and a rate limit that clears on
+ * its own. On 2026-09-17 a run reported `HTTP 400 — out of quota` for the
+ * ninth day running and nobody could tell which of the three it was without
+ * the body, which this module deliberately throws away. The phrase that
+ * matched is the smallest thing that separates them.
  */
 
 /**
  * Phrases an Anthropic refusal uses when the account, not the request, is
  * the problem. Matched case-insensitively against the whole body, because
  * the wording sits inside a JSON error object rather than on its own.
+ *
+ * ORDER IS THE TIE-BREAK, and it is the order as it already stood: a body
+ * naming two of these is reported as the first one listed, which puts
+ * `credit balance` above `billing` and `usage limit` above `quota`. It was
+ * never chosen for that job, so a refusal saying both `spend limit` and
+ * `quota` reports the vaguer one. Whether the list is the right partition at
+ * all is a separate question — see the PR that added this comment.
  */
-const QUOTA_PHRASES = [
+export const QUOTA_PHRASES = [
   'credit balance',
   'usage limit',
   'quota',
@@ -37,6 +55,27 @@ const QUOTA_PHRASES = [
   'insufficient_quota',
 ] as const;
 
+/** One of the phrases above, and nothing else can be one. */
+export type QuotaPhrase = (typeof QUOTA_PHRASES)[number];
+
+/**
+ * Which of our phrases classified this refusal, or `null` when none did.
+ *
+ * `null`, never `''`: "no phrase" and "a phrase that is empty" are different
+ * answers, and a caller that has to tell them apart should not have to know
+ * that one of them is falsy for two reasons.
+ *
+ * ONLY WHERE THE BODY IS ALREADY READ. A 429 is quota by its status alone and
+ * this answers `null` for one, which is not an omission: the status has
+ * already said which family it is, and reading a 429's body here would start
+ * consulting a body the module does not consult today.
+ */
+export function quotaPhrase(status: number, body: string): QuotaPhrase | null {
+  if (status !== 400) return null;
+  const haystack = body.toLowerCase();
+  return QUOTA_PHRASES.find((phrase) => haystack.includes(phrase)) ?? null;
+}
+
 /**
  * Is this refusal the account being out of quota?
  *
@@ -46,9 +85,7 @@ const QUOTA_PHRASES = [
  */
 export function isQuotaRefusal(status: number, body: string): boolean {
   if (status === 429) return true;
-  if (status !== 400) return false;
-  const haystack = body.toLowerCase();
-  return QUOTA_PHRASES.some((phrase) => haystack.includes(phrase));
+  return quotaPhrase(status, body) !== null;
 }
 
 /**
@@ -69,11 +106,18 @@ export function isQuotaFailure(message: string): boolean {
 }
 
 /**
- * The one message shape a refused model call is described by: the status,
- * and the quota mark when it earned one. `what` names the call so a log with
- * several kinds of request in it can still be read.
+ * The one message shape a refused model call is described by: the status, the
+ * quota mark when it earned one, and the phrase that earned it when a phrase
+ * did. `what` names the call so a log with several kinds of request in it can
+ * still be read.
+ *
+ * The parenthesised phrase is OUR constant, never the body's wording, and it
+ * is absent rather than empty when the status classified the refusal on its
+ * own. `isQuotaFailure` reads the mark and is unaffected by what follows it.
  */
 export function refusalMessage(what: string, status: number, body: string): string {
-  const quota = isQuotaRefusal(status, body) ? ` — ${QUOTA_REFUSAL_MARK}` : '';
-  return `${what} HTTP ${status}${quota}`;
+  if (!isQuotaRefusal(status, body)) return `${what} HTTP ${status}`;
+  const phrase = quotaPhrase(status, body);
+  const named = phrase === null ? '' : ` (${phrase})`;
+  return `${what} HTTP ${status} — ${QUOTA_REFUSAL_MARK}${named}`;
 }
