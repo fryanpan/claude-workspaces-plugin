@@ -14100,7 +14100,10 @@ function mayCarryAnOpenAsk(thread) {
     return review.answeredAt === undefined && review.answeredWith === undefined && review.withdrawnAt === undefined;
   });
 }
+var BOOKKEEPING_EVENTS = new Set(["comment.delivered", "agent.listening", "replay.gap"]);
 function isBookkeepingEvent(event, payload) {
+  if (BOOKKEEPING_EVENTS.has(event))
+    return true;
   if (event === "thread.resolved") {
     if (!payload || typeof payload !== "object")
       return false;
@@ -14949,6 +14952,8 @@ async function handleFrame(deps, raw) {
     return;
   }
   if (ev === "replay.gap") {
+    if (isBookkeepingEvent(ev, payload))
+      return;
     const p = payload ?? {};
     await outsideToolCall(deps, () => deps.notify({
       method: "notifications/claude/channel",
@@ -20419,7 +20424,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.254";
+var PLUGIN_VERSION = "0.1.255";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

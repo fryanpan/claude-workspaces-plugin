@@ -12,6 +12,7 @@
  * OUTSIDE the dedup gate, so a redelivered frame is still acknowledged while
  * being hidden from the session.
  */
+import { isBookkeepingEvent } from './bookkeeping-events.ts';
 import { isChannelEvent } from './channel-gate.ts';
 import type { ChannelNotification } from './channel-messages.ts';
 
@@ -76,12 +77,32 @@ async function handleFrame(deps: FrameHandlerDeps, raw: string): Promise<void> {
   }
   if (ev === 'replay.gap') {
     // An explicit hole: the server is saying it CANNOT replay what this
-    // session missed while disconnected. Surface it as its own channel line —
-    // the doc-shaped formatter below would render it as a garbled comment —
-    // so the agent refetches (get_doc / list_threads / next_tasks) instead of
-    // trusting the stream to have been complete. No receipt: a gap notice
-    // carries no queue row, and acking one would claim delivery of the very
-    // frames it is reporting as missing.
+    // session missed while disconnected. Rendered as its own channel line
+    // when it is rendered at all — the doc-shaped formatter below would make
+    // a garbled comment of it. No receipt either way: a gap notice carries no
+    // queue row, and acking one would claim delivery of the very frames it is
+    // reporting as missing.
+    //
+    // WHY IT NO LONGER WAKES, and what still recovers the missed frames. The
+    // notice asked the agent to refetch. It is dropped because nothing it
+    // asks for is lost by not asking:
+    //
+    //  - The CURSOR still clears. `sse-cursor.ts` and `mux-loop.ts` act on
+    //    the frame's event name after `deliver` resolves, not on whether a
+    //    notification went out, so the next reconnect presents no stale id
+    //    and buys no second gap, and the dedup window is still dropped.
+    //  - A comment addressed to this agent is DURABLE. Its queue row stays
+    //    until this process acks it, and a frame missed while disconnected
+    //    was never acked, so the next heartbeat re-offers it as a real wake
+    //    carrying the words (`routes/workspace-attachments.ts`).
+    //  - Everything else the gap covers is STATE, not news: the task, the
+    //    thread, the review item and the doc are exactly where the next
+    //    `next_tasks` / `list_threads` / `get_doc` finds them.
+    //
+    // So the wake bought a refetch of state that the agent's next wake reads
+    // anyway, and the one class of frame that could have been lost brings
+    // itself back.
+    if (isBookkeepingEvent(ev, payload)) return;
     const p = (payload ?? {}) as { docId?: string };
     await outsideToolCall(deps, () =>
       deps.notify({

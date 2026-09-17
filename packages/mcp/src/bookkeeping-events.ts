@@ -26,6 +26,10 @@
  * where that state is in hand. `thread.resolved` is the second kind — see the
  * carve-out below, which reads what the thread was carrying.
  *
+ * The division has one exception, and `BOOKKEEPING_EVENTS` below says why it
+ * is one: a frame a PAGE must still receive cannot be dropped at the fan-out
+ * at all, and the server cannot always tell an agent's stream from a tab's.
+ *
  * THIS IS NOT THE SELF-ECHO RULE, and the two must not be merged. Telling
  * them apart is one question — WHOSE act is it?
  *
@@ -130,12 +134,42 @@ function mayCarryAnOpenAsk(thread: unknown): boolean | undefined {
 }
 
 /**
+ * The events whose NAME alone settles it — each a record of the transport
+ * doing its job, carrying nothing the reader is being asked to act on.
+ *
+ * Each is here for its own reason, and the reason is why the list is named
+ * one member at a time:
+ *
+ *   - `comment.delivered` — the second tick beside somebody's comment. It
+ *     says a session was handed words it was just handed, which is news to
+ *     the author's page and to nobody else.
+ *   - `agent.listening` — a peer's presence circle appearing or
+ *     disappearing. An agent cannot act on another session's socket.
+ *   - `replay.gap` — see `frame-handler.ts`, which is where this one is
+ *     asked and where what survives the drop is written down.
+ *
+ * WHY THE FIRST TWO ARE NOT IN THE SERVER, though both are name-decidable and
+ * the division above sends a name-decidable drop there. Neither may leave the
+ * fan-out: a page must still get them, and the server's existing "pages only"
+ * mechanism — `skipAgentStreams` on `SseBus.broadcastTransient` — is exact
+ * only where an agent's stream carries its `agentId`. `sse-mux.ts` registers
+ * that on BOARD keys alone (`registersAgentId`), deliberately, so the doc
+ * channel a `comment.delivered` also goes out on reaches an agent's stream
+ * looking exactly like a browser tab's. The server cannot tell them apart;
+ * the child knows what it is. `agent.listening` rides board channels only and
+ * is already skipped there — it is named here as the second half of one rule
+ * rather than left resting on where it happens to be broadcast today.
+ */
+const BOOKKEEPING_EVENTS = new Set(['comment.delivered', 'agent.listening', 'replay.gap']);
+
+/**
  * Whether this frame records something that happened without asking the
  * reader for anything.
  *
  * `true` means "do not wake"; every event not named below answers `false`.
  */
 export function isBookkeepingEvent(event: string, payload: unknown): boolean {
+  if (BOOKKEEPING_EVENTS.has(event)) return true;
   // A thread closed. Nothing was said — `channel-messages.ts` renders a
   // resolve with an empty body for exactly this reason — and a closed thread
   // is the absence of a request rather than one. Unless it closed over an ask
