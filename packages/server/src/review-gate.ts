@@ -43,7 +43,7 @@ import {
 } from '@claude-workspaces/core/review-hold';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
-import type { ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
+import type { GateRunOpts, ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
 import {
   admittedLessSpecificMessage,
   admittedUnjudgedMessage,
@@ -290,7 +290,13 @@ export function createReviewGate(ctx: ReviewGateContext) {
       announceThreadReview(docId, thread.id, review, author);
       return { held: false, review };
     }
-    const gate = await judgeThreadReview(docId, thread.id, commentId, review, author);
+    // Every caller of this function answers the same request with
+    // `heldFields(gate)` in its body, so the author reads the hold in the
+    // reply it is already waiting on and the pushed copy is skipped
+    // (`GateRunOpts.heldInReply`).
+    const gate = await judgeThreadReview(docId, thread.id, commentId, review, author, {
+      heldInReply: true,
+    });
     if (!gate.held) announceThreadReview(docId, thread.id, gate.review, author);
     return gate;
   }
@@ -473,24 +479,6 @@ export function createReviewGate(ctx: ReviewGateContext) {
     return taskId === ''
       ? { kind: 'doc', docId: address.docId, exceptCommentId: address.commentId }
       : { kind: 'task', taskId, exceptCommentId: address.commentId };
-  }
-
-  /**
-   * What a REVISE may say to the gate beyond the words themselves.
-   *
-   * One field, and it exists because of what the gate was measured teaching:
-   * every hold asked for a concrete specific, so a fabricated specific read
-   * as more responsive than a vague truth and the revision loop selected for
-   * invention. The filer needs a way to say "the source does not support
-   * that", and it has to be an answer the gate ACCEPTS, or it is not an
-   * answer at all.
-   */
-  interface GateRunOpts {
-    /** The filer's own words for why the honest answer is less specific than
-     *  the hold asked for. Only acted on when the item is currently held —
-     *  on an unheld item there is no hold to answer, and honouring it there
-     *  would be a one-field bypass of a gate nobody had raised. */
-    lessSpecific?: string;
   }
 
   /**
@@ -875,7 +863,12 @@ export function createReviewGate(ctx: ReviewGateContext) {
       reason: judgement.reason,
       ts: at,
     };
-    sse.sendToAgent(`ws~${target.workspaceId}`, author.id, { ...frame });
+    // Silent when the caller is about to say the same thing in its reply —
+    // see `GateRunOpts.heldInReply`. The frame is still built above and still
+    // shapes the message below; what is skipped is the second delivery.
+    if (runOpts.heldInReply !== true) {
+      sse.sendToAgent(`ws~${target.workspaceId}`, author.id, { ...frame });
+    }
     return {
       held: true,
       row: recorded.row,

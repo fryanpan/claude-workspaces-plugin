@@ -20,7 +20,7 @@ import type { KeepMovingVerdict } from '../src/keep-moving-verdict.ts';
 import type { ReviewJudgeVerdict } from '../src/review-judge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { REVIEW_ITEM_HELD_EVENT, STALL_EVENT } from '../src/stall-nudge.ts';
-import { type Frame, listenFrames, settle, waitForFrames } from './doc-activity-stall-harness.ts';
+import { type Frame, listenFrames, settle } from './doc-activity-stall-harness.ts';
 import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -145,7 +145,7 @@ describe('a held review item past the quiet window is the lead’s finding', () 
       await fetch(`${base}/workspaces/${workspaceId}/keep-moving`),
     );
 
-  it('the filer is told at once; the lead only once the hold outlives the window, then once', async () => {
+  it('the filer is told in its own reply; the lead only once the hold outlives the window, then once', async () => {
     const { workspaceId, taskId } = await board();
     const lead = await agentStream(workspaceId, LEAD);
     const filer = await agentStream(workspaceId, FILER);
@@ -155,21 +155,27 @@ describe('a held review item past the quiet window is the lead’s finding', () 
         author: FILER,
       }),
     );
+    // The reply IS the telling: `held` and its reason come back on the call
+    // the filer just made, so no frame is pushed at it as well. Since
+    // 2026-09-17 a create that hands the hold back in its own reply sends
+    // none — a wake is the reader's whole turn, and this one would name
+    // nothing the caller did not already hold.
     expect(res.held).toBe(true);
-    // The create-time wake, then the overdue nudge — polled, because the
-    // store's window is strictly greater-than and the first pass can land in
-    // the millisecond the judge stamped.
-    await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
+    expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
+    // The overdue nudge is a different matter and still goes: nobody asked
+    // for it, and it says the hold has now outlived the filer's window.
+    // Polled, because the store's window is strictly greater-than and the
+    // first pass can land in the millisecond the judge stamped.
     await waitFor(
       () => {
         handle.nudgeStalls();
-        return filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT).length >= 2;
+        return filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT).length >= 1;
       },
       { timeout: 5_000, interval: 25, describe: 'the filer’s overdue nudge' },
     );
-    // The filer has been told twice and the hold is seconds old: nothing for
-    // the lead yet. This is the line step 4 moved — the same pass used to
-    // hand the lead the hold at the filer's window.
+    // The filer has been told and the hold is seconds old: nothing for the
+    // lead yet. This is the line step 4 moved — the same pass used to hand
+    // the lead the hold at the filer's window.
     expect(stallFrames(lead.frames)).toEqual([]);
     const { latest: young } = await latestVerdict(workspaceId);
     expect(young?.held).toEqual([]);
@@ -183,8 +189,8 @@ describe('a held review item past the quiet window is the lead’s finding', () 
       reason: 'No stakes.',
       filedBy: FILER.name,
     });
-    // The lead's turn is not a third tap on the filer.
-    expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toHaveLength(2);
+    // The lead's turn is not a second tap on the filer.
+    expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toHaveLength(1);
     // …and it is a line in the measurement, the same item under the same window.
     const { latest } = await latestVerdict(workspaceId);
     expect(latest?.verdict).toBe('FAIL');
@@ -207,7 +213,9 @@ describe('a held review item past the quiet window is the lead’s finding', () 
         author: FILER,
       }),
     );
-    await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
+    // Told in the reply, not pushed at — and the filer's stream stays empty
+    // right through the revision, so the absence below is the lead's alone.
+    expect(res.held).toBe(true);
     verdict = { ok: true, reason: 'Clear.' };
     await jj(
       await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${res.item.id}/revise`, {
@@ -227,6 +235,7 @@ describe('a held review item past the quiet window is the lead’s finding', () 
     handle.nudgeStalls();
     await settle(100);
     expect(stallFrames(lead.frames)).toEqual([]);
+    expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
     const { latest } = await latestVerdict(workspaceId);
     expect(latest?.verdict).toBe('PASS');
     expect(latest?.held).toEqual([]);
