@@ -33,9 +33,11 @@
  *
  * The control is in the same run and needs no second fixture: the two
  * per-board wakes are themselves single-board frames whose rows must resolve
- * to their own tag. A fix that simply stopped the fleet frame being sent
- * would be caught by `it('still escalates …')` below, which asserts the fleet
- * frame arrives and names BOTH rows.
+ * to their own tag. A fix that simply stopped the fleet frame being sent is
+ * caught by BOTH cases, because neither runs its assertions until a frame
+ * carrying more than one row has actually arrived (`tickUntilFleetFrame`) —
+ * the per-board wakes alone never satisfy that, so a run without the fleet
+ * frame fails on the wait rather than passing by saying nothing.
  *
  * All fixtures are synthetic — invented names on made-up boards. The repo is
  * public.
@@ -62,6 +64,9 @@ const WAIT_TEXT = (who: string) =>
   `Branch is cut and the smoke run is green. Waiting on ${who} to pick the release window.`;
 
 type Named = { id?: string; workspaceId?: string };
+
+/** One board's waiting row, and the agent whose closing words say so. */
+type Row = { ws: string; taskId: string; agent: string };
 
 /** Every row a frame names, in the order a reader meets them, each paired
  *  with the board the frame attributes it to. */
@@ -132,15 +137,15 @@ describe('a stall frame attributes every row it names to the board that holds it
   }
 
   /**
-   * A board carrying one in-progress row whose closing note says its holder is
-   * waiting on a person, with nothing filed — the `waiting-unfiled` shape the
-   * fleet escalation ages.
+   * A board carrying one in-progress row, up to but NOT including the closing
+   * note that turns it into a `waiting-unfiled` finding. The note is posted
+   * separately, for both boards at once — see `startWaiting`.
    */
-  async function boardWithUnfiledWait(
+  async function boardWithWaitingRow(
     name: string,
     lead: typeof LEAD_A,
     title: string,
-  ): Promise<{ ws: string; taskId: string }> {
+  ): Promise<Row> {
     const { workspace } = await jj<{ workspace: { id: string } }>(
       await post('/workspaces', { name, leadAgentId: lead.id }),
     );
@@ -168,15 +173,34 @@ describe('a stall frame attributes every row it names to the board that holds it
         }),
       );
     }
-    await jj(
-      await post(`/workspaces/${ws}/tasks/${task.id}/notes`, {
-        kind: 'turn',
-        text: WAIT_TEXT(PERSON.name),
-        agent: lead.name,
-        at: Date.now(),
-      }),
+    return { ws, taskId: task.id, agent: lead.name };
+  }
+
+  /**
+   * Start BOTH rows waiting at the same instant.
+   *
+   * The two closing notes go out together and carry one shared `at`, so the
+   * rows cross the quiet window on the same clock rather than on however long
+   * the fixture's own setup took. That skew is not cosmetic: a row's
+   * `firstSeen` is stamped at the first tick that sees it as a finding, and it
+   * is due one aging window after THAT — so two rows seeded a window apart are
+   * never due together, and the fleet escalation carries one of them. CI found
+   * that (PR 1091, `rows=1`) where this machine did not.
+   */
+  async function startWaiting(...tasks: Row[]): Promise<void> {
+    const at = Date.now();
+    await Promise.all(
+      tasks.map(async ({ ws, taskId, agent }) =>
+        jj(
+          await post(`/workspaces/${ws}/tasks/${taskId}/notes`, {
+            kind: 'turn',
+            text: WAIT_TEXT(PERSON.name),
+            agent,
+            at,
+          }),
+        ),
+      ),
     );
-    return { ws, taskId: task.id };
   }
 
   /**
@@ -185,32 +209,43 @@ describe('a stall frame attributes every row it names to the board that holds it
    * the rows it carries come from both.
    */
   async function twoBoards(): Promise<{
-    a: { ws: string; taskId: string };
-    b: { ws: string; taskId: string };
+    a: Row;
+    b: Row;
     teamLeadFrames: Frame[];
     leadAFrames: Frame[];
     leadBFrames: Frame[];
   }> {
-    const a = await boardWithUnfiledWait('release-train', LEAD_A, 'Cut the release branch');
-    const b = await boardWithUnfiledWait('ferry-timetable', LEAD_B, 'Publish the winter timetable');
+    const a = await boardWithWaitingRow('release-train', LEAD_A, 'Cut the release branch');
+    const b = await boardWithWaitingRow('ferry-timetable', LEAD_B, 'Publish the winter timetable');
     const leadAFrames = await attach(a.ws, LEAD_A.id);
     const leadBFrames = await attach(b.ws, LEAD_B.id);
     const teamLeadFrames = await attach(a.ws, TEAM_LEAD);
+    await startWaiting(a, b);
     return { a, b, teamLeadFrames, leadAFrames, leadBFrames };
   }
 
   /**
-   * Tick until Team Lead has been told. Polled rather than slept: the rows
-   * have to out-quiet the stall window and then age a further window before
-   * the fleet escalation is due, and both clocks are real.
+   * Tick until Team Lead has been told about BOTH boards in one frame.
+   *
+   * Polled rather than slept: the rows have to out-quiet the stall window and
+   * then age a further window before the fleet escalation is due, and both
+   * clocks are real.
+   *
+   * The condition is two rows rather than any stall frame, and that is
+   * load-bearing in both directions. The per-board wakes arrive first and each
+   * name one row, so a poll that stopped at the first `STALL_EVENT` would hand
+   * the assertions a board wake and let a run where the fleet frame never
+   * arrived pass by saying nothing — which is what CI caught. And a change
+   * that split the fan-in into one wake per board would time out here, named,
+   * rather than quietly satisfying a looser bar.
    */
   const tickUntilFleetFrame = (teamLeadFrames: Frame[]): Promise<unknown> =>
     waitFor(
       () => {
         handle.nudgeStalls();
-        return teamLeadFrames.some((f) => f.event === STALL_EVENT);
+        return teamLeadFrames.some((f) => f.event === STALL_EVENT && attributions(f).length > 1);
       },
-      { describe: 'Team Lead received a stall frame', timeout: 20_000 },
+      { describe: 'Team Lead received ONE frame naming both boards’ rows', timeout: 30_000 },
     );
 
   it('names no row the frame cannot attribute to the board that holds it', async () => {

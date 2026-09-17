@@ -335,6 +335,15 @@ export interface StallNudgeFrame {
    * the lookup the frame exists to save. A stalled set large enough to be a
    * wall of text is itself the finding. The RENDERED line is what shortens;
    * see `nudge-line.ts`.
+   *
+   * **This list never spans boards.** Every row on it comes from the wake for
+   * one board, so each belongs to the frame's own `workspaceId` and carries no
+   * per-row board of its own — which is why the renderer is handed no frame
+   * board for it and names no board on these rows. `unfiled` is the list that
+   * can span boards (the fleet escalation), and it is typed `AttributedRow`
+   * for exactly that reason. Widen this one and the renderer has to be given
+   * the frame board here too, or it will stay silent about a row that moved
+   * house.
    */
   rows?: readonly StalledRow[];
   /**
