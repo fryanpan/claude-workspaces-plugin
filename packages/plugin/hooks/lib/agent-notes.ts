@@ -44,6 +44,19 @@ export interface NotePayload {
   at: number;
 }
 
+/**
+ * What a session that has DECLARED it does not post its turns sends instead:
+ * no text, no cwd — only that a turn ended and that the silence is a choice.
+ * The board shows it as its own state, so a blank Activity tab is not read as
+ * a fault and re-raised on every audit.
+ */
+export interface WithheldPayload {
+  agent: string;
+  withheld: true;
+  sessionId?: string;
+  at: number;
+}
+
 export type Decision = { post: NotePayload } | { skip: string };
 
 /** IP-literal for the reason `resolveBaseUrl` in packages/mcp/src/http-client.ts gives. */
@@ -81,6 +94,16 @@ export function readAgentName(env: EnvLike): string | undefined {
  */
 export function readWorkspaceId(env: EnvLike): string | undefined {
   return readRenamed(env, 'CW_WORKSPACE_ID', 'FEEDBACK_WORKSPACE_ID')?.trim();
+}
+
+/**
+ * Whether this session declared that it does not post its turns: the launch
+ * setting `CW_TURN_NOTES=withheld`. Read like the agent name, once per hook.
+ * Any other value — or none — posts as before; a typo must not silently turn
+ * a session's notes off, so only the one word counts.
+ */
+export function readsWithheld(env: EnvLike): boolean {
+  return env.CW_TURN_NOTES?.trim().toLowerCase() === 'withheld';
 }
 
 /**
@@ -210,7 +233,7 @@ export function payloadKeys(payload: unknown): string[] {
 export async function postNote(
   baseUrl: string,
   workspaceId: string,
-  body: NotePayload,
+  body: NotePayload | WithheldPayload,
   fetchImpl: typeof fetch = fetch,
   timeoutMs = POST_TIMEOUT_MS,
 ): Promise<{ ok: boolean; unfiledAsk?: string }> {
@@ -290,6 +313,10 @@ export async function runHook(
       agent: readAgentName(deps.env),
       now: deps.now ? deps.now() : Date.now(),
     };
+    if (readsWithheld(deps.env)) {
+      await declareWithheld(kind, payload, ctx, deps);
+      return undefined;
+    }
     const decision =
       kind === 'turn' ? decideTurnNote(payload, ctx) : decideDenialNote(payload, ctx);
     if ('skip' in decision) return undefined;
@@ -306,6 +333,40 @@ export async function runHook(
     // fail open
   }
   return undefined;
+}
+
+/**
+ * The withheld branch of `runHook`. A turn sends the wordless declaration; a
+ * denial sends nothing, because the declaration already says the session is
+ * not posting, and a denial's shape is still something it said. The closing
+ * message is never read, so nothing it held can reach the request. Never
+ * nudges: there is no text for the server to judge.
+ */
+async function declareWithheld(
+  kind: NoteKind,
+  payload: unknown,
+  ctx: DecideContext,
+  deps: HookDeps,
+): Promise<void> {
+  if (kind !== 'turn' || !ctx.agent) return;
+  const p = asPayload(payload);
+  if (!p) return;
+  const workspaceId = readWorkspaceId(deps.env);
+  if (!workspaceId) return;
+  const baseUrl = deps.baseUrl ? deps.baseUrl() : resolveBaseUrl(deps.env, deps.discoveryPort);
+  if (!baseUrl) return;
+  const sessionId = shortString(p.session_id);
+  await postNote(
+    baseUrl,
+    workspaceId,
+    {
+      agent: ctx.agent,
+      withheld: true,
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      at: ctx.now,
+    },
+    deps.fetch ?? fetch,
+  );
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   postNote,
   readAgentName,
   readWorkspaceId,
+  readsWithheld,
   resolveBaseUrl,
   runHook,
 } from '../hooks/lib/agent-notes.ts';
@@ -412,5 +413,58 @@ describe('runHook — the thin main, end to end', () => {
     expect(logged[0]).toContain('tool_input');
     expect(logged[0]).not.toContain('node_modules');
     expect(logged[0]).not.toContain('sess-abc1');
+  });
+
+  it('a session that DECLARED withheld sends a wordless declaration, never its message', async () => {
+    const calls: Call[] = [];
+    const secret = 'A private sentence that must never leave this session.';
+    const code = await runHook(
+      'turn',
+      JSON.stringify({ ...STOP, last_assistant_message: secret }),
+      {
+        env: { ...ENV, CW_TURN_NOTES: 'withheld' },
+        fetch: fakeFetch(calls, () =>
+          Promise.resolve(new Response('{"unfiledAsk":"file it"}', { status: 202 })),
+        ),
+        now: () => NOW,
+      },
+    );
+    // No nudge: there were no words to judge.
+    expect(code).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('http://localhost:1/workspaces/w-board/agents/Cartographer/notes');
+    expect(sentBody(calls[0])).toEqual({
+      agent: 'Cartographer',
+      withheld: true,
+      sessionId: 'sess-abc1',
+      at: NOW,
+    });
+    expect(String(calls[0]?.init.body)).not.toContain('private sentence');
+    expect(String(calls[0]?.init.body)).not.toContain('/work/repo');
+  });
+  it('a withheld session posts no denial, and still needs a name and a board', async () => {
+    const env = { ...ENV, CW_TURN_NOTES: 'withheld' };
+    const denial = JSON.stringify({ ...DENIED, tool_name: 'Bash', tool_input: { command: 'ls' } });
+    const turn = JSON.stringify({ ...STOP, last_assistant_message: 'x' });
+    const cases: Array<[string, 'turn' | 'denial', Record<string, string>, string]> = [
+      ['denial', 'denial', env, denial],
+      ['no agent', 'turn', { ...env, CW_AGENT_NAME: '' }, turn],
+      ['no board', 'turn', { ...env, CW_WORKSPACE_ID: '' }, turn],
+      ['bad json', 'turn', env, '{not json'],
+    ];
+    for (const [label, kind, e, stdin] of cases) {
+      const calls: Call[] = [];
+      expect(await runHook(kind, stdin, { env: e, fetch: fakeFetch(calls), now: () => NOW })).toBe(
+        undefined,
+      );
+      expect(calls, label).toHaveLength(0);
+    }
+  });
+  it('reads only the one word as a declaration, so a typo keeps posting', () => {
+    expect(readsWithheld({ CW_TURN_NOTES: 'withheld' })).toBe(true);
+    expect(readsWithheld({ CW_TURN_NOTES: ' Withheld ' })).toBe(true);
+    for (const v of [undefined, '', 'off', 'withhold', '0']) {
+      expect(readsWithheld({ CW_TURN_NOTES: v }), String(v)).toBe(false);
+    }
   });
 });

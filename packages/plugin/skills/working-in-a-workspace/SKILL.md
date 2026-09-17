@@ -70,7 +70,7 @@ DO NOT use regular chat messages in Claude Code to share progress or ask for hel
 - **Triage tasks never appear in the queue.** A task an agent filed sits in triage until somebody vets it; so does a parked task. Read them with `list_tasks(status: "triage")`, and read the comments before picking one up.
 - **A UI change an agent filed waits for an answer before you build it.** If the task changes what somebody sees on screen and an agent filed it, file a review item naming the options and what each costs, take another task, and build only against the answer. A task a person filed already carries their answer.
 - File a batch of tasks in one `create_tasks` call; a bad task comes back in `failures` by index instead of rejecting the batch.
-- Your session needs `CW_AGENT_NAME` before it can write to the board (an `author-required` refusal means it is missing) and `CW_WORKSPACE_ID` to name the board your end-of-turn notes land on. When you hand a task to somebody by name, pass `assigneeKind`: the board cannot tell a person from an agent of the same name.
+- Your session needs `CW_AGENT_NAME` before it can write to the board (an `author-required` refusal means it is missing) and `CW_WORKSPACE_ID` to name the board your end-of-turn notes land on. If your turns must not be posted, launch with `CW_TURN_NOTES=withheld`. The hook then sends no words and tells the board you do not post, so its Home says "does not post" instead of showing nothing. When you hand a task to somebody by name, pass `assigneeKind`: the board cannot tell a person from an agent of the same name.
 
 ## Writing Clear Tasks
 
