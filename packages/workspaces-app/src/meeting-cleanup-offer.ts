@@ -223,7 +223,7 @@ export function mountMeetingCleanupOffer(opts: {
    * clears them. Leaving them is worse than saying nothing: they explain a
    * run that is no longer the one on screen.
    */
-  const say = (phase: 'asking' | 'working', headline: string): void => {
+  const say = (phase: 'asking' | 'working' | 'reported', headline: string): void => {
     root.dataset.phase = phase;
     title.textContent = headline;
     reasons.replaceChildren();
@@ -256,8 +256,7 @@ export function mountMeetingCleanupOffer(opts: {
     recovery: string;
     retry: boolean;
   }): void => {
-    say('asking', r.headline);
-    root.dataset.phase = 'reported';
+    say('reported', r.headline);
     reasons.replaceChildren(
       ...r.reasons.map((group) => {
         const row = document.createElement('li');
