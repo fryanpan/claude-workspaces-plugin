@@ -20,6 +20,7 @@ import {
   type RestartLedger,
   SUPERVISOR_PROBE_HEADER,
   SUPERVISOR_PROBE_PATH,
+  type WatchdogTick,
   createHealthWatchdog,
   fileRestartLedger,
   healthStep,
@@ -343,5 +344,133 @@ describe('the ledger file', () => {
     expect(fileRestartLedger(path).load()).toEqual([]);
     writeFileSync(path, '{ not json');
     expect(fileRestartLedger(path).load()).toEqual([]);
+  });
+});
+
+describe('healthStep: a boot in progress is not a dead server', () => {
+  it('holds the count for not-listening during the first-bind grace', () => {
+    let fails = 0;
+    for (let i = 0; i < 20; i++) {
+      const step = healthStep(fails, 'not-listening', 2, { bootingFirstBind: true });
+      expect(step.action).toBe('booting');
+      fails = step.fails;
+    }
+    expect(fails).toBe(0);
+  });
+
+  it('counts not-listening the moment the grace is over', () => {
+    const held = healthStep(0, 'not-listening', 2, { bootingFirstBind: true });
+    expect(held).toEqual({ fails: 0, action: 'booting' });
+    const first = healthStep(held.fails, 'not-listening', 2, { bootingFirstBind: false });
+    expect(first).toEqual({ fails: 1, action: 'wait' });
+    expect(healthStep(first.fails, 'not-listening', 2)).toEqual({ fails: 2, action: 'restart' });
+  });
+
+  it('never delays no-answer: a reply that did not come back still had a handshake', () => {
+    const first = healthStep(0, 'no-answer', 2, { bootingFirstBind: true });
+    expect(first).toEqual({ fails: 1, action: 'wait' });
+    expect(healthStep(first.fails, 'no-answer', 2, { bootingFirstBind: true })).toEqual({
+      fails: 2,
+      action: 'restart',
+    });
+  });
+});
+
+describe('the first bind gets a grace, and only the first', () => {
+  const GRACE = 240_000;
+  const TICK = 30_000;
+  const SLOW_BOOT: HealthVerdict[] = [
+    'not-listening',
+    'not-listening',
+    'not-listening',
+    'not-listening',
+    'not-listening',
+    'answering',
+  ];
+
+  /**
+   * Runs `ticks` probes a TICK apart, starting a TICK after the watchdog
+   * armed, and reports what happened. The clock is injected, so nothing here
+   * reads a wall clock or sleeps.
+   */
+  async function run(
+    verdicts: HealthVerdict[],
+    ticks: number,
+    firstBindGraceMs?: number,
+  ): Promise<{ outcomes: WatchdogTick[]; restarts: number[]; lines: string[] }> {
+    const restarts: number[] = [];
+    const lines: string[] = [];
+    const outcomes: WatchdogTick[] = [];
+    let clock = 0;
+    const dog = createHealthWatchdog({
+      probe: scripted(verdicts),
+      maxFails: 2,
+      ledger: memoryLedger(),
+      policy: POLICY,
+      now: () => clock,
+      log: (l) => lines.push(l),
+      restart: () => restarts.push(clock),
+      label: ':8873',
+      ...(firstBindGraceMs === undefined ? {} : { firstBindGraceMs }),
+    });
+    for (let i = 0; i < ticks; i++) {
+      clock += TICK;
+      outcomes.push(await dog.tick());
+    }
+    return { outcomes, restarts, lines };
+  }
+
+  it('does not restart a boot that is still hydrating and then binds', async () => {
+    const { outcomes, restarts } = await run(SLOW_BOOT, 8, GRACE);
+    expect(restarts).toEqual([]);
+    expect(outcomes.slice(0, 5)).toEqual(Array(5).fill('booting'));
+    expect(outcomes.slice(5)).toEqual(['ok', 'ok', 'ok']);
+  });
+
+  it('CONTROL: the same boot is killed when the grace is not there', async () => {
+    const { outcomes, restarts } = await run(SLOW_BOOT, 8, 0);
+    expect(restarts).toEqual([2 * TICK]);
+    expect(outcomes.slice(0, 2)).toEqual(['wait', 'restart']);
+  });
+
+  it('names the elapsed boot seconds on every tick it waits', async () => {
+    const { lines } = await run(['not-listening'], 3, GRACE);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('30s into boot');
+    expect(lines[1]).toContain('60s into boot');
+    expect(lines[2]).toContain('90s into boot');
+  });
+
+  it('restarts once the grace runs out, and says the first bind never arrived', async () => {
+    const { outcomes, restarts, lines } = await run(['not-listening'], 10, GRACE);
+    // Ticks at 30s..210s sit inside the grace; 240s is the first that counts.
+    expect(outcomes.slice(0, 7)).toEqual(Array(7).fill('booting'));
+    expect(outcomes.slice(7)).toEqual(['wait', 'restart', 'skipped']);
+    expect(restarts).toEqual([GRACE + TICK]);
+    expect(lines.at(-1)).toContain('never bound');
+  });
+
+  it('still catches a server that bound and then LOST its port, inside the window', async () => {
+    // The outage this watchdog was built for. `answering` flips the
+    // first-bind state, so the grace is spent while the clock still has most
+    // of it left — the flag gates on the bind, not on elapsed time.
+    const { outcomes, restarts } = await run(['answering', 'not-listening'], 4, GRACE);
+    expect(outcomes).toEqual(['ok', 'wait', 'restart', 'skipped']);
+    expect(restarts).toEqual([3 * TICK]);
+    expect(restarts[0]).toBeLessThan(GRACE);
+  });
+
+  it('never delays a wedge: no-answer restarts at maxFails inside the grace', async () => {
+    const { outcomes, restarts } = await run(['no-answer'], 3, GRACE);
+    expect(outcomes).toEqual(['wait', 'restart', 'skipped']);
+    expect(restarts).toEqual([2 * TICK]);
+    expect(restarts[0]).toBeLessThan(GRACE);
+  });
+
+  it('applies the production grace when the caller names none', async () => {
+    // What prod runs with. A default of 0 would restart at the second tick.
+    const { outcomes, restarts } = await run(['not-listening'], 5);
+    expect(restarts).toEqual([]);
+    expect(outcomes).toEqual(Array(5).fill('booting'));
   });
 });
