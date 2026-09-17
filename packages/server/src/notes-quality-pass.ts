@@ -93,7 +93,18 @@ export function voicesOf(
 export interface NotesQualityPassDeps {
   docStore: () => NotesDocStore;
   /**
-   * Where a reading that crossed a bar goes. Absent, nothing is filed.
+   * Where EVERY reading goes — the ones that crossed a bar and the ones that
+   * came out clean alike. Absent, nothing is filed.
+   *
+   * IT TAKES THE CLEAN READINGS TOO, and that is not tidiness. A meeting's
+   * legs each produce their own reading, so a meeting whose first leg was
+   * unreadable and whose later legs read fine used to hand the sink one
+   * flagged reading and then nothing at all: the leg where a flag DISAPPEARS
+   * reached no one, and the item filed at the bad leg stood on a reader's
+   * queue claiming something the meeting had since disproved. The sink is
+   * the only thing that knows an item exists, so it is the only thing that
+   * can take one back — which it cannot do if it is never told the flag
+   * cleared. What it does with a clean reading is `notes-quality-filing.ts`.
    *
    * A SINK RATHER THAN A BOARD, because the pass knows what the notes came
    * out like and knows nothing about whether the meeting is over. It runs at
@@ -191,17 +202,22 @@ export function runNotesQualityPass(
   }
 
   const workspaceId = deps.boardOf?.(docId);
-  let filing: NotesQualityFiling = { filed: false, reason: 'healthy' };
-  if (report.flags.length > 0) {
-    filing = deps.file
-      ? deps.file({
-          workspaceId,
-          docId,
-          ...(meeting.docTitle !== undefined ? { docTitle: meeting.docTitle } : {}),
-          report,
-        })
-      : { filed: false, reason: 'no-board' };
-  }
+  // EVERY READING, FLAGGED OR NOT. The sink decides what a clean one means —
+  // for a meeting with no item it means nothing, and for one with a standing
+  // item it is the only news that can take it back. A pass with no sink keeps
+  // the answer it always gave, so a caller reading `filing` for a meeting
+  // nothing could have been filed for still reads `healthy` rather than a
+  // board complaint about a meeting that went fine.
+  const filing: NotesQualityFiling = deps.file
+    ? deps.file({
+        workspaceId,
+        docId,
+        ...(meeting.docTitle !== undefined ? { docTitle: meeting.docTitle } : {}),
+        report,
+      })
+    : report.flags.length > 0
+      ? { filed: false, reason: 'no-board' }
+      : { filed: false, reason: 'healthy' };
 
   return { report, filing, stored, line: passLine(report, filing, workspaceId) };
 }

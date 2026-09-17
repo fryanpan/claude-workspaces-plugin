@@ -507,6 +507,23 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
                   color: hashToColor(actor.name),
                 },
               }),
+            // And a meeting that ends past no bar takes its item back, so a
+            // reading one recording leg produced cannot stand as a claim
+            // about a meeting that went on to read clean. The asker's own
+            // exit on both surfaces — soft, reversible, and the words a
+            // person replied with are untouched.
+            withdrawReviewItem: (taskId, itemId, o) =>
+              taskStore.withdrawReviewItem(taskId, itemId, o),
+            withdrawOnDoc: (docId, threadId, commentId, reason, actor) =>
+              docStore.withdrawCommentReview(docId, threadId, commentId, {
+                actor: {
+                  id: actor.id,
+                  name: actor.name,
+                  kind: 'known',
+                  color: hashToColor(actor.name),
+                },
+                reason,
+              }),
           }),
           // Where "pull up last week's notes" looks. Board docs and when
           // each last carried a meeting; the meeting's own doc is dropped

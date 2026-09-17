@@ -62,20 +62,50 @@ function pasteRepeats(harness: NotesTickHarness, line: string): void {
   );
 }
 
-/** A board that remembers every filing and every revision it was asked for. */
+/**
+ * Take the pasted repeats back out of the doc, as a person tidying the notes
+ * between two recordings does.
+ *
+ * It is what makes a LATER leg of one meeting read clean after an earlier one
+ * flagged — the sequence this file's withdrawal cases are about, and the one
+ * a filer that only ever hears about flagged readings cannot see.
+ */
+function tidyRepeats(ydoc: Y.Doc, line: string): void {
+  const text = line.replace(/^- /, '');
+  let kept = false;
+  const gone: string[] = [];
+  for (const entry of prose.readOutline(ydoc)) {
+    if (entry.text !== text) continue;
+    if (kept) gone.push(entry.id);
+    else kept = true;
+  }
+  prose.applyBlockEdits(
+    ydoc,
+    gone.map((blockId) => ({ op: 'delete_block', blockId })),
+    {
+      author: 'person-a',
+      suggestionAuthor: { id: 'person-a', name: 'Harbour clerk', color: '#777777' },
+    },
+  );
+}
+
+/** A board that remembers every filing, revision and withdrawal it was asked for. */
 interface Recorder extends NotesQualityBoard {
   readonly filed: string[];
   readonly revised: Array<{ itemId: string; headline: string }>;
+  readonly withdrawn: string[];
 }
 
 function recordingBoard(): Recorder {
   const filed: string[] = [];
   const revised: Array<{ itemId: string; headline: string }> = [];
+  const withdrawn: string[] = [];
   const row = { id: 't-season', status: 'todo' } as Task;
   let n = 0;
   return {
     filed,
     revised,
+    withdrawn,
     backlinksFor: (_ref: Ref) => [row],
     addReviewItem: (taskId) => {
       n += 1;
@@ -84,6 +114,10 @@ function recordingBoard(): Recorder {
     },
     reviseReviewItem: (_taskId, reviewItemId, patch) => {
       revised.push({ itemId: reviewItemId, headline: String(patch.headline ?? '') });
+      return { ok: true as const };
+    },
+    withdrawReviewItem: (_taskId, reviewItemId) => {
+      withdrawn.push(reviewItemId);
       return { ok: true as const };
     },
   };
@@ -147,14 +181,21 @@ function meeting(filer: NotesQualityFiler, board: NotesQualityBoard) {
     notes?: string;
     /** Extra markdown a person left in the doc before the leg stopped. */
     paste?: string;
+    /**
+     * A leg whose notes come out past no bar: the repeats an earlier leg left
+     * are tidied away before it starts, and it leaves none of its own. This
+     * is the reading that used to reach nothing.
+     */
+    clean?: boolean;
     resumable: boolean;
   }): Promise<NotesTickHarness> {
     const harness = createNotesTickHarness({
       ...shared,
       compose: (input, tick) => (tick === 1 ? addNotes(input, opts.notes ?? NOTE) : []),
     });
+    if (opts.clean) tidyRepeats(harness.ydoc, NOTE);
     await harness.speak(opts.say);
-    pasteRepeats(harness, NOTE);
+    if (!opts.clean) pasteRepeats(harness, NOTE);
     if (opts.paste !== undefined) {
       prose.applyBlockEdits(harness.ydoc, [{ op: 'insert_at_end', markdown: opts.paste }], {
         author: 'person-a',
@@ -276,6 +317,82 @@ describe('a quality item waits for the meeting to be over', () => {
     expect(board.revised).toHaveLength(1);
     expect(board.revised[0]?.itemId).toBe('ri-1');
     expect(board.revised[0]?.headline).toContain('came out badly');
+  });
+});
+
+describe('a quality item is taken back when the meeting ends clean', () => {
+  /** A filer over a recording board, with the grace on a hand clock. */
+  const filerOver = (
+    board: NotesQualityBoard,
+    schedule: HandScheduler,
+  ): ReturnType<typeof createNotesQualityFiler> =>
+    createNotesQualityFiler({ board: () => board, actor: ACTOR, schedule, say: () => {} });
+
+  it('leaves no standing item when the first leg flags and the last reads clean', async () => {
+    // The whole lifecycle, legs in order: a meeting that went wrong, the
+    // notes tidied, and a second recording that reads them past no bar. The
+    // item filed at the first leg must not still be on the queue claiming
+    // otherwise.
+    const board = recordingBoard();
+    const filer = filerOver(board, new HandScheduler());
+    const leg = meeting(filer, board);
+
+    await leg({ say: 'The winter crew stays on.', resumable: false });
+    expect(board.filed).toEqual(['t-season']);
+
+    const last = await leg({
+      say: 'We tidied those repeats out before we carried on.',
+      clean: true,
+      resumable: false,
+    });
+    // The premise of the case, read off the real pass rather than assumed:
+    // this leg really did come out past no bar.
+    expect(last.summary()).not.toBeNull();
+
+    expect(board.withdrawn).toEqual(['ri-1']);
+    expect(board.filed).toEqual(['t-season']);
+    expect(board.revised).toEqual([]);
+  });
+
+  it('THE CONTROL: a meeting whose last leg still flags keeps its item', async () => {
+    // The same two legs the other way round. This is what fails if a
+    // withdrawal is taken on any clean reading rather than on the meeting's
+    // last one.
+    const board = recordingBoard();
+    const filer = filerOver(board, new HandScheduler());
+    const leg = meeting(filer, board);
+
+    await leg({ say: 'We tidied those repeats out first.', clean: true, resumable: false });
+    expect(board.filed).toEqual([]);
+    expect(board.withdrawn).toEqual([]);
+
+    await leg({ say: 'And then it went wrong again.', resumable: false });
+
+    expect(board.filed).toEqual(['t-season']);
+    expect(board.withdrawn).toEqual([]);
+  });
+
+  it('withdraws nothing while the grace is still running', async () => {
+    // A clean leg that DROPPED is not the end of the meeting. Withdrawing
+    // there would take the item off the queue and put it straight back when
+    // the resumed leg goes wrong again — asserted on the board's calls,
+    // because that sequence and never-withdrawing end in the same state.
+    const board = recordingBoard();
+    const schedule = new HandScheduler();
+    const filer = filerOver(board, schedule);
+    const leg = meeting(filer, board);
+
+    await leg({ say: 'The winter crew stays on.', resumable: false });
+    expect(board.filed).toEqual(['t-season']);
+
+    await leg({ say: 'That reads better now.', clean: true, resumable: true });
+    expect(board.withdrawn).toEqual([]);
+    expect(schedule.armed).toBe(1);
+
+    await leg({ say: 'One more thing, and it repeated itself.', resumable: false });
+
+    expect(board.withdrawn).toEqual([]);
+    expect(board.filed).toEqual(['t-season']);
   });
 });
 

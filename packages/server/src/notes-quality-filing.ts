@@ -37,6 +37,33 @@
  * outcome this module must never produce, so a refusal is logged and the
  * standing item is left as it is.
  *
+ * AN ITEM WHOSE CLAIM STOPPED BEING TRUE IS TAKEN BACK, which is why EVERY
+ * reading reaches this module rather than only the flagged ones. A reading
+ * that crossed no bar used to stop at the pass, so the leg where a flag
+ * DISAPPEARED reached nothing and the item filed at the bad leg went on
+ * claiming a meeting had come out badly after the meeting had read clean.
+ * What this module does with an unflagged reading, in full:
+ *
+ *  - The meeting has no item: nothing. A clean reading of a meeting nobody
+ *    was told about is not news, and it files nothing, says nothing and
+ *    leaves no memory behind.
+ *  - The meeting has an item: the item is WITHDRAWN — the asker's own exit,
+ *    the same one the stall escalation takes, which retires the ask without
+ *    destroying it or touching the words a person may have replied with.
+ *    The memory of where it went is dropped with it, so a later leg that
+ *    goes wrong again files a fresh item rather than revising a withdrawn
+ *    one.
+ *  - A refused withdrawal is logged and the item is LEFT STANDING. An item a
+ *    person has already answered refuses, and so it should: withdrawing it
+ *    would retract their answer.
+ *
+ * AND THE WITHDRAWAL IS HELD EXACTLY AS THE FILING IS. It is decided at
+ * commit, on the last reading of the meeting, never at the moment a flag
+ * clears — a clean leg can be followed by another bad one, and withdrawing
+ * mid-grace would take the item off a reader's queue and put it back. So a
+ * meeting that ends clean withdraws once, and a meeting that ends badly
+ * never withdraws at all.
+ *
  * AND A REVISION THAT CHANGES NOTHING IS NOT MADE AT ALL. Revising a review
  * item re-judges it, which puts it back in front of its reader — so a flag
  * that cannot clear would walk a person back to the same unanswerable
@@ -81,8 +108,20 @@ type Filed =
   | { kind: 'row'; taskId: string; itemId: string }
   | { kind: 'doc'; docId: string; threadId: string; commentId: string };
 
+/**
+ * The words on a withdrawal, which a reader sees beside the retired ask.
+ *
+ * It says what changed rather than that the server changed its mind: the item
+ * was true of the leg it was filed from, and the meeting read clean by the
+ * end. A reader who remembers seeing the ask needs that sentence to know
+ * nothing was lost.
+ */
+export const WITHDRAWN_BECAUSE_CLEAN =
+  'the notes read clean by the end of this meeting — the reading this item was filed from ' +
+  'was one recording leg, and a later one found nothing past a bar';
+
 interface Held {
-  /** The newest reading of this meeting that crossed a bar. */
+  /** The newest reading of this meeting, whether or not it crossed a bar. */
   input?: NotesQualityFileInput;
   /** Where this meeting's one item went, once it has gone anywhere. */
   filed?: Filed;
@@ -121,9 +160,11 @@ export interface NotesQualityFilerDeps {
  */
 export interface NotesQualityFiler {
   /**
-   * A reading that crossed a bar. Held rather than filed — the answer is
-   * always `held`, and the item lands when {@link legEnded} says the meeting
-   * is over.
+   * A reading of this meeting — one that crossed a bar, or one that came out
+   * clean. Held rather than acted on: the answer is always `held`, and what
+   * the reading means is decided when {@link legEnded} says the meeting is
+   * over. A flagged one files or revises the meeting's one item; a clean one
+   * withdraws it, or means nothing if there is none.
    */
   file(ids: MeetingIds, input: NotesQualityFileInput): NotesQualityFiling;
   /**
@@ -265,7 +306,58 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     return 'revised';
   };
 
-  /** The meeting is over: file the reading it left, or revise the item it has. */
+  /**
+   * Take the meeting's item back, because its last reading crossed no bar.
+   *
+   * ONLY ON SUCCESS IS THE MEMORY DROPPED. A refusal leaves `filed` where it
+   * is, so the item is still addressable: a later leg that goes wrong revises
+   * the ask that is still standing rather than raising a second one beside
+   * it, which is the outcome this whole module exists to prevent.
+   */
+  const withdraw = (ids: MeetingIds, filed: Filed, mem: Held): 'withdrawn' | 'failed' => {
+    const board = deps.board?.();
+    const res = !board
+      ? undefined
+      : filed.kind === 'row'
+        ? board.withdrawReviewItem?.(filed.taskId, filed.itemId, {
+            actor: deps.actor,
+            reason: WITHDRAWN_BECAUSE_CLEAN,
+          })
+        : board.withdrawOnDoc?.(
+            filed.docId,
+            filed.threadId,
+            filed.commentId,
+            WITHDRAWN_BECAUSE_CLEAN,
+            deps.actor,
+          );
+    if (res === undefined) {
+      say(
+        `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: the quality item cannot be ` +
+          'withdrawn on this board — the standing item keeps a reading the meeting outgrew',
+      );
+      return 'failed';
+    }
+    if (!res.ok) {
+      // An item somebody already answered refuses, and must: withdrawing it
+      // would retract their answer.
+      say(
+        `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item withdraw refused ` +
+          `(${res.error}${res.message !== undefined ? `: ${res.message}` : ''})`,
+      );
+      return 'failed';
+    }
+    mem.filed = undefined;
+    mem.verdict = undefined;
+    return 'withdrawn';
+  };
+
+  /**
+   * The meeting is over: act on the last reading it left.
+   *
+   * A flagged reading files the meeting's item or revises it. A clean one
+   * withdraws the item the meeting has, and does nothing at all for a meeting
+   * that never had one.
+   */
   const commit = (ids: MeetingIds): void => {
     const key = keyOf(ids);
     const h = state.get(key);
@@ -279,6 +371,15 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     // for one phrase.
     const line = (where: string): void =>
       say(`[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item ${where}`);
+    if (input.report.flags.length === 0) {
+      // The meeting's last word is that its notes came out fine. There is
+      // nothing to file for that, and exactly one thing to undo.
+      if (!h.filed) return;
+      if (withdraw(ids, h.filed, h) === 'withdrawn') {
+        line('withdrawn — the meeting ended with its notes past no bar');
+      }
+      return;
+    }
     if (h.filed) {
       const outcome = revise(ids, h.filed, input, h);
       if (outcome === 'unchanged') {
