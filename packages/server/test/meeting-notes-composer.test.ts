@@ -190,6 +190,50 @@ describe('createHaikuNotesComposer', () => {
     });
   });
 
+  it('reports the shape of the prefix it offered the cache, tick over tick', async () => {
+    // The two numbers that tell a miss caused by a moved prefix from one
+    // caused by the model's minimum. The same composer is asked twice with
+    // the same doc and different speech, which is the ordinary tick: the head
+    // repeats whole, and only the block carrying the speech moved.
+    const { impl } = stubFetch({ content: [{ text: ONE_EDIT }], stop_reason: 'end_turn' });
+    const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
+    const doc = withBullets(40);
+    const seen: NotesComposeMeasure[] = [];
+    await composer?.compose({ ...doc, measure: (m) => seen.push(m) });
+    const first = seen.find((m) => m.cacheBlocks !== undefined);
+    // Nothing to have repeated on a meeting's first tick — null, not zero.
+    expect(first?.cacheStableBlocks).toBeNull();
+    expect(first?.cacheBlocks).toBeGreaterThan(1);
+    expect(first?.cacheFirstBlockChars).toBeGreaterThan(0);
+
+    seen.length = 0;
+    await composer?.compose({
+      ...doc,
+      tick: { tick: 3, reason: 'cadence', turns: [{ turn: 5, text: 'And ship it Thursday.' }] },
+      measure: (m) => seen.push(m),
+    });
+    const second = seen.find((m) => m.cacheBlocks !== undefined);
+    expect(second?.cacheStableBlocks).toBe(second?.cacheBlocks ?? -1);
+  });
+
+  it('says the prefix MOVED when a row inside the cached head changed', async () => {
+    // The control on the case above: without it, a watcher that always
+    // answered "the whole head repeated" would pass.
+    const { impl } = stubFetch({ content: [{ text: ONE_EDIT }], stop_reason: 'end_turn' });
+    const composer = createHaikuNotesComposer({ apiKey: 'k-test', fetchImpl: impl });
+    const doc = withBullets(40);
+    await composer?.compose(doc);
+    const edited = {
+      ...doc,
+      outline: doc.outline.map((e, i) =>
+        i === 1 ? { ...e, text: 'the note-taker revised this one' } : e,
+      ),
+    };
+    const seen: NotesComposeMeasure[] = [];
+    await composer?.compose({ ...edited, measure: (m) => seen.push(m) });
+    expect(seen.find((m) => m.cacheBlocks !== undefined)?.cacheStableBlocks).toBe(0);
+  });
+
   it('reports nothing rather than zeros when the reply carries no usage', async () => {
     // The control. Zeros here would read as "the cache returned nothing",
     // which is a claim about the API rather than about a missing field.

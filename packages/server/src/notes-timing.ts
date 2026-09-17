@@ -124,6 +124,24 @@ export interface NotesTickTiming {
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
   /**
+   * WHY THIS TICK READ WHAT IT READ — the shape of the prefix it offered the
+   * cache, which the four token counts above cannot say.
+   *
+   * `cacheStableBlocks` is the one to read first: 0 says the first cached
+   * block's own text moved since the last tick, so there was nothing to read
+   * whatever the tokens say; a number above 0 says the head repeated and a
+   * zero read is the model's minimum cacheable prefix (or the entry's life),
+   * not the prompt. `cacheFirstBlockChars` is what that minimum is judged
+   * against — the first breakpoint has to clear it on its own.
+   *
+   * Null on a tick that reached no model, and on a composer that sends no
+   * breakpoints. `cacheStableBlocks` is ALSO null on a meeting's first tick,
+   * where there is no previous prompt to have repeated.
+   */
+  cacheBlocks: number | null;
+  cacheFirstBlockChars: number | null;
+  cacheStableBlocks: number | null;
+  /**
    * EVERY MODEL CALL THIS TICK MADE, compose and capture alike, each with the
    * model that billed it.
    *
@@ -294,6 +312,14 @@ export interface NotesComposeMeasure {
   /** The slot this composer resolved. Absent on a composer that spends
    *  nothing — the stub the replay harness uses. */
   keySlot?: ClaudeKeySlot;
+  /**
+   * The shape of the cacheable prefix this call sent — see
+   * `notes-prompt-cache-shape.ts` for what each number separates. Absent on a
+   * composer that sends no cache breakpoints, which is every stub.
+   */
+  cacheBlocks?: number;
+  cacheFirstBlockChars?: number;
+  cacheStableBlocks?: number | null;
 }
 
 /** Where a composer reports what its call cost. Never given the words. */
