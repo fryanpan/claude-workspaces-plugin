@@ -974,13 +974,17 @@ request to a route that already exists, a verdict, and a restart ledger that
 outlives the supervisor — so the server imports only its probe-marker
 constant, and only so `sentry.ts` can leave the probe out of tracing.
 
-`event-loop.ts` joins Ops and moves no boundary. It is a helper, importing
-nothing from the subsystems that use it: `timeSlice`, the budget a long
-synchronous pass uses to hand the single JS thread back, so that a health probe
-queued behind it is answered while it still runs. `doc-edit-ops.ts` is its
-first caller. The reason it exists is that on 2026-09-16 a pass that could not
-yield held prod for 114,650 ms, and the supervisor's answer to an unanswered
-probe is to restart the process.
+`event-loop.ts` joins Ops and moves no boundary. It is an observer plus a
+helper, importing nothing from the subsystems it watches: a lag monitor that
+reports a turn which held the single JS thread past a threshold and names the
+requests in flight at the time, and `timeSlice`, the budget a long pass uses to
+hand the loop back. `server.ts` registers each request at the front door and
+arms the monitor beside the other running-board timers; `doc-edit-ops.ts` is
+its first `timeSlice` caller. The reason it exists is that the 2026-09-16
+outages were legible only as a 404 that took 56 seconds — the block itself was
+recorded nowhere, and whether a stall was a synchronous pass or the OS
+descheduling the process could not be told apart. A stall with nothing in
+flight is that second thing, and the line says so.
 
 `server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
 start of the process in `server-starts.json` beside the deploy log: once at

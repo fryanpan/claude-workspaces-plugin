@@ -38,6 +38,7 @@ import { DispatchRegistry } from './dispatch-registry.ts';
 import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
+import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
 import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { createHomePane } from './home-pane.ts';
@@ -2313,6 +2314,18 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const slowLoadAlarm = new SlowLoadAlarm((message, extra) =>
     captureServerError(new Error(message), extra),
   );
+  // The loop watchdog and the register it reads.
+  //
+  // `SlowLoadAlarm` above judges how long a BOARD took to load, as the browser
+  // reports it; this judges whether the server was running anything at all.
+  // The 16 September episodes were invisible to the first and would have been
+  // one line each to the second, because the requests that came back late were
+  // 401s and 404s — nothing about them is slow except the queue they sat in.
+  const inflight = new InflightRegistry();
+  const loopLag = new LoopLagMonitor({
+    thresholdMs: opts.loopBlockThresholdMs ?? undefined,
+    inflight: () => inflight.snapshot(),
+  });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     chatAudit,
     shareLinks,
@@ -2362,7 +2375,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    *  scope for exactly as long as the request is (event-origin.ts). */
   function handleWithOrigin(req: Request): Promise<Response | undefined> {
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
-    return withEventOrigin(origin, () => handleRequest(req));
+    // Registered HERE rather than inside `handleRequest`, which has several
+    // early returns and a hoisted inner `route` declaration that a wrapping
+    // try/finally would move out of function scope. This wrapper is the one
+    // place every request passes through exactly once — the route table and
+    // the fallback both call it — so one `finally` cannot leak an entry, not
+    // even for an upgrade that answers `undefined`.
+    const settled = inflight.enter(req);
+    return withEventOrigin(origin, () => handleRequest(req)).finally(settled);
   }
 
   async function handleRequest(req: Request): Promise<Response | undefined> {
@@ -3292,6 +3312,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   readyNudger.start();
   stallNudger.start();
   taskScheduler.start(opts.schedulerTickMs ?? undefined);
+
+  // The loop watchdog. Armed with every other running-board timer and for the
+  // same reason: a staging server wedges exactly like prod does, and the whole
+  // value of this line is being in the log the incident is read from. `start`
+  // unrefs, so it cannot hold a process open.
+  loopLag.start();
 
   // Done-when lines already marked for the owner before their review items
   // existed get one each. Idempotent by construction — a line with an open

@@ -726,4 +726,12 @@ export interface ServerOptions {
    * different bugs, and the line has to tell them apart. Tests set 0.
    */
   slowRequestMs?: number;
+  /**
+   * A turn that blocked the event loop for at least this long leaves a
+   * `[loop] blocked <n>ms` line naming what was in flight. Default 1,000 —
+   * see `event-loop.ts` for why that floor, and for the outage that is the
+   * reason this is measured at all. Tests set it low so a block they build
+   * deliberately is reported without the suite waiting a real second.
+   */
+  loopBlockThresholdMs?: number;
 }
