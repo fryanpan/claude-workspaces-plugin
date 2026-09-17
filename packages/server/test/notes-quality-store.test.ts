@@ -11,15 +11,17 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { buildNotesQualityReport } from '../src/notes-quality-report.ts';
 import {
   type NotesQualityRecord,
+  QUALITY_SERIES_LIMIT,
   notesQualityPath,
   notesQualityRecord,
   readNotesQuality,
+  readNotesQualitySeries,
   rollupNotesQuality,
   writeNotesQuality,
 } from '../src/notes-quality-store.ts';
@@ -33,6 +35,12 @@ const freshDir = (): string => {
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** A file written by hand at the meeting's own path. */
+const putFile = (path: string, text: string): void => {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, text);
+};
 
 const record = (over: Partial<NotesQualityRecord> = {}): NotesQualityRecord => ({
   docId: 'd-harbour',
@@ -69,6 +77,54 @@ describe('one meeting’s record', () => {
     writeNotesQuality(dir, record());
     Bun.write(notesQualityPath(dir, 'd-harbour', 'm-d-harbour-1'), 'not json at all');
     expect(readNotesQuality(dir, 'd-harbour', 'm-d-harbour-1')).toBeUndefined();
+  });
+
+  it('keeps every reading, not only the last one', () => {
+    // A meeting is read once per recording LEG. On 2026-09-15 one meeting was
+    // read seven times and the file held the seventh, so the six readings
+    // that would have shown the verdict never changing had to be recalled
+    // from somebody's memory of the log.
+    const dir = freshDir();
+    for (const at of [1_000, 2_000, 3_000]) writeNotesQuality(dir, record({ at, ideas: at / 100 }));
+    const series = readNotesQualitySeries(dir, 'd-harbour', 'm-d-harbour-1');
+    expect(series.map((r) => r.at)).toEqual([1_000, 2_000, 3_000]);
+    expect(series.map((r) => r.ideas)).toEqual([10, 20, 30]);
+  });
+
+  it('answers the NEWEST reading, so every existing reader is unchanged', () => {
+    const dir = freshDir();
+    writeNotesQuality(dir, record({ at: 1_000, ideas: 10 }));
+    writeNotesQuality(dir, record({ at: 2_000, ideas: 20 }));
+    expect(readNotesQuality(dir, 'd-harbour', 'm-d-harbour-1')?.ideas).toBe(20);
+  });
+
+  it('drops the oldest readings rather than growing without bound', () => {
+    const dir = freshDir();
+    for (let i = 0; i < QUALITY_SERIES_LIMIT + 5; i++) writeNotesQuality(dir, record({ at: i }));
+    const series = readNotesQualitySeries(dir, 'd-harbour', 'm-d-harbour-1');
+    expect(series).toHaveLength(QUALITY_SERIES_LIMIT);
+    expect(series[0]?.at).toBe(5);
+    expect(series.at(-1)?.at).toBe(QUALITY_SERIES_LIMIT + 4);
+  });
+
+  it('reads a file written before the series existed', () => {
+    // One JSON object and a newline is what the old writer left, and it is
+    // one valid line of what the new one writes.
+    const dir = freshDir();
+    const old = record({ at: 7_000 });
+    putFile(notesQualityPath(dir, old.docId, old.meetingId), `${JSON.stringify(old)}\n`);
+    expect(readNotesQualitySeries(dir, old.docId, old.meetingId)).toEqual([old]);
+    expect(readNotesQuality(dir, old.docId, old.meetingId)).toEqual(old);
+  });
+
+  it('keeps the readings it can parse when one line is corrupt', () => {
+    const dir = freshDir();
+    const good = record({ at: 8_000 });
+    putFile(
+      notesQualityPath(dir, good.docId, good.meetingId),
+      `not json at all\n${JSON.stringify(good)}\n`,
+    );
+    expect(readNotesQualitySeries(dir, good.docId, good.meetingId)).toEqual([good]);
   });
 
   it('carries no words from the notes it is about', () => {
@@ -127,6 +183,45 @@ describe('the week the health check reads', () => {
     const rollup = rollupNotesQuality(dir, { now: 10_000, windowMs: 5_000 });
     expect(rollup.totals.duplicateBulletLines).toBe(9);
     expect(rollup.totals.ideas).toBe(24);
+  });
+
+  it('says how many meetings could say nothing about coverage', () => {
+    const dir = freshDir();
+    writeNotesQuality(dir, record({ meetingId: 'm-judged', at: 9_000 }));
+    writeNotesQuality(
+      dir,
+      record({
+        meetingId: 'm-unread',
+        at: 9_100,
+        coverageSource: 'unreadable',
+        uncoveredIdeas: null,
+        uncoveredShare: null,
+      }),
+    );
+    const rollup = rollupNotesQuality(dir, { now: 10_000, windowMs: 5_000 });
+    expect(rollup.coverageUnknown).toBe(1);
+  });
+
+  it('leaves a meeting whose notes were unreadable out of the coverage totals', () => {
+    // BOTH halves, not just the uncovered one: counting its ideas while its
+    // uncovered count is unknown moves the window's ratio by a meeting
+    // nothing is known about.
+    const dir = freshDir();
+    writeNotesQuality(dir, record({ meetingId: 'm-judged', at: 9_000 }));
+    writeNotesQuality(
+      dir,
+      record({
+        meetingId: 'm-unread',
+        at: 9_100,
+        ideas: 262,
+        coverageSource: 'unreadable',
+        uncoveredIdeas: null,
+        uncoveredShare: null,
+      }),
+    );
+    const rollup = rollupNotesQuality(dir, { now: 10_000, windowMs: 5_000 });
+    expect(rollup.totals.ideas).toBe(12);
+    expect(rollup.totals.uncoveredIdeas).toBe(2);
   });
 
   it('is an empty week rather than an error when nothing has met', () => {

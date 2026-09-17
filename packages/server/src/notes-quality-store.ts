@@ -21,6 +21,17 @@
  * everything else here is keyed by, an append-only index would have to be
  * rewritten to correct a reading, and a corrupt record costs one meeting's
  * number rather than the day's.
+ *
+ * ONE FILE, EVERY READING. A meeting is read at the end of every recording
+ * LEG, so a meeting whose socket dropped six times is read seven times — and
+ * the file used to hold the last of those and nothing else. When one
+ * meeting's item was filed seven times with a climbing denominator
+ * (2026-09-15), six of the seven readings had to be reconstructed from
+ * somebody's memory of the log, because the only durable copy had been
+ * overwritten. The file is now JSON LINES, oldest first, capped at
+ * {@link QUALITY_SERIES_LIMIT}. A file written before this is one line, so it
+ * reads back unchanged; {@link readNotesQuality} still answers the newest
+ * record, which is what every existing reader wants.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -40,10 +51,24 @@ export interface NotesQualityRecord {
   longRuns: number;
   unknownVoices: number;
   ideas: number;
-  uncoveredIdeas: number;
+  /** `null` when the notes could not be read: the count is unknown, and both
+   *  0 and `ideas` are lies about it. */
+  uncoveredIdeas: number | null;
   /** `null` when the meeting held too few ideas for a share to mean
-   *  anything, exactly as the report says it. */
+   *  anything, and `null` when the notes could not be read at all.
+   *  `coverageSource` says which — see {@link NotesQualityRecord.coverageSource}. */
   uncoveredShare: number | null;
+  /**
+   * Whether the coverage numbers on this row are about the notes.
+   *
+   * `unreadable` means the reading failed, and then `uncoveredIdeas` and
+   * `uncoveredShare` are both `null` rather than `ideas` and `1`. A row
+   * written before this field existed is a reading from the era when a failed
+   * reading was indistinguishable from a covered-nothing one, so it reads
+   * back as `notes` and the ambiguity stays visible in the date, not hidden
+   * in a default that claims more than the row knows.
+   */
+  coverageSource?: 'notes' | 'unreadable';
   /** `null` when no per-tick timing record was found. */
   lateShare: number | null;
   lateMedianMs: number | null;
@@ -73,9 +98,10 @@ export function notesQualityRecord(
     duplicateHeadings: report.duplicateHeadings.length,
     longRuns: report.longRuns.length,
     unknownVoices: report.unknownVoices.length,
-    ideas: report.ideas,
-    uncoveredIdeas: report.uncoveredIdeas,
-    uncoveredShare: report.uncoveredShare,
+    ideas: report.coverage.ideas,
+    uncoveredIdeas: report.coverage.uncoveredIdeas,
+    uncoveredShare: report.coverage.uncoveredShare,
+    coverageSource: report.coverage.source,
     lateShare: report.lateness.lateShare,
     lateMedianMs: report.lateness.medianMs,
     flags: report.flags.map((f) => f.kind),
@@ -83,38 +109,92 @@ export function notesQualityRecord(
 }
 
 /**
- * Write one meeting's reading. Answers whether it landed rather than
- * throwing: this runs inside a meeting's stop, and a full disk must not be
- * what costs the doc its last notes flush.
+ * How many readings one meeting keeps. A meeting is read once per recording
+ * leg, and a socket that flaps can end a lot of them; past this the oldest go,
+ * because the question the series answers — did this verdict change, or did
+ * one broken number repeat — is answerable from the recent ones.
+ */
+export const QUALITY_SERIES_LIMIT = 50;
+
+/** The records in one meeting's file, oldest first. Lines that will not parse
+ *  are skipped rather than costing the meeting its whole series. */
+function parseSeries(text: string): NotesQualityRecord[] {
+  const out: NotesQualityRecord[] = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (typeof parsed !== 'object' || parsed === null) continue;
+      const record = parsed as NotesQualityRecord;
+      if (typeof record.meetingId !== 'string' || typeof record.at !== 'number') continue;
+      out.push(record);
+    } catch {
+      // One unreadable line is one reading lost, not the meeting's history.
+    }
+  }
+  return out;
+}
+
+/**
+ * Add one meeting's reading to its series. Answers whether it landed rather
+ * than throwing: this runs inside a meeting's stop, and a full disk must not
+ * be what costs the doc its last notes flush.
+ *
+ * Read-modify-write rather than an append, because the cap has to be applied
+ * somewhere and these files are one small line per recording leg. A file that
+ * cannot be read is treated as no history — this reading is still written,
+ * which loses the past rather than the present.
  */
 export function writeNotesQuality(dataDir: string, record: NotesQualityRecord): boolean {
   const path = notesQualityPath(dataDir, record.docId, record.meetingId);
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(record)}\n`);
+    let series: NotesQualityRecord[] = [];
+    try {
+      if (existsSync(path)) series = parseSeries(readFileSync(path, 'utf8'));
+    } catch {
+      series = [];
+    }
+    series.push(record);
+    const kept = series.slice(-QUALITY_SERIES_LIMIT);
+    writeFileSync(path, `${kept.map((r) => JSON.stringify(r)).join('\n')}\n`);
     return true;
   } catch {
     return false;
   }
 }
 
-/** One meeting's reading, or `undefined` for a meeting that has none. */
+/**
+ * Every reading this meeting has left, oldest first. Empty for a meeting with
+ * none.
+ *
+ * This is the read that answers "was the verdict the same every time" — the
+ * question nobody could answer on 2026-09-15 because the file held only the
+ * last of seven readings.
+ */
+export function readNotesQualitySeries(
+  dataDir: string,
+  docId: string,
+  meetingId: string,
+): NotesQualityRecord[] {
+  const path = notesQualityPath(dataDir, docId, meetingId);
+  if (!existsSync(path)) return [];
+  try {
+    return parseSeries(readFileSync(path, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+/** This meeting's NEWEST reading, or `undefined` for a meeting that has none.
+ *  The newest rather than the whole series, because every existing reader —
+ *  the rollup, the rerun report — is asking how the meeting came out. */
 export function readNotesQuality(
   dataDir: string,
   docId: string,
   meetingId: string,
 ): NotesQualityRecord | undefined {
-  const path = notesQualityPath(dataDir, docId, meetingId);
-  if (!existsSync(path)) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (typeof parsed !== 'object' || parsed === null) return undefined;
-    const record = parsed as NotesQualityRecord;
-    if (typeof record.meetingId !== 'string' || typeof record.at !== 'number') return undefined;
-    return record;
-  } catch {
-    return undefined;
-  }
+  return readNotesQualitySeries(dataDir, docId, meetingId).at(-1);
 }
 
 /** What the health check is shown. */
@@ -137,6 +217,12 @@ export interface NotesQualityRollup {
     ideas: number;
     uncoveredIdeas: number;
   };
+  /** How many of the window's meetings the notes reading failed on, and so
+   *  contributed nothing to the coverage totals. Reported for the same reason
+   *  `latenessUnknown` is, and it is the number that would have made
+   *  2026-09-15 visible on the day: a coverage figure computed over meetings
+   *  whose notes could not be read is not a claim about note quality. */
+  coverageUnknown: number;
   /** How many of the window's meetings had no per-tick timing record, and so
    *  contributed nothing to the lateness picture. Reported rather than
    *  silently excluded — a lateness number computed from two meetings out of
@@ -210,15 +296,22 @@ export function rollupNotesQuality(
   };
   let flagged = 0;
   let latenessUnknown = 0;
+  let coverageUnknown = 0;
   for (const record of records) {
     if (record.flags.length > 0) flagged++;
     if (record.lateShare === null) latenessUnknown++;
+    if (record.coverageSource === 'unreadable') coverageUnknown++;
     for (const flag of record.flags) byFlag[flag] = (byFlag[flag] ?? 0) + 1;
     totals.duplicateBulletLines += record.duplicateBulletLines;
     totals.duplicateHeadings += record.duplicateHeadings;
     totals.unknownVoices += record.unknownVoices;
-    totals.ideas += record.ideas;
-    totals.uncoveredIdeas += record.uncoveredIdeas;
+    // A reading that failed contributes NEITHER half. Adding its ideas while
+    // its uncovered count is unknown would move the window's ratio by a
+    // meeting nothing is known about.
+    if (record.uncoveredIdeas !== null) {
+      totals.ideas += record.ideas;
+      totals.uncoveredIdeas += record.uncoveredIdeas;
+    }
   }
   return {
     windowMs: opts.windowMs,
@@ -226,6 +319,7 @@ export function rollupNotesQuality(
     flagged,
     byFlag,
     totals,
+    coverageUnknown,
     latenessUnknown,
     worst: records.filter((r) => r.flags.length > 0).slice(0, ROLLUP_WORST_LIMIT),
   };
