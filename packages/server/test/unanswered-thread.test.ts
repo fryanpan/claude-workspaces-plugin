@@ -255,6 +255,9 @@ describe('the lead is woken — and Bryan is not reached at all', () => {
     const sent: Array<{ agentId: string; frame: StallNudgeFrame }> = [];
     let clock = now;
     const nudger = new StallNudger({
+      // Off: this file's subject is not the moved-within-the-hour rule
+      // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+      movedWithinMs: 0,
       now: () => clock,
       snapshot: boards,
       canReach: () => true,

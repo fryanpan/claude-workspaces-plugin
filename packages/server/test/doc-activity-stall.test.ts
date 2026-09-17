@@ -135,7 +135,7 @@ describe("a task's linked doc counts as the task moving", () => {
     // Nobody writes the doc. The row must out-quiet the window and be named,
     // exactly as it would with no doc at all — this change removes false
     // wakes, it does not make the loop unable to fire.
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
 
     handle.nudgeStalls();
     const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
@@ -152,7 +152,7 @@ describe("a task's linked doc counts as the task moving", () => {
     // only the doc edit can save. Then the agent writes the doc — the exact
     // shape measured on the live board, where a row whose whole current work
     // was an agent rewriting its doc woke the lead three times in one hour.
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
     await jj(
       await post(`/workspaces/${WS}/docs/${docId}/content`, {
         markdown: '# Design\n\nSecond pass, written by the agent holding the row.\n',
@@ -174,7 +174,7 @@ describe("a task's linked doc counts as the task moving", () => {
     const busy = await inProgressRow(ctx.workspaceId, 'Rank results by recency');
     const quiet = await inProgressRow(ctx.workspaceId, 'Cache the facet counts');
     const docId = await linkedDoc(busy, 'design-shared');
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
     await jj(
       await post(`/workspaces/${WS}/docs/${docId}/content`, {
         markdown: '# Design\n\nEdited.\n',

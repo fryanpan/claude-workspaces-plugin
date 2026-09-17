@@ -19,8 +19,17 @@ export const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 export const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 export const BUILDER = { id: 'agent-millwright', name: 'Millwright', kind: 'agent' };
 
-/** Rows must out-quiet this window before a doc edit can matter. */
-export const QUIET_MS = 250;
+/**
+ * Rows must out-quiet this window before a doc edit can matter.
+ *
+ * TWO windows ride on it, so the waits below are `2 * QUIET_MS`: the gate
+ * makes a row a finding at one, and the wake spends no turn while every task
+ * it would name moved inside the moved-within window, which the wiring derives
+ * as twice this (`stall-frame-news.ts`). It was halved from 250ms when that
+ * second window arrived, so the wall-clock wait per case is what it always
+ * was and the margin over the gate's own window is wider than before.
+ */
+export const QUIET_MS = 150;
 
 export type Frame = { event: string; data?: Record<string, unknown> };
 

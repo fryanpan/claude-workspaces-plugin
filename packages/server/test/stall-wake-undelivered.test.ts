@@ -19,6 +19,9 @@ function harness(streams: { value: number }) {
   const sent: StallNudgeFrame[] = [];
   const lines: string[] = [];
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => world.now,
     snapshot: () => [
       {

@@ -1282,6 +1282,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // The lead hears of a hold at the quiet window — the window the verdict
     // above counts it under — not at the filer's shorter one.
     ...(ctx.stallNudgeQuietMs !== undefined ? { leadHeldMs: ctx.stallNudgeQuietMs } : {}),
+    // A frame whose every named task moved inside two quiet windows waits
+    // (`everyNamedTaskMoved`) — an hour at the default half hour, and the
+    // same ratio on a server run with a shorter window.
+    ...(ctx.stallNudgeQuietMs !== undefined ? { movedWithinMs: 2 * ctx.stallNudgeQuietMs } : {}),
     ...(ctx.stallNudgeRepeatMs !== undefined ? { repeatMs: ctx.stallNudgeRepeatMs } : {}),
     // One task costs the lead a check-in reminder at most once per window —
     // the same window that makes the row due, so the reminder is one per
