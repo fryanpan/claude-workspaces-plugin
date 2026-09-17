@@ -76,6 +76,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { HoldReason, UndeterminedRow } from './ready-gate.ts';
 import { type ReadyMark, freedRows, readyMark } from './ready-release.ts';
 import type { ParallelismCapChange } from './tasks.ts';
+import { type SentSetsJson, WakeSentSets } from './wake-sent-sets.ts';
 
 /**
  * Fifteen minutes — a DAMPER, no longer the evidence.
@@ -352,6 +353,25 @@ export interface NudgeTally {
  */
 export const NUDGE_TALLY_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
+/**
+ * Everything a `ready_idle` frame could name, as the tokens the sent set is
+ * compared over.
+ *
+ * The ready rows and the rows the gate could not read, each under its own
+ * key, plus one token for "there is work waiting behind the parallelism cap"
+ * — which is a fact about the board rather than about a task, and carries no
+ * count: the number moving is not news, and a board held at the cap with no
+ * ready row would otherwise name nothing at all and so could never read as a
+ * repeat.
+ */
+function readyNudgeTokens(board: ReadyWorkSnapshot): string[] {
+  return [
+    ...board.ready.map((row) => `ready:${row.id}`),
+    ...(board.undetermined ?? []).map((row) => `undet:${row.id}:${row.reason}`),
+    ...(board.capacityHeld && board.capacityHeld > 0 ? ['cap:held'] : []),
+  ];
+}
+
 /** The stamp file's shape. Versioned so a later format change can recognise
  *  an older file rather than treating it as corrupt. */
 interface StampFile {
@@ -360,6 +380,9 @@ interface StampFile {
   /** Absent in a v1 file, which is not corruption — the window simply starts
    *  fresh, and the stamps still load. */
   tally?: NudgeTally;
+  /** What the last delivered frame named, per board and per lead. Absent in a
+   *  file written before this existed, which costs each board one nudge. */
+  sent?: SentSetsJson;
 }
 
 const STAMP_FORMAT_VERSION = 2;
@@ -392,6 +415,18 @@ export class ReadyWorkNudger {
   private readonly opts: ReadyWorkNudgerOptions;
   private readonly now: () => number;
   private readonly idleMs: number;
+  /**
+   * What the last DELIVERED nudge named, per board and per lead.
+   *
+   * The stamp above re-arms on the activity clock, which is exactly what made
+   * `ready_idle` a repeat: a lead writes anything at all, idles out again, and
+   * is handed the same ready row it was handed an hour ago. This asks the
+   * narrower question — is any of this new to THIS reader? — and is why an
+   * unchanged ready set costs no second turn. Forgetting is on the idle
+   * window, so a row that leaves the ready list for a whole one and comes
+   * back is news again (`wake-sent-sets.ts`).
+   */
+  private readonly sentSets: WakeSentSets;
   private readonly report: (message: string) => void;
   /** Activity this process has observed, by workspace. Floored by the
    *  snapshot's own clock, never replacing it. */
@@ -423,6 +458,7 @@ export class ReadyWorkNudger {
     this.opts = opts;
     this.now = opts.now ?? Date.now;
     this.idleMs = opts.idleMs ?? READY_IDLE_DEFAULT_MS;
+    this.sentSets = new WakeSentSets(this.idleMs);
     this.report = opts.report ?? ((message) => console.error(message));
     this.stampFile = opts.stampFile ?? null;
     // Opened before the load so a file with no tally (v1, or none at all)
@@ -716,6 +752,7 @@ export class ReadyWorkNudger {
     for (const key of this.observed.keys()) if (!live.has(key)) this.observed.delete(key);
     for (const key of this.reported.keys()) if (!live.has(key)) this.reported.delete(key);
     for (const key of this.counted.keys()) if (!live.has(key)) this.counted.delete(key);
+    this.sentSets.retain(live);
     // AFTER every board has been considered, so a window closing on this tick
     // reaches its verdict over the counts this tick produced rather than over
     // last tick's.
@@ -760,11 +797,28 @@ export class ReadyWorkNudger {
     // not evaluate one of them has not established that the board is quiet,
     // and returning here on `ready.length === 0` alone is precisely how "I
     // could not look" came to be delivered as "I looked and saw nothing".
+    //
+    // No `sentSets.observe` here, where `stall-nudge.ts` has one on the same
+    // branch, and the difference is deliberate rather than an oversight. That
+    // call is a SWEEP with an empty list: it ages tokens out. A board with no
+    // lead has no reader whose memory could be wrong, and the first observe
+    // after the seat is refilled sweeps on the same stale timestamps, so the
+    // forgetting happens either way. What it would buy is a board that sat
+    // leaderless being swept on a clock nobody is reading — which costs a
+    // little and proves nothing. The stall side has the call because that
+    // branch does not return empty-handed: it still reports unreadable rows.
     if (board.retired || lead === undefined) {
       this.armed.delete(key);
       this.counted.delete(key);
       return;
     }
+    // Everything this board could name, on EVERY pass — before the idle gate
+    // below, not after it. A ready row is still a ready row while the lead is
+    // busy, and letting it age out of the sent set during the working half of
+    // the cycle would hand it back the moment the lead next went quiet, which
+    // is the repeat this exists to remove.
+    const named = readyNudgeTokens(board);
+    this.sentSets.observe(key, named, now);
     const lastActivityAt = this.lastActivity(board);
     const idleMs = now - lastActivityAt;
     if (idleMs < this.idleMs) return;
@@ -798,6 +852,13 @@ export class ReadyWorkNudger {
     // that reached nobody must stay owed, or the lead returns to a board
     // that has already decided it told them.
     if (!this.reachable(key, lead)) return;
+    // Names nothing this lead was not handed last time. Silent, but the stamp
+    // is recorded the way an unchanged board's is, so the arming still
+    // describes the board that is actually there.
+    if (this.sentSets.nothingNew(key, lead, named)) {
+      this.armed.set(key, stamp);
+      return;
+    }
     const top = board.ready[0];
     const held = describeHeld(board.held);
     // Folded in beside the dependency gate's own holds rather than merged
@@ -808,7 +869,7 @@ export class ReadyWorkNudger {
       board.capacityHeld && board.capacityHeld > 0
         ? { ...(held ?? {}), 'parallelism-cap': board.capacityHeld }
         : held;
-    this.emit(key, lead, {
+    const delivered = this.emit(key, lead, {
       event: READY_IDLE_EVENT,
       workspaceId: key,
       ...(top ? { taskId: top.id, title: top.title } : {}),
@@ -824,6 +885,12 @@ export class ReadyWorkNudger {
       idleMs,
       ts: now,
     });
+    // Only what actually REACHED the lead. A stream that answered `reachable`
+    // and then delivered nothing has told them nothing, and this memory is not
+    // the stamp: the stamp re-arms on the next activity, so a lost frame comes
+    // back, while a set recorded here suppresses every re-arm that follows and
+    // would bury this list for good.
+    if (delivered > 0) this.sentSets.record(key, lead, named, now);
     this.armed.set(key, stamp);
     // A DELIVERED nudge — the numerator the stopping rule reads. Counted here
     // rather than beside the suppressions above so it can never be inflated by
@@ -989,6 +1056,7 @@ export class ReadyWorkNudger {
         }
         this.tallyState = { since: tally.since, passed: tally.passed, suppressed };
       }
+      this.sentSets.load(parsed.sent, Date.now());
       this.lastPersisted = this.serializeStamps();
     } catch {
       this.armed.clear();
@@ -1014,6 +1082,7 @@ export class ReadyWorkNudger {
       version: STAMP_FORMAT_VERSION,
       stamps,
       tally: { ...this.tallyState, suppressed },
+      sent: this.sentSets.toJSON(),
     };
     return `${JSON.stringify(file, null, 2)}\n`;
   }

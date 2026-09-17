@@ -44,6 +44,7 @@ import { OWNER_UNFILED_BUCKET } from './stall-gate.ts';
 import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';
 import { type AgingWait, buildWaitingUnfiledReview } from './waiting-unfiled-review.ts';
+import { isDue, ownerBound, teamLeadCarry } from './waiting-unfiled-routing.ts';
 import {
   type Seen,
   type Sidecar,
@@ -103,15 +104,12 @@ const key = (workspaceId: string, taskId: string): string => `${workspaceId}|${t
  * `stall-gate.ts` keeps them on one list because they have one remedy: a
  * person is being waited on and cannot see it, and the fix is to file the ask
  * or say there was none. `waiting-unfiled` is the task's own agent saying so
- * in its closing words; `blocked-on-owner-unfiled` is the BOARD saying so,
- * from who owns the task. The ladder in `stall-check/README.md` is written
- * against the failure, not against how the board came to know of it.
+ * in its closing words; `blocked-on-owner-unfiled` is the BOARD saying so.
+ * They part company at the rung, not here — `waiting-unfiled-routing.ts`.
  *
  * It read the first bucket alone until 2026-09-17, which left the second with
  * no aging path at all: `stall-escalation.ts` — the only other filer — fires
- * only on a board where no session is alive, so a board-declared unfiled ask
- * on a LIVE board was told to its lead every repeat window and went past
- * nobody, however long the lead ignored it.
+ * only on a board where no session is alive.
  *
  * A retired board says nobody is working it, so it contributes none.
  */
@@ -186,10 +184,13 @@ export class WaitingUnfiledEscalations {
     }
     this.sidecar.seen = seen;
 
-    // Due: named to a lead a full window ago and STILL unfiled. Worst first,
-    // so the anchor is the task that has waited longest.
+    // Due: named a full window ago and STILL unfiled. ONE window, whatever the
+    // bucket (`isDue`, `waiting-unfiled-routing.ts`) — a finding that clears
+    // inside it should file nothing, and that is as true of the person-blocked
+    // half as of the other. What the bucket changes is the ADDRESSEE, decided
+    // below. Worst first, so the anchor is the task that has waited longest.
     const due = [...present.values()]
-      .filter((row) => now - row.firstSeen >= this.agingMs)
+      .filter((row) => isDue(row, now, this.agingMs))
       .sort((a, b) => a.firstSeen - b.firstSeen);
     if (due.length === 0) {
       this.clear('every unfiled wait was filed or cleared');
@@ -206,7 +207,7 @@ export class WaitingUnfiledEscalations {
       // When nothing has a wake left the stamp is not moved either, so a row
       // that becomes a finding later is carried on its own clock rather than
       // waiting out a window it was never in.
-      const carry = due.filter((row) => row.tells < this.tellCap);
+      const carry = teamLeadCarry(due, (row) => row.tells, this.tellCap);
       const told = this.sidecar.teamLeadToldAt;
       if (carry.length > 0 && (told === undefined || now - told >= this.agingMs)) {
         if (this.tellTeamLead(board, carry, now)) {
@@ -229,10 +230,12 @@ export class WaitingUnfiledEscalations {
       // Read off the sidecar rather than off `due`, because `due` carries the
       // count as it was at the top of the tick: a row that spent its last
       // wake seconds ago is capped NOW, and waiting a window to say so would
-      // leave it with no audience in between.
-      const capped = due.filter((row) => this.tellsOf(row) >= this.tellCap);
-      if (capped.length > 0) {
-        this.fileOrRevise(capped, now);
+      // leave it with no audience in between. A row the BOARD says a person
+      // owns arrives here on its FIRST tick instead, never having been in
+      // `carry`: no agent can end it, so none is woken on the way.
+      const forOwner = ownerBound(due, (row) => this.tellsOf(row), this.tellCap);
+      if (forOwner.length > 0) {
+        this.fileOrRevise(forOwner, now);
         return;
       }
       // Team Lead is reachable and every row still has wakes left, so the

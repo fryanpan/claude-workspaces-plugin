@@ -240,6 +240,9 @@ describe('an asked-back item arms the lead’s wake once per question', () => {
     };
     const sent: StallNudgeFrame[] = [];
     const nudger = new StallNudger({
+      // Off: this file's subject is not the moved-within-the-hour rule
+      // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+      movedWithinMs: 0,
       now: () => world.now,
       snapshot: () => [
         {

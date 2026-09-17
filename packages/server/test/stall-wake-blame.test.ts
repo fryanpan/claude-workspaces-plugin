@@ -67,6 +67,9 @@ afterAll(() => rmSync(stampDir, { recursive: true, force: true }));
 function runOver(snapshot: StallSnapshot): StallNudgeFrame[] {
   const sent: StallNudgeFrame[] = [];
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => NOW,
     snapshot: () => [snapshot],
     canReach: (_ws, agentId) => agentId === 'agent-cartographer',
@@ -90,6 +93,9 @@ function runTwice(first: StallSnapshot, second: StallSnapshot): StallNudgeFrame[
   const sent: StallNudgeFrame[] = [];
   let current = first;
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => NOW,
     snapshot: () => [current],
     canReach: (_ws, agentId) => agentId === 'agent-cartographer',
@@ -117,6 +123,9 @@ function runTwice(first: StallSnapshot, second: StallSnapshot): StallNudgeFrame[
 function runEscalated(snapshot: StallSnapshot): StallNudgeFrame[] {
   const sent: StallNudgeFrame[] = [];
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => NOW,
     snapshot: () => [snapshot],
     canReach: (_ws, agentId) => agentId === 'agent-millwright',

@@ -79,6 +79,9 @@ function harness(
   const toFilers: Array<{ workspaceId: string; agentId: string; frame: ReviewItemHeldFrame }> = [];
   const reported: string[] = [];
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => world.now,
     snapshot: () => world.boards,
     canReach: (_workspaceId, agentId) => world.reachable.has(agentId),
@@ -196,7 +199,7 @@ describe('a stalled row wakes the lead — once', () => {
  */
 describe('a set that shrinks is not news', () => {
   function unfiled(id: string, quietMs = 30 * MIN) {
-    return { id, title: `Decide ${id}`, bucket: 'blocked-on-owner-unfiled', quietMs };
+    return { id, title: `Decide ${id}`, bucket: 'waiting-unfiled', quietMs };
   }
 
   it('says nothing when the lead files the ask the wake asked for', () => {
@@ -438,21 +441,21 @@ describe('a repeat wake names what changed since the last one', () => {
     expect(frame.changed?.escalated).toBeUndefined();
   });
 
-  it('says so when the board escalated rather than gained a row', () => {
+  it('says nothing when the board only escalated', () => {
     const { world, sent, nudger } = harness({ repeatMs: 60 * MIN });
     nudger.tick();
     expect(sent).toHaveLength(1);
 
-    // Same row, another repeat window deep. Nothing joined; the board simply
-    // got worse, and that is the whole news.
+    // Same row, another repeat window deep. Nothing joined, so the frame
+    // would name exactly what the lead was handed a moment ago — the same
+    // sentence with a bigger number on it, which is what the sent set exists
+    // to stop (`wake-sent-sets.ts`).
     world.boards[0]!.stalled = [
       { id: 't-1', title: 'Rank results by recency', bucket: 'in-progress', quietMs: 125 * MIN },
     ];
     nudger.tick();
 
-    expect(sent).toHaveLength(2);
-    expect(sent[1]?.frame.changed?.escalated).toBe(true);
-    expect(sent[1]?.frame.changed?.rows ?? []).toHaveLength(0);
+    expect(sent).toHaveLength(1);
   });
 
   it('names a row the pass newly could not read', () => {
@@ -585,21 +588,33 @@ describe('a finding that flickers off the list is not an escalation', () => {
     expect(sent).toHaveLength(2);
 
     // Past the old row's whole repeat window: it is forgotten, and with it the
-    // bucket it was speaking for. The new row has now crossed a window of its
-    // own, which is exactly what the repeat is for.
-    world.now += 61 * MIN;
-    world.boards[0]!.stalled = [{ ...YOUNGER, quietMs: 61 * MIN }];
+    // bucket it was speaking for. The remaining row has crossed a window of
+    // its own — which used to be a third wake and is now silence, because the
+    // lead has already been handed that row and nothing has joined it.
+    //
+    // Ticked along the way on purpose. The board's pass runs every minute in
+    // the server, and each pass tells the sent set the row is still a finding
+    // (`WakeSentSets.observe`). A single jump with no tick in it would instead
+    // assert the FORGETTING — a row nobody was reminded of for a whole window
+    // is news again — which is the next case, not this one.
+    for (const quietMs of [35 * MIN, 66 * MIN]) {
+      world.now += 31 * MIN;
+      world.boards[0]!.stalled = [{ ...YOUNGER, quietMs }];
+      nudger.tick();
+    }
+    expect(sent).toHaveLength(2);
+
+    // And a row nobody has heard of is still through at once, so the silence
+    // above is the sent set's and not a board that has stopped speaking.
+    world.now += 31 * MIN;
+    world.boards[0]!.stalled = [
+      { ...YOUNGER, quietMs: 97 * MIN },
+      { id: 't-third', title: 'Split the shard writer', bucket: 'in-progress', quietMs: 40 * MIN },
+    ];
     nudger.tick();
 
     expect(sent).toHaveLength(3);
-    expect(sent[2]?.frame.changed?.escalated).toBe(true);
-
-    // And again a window later, unchanged in every other way.
-    world.now += 61 * MIN;
-    world.boards[0]!.stalled = [{ ...YOUNGER, quietMs: 122 * MIN }];
-    nudger.tick();
-
-    expect(sent).toHaveLength(4);
+    expect(sent[2]?.frame.changed?.rows?.map((r) => r.id)).toEqual(['t-third']);
   });
 
   /**
@@ -648,8 +663,19 @@ describe('a finding that flickers off the list is not an escalation', () => {
   });
 });
 
-describe('a row that stays stalled is said again, eventually', () => {
-  it('re-fires once the row has been quiet for another repeat window', () => {
+/**
+ * A row that stays stalled is said ONCE.
+ *
+ * This describe used to assert the other way round — a board's oldest row
+ * crossing another repeat window re-woke the lead, which is the owner's
+ * 2026-09-11 "report again in half an hour if still stalled". A week of the
+ * fleet's transcripts measured those repeats at 5.4% of all model spend, so
+ * the wake now fires on the set of findings changing and on nothing else.
+ * What the escalation bucket still does is decide whether the stamp counts a
+ * pass as a change at all; what it no longer does is send anything by itself.
+ */
+describe('a row that stays stalled is said once, and the clock adds nothing', () => {
+  it('does NOT re-fire once the row has been quiet for another repeat window', () => {
     const { world, sent, nudger } = harness({ repeatMs: 60 * MIN });
     world.boards[0]!.stalled[0]!.quietMs = 45 * MIN;
     nudger.tick();
@@ -661,13 +687,14 @@ describe('a row that stays stalled is said again, eventually', () => {
     nudger.tick();
     expect(sent).toHaveLength(1);
 
-    // Crossed into the next one. The escalation is intrinsic to how long the
-    // row has been quiet rather than to a timer of its own, so a row that
-    // recovers stops escalating without anything having to cancel it.
+    // …and across into the next one, still silence. The board's escalation
+    // bucket moved, and the lead is handed nothing it was not handed before,
+    // so no turn is spent. The describe above this one used to say the
+    // opposite; the rename is the change.
     world.now += 20 * MIN;
     world.boards[0]!.stalled[0]!.quietMs = 75 * MIN;
     nudger.tick();
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
   });
 
   /**
@@ -703,7 +730,7 @@ describe('a row that stays stalled is said again, eventually', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('re-fires when the OLDEST row crosses the next boundary', () => {
+  it('does not re-fire when the OLDEST row crosses the next boundary either', () => {
     const { world, sent, nudger } = harness({ repeatMs: 60 * MIN });
     world.boards[0]!.stalled = [
       { id: 't-young', title: 'Cache the facet counts', bucket: 'in-progress', quietMs: 10 * MIN },
@@ -717,7 +744,7 @@ describe('a row that stays stalled is said again, eventually', () => {
     world.boards[0]!.stalled[1]!.quietMs = 185 * MIN;
     nudger.tick();
 
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
   });
 
   it('still fires at once when the set itself changes inside a window', () => {
@@ -793,6 +820,9 @@ describe('who is never woken', () => {
   it('survives a snapshot that throws rather than taking the timer down', () => {
     const sent: Sent[] = [];
     const nudger = new StallNudger({
+      // Off: this file's subject is not the moved-within-the-hour rule
+      // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+      movedWithinMs: 0,
       now: () => 1_000_000,
       snapshot: () => {
         throw new Error('store is mid-hydrate');
@@ -816,7 +846,7 @@ describe('rows waiting on a person with nothing filed', () => {
       {
         id: 't-9',
         title: 'Pick a retention window',
-        bucket: 'blocked-on-owner-unfiled',
+        bucket: 'waiting-unfiled',
         quietMs: 2 * 60 * MIN,
       },
     ];
@@ -983,7 +1013,7 @@ describe('every delivered wake is counted', () => {
       {
         id: 't-9',
         title: 'Pick a retention window',
-        bucket: 'blocked-on-owner-unfiled',
+        bucket: 'waiting-unfiled',
         quietMs: 0,
       },
     ];
@@ -1480,27 +1510,61 @@ describe('a dispatched row whose holder stopped reporting is the lead’s remind
       nudger.tick();
     }
     expect(sent).toHaveLength(1);
-
-    // One second past the window, and the second missed check-in is said.
-    world.now += CHECK_IN_REPEAT_DEFAULT_MS - 20 * MIN + 1_000;
-    nudger.tick();
-    expect(sent).toHaveLength(2);
-    expect((sent[1]?.frame as StallNudgeFrame).checkIn).toEqual([DUE]);
   });
 
-  it('the window is what silences it — a shorter one lets the next reminder through', () => {
-    // Mutation control for the clock above: the SAME twenty ticks, with the
-    // repeat window at one minute, produce twenty reminders. Without this the
-    // first test would pass against a build that never re-sent at all.
-    const { world, sent, nudger } = harness({ checkInRepeatMs: MIN });
+  it('MUTATION CONTROL: the NEXT window is a new ask, not a repeat of the last', () => {
+    // The control the silence above needs, and the one the sent set nearly
+    // took away: each window in which the row is still owing a word is its
+    // own event, so the token carries the window (`checkInTokens`) and not
+    // just the row. With the row alone the lead is asked once, ever.
+    //
+    // IT HAS TO TICK EVERY MINUTE, as the server does, and a first version of
+    // this case did not — it jumped the clock a whole window at a time and
+    // passed against the broken token. Nothing observed the board in between,
+    // so the bare `checkin:t-11` aged out of the sent set on its own and the
+    // second window read as new for the wrong reason. A row that sits there
+    // being looked at every minute never ages out, which is the case the
+    // fleet actually runs.
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+    const runMinutes = (n: number): void => {
+      for (let i = 0; i < n; i += 1) {
+        world.now += MIN;
+        nudger.tick();
+      }
+    };
+
+    nudger.tick();
+    expect(sent).toHaveLength(1);
+
+    // Every tick up to the next window is inside the first, so it is silent.
+    runMinutes(CHECK_IN_REPEAT_DEFAULT_MS / MIN - 1);
+    expect(sent).toHaveLength(1);
+
+    runMinutes(2);
+    expect(sent).toHaveLength(2);
+
+    runMinutes(CHECK_IN_REPEAT_DEFAULT_MS / MIN);
+    expect(sent).toHaveLength(3);
+    expect((sent[2]?.frame as StallNudgeFrame).checkIn?.map((r) => r.id)).toEqual(['t-11']);
+  });
+
+  it('a DIFFERENT row coming due is still a reminder', () => {
+    // The control the silence above needs: the check-in path is not switched
+    // off, it is deduped per row.
+    const { world, sent, nudger } = harness();
     world.boards = [board({ stalled: [], checkIn: [DUE] })];
 
     nudger.tick();
-    for (let i = 0; i < 20; i += 1) {
-      world.now += MIN;
-      nudger.tick();
-    }
-    expect(sent).toHaveLength(21);
+    expect(sent).toHaveLength(1);
+
+    const other = { ...DUE, id: 't-12', title: 'Rebuild the shard index' };
+    world.boards = [board({ stalled: [], checkIn: [DUE, other] })];
+    world.now += MIN;
+    nudger.tick();
+
+    expect(sent).toHaveLength(2);
+    expect((sent[1]?.frame as StallNudgeFrame).checkIn?.map((row) => row.id)).toContain('t-12');
   });
 
   it('goes quiet the tick the holder reports, and is owed afresh if they stop again', () => {
@@ -1516,10 +1580,12 @@ describe('a dispatched row whose holder stopped reporting is the lead’s remind
     nudger.tick();
     expect(sent).toHaveLength(1);
 
-    // …and goes quiet again well INSIDE what would have been the first
-    // reminder's window. A told-time left standing would swallow this.
+    // …and goes quiet again, a full repeat window later. That window is how
+    // long the lead's memory of a row lasts (`wake-sent-sets.ts`): inside it
+    // the row is one they were handed minutes ago, past it the recurrence is
+    // a finding of its own.
     world.boards = [board({ stalled: [], checkIn: [DUE] })];
-    world.now += MIN;
+    world.now += STALL_REPEAT_DEFAULT_MS + MIN;
     nudger.tick();
     expect(sent).toHaveLength(2);
   });

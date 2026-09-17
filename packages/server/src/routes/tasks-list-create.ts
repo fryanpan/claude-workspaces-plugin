@@ -184,14 +184,16 @@ export async function handleTaskListCreate(
     // them" for a row the queue omits.
     let decisionGate: ReviewGate | undefined;
     if (res.task.needs === 'decision') {
-      decisionGate = await judgeTaskDecision(res.task, authorFor(body?.author) ?? ANONYMOUS_ACTOR);
+      decisionGate = await judgeTaskDecision(res.task, authorFor(body?.author) ?? ANONYMOUS_ACTOR, {
+        heldInReply: true,
+      });
       if (decisionGate?.held) taskProjection.ensureWorkspace(workspaceId);
     }
     if (parsed.review !== undefined) {
       const actor = authorFor(body?.author) ?? ANONYMOUS_ACTOR;
       const added = taskStore.addReviewItem(res.task.id, parsed.review, { actor });
       if (added.ok) {
-        gate = await judgeReviewItem(added.task, added.item, actor);
+        gate = await judgeReviewItem(added.task, added.item, actor, { heldInReply: true });
         if (!gate.held) announceTaskReview(added.task, added.item, actor);
       }
       // `createTask` already emitted `task.created` — and therefore

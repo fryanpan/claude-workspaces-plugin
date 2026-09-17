@@ -86,6 +86,14 @@ import { WAITING_UNFILED_BUCKET } from './waiting-unfiled.ts';
  * known about elapsed time as a signal — so it is exported, overridable via
  * `CW_STALL_NUDGE_MINUTES`, and the one number to reach for first if the wake
  * turns out to be noisy.
+ *
+ * SINCE 2026-09-17 IT NO LONGER SETS TIME-TO-FIRST-WAKE ON ITS OWN. This is
+ * when a row becomes a FINDING; the frame naming it also has to clear the
+ * moved-within deferral, which `stall-wiring.ts` sets at twice this number.
+ * So an ordinary in-progress row with nothing louder beside it is named at
+ * about twice this window, and halving this knob halves both. The reasoning
+ * is in `docs/architecture/stall-detection.md`; the name is older than the
+ * behaviour, which is why this paragraph is here.
  */
 export const STALL_QUIET_DEFAULT_MS = 30 * 60_000;
 

@@ -160,7 +160,7 @@ describe("a linked doc's discussion counts too", () => {
     const asked = await inProgressRow(ctx.workspaceId, 'Rank results by recency');
     const docId = await linkedDoc(asked, 'mock-round-one');
     await askOnDoc(docId);
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
 
     handle.nudgeStalls();
     await settle(400);
@@ -170,7 +170,7 @@ describe("a linked doc's discussion counts too", () => {
     // unable to fire: a second row with no doc and no question is still named
     // by the very next pass.
     const free = await inProgressRow(ctx.workspaceId, 'Cache the facet counts');
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
     handle.nudgeStalls();
     const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
 
@@ -184,7 +184,7 @@ describe("a linked doc's discussion counts too", () => {
     const asked = await inProgressRow(ctx.workspaceId, 'Rank results by recency');
     const docId = await linkedDoc(asked, 'mock-round-two');
     const { threadId, commentId } = await askOnDoc(docId);
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
     handle.nudgeStalls();
     await settle(400);
     expect(stalls(ctx.lead.frames)).toHaveLength(0);
@@ -199,7 +199,7 @@ describe("a linked doc's discussion counts too", () => {
     // The answer is itself activity, so the row has to out-quiet the window
     // again before the wake may name it. That is the point: an answered ask
     // excuses nothing once the row goes quiet behind it.
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
     handle.nudgeStalls();
     const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
 
@@ -223,7 +223,7 @@ describe("a linked doc's discussion counts too", () => {
         },
       ),
     );
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
 
     handle.nudgeStalls();
     const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
@@ -240,7 +240,7 @@ describe("a linked doc's discussion counts too", () => {
     const docId = await linkedDoc(busy, 'mock-round-four');
     // Out-quiet the window FIRST, so only the reply can save the row — and so
     // the untouched second row proves the pass still fires.
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
     await jj(
       await post(`/workspaces/${WS}/docs/${encodeURIComponent(docId)}/threads`, {
         text: 'Second pass is up; the spacing question is closed.',
@@ -278,7 +278,7 @@ describe("a linked doc's discussion counts too", () => {
     // The Millwright does not own the row and is not its assignee; the doc is
     // the row's alone, which is what makes the question unambiguously its own.
     await askOnDoc(docId, BUILDER);
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
 
     handle.nudgeStalls();
     const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
@@ -303,7 +303,7 @@ describe("a linked doc's discussion counts too", () => {
     // The question is the LEAD's, so it says nothing about whether the
     // Millwright's row is moving.
     await askOnDoc(docId, LEAD);
-    await settle(QUIET_MS + 100);
+    await settle(2 * QUIET_MS + 50);
 
     handle.nudgeStalls();
     const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
