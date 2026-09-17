@@ -281,6 +281,81 @@ could dismiss a false positive in a second was the lead who had been told
 which token matched — and the two together say more than either alone: the
 file is what the builder did, the word is what the task claimed to be about.
 
+## `blockage-lift.ts` — the lifted blockage
+
+- **Must:** name every task whose blockage LIFTED and which nothing has
+  touched since — in the lead's stall frame as `unresumed` and on the
+  verdict's `unresumed` line, off the same snapshot, so the frame and the
+  measurement cannot name different tasks. Two lift signals, both explicit
+  state: a review item on the task was ANSWERED (on either surface — a
+  ticket-borne item's `answer`, a comment-borne payload's `answeredAt`), and
+  a done-when line moved to `met` while a LATER line is still open. Every
+  finding carries the lift's kind, its timestamp and the line or headline it
+  rests on, the way `ungatedUi` carries the file that convicted a row: a
+  finding that fires once at a boundary and never again is indistinguishable
+  from a real one unless it names what it rests on. The reading is gated on
+  the board's own quiet window measured FROM THE LIFT, and on the classifier's
+  existing `sinceActivityMs` — the newest of status change, board event,
+  thread activity and Activity note.
+- **Must never:** read prose; add a second clock; name a task whose LAST open
+  line just went met — completion is not a resumed blockage, and naming it
+  would turn the moment a ticket finishes into a wake; or name a task the
+  board has recorded any activity on since the lift. That last one is the
+  load-bearing guard, not the window: a task answered on Monday, worked all
+  week and quiet for forty minutes is not this finding, and a reading that
+  names it has rebuilt the status-age reading that called a merged, deployed
+  task parked for 44.6 hours.
+- **Measured by:** the wired test (`resumed-work-finding.test.ts`), which
+  files an ask on a quiet in-progress task, answers it, and asserts the lead's
+  frame and the verdict both name the task with the answer's own timestamp;
+  the same for a first done-when line going met with the remainder open. Beside
+  them sit three controls, each differing from a positive by exactly ONE
+  input — the connector timeline (the same answer, plus one note stamped clear
+  of `LIFT_CLOCK_EPSILON_MS` after it), completion (every line met rather than
+  the first), and the last line going met while earlier lines are open, which
+  isolates the rule from the auto-close that would carry the previous control
+  on its own. Each control rides a BEACON row that is quiet and on no lift, so
+  a silence assertion proves the tick ran rather than that no frame arrived.
+  The unit cases are `blockage-lift.test.ts`. And on the board itself: the
+  verdict's `unresumed` line at zero, and the finding naming a PROPER SUBSET
+  of the tasks that merely carry a met line with later lines open — naming all
+  of them is the status-age reading again.
+
+### Why the lift is never a finding on its own
+
+The failure it was built for, measured: a task declared a wait on a person for
+two values, the person answered the item that asked for them, the board
+recorded the answer, and nothing treated it as an event. The work sat
+unblocked for 21 hours while the board still read as blocked. Every step of
+the queue worked — the ask was filed, it was answered, the answer was
+stored — and the one thing missing was anybody reading the answer as the
+moment the work could start again.
+
+On the same board, the same evening, a second task carried an answered item
+AND an open done-when line and was working perfectly: a plan posted at
+12:21:28Z, its first report at 13:53:30Z, the done-when line marked met at
+13:54:31Z quoting that report. **Sixty-one seconds from the answer to the
+line.** From the outside those two tasks carry the same two facts in the same
+order.
+
+So the reading asks two things of a lift, and both are about the task's own
+activity clock rather than about the lift's existence: the lift is older than
+the quiet window, and NOTHING has touched the task since it. The connector
+task fails both, and would fail the second with no window at all — which is
+the property that matters. The window is the cheap guard; the activity read is
+the load-bearing one.
+
+`LIFT_CLOCK_EPSILON_MS` is the one tolerance, and it exists because the lift's
+own write is itself activity: answering an item stamps the row, and so does
+reporting a line, so with no tolerance the newest activity would always be
+at-or-after every lift and the finding could never fire. It is 250ms —
+MEASURED rather than assumed, against a real server on 2026-09-17, where both
+writes are stamped from one clock read inside the handling request and the gap
+read **0 ms** on both paths. It is deliberately not `EVENT_TICK_EPSILON_MS`'s
+five seconds: that number covers a note carrying the POSTER's clock across the
+network, and every millisecond of this one is a millisecond in which real work
+would be mistaken for the lift's own write.
+
 ## `stall-escalation.ts` — the last resort — *rebuild step 3*
 
 - **Must:** file past the lead only when no session on the board is alive:
