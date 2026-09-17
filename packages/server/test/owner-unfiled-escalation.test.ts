@@ -147,8 +147,12 @@ describe('a board-declared unfiled ask ages past its lead too', () => {
     // One line per task, each naming its own evidence.
     const owner = detail.split('\n').find((l) => l.includes(ids[0] as string)) ?? '';
     const agent = detail.split('\n').find((l) => l.includes(ids[1] as string)) ?? '';
-    expect(owner).not.toContain('closing words');
-    expect(owner.toLowerCase()).toContain('down to you');
+    // Each line must carry its OWN evidence and not the other's. Asserting
+    // the absence of a phrase neither line contains would pass under any
+    // wording, so each half names the sibling's words.
+    expect(owner).not.toContain('said it is waiting');
+    expect(owner.toLowerCase()).toContain('down to its owner');
+    expect(agent).not.toContain('down to its owner');
     expect(agent.toLowerCase()).toContain('said it is waiting');
   });
 });

@@ -25,11 +25,15 @@ today's code fails is flagged.
   silence as `builder-silent`.
 - **Must never:** report as STALLED a task the parallelism cap keeps out of
   flight, or report at all a task under a triage band. Both exclusions are
-  about work nobody was supposed to be doing. Neither reaches the `unfiled`
-  list, and nor does the schedule-rule exclusion: an unanswered question is a
-  finding whatever the capacity, the band or the row's kind. The cap held one
-  anyway until 2026-09-17 — it skipped the row outright, and
-  `waiting-unfiled` rides the two runnable buckets the cap is built from.
+  about work nobody was supposed to be doing, but they are not the same
+  shape: a triage-band row is dropped in `keep-moving.ts` before any bucket
+  is decided, so it reaches no list here at all, while a capped row is
+  classified like any other and only its STALL reading is withheld. So the
+  claim is about the cap — a capped row still reaches the `unfiled` list,
+  and so does a schedule-rule row, because an unanswered question is a
+  finding whatever the capacity or the row's kind. The cap held one anyway
+  until 2026-09-17: it skipped the row outright, and `waiting-unfiled` rides
+  runnable buckets the cap is built from.
 - **Measured by:** unit tests per exclusion, including a `waiting-unfiled`
   row ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the
   verdict's `considered` denominator.

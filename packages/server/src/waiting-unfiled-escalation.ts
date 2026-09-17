@@ -117,7 +117,7 @@ export function buildWaitingUnfiledReview(input: {
   const boards = new Set(rows.map((r) => r.workspaceId)).size;
   const headline =
     n === 1
-      ? `“${clip(rows[0]?.title ?? '', 40)}” is waiting on you, with nothing filed`
+      ? `“${clip(rows[0]?.title ?? '', 40)}” is waiting on a person, with nothing filed`
       : `${n} tasks are waiting on a person with nothing filed`;
   const lines = rows.map((row) => {
     const waited = span(Math.max(0, now - row.firstSeen));
@@ -139,11 +139,13 @@ export function buildWaitingUnfiledReview(input: {
  * different for the two buckets, and the difference is what the reader would
  * correct. One sentence covering both would either claim an agent wrote
  * closing words it never wrote, or drop the fact that one of them did.
+ * Neither says "you": the item is fleet-wide, and the owner a row names need
+ * not be its reader (`blocked-on-owner-unfiled` fires on any person owner).
  */
 function evidence(bucket: string, waited: string): string {
   return bucket === WAITING_UNFILED_BUCKET
     ? `said it is waiting on a person ${waited} ago, with no question on anybody's queue.`
-    : `has been down to you for ${waited}, with no question on your queue.`;
+    : `has been down to its owner for ${waited}, with no question on their queue.`;
 }
 
 function clip(text: string, max: number): string {

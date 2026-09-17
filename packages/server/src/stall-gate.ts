@@ -422,7 +422,8 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // still judged for an unanswered ask: capacity says why nobody picked the
     // row up and says nothing about a question already asked and filed
     // nowhere. Read as a whole-row skip it swallowed exactly that — a
-    // `waiting-unfiled` row rides the two RUNNABLE buckets, which are the two
+    // `waiting-unfiled` row rides `in-progress`, `ready-unpicked` or
+    // `scheduled-rule` (`keep-moving.ts`), and the first two are the buckets
     // this set is built from, so on any board with more runnable rows than
     // its cap such a row was never named, never aged and escalated to nobody
     // (`waiting-unfiled-escalation.ts`). The sibling reading has always
