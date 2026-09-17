@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'bun:test';
 /**
  * An agent-owned row is not woken about as though the BOARD said a person
  * were waiting on it.
@@ -42,6 +41,7 @@ import { describe, expect, it } from 'bun:test';
  * All fixtures are synthetic: invented names on a made-up board. The repo is
  * public.
  */
+import { describe, expect, it } from 'bun:test';
 import { type StallPayload, stalledLine } from '../../mcp/src/nudge-line.ts';
 import type { TaskRow } from '../src/keep-moving.ts';
 import { OWNER_UNFILED_BUCKET, evaluateStalls } from '../src/stall-gate.ts';
@@ -187,7 +187,7 @@ describe('the wake line says which of the two doors a row came through', () => {
     // What it says instead: whose words this reading came from, and that the
     // reading is a guess the reader should check.
     expect(line).toContain('closing note');
-    expect(line).toContain('one message in six');
+    expect(line).toContain('a regex over the agent');
     expect(line).toContain('t-verbs');
   });
 
@@ -208,7 +208,43 @@ describe('the wake line says which of the two doors a row came through', () => {
     expect(line).toContain('t-date');
     // And it is NOT dressed as a guess — no hedge borrowed from the other
     // sentence, because for this row there is nothing to hedge.
-    expect(line).not.toContain('one message in six');
+    expect(line).not.toContain('a regex over the agent');
+    expect(line).not.toContain('closing note');
+  });
+
+  /**
+   * A frame from a server too old to send `bucket` renders the ORIGINAL
+   * sentence, byte for byte. That default is right rather than merely
+   * tolerable: `bucket` has been on `StalledRow` since the frame's inception
+   * (#404) and a row could only reach `unfiled` through the note door from
+   * #1050, so a server old enough to omit the field can only ever have
+   * carried board-declared rows.
+   */
+  it('renders an old frame with no bucket as the board-declared sentence', () => {
+    const line = stalledLine({ unfiled: [{ id: 't-old', title: 'Old frame row' }] });
+    expect(line).toContain('1 task is waiting on a person with NO question filed');
+    expect(line).toContain('File the ask where they will see it, or the wait is invisible.');
+    expect(line).not.toContain('closing note');
+  });
+
+  /** Every clause agrees in number with its subject. A plural subject wearing
+   *  "an ask" / "the row" / "the note" tells the reader the sentence was not
+   *  proof-read, on the one line whose job is to be believed. */
+  it('agrees in number when several rows came through the note door', () => {
+    const line = stalledLine({
+      unfiled: [
+        { id: 't-a', title: 'One', bucket: WAITING_UNFILED_BUCKET },
+        { id: 't-b', title: 'Two', bucket: WAITING_UNFILED_BUCKET },
+        { id: 't-c', title: 'Three', bucket: WAITING_UNFILED_BUCKET },
+      ],
+    });
+    expect(line).toContain('3 tasks’ own closing notes read as asks to a person');
+    expect(line).toContain('with nothing filed on those rows');
+    expect(line).toContain('a person owns those rows');
+    expect(line).toContain('Read each note');
+    // The singular forms must not survive into the plural sentence.
+    expect(line).not.toContain('as an ask to a person');
+    expect(line).not.toContain('Read the note');
   });
 
   /** Both on one frame: two sentences, each naming only its own rows, and the
@@ -225,5 +261,16 @@ describe('the wake line says which of the two doors a row came through', () => {
     // Neither sentence claims the other's row: "2 tasks" would be the flat
     // reading this change exists to end.
     expect(line).not.toContain('2 tasks are waiting on a person');
+  });
+
+  /** No error rate is quoted. There are two measured ones and both were taken
+   *  over end-of-turn NOTES, while these rows also survived the quiet clock —
+   *  so any figure here would be an extrapolation onto another population,
+   *  and a precise-sounding wrong number on a calibration line is the failure
+   *  this whole split exists to end. See `docs/architecture/unfiled-ask.md`. */
+  it('quotes no error rate at all', () => {
+    const line = render(judge([agentOwnedRow()]));
+    expect(line).not.toMatch(/one (?:message )?in (?:six|seven|ten|seventeen)/i);
+    expect(line).not.toMatch(/\d+%/);
   });
 });

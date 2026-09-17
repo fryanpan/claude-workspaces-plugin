@@ -146,12 +146,28 @@ export interface StalledRowPayload {
  * Two things put a row on that list, and until this constant existed the line
  * said the same words about both. `blocked-on-owner-unfiled` is the BOARD
  * saying a person owns the row (its `ownerKind`, or its goal band) with
- * nothing filed. This one is `detectAsk` — a regex over the agent's prose,
- * wrong about one message in six by its own module's measurement — reading a
- * status note as an ask. Measured case: a note ending "Merge waits on the
- * classifier block on <person>'s queue" put an agent-assigned row under an
- * ordinary dispatched goal into the flat sentence, and its reader was told to
- * go and file an ask that nobody had asked for.
+ * nothing filed. This one is `detectAsk` — a regex over the agent's prose —
+ * reading a status note as an ask. Measured case: a note ending "Merge waits
+ * on the classifier block on <person>'s queue" put an agent-assigned row
+ * under an ordinary dispatched goal into the flat sentence, and its reader
+ * was told to go and file an ask that nobody had asked for.
+ *
+ * **The rendered sentence quotes no error RATE, on purpose.** There are two
+ * measured ones — 86% precision over 631 closing messages, and 94% after the
+ * tuning, both in `docs/architecture/unfiled-ask.md` — and both were measured
+ * over end-of-turn NOTES, while the rows reaching this sentence also had to
+ * survive the quiet clock. So any figure here is an extrapolation onto a
+ * different population, and a precise-sounding wrong number on a calibration
+ * line is the very failure this split exists to end. The qualitative claim —
+ * this came from a regex over the agent's words, not from the board — is the
+ * part that is true and the part the reader acts on.
+ *
+ * **A row with NO `bucket` renders as the board-declared sentence, and that
+ * is right rather than merely tolerable.** `bucket` has been on `StalledRow`
+ * since #404, the frame's inception; a row could only reach `unfiled` through
+ * this door from #1050. So a server old enough to omit the field can only
+ * ever have carried board-declared rows, and the default reproduces the old
+ * wording byte for byte for exactly those frames.
  *
  * A reader who learns the notice overclaims stops acting on the true rows
  * too, which is why the fix is the wording rather than the finding: both rows
@@ -632,13 +648,19 @@ export function stalledLine(p: StallPayload): string {
     );
   }
   if (saidUnfiled.length > 0) {
-    const noun =
-      saidUnfiled.length === 1 ? "task's own closing note reads" : 'tasks’ own closing notes read';
+    const one = saidUnfiled.length === 1;
+    // Every clause agrees in number with its subject. Written out rather than
+    // pluralised by a helper: "an ask", "the row" and "the note" each had to
+    // move, and a reader who meets "3 tasks' own closing notes read as an ask
+    // to a person" is being told the sentence was not proof-read.
+    const subject = one
+      ? 'task’s own closing note reads as an ask to a person, with nothing filed on the row'
+      : 'tasks’ own closing notes read as asks to a person, with nothing filed on those rows';
     parts.push(
-      `${saidUnfiled.length} ${noun} as an ask to a person, with nothing filed on the row — ` +
-        `${stalledRowsClause(saidUnfiled)}. This is NOT the board saying a person owns the row — ` +
-        'it is a regex over the agent’s own words, wrong about one message in six. Read the note, ' +
-        'then file the ask where they will see it, or say in one line that there was none.',
+      `${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled)}. This is NOT the board ` +
+        `saying a person owns ${one ? 'the row' : 'those rows'} — it is a regex over the agent’s ` +
+        `own words. Read ${one ? 'the note' : 'each note'}, then file the ask where they will see ` +
+        'it, or say in one line that there was none.',
     );
   }
   // The declared waits, in two sentences rather than one, because the reader's

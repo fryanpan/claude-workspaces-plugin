@@ -71,6 +71,16 @@ function sh(command: string, env: Record<string, string>, stdin = ''): Promise<R
       done({ code: null, stdout, stderr });
     });
     child.on('close', (code) => done({ code, stdout, stderr }));
+    // EPIPE here is the expected shape of half these cases, not a failure. A
+    // child that exits before it reads stdin — which is precisely what a hook
+    // on a bun-less PATH does — closes the pipe, and an unhandled write error
+    // on a stream nobody is listening to reaches vitest as an UNCAUGHT
+    // exception. That fails the whole shard while every file in it passes, so
+    // the run reads red with nothing broken: seen on main's own run for
+    // b9643dcc, on this branch, and on a sibling's first two runs, cleared
+    // once by a bare re-run. The verdict each case asserts is the exit code
+    // and the output, both of which arrive on `close` regardless.
+    child.stdin.on('error', () => {});
     child.stdin.write(stdin);
     child.stdin.end();
   });

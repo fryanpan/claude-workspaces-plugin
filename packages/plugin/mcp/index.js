@@ -14291,8 +14291,9 @@ function stalledLine(p) {
     parts.push(`${declaredUnfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(declaredUnfiled)}. File the ask where they will see it, or the wait is invisible.`);
   }
   if (saidUnfiled.length > 0) {
-    const noun = saidUnfiled.length === 1 ? "task's own closing note reads" : "tasks’ own closing notes read";
-    parts.push(`${saidUnfiled.length} ${noun} as an ask to a person, with nothing filed on the row — ` + `${stalledRowsClause(saidUnfiled)}. This is NOT the board saying a person owns the row — ` + "it is a regex over the agent’s own words, wrong about one message in six. Read the note, " + "then file the ask where they will see it, or say in one line that there was none.");
+    const one = saidUnfiled.length === 1;
+    const subject = one ? "task’s own closing note reads as an ask to a person, with nothing filed on the row" : "tasks’ own closing notes read as asks to a person, with nothing filed on those rows";
+    parts.push(`${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled)}. This is NOT the board ` + `saying a person owns ${one ? "the row" : "those rows"} — it is a regex over the agent’s ` + `own words. Read ${one ? "the note" : "each note"}, then file the ask where they will see ` + "it, or say in one line that there was none.");
   }
   const waits = p.declaredWaits ?? [];
   const standing = waits.filter((w) => w.lapsed !== true);
