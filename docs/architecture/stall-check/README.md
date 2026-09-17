@@ -29,9 +29,9 @@ check that serves none of them is weight.
 | Finding | Who hears it | How |
 | --- | --- | --- |
 | A task is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
-| A task waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
+| A task waits on a person and nothing is filed on that person's queue — the BOARD says so, by who owns the row | Nobody live; the owner, a window later | NOT on the lead's frame since 2026-09-17: no agent can end this wait, so a wake spends a turn that ends where it started. It ages one window like the row below and lands on the owner's standing item as a record, skipping Team Lead — an agent that cannot act on it is not a rung |
 | An agent's own closing note says it is waiting on a person, with nothing filed on that person's queue | The lead | Same frame, `unfiled`, bucket `waiting-unfiled` — the note also loses its movement credit, so the task's clock never stopped |
-| Either of those still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item naming every such task across every board — each line saying which of the two it is, because the evidence differs and the reader would correct a line that claimed the wrong one. The frame carries any one row at most `FLEET_TELL_CAP` times, counting only frames that were delivered; past that the row moves onto the owner's item — a record, not a wake — and stays on the lead's line above it |
+| An agent-declared wait still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item naming every such task across every board — each line saying which of the two buckets it is, because the evidence differs and the reader would correct a line that claimed the wrong one. The frame carries any one row at most `FLEET_TELL_CAP` times, counting only frames that were delivered; past that the row moves onto the owner's item — a record, not a wake — and stays on the lead's line above it. A board-declared one ages on the same clock and goes straight to that item (`waiting-unfiled-routing.ts`) |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
 | A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
@@ -45,7 +45,14 @@ not one per task: a fleet-wide problem that arrives as eleven separate cards
 is a fleet-wide problem nobody reads. A task waiting on the owner with a filed
 item is already on their queue and is never re-announced.
 
-Every line of that table is said again while it stands: the board's repeat
+Every line of that table is said again while it stands — but only when the
+SET it names has changed (2026-09-17). A frame naming nothing the reader was
+not last handed is dropped at the door, and a frame whose every named task
+moved inside the hour waits until one of them crosses. Both are
+`stall-detection.md`'s "The repeat window escalates a board that stays bad";
+what survives them is a set that gained a task, a row that changed bucket, a
+new hold, a question asked back, a person's new comment, a newly unreadable
+row and a due check-in. The board's repeat
 window is what makes a board nobody is driving get louder. It gets louder only
 about work the lead can move. A ticket whose review item is held, or whose
 reader asked a question back, is quiet for a reason that belongs to its filer,
@@ -154,6 +161,18 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    One remedy, one list, one ladder. The item names each task for the evidence
    it has, because a line telling the reader an agent wrote closing words it
    never wrote is a line they would correct.
+
+   **One ladder, two addressees** (2026-09-17). Both buckets still age a full
+   window before anything is filed, and there the paths part.
+   `waiting-unfiled` is an agent saying it waits — an agent can end that, by
+   filing the ask or saying there was none, so it climbs to Team Lead.
+   `blocked-on-owner-unfiled` is the board saying a person owns the row: no
+   agent can hand it back, so it skips the rung and lands on the owner's item
+   directly, and it comes off the lead's frame as well. Stall frames naming
+   rows blocked on a person were part of the 11% of fleet model spend that
+   repeat or empty reminders were measured at. Which bucket goes where is
+   `waiting-unfiled-routing.ts`, read by the escalation and by the wake, so
+   the two halves cannot drift on the word.
 
 ## How to read the verdict
 
