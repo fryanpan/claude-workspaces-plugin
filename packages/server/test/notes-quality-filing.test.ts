@@ -12,89 +12,17 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
-import type { Task } from '@claude-workspaces/core/task-wire';
-import type { TickScheduler } from '../src/meeting-notes.ts';
 import { legIsResumable } from '../src/meeting-protocol.ts';
 import { createNotesQualityFiler } from '../src/notes-quality-filing.ts';
 import { buildNotesQualityReport } from '../src/notes-quality-report.ts';
-import type { NotesQualityBoard, NotesQualityFileInput } from '../src/notes-quality-review.ts';
-
-const ACTOR = { id: 'meeting-notes', name: 'Meeting Assistant' };
-const REPEAT = '- The Saltmarsh ferry keeps its winter crew until April';
-
-/** A reading that crossed the duplicate-bullet bar. */
-function badReading(docId: string, repeats = 5): NotesQualityFileInput {
-  const report = buildNotesQualityReport({
-    notes: ['## Meeting notes', ...Array.from({ length: repeats }, () => REPEAT)].join('\n'),
-    transcript: [],
-  });
-  expect(report.flags.length).toBeGreaterThan(0);
-  return { workspaceId: 'w-harbour', docId, report };
-}
-
-function recordingBoard(): NotesQualityBoard & { filed: string[]; revised: string[] } {
-  const filed: string[] = [];
-  const revised: string[] = [];
-  const row = { id: 't-season', status: 'todo' } as Task;
-  return {
-    filed,
-    revised,
-    backlinksFor: (_ref: Ref) => [row],
-    addReviewItem: (taskId) => {
-      filed.push(taskId);
-      return { ok: true as const, task: row, item: { id: 'ri-1' } as TaskReviewItem };
-    },
-    reviseReviewItem: (_taskId, reviewItemId) => {
-      revised.push(reviewItemId);
-      return { ok: true as const };
-    },
-  };
-}
-
-/** A board with no row for the meeting's doc, so the item goes on the doc
- *  itself. The two filing paths are separate code and only one of them was
- *  covered; a meeting whose doc has no task is the ordinary case for a doc
- *  nobody has filed work against. */
-function recordingDocBoard(): NotesQualityBoard & { filed: string[]; revised: string[] } {
-  const filed: string[] = [];
-  const revised: string[] = [];
-  return {
-    filed,
-    revised,
-    backlinksFor: (_ref: Ref) => [],
-    // Reached only if the filer picks the row path, which this board has no
-    // row for — so the throw is the assertion that the doc path was taken.
-    addReviewItem: () => {
-      throw new Error('this meeting doc has no row to file on');
-    },
-    fileOnDoc: (docId) => {
-      filed.push(docId);
-      return { ok: true as const, threadId: 'th-1', commentId: 'c-1' };
-    },
-    reviseOnDoc: (_docId, _threadId, commentId) => {
-      revised.push(commentId);
-      return { ok: true as const };
-    },
-  };
-}
-
-class HandScheduler implements TickScheduler {
-  private fns = new Map<number, () => void>();
-  private n = 0;
-  set(fn: () => void, _ms: number): unknown {
-    this.n += 1;
-    this.fns.set(this.n, fn);
-    return this.n;
-  }
-  clear(handle: unknown): void {
-    this.fns.delete(handle as number);
-  }
-  fire(): void {
-    for (const fn of [...this.fns.values()]) fn();
-    this.fns.clear();
-  }
-}
+import type { NotesQualityFileInput } from '../src/notes-quality-review.ts';
+import {
+  ACTOR,
+  HandScheduler,
+  badReading,
+  recordingBoard,
+  recordingDocBoard,
+} from './notes-quality-board-harness.ts';
 
 describe('a held reading is never lost', () => {
   it('keeps every meeting that is still waiting, past the remembered bound', () => {

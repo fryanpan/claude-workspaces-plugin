@@ -93,6 +93,28 @@ export interface NotesQualityBoard {
     patch: { headline?: unknown; detail?: unknown },
     actor: { id: string; name: string; kind?: string },
   ): { ok: true } | { ok: false; error: string; message?: string };
+  /**
+   * Take an item back off a row — `TaskStore`'s own `withdrawReviewItem`.
+   *
+   * THE EXIT A STANDING CLAIM NEEDS. An item filed at a bad leg says the
+   * meeting's notes came out badly; a later leg of the SAME meeting can read
+   * them clean, and without this the item stands on a reader's queue making
+   * a claim the meeting has since disproved. Absent, such an item stays —
+   * the safe direction, since a person can always answer it.
+   */
+  withdrawReviewItem?(
+    taskId: string,
+    reviewItemId: string,
+    opts: { actor: { id: string; name: string; kind?: string }; reason?: string },
+  ): { ok: true } | { ok: false; error: string; message?: string };
+  /** The same for an item filed on the doc itself. `withdrawCommentReview`. */
+  withdrawOnDoc?(
+    docId: string,
+    threadId: string,
+    commentId: string,
+    reason: string,
+    actor: { id: string; name: string; kind?: string },
+  ): { ok: true } | { ok: false; error: string; message?: string };
 }
 
 /**
