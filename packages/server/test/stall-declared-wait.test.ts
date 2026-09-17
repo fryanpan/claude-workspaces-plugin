@@ -78,6 +78,9 @@ function loop(tasks: TaskRow[]) {
     ];
   };
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => world.now,
     snapshot,
     canReach: () => true,
@@ -126,7 +129,11 @@ describe('a task with a standing declared wait', () => {
     expect(h.sent).toHaveLength(0);
   });
 
-  it('the control: the same quiet task with no wait wakes, and is re-said every window', () => {
+  it('the control: the same quiet task with no wait DOES wake, once', () => {
+    // The control the silence above needs: without a declared wait the row is
+    // named at once. It is named once and not again — the half-hourly re-say
+    // is retired (`stall-repeat-suppression.test.ts`) — so what this proves is
+    // that the wait, not the suppression, is what kept the case above at zero.
     const h = loop([task('t-rollout', 'Agree the rollout window', 5 * 60 * MIN)]);
 
     h.tick();
@@ -135,7 +142,7 @@ describe('a task with a standing declared wait', () => {
 
     h.advance(3 * STALL_REPEAT_DEFAULT_MS);
 
-    expect(h.sent).toHaveLength(4);
+    expect(h.sent).toHaveLength(1);
   });
 
   it('comes back loud on the first tick after the wait lapses', () => {
@@ -156,12 +163,18 @@ describe('a task with a standing declared wait', () => {
     expect(h.sent[0]?.declaredWaits?.[0]?.lapsed).toBe(true);
   });
 
-  it('comes back loud when a short wait lapses on a task the lead had already been told about', () => {
+  it('comes back loud when a wait lapses on a task the lead had already been told about', () => {
     // The lapse must be news in its own right. Here the lead heard about
     // t-rollout before its wait was declared, and a quieter task beside it
     // holds the board's bucket steady across the lapse — so neither "a task
     // the lead never heard of" nor "the board crossed a window" would carry
     // the wake. Only forgetting a task while it waits does.
+    //
+    // The wait outlasts a repeat window on purpose: that is how long a task
+    // stays in the set the lead was last handed (`wake-sent-sets.ts`). A wait
+    // shorter than that ends with the lead's memory of the row still standing,
+    // and re-naming a row they were handed minutes ago is the repeat this
+    // whole change exists to stop.
     const tasks = [
       task('t-index', 'Trim the index writer', 100 * MIN),
       task('t-rollout', 'Agree the rollout window', 40 * MIN),
@@ -171,22 +184,25 @@ describe('a task with a standing declared wait', () => {
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]?.rows?.map((row) => row.id)).toEqual(['t-index', 't-rollout']);
 
-    (tasks[1] as TaskRow).externalWait = waitOn('the fleet restart', h.now(), 10 * MIN);
+    (tasks[1] as TaskRow).externalWait = waitOn(
+      'the fleet restart',
+      h.now(),
+      STALL_REPEAT_DEFAULT_MS + 10 * MIN,
+    );
     h.advance(5 * MIN);
     expect(h.sent).toHaveLength(1);
 
-    h.advance(10 * MIN);
+    h.advance(STALL_REPEAT_DEFAULT_MS + 10 * MIN);
 
     expect(h.sent).toHaveLength(2);
     expect(h.sent[1]?.changed?.rows?.map((row) => row.id)).toEqual(['t-rollout']);
-    expect(h.sent[1]?.changed?.escalated).toBeUndefined();
   });
 });
 
 describe('a wake that fires for another reason', () => {
   it('lists waiting tasks only as declared waits, never under "stopped moving"', () => {
-    // The live board's shape: two waiting tasks and an ask filed nowhere,
-    // which is re-said every window it stays unfiled.
+    // The live board's shape: two waiting tasks beside one that simply
+    // stopped, which is what the one wake is about.
     const tasks = [
       task('t-rollout', 'Agree the rollout window', 5 * 60 * MIN, {
         externalWait: waitOn('the fleet restart', START - 20 * MIN, 8 * 60 * MIN),
@@ -194,20 +210,28 @@ describe('a wake that fires for another reason', () => {
       task('t-palette', 'Settle the chart palette', 4 * 60 * MIN, {
         externalWait: waitOn('a peer landing the token export', START - 20 * MIN, 8 * 60 * MIN),
       }),
-      task('t-copy', 'Pick the empty-state copy', 6 * 60 * MIN, { ownerKind: 'person' }),
+      // A plain stall, quiet with nothing explaining it: an agent owns it and
+      // nobody has declared anything. It used to be a person-owned row with
+      // the ask filed nowhere, which no longer wakes anyone at all — that
+      // reading goes to the owner's queue (`waiting-unfiled-escalation.ts`)
+      // rather than to the lead. Either way the row here is only the REASON
+      // the frame exists; what is asserted is where the waiting two appear.
+      task('t-copy', 'Pick the empty-state copy', 6 * 60 * MIN),
     ];
     const h = loop(tasks);
-    expect(h.verdict().unfiled.map((row) => row.id)).toEqual(['t-copy']);
+    // The gate judges all three stalled; the nudger is what drops the two
+    // with a standing wait on them.
+    expect(h.verdict().stalled.map((row) => row.id)).toContain('t-copy');
 
     h.tick();
     h.advance(2 * STALL_REPEAT_DEFAULT_MS);
 
-    expect(h.sent.length).toBeGreaterThan(1);
+    expect(h.sent).toHaveLength(1);
     for (const frame of h.sent) {
-      expect(frame.stalledCount).toBe(0);
-      expect(frame.rows).toBeUndefined();
+      expect(frame.stalledCount).toBe(1);
+      expect(frame.rows?.map((row) => row.id)).toEqual(['t-copy']);
       expect(frame.taskId).toBe('t-copy');
-      expect(frame.unfiled?.map((row) => row.id)).toEqual(['t-copy']);
+      expect(frame.unfiled).toBeUndefined();
       expect(frame.declaredWaits?.map((wait) => wait.id).sort()).toEqual([
         't-palette',
         't-rollout',

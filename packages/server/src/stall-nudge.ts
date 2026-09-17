@@ -83,6 +83,14 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { ParallelismCapSummary } from './ready-nudge.ts';
 import {
+  STALL_MOVED_WITHIN_DEFAULT_MS,
+  checkInTokens,
+  everyNamedTaskMoved,
+  rowBucketTokens,
+  undeterminedTokens,
+  withoutPersonBlocked,
+} from './stall-frame-news.ts';
+import {
   type AskedBackRow,
   type DeclaredWaitRow,
   type HeldItemRow,
@@ -94,6 +102,7 @@ import {
 } from './stall-gate.ts';
 import type { UngatedUiRow } from './ui-review-gate.ts';
 import type { UnansweredThreadRow } from './unanswered-thread.ts';
+import { type SentSetsJson, WakeSentSets } from './wake-sent-sets.ts';
 
 /**
  * How long a row must stay quiet before the wake says it AGAIN.
@@ -548,6 +557,12 @@ export interface StallNudgerOptions {
    *  Defaults to `CHECK_IN_REPEAT_DEFAULT_MS`. */
   checkInRepeatMs?: number;
   repeatMs?: number;
+  /**
+   * A frame whose every named task moved inside this window is not sent yet
+   * (`everyNamedTaskMoved`). Defaults to `STALL_MOVED_WITHIN_DEFAULT_MS`, an
+   * hour; `0` turns the rule off.
+   */
+  movedWithinMs?: number;
   now?: () => number;
   /**
    * Where a condition the wake could not evaluate is written when there is no
@@ -601,6 +616,9 @@ interface StampFile {
   stamps: Record<string, string>;
   /** workspaceId → rowId → the bucket the row was last named under. */
   told?: Record<string, Record<string, string>>;
+  /** workspaceId → session → the ids its last delivered frame named
+   *  (`wake-sent-sets.ts`). Additive: an older file has none. */
+  sent?: SentSetsJson;
   // A file written by an earlier build may also carry `toldAt` and
   // `undeliverable` maps — the escalation's old clocks. They are ignored:
   // the escalation runs on liveness now (`stall-escalation.ts`) and reads
@@ -775,6 +793,14 @@ export class StallNudger {
   private readonly repeatMs: number;
   private readonly leadHeldMs: number;
   private readonly checkInRepeatMs: number;
+  private readonly movedWithinMs: number;
+  /**
+   * The task set each session's last delivered frame named, per board. The
+   * last question asked before a frame goes out: a frame naming exactly what
+   * its reader was last handed is not sent, whatever the stamp says changed.
+   * Persisted beside the stamps, so a restart does not re-send a set.
+   */
+  private readonly sentSets: WakeSentSets;
   private readonly report: (message: string) => void;
   /** The stamp each workspace was last woken for. */
   private readonly armed = new Map<string, string>();
@@ -842,6 +868,8 @@ export class StallNudger {
     this.repeatMs = opts.repeatMs ?? STALL_REPEAT_DEFAULT_MS;
     this.leadHeldMs = opts.leadHeldMs ?? STALL_QUIET_DEFAULT_MS;
     this.checkInRepeatMs = opts.checkInRepeatMs ?? CHECK_IN_REPEAT_DEFAULT_MS;
+    this.movedWithinMs = opts.movedWithinMs ?? STALL_MOVED_WITHIN_DEFAULT_MS;
+    this.sentSets = new WakeSentSets(this.repeatMs);
     this.report = opts.report ?? ((message) => console.error(message));
     this.stampFile = opts.stampFile ?? null;
     this.loadStamps();
@@ -870,12 +898,17 @@ export class StallNudger {
       // whole, because the keep-moving measurement reads it too.
       const { board, waited } = withoutStandingWaits(snapshot);
       this.forgetWhileWaiting(board.workspaceId, waited);
+      // The fleet pass reads the board WITH its person-blocked rows: that is
+      // the path that puts them on the owner's queue. The lead's wake and the
+      // dead-board escalation read it without, because nothing an agent can
+      // do unblocks a task a person owns (`withoutPersonBlocked`).
       read.push(board);
-      this.considerBoard(board, now);
+      const agentsView = withoutPersonBlocked(board);
+      this.considerBoard(agentsView, now);
       // After the wake, so a row told for the first time on this very tick is
       // measured from now and cannot escalate in the same pass. Isolated: a
       // filer that throws must cost its own board, never the boards behind it.
-      this.escalate(board, now);
+      this.escalate(agentsView, now);
     }
     // The one finding that belongs to no board: an unfiled wait the lead was
     // told about a window ago and still nobody has filed. After every board,
@@ -896,6 +929,7 @@ export class StallNudger {
     for (const key of this.checkInTold.keys()) {
       if (!live.has(key.slice(0, key.indexOf('|')))) this.checkInTold.delete(key);
     }
+    this.sentSets.retain(live);
     this.saveStamps();
   }
 
@@ -986,6 +1020,7 @@ export class StallNudger {
     if (board.retired || lead === undefined) {
       this.armed.delete(key);
       this.held.delete(key);
+      this.sentSets.observe(key, [], now);
       // …but an unreadable row on a board with no lead is exactly the case
       // the reporter exists for, so it is named BEFORE returning.
       this.reportUnevaluable(board);
@@ -1009,6 +1044,30 @@ export class StallNudger {
     // Filtered HERE rather than in `changeOn`, because this finding's repeat
     // is its own clock and the stamp must never see a row it is holding back.
     const checkIn = this.dueCheckIns(key, board.checkIn ?? [], now);
+    // Which due window a check-in row is in, as the last telling dates it —
+    // the same reading `dueCheckIns` just made, so the token a tick observes
+    // and the token it names can only ever agree. Read BEFORE the frame goes,
+    // because delivering it moves the row to the next window.
+    const checkInWindow = (id: string): number | undefined => this.checkInTold.get(`${key}|${id}`);
+    // Every token the board could name this pass, whether or not a frame goes
+    // out and whether or not a check-in is due yet, so a token stays
+    // remembered in the sent sets for as long as it is still a finding. A
+    // check-in that has merely not come round again must not be forgotten and
+    // then re-sent as if it were a new one — which is why the check-in tokens
+    // here read the FULL list and not `checkIn`, and why they carry the window
+    // (`checkInTokens`): this pass's window must stay remembered, and the next
+    // one must not be mistaken for it.
+    const boardIds = this.newsIds(board, held, askedBack, unanswered, ungatedUi, unresumed);
+    this.sentSets.observe(
+      key,
+      [
+        ...boardIds,
+        ...rowBucketTokens([...board.stalled, ...board.unfiled]),
+        ...checkInTokens(board.checkIn ?? [], checkInWindow),
+        ...undeterminedTokens(board.undetermined),
+      ],
+      now,
+    );
     if (
       board.stalled.length === 0 &&
       board.unfiled.length === 0 &&
@@ -1030,7 +1089,7 @@ export class StallNudger {
     // high-water mark, because a row excluded from one and counted in the
     // other would put the clock back through the side door.
     const clock = this.clockRows(board, held, askedBack);
-    const stamp = this.stampFor(board, held, askedBack, unanswered, ungatedUi, unresumed, clock);
+    const stamp = this.stampFor(boardIds, board, clock);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -1067,7 +1126,7 @@ export class StallNudger {
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
     const anchor = stallAnchor(board, held, askedBack, unanswered, ungatedUi, checkIn, unresumed);
-    const delivered = this.emit(key, to.agentId, {
+    const frame: StallNudgeFrame = {
       event: STALL_EVENT,
       workspaceId: key,
       ...(anchor
@@ -1113,11 +1172,38 @@ export class StallNudger {
       ...(memory.firstWake ? {} : { changed: change }),
       ...(to.escalatedFrom !== undefined ? { escalatedFrom: to.escalatedFrom } : {}),
       ts: now,
-    });
+    };
+    // Every task it names moved inside the hour: not yet, and nothing is
+    // recorded — the wake stays owed, so the tick a named task crosses the
+    // window sends it with everything the stamp saw change since.
+    if (everyNamedTaskMoved(frame, this.movedWithinMs)) return;
+    // What this frame names — the stamp's own tokens, so a second hold, a new
+    // question and a person's new comment all read as different findings,
+    // WITHOUT the escalation bucket the stamp carries in front of them. That
+    // omission is the rule: a board whose oldest row merely crossed another
+    // repeat window is naming exactly what it named last time.
+    const named = [
+      ...boardIds,
+      ...rowBucketTokens([...board.stalled, ...board.unfiled]),
+      ...checkInTokens(checkIn, checkInWindow),
+      ...undeterminedTokens(board.undetermined),
+    ];
+    // The same findings this session was last handed: silent, but RECORDED the
+    // way a board with no change is, so the escalation bucket is read against
+    // the set the board actually has. A set that gained or lost one is not a
+    // repeat, and nor is one whose tokens were forgotten after a whole repeat
+    // window off the findings (`wake-sent-sets.ts`).
+    if (this.sentSets.nothingNew(key, to.agentId, named)) {
+      this.armed.set(key, stamp);
+      this.rememberHighWater(key, clock, memory.rows);
+      return;
+    }
+    const delivered = this.emit(key, to.agentId, frame);
     // Nothing below is recorded for a wake nobody took: the stamp, the told
     // rows and the check-in clocks all assert that the lead has heard.
     if (!delivered) return;
     this.armed.set(key, stamp);
+    this.sentSets.record(key, to.agentId, named, now);
     // Recorded only now, after a delivered wake — a row named while the lead
     // held no stream must stay news, or the lead comes back to a board that
     // has decided it told them.
@@ -1445,41 +1531,21 @@ export class StallNudger {
   }
 
   /**
-   * Which rows are stuck, what kind of stuck, and how many repeat windows deep
-   * THE BOARD is. One string, so a new stall, a recovery, a row changing
-   * bucket and the board escalating all arm the wake through the same door.
-   *
-   * The quiet time is QUANTISED rather than carried exactly, and that is the
-   * whole escalation design: a raw duration changes on every tick and would
-   * make the stamp a clock, waking the lead every minute over a row they have
-   * already seen.
-   *
-   * ── Why the window is the board's and not each row's ──────────────────
-   *
-   * It was per-row first, and that amortises catastrophically. Every stalled
-   * row crosses its own boundary at its own wall-clock moment, each crossing
-   * moves the stamp, and the ceiling becomes one wake per row per window
-   * rather than one per board. On the boards this shipped against — 32
-   * eligible rows on one, 24 on another — that is seven or eight wakes an hour
-   * forever, with nothing about the board having changed. The frugality rules
-   * at the top of this file were doing their job on the SET and being
-   * completely defeated on the clock.
-   *
-   * So the bucket is computed once, from the OLDEST row: one re-wake per board
-   * per window. Escalation survives intact — the board still gets louder the
-   * longer its worst row sits — and the row ids stay in the stamp, so a
-   * genuinely new stall still fires immediately rather than waiting out
-   * somebody else's window.
+   * Every token a frame would name, deduped and sorted. The stamp is built
+   * from these and so is the per-session sent set (`wake-sent-sets.ts`), and
+   * they must be the same tokens: the stamp decides whether the BOARD got
+   * worse, the sent set whether this READER has already been handed exactly
+   * this, and a reader handed a token the stamp never saw would be woken by a
+   * finding nothing is arming.
    */
-  private stampFor(
+  private newsIds(
     board: StallSnapshot,
     held: readonly HeldItemRow[],
     askedBack: readonly AskedBackRow[],
     unanswered: readonly UnansweredThreadRow[],
     ungatedUi: readonly UngatedUiRow[],
     unresumed: readonly UnresumedRow[],
-    clock: readonly StalledRow[],
-  ): string {
+  ): string[] {
     const rows = [...board.stalled, ...board.unfiled];
     // Ids alone, without the bucket they used to carry. A row changing bucket
     // is most often the lead's OWN action landing — dispatching a worker moves
@@ -1531,6 +1597,41 @@ export class StallNudger {
         ...unresumed.map((row) => `lift:${row.id}@${row.liftedAt}`),
       ]),
     ).sort();
+    return ids;
+  }
+
+  /**
+   * Which rows are stuck, what kind of stuck, and how many repeat windows deep
+   * THE BOARD is. One string, so a new stall, a recovery, a row changing
+   * bucket and the board escalating all arm the wake through the same door.
+   *
+   * The quiet time is QUANTISED rather than carried exactly, and that is the
+   * whole escalation design: a raw duration changes on every tick and would
+   * make the stamp a clock, waking the lead every minute over a row they have
+   * already seen.
+   *
+   * ── Why the window is the board's and not each row's ──────────────────
+   *
+   * It was per-row first, and that amortises catastrophically. Every stalled
+   * row crosses its own boundary at its own wall-clock moment, each crossing
+   * moves the stamp, and the ceiling becomes one wake per row per window
+   * rather than one per board. On the boards this shipped against — 32
+   * eligible rows on one, 24 on another — that is seven or eight wakes an hour
+   * forever, with nothing about the board having changed. The frugality rules
+   * at the top of this file were doing their job on the SET and being
+   * completely defeated on the clock.
+   *
+   * So the bucket is computed once, from the OLDEST row: one re-wake per board
+   * per window. Escalation survives intact — the board still gets louder the
+   * longer its worst row sits — and the row ids stay in the stamp, so a
+   * genuinely new stall still fires immediately rather than waiting out
+   * somebody else's window.
+   */
+  private stampFor(
+    ids: readonly string[],
+    board: StallSnapshot,
+    clock: readonly StalledRow[],
+  ): string {
     // The oldest row speaks for the board — of the rows the clock may speak
     // for at all (`clockRows`). `0` on a board whose only finding is
     // unreadable rows, which is right: there is no silence to escalate. `0`
@@ -1653,6 +1754,10 @@ export class StallNudger {
     // — so every row still here is news by its own clock, and it does not ride
     // the stamp. That is the one departure from the stamp rule in this method,
     // and it is deliberate: a missed check-in repeats per task per window.
+    // Since 2026-09-17 the sent sets have a say as well, and this is the one
+    // finding whose token had to carry a WINDOW rather than a row to survive
+    // them (`checkInTokens`) — a bare row id sits on the board between windows
+    // and would make the second ask a repeat of the first.
     if (
       !escalated &&
       rows.length === 0 &&
@@ -1794,6 +1899,7 @@ export class StallNudger {
           map.set(id, { bucket: UNKNOWN_BUCKET, seenAt: now });
         if (map.size > 0) this.told.set(workspaceId, map);
       }
+      this.sentSets.load(parsed.sent, now);
       this.lastPersisted = this.serializeStamps();
     } catch {
       this.armed.clear();
@@ -1822,6 +1928,7 @@ export class StallNudger {
       version: STAMP_FORMAT_VERSION,
       stamps,
       told,
+      sent: this.sentSets.toJSON(),
     };
     return `${JSON.stringify(file, null, 2)}\n`;
   }

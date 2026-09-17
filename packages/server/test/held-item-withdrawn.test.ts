@@ -166,6 +166,9 @@ function nudger(f: ReturnType<typeof fake>) {
     stalls,
     toFilers,
     nudger: new StallNudger({
+      // Off: this file's subject is not the moved-within-the-hour rule
+      // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+      movedWithinMs: 0,
       now: f.now,
       snapshot: () => [board()],
       canReach: (_ws, agentId) => agentId === LEAD || agentId === FILER.id,

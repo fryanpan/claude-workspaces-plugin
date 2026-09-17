@@ -18,11 +18,13 @@ import type { ReviewJudgeInput, ReviewJudgeVerdict } from '../src/review-judge.t
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { REVIEW_ITEM_HELD_EVENT } from '../src/stall-nudge.ts';
 import type { Task } from '../src/tasks.ts';
-import { listenFrames, waitForFrames } from './doc-activity-stall-harness.ts';
+import { listenFrames, settle, waitForFrames } from './doc-activity-stall-harness.ts';
 import { waitFor } from './wait-for.ts';
 
 const PERSON = { id: 'known-reader', name: 'Reader', kind: 'known', color: '#2e7dd7' };
 const BUILDER = { id: 'agent-millwright', name: 'Millwright', kind: 'agent' };
+/** A second session on the same board — the control for who reads a hold. */
+const SCOUT = { id: 'agent-saltmarsh', name: 'Saltmarsh', kind: 'agent' };
 const SHOT = 'https://example.com/phone.png';
 const SENTRY_REASON = 'An agent can read the error tracker for this alarm itself.';
 
@@ -104,18 +106,19 @@ async function report(
   lineId: string,
   verdictName: string,
   proof?: Array<{ text: string; url?: string }>,
+  author: { id: string; name: string; kind: string } = BUILDER,
 ): Promise<{ status: number; body: ReportBody }> {
   const r = await post(`/workspaces/${ws}/tasks/${taskId}/done-when/report`, {
-    author: BUILDER,
+    author,
     lines: [{ id: lineId, verdict: verdictName, ...(proof ? { proof } : {}) }],
   });
   return { status: r.status, body: (await r.json()) as ReportBody };
 }
 
-async function builderStream() {
-  await post(`/workspaces/${ws}/agents`, { agentId: BUILDER.id, runtime: 'claude-code-local' });
+async function builderStream(agentId: string = BUILDER.id) {
+  await post(`/workspaces/${ws}/agents`, { agentId, runtime: 'claude-code-local' });
   const res = await fetch(
-    `${base}/workspaces/${ws}/events:stream?agentId=${encodeURIComponent(BUILDER.id)}`,
+    `${base}/workspaces/${ws}/events:stream?agentId=${encodeURIComponent(agentId)}`,
     { headers: { accept: 'text/event-stream' } },
   );
   const stream = listenFrames(res);
@@ -209,12 +212,18 @@ describe('an owner check passes the same gate a hand-written item does', () => {
     expect(body.held?.[0]?.lineId).toBe(lineId);
     expect(body.held?.[0]?.heldReason).toBe(SENTRY_REASON);
     expect(body.held?.[0]?.message).toContain('report_done_when(');
+    // The whole address is in the reply the builder is already reading: the
+    // call that ends the hold names this line. So no frame is pushed at it as
+    // well — since 2026-09-17 a hold handed back in its own reply sends none,
+    // because a wake is the reader's whole turn and this one would name
+    // nothing the caller did not already hold.
+    expect(body.held?.[0]?.message).toContain(`id: "${lineId}"`);
     expect(await onQueue(taskId)).toHaveLength(0);
-
-    await waitForFrames(builder.frames, REVIEW_ITEM_HELD_EVENT, 1);
-    const frame = builder.frames.find((f) => f.event === REVIEW_ITEM_HELD_EVENT);
-    expect(frame?.data?.reason).toBe(SENTRY_REASON);
-    expect(String(frame?.data?.revise)).toContain(`id: "${lineId}"`);
+    // A frame would already be on the wire: the send is synchronous with the
+    // gate, and the reply above has landed. The control below is what proves
+    // this stream carries held frames at all on this board.
+    await settle();
+    expect(builder.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
 
     // The fix the hold asks for: the builder reads it and reports met itself,
     // which the owner rule allows while the check never reached the owner.
@@ -226,6 +235,33 @@ describe('an owner check passes the same gate a hand-written item does', () => {
     expect(after.doneWhen?.[0]?.verdict).toBe('met');
     expect(after.status).toBe('done');
     expect(typeof after.reviews?.[0]?.review.withdrawnAt).toBe('number');
+  });
+
+  it('MUTATION CONTROL: a hold whose filer is NOT the caller is still pushed', async () => {
+    // The rule is "no second copy for a caller who reads the hold in its own
+    // reply", not "no held frames". Here a second session reports the same
+    // line: the hold still belongs to the builder that marked it, who has no
+    // reply of its own to read, so the frame goes exactly as it always did.
+    await fresh();
+    const { taskId, lineId } = await lineTask(
+      'Reader is not paged for slow loads',
+      'No over-budget alarm in the error tracker for 24 hours after the deploy',
+    );
+    const builder = await builderStream();
+    await builderStream(SCOUT.id);
+    verdict = { ok: false, reason: SENTRY_REASON };
+    // The first report records the builder as the item's filer.
+    await report(taskId, lineId, 'owner', [{ text: 'the alarm view', url: SHOT }]);
+    await settle();
+    expect(builder.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
+
+    // Now a different session touches the same line.
+    await report(taskId, lineId, 'owner', [{ text: 'the alarm view', url: SHOT }], SCOUT);
+
+    await waitForFrames(builder.frames, REVIEW_ITEM_HELD_EVENT, 1);
+    const frame = builder.frames.find((f) => f.event === REVIEW_ITEM_HELD_EVENT);
+    expect(frame?.data?.reason).toBe(SENTRY_REASON);
+    expect(String(frame?.data?.revise)).toContain(`id: "${lineId}"`);
   });
 
   it('still refuses the builder a met on a check that reached the owner', async () => {

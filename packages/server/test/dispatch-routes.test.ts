@@ -26,8 +26,16 @@ import { seedBoard } from './workspace-seed.ts';
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
-/** Rows must out-quiet this window before the fake activity can matter. */
-const QUIET_MS = 250;
+/**
+ * Rows must out-quiet this window before the fake activity can matter.
+ *
+ * Halved from 250ms when the wake gained its second window: a frame is not
+ * spent while every task it would name moved inside the moved-within window,
+ * which the wiring derives as twice this one (`stall-frame-news.ts`). The
+ * waits that want a frame therefore say `2 * QUIET_MS`, and halving the
+ * window keeps each of them at the wall-clock cost it always had.
+ */
+const QUIET_MS = 150;
 
 type Frame = { event: string; data?: Record<string, unknown> };
 
@@ -302,10 +310,13 @@ describe('builder dispatches through the server', () => {
         await post(`/workspaces/${WS}/dispatches`, { taskId, worktreePath: worktree }),
       );
       expect(reg.dispatch.watching).toBe(false);
-      // The same silence the not-yet-stalled test above holds back on: a
-      // watcher that cannot see activity must not buy the row a longer leash,
-      // so this is exactly the pre-dispatch behavior, ordinary bucket and all.
-      await settle(QUIET_MS + 50);
+      // A watcher that cannot see activity must not buy the row a longer
+      // leash. What says so is the BUCKET on the frame below: an armed
+      // watcher would have made this row `builder-silent` by now, and it
+      // reads `in-progress`. The wait is the moved-within window rather than
+      // the gate's own, because no frame goes out under that one any more —
+      // the not-yet-stalled case above is what still holds at the short wait.
+      await settle(2 * QUIET_MS + 150);
 
       handle.nudgeStalls();
       const got = await waitForFrames(ctx.lead.frames, STALL_EVENT, 1);
@@ -515,7 +526,7 @@ describe('builder dispatches through the server', () => {
       const ctx = await boardWithLead();
       const taskId = await inProgressRow(ctx.workspaceId, 'Rank results by recency');
       await jj(await post(`/workspaces/${WS}/dispatches`, { taskId, worktreePath: worktree }));
-      await settle(QUIET_MS + 150);
+      await settle(2 * QUIET_MS + 150);
       fired.get(worktree)?.();
       await jj(
         await fetch(`${base}/workspaces/${WS}/dispatches/${encodeURIComponent(taskId)}`, {

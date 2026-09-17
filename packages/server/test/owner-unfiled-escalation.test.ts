@@ -19,12 +19,18 @@ import type { StallNudgeFrame, StallSnapshot } from '../src/stall-nudge.ts';
  * `stall-escalation.ts` — the other filer — fires only on a board where no
  * session is alive. So a board-declared unfiled ask on a LIVE board was told
  * to its lead every repeat window and went past nobody, however long the lead
- * ignored it. `stall-check/README.md`'s table gives one addressee chain for
- * "a task waits on a person and nothing is filed on that person's queue" and
- * does not split it by how the board came to know.
+ * ignored it.
  *
- * Asserted here: the aging, and that the item's words say which kind each
- * task is rather than telling the reader an agent wrote something it did not.
+ * ONE LADDER, TWO ADDRESSEES since 2026-09-17. Both buckets still age a full
+ * window before anything is filed, and there the paths part: an agent can end
+ * a `waiting-unfiled` row, so it climbs to Team Lead; nobody but a person can
+ * end a `blocked-on-owner-unfiled` one, so it skips the rung and lands on the
+ * owner's standing item as a record. The stall wake drops the same rows from
+ * the lead's frame, which is what makes this the ONLY surface they reach.
+ *
+ * Asserted here: the aging, which addressee each bucket reaches, and that the
+ * item's words say which kind each task is rather than telling the reader an
+ * agent wrote something it did not.
  *
  * All fixtures are synthetic — invented names on made-up boards. The repo is
  * public.
@@ -105,7 +111,7 @@ describe('a board-declared unfiled ask ages past its lead too', () => {
     expect(serverItems(store, ws)).toHaveLength(1);
   });
 
-  it('goes to Team Lead first, exactly as the other bucket does', () => {
+  it('goes to the owner\u2019s queue, never to Team Lead', () => {
     const { store, ws, ids } = boardWith(['Pick the launch date']);
     const sent: Array<{ agentId: string; frame: StallNudgeFrame }> = [];
     const teamLead: TeamLeadReach = {
@@ -122,9 +128,37 @@ describe('a board-declared unfiled ask ages past its lead too', () => {
     escalations.onTick([snapshot(ws, rows)], START);
     escalations.onTick([snapshot(ws, rows)], START + WINDOW);
 
+    // Team Lead is an agent, and no agent can hand this row back: the board
+    // itself says a person owns it. Waking one spends a turn that ends where
+    // it started, which is part of what the 11% measurement was made of. So
+    // the rung is skipped and the row lands on the one surface a person reads.
+    // It ages exactly as before (the case above) — only the addressee moved.
+    expect(sent).toHaveLength(0);
+    expect(serverItems(store, ws)).toHaveLength(1);
+  });
+
+  it('CONTROL: the agent-declared bucket still climbs to Team Lead', () => {
+    // Same board, same reachable Team Lead, same window — and a row an agent
+    // CAN end. Without this, the case above would pass against a build that
+    // had simply stopped escalating.
+    const { store, ws, ids } = boardWith(['Pick the launch date']);
+    const sent: Array<{ agentId: string; frame: StallNudgeFrame }> = [];
+    const teamLead: TeamLeadReach = {
+      agentId: 'agent-team-lead',
+      boards: () => [ws],
+      canReach: () => true,
+      send: (_ws, agentId, frame) => {
+        sent.push({ agentId, frame });
+        return 1;
+      },
+    };
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW, teamLead });
+    const rows = [row(ids[0] as string, 'Pick the launch date', WAITING_UNFILED_BUCKET)];
+    escalations.onTick([snapshot(ws, rows)], START);
+    escalations.onTick([snapshot(ws, rows)], START + WINDOW);
+
     expect(sent).toHaveLength(1);
-    expect((sent[0]?.frame.unfiled ?? []).map((r) => r.bucket)).toEqual([OWNER_UNFILED_BUCKET]);
-    // The owner's queue is untouched while Team Lead is reachable.
+    expect((sent[0]?.frame.unfiled ?? []).map((r) => r.bucket)).toEqual([WAITING_UNFILED_BUCKET]);
     expect(serverItems(store, ws)).toHaveLength(0);
   });
 

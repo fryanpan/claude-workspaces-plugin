@@ -9,7 +9,7 @@ import type { DocStore } from '../doc-store.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
-import type { ReviewGate } from '../review-gate-types.ts';
+import type { GateRunOpts, ReviewGate } from '../review-gate-types.ts';
 import type { SecretWriter } from '../secret-store.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -138,14 +138,14 @@ export interface TaskRoutesContext {
     /** `lessSpecific`: the filer's own reason why the honest answer is less
      *  specific than a standing hold asked for. Acted on only when the item
      *  is held. */
-    runOpts?: { lessSpecific?: string },
+    runOpts?: GateRunOpts,
   ) => Promise<ReviewGate>;
   /** The same gate for a ticket that IS a decision; `undefined` when the
    *  ticket is not one, so a caller cannot report a judgement never made. */
   judgeTaskDecision: (
     task: Task,
     author: { id: string; name: string; kind?: string },
-    runOpts?: { lessSpecific?: string },
+    runOpts?: GateRunOpts,
   ) => Promise<ReviewGate | undefined>;
   /** One hold out of a filed item's and the ticket decision's. */
   mergedHold: (

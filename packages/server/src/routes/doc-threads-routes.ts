@@ -575,14 +575,11 @@ export async function handleDocThreadRoutes(
       // the verdict was about the old words. Without this a hold on
       // this surface would be a dead end — the filer's one remedy
       // would leave the item held for words the judge never read.
-      const gate = await judgeThreadReview(
-        docId,
-        threadId,
-        commentId,
-        res.review,
-        user,
-        lessSpecific !== undefined ? { lessSpecific } : {},
-      );
+      const gate = await judgeThreadReview(docId, threadId, commentId, res.review, user, {
+        ...(lessSpecific !== undefined ? { lessSpecific } : {}),
+        // The hold rides back in this reply's `heldFields`.
+        heldInReply: true,
+      });
       // Watchers hear a revision the same way they hear the original
       // ask: the item changed, and anyone holding the old words is
       // holding words the reader can no longer see. Not while it is
