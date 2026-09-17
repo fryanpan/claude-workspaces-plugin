@@ -95,16 +95,44 @@ describe('createBoardHomeRegion', () => {
     // measured eating; the poll below re-runs this every 1.5s.
     const h = home();
     serve({ generating: false });
-    return h.loadHome().then(() => {
-      expect(h.scheduled).toHaveLength(1);
+    return h.loadHome().then(async () => {
+      // The brief and the notes no task took each repaint once, both through
+      // the guard.
+      await vi.waitFor(() => expect(h.scheduled).toHaveLength(2));
     });
+  });
+
+  it('reads the notes no task took from their own route and hands them to the activity pane', async () => {
+    const h = home();
+    const urls: string[] = [];
+    const agents = [
+      {
+        agent: 'Riverbend',
+        placement: 'unattachable',
+        latestAt: 5,
+        notes: [{ at: 5, kind: 'turn', text: 'Parked.' }],
+        more: 0,
+      },
+    ];
+    serve({ agents }, (url) => urls.push(url));
+    await h.loadAgentNotes();
+    expect(urls).toEqual(['/workspaces/w-1/agent-notes']);
+    h.renderHomeRegion();
+    expect(homeActivityData.value.agentNotes?.map((a) => [a.agent, a.placement])).toEqual([
+      ['Riverbend', 'unattachable'],
+    ]);
+    // A read that never reached the server keeps what was there.
+    serve(null);
+    await h.loadAgentNotes();
+    h.renderHomeRegion();
+    expect(homeActivityData.value.agentNotes).toHaveLength(1);
   });
 
   it('keeps polling while the server says a brief is still being generated', async () => {
     const h = home();
     let calls = 0;
-    serve({ generating: true }, () => {
-      calls += 1;
+    serve({ generating: true }, (url) => {
+      if (url.includes('/home?')) calls += 1;
     });
     await h.loadHome();
     expect(calls).toBe(1);

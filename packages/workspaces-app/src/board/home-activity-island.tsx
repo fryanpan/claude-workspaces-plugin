@@ -26,6 +26,11 @@
  *
  * Groups are keyed on the task id, so a signal write that changes one task's
  * lines leaves every other group's DOM node IDENTICAL.
+ *
+ * Below the task groups, "Not on a task": end-of-turn notes no task took, one
+ * group per agent, headed by the state they are in (`agent-notes-model.ts`).
+ * The by-task rule cannot apply to a note with no task, so these are the one
+ * place the pane names an agent first.
  */
 import type { Thread, User } from '@claude-workspaces/core';
 import { signal } from '@preact/signals';
@@ -38,6 +43,7 @@ import {
   DENIAL_PREFIX,
   homeActivity,
 } from './activity-model.ts';
+import { type AgentNoteGroup, type AgentNotesWire, agentNoteGroups } from './agent-notes-model.ts';
 import { selectWordAtPoint, useSelectionPill } from './selection-pill.ts';
 import { NOBODY, type OpenComment, ThreadCard, draftThread } from './thread-card.tsx';
 
@@ -56,7 +62,14 @@ export interface ActivityHandlers {
 /** The one write target the vanilla side has: the projection as it stands.
  *  The island does the grouping, so the loader never learns the pane's
  *  rules and a rule change never touches board-app. */
-export const homeActivityData = signal<ActivityInput>({ tasks: [], goals: [], now: 0 });
+export const homeActivityData = signal<HomeActivityInput>({ tasks: [], goals: [], now: 0 });
+
+/** The projection, plus the board's notes no task took — read from their own
+ *  route (`GET /workspaces/:ws/agent-notes`), because they are not on any
+ *  task in the projection. Absent is "not read yet", drawn as none. */
+export interface HomeActivityInput extends ActivityInput {
+  agentNotes?: AgentNotesWire[];
+}
 
 /** The one line the pane shows when nothing has moved inside the window.
  *  Names the
@@ -229,9 +242,59 @@ function Group(props: {
   );
 }
 
+/**
+ * One agent's notes that no task took (`agent-notes-model.ts`): the agent's
+ * name and the state its notes are in, then the lines. The header opens a
+ * task only when there is one — an `attached` agent's latest note. Otherwise
+ * it is plain text, because there is nowhere to go. No comment pill: a
+ * comment is a thread on a task, and these have none.
+ */
+function AgentGroup(props: { group: AgentNoteGroup; onOpenTask: (taskId: string) => void }) {
+  const { group } = props;
+  const taskId = group.taskId;
+  const head = (
+    <>
+      <span class="board-review-row-title acti-title-text">
+        <span class="acti-agent-name">{group.agent}</span>
+        {' · '}
+        <span class="acti-state">{group.state}</span>
+      </span>
+      <span class="acti-quiet acti-quiet-neutral">{group.age}</span>
+    </>
+  );
+  return (
+    <div
+      class="acti-group acti-agent-group"
+      data-agent={group.agent}
+      data-placement={group.placement}
+    >
+      {taskId ? (
+        <button
+          type="button"
+          class="board-review-row acti-head acti-agent-head"
+          onClick={() => props.onOpenTask(taskId)}
+        >
+          {head}
+        </button>
+      ) : (
+        <div class="board-review-row acti-head acti-agent-head acti-agent-head-static">{head}</div>
+      )}
+      {(group.notes.length > 0 || group.more > 0) && (
+        <div class="acti-notes">
+          {group.notes.map((n) => (
+            <NoteLine key={`${n.at}:${n.kind}:${n.text}`} note={n} />
+          ))}
+          {group.more > 0 && <div class="acti-more">{`+${group.more} more`}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HomeActivity(props: { handlers: ActivityHandlers; user: User }) {
   const input = homeActivityData.value;
   const groups = homeActivity(input);
+  const agentGroups = agentNoteGroups(input.agentNotes ?? [], input.tasks, input.now);
   const listRef = useRef<HTMLDivElement | null>(null);
   const pill = useSelectionPill(listRef, true);
   const [open, setOpen] = useState<OpenComment | null>(null);
@@ -275,7 +338,9 @@ function HomeActivity(props: { handlers: ActivityHandlers; user: User }) {
       <div class="board-home-review-head">
         <h2 class="board-home-heading">Recent activity</h2>
       </div>
-      {groups.length === 0 && <p class="board-home-quiet">{ACTIVITY_EMPTY}</p>}
+      {groups.length === 0 && agentGroups.length === 0 && (
+        <p class="board-home-quiet">{ACTIVITY_EMPTY}</p>
+      )}
       {groups.length > 0 && (
         <div class="acti-list" ref={listRef}>
           {groups.map((g) => (
@@ -288,6 +353,14 @@ function HomeActivity(props: { handlers: ActivityHandlers; user: User }) {
               onPosted={(thread) => setOpen((o) => (o ? { ...o, thread } : o))}
               onClose={() => setOpen(null)}
             />
+          ))}
+        </div>
+      )}
+      {agentGroups.length > 0 && (
+        <div class="acti-list acti-agents">
+          <h3 class="acti-subhead">Not on a task</h3>
+          {agentGroups.map((g) => (
+            <AgentGroup key={g.key} group={g} onOpenTask={props.handlers.onOpenTask} />
           ))}
         </div>
       )}

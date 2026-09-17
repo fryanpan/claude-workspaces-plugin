@@ -22,6 +22,7 @@
  */
 import type { User } from '@claude-workspaces/core';
 import { asksOf } from './activity-model.ts';
+import { type AgentNotesWire, parseAgentNotes } from './agent-notes-model.ts';
 import { type BoardState, fetchJson, send, showToast } from './board-actions.ts';
 import type { BoardTask } from './board-model.ts';
 import { type HomePayload, shouldPollHome } from './board-presence-model.ts';
@@ -61,10 +62,18 @@ export interface BoardHomeDeps {
 export interface BoardHomeRegion {
   renderHomeRegion(): void;
   loadHome(): Promise<void>;
+  /** Re-read only the notes no task took — what an `agent.noted` push asks
+   *  for. Not `loadHome`: that one can queue a model call for the brief. */
+  loadAgentNotes(): Promise<void>;
 }
 
 export function createBoardHomeRegion(deps: BoardHomeDeps): BoardHomeRegion {
   const { state, workspaceId, author, user, document, el, currentQueue, taskList, schedule } = deps;
+
+  // The board's notes no task took (`GET /workspaces/:ws/agent-notes`). A
+  // failed read keeps the last answer, like every REST-fed region; a share
+  // visitor is refused the route and so keeps the empty list.
+  let agentNotes: AgentNotesWire[] = [];
 
   function renderHomeRegion(): void {
     // Nav active state, all four destinations.
@@ -108,12 +117,28 @@ export function createBoardHomeRegion(deps: BoardHomeDeps): BoardHomeRegion {
       tasks: taskList(),
       goals: state.info?.goals ?? [],
       asks: asksOf(queue.items),
+      agentNotes,
       now,
     };
   }
 
+  async function loadAgentNotes(): Promise<void> {
+    const res = await fetchJson<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/agent-notes`,
+    );
+    if (res) agentNotes = parseAgentNotes(res);
+    schedule(renderHomeRegion);
+  }
+
   let homePollTimer: ReturnType<typeof setTimeout> | null = null;
   async function loadHome(): Promise<void> {
+    // Beside the brief, not inside it: its own route and its own failure, and
+    // not on the brief's 1.5s generating poll below.
+    void loadAgentNotes();
+    await loadBrief();
+  }
+
+  async function loadBrief(): Promise<void> {
     const res = await fetchJson<HomePayload>(
       // `format=json`: this address is also the board's Home TAB, and without
       // it the brief request comes back as the page's own HTML shell.
@@ -137,7 +162,7 @@ export function createBoardHomeRegion(deps: BoardHomeDeps): BoardHomeRegion {
     if (res?.generating) {
       if (state.homePollStarted === 0) state.homePollStarted = Date.now();
       if (shouldPollHome(res, state.homePollStarted, Date.now())) {
-        homePollTimer = setTimeout(() => void loadHome(), 1500);
+        homePollTimer = setTimeout(() => void loadBrief(), 1500);
       }
     } else {
       state.homePollStarted = 0;
@@ -174,5 +199,5 @@ export function createBoardHomeRegion(deps: BoardHomeDeps): BoardHomeRegion {
     await loadHome();
   }
 
-  return { renderHomeRegion, loadHome };
+  return { renderHomeRegion, loadHome, loadAgentNotes };
 }
