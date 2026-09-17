@@ -325,6 +325,18 @@ nameless voice holding 63% of the words.
   unnamed voice" beside its other measures, with the labels named
   (`unnamedVoiceBullets`, `scripts/rerun-meeting-report.ts`). By hand:
   `grep -oE '\[@(Room |Remote )?Speaker [^]]*\]' <notes.md> | sort | uniq -c`.
+- **What the carry can reach, counted with no model call.**
+  `bun scripts/speaker-carry-audit.ts --data-dir <dir> --doc <docId>` folds a
+  stored index two ways, per meeting and doc-wide. For each fold it reports
+  the turns and WORDS spoken by voices left without a name. It counts turns
+  and words, not bullets, so it does not replace the 87-of-140 line: counting
+  bullets again needs the note-taker, and that needs quota. On the 15
+  September meeting it reads 4 labels, 355 turns and 5,890 words. 64.5% of
+  the words are nameless under BOTH folds, and one label alone holds 62.7%,
+  which matches the 63% above by a separate route. The folds agree because
+  the carry only copies a typed name onto the other labels of the same voice.
+  A label nobody named in any leg has no name to copy. So if the bullet count
+  stays flat after a replay, a name is missing; the fix has not failed.
 
 ## A recording with nothing in it ends itself (2026-09-12)
 
