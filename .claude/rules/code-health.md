@@ -66,29 +66,22 @@ is read by the reviewer.
 
 ## An agent is only woken by news it can act on
 
-Two questions on any diff that adds or fans out a board or doc event.
+A diff that adds or fans out a board or doc event answers two questions.
 
-- **Does it tell an agent about its own action?** The MCP child drops a frame
-  whose actor is this session. A new event carries its actor in a field
-  `packages/mcp/src/self-authored.ts` already reads, or that file gains a rule
-  for it in the same PR. A frame with no identified actor is delivered, and
-  that is the safe direction.
-- **Does it exist for analytics?** An event that only the measurement log
-  reads does not ride the SSE fan-out. Put its name in
-  `ANALYTICS_ONLY_EVENTS` (`packages/server/src/review-items/analytics.ts`).
-  The test is who acts on the event, not which file wrote it:
-  `review_item.viewed` is on the list and `review_item.answered` is not,
-  although one function builds both. The audit log is written before any
-  listener runs, so the measurement keeps the row either way.
+- **Does it tell an agent about its own action?** Give the event an actor
+  field `packages/mcp/src/self-authored.ts` reads, so the MCP child can drop
+  the frame. An event whose actor cannot be identified is delivered, because
+  an agent cannot detect silence.
+- **Does it exist only for analytics?** Put its name in
+  `ANALYTICS_ONLY_EVENTS` (`packages/server/src/review-items/analytics.ts`) so
+  it stays off the SSE fan-out. The test is who acts on the event, not which
+  file wrote it.
 
-Both rules cost an agent a turn when they are missed, and one turn per event
-per attached session. Bryan asked for the second on 2026-09-17: "there's also
-no point sending [review_item.viewed] events to the agent … events just for
-analytics do not need to be sent to listening agents."
+A miss costs one turn per event per attached session.
 
 *Enforced by:* `packages/server/test/analytics-events-off-stream.test.ts` and
-`packages/server/test/self-echo-suppression.test.ts` for the events that exist
-today, and the reviewer's eye for a new one.
+`packages/server/test/self-echo-suppression.test.ts`; the reviewer's eye for a
+new event.
 
 ## The architecture map is current
 

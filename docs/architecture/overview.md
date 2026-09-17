@@ -568,21 +568,17 @@ could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
 **An agent gets no wake for an event it cannot act on.** Two rules give that,
-and neither one hides state. The next read shows the same board.
+and neither hides state.
 
-*Its own action.* Every board event and doc event names the actor who caused
-it. The MCP child drops a frame whose actor is this session, before the frame
-becomes a wake. The agent's own comment, review item, task move or attach then
-costs it no turn. The child drops the frame and the server does not, so every
-other reader still gets it. A frame with an actor the child cannot identify is
-always delivered, because an agent cannot detect silence. The rule and each
-family's attribution field are in `packages/mcp/src/self-authored.ts`.
+*Its own action.* The MCP child drops a frame whose actor is this session, so
+an agent's own comment, review item or task move costs it no turn. Every other
+reader still gets the frame, and one whose actor the child cannot identify is
+always delivered, because an agent cannot detect silence. Rules in
+`packages/mcp/src/self-authored.ts`.
 
-*An analytics event.* `review_item.viewed` records that a person opened a
-card. It changes no task and no status, and no page reads the frame. The
-server keeps it off the fan-out, next to `task.noted` and
-`dispatch.requested`. The audit log still gets the row, which is what the
-measurement reads. `review_item.answered` stays on the stream, because an
+*An analytics event.* `review_item.viewed` records that a person opened a card
+and changes nothing, so the server keeps it off the fan-out while the audit log
+still gets the row. `review_item.answered` stays on the stream, because an
 answer is the wake an agent waits for. The list is in
 `packages/server/src/review-items/analytics.ts`.
 
