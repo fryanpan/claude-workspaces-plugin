@@ -1382,17 +1382,28 @@ any reading. The record on disk carries `coverageSource` so it cannot be read
 back as a real zero, and the week's rollup leaves it out of every
 notes-derived total, counting it under `coverageUnknown` instead.
 
-**What stops the re-filing is comparing the VERDICT, not the words.** The
-filer holds the flags its standing item was filed with and revises only when
-a later leg's flags differ. Comparing the rendered words was the first
-version and could not work: every leg hears a longer transcript, so any count
-the item's detail interpolates differs at every stop while the reading says
-the identical thing — which is the 2026-09-15 shape exactly. A flag carries
-its own number in its own text, so a duplicate count going 3 to 40 or an
-uncovered share going 30% to 60% does revise. The cost, taken deliberately:
-the detail's supporting numbers keep the values they were filed with until
-the verdict itself moves, which is cheaper than re-asking a person a question
-they have already answered.
+**What stops the re-filing is comparing the VERDICT, not the words** —
+`notes-quality-verdict.ts`. The filer holds what its standing item says and
+revises only when a later leg says something else. Comparing the rendered
+words was the first version and could not work: every leg hears a longer
+transcript, so any count the item's detail interpolates differs at every stop
+while the reading says the identical thing, which is the 2026-09-15 shape
+exactly. Comparing the FLAGS was the second, and fixed only the unreadable
+path — `buildFlags` puts numbers in the text of the other six.
+
+So the verdict is the bars crossed, the counts behind them compared exactly,
+and the RATES behind them compared to within `REVISE_RATIO_BAND`. **A ratio
+moving is the denominator talking; a count moving is the meeting talking.** A
+second repeated bullet is a second defect and revises; an uncovered share
+drifting from 55% to 60% while the note-taker does exactly as well as before
+does not. The band is ten points, against a measured noise floor: a synthetic
+six-leg meeting with the hit rate pinned moved the rounded share on 815 of
+1,000 leg transitions, by a median of 2 points and a 90th percentile of 5.
+
+**And the band is measured against the value on the ITEM**, not against the
+previous leg. Against the previous leg, 55, 59, 63, 67 clears the band three
+times in a row and never revises, leaving the item twelve points out of date;
+against what the item says, the fourth leg crosses and revises once.
 
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw

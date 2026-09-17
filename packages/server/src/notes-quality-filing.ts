@@ -41,10 +41,12 @@
  * item re-judges it, which puts it back in front of its reader — so a flag
  * that cannot clear would walk a person back to the same unanswerable
  * question at every leg stop, which is what seven identical filings on one
- * meeting looked like from the reader's side (2026-09-15). The words filed
- * are remembered and compared, and a reading that produces the same headline
- * and the same detail is a re-check rather than a change of verdict. One
- * filing per genuine change, and none for a repeat.
+ * meeting looked like from the reader's side (2026-09-15). The VERDICT filed
+ * is remembered and compared — the bars crossed, the counts behind them, and
+ * the rates behind them to within a band — so a reading that says what the
+ * item already says is a re-check rather than a change of verdict. One filing
+ * per genuine change, and none for a repeat. What counts as a change, and why
+ * it is not the item's words, is `notes-quality-verdict.ts`.
  */
 
 import type { TickScheduler } from './meeting-notes.ts';
@@ -56,6 +58,7 @@ import {
   fileNotesQualityReview,
   filingWhere,
 } from './notes-quality-review.ts';
+import { type NotesQualityVerdict, verdictChanged, verdictOf } from './notes-quality-verdict.ts';
 
 /** A meeting, as every file on this path names one. */
 export interface MeetingIds {
@@ -84,8 +87,10 @@ interface Held {
   /** Where this meeting's one item went, once it has gone anywhere. */
   filed?: Filed;
   /** The verdict that item currently carries, so a re-check reaching the
-   *  same one does not re-judge it in front of its reader. */
-  verdict?: string;
+   *  same one does not re-judge it in front of its reader. Kept as the
+   *  STRUCTURE rather than as the words: the rates in it are compared with a
+   *  band against what the ITEM says — see `notes-quality-verdict.ts`. */
+  verdict?: NotesQualityVerdict;
   /** The resume grace, while one is armed. */
   timer?: unknown;
 }
@@ -197,23 +202,22 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
         });
 
   /**
-   * What a re-check is compared on: THE FLAGS, which are the verdict.
+   * Whether this reading says something the item does not already say.
    *
-   * Not the rendered words, which was the first version and was wrong. Every
-   * leg of a meeting sees a longer transcript, so any count the detail
-   * interpolates differs at every stop — and a reading that could not read
-   * the notes at all renders a different sentence each leg while saying the
-   * identical thing. Comparing words made the suppression unreachable for
-   * exactly the state it was written for.
+   * The rule and its reasoning are `notes-quality-verdict.ts`: bars and
+   * counts exactly, RATES with a band, and the band measured against the
+   * value ON THE ITEM rather than against the previous leg's reading — which
+   * is what makes a slow ramp eventually cross instead of sliding under the
+   * band forever.
    *
-   * A flag already carries its own number in its text, so a duplicate count
-   * going 3 to 40, or an uncovered share going 30% to 60%, changes this key
-   * and does revise. What it deliberately does not catch is the detail's
-   * SUPPORTING numbers moving while no bar is crossed: that leaves the item
-   * carrying the figures it was filed with until the verdict itself changes,
-   * which is the price of not re-asking a person a question they answered.
+   * Two earlier versions of this comparison were wrong in the same direction,
+   * and both are worth knowing before touching it. It compared the item's
+   * rendered words, which differ at every leg because the transcript grows.
+   * Then it compared the flags — whose TEXT carries those same growing
+   * numbers for six of the seven kinds.
    */
-  const verdictOf = (input: NotesQualityFileInput): string => JSON.stringify(input.report.flags);
+  const saysSomethingNew = (filed: NotesQualityVerdict, input: NotesQualityFileInput): boolean =>
+    verdictChanged(filed, verdictOf(input.report));
 
   /**
    * Rewrite the words of the item this meeting already has.
@@ -228,8 +232,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     input: NotesQualityFileInput,
     mem: Held,
   ): 'revised' | 'unchanged' | 'failed' => {
-    const verdict = verdictOf(input);
-    if (mem.verdict !== undefined && mem.verdict === verdict) return 'unchanged';
+    if (mem.verdict !== undefined && !saysSomethingNew(mem.verdict, input)) return 'unchanged';
     const board = deps.board?.();
     const review = wordsOf(input);
     if (!board || review === null) return 'failed';
@@ -254,7 +257,11 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       );
       return 'failed';
     }
-    mem.verdict = verdict;
+    // The item now says THIS, so this is what the next leg is banded
+    // against. Never the reading that produced it: a suppressed reading left
+    // the item where it was, and banding against the suppressed one is how a
+    // slow ramp never crosses.
+    mem.verdict = verdictOf(input.report);
     return 'revised';
   };
 
@@ -305,7 +312,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
             threadId: filing.threadId,
             commentId: filing.commentId,
           };
-    h.verdict = verdictOf(input);
+    h.verdict = verdictOf(input.report);
   };
 
   return {

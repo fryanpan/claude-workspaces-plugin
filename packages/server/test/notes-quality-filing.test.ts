@@ -339,6 +339,100 @@ describe('an unreadable meeting is filed once however much more it hears', () =>
     expect(board.revised).toEqual(['c-1']);
   });
 
+  /**
+   * A readable reading whose uncovered share is as close to `pct` as the
+   * transcript allows. `missed` ideas of `total` are absent from the notes,
+   * so the share is `missed / total` exactly — no rounding to reason about.
+   */
+  const atShare = (docId: string, total: number, missed: number): NotesQualityFileInput => {
+    const report = buildNotesQualityReport({
+      notes: `## Meeting notes\n- ${SPOKEN}`,
+      transcript: [
+        ...Array.from({ length: total - missed }, () => ({ text: SPOKEN })),
+        ...Array.from({ length: missed }, () => ({ text: UNNOTED })),
+      ],
+    });
+    expect(report.coverage.uncoveredShare).toBeCloseTo(missed / total, 10);
+    expect(report.flags.map((f) => f.kind)).toEqual(['coverage']);
+    return { workspaceId: 'w-harbour', docId, report };
+  };
+
+  it('rides out the drift a growing meeting produces on its own', () => {
+    // THE MEASURED SHAPE, lifted above the bar the flag fires at. Six legs
+    // of one meeting whose note-taking quality never changed, drifting
+    // 55%, 60%, 58%, 60%, 59%, 57% uncovered — the same 5-point spread a
+    // synthetic run measured with the hit rate pinned. Every one of those
+    // steps moves the rendered percentage and so the flag's words, and not
+    // one of them is news. Across 200 seeded runs of that shape, 82% of
+    // leg-to-leg transitions moved the rounded figure at all, so without the
+    // band this is the COMMON case rather than an edge.
+    const board = recordingDocBoard();
+    const filer = createNotesQualityFiler({
+      board: () => board,
+      actor: ACTOR,
+      schedule: new HandScheduler(),
+      say: () => {},
+    });
+    const ids = { docId: 'd-harbour', meetingId: 'm-1' };
+    const series: [number, number][] = [
+      [100, 55],
+      [100, 60],
+      [100, 58],
+      [100, 60],
+      [100, 59],
+      [100, 57],
+    ];
+    for (const [total, missed] of series) {
+      filer.file(ids, atShare(ids.docId, total, missed));
+      filer.legEnded(ids, { resumable: false });
+    }
+    expect(board.filed).toEqual(['d-harbour']);
+    expect(board.revised).toEqual([]);
+  });
+
+  it('THE CONTROL: a step past the band revises, on the same series', () => {
+    // The same first leg and the same filer, then one reading 30 points
+    // further out. If the case above passed because the filer had stopped
+    // revising at all, this one fails.
+    const board = recordingDocBoard();
+    const filer = createNotesQualityFiler({
+      board: () => board,
+      actor: ACTOR,
+      schedule: new HandScheduler(),
+      say: () => {},
+    });
+    const ids = { docId: 'd-harbour', meetingId: 'm-1' };
+    filer.file(ids, atShare(ids.docId, 100, 55));
+    filer.legEnded(ids, { resumable: false });
+    filer.file(ids, atShare(ids.docId, 100, 85));
+    filer.legEnded(ids, { resumable: false });
+    expect(board.revised).toEqual(['c-1']);
+  });
+
+  it('THE SLOW RAMP: four steps each inside the band, crossing it in total', () => {
+    // 55, 59, 63, 67. No step is more than 4 points, so a filer comparing
+    // each reading against the PREVIOUS one suppresses all three and leaves
+    // the item saying 55 while the meeting is at 67. Compared against what
+    // the ITEM says, the fourth leg is 12 points out and revises — once.
+    //
+    // This is the case a later "simplification" to previous-reading
+    // comparison would get wrong, which is why it is worth its runtime.
+    const board = recordingDocBoard();
+    const filer = createNotesQualityFiler({
+      board: () => board,
+      actor: ACTOR,
+      schedule: new HandScheduler(),
+      say: () => {},
+    });
+    const ids = { docId: 'd-harbour', meetingId: 'm-1' };
+    for (const missed of [55, 59, 63, 67]) {
+      filer.file(ids, atShare(ids.docId, 100, missed));
+      filer.legEnded(ids, { resumable: false });
+    }
+    expect(board.filed).toEqual(['d-harbour']);
+    expect(board.revised).toEqual(['c-1']);
+  });
+
   it('THE SECOND CONTROL: a verdict that turns unreadable revises the item', () => {
     // A meeting whose first reading was a real coverage verdict and whose
     // second could not read the notes at all is telling its reader something

@@ -819,7 +819,11 @@ they belong beside `notes-edit-parse.ts` in the domain row on everything but
 their filename), `notes-quality-coverage.ts` is the same tier and holds the
 one check whose answer depends on something outside the notes — did what was
 said reach a note — together with the third state that keeps a FAILED notes
-reading from arriving as a confident 100%-uncovered verdict, `notes-quality-store.ts` and `notes-tick-timing.ts` read and
+reading from arriving as a confident 100%-uncovered verdict,
+`notes-quality-verdict.ts` is pure too and holds one rule — whether two
+readings of the same meeting differ enough to re-ask a person about, which is
+counts exactly and rates to within a band, so that a share drifting a point
+per leg does not re-judge a standing item — `notes-quality-store.ts` and `notes-tick-timing.ts` read and
 write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a

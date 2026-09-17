@@ -107,6 +107,31 @@ export const MAX_UNCOVERED_IDEA_SHARE = 0.5;
 export const MIN_IDEAS_FOR_COVERAGE = 10;
 
 /**
+ * How far a RATE on a standing review item must move before the item is
+ * rewritten and re-asked.
+ *
+ * Ten points. A meeting's uncovered share is a proportion over everything
+ * said so far, so it moves at every recording leg even when the note-taker's
+ * quality has not changed at all — and revising an item re-judges it, which
+ * walks its reader back to a question they have already answered.
+ *
+ * MEASURED, and here is the denominator so the next reader can weigh it: a
+ * synthetic six-leg meeting growing from 40 to 240 settled sentences, with
+ * the note-taker's hit rate PINNED at 55% so that every movement is sampling
+ * noise by construction, 200 seeded runs, driven through
+ * `buildNotesQualityReport`. Of 1,000 leg-to-leg transitions, 815 moved the
+ * rounded percentage at all; the movement was a median of 2 points, a 90th
+ * percentile of 5, and a maximum of 15. Ten points sits above the noise and
+ * well below a real change — a meeting going from a third of what was said
+ * missed to two thirds still crosses it at once.
+ *
+ * It is a band on the RATES only. A count moves because the notes gained a
+ * defect, and its reader should hear about that; see the header of
+ * `notes-quality-verdict.ts`.
+ */
+export const REVISE_RATIO_BAND = 0.1;
+
+/**
  * How long after a turn settles its note may land before the wait is late.
  *
  * A minute. The notes clocks are held at four seconds of quiet and a
