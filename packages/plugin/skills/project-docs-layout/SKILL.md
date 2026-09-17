@@ -22,7 +22,9 @@ A mount is a **filesystem walk**, not `git ls-files`. Gitignored and untracked f
 1. `register_worktree` for every checkout that exists — including ones you create later. Unregistered, the same file in a second checkout is a different doc with different comments.
 2. `set_project_privacy` if the project is anything but ordinary.
 3. Write the conventions index, then `set_project_conventions` to point at it. The verb records the location; you write the file.
-4. `mount_folder` per kind of artifact. Never the repo root — a 20,000-file ceiling exists and a truncated mount is a mount that was too broad.
+4. `mount_folder` per kind of artifact. **The folder must be inside a git checkout** — a path in no checkout is refused with `not-a-repo`, because a mounted file's address is its repo plus its path from the repo root, and a loose folder has no repo to supply one. Never the repo root either — a 20,000-file ceiling exists and a truncated mount is a mount that was too broad.
+
+   A checkout is the whole requirement: no remote, no commits and no prior `register_worktree` (the mount records the checkout itself). **So when a project's files are not in a checkout, `git init` the folder or a parent of it and mount from there** — a repo with no remote is keyed by its directory and mounts like any other, and the walk skips `.git`, so nothing extra is served. There is no way to mount a folder outside a repo, so material that must not become one stays off the board.
 
 ## The index is the project's words, and the project decides what is committed
 
