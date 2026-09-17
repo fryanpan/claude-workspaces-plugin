@@ -186,20 +186,34 @@ is never nudged again.
 
 ## Where the note itself goes, and what a many-row board loses
 
-The judgement runs on every turn note the route accepts, before the note is
+The judgement runs on every turn note the route accepts, BEFORE the note is
 matched to a row — so an agent holding twenty-five in-progress rows is judged
-exactly like one holding a single row, and the counter moves either way. What
-a many-row board loses is the NOTE. `resolveNoteTarget` answers with a row
-only when the agent holds exactly one in-progress claim on the board, because
-a judged sample put the old newest-claim guess wrong about three times in
-four; a note it will not place lands on no task, emits no `task.noted`, and
-appears nowhere in `events.jsonl`.
+exactly like one holding a single row, and the counter moves either way. The
+detector is not dark on a busy board. What such a board loses is the NOTE.
+`resolveNoteTarget` answers with a row only when the agent holds exactly one
+in-progress claim, because a judged sample put the old newest-claim guess
+wrong about three times in four; a note it will not place lands on no task,
+emits no `task.noted`, and appears nowhere in `events.jsonl`.
 
-That was measured on this fleet over 14-17 September 2026: 335 turn notes, all
-from boards where one agent held one or two rows. One board logged 494 turn
-notes up to 2026-09-02 and none in the fifteen days after, while 1,793 status
-notes kept arriving — `post_status` names its row and takes the explicit
-address, which the Stop hook has no way to do.
+### Whose rows, not how many
+
+The trigger is per AGENT, not per board, and the loose reading of it is wrong
+in a way that matters when you go looking for affected boards. The walk keeps
+the in-progress rows that are **this agent's** and refuses only when it kept
+more than one. A row is the agent's when the actor of its latest in-progress
+transition is that agent — or, when a PERSON moved it and the claimant says
+nothing, when the stored assignee folds to its name.
+
+So a lead and three builders each holding one row place every note they write,
+on a board with four rows in progress. One agent holding two places none. **A
+count of a board's in-progress rows cannot tell those apart**, and neither can
+a count of its recent notes: a board can be busy, current, and still be
+dropping one agent's turns. `turn-note-many-rows.test.ts` drives both sides.
+
+`post_status` is unaffected throughout — it names its row and takes the
+explicit-address branch, never reaching this walk. That is a property of the
+caller, not of the kind: a status note posted down the nameless route is
+dropped exactly as a turn note is.
 
 The note now also goes to `agent-note-log.ts`, which appends it to
 `<dataDir>/workspaces/<ws>.agent-notes.jsonl`. It is still not placed on a row:
@@ -229,17 +243,21 @@ describe the messages they were computed over. What they do not describe is the
 population, and the gap between the two has a direction — the boards excluded
 are the busy ones, where a session holds many rows.
 
-The second gap is upstream of the server entirely. A Stop hook that cannot
-resolve a board id posts nothing, so its turns are in no corpus and no log,
-and the board looks quiet rather than broken. Two boards on this fleet were
-in that state with neither `CW_WORKSPACE_ID` nor `FEEDBACK_WORKSPACE_ID` set
-in their session environment; a third had both set to a real board, ended
-turns, and still produced no turn row ever, which the server-side cause above
-does not explain and which is still open.
+The second gap is upstream of the server entirely, and it is a gap in the
+code rather than a measured population. A Stop hook that cannot resolve a
+board id — `CW_WORKSPACE_ID` and `FEEDBACK_WORKSPACE_ID` both unset, or an
+interpreter it cannot launch — posts nothing and says nothing, so its turns
+are in no corpus, in no log, and in no error. The board reads as quiet. That
+state is indistinguishable from a session that had nothing to say, which is
+what makes it worth naming here rather than counting.
 
-Whoever re-measures next: the denominator is the sum of the two files, and a
+Whoever re-measures next, two cautions from the run that produced this page.
+The denominator is the sum of the two files above, and neither alone. And a
 board contributing zero is a question about its hook before it is a fact about
-its agents.
+its agents — a fleet-wide count of "boards that went dark" was computed for
+this work and turned out to be an artefact of unconverted timestamps, on
+boards that were in fact producing notes minutes earlier. No number on this
+page rests on it.
 
 ## The count is about the person, not the board
 

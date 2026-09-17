@@ -7,11 +7,21 @@
  * right — a judged sample put the old newest-claim guess wrong about three
  * times in four. But the note it refuses to place then went to
  * `AgentNoteRing` alone: in-process, twenty per agent, gone on restart, and
- * read by nothing. So on a board where one session holds many rows, EVERY
+ * read by nothing. So whenever a session holds more than one such row, EVERY
  * end-of-turn message was written to a buffer nobody reads and then dropped.
- * Measured on this fleet: one board logged 494 turn notes up to 2026-09-02
- * and none in the fifteen days after, while 1,793 status notes kept arriving,
- * because `post_status` names its row and the Stop hook cannot.
+ *
+ * WHAT TRIGGERS IT, precisely, because the loose version of this sentence is
+ * wrong and was believed for a while. Not "the board is busy": the walk keeps
+ * the in-progress rows that are THIS AGENT'S and refuses only if it kept more
+ * than one. A row is the agent's when the actor of its latest in-progress
+ * transition is that agent, or — when a PERSON moved it, so the claimant says
+ * nothing — when the stored assignee folds to its name. A lead and three
+ * builders each holding one row place every note they write; one agent
+ * holding two rows places none. A count of a board's rows cannot tell the two
+ * apart, and `turn-note-many-rows.test.ts` drives both.
+ *
+ * `post_status` is unaffected throughout, because it names its row and takes
+ * the explicit-address branch; the Stop hook has no row to name.
  *
  * WHAT IT DOES NOT DO. It does not pick a row. An unplaced note stays
  * unplaced; this only makes it survive. The row it belongs to is a question

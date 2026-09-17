@@ -2,14 +2,16 @@
  * Does a second in-progress row belonging to the same agent stop an
  * end-of-turn note reaching the store?
  *
- * The measurement that raised this (14-17 September, every board's own
- * `events.jsonl`): 335 turn notes, all from boards where one agent held one
- * or two in-progress rows. The boards where one agent held six and
- * twenty-five rows produced none for a fortnight while their `status` notes
- * kept arriving. That is a correlation; these cases are the experiment.
+ * It does, and these cases are the experiment rather than the inference: the
+ * same note, the same agent, the same board, posted once under one row and
+ * once under two. A green result cannot come from the harness refusing every
+ * note, because the one-row post is the control and it lands.
  *
- * Each claim is paired with the same note posted under one row, so a green
- * result cannot come from the harness refusing every note.
+ * They also fix what "a second row" MEANS, which the loose reading gets
+ * wrong. A board with several rows in progress is not a dropping board; an
+ * AGENT with several of its own is. Two cases below pin that boundary from
+ * each side — a peer's row is not a second claim, and a row a person started
+ * counts by its assignee.
  *
  * All fixtures are synthetic. The repo is public.
  */
@@ -112,13 +114,24 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  /** A row the lead agent holds in-progress, the way a dispatch leaves it. */
-  async function claimRow(title: string): Promise<string> {
+  /**
+   * A row held in-progress, the way a dispatch leaves it.
+   *
+   * `holder` is both the assignee and the actor that claims it, because that
+   * is the shape a dispatch produces. `claimedBy` splits them for the one
+   * case that needs to: a row a PERSON moved, where the claimant says
+   * nothing and the assignee decides.
+   */
+  async function claimRow(
+    title: string,
+    holder: typeof LEAD = LEAD,
+    claimedBy: typeof LEAD | typeof PERSON = holder,
+  ): Promise<string> {
     const { task } = await jj<{ task: { id: string } }>(
       await post(`/workspaces/${WS}/tasks`, {
         title,
         body: `Agent can ${title.toLowerCase()} so that the queue keeps moving.`,
-        assignee: LEAD.name,
+        assignee: holder.name,
         assigneeKind: 'agent',
         author: LEAD,
       }),
@@ -127,7 +140,7 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
       await jj(
         await post(`/workspaces/${WS}/tasks/${task.id}/transition`, {
           to,
-          author: to === 'todo' ? PERSON : LEAD,
+          author: to === 'todo' ? PERSON : claimedBy,
           workspaceId: WS,
         }),
       );
@@ -173,6 +186,45 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
 
     expect(storedNotes([only])).toEqual([ASKING_TURN]);
     expect(notedLines().filter((l) => l.includes('ship it tonight'))).toHaveLength(1);
+  });
+
+  it('counts the agent’s OWN rows, not the board’s — a peer’s row is not a second claim', async () => {
+    // What actually decides it, measured rather than assumed. The condition
+    // is NOT "the board has more than one row in progress": `resolveNoteTarget`
+    // walks the board's in-progress rows and keeps the ones that are THIS
+    // agent's, then refuses only if it kept more than one. Whose a row is:
+    // the actor of its latest in-progress transition when that actor is an
+    // agent, and the stored assignee when a person moved it.
+    //
+    // So a board where a lead and its builders each hold a row places every
+    // one of their notes. A busy board is not by itself a dropping board, and
+    // a count of a board's in-progress rows cannot tell you whether it is.
+    await jj(
+      await post(`/workspaces/${WS}/agents`, { agentId: NOMAD.id, runtime: 'claude-code-local' }),
+    );
+    const mine = await claimRow('Wire the index');
+    await claimRow('Rebuild the sidecar', NOMAD);
+
+    const r = await turnNote(ASKING_TURN);
+    expect(r.status).toBe(202);
+    expect(await r.json()).toMatchObject({ ok: true, taskId: mine });
+    expect(storedNotes([mine])).toEqual([ASKING_TURN]);
+  });
+
+  it('counts a row a PERSON moved by its assignee, so two can still be one agent’s', async () => {
+    // The other half of the same rule, and the one that makes a board look
+    // innocent. Nobody claimed this row as an agent — a person started it —
+    // so the claimant says nothing and the assignee decides. Both rows come
+    // out as the lead's, and the note is refused exactly as if it had
+    // claimed them both itself.
+    const first = await claimRow('Wire the index');
+    const second = await claimRow('Rebuild the sidecar', LEAD, PERSON);
+
+    const r = await turnNote(ASKING_TURN);
+    const body = (await r.json()) as { taskId?: string; needsFiling?: boolean };
+    expect(body.taskId).toBeUndefined();
+    expect(body.needsFiling).toBe(true);
+    expect(storedNotes([first, second])).toEqual([]);
   });
 
   it('lands on NO row once a second is held — the no-guess rule is unchanged', async () => {
@@ -314,11 +366,11 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
   });
 
   it('a status note is lost at two rows too — the kind is not what decides it', async () => {
-    // The measurement showed `status` notes still arriving on the dark
-    // boards. If ambiguity dropped statuses as well, the correlation would
-    // have to have another cause; it does not, because `post_status` names
-    // its row. This drives the SAME nameless route a status note takes when
-    // nothing names a row.
+    // `post_status` survives this whole defect because it NAMES its row and
+    // takes the explicit-address branch, never reaching `resolveNoteTarget`.
+    // That is a property of the caller, not of the kind — so a status note
+    // posted down the nameless route, as this one is, is dropped exactly as
+    // a turn note is. The kind is not what decides it.
     const first = await claimRow('Wire the index');
     const second = await claimRow('Rebuild the sidecar');
     const r = await post(`/workspaces/${WS}/agents/cartographer/notes`, {
