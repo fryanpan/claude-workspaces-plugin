@@ -24,6 +24,7 @@ import * as Y from 'yjs';
 import { meetingDirPath, meetingIndexPath, meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesDocStore } from '../src/notes-doc-access.ts';
 import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
+import { createNotesQualityFiler } from '../src/notes-quality-filing.ts';
 import { readSectionMarkdown, runNotesQualityPass } from '../src/notes-quality-pass.ts';
 import { type NotesQualityBoard, fileNotesQualityReview } from '../src/notes-quality-review.ts';
 import { readNotesQuality } from '../src/notes-quality-store.ts';
@@ -145,6 +146,12 @@ describe('the whole pass', () => {
         docStore: () => store,
         // The immediate filing policy: the pass's own unit tests care WHERE a
         // reading goes, not when. `notes-quality-timing.test.ts` covers when.
+        //
+        // `healthy` below is THIS sink's answer, not the server's. The pass
+        // hands a clean reading to whatever sink it was given, and the
+        // immediate filer answers `healthy` because it has nothing to hold it
+        // for; the scheduler the server wires answers `held`, which the next
+        // case pins.
         file: (input) => fileNotesQualityReview(board, ACTOR, input),
         boardOf: () => 'w-1',
         dataDir,
@@ -159,6 +166,40 @@ describe('the whole pass', () => {
     expect(board.filed).toEqual([]);
     expect(result.line).toContain('repeated bullets');
     expect(readNotesQuality(dataDir, 'd-harbour', 'm-1')?.at).toBe(5_000);
+  });
+
+  it('hands a clean reading to the sink the server actually wires, which holds it', () => {
+    // THE MUTATION THIS CATCHES: the pass skipping `file()` when the report
+    // carries no flags — which is what it did before a clean reading could
+    // withdraw anything, and what a refactor would restore by reading the
+    // clean path as dead code. The sink here is the real scheduler, so the
+    // assertion is the one production makes: the reading reaches it, comes
+    // back `held`, and is still held afterwards for `legEnded` to decide on.
+    // Route the clean reading past `file()` and `heldCount()` reads 0.
+    const dataDir = freshDir();
+    const { store } = docStoreFrom(TWO_MEETINGS);
+    const board = recordingBoard([{ id: 't-season', status: 'todo' } as Task]);
+    const filer = createNotesQualityFiler({
+      board: () => board,
+      actor: ACTOR,
+      say: () => {},
+    });
+    const result = runNotesQualityPass(
+      {
+        docStore: () => store,
+        file: (input) => filer.file({ docId: 'd-harbour', meetingId: 'm-1' }, input),
+        boardOf: () => 'w-1',
+        dataDir,
+        headingIdOf: () => headingIdAt(store, 0),
+        actor: ACTOR,
+        now: () => 5_000,
+      },
+      { docId: 'd-harbour', meetingId: 'm-1' },
+    );
+    expect(result.report.flags).toEqual([]);
+    expect(result.filing).toEqual({ filed: false, reason: 'held' });
+    expect(filer.heldCount()).toBe(1);
+    expect(board.filed).toEqual([]);
   });
 
   it('carries each voice’s own name through, so a name on the wrong voice is caught', () => {

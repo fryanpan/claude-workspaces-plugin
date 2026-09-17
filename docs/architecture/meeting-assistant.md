@@ -260,6 +260,25 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   ask. A refused revision leaves the standing item alone; it never becomes a
   second filing. `notes-quality-timing.test.ts` drives it, and carries the
   base policy as a live control.
+- **And withdrawn, since 2026-09-17, when the claim stops being true.** A flag
+  that cleared used to be invisible: only FLAGGED readings reached the filer,
+  so the leg where a flag disappeared reached nothing and the item filed at a
+  bad leg went on claiming a meeting had come out badly after the meeting had
+  read clean. Measured over 200 seeded runs of a six-leg meeting, the
+  uncovered share straddles its own 50% bar between legs (one run: 45, 50, 48,
+  50, 49, 47), so a flag appearing and disappearing mid-meeting is the
+  ordinary case rather than a corner. Now every reading reaches the filer,
+  clean or not, and a clean one on a meeting that HAS an item withdraws it —
+  `withdrawReviewItem`, or `withdrawCommentReview` for a doc no row links. A
+  clean reading on a meeting with no item does nothing at all. The withdrawal
+  is held exactly as the filing is: decided at commit, on the meeting's LAST
+  reading, never at the moment a flag clears — a clean leg can be followed by
+  another bad one, and withdrawing mid-grace would take the item off the queue
+  and put it back. So a meeting that ends clean withdraws once and a meeting
+  that ends badly never withdraws at all. A refused withdrawal (an item
+  somebody already answered) leaves the item standing and addressable; a
+  successful one drops the memory, so a meeting that goes wrong again files a
+  fresh item rather than revising a retired one.
 
 ## A voice keeps its name across every session of a doc (2026-09-16)
 
