@@ -144,6 +144,29 @@ describe('the unnamed-voice measure', () => {
   });
 });
 
+describe('the cast the run started with', () => {
+  it('is named in the report, so the unnamed-voice row can be read at all', () => {
+    // Two runs can both report "0 of 6 on an unnamed voice" and mean opposite
+    // things: one whose doc knew nobody, and one whose doc knew everybody and
+    // carried it. The header is what tells them apart.
+    const text = renderRerunReport(
+      buildRerunReport(input({ cast: { A: 'Riverbend', B: 'Harborlight' } })),
+    );
+    expect(text).toContain(
+      'Cast named by an earlier meeting on this doc: **A=Riverbend, B=Harborlight**.',
+    );
+  });
+
+  it('says so out loud when there was none, because that is the finding', () => {
+    // A rerun's data dir is new, so with no cast nobody has ever named a voice
+    // on the doc and the unnamed-voice row could not have read anything but
+    // 100%. An absent line would leave that looking like a measurement.
+    const text = renderRerunReport(buildRerunReport(input()));
+    expect(text).toContain('No cast: this doc had held no meeting');
+    expect(text).not.toContain('Cast named by an earlier meeting');
+  });
+});
+
 describe('renderRerunReport', () => {
   it('fills all eight measures', () => {
     const text = renderRerunReport(buildRerunReport(input()));

@@ -75,6 +75,7 @@ import {
   checkDocEdits,
   pcmDurationMs,
 } from './rerun-meeting-args.ts';
+import { castLine, seedCast } from './rerun-meeting-cast.ts';
 import { REPORT_JSON, headCommit, loadRerunReport } from './rerun-meeting-compare.ts';
 import {
   STOP_TIMEOUT_MS,
@@ -332,6 +333,13 @@ export async function runRerun(
     // what makes `--method` choose the note-taker rather than the harness
     // wiring a different object.
     writeNotesMethod(dataDir, docId, { method: args.method, at: Date.now(), by: 'meeting-rerun' });
+    // THE CAST THIS DOC ALREADY KNEW, before a word of the replay is fed.
+    // Without it `docSpeakerNames` is empty and every voice reads as its
+    // placeholder however well names carry — see `rerun-meeting-cast.ts`.
+    if (args.cast !== undefined) {
+      const prior = seedCast(dataDir, docId, args.cast, Date.now() - 1000);
+      deps.log(`cast named by an earlier meeting (${prior}): ${castLine(args.cast)}`);
+    }
     if (doc.markdown.trim().length > 0) await seedContent(base, ws, docId, doc.markdown);
     deps.log(
       `starting document: ${doc.shape}` +
@@ -387,6 +395,7 @@ export async function runRerun(
       engine: deps.transcription.name,
       docShape: doc.shape,
       docEdits: doc.edits.length,
+      ...(args.cast !== undefined ? { cast: args.cast } : {}),
       audioMs,
       elapsedMs: summary.elapsedMs,
       ticks: summary.ticks,

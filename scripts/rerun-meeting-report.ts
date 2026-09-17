@@ -39,6 +39,7 @@ import {
   flatBulletRuns,
   parseNotesTopics,
 } from '../packages/server/src/notes-quality.ts';
+import { type SeededCast, castLine } from './rerun-meeting-cast.ts';
 import { renderComparison } from './rerun-meeting-compare.ts';
 
 /** A speaker tag as the notes carry it in markdown: `[@Devi](speaker:A)`. */
@@ -117,6 +118,16 @@ export interface RerunReport {
   engine: string;
   docShape: string;
   docEdits: number;
+  /**
+   * The voices this doc's earlier meetings had already named, if any.
+   *
+   * IN THE REPORT BECAUSE THE UNNAMED-VOICE ROW IS UNREADABLE WITHOUT IT. A
+   * run with no cast starts on a doc where nobody has ever named anybody, so
+   * that row reads near 100% whatever the note-taker does; a run with one is
+   * measuring whether the names carried. Two reports showing "0 of 40" mean
+   * opposite things, and this is the field that says which.
+   */
+  cast?: SeededCast;
   /** The audio, and how long the meeting actually ran for. */
   audioMs: number;
   elapsedMs: number;
@@ -307,6 +318,13 @@ export function renderRerunReport(r: RerunReport, before?: RerunReport): string 
     '',
     `Note-taker **${r.method}** · engine **${r.engine}** · starting document **${r.docShape}**` +
       (r.docEdits > 0 ? ` with ${r.docEdits} edit(s) mid-run` : ''),
+    '',
+    // SAID WHETHER THERE WAS ONE OR NOT. The absence is the finding on a run
+    // whose unnamed-voice row reads 100%: nobody had named a voice on this
+    // doc, so that row could not have read anything else.
+    r.cast === undefined
+      ? 'No cast: this doc had held no meeting, so no voice had a name to carry into this one.'
+      : `Cast named by an earlier meeting on this doc: **${castLine(r.cast)}**.`,
     '',
     `${minutes(r.audioMs)} of audio, replayed at audio rate; the meeting ran ${minutes(r.elapsedMs)} ` +
       `over ${r.ticks} tick(s) and ${r.turnsSettled} settled turn(s), on commit \`${r.commit}\`.`,
