@@ -32,7 +32,10 @@ asked Bryan something with nothing filed, and the measured rates at which that
 judgement is wrong),
 [scrub-name-finder](docs/architecture/scrub-name-finder.md) (the free pass
 that picks which pushed lines Haiku reads, its measured recall, and the
-names it never sends) and
+names it never sends),
+[supervisor](docs/architecture/supervisor.md) (the health check that decides
+prod's server is dead, why its budget is 75s and a first bind's is 240s, the
+three-per-hour restart limit, and the 16 September outage worked through) and
 [security](docs/architecture/security.md) (trust boundaries, the gates that
 enforce them, where secrets live, the deploy and webhook surfaces). Read the
 relevant one before touching its subsystem.
