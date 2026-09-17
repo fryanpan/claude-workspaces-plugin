@@ -171,6 +171,10 @@ export interface DocRoutesContext {
     commentId: string,
     review: ReviewPayload,
     author: User,
+    /** `lessSpecific`: the filer's own reason why the honest answer is less
+     *  specific than a standing hold asked for. Acted on only when the item
+     *  is held. */
+    runOpts?: { lessSpecific?: string },
   ) => Promise<ThreadReviewGate>;
   /** Tell the addressee a comment-borne review item is waiting on them. */
   announceThreadReview: (

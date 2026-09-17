@@ -454,15 +454,64 @@ export interface ReviewItemJudgement {
    */
   heldFor?: string[];
   /**
-   * On a hold: the sentence the judge wants added, written out.
+   * On a hold: the ITEM's own words the gap is about, copied out verbatim
+   * and checked against the item before it was stored.
    *
-   * Stored beside the reason rather than folded into it, because the two do
-   * different jobs — the reason says what is wrong, this says what to write —
-   * and every surface that repeats a hold (the tool result, the filer's wake,
-   * the stall report, the card's "Held: …") should be able to offer the draft
-   * without re-deriving it from prose.
+   * It replaced `add`, the sentence the judge wanted written into the item.
+   * That draft was where the gate invented specifics — the judge never sees
+   * the source an item was written from, so a figure it supplies is a figure
+   * it made up, and four of those reached the owner across five boards on
+   * 2026-09-14. Quoting cannot invent: `boundHoldWords` drops a quote the
+   * item does not contain. Items filed before this carry `add` on disk; it is
+   * read by nothing and shown nowhere.
    */
-  add?: string;
+  quote?: string;
+  /**
+   * How an item reached the reader WITHOUT the judge passing it, when that
+   * is how it got there. Absent on the ordinary item the judge passed.
+   *
+   *  - `holds` — the last-hold rule. The gate holds at most
+   *    `REVIEW_GATE_MAX_HOLDS` times and then stops; the words were never
+   *    judged good, and the reader is told so on the card rather than being
+   *    handed something that looks like it passed.
+   *  - `less-specific` — the filer answered a hold by saying the honest
+   *    answer is less specific than the gate asked for, and said why in
+   *    `lessSpecific`. The gate does not hold that gap again; the reader gets
+   *    the item with the filer's reason beside it and decides for themselves.
+   *
+   * A FACT ABOUT HOW THE ITEM GOT HERE, so it survives later revisions the
+   * way `heldFor` does. An item that reached the reader unjudged and was then
+   * revised is still an item that reached the reader unjudged.
+   */
+  admitted?: 'holds' | 'less-specific';
+  /**
+   * The filer's own words for why the honest answer is less specific than
+   * the hold asked for. Shown on the card verbatim.
+   *
+   * The filer's, never the gate's, and that is the whole point of the field:
+   * the loop it exists to break is one where the only answer the gate would
+   * accept was a concrete specific, so a fabricated specific read as more
+   * responsive than a vague truth. Saying "the source gives a range" has to
+   * be an available answer, or inventing a point figure is the only move.
+   */
+  lessSpecific?: string;
+  /**
+   * WHICH hold the filer's note answered, as `holdGapKey` of the judge's own
+   * sentence at the moment they said the source will not support it.
+   *
+   * The exemption is scoped to that gap and no wider. Without it one note
+   * would admit every later verdict for the life of the item, so a revision
+   * introducing an unrelated defect — a broken link, say — would go through
+   * with nobody having looked. An opaque key rather than the sentence,
+   * because the sentence may be the invented one the gate refused to show,
+   * and because the REPLACEMENT for such a sentence is a single constant that
+   * every bounded hold would share (codex review, twice).
+   */
+  lessSpecificFor?: string;
+  /** `holdGapKey` of the sentence THIS hold is about, so a later round can
+   *  tell whether the gate is repeating itself. Written on a hold, carried
+   *  nowhere else, shown to nobody. */
+  gapKey?: string;
 }
 
 /**

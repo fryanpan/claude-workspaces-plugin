@@ -28,22 +28,33 @@ const shims = join(here, 'shims');
  */
 
 /**
+ * Three modules the widget's dependencies reach for and the widget has no use
+ * for on a host page.
+ *
  * `lib0/logging` drags `lib0/dom` -> `lib0/schema` (~6.8 KB) in to colourise
  * five yjs console diagnostics, and `lib0/environment` carries env-var and CLI
- * parsing for a single dev-mode check. Neither has anything to do on a host
- * page, so both resolve to a local stand-in.
+ * parsing for a single dev-mode check. `y-protocols/awareness` is presence,
+ * which the widget renders nowhere and which no reader has ever seen from a
+ * widget — its stand-in says what that cost in the meantime. All three resolve
+ * to a local stand-in.
  */
 // Fail the build rather than ship a shim that is short an export; see
 // shim-guard.ts for why a missing one is worse than a build error.
 assertShimCovers('lib0/logging', join(shims, 'lib0-logging.js'), pkgRoot);
 assertShimCovers('lib0/environment', join(shims, 'lib0-environment.js'), pkgRoot);
+assertShimCovers('y-protocols/awareness', join(shims, 'y-protocols-awareness.ts'), pkgRoot);
 
-const lib0Shims: BunPlugin = {
-  name: 'lib0-shims',
+const guestShims: BunPlugin = {
+  name: 'guest-shims',
   setup(build) {
     const replacements: Array<[RegExp, string]> = [
       [/^lib0\/logging$/, join(shims, 'lib0-logging.js')],
       [/^lib0\/environment$/, join(shims, 'lib0-environment.js')],
+      // `packages/core/src/ws-client.ts` is the only importer in the widget's
+      // graph, and it uses the bare specifier — `y-protocols/sync.js`, the
+      // other half of the protocol, does not reach for awareness at all, so
+      // there is no relative form to catch the way lib0's modules need.
+      [/^y-protocols\/awareness$/, join(shims, 'y-protocols-awareness.ts')],
     ];
     for (const [filter, path] of replacements) {
       build.onResolve({ filter }, () => ({ path }));
@@ -119,7 +130,7 @@ async function build(format: 'esm' | 'iife', name: string, entry: string) {
     format: format === 'iife' ? 'iife' : 'esm',
     minify: true,
     sourcemap: 'external',
-    plugins: [lib0Shims, cssMinify, threadReaderCuts],
+    plugins: [guestShims, cssMinify, threadReaderCuts],
     naming: {
       entry: name,
     },

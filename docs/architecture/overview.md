@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>keep-moving · waiting-unfiled<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts · server-starts.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -133,7 +133,12 @@ the store never holds a default, only an override. The notes composer's own
 half of that — assembling the tick's whole prompt — came out to
 `notes-prompt-build.ts` when the compose started taking a prompt cache: it
 returns the prompt already split at the line the cache breakpoint is taken
-on, and `meeting-notes-composer.ts` is left with the HTTP seam. Two of the six are
+on, and `meeting-notes-composer.ts` is left with the HTTP seam.
+`notes-prompt-cache-shape.ts` sits beside them as an instrument rather than a
+step: it holds the previous tick's block digests so the timing row can say
+whether a tick that read nothing had a prefix that MOVED or one still under
+the model's minimum cacheable length. It changes no prompt and no breakpoint,
+which is why it is not drawn in the flow. Two of the six are
 fields on a **board** rather than on the server and keep being written
 through `PUT /api/workspaces/<id>/settings` — `routes/prompts.ts` says so
 with `scope` rather than serving them twice, and the client hides the split.
@@ -159,7 +164,11 @@ sit there rather than at the top level, while `request-admission.ts`,
 run for a request whatever path it named. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
-need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
+need. `review-hold-message.ts` joins those two at the top level: it is the
+sentences the gate says to a filer when it holds an item or admits one
+unjudged, out of `review-gate.ts` so that "a hold proposes no replacement
+text" is a rule with a unit test rather than a habit of one long function.
+It sees no `Request` and names no path, so it is not a route. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
 The board-roles work added `routes/workspace-members.ts` — who has access and
 at what level — inside a directory this picture already draws, so the picture
 does not move; what a board's Owner may do that a Regular User may not is
@@ -228,6 +237,19 @@ read and write the same tasks through the same store, and only the clock is
 new. The two
 wake frames render in `mcp` through `scheduled-line.ts`, beside the other
 line modules.
+
+**A verb says what it can do, in its own answer.** Two small modules exist
+because a capability announced only in a skill goes unused: a skill is read
+once, at session start. `attach-mounts.ts` in `server` words what an attaching
+session is told about its project's mounted folders — the count and the names,
+or, when there are none, what `mount_folder` does and that `.gitignore` is not
+a privacy control. It sits beside `sentry-projects.ts` in the Ops group and
+for the same reason: the attach answer is where a session learns what this
+deployment can do for it. `schedule-output-line.ts` in `mcp` is the same shape
+one layer out — it words `set_task_schedule`'s answer about the folder a
+rule's runs write into — and joins the line modules beside
+`scheduled-line.ts`. Neither moves a boundary: both are pure wording, read by
+one caller each.
 
 `task-wait.ts` joins the Board group under the same `task-*.ts` glob and
 moves no boundary either. It writes one field on a task — what an agent
@@ -591,6 +613,14 @@ line that needs a person asks nobody until its builder reports it `owner`;
 the stall tick reminds that builder once every other line is met
 (`review-items/done-when-ready.ts`), and the reminder renders in `mcp`
 through `done-when-ready-line.ts`, beside the other line modules.
+`done-when-refusal.ts` (`core`) sits beside `done-when.ts` for the one case
+that is nobody's to check: a proof marked `refused`, or one whose words name a
+permission refusal, says the agent was DENIED permission to run the check. It
+is terminal, so the three sides read the same predicate — the report route
+takes it in place of the link an `owner` line otherwise needs, the item
+template says why the reader is holding it, and `review-gate.ts` drops a hold
+that would tell the agent to obtain the fact another way rather than handing
+that instruction back.
 
 **A rebuild changes every clientID, so a tab that was away is told to start
 over.** Sync is a state-vector exchange, and after a rebuild a reconnecting
@@ -904,7 +934,7 @@ owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `waiting-unfiled.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `waiting-unfiled.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -1075,6 +1105,13 @@ two cannot drift into a suggestion nobody can accept). The `review-item*.ts`
 glob is deliberate: `review-item-look-ask.ts` is the gate's two English
 heuristics lifted out whole when the gate crossed the line, and it changes no
 boundary the diagram draws.
+
+`review-hold.ts` is the newest member of that same glob's neighbourhood, and
+it is there for the usual reason: the BOUND on what a hold may say — a quote
+must be the item's own words, a diagnosis may carry no figure the item does
+not state — is checked on the server before the hold is sent, while the
+derived note a card draws from a stored verdict is read in the browser. One
+definition, two readers, no boundary moved.
 
 `secret-name.ts` joins that third tier for the same reason, with the two
 readers furthest apart in this repo: the server's writer spells the stored

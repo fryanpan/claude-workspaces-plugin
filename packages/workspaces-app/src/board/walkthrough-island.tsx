@@ -74,6 +74,7 @@ import {
   revisedPhrase,
 } from './board-review-model.ts';
 import { requireText } from './board-review-render.ts';
+import { GateHoldLine, GateLessSpecificNote } from './review-gate-note.tsx';
 import { markPhrase, unmarkPhrase } from './review-item-phrase.ts';
 import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
@@ -902,6 +903,15 @@ function WalkCard(props: {
           going through the queue must not mean leaving the queue on every
           item — but a comment sometimes only makes sense in place. */}
         <WalkWhere item={item} handlers={handlers} />
+        {/* How these words got here: how often the gate held them, and the
+            filer's own note when that is what let them through. Absent on an
+            item the gate simply passed, which is most of them. */}
+        <GateHoldLine gate={item.gate} prefix="board-walk" />
+        <GateLessSpecificNote
+          gate={item.gate}
+          prefix="board-walk"
+          {...(item.thread?.askedBy ? { who: item.thread.askedBy } : {})}
+        />
 
         {row ? (
           <Fragment>

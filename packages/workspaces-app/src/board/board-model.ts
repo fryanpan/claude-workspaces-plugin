@@ -19,6 +19,7 @@ import {
   formatGoalEffortSeconds,
   summarizeGoalEffort,
 } from '@claude-workspaces/core/goal-effort';
+import type { ReviewGateNote } from '@claude-workspaces/core/review-hold';
 import type { MissedRunPolicy } from '@claude-workspaces/core/schedule-missed';
 import {
   MONTH_SHORT,
@@ -241,6 +242,10 @@ export interface BoardTask {
     threadId?: string;
     range?: { start: number; end: number };
   };
+  /** What the quality gate did to the ticket's own decision before the
+   *  reader saw it — hold count, and how it got through if the gate never
+   *  passed it. Absent when it simply passed, and on an older projection. */
+  decisionGate?: ReviewGateNote;
   answer?: { text: string; by: string; ts: number; optionId?: string };
   triagedAgainst?: { goalId: string; ts: number };
   transitions: BoardTransition[];

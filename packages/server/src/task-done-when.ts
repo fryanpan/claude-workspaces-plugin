@@ -26,6 +26,7 @@ import {
   doneWhenComplete,
   firstOpenDoneWhen,
 } from '@claude-workspaces/core/done-when';
+import { proofReportsRefusal } from '@claude-workspaces/core/done-when-refusal';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from './actor-identity.ts';
 import { type DoneWhenInput, buildDoneWhenLines } from './task-done-when-input.ts';
@@ -266,7 +267,14 @@ export class TaskDoneWhenStore {
       // the reader opens: the first owner items reached the queue with none,
       // and the owner's answer was "Where's the mock?" (2026-09-14). Read off
       // the proof this report leaves on the line — new proof replaces the old.
-      if (entry.verdict === 'owner' && !(proof ?? line.proof ?? []).some((p) => p.url)) {
+      // A REFUSED check is the exception, and it is the whole reason the flag
+      // exists: the agent was denied permission to run the thing, so there is
+      // nothing for it to link — demanding a url would leave a line that
+      // cannot be reported at all. What the reader opens is the line itself.
+      if (
+        entry.verdict === 'owner' &&
+        !(proof ?? line.proof ?? []).some((p) => p.url || proofReportsRefusal(p))
+      ) {
         return {
           ok: false,
           error: 'link-required',

@@ -1,3 +1,12 @@
+/**
+ * @vitest-environment happy-dom
+ *
+ * Core runs under `node` by default — a DOM costs ~170ms per test FILE and
+ * almost nothing here needs one. This file asks for one because `receiptHtml`
+ * has a caller that PARSES it: `receiptMark` in the app does
+ * `innerHTML = receiptHtml(state)` and returns `firstElementChild`, so "one
+ * root element" is load-bearing there and only a parser can check it.
+ */
 import { describe, expect, it } from 'vitest';
 import { type ReceiptComment, receiptHtml, receiptState } from './comment-receipt.ts';
 
@@ -70,6 +79,21 @@ describe('receiptHtml', () => {
 
   it('carries the state on the element, so one stylesheet rule shows the second tick', () => {
     expect(receiptHtml('received')).toContain('data-receipt="received"');
+  });
+
+  it('is exactly one root element, which is what the app parses out of it', () => {
+    for (const state of ['sent', 'received'] as const) {
+      const box = document.createElement('div');
+      box.innerHTML = receiptHtml(state);
+      // Not `firstElementChild !== null`: the app takes the first and drops
+      // the rest, so a second root would be silently lost on that surface and
+      // drawn on the widget's.
+      expect(box.children, state).toHaveLength(1);
+      expect(box.firstElementChild?.tagName, state).toBe('SPAN');
+      // CONTROL: the count is a real one — the same box given two roots says 2.
+      box.innerHTML = receiptHtml(state) + receiptHtml(state);
+      expect(box.children, state).toHaveLength(2);
+    }
   });
 
   it('draws both ticks in both states, so the time beside it never moves', () => {

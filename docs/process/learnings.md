@@ -1282,6 +1282,48 @@ kernel-wide socket CREATION failing, and its cause is still unknown.**
   a new name. Attribution changes require a full session restart with the
   env set (launcher config, not an agent-side action).
 
+## Reading a doc's threads used to hydrate its file binding, and the fear outlived the fix
+
+- **The incident (2026-09-16).** The home queue fans a threads GET out over
+  every doc on a board. ~7,000 of those reads went through the ordinary
+  content hydrate, which arms the file binding: residentDocs 2,246→7,114,
+  bindings 586→3,134, 281MB RSS, ~95s not answering — and the bindings they
+  woke flushed weeks-old `.ydoc` content over files on disk. A read did a
+  write.
+- **The fix (PR #1045).** `DocStore.getForRead` / `resolveDocForRead` hydrate
+  with `bind: false`: the `.ydoc` comes into memory and nothing else happens —
+  no bound-file read, no mtime poll, no write-back observer, no `touchDoc`, and
+  a doc that is already resident is left exactly as it is, including one an
+  earlier read left unbound. `listThreads` takes it, and `routes/docs.ts`
+  picks it for `GET …/threads` and `GET …/threads/:id` while every other
+  subroute keeps the binding hydrate. `resolveDoc` upgrades such a doc the
+  moment anything asks for its CONTENT, so a doc whose first visitor was a
+  threads read still writes back.
+- **Two separate properties, and they have separate gates.** "Does not arm a
+  binding" is the PR #1045 property; "does not enter the file poll's fast
+  lane" is the older `peek`-vs-`get` property from the scan incident (a single
+  `GET /` moving `activeBindings` 0→122; prod reporting all 2,549 bound docs
+  active five minutes after boot with nobody connected). Both are pinned in
+  `packages/server/test/scan-does-not-activate.test.ts`.
+- **A "no binding" assertion needs a control that is a peer in TIME.** A
+  hydrate whose bytes are not already in hand hands the read to a pool and
+  binds when it lands (`bindAfterRead`) — boot is the only blocking case. So
+  reading `stats().bindings` straight after the call proves nothing: the first
+  version of the test passed unchanged when `listThreads` was mutated back onto
+  `resolveDoc`, because the deferred bind had not landed yet. The fix is a
+  second doc in the same state, read through `get` AFTER the read under test,
+  waited on until its binding lands; only then does zero mean "never bound".
+- **Bounded is not free, and that half is what a rule has to carry.** The
+  binding damage is fixed; the residency cost is not. A threads read on a
+  non-resident doc still `readFileSync`s the whole `.ydoc` on the main thread
+  (it is in the server's own data dir, so no cloud-sync provider stands
+  between — that is why it is allowed to be synchronous) and holds the doc
+  resident for two days, because `IDLE_EVICT_MS` is what releases it and
+  nothing shorter does. The 2,246→7,114 half of the incident is
+  therefore still what a corpus-wide read would cost. An agent told only
+  "thread reads are cheap" sweeps the whole server; the rule in
+  `.claude/rules/workspaces-default.md` says cheap AND bounded for that reason.
+
 ## Multi-agent workflow implementation (balloons + suggestions pattern)
 
 - **The recipe that shipped two features with <30 min human hands-on:**

@@ -107,14 +107,16 @@ const TOTAL_QUANTIFIER =
 const HAND_BACK =
   /^(?:(?:yes|no|sure|ok|okay)[,\s-]+)?(?:(?:i\s+)?don'?t\s+mind|no\s+preference|your\s+call|up\s+to\s+you|(?:do\s+)?whatever\s+you\s+(?:think|want|like|prefer|decide|see\s+fit))(?:\s+(?:on|for|about|with)\s+(?:the\s+)?(?:rest|others|lot|questions?|asks?|them|these|those|all|both|everything))?$/;
 
-/** The reply's last sentence, which is where a whole-ask settlement sits: an
- *  earlier sentence may answer one part and the last one hand back the rest. */
-function lastSentence(one: string): string {
-  const parts = one
+/** The reply's sentences, in order. Which of them a shape may read is that
+ *  shape's own business: a quantifier or a hand-back counts only as the LAST
+ *  one, because "do whatever you think for the rest" settles the ask only
+ *  when it is where the reply lands; a refusal of the ask's subject counts
+ *  wherever it sits. */
+function sentences(one: string): string[] {
+  return one
     .split(/[.!;]+/)
     .map((p) => p.trim())
     .filter((p) => p !== '');
-  return parts.at(-1) ?? one;
 }
 
 /** The word as the item might also spell it: with or without a plural `s`. */
@@ -132,18 +134,72 @@ function nounForms(noun: string): string[] {
  * noun can name one part as easily as all of them. So the noun the reply
  * refuses has to be a word every question asks about — which is what makes
  * refusing it a refusal of all of them. Anything less goes to the model.
+ *
+ * Asked of ONE sentence; the caller asks it of each. A refusal of the whole
+ * subject is a refusal wherever in the reply it was written. Answers WHICH
+ * noun it refused, because the caller then has to ask whether another
+ * sentence kept one of them back.
  */
-function refusesTheAsksSubject(last: string, item: AnswerCoverageItem | undefined): boolean {
-  if (!item || !ACCEPT_REFUSE.test(last)) return false;
-  const m = last.match(
+function refusedSubject(sentence: string, item: AnswerCoverageItem | undefined): string | null {
+  if (!item || !ACCEPT_REFUSE.test(sentence)) return null;
+  const m = sentence.match(
     /\b(?:these|those)\s+(?:\d+\s+|two\s+|three\s+|four\s+)?([a-z][a-z-]{2,})\b/,
   );
   const noun = m?.[1];
-  if (noun === undefined) return false;
+  if (noun === undefined) return null;
   const questions = questionSegments(item);
-  if (questions.length < 2) return false;
+  if (questions.length < 2) return null;
   const forms = nounForms(noun);
-  return questions.every((q) => forms.some((w) => new RegExp(`\\b${w}e?s?\\b`).test(q)));
+  const everyQuestion = questions.every((q) =>
+    forms.some((w) => new RegExp(`\\b${w}e?s?\\b`).test(q)),
+  );
+  return everyQuestion ? noun : null;
+}
+
+/** Matches the word as the item might spell it, singular or plural. */
+function wordRe(w: string): RegExp {
+  return new RegExp(`\\b${w}e?s?\\b`);
+}
+
+/**
+ * The words that name a PART of the ask rather than its subject: those a
+ * question asks about which do NOT run through every question. "tip" is in
+ * all three, so it is the subject; "harborlight" and "saltmarsh" are in one
+ * each, so naming one names a part.
+ *
+ * Short words are skipped because at three letters and under the field is
+ * almost all grammar ("it", "to", "on"), and a grammatical word names
+ * nothing.
+ */
+function partWords(item: AnswerCoverageItem): string[] {
+  const per = questionSegments(item).map((q) => new Set(q.match(/[a-z][a-z-]{3,}/g) ?? []));
+  const everywhere = (w: string) => per.every((s) => s.has(w));
+  return [...new Set(per.flatMap((s) => [...s]))].filter((w) => !everywhere(w));
+}
+
+/**
+ * English's pro-form for "another of the things we were discussing" — "keep
+ * the persona ONE". Naming it is not the start of a vocabulary the way the
+ * contrast words are: the language has this one word for the job, so there is
+ * no next one to add when somebody phrases a carve-out differently.
+ */
+const ANOTHER_OF_THEM = /\bones?\b/;
+
+/**
+ * Does this sentence hold a PART of the ask back from a refusal — the shape
+ * of a walk-back, whatever word introduces it?
+ *
+ * Three ways a sentence can be about one of the things: the pro-form above,
+ * the ask's own subject noun (a sentence that is not itself the refusal but
+ * still says "tip" is talking about a tip), and a word that names one part.
+ * None of them is a list of ways to say "but", which is the point — "however",
+ * "actually", "though", "scratch that" and a walk-back with no contrast word
+ * at all are all caught by what the sentence is ABOUT.
+ */
+function keepsAPart(sentence: string, item: AnswerCoverageItem, subject: string): boolean {
+  if (ANOTHER_OF_THEM.test(sentence)) return true;
+  if (nounForms(subject).some((w) => wordRe(w).test(sentence))) return true;
+  return partWords(item).some((w) => new RegExp(`\\b${w}\\b`).test(sentence));
 }
 
 /**
@@ -162,7 +218,26 @@ function refusesTheAsksSubject(last: string, item: AnswerCoverageItem | undefine
  * decided before the call. Four shapes, each of which can only be speaking to
  * the ask as a body: a reply made only of accepting and refusing words, a
  * total quantifier as the whole last sentence, a hand-back as the whole last
- * sentence, and a refusal of the very subject every question asks about.
+ * sentence, and a refusal of the very subject every question asks about, in
+ * ANY sentence of the reply.
+ *
+ * That last shape reads any sentence because a refusal is not made
+ * provisional by what follows it (2026-09-16): "no don't give these tips. i
+ * think this is a different story" refuses in sentence one and then says why,
+ * and reading only the last sentence put the same ask back on the reader's
+ * queue. The other two shapes stay pinned to the last sentence: a hand-back
+ * settles the ask only when it is where the reply lands.
+ *
+ * What stops a later sentence from walking that refusal back is NOT the
+ * carve-out test above. That test is a fixed list of contrast words, and the
+ * first version of this widening leaned on it: "…but keep the persona one"
+ * was held, while "however", "actually", "though" and "scratch that" all
+ * closed items their reader had not refused — silently, which is the worst
+ * way for this to be wrong. A word list cannot be finished, so the guard is
+ * `keepsAPart` instead: a refusal is blanket only while no OTHER sentence is
+ * ABOUT one of the things. That is a property of the reply, so it holds for
+ * phrasings nobody listed, including a walk-back with no contrast word at
+ * all ("don't give these tips. keep the persona one.").
  *
  * Everything else goes to the model, which is what keeps a genuinely partial
  * answer on the queue: "no, don't send the alert" names one thing, and so
@@ -193,9 +268,16 @@ export function blanketAnswer(text: string, item?: AnswerCoverageItem): boolean 
   if (bare !== '' && BARE_LEAD.test(one) && bare.split(' ').every((w) => BARE_WORDS.has(w))) {
     return true;
   }
-  const last = lastSentence(one);
+  const said = sentences(one);
+  const last = said.at(-1) ?? one;
   if (TOTAL_QUANTIFIER.test(last) || HAND_BACK.test(last)) return true;
-  return refusesTheAsksSubject(last, item);
+  if (!item) return false;
+  const refused = said.map((s) => refusedSubject(s, item));
+  const subject = refused.find((n) => n !== null);
+  if (subject === undefined || subject === null) return false;
+  // Refused somewhere — but only blanket while no OTHER sentence keeps one of
+  // them back. A sentence that refuses again is not a walk-back.
+  return !said.some((s, i) => refused[i] === null && keepsAPart(s, item, subject));
 }
 
 /** Collapse whitespace and fence-breaking angle brackets, as the judge does. */
