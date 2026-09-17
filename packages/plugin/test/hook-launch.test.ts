@@ -29,6 +29,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,7 +83,13 @@ interface HookEntry {
   script: string;
 }
 
-function hookEntries(): HookEntry[] {
+/** The hook script a command runs, read out of the shell string. Quote-aware
+ *  rather than whitespace-split, because the paths hooks.json substitutes are
+ *  quoted precisely so they may contain a space. */
+const scriptIn = (command: string) =>
+  (command.match(/"([^"]*\.ts)"/) ?? command.match(/(\S+\.ts)/))?.[1] ?? '';
+
+function hookEntries(root = PLUGIN_ROOT): HookEntry[] {
   // audit: not-source — hooks.json is CONFIGURATION, and it is parsed here to
   // get the commands this file then executes; nothing asserts on its text.
   const config = JSON.parse(readFileSync(HOOKS_JSON, 'utf8')) as {
@@ -92,9 +99,8 @@ function hookEntries(): HookEntry[] {
   for (const [event, matchers] of Object.entries(config.hooks)) {
     for (const matcher of matchers) {
       for (const h of matcher.hooks) {
-        const command = h.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', PLUGIN_ROOT);
-        const script = command.split(/\s+/).find((t) => t.endsWith('.ts')) ?? '';
-        out.push({ event, command, script });
+        const command = h.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', root);
+        out.push({ event, command, script: scriptIn(command) });
       }
     }
   }
@@ -174,6 +180,33 @@ describe('hook interpreter resolution', () => {
       for (const entry of ENTRIES) {
         expect(argv, `${entry.event} never reached bun`).toContain(entry.script);
       }
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    'survives a plugin root with a space in it',
+    async () => {
+      // The command is a shell string, so an unquoted ${CLAUDE_PLUGIN_ROOT}
+      // splits on the space and the hook silently does nothing — the exact
+      // failure class this PR is about, one install path away. ~/.claude/plugins
+      // has no space today, which is why nobody has hit it and why only a test
+      // can hold the quoting in place.
+      const dir = mkdtempSync(join(tmpdir(), 'cw-hook-spaced-'));
+      const spacedRoot = join(dir, 'plugin root');
+      symlinkSync(PLUGIN_ROOT, spacedRoot);
+
+      const entry = hookEntries(spacedRoot).find((e) => e.event === 'SessionStart');
+      expect(entry?.script).toContain('plugin root');
+
+      const { code, stdout } = await sh(
+        entry?.command ?? '',
+        bunlessEnv({ CW_AGENT_NAME: 'Harborlight' }),
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(stdout.trim()).hookSpecificOutput.additionalContext).toContain(
+        'CW_WORKSPACE_ID',
+      );
     },
     CASE_TIMEOUT,
   );
