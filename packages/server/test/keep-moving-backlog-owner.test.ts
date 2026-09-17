@@ -145,7 +145,16 @@ describe('classifyOpenTasks — a Backlog row is not an unfiled ask', () => {
 
   it('a schedule rule in the backlog is still a rule row — that test stays first', () => {
     const [r] = classifyOpenTasks(
-      [row({ ownerKind: 'person', goal: 'g-someday', schedule: { every: 'week' } })],
+      [
+        row({
+          ownerKind: 'person',
+          goal: 'g-someday',
+          schedule: {
+            rule: { kind: 'every', everyMs: 7 * 86_400_000 },
+            armedAt: now - 30 * 86_400_000,
+          },
+        }),
+      ],
       [],
       [],
       now,

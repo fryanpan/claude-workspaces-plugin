@@ -24,6 +24,7 @@
  * for why that direction is safe when the other was not).
  */
 
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import type { ExternalWait } from '@claude-workspaces/core/task-wire';
 import {
   type FiledItemAddress,
@@ -51,9 +52,10 @@ export interface TaskRow {
    */
   ownerKind?: string;
   assignee?: string;
-  /** Present on a rule row (`Task.schedule`); the classifier needs only the
-   *  fact, so it is typed as loosely as the wire allows. */
-  schedule?: unknown;
+  /** Present on a rule row (`Task.schedule`). The BUCKETING needs only the
+   *  fact; `owner-ask.ts` needs the date, so it is typed rather than left
+   *  loose (2026-09-17). */
+  schedule?: TaskSchedule;
   /** Row-edit timestamps — activity the /events feed has measurably missed. */
   updatedAt?: number;
   bodyWrittenAt?: number;
@@ -285,7 +287,18 @@ export function classifyOpenTasks(
     // unfiled reading, and a question left on one went unread while the rule
     // kept closing green. That precedence is right for dispatch and was never
     // right for asks, so the ask is read off the same facts, separately.
-    const ownerAsk = ownerAskOf({ hasPendingAsk, boardSaysOwnerWaits, inBacklog });
+    // The schedule goes in as a FOURTH FACT rather than being re-derived
+    // here: a row whose rule has not fired yet is deferred, not asked, and
+    // #1077 lost that by reading the ask off three facts none of which can
+    // see a date. `owner-ask.ts` still reads no bucket, and the bucketing
+    // below still reads nothing of the ask.
+    const ownerAsk = ownerAskOf({
+      hasPendingAsk,
+      boardSaysOwnerWaits,
+      inBacklog,
+      ...(t.schedule !== undefined ? { schedule: t.schedule } : {}),
+      now,
+    });
     let bucket: Bucket;
     // A rule row first: not work anyone picks up whatever else is true of it,
     // and reading it as ready-unpicked sent a session at a runbook

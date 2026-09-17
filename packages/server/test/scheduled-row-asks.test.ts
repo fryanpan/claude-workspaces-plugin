@@ -25,10 +25,10 @@
  * is public.
  */
 import { describe, expect, it } from 'bun:test';
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import { type ReviewItemRow, type TaskRow, classifyOpenTasks } from '../src/keep-moving.ts';
 import { indexFiledAsks, ownerAskOf } from '../src/owner-ask.ts';
 import { OWNER_UNFILED_BUCKET, evaluateStalls } from '../src/stall-gate.ts';
-import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import { WAITING_UNFILED_BUCKET, noteClockOf, noteClocks } from '../src/waiting-unfiled.ts';
 
 const MIN = 60_000;
@@ -82,26 +82,26 @@ function classify(tasks: TaskRow[], reviewItems: ReviewItemRow[] = []) {
 
 describe('ownerAskOf — the reading, driven on its own', () => {
   it('a pending item is a filed ask whatever else is true of the task', () => {
-    expect(ownerAskOf({ hasPendingAsk: true, boardSaysOwnerWaits: false, inBacklog: true })).toBe(
-      'filed',
-    );
+    expect(
+      ownerAskOf({ hasPendingAsk: true, boardSaysOwnerWaits: false, inBacklog: true, now }),
+    ).toBe('filed');
   });
 
   it('the board saying a person waits, with nothing filed, is an unfiled ask', () => {
-    expect(ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: false })).toBe(
-      'unfiled',
-    );
+    expect(
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: false, now }),
+    ).toBe('unfiled');
   });
 
   it('the backlog carries no ask, because there is none anyone could file', () => {
     expect(
-      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: true }),
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: true, now }),
     ).toBeUndefined();
   });
 
   it('a task nobody is waiting on reads as no ask at all, not as a filed one', () => {
     expect(
-      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: false, inBacklog: false }),
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: false, inBacklog: false, now }),
     ).toBeUndefined();
   });
 });

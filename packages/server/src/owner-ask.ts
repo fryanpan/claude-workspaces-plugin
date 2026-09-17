@@ -10,12 +10,23 @@
  * left on one went unread while the rule kept closing green. Nothing here
  * reads a bucket, and the bucketing reads nothing here.
  *
+ * It does read the schedule's DATE, which is a different thing and was the
+ * correction of 2026-09-17. Splitting the two questions made every reading
+ * here reachable for a rule row, including for one whose date has not
+ * arrived — and a row deferred to January owes nobody an answer today. Six
+ * rows on a peer board were named "waiting on a person with NO question
+ * filed" the day after the split, all scheduled months out, one of them
+ * deferred by its owner in as many words. So the rule's calendar is a fourth
+ * fact below, and the bucket is still not.
+ *
  * "Waiting on a person" is DECLARED, never inferred (rebuild step 2,
  * 2026-09-08): a task is waiting when an open review item is filed for it,
  * and it then carries the ADDRESS of that item. Whether an item is open is
  * the Home queue's own predicate, read by the caller that builds the rows
  * handed to `indexFiledAsks`; nothing here reads prose.
  */
+
+import { type TaskSchedule, nextOccurrence } from '@claude-workspaces/core/task-schedule';
 
 /**
  * Where a filed item lives — the thing a waiting row carries so that every
@@ -114,8 +125,31 @@ export function ownerAskOf(facts: {
   boardSaysOwnerWaits: boolean;
   /** The task's band is neither dispatched nor the owner's. */
   inBacklog: boolean;
+  /** The row's rule, when it has one (`Task.schedule`). Read here for its
+   *  DATE and nothing else — the bucketing still reads it separately, and
+   *  neither reading is derived from the other. */
+  schedule?: TaskSchedule;
+  /** Now, so the date above can be judged. The module stays pure. */
+  now: number;
 }): OwnerAsk | undefined {
   if (facts.hasPendingAsk) return 'filed';
-  if (facts.boardSaysOwnerWaits && !facts.inBacklog) return 'unfiled';
+  if (facts.boardSaysOwnerWaits && !facts.inBacklog && !deferredToADate(facts.schedule, facts.now))
+    return 'unfiled';
   return undefined;
+}
+
+/**
+ * Whether the row's rule is still waiting for its own date.
+ *
+ * `nextOccurrence` with no cursor, because the question is about the rule's
+ * calendar and not about any instance it has produced: a next occurrence in
+ * the future means the work has not started, so nobody has been asked
+ * anything yet. No occurrence at all — a one-off already fired, an `until`
+ * exhausted — is NOT a deferral: the rule is spent, and a person-owned row
+ * the board is still carrying owes the same answer any other one does.
+ */
+function deferredToADate(schedule: TaskSchedule | undefined, now: number): boolean {
+  if (schedule === undefined) return false;
+  const next = nextOccurrence(schedule);
+  return next !== undefined && next > now;
 }
