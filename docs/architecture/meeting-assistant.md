@@ -1359,6 +1359,29 @@ round trip took off. The at-stop quality pass and the tidy-up's
 the coverage reading over each slice so the change of definition is visible
 beside the change in the notes.
 
+**And a reading that FAILED is a third state, not an empty one.** Both halves
+of that address can fail together. A prepared document gives the section half
+nothing to name, and `releaseNotesAuthorship` drops every mark at the start of
+every recording LEG, so a leg that composed nothing new has no marks either —
+and the reading that comes back is indistinguishable from a meeting where
+nobody wrote a word. Every check over empty notes then reports zero of
+something, which is obviously nothing; coverage reports 100% of everything,
+which reads exactly like a verdict. On 2026-09-15 one meeting's quality item
+was filed seven times on one doc with one headline, the denominator climbing
+15, 33, 75, 160, 199, 262, each one saying 100% of what was said had reached
+no note. 172 notes had been written; the arithmetic was right every time and
+the divisor was broken. So `readMeetingNotes` answers `notes` or `unreadable`
+rather than a string: a reading that claimed no blocks in a document that
+HOLDS blocks is `unreadable`, a document holding no blocks at all is the
+genuine zero, and `notes-quality-coverage.ts` turns `unreadable` into a null
+count and a null share instead of a percentage. A meeting in that state
+raises `notes-unread` — "this meeting's notes could not be read" — and never
+`coverage`, the record on disk carries `coverageSource` so it cannot be read
+back as a real zero, and the week's rollup counts it under `coverageUnknown`
+rather than in the totals. The filer compares the words it already filed
+before revising, so a verdict that cannot clear stops re-judging its item at
+every leg stop.
+
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw
 and wrote nothing about — the complaint a reader actually makes. The second

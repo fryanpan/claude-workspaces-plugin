@@ -182,7 +182,7 @@ function markdownOfScope(all: readonly Y.XmlElement[], scope: ReadonlySet<Y.XmlE
  *
  * KEPT, and still the OLD definition of a meeting's notes, because a report
  * that changes what it measures owes its reader both readings of the run it
- * changed on. {@link readMeetingNotesMarkdown} is the one the server acts on.
+ * changed on. {@link readMeetingNotes} is the one the server acts on.
  */
 export function readSectionMarkdown(
   docStore: NotesDocStore,
@@ -196,6 +196,45 @@ export function readSectionMarkdown(
 }
 
 /**
+ * What one reading of a meeting's notes found, and whether it can be trusted
+ * as a reading at all.
+ *
+ * THE THIRD STATE IS THE POINT. Before it there were two answers — some
+ * markdown, or the empty string — and four different situations collapsed
+ * into the empty one: a document the store could not hand over, a fragment
+ * that would not parse, an address that named nothing in a document full of
+ * notes, and a meeting where genuinely nothing was written down. Only the
+ * last is a fact about the meeting. The first three are facts about this
+ * reading, and a coverage verdict computed over any of them is 100% by
+ * construction — which is how one meeting's notes were reported as reaching
+ * nobody seven times while the doc held 172 of them (2026-09-15).
+ */
+export interface MeetingNotesReading {
+  /** The markdown of the blocks this reading claimed. */
+  markdown: string;
+  /**
+   * `notes` when the reading is a fact about the meeting — either it found
+   * blocks, or the document holds none for it to have missed. `unreadable`
+   * when it found nothing in a document that holds blocks, which says only
+   * that the address failed.
+   */
+  source: 'notes' | 'unreadable';
+  /** What could not be reached, in words, when `source` is `unreadable`, so
+   *  a reader of the report is told rather than left to infer it. */
+  missing?: string;
+}
+
+/** The words an unreadable reading carries, by what went wrong. */
+const NO_DOCUMENT =
+  'the document could not be read at the stop — it is not in the store, or its ' +
+  'prose would not parse, so nothing can be said about what this meeting wrote';
+const NO_ADDRESS =
+  'the document holds blocks and this reading claimed none of them — the meeting ' +
+  'opened no section this reading could find, and no block still carries the ' +
+  "note-taker's authorship mark, which a person's edit, a markdown round trip " +
+  'and the release every recording leg does on its own start all remove';
+
+/**
  * Everything this meeting wrote in this doc: the blocks it still holds the
  * authorship mark on, wherever they sit, plus its own section.
  *
@@ -204,17 +243,32 @@ export function readSectionMarkdown(
  * ordinary case; the section finds notes whose mark a person's edit or a
  * markdown round trip has taken off, which is why a doc with no marks at all
  * reads exactly as it did before whole-doc note-taking.
+ *
+ * BOTH HALVES CAN FAIL AT ONCE, and then the honest answer is not "no notes".
+ * A meeting on a prepared document opens no section, so the section half has
+ * no address to use; `releaseNotesAuthorship` drops every mark at the start
+ * of every recording LEG, so a leg that composed nothing new has no marks
+ * either. That pair reads exactly like a meeting nobody wrote a word in, and
+ * {@link MeetingNotesReading} is what tells them apart: a document holding
+ * blocks that this reading claimed none of is `unreadable`, and a document
+ * holding no blocks at all is the genuine zero.
  */
-export function readMeetingNotesMarkdown(
+export function readMeetingNotes(
   docStore: NotesDocStore,
   docId: string,
   headingId: string | undefined,
   skip: ReadonlySet<string> = new Set(),
   author: string = NOTES_AUTHOR_ID,
-): string {
+): MeetingNotesReading {
   const all = blocksOf(docStore, docId);
-  if (all === null) return '';
+  if (all === null) return { markdown: '', source: 'unreadable', missing: NO_DOCUMENT };
   const scope = sectionScope(all, headingId, skip);
   for (const el of authoredScope(all, author, skip)) scope.add(el);
-  return markdownOfScope(all, scope);
+  const markdown = markdownOfScope(all, scope);
+  if (markdown !== '') return { markdown, source: 'notes' };
+  // A document with nothing in it is the one empty reading that is a fact
+  // about the meeting: there were no blocks for this address to have missed.
+  return all.length === 0
+    ? { markdown: '', source: 'notes' }
+    : { markdown: '', source: 'unreadable', missing: NO_ADDRESS };
 }

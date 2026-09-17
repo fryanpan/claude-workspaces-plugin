@@ -240,11 +240,21 @@ export function buildNotesQualityReview(input: {
         'The transcript carries no voice by that name.',
     );
   }
-  if (report.uncoveredShare !== null) {
+  if (report.coverage.source === 'unreadable') {
+    // The sentence that replaces a verdict nobody could have answered. It
+    // names the ideas heard, because that half WAS measured, and then says
+    // plainly that what became of them is not known — rather than reporting
+    // every one of them as lost, which is what an empty reading used to do.
     lines.push(
-      `- **${report.uncoveredIdeas} of ${report.ideas} things said reached no note** ` +
-        `(${Math.round(report.uncoveredShare * 100)}%). This one is a lexical proxy and ` +
-        'over-reports paraphrase, so read it as an upper bound.',
+      '- **Whether what was said reached a note is not known.** ' +
+        `${report.coverage.ideas} things were said and this reading could account for ` +
+        `none of them, because ${report.coverage.missing ?? 'the notes could not be read'}.`,
+    );
+  } else if (report.coverage.uncoveredShare !== null) {
+    lines.push(
+      `- **${report.coverage.uncoveredIdeas} of ${report.coverage.ideas} things said reached ` +
+        `no note** (${Math.round(report.coverage.uncoveredShare * 100)}%). This one is a ` +
+        'lexical proxy and over-reports paraphrase, so read it as an upper bound.',
     );
   }
   if (report.lateness.source === 'ticks' && report.lateness.lateShare !== null) {

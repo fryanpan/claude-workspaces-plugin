@@ -310,4 +310,51 @@ describe('what the person reads', () => {
   it('says the lateness is unknown when nothing measured it', () => {
     expect(String(item().detail)).toContain('not known');
   });
+
+  /** The same item for a meeting whose notes reading failed. */
+  const unreadItem = (): Record<string, unknown> =>
+    buildNotesQualityReview({
+      workspaceId: 'w-1',
+      docId: 'd-harbour',
+      docTitle: 'Harbour season',
+      report: buildNotesQualityReport({
+        notes: '',
+        transcript: Array.from({ length: 20 }, (_, i) => ({
+          text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
+        })),
+        notesRead: false,
+        notesMissing: 'the document could not be read at the stop',
+      }),
+    });
+
+  it('tells a person the notes could not be read, not that nothing was covered', () => {
+    // The sentence Bryan answered "not true" to was "100% of what was said
+    // reached no note", written over a reading that had failed.
+    const detail = String(unreadItem().detail);
+    expect(detail).toContain('is not known');
+    expect(detail).toContain('the document could not be read at the stop');
+    expect(detail).not.toContain('reached no note');
+  });
+
+  it('THE CONTROL: a reading that DID read the notes still names the share', () => {
+    const detail = String(
+      buildNotesQualityReview({
+        workspaceId: 'w-1',
+        docId: 'd-harbour',
+        docTitle: 'Harbour season',
+        report: buildNotesQualityReport({
+          notes: '',
+          transcript: Array.from({ length: 20 }, (_, i) => ({
+            text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
+          })),
+          notesRead: true,
+        }),
+      }).detail,
+    );
+    expect(detail).toContain('reached no note');
+  });
+
+  it('passes the review gate for an unreadable meeting too', () => {
+    expect(checkReviewPayload(unreadItem()).ok).toBe(true);
+  });
 });

@@ -24,29 +24,15 @@
  * that reached no note — plus the arithmetic that turns all of them into one
  * verdict.
  *
- * THE COVERAGE CHECK IS LEXICAL AND ITS LIMITS ARE REAL. "Was this idea
- * written down" is answered by content-word overlap between one settled
- * sentence and the whole notes text. Three things it cannot do, and a reader
- * of its number has to know all three:
- *
- *   - **A paraphrase with no shared nouns reads as a miss.** "We'll ship it
- *     Tuesday" noted as "release lands early next week" shares nothing this
- *     can see. So the number is an UPPER bound on what was lost.
- *   - **An unrelated bullet about the same subject reads as coverage.** The
- *     overlap is against the whole notes text rather than against one bullet,
- *     so a topic mentioned anywhere absolves every sentence about it.
- *   - **It has no idea what mattered.** A settled sentence is an idea if it
- *     carries enough content words, which counts a long aside and skips a
- *     short decision.
- *
- * The model-judged version of the same question lives in the eval harness,
- * over a corpus, and is the number to trust about the RATE. This one is the
- * number to trust about THIS meeting having gone wrong, and its errors are
- * deliberately asymmetric: it over-reports misses, so a meeting it calls
- * clean is very likely clean.
+ * THE COVERAGE CHECK LIVES NEXT DOOR. "Was this idea written down" is the
+ * one check whose answer depends on something outside the notes, and the one
+ * whose number stays well-formed when the notes reading fails. It, its
+ * limits, and the third state that keeps a failed reading from arriving here
+ * as a confident 100% verdict are in `notes-quality-coverage.ts`.
  */
 
 import { findSpeakerTags } from '@claude-workspaces/core';
+import { type NotesCoverage, type SpokenTurn, coverageOf } from './notes-quality-coverage.ts';
 import {
   LATE_NOTE_MS,
   MAX_DUPLICATE_BULLET_LINES,
@@ -55,7 +41,6 @@ import {
   MAX_LONG_FLAT_RUNS,
   MAX_UNCOVERED_IDEA_SHARE,
   MAX_UNKNOWN_SPEAKERS,
-  MIN_IDEAS_FOR_COVERAGE,
 } from './notes-quality-thresholds.ts';
 import {
   type FlatRun,
@@ -65,17 +50,7 @@ import {
   plainWords,
 } from './notes-quality.ts';
 
-/** One settled turn, as much of it as this module reads. Structural on
- *  purpose: `TranscriptTurn` from `meetings.ts` satisfies it, and so does a
- *  literal in a test, without this module importing anything that reads a
- *  file. */
-export interface SpokenTurn {
-  text: string;
-  /** The engine's label for the voice. */
-  speaker?: string;
-  /** When the turn settled. Only the lateness reading uses it. */
-  ts?: number;
-}
+export type { SpokenTurn } from './notes-quality-coverage.ts';
 
 /** Who the meeting actually had, as its record knows them. */
 export interface MeetingVoices {
@@ -154,11 +129,9 @@ export interface NotesQualityReport {
   longRuns: FlatRun[];
   /** Voices the meeting never had. */
   unknownVoices: UnknownVoice[];
-  /** Ideas heard, and the ones no note accounts for. */
-  ideas: number;
-  uncoveredIdeas: number;
-  /** `null` when there were too few ideas for a share to mean anything. */
-  uncoveredShare: number | null;
+  /** Ideas heard, how many reached a note, and whether the notes could be
+   *  read at all. The third state lives here and nowhere else. */
+  coverage: NotesCoverage;
   lateness: NotesLateness;
   /** Which bars this meeting passed. Empty is the healthy state. */
   flags: NotesQualityFlag[];
@@ -172,41 +145,10 @@ export interface NotesQualityFlag {
     | 'flat-runs'
     | 'unknown-speakers'
     | 'coverage'
+    | 'notes-unread'
     | 'late';
   /** What a reader is told, already carrying its own number. */
   text: string;
-}
-
-/** Words too common to say anything about whether two texts are about the
- *  same thing. Small on purpose: a long list starts throwing away the nouns
- *  that carry a short sentence. */
-const STOPWORDS = new Set(
-  (
-    'a about all also an and any are as at be been but by can could did do does for from get go' +
-    ' had has have he her here him his how i if in into is it its just like me more most my no' +
-    ' not of on one or our out over said say see she should so some than that the their them' +
-    ' then there these they this those to too up us very was we well were what when where which' +
-    ' who will with would yeah yes you your'
-  ).split(' '),
-);
-
-/** A word reduced to the part two forms of it share. Not a stemmer: it drops
- *  the three endings that change a word without changing its subject, which
- *  is what keeps "shipping" and "shipped" from reading as different ideas. */
-function stem(word: string): string {
-  const w = word.toLowerCase();
-  if (w.length > 4 && w.endsWith('ing')) return w.slice(0, -3);
-  if (w.length > 4 && w.endsWith('ed')) return w.slice(0, -2);
-  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
-  return w;
-}
-
-/** The words of a text that say what it is about. */
-export function contentWords(text: string): string[] {
-  return plainWords(text)
-    .map((w) => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
-    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
-    .map(stem);
 }
 
 /** The bullets written more than once, worst first. Compared on their words
@@ -297,49 +239,6 @@ export function unknownVoices(notes: string, voices: MeetingVoices): UnknownVoic
   return out;
 }
 
-/**
- * The share of an idea's content words that has to appear in the notes before
- * it counts as written down. Two fifths, for the reason
- * {@link MAX_UNCOVERED_IDEA_SHARE} gives: notes paraphrase, so an exact-words
- * test would report every good note as a miss.
- */
-export const IDEA_OVERLAP_SHARE = 0.4;
-
-/** The fewest content words a settled sentence needs before it is an idea at
- *  all. "Right." and "Yeah, exactly" are not ideas; "we ship Tuesday" is, and
- *  it is two content words, so the floor cannot be higher than two. */
-export const MIN_IDEA_CONTENT_WORDS = 4;
-
-/** The sentences of a meeting that carried enough to be worth a note. */
-export function spokenIdeas(transcript: readonly SpokenTurn[]): string[][] {
-  const out: string[][] = [];
-  for (const turn of transcript) {
-    for (const sentence of turn.text.split(/(?<=[.?!])\s+/)) {
-      const words = contentWords(sentence);
-      if (words.length >= MIN_IDEA_CONTENT_WORDS) out.push(words);
-    }
-  }
-  return out;
-}
-
-/** The ideas whose words the notes do not carry. */
-export function uncoveredIdeaCount(
-  notes: string,
-  transcript: readonly SpokenTurn[],
-): {
-  ideas: number;
-  uncovered: number;
-} {
-  const ideas = spokenIdeas(transcript);
-  const noted = new Set(contentWords(notes));
-  let uncovered = 0;
-  for (const idea of ideas) {
-    const hit = idea.filter((w) => noted.has(w)).length;
-    if (hit / idea.length < IDEA_OVERLAP_SHARE) uncovered++;
-  }
-  return { ideas: ideas.length, uncovered };
-}
-
 /** The lateness reading for a meeting whose waits are known. */
 export function latenessFrom(waits: readonly NoteWait[]): NotesLateness {
   if (waits.length === 0) {
@@ -383,13 +282,27 @@ export interface NotesQualityInput {
   voices?: MeetingVoices;
   /** Per-turn waits, when a timing record was found. */
   waits?: readonly NoteWait[];
+  /**
+   * Whether `notes` is a reading of this meeting's notes at all.
+   *
+   * Default `true`, because a caller holding notes it built itself — every
+   * test, the eval harness — knows it read them. The server passes the
+   * reader's own answer (`notes-written.ts`), and `false` is what stops a
+   * failed reading from becoming a 100%-uncovered verdict.
+   */
+  notesRead?: boolean;
+  /** What could not be read, when `notesRead` is false. */
+  notesMissing?: string;
 }
 
 export function buildNotesQualityReport(input: NotesQualityInput): NotesQualityReport {
   const { notes, transcript } = input;
   const voices = input.voices ?? { labels: [], names: [] };
   const repeats = repeatedBullets(notes);
-  const coverage = uncoveredIdeaCount(notes, transcript);
+  const coverage = coverageOf(notes, transcript, {
+    read: input.notesRead ?? true,
+    ...(input.notesMissing !== undefined ? { missing: input.notesMissing } : {}),
+  });
   const report: Omit<NotesQualityReport, 'flags'> = {
     bullets: allBullets(notes).length,
     duplicateHeadings: duplicateTopics(notes),
@@ -397,10 +310,7 @@ export function buildNotesQualityReport(input: NotesQualityInput): NotesQualityR
     duplicateBulletLines: duplicateBulletLines(repeats),
     longRuns: longFlatRuns(notes),
     unknownVoices: unknownVoices(notes, voices),
-    ideas: coverage.ideas,
-    uncoveredIdeas: coverage.uncovered,
-    uncoveredShare:
-      coverage.ideas >= MIN_IDEAS_FOR_COVERAGE ? coverage.uncovered / coverage.ideas : null,
+    coverage,
     lateness: latenessFrom(input.waits ?? []),
   };
   return { ...report, flags: notesQualityFlags(report) };
@@ -434,10 +344,27 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
       text: `${plural(report.unknownVoices.length, 'speaker')} the meeting never had`,
     });
   }
-  if (report.uncoveredShare !== null && report.uncoveredShare > MAX_UNCOVERED_IDEA_SHARE) {
+  const { coverage } = report;
+  if (coverage.source === 'unreadable') {
+    // NEVER A COVERAGE FLAG HERE. The one thing this state must not do is
+    // wear the verdict it replaced: "100% of what was said reached no note"
+    // is what a broken divisor says, and it is what a person answered "not
+    // true" to. A reading that failed raises a flag about ITSELF, and only
+    // when the meeting had something to cover — a meeting nobody spoke in
+    // whose notes could not be read has lost nothing worth waking anyone for.
+    if (coverage.ideas > 0) {
+      flags.push({
+        kind: 'notes-unread',
+        text: `this meeting's notes could not be read, so what reached a note is not known`,
+      });
+    }
+  } else if (
+    coverage.uncoveredShare !== null &&
+    coverage.uncoveredShare > MAX_UNCOVERED_IDEA_SHARE
+  ) {
     flags.push({
       kind: 'coverage',
-      text: `${Math.round(report.uncoveredShare * 100)}% of what was said reached no note`,
+      text: `${Math.round(coverage.uncoveredShare * 100)}% of what was said reached no note`,
     });
   }
   const { lateness } = report;
@@ -459,9 +386,11 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
  */
 export function notesQualityLogLine(report: NotesQualityReport): string {
   const coverage =
-    report.ideas === 0
-      ? 'no ideas heard'
-      : `${report.uncoveredIdeas}/${report.ideas} ideas in no note`;
+    report.coverage.source === 'unreadable'
+      ? `notes unreadable, ${report.coverage.ideas} ideas unjudged`
+      : report.coverage.ideas === 0
+        ? 'no ideas heard'
+        : `${report.coverage.uncoveredIdeas}/${report.coverage.ideas} ideas in no note`;
   const lateness =
     report.lateness.source === 'ticks'
       ? `${report.lateness.late}/${report.lateness.measured} notes late`
