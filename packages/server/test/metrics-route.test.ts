@@ -41,6 +41,7 @@ interface Metrics {
     byFlag: Record<string, number>;
     totals: Record<string, number>;
     latenessUnknown: number;
+    coverageUnknown: number;
   };
 }
 
@@ -211,6 +212,37 @@ describe('GET /api/metrics', () => {
     expect(top?.count).toBeGreaterThan(0);
   });
 
+  it('counts a meeting whose notes could not be read as unknown coverage', async () => {
+    // THE OTHER SIDE of the field above, and the reason it exists. This
+    // meeting's uncovered count is null rather than 262, so it adds nothing
+    // to the totals — and without `coverageUnknown` its absence from them
+    // would be indistinguishable from a week in which it went well.
+    writeNotesQuality(dataDir, {
+      docId: 'd-mtg',
+      meetingId: 'm-mtg-2',
+      at: Date.now(),
+      bullets: 0,
+      duplicateBulletLines: 0,
+      duplicateHeadings: 0,
+      longRuns: 0,
+      unknownVoices: 0,
+      ideas: 262,
+      coverageSource: 'unreadable',
+      uncoveredIdeas: null,
+      uncoveredShare: null,
+      lateShare: null,
+      lateMedianMs: null,
+      flags: ['notes-unread'],
+    });
+
+    const m = await metrics();
+    expect(m.notesQuality?.meetings).toBe(1);
+    expect(m.notesQuality?.coverageUnknown).toBe(1);
+    expect(m.notesQuality?.byFlag['notes-unread']).toBe(1);
+    expect(m.notesQuality?.totals.ideas).toBe(0);
+    expect(m.notesQuality?.totals.uncoveredIdeas).toBe(0);
+  });
+
   it('carries the note-taker’s week, and names no meeting in it', async () => {
     // A meeting that went badly, as its stop would have left it.
     writeNotesQuality(dataDir, {
@@ -238,6 +270,11 @@ describe('GET /api/metrics', () => {
     expect(m.notesQuality?.byFlag['duplicate-bullets']).toBe(1);
     expect(m.notesQuality?.totals.uncoveredIdeas).toBe(9);
     expect(m.notesQuality?.latenessUnknown).toBe(1);
+    // This meeting's notes WERE read, so nothing is unknown about its
+    // coverage. The field has to be here and has to be zero: a route that
+    // dropped it would leave a reader unable to tell a week of good coverage
+    // from a week the checker could not see.
+    expect(m.notesQuality?.coverageUnknown).toBe(0);
 
     // And it names neither the doc nor the meeting: the route promises a body
     // with no identifiers in it, and a bad meeting reaches a person on the

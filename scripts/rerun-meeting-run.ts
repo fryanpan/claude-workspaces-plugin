@@ -58,11 +58,11 @@ import { meetingDirPath } from '../packages/server/src/meetings.ts';
 import { readTranscript } from '../packages/server/src/meetings.ts';
 import { createNotesHeadingFileStore } from '../packages/server/src/notes-heading-store.ts';
 import { readNotesMethod, writeNotesMethod } from '../packages/server/src/notes-method-store.ts';
+import { uncoveredIdeaCount } from '../packages/server/src/notes-quality-coverage.ts';
 import {
-  readMeetingNotesMarkdown,
+  readMeetingNotes,
   readSectionMarkdown,
 } from '../packages/server/src/notes-quality-pass.ts';
-import { uncoveredIdeaCount } from '../packages/server/src/notes-quality-report.ts';
 import { readNotesQuality } from '../packages/server/src/notes-quality-store.ts';
 import { type ServerHandle, createServer } from '../packages/server/src/server.ts';
 import type { TranscriptionEngine } from '../packages/server/src/transcribe.ts';
@@ -374,13 +374,13 @@ export async function runRerun(
     // coverage line counts. `notes-section.md` is kept beside it because the
     // report prints the old reading too, and a number in a report a reader
     // cannot open is a number they have to take on trust.
-    const written = readMeetingNotesMarkdown(server.docStore, docId, headingId);
+    const written = readMeetingNotes(server.docStore, docId, headingId);
     const quality = readNotesQuality(dataDir, docId, meetingId);
     const notesPath = join(runDir, 'notes.md');
     const writtenNotesPath = join(runDir, 'notes-meeting.md');
     const document = server.docStore.readMarkdownBody(docId) ?? '';
     writeFileSync(notesPath, document);
-    writeFileSync(writtenNotesPath, written);
+    writeFileSync(writtenNotesPath, written.markdown);
     writeFileSync(join(runDir, 'notes-section.md'), section);
     copyTranscript(dataDir, docId, runDir);
     // THE OLD READING OF THE SAME RUN, computed here rather than remembered:
@@ -405,8 +405,13 @@ export async function runRerun(
       // count is the fallback for a run whose record failed to write, so the
       // row is never blank.
       ideasVoiced: quality?.ideas ?? summary.ideas.seen,
+      // A run whose notes reading FAILED has no covered count — `uncovered`
+      // is null there, not zero — so the row falls back to the pipeline's own
+      // running count rather than printing a subtraction from nothing.
       ideasCovered:
-        quality !== undefined ? quality.ideas - quality.uncoveredIdeas : summary.ideas.carried,
+        quality !== undefined && quality.uncoveredIdeas !== null
+          ? quality.ideas - quality.uncoveredIdeas
+          : summary.ideas.carried,
       sectionIdeasVoiced: sectionCoverage.ideas,
       sectionIdeasCovered: sectionCoverage.ideas - sectionCoverage.uncovered,
       commit: headCommit(),
@@ -420,7 +425,7 @@ export async function runRerun(
       writtenNotesPath,
       document,
       section,
-      written,
+      written: written.markdown,
     });
     const reportPath = join(runDir, 'report.md');
     writeFileSync(reportPath, renderRerunReport(report, before));

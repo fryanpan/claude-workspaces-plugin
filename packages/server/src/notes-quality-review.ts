@@ -240,11 +240,24 @@ export function buildNotesQualityReview(input: {
         'The transcript carries no voice by that name.',
     );
   }
-  if (report.uncoveredShare !== null) {
+  if (report.coverage.source === 'unreadable') {
+    // The sentence that replaces a verdict nobody could have answered — and
+    // it carries NO COUNT, deliberately. Every leg of a meeting hears more
+    // than the last, so a number here would differ at every stop while the
+    // reading said the identical thing, and the filer would re-judge this
+    // item in front of its reader once per leg. See `verdictOf` in
+    // notes-quality-filing.ts.
     lines.push(
-      `- **${report.uncoveredIdeas} of ${report.ideas} things said reached no note** ` +
-        `(${Math.round(report.uncoveredShare * 100)}%). This one is a lexical proxy and ` +
-        'over-reports paraphrase, so read it as an upper bound.',
+      '- **Whether what was said reached a note is not known.** This check could not find ' +
+        `this meeting's notes, because ${report.coverage.missing ?? 'they could not be read'}. ` +
+        'That is a statement about the check, not about the notes: it is not a claim that ' +
+        'nothing was written down.',
+    );
+  } else if (report.coverage.uncoveredShare !== null) {
+    lines.push(
+      `- **${report.coverage.uncoveredIdeas} of ${report.coverage.ideas} things said reached ` +
+        `no note** (${Math.round(report.coverage.uncoveredShare * 100)}%). This one is a ` +
+        'lexical proxy and over-reports paraphrase, so read it as an upper bound.',
     );
   }
   if (report.lateness.source === 'ticks' && report.lateness.lateShare !== null) {

@@ -16,6 +16,14 @@
  * failure degrades to a log line. A quality report is worth strictly less
  * than the notes it is about.
  *
+ * THE READING ANSWERS THREE STATES, NOT TWO. `notes-written.ts` says whether
+ * it read the notes at all, and this pass carries that answer into the
+ * report rather than collapsing it into an empty string. A reading that
+ * failed used to arrive here as notes holding nothing, which makes every
+ * idea uncovered by construction and the coverage verdict 100% whatever the
+ * meeting was like — the shape behind seven identical filings on one meeting
+ * on 2026-09-15.
+ *
  * READING THE NOTES IS THE PART THAT NEEDED CARE, and what it reads changed
  * with whole-doc note-taking. The notes are no longer a section: a meeting on
  * a prepared doc writes under the document's own headings and opens no
@@ -44,9 +52,9 @@ import {
 } from './notes-quality-review.ts';
 import { notesQualityRecord, writeNotesQuality } from './notes-quality-store.ts';
 import { readTickWaits } from './notes-tick-timing.ts';
-import { readMeetingNotesMarkdown } from './notes-written.ts';
+import { readMeetingNotes } from './notes-written.ts';
 
-export { readMeetingNotesMarkdown, readSectionMarkdown } from './notes-written.ts';
+export { readMeetingNotes, readSectionMarkdown } from './notes-written.ts';
 
 /** Who a meeting had, read off its own record and its transcript. */
 export function voicesOf(
@@ -153,7 +161,7 @@ export function runNotesQualityPass(
   const { docId, meetingId } = meeting;
   const now = deps.now?.() ?? Date.now();
 
-  const notes = readMeetingNotesMarkdown(
+  const notes = readMeetingNotes(
     deps.docStore(),
     docId,
     deps.headingIdOf(docId, meetingId),
@@ -169,10 +177,12 @@ export function runNotesQualityPass(
   }
   const waits = deps.dataDir === undefined ? null : readTickWaits(deps.dataDir, docId, meetingId);
   const report = buildNotesQualityReport({
-    notes,
+    notes: notes.markdown,
     transcript,
     voices: voicesOf(deps.dataDir, docId, meetingId, transcript),
     ...(waits !== null ? { waits } : {}),
+    notesRead: notes.source === 'notes',
+    ...(notes.missing !== undefined ? { notesMissing: notes.missing } : {}),
   });
 
   let stored = false;

@@ -1359,6 +1359,53 @@ round trip took off. The at-stop quality pass and the tidy-up's
 the coverage reading over each slice so the change of definition is visible
 beside the change in the notes.
 
+**And a reading that FAILED is a third state, not an empty one.** Both halves
+of that address can fail together. A prepared document gives the section half
+nothing to name, and `releaseNotesAuthorship` drops every mark at the start of
+every recording LEG, so a leg that composed nothing new has no marks either —
+and the reading that comes back is indistinguishable from a meeting where
+nobody wrote a word. Every check over empty notes then reports zero of
+something, which is obviously nothing; coverage reports 100% of everything,
+which reads exactly like a verdict. On 2026-09-15 one meeting's quality item
+was filed seven times on one doc with one headline, the denominator climbing
+15, 33, 75, 160, 199, 262, each one saying 100% of what was said had reached
+no note. 172 notes had been written; the arithmetic was right every time and
+the divisor was broken. So `readMeetingNotes` answers `notes` or `unreadable`
+rather than a string: a reading that claimed nothing in a document that HOLDS
+TEXT is `unreadable`, a document with no text in it at all is the genuine
+zero, and `notes-quality-coverage.ts` turns `unreadable` into a null count
+and a null share instead of a percentage. A meeting in that state raises
+`notes-unread` — "this meeting's notes could not be read" — and never
+`coverage`; it raises it only at `MIN_IDEAS_FOR_COVERAGE`, the floor a real
+coverage verdict needs, because below that there was no verdict to reach from
+any reading. The record on disk carries `coverageSource` so it cannot be read
+back as a real zero, and the week's rollup leaves it out of every
+notes-derived total, counting it under `coverageUnknown` instead.
+
+**What stops the re-filing is comparing the VERDICT, not the words** —
+`notes-quality-verdict.ts`. The filer holds what its standing item says and
+revises only when a later leg says something else. Comparing the rendered
+words was the first version and could not work: every leg hears a longer
+transcript, so any count the item's detail interpolates differs at every stop
+while the reading says the identical thing, which is the 2026-09-15 shape
+exactly. Comparing the FLAGS was the second, and fixed only the unreadable
+path — `buildFlags` puts numbers in the text of the other six.
+
+So the verdict is the bars crossed, the counts behind them compared exactly,
+and the RATES behind them compared to within `REVISE_RATIO_BAND`. **A ratio
+moving is the denominator talking; a count moving is the meeting talking.** A
+second repeated bullet is a second defect and revises; an uncovered share
+drifting from 55% to 60% while the note-taker does exactly as well as before
+does not. The band is ten points, against a measured noise floor: a synthetic
+six-leg meeting with the hit rate pinned moved the rounded share on 823 of
+1,000 leg transitions, by a median of 2 points and a 90th percentile of 6 —
+and banding it turns those 823 revisions into 54.
+
+**And the band is measured against the value on the ITEM**, not against the
+previous leg. Against the previous leg, 55, 59, 63, 67 clears the band three
+times in a row and never revises, leaving the item twelve points out of date;
+against what the item says, the fourth leg crosses and revises once.
+
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw
 and wrote nothing about — the complaint a reader actually makes. The second

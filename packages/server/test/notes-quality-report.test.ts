@@ -13,17 +13,15 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import type { SpokenTurn } from '../src/notes-quality-coverage.ts';
 import {
-  type SpokenTurn,
   buildNotesQualityReport,
-  contentWords,
   latenessFrom,
   notesQualityLogLine,
   repeatedBullets,
-  spokenIdeas,
-  uncoveredIdeaCount,
   unknownVoices,
 } from '../src/notes-quality-report.ts';
+import { MIN_IDEAS_FOR_COVERAGE } from '../src/notes-quality-thresholds.ts';
 import {
   LATE_NOTE_MS,
   MAX_DUPLICATE_BULLET_LINES,
@@ -157,48 +155,6 @@ describe('unknown voices', () => {
 
 /* ===== A subject that reached no note ===== */
 
-describe('spoken ideas and their coverage', () => {
-  const said = (text: string): SpokenTurn => ({ text });
-
-  it('skips a sentence with nothing in it', () => {
-    expect(spokenIdeas([said('Yeah. Right, exactly.')])).toEqual([]);
-  });
-
-  it('counts a sentence carrying content as one idea', () => {
-    expect(spokenIdeas([said('The harbour ferry moves to the half hour.')])).toHaveLength(1);
-  });
-
-  it('calls an idea carried when the notes keep its words', () => {
-    const notes = '- The harbour ferry moves to the half hour';
-    const { uncovered } = uncoveredIdeaCount(notes, [
-      said('So the harbour ferry moves to the half hour from Monday.'),
-    ]);
-    expect(uncovered).toBe(0);
-  });
-
-  it('calls an idea uncovered when the notes are about something else', () => {
-    const notes = '- Kestrel Lane keeps its winter crew';
-    const { uncovered } = uncoveredIdeaCount(notes, [
-      said('So the harbour ferry moves to the half hour from Monday.'),
-    ]);
-    expect(uncovered).toBe(1);
-  });
-
-  it('calls every idea uncovered when there are no notes at all', () => {
-    const transcript = [
-      said('The harbour ferry moves to the half hour from Monday.'),
-      said('Kestrel Lane keeps the winter crew until April.'),
-    ];
-    const { ideas, uncovered } = uncoveredIdeaCount('', transcript);
-    expect(ideas).toBe(2);
-    expect(uncovered).toBe(2);
-  });
-
-  it('reads two forms of one word as one word', () => {
-    expect(contentWords('shipping')).toEqual(contentWords('shipped'));
-  });
-});
-
 /* ===== How late notes landed ===== */
 
 describe('lateness', () => {
@@ -315,7 +271,7 @@ describe('the thresholds', () => {
 
   it('holds its judgement on coverage until there are enough ideas to judge', () => {
     const thin = buildNotesQualityReport({ notes: '## Meeting notes', transcript });
-    expect(thin.uncoveredShare).toBeNull();
+    expect(thin.coverage.uncoveredShare).toBeNull();
     expect(thin.flags.map((f) => f.kind)).not.toContain('coverage');
   });
 
@@ -324,9 +280,100 @@ describe('the thresholds', () => {
       text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
     }));
     const report = buildNotesQualityReport({ notes: '## Meeting notes', transcript: long });
-    expect(report.uncoveredShare).not.toBeNull();
-    expect(report.uncoveredShare ?? 0).toBeGreaterThan(MAX_UNCOVERED_IDEA_SHARE);
+    expect(report.coverage.uncoveredShare).not.toBeNull();
+    expect(report.coverage.uncoveredShare ?? 0).toBeGreaterThan(MAX_UNCOVERED_IDEA_SHARE);
     expect(report.flags.map((f) => f.kind)).toContain('coverage');
+  });
+});
+
+/* ===== A reading that failed is not a meeting that covered nothing ===== */
+
+describe('a report built from a reading that could not read the notes', () => {
+  /** Enough ideas to judge a share, none of them noted. */
+  const long: SpokenTurn[] = Array.from({ length: 20 }, (_, i) => ({
+    text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
+  }));
+
+  it('raises no coverage flag, because the verdict was never decidable', () => {
+    const report = buildNotesQualityReport({
+      notes: '',
+      transcript: long,
+      notesRead: false,
+      notesMissing: 'the document could not be read',
+    });
+    expect(report.flags.map((f) => f.kind)).not.toContain('coverage');
+    expect(report.coverage.uncoveredShare).toBeNull();
+    expect(report.coverage.uncoveredIdeas).toBeNull();
+  });
+
+  it('raises a flag about the reading instead, so the meeting is not silently passed', () => {
+    const report = buildNotesQualityReport({ notes: '', transcript: long, notesRead: false });
+    expect(report.flags.map((f) => f.kind)).toContain('notes-unread');
+  });
+
+  it('THE CONTROL: the same empty notes claimed AS a reading still flags coverage', () => {
+    // Identical notes text and transcript; only `notesRead` differs. Without
+    // it these two produce one verdict, which is what filed the same item
+    // seven times on 2026-09-15.
+    const real = buildNotesQualityReport({ notes: '', transcript: long, notesRead: true });
+    expect(real.flags.map((f) => f.kind)).toContain('coverage');
+    expect(real.flags.map((f) => f.kind)).not.toContain('notes-unread');
+  });
+
+  it('wakes nobody about a meeting nobody spoke in', () => {
+    const quiet = buildNotesQualityReport({ notes: '', transcript: [], notesRead: false });
+    expect(quiet.flags).toEqual([]);
+  });
+
+  /** A transcript of exactly `n` settled ideas, none of them noted. */
+  const heard = (n: number): SpokenTurn[] =>
+    Array.from({ length: n }, (_, i) => ({
+      text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
+    }));
+
+  it('stays quiet below the floor a coverage verdict needs, and speaks at it', () => {
+    // THE BOUNDARY, both sides. This flag says a coverage verdict could not
+    // be reached; one idea below MIN_IDEAS_FOR_COVERAGE there was no verdict
+    // to reach from any reading, so there is nothing to tell anyone about.
+    // The first version fired at one idea, which made a failed reading noisier
+    // than a successful one on the same short meeting.
+    const below = buildNotesQualityReport({
+      notes: '',
+      transcript: heard(MIN_IDEAS_FOR_COVERAGE - 1),
+      notesRead: false,
+    });
+    expect(below.coverage.ideas).toBe(MIN_IDEAS_FOR_COVERAGE - 1);
+    expect(below.flags).toEqual([]);
+
+    const at = buildNotesQualityReport({
+      notes: '',
+      transcript: heard(MIN_IDEAS_FOR_COVERAGE),
+      notesRead: false,
+    });
+    expect(at.coverage.ideas).toBe(MIN_IDEAS_FOR_COVERAGE);
+    expect(at.flags.map((f) => f.kind)).toEqual(['notes-unread']);
+  });
+
+  it('THE CONTROL: a readable reading is silent on the same short meeting', () => {
+    // The symmetry the floor exists for. Nine ideas and not one of them
+    // noted raises nothing, because a share over nine ideas says nothing —
+    // so a reading that FAILED on those same nine must raise nothing either.
+    const short = buildNotesQualityReport({
+      notes: '',
+      transcript: heard(MIN_IDEAS_FOR_COVERAGE - 1),
+      notesRead: true,
+    });
+    expect(short.coverage.uncoveredIdeas).toBe(MIN_IDEAS_FOR_COVERAGE - 1);
+    expect(short.coverage.uncoveredShare).toBeNull();
+    expect(short.flags.map((f) => f.kind)).not.toContain('coverage');
+  });
+
+  it('says the notes were unreadable in the log line rather than printing a ratio', () => {
+    const line = notesQualityLogLine(
+      buildNotesQualityReport({ notes: '', transcript: long, notesRead: false }),
+    );
+    expect(line).toContain('notes unreadable');
+    expect(line).not.toContain('ideas in no note');
   });
 });
 

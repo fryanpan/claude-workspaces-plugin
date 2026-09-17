@@ -259,7 +259,7 @@ describe('the whole pass', () => {
       { docId: 'd-harbour', meetingId: 'm-1' },
     );
     expect(result.stored).toBe(false);
-    expect(result.report.ideas).toBe(0);
+    expect(result.report.coverage.ideas).toBe(0);
     expect(result.report.lateness.source).toBe('unavailable');
   });
 });
@@ -324,16 +324,108 @@ describe('coverage over notes filed under the document’s own headings', () => 
 
   it('counts an idea as covered when its note sits under the person’s heading', () => {
     const result = passOver(preparedStore());
-    expect(result.report.ideas).toBe(2);
-    expect(result.report.uncoveredIdeas).toBe(0);
+    expect(result.report.coverage.ideas).toBe(2);
+    expect(result.report.coverage.uncoveredIdeas).toBe(0);
   });
 
   it('THE CONTROL: with no mark to find, the same run reads both ideas as lost', () => {
     // The unmarked doc is what the section reading always saw — the notes
     // outside the meeting's own section are invisible, so every idea they
-    // carry reads as an idea that reached no note.
+    // carry reads as an idea that reached no note. The section itself is
+    // still found here, so this IS a reading, and it is judged as one.
     const result = passOver(docStoreFrom(PREPARED).store);
-    expect(result.report.ideas).toBe(2);
-    expect(result.report.uncoveredIdeas).toBe(2);
+    expect(result.report.coverage.source).toBe('notes');
+    expect(result.report.coverage.ideas).toBe(2);
+    expect(result.report.coverage.uncoveredIdeas).toBe(2);
+  });
+});
+
+/* ===== The 2026-09-15 shape, end to end ===== */
+
+describe('a pass whose notes reading found nothing in a document holding notes', () => {
+  const ACTOR = { id: 'meeting-notes', name: 'Meeting Assistant' };
+
+  /** A prepared document holding bullets, and a meeting with no section of
+   *  its own and no authorship marks left to find. Both halves of the address
+   *  fail, and the notes are sitting in the doc the whole time. */
+  const PREPARED = [
+    '## Timetable',
+    '',
+    '- The harbour run moves to the half hour from April',
+    '- The winter crew stays on until the season opens',
+  ].join('\n');
+
+  /** Enough said that a coverage share would be computed if one could be. */
+  const SPOKEN = Array.from({ length: 20 }, (_, i) => ({
+    text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
+    ts: i + 1,
+  }));
+
+  function passWithHeading(withSection: boolean): {
+    result: ReturnType<typeof runNotesQualityPass>;
+    dataDir: string;
+    filed: string[];
+  } {
+    const dataDir = freshDir();
+    const { store } = docStoreFrom(PREPARED);
+    // Minted by THIS store: a block id from another Y.Doc names nothing here.
+    const headingId = withSection ? headingIdAt(store, 0) : undefined;
+    mkdirSync(meetingDirPath(dataDir, 'd-harbour'), { recursive: true });
+    writeFileSync(
+      meetingTranscriptPath(dataDir, 'd-harbour', 'm-1'),
+      `${SPOKEN.map((t, i) => JSON.stringify({ turn: i, ...t })).join('\n')}\n`,
+    );
+    writeFileSync(
+      meetingIndexPath(dataDir, 'd-harbour'),
+      `${JSON.stringify({ meetingId: 'm-1', docId: 'd-harbour', startedAt: 1 })}\n`,
+    );
+    const board = recordingBoard([{ id: 't-season', status: 'todo' } as Task]);
+    const result = runNotesQualityPass(
+      {
+        docStore: () => store,
+        file: (input) => fileNotesQualityReview(board, ACTOR, input),
+        boardOf: () => 'w-1',
+        dataDir,
+        headingIdOf: () => headingId,
+        actor: ACTOR,
+        now: () => 5_000,
+      },
+      { docId: 'd-harbour', meetingId: 'm-1' },
+    );
+    return { result, dataDir, filed: board.filed };
+  }
+
+  it('does not tell anybody that 100% of what was said reached no note', () => {
+    const { result } = passWithHeading(false);
+    expect(result.report.bullets).toBe(0);
+    expect(result.report.coverage.source).toBe('unreadable');
+    expect(result.report.flags.map((f) => f.kind)).not.toContain('coverage');
+    expect(result.report.flags.map((f) => f.kind)).toContain('notes-unread');
+  });
+
+  it('files an item that says the notes could not be read', () => {
+    const { result, filed } = passWithHeading(false);
+    expect(filed).toEqual(['t-season']);
+    expect(result.line).toContain('notes unreadable');
+  });
+
+  it('stores the third state, so the record cannot be read back as a real zero', () => {
+    const { dataDir } = passWithHeading(false);
+    const stored = readNotesQuality(dataDir, 'd-harbour', 'm-1');
+    expect(stored?.coverageSource).toBe('unreadable');
+    expect(stored?.uncoveredIdeas).toBeNull();
+    expect(stored?.uncoveredShare).toBeNull();
+    expect(stored?.ideas).toBe(SPOKEN.length);
+  });
+
+  it('THE CONTROL: the same pass with a section to read judges coverage as before', () => {
+    // One thing changes: the meeting has a heading the reading can address.
+    // The notes under it still cover none of what was said, so this run gets
+    // the coverage verdict — which is what proves the case above discriminates
+    // rather than suppressing the check for everybody.
+    const { result } = passWithHeading(true);
+    expect(result.report.coverage.source).toBe('notes');
+    expect(result.report.flags.map((f) => f.kind)).toContain('coverage');
+    expect(result.report.flags.map((f) => f.kind)).not.toContain('notes-unread');
   });
 });

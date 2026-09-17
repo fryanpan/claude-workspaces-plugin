@@ -89,7 +89,7 @@ export const MAX_UNKNOWN_SPEAKERS = 0;
  *
  * The check behind it is lexical and its errors run one way — it calls a
  * paraphrase a miss more often than it calls a miss covered (see the module
- * header of `notes-quality-report.ts`) — so the bar HAS to sit well above the
+ * header of `notes-quality-coverage.ts`) — so the bar HAS to sit well above the
  * miss rate a healthy meeting scores rather than near the rate a perfect one
  * would.
  */
@@ -105,6 +105,40 @@ export const MAX_UNCOVERED_IDEA_SHARE = 0.5;
  * neighbouring meetings.
  */
 export const MIN_IDEAS_FOR_COVERAGE = 10;
+
+/**
+ * How far a RATE on a standing review item must move before the item is
+ * rewritten and re-asked.
+ *
+ * Ten points. A meeting's uncovered share is a proportion over everything
+ * said so far, so it moves at every recording leg even when the note-taker's
+ * quality has not changed at all — and revising an item re-judges it, which
+ * walks its reader back to a question they have already answered.
+ *
+ * MEASURED, and here is the denominator so the next reader can weigh it: a
+ * synthetic six-leg meeting growing from 40 to 240 settled sentences, with
+ * the note-taker's hit rate PINNED so that every movement is sampling noise
+ * by construction, 200 seeded runs, driven through `buildNotesQualityReport`.
+ * Run at a 40% hit rate, so the uncovered share sits near 60% and these are
+ * meetings that really do raise the flag — 146 of the 200 raised it at every
+ * leg. Of 1,000 leg-to-leg transitions, 823 moved the rounded percentage at
+ * all: a median of 2 points, a 90th percentile of 6, a maximum of 16. The
+ * same shape at a 55% hit rate gives 815, median 2, p90 5.
+ *
+ * What the band is worth, on that same run: 823 revisions become 54. Ten
+ * points sits above the noise and well below a real change — a meeting going
+ * from a third of what was said missed to two thirds crosses it at once.
+ *
+ * It is a SYNTHETIC measurement, and the one thing it cannot speak to is
+ * whether a real note-taker's quality drifts within a meeting. It holds the
+ * hit rate fixed on purpose, because the question the band answers is what
+ * the arithmetic does when nothing else changes.
+ *
+ * It is a band on the RATES only. A count moves because the notes gained a
+ * defect, and its reader should hear about that; see the header of
+ * `notes-quality-verdict.ts`.
+ */
+export const REVISE_RATIO_BAND = 0.1;
 
 /**
  * How long after a turn settles its note may land before the wait is late.

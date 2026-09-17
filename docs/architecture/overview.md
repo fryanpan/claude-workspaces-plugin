@@ -816,7 +816,14 @@ The `notes-quality-*` family joins the same services tier and adds no new box
 to the picture: `notes-quality-report.ts` and `notes-quality-thresholds.ts`
 are pure (they read a markdown string and a transcript and answer counts, so
 they belong beside `notes-edit-parse.ts` in the domain row on everything but
-their filename), `notes-quality-store.ts` and `notes-tick-timing.ts` read and
+their filename), `notes-quality-coverage.ts` is the same tier and holds the
+one check whose answer depends on something outside the notes — did what was
+said reach a note — together with the third state that keeps a FAILED notes
+reading from arriving as a confident 100%-uncovered verdict,
+`notes-quality-verdict.ts` is pure too and holds one rule — whether two
+readings of the same meeting differ enough to re-ask a person about, which is
+counts exactly and rates to within a band, so that a share drifting a point
+per leg does not re-judge a standing item — `notes-quality-store.ts` and `notes-tick-timing.ts` read and
 write under the data dir the way the rest of the `meeting-*` family does, and
 `notes-quality-review.ts` and `notes-quality-pass.ts` are the orchestration a
 meeting's stop runs — read the notes, judge them, store the reading, file a
@@ -829,10 +836,12 @@ socket layer says the meeting is over — one item per meeting, revised rather
 than duplicated when a later reading changes. `notes-written.ts` joins the pure end of that
 family and is the one box worth naming, because it answers WHICH BLOCKS ARE
 THE MEETING'S: the note-taker's authorship marks wherever they sit in the
-doc, union the section it opened. It reads a doc and returns markdown, writes
-nothing, and both the quality pass and the rerun harness address the notes
-through it — whole-doc note-taking means a heading id no longer names a
-meeting's output. Nothing under `routes/` is added: the
+doc, union the section it opened. It reads a doc and answers markdown plus
+whether that markdown is a reading at all, writes nothing, and both the
+quality pass and the rerun harness address the notes through it — whole-doc
+note-taking means a heading id no longer names a meeting's output, and a
+reading that finds nothing in a document holding blocks says so rather than
+answering the empty string a genuinely empty document would. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
 
