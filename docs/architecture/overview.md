@@ -724,6 +724,19 @@ restart mid-recording keeps writing under the section it opened rather than
 opening a second one. Ids and a block id, no meeting words, so it sits with
 `notes-timing.ts` rather than with the stores that own durable text.
 
+`notes-quality-filed-store.ts` and `notes-quality-meeting-memory.ts` join it
+in the same position and change none of the picture either. Between them they
+are the quality filer's memory: the memory module holds the map of meetings
+it has read, its bound and its eviction rule, and the store is one small file
+per meeting recording WHERE that meeting's review item went — the pointer a
+later leg revises or withdraws. It is durable for the same reason the heading
+record is: a restart ends a recording leg and files the item at once, while
+the browser resumes across the gap, so without a file on disk the meeting
+ended clean in a new process that had nothing left to take back. Ids, a
+verdict's counts and shares, no meeting words; and it is not
+`notes-quality-store.ts`, which is the append-only series of READINGS the
+daily health check rolls up.
+
 `notes-section-tidy.ts` joins the same `notes-*` family and moves nothing in
 the picture: it is the repair on a notes section that neither a prompt nor a
 block edit can make — an empty paragraph under the heading, a topic heading
