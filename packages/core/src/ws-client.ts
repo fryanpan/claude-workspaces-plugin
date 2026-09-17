@@ -181,7 +181,7 @@ export function connect(url: string, protocol?: () => string | undefined): Feedb
       // client that never touches presence still holds one entry and still
       // sends this frame. It is true of the widget now because its build
       // stands a stand-in in for the module — see
-      // `packages/widget/scripts/shims/y-protocols-awareness.js` — and false
+      // `packages/widget/scripts/shims/y-protocols-awareness.ts` — and false
       // of anything else that has not.
       const states = awareness.getStates();
       if (states.size > 0) {

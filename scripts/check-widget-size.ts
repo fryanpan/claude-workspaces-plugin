@@ -77,15 +77,18 @@ import { gzipSync } from 'node:zlib';
  * reading anything:
  *
  *   before        40,733 gz   (130,819 raw)      227 under
- *   after         39,847 gz   (127,461 raw)    1,113 under
+ *   after         39,853 gz   (127,488 raw)    1,107 under
  *
- * 886 of it was `y-protocols/awareness`, plus the `lib0/time` behind it. The
+ * 880 of it was `y-protocols/awareness`, plus the `lib0/time` behind it. The
  * widget renders presence nowhere — it reads `client.awareness` in no module —
  * and the two surfaces that DO render presence skip an entry carrying no
  * `user.name`, which is the only kind a widget has ever had. So no reader has
  * ever seen a widget in a presence strip, while every host page paid for the
  * protocol, announced an empty entry on each connect, and ran a 3-second
- * interval for the life of the page. The build stands a shim in for it
+ * interval for the life of the page — measured on a real embed, not read
+ * off the diff: the same host page in the same browser arms one 3s interval
+ * with the real module and none with the shim, the widget mounting either
+ * way. The build stands a shim in for it
  * (`packages/widget/scripts/shims/y-protocols-awareness.ts`) and
  * `bundle-guard.ts` refuses a bundle that takes the real one back.
  *
