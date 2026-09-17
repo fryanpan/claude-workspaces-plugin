@@ -556,6 +556,31 @@ export async function handleWorkspaceTool(
       const { taskId } = a as { taskId: string };
       return ok(await http('DELETE', `${board()}/dispatches/${encodeURIComponent(taskId)}`));
     }
+    case 'report_dispatch': {
+      const { taskId, prNumber, headCommit, checks, doneWhen } = a as {
+        taskId: string;
+        prNumber: unknown;
+        headCommit: unknown;
+        checks: unknown;
+        doneWhen: unknown;
+      };
+      // Every field goes through unvalidated on purpose: the server owns ONE
+      // definition of a usable report (`dispatch-reports.ts`), and a second
+      // copy here would be the one that drifts — a builder on an older bundle
+      // must hear the same refusal, in the same words, as one on this bundle.
+      // `agentName` is this session's own name so the wake can say who
+      // reported without the caller having to pass itself.
+      return ok(
+        await http('POST', `${board()}/dispatches/${encodeURIComponent(taskId)}/report`, {
+          prNumber,
+          headCommit,
+          checks,
+          doneWhen,
+          agentName: AUTHOR.name,
+          author: AUTHOR,
+        }),
+      );
+    }
     case 'set_parallelism_cap': {
       const { workspaceId, cap: rawCap } = a as { workspaceId: string; cap: unknown };
       // Refuse a bad cap here, with a sentence, rather than relaying the

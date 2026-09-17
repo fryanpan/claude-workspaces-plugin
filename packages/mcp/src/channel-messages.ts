@@ -10,8 +10,8 @@
  * sink, the HTTP client, this session's identity, and the clock.
  *
  * `emitChannelMessage` is the entry point. Board families (`task.`, `decision.`,
- * `workspace.`, `agent.`, `voice.`) go to `emitBoardChannelMessage`; everything
- * else keeps the doc-shaped path.
+ * `workspace.`, `agent.`, `voice.`, `dispatch.`) go to
+ * `emitBoardChannelMessage`; everything else keeps the doc-shaped path.
  */
 import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
@@ -112,7 +112,7 @@ export interface ChannelPayload {
 /** Board/workspace event families formatted by emitBoardChannelMessage. Thread
  *  and suggestion events on the same workspace stream keep the doc-shaped
  *  path below. */
-const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice)\./;
+const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch)\./;
 
 export interface BoardEventPayload {
   workspaceId?: string;
@@ -166,6 +166,15 @@ export interface BoardEventPayload {
   attempt?: number;
   attempts?: number;
   agentName?: string;
+  /** `dispatch.reported` only: the build a builder just closed out. See
+   *  `dispatchReportedLine`. */
+  prNumber?: number;
+  headCommit?: string;
+  checksTotal?: number;
+  checksFailed?: number;
+  checksHeld?: number;
+  doneWhenTotal?: number;
+  doneWhenMet?: number;
   /** `workspace.ready_idle` only: how much was ready and how long the board
    *  had stood still when the wake fired. See ready-nudge.ts. */
   readyCount?: number;
@@ -209,6 +218,29 @@ export interface BoardEventPayload {
 }
 
 /**
+ * One line for a builder's closing report.
+ *
+ * It leads with what a lead decides on — a failing gate or an unmet line — and
+ * ends with where to read the rest. `held` gates are named separately from
+ * failures because they are neither: a browser-gated member that did not run
+ * on the builder's machine is not a red, and folding it into one number would
+ * turn every honest local run into a report that reads as broken.
+ */
+function dispatchReportedLine(p: BoardEventPayload): string {
+  const who = p.agentName ?? p.actor?.name ?? 'a builder';
+  const commit = (p.headCommit ?? '').slice(0, 7);
+  const failed = p.checksFailed ?? 0;
+  const held = p.checksHeld ?? 0;
+  const gates =
+    failed > 0
+      ? `${failed} of ${p.checksTotal ?? 0} gates FAILED`
+      : `${p.checksTotal ?? 0} gates passed${held > 0 ? ` (${held} held)` : ''}`;
+  const met = p.doneWhenMet ?? 0;
+  const total = p.doneWhenTotal ?? 0;
+  return `[dispatch.reported] ${who} finished ${p.taskId ?? 'a task'}: PR #${p.prNumber ?? '?'} at ${commit} — ${gates}, ${met}/${total} done-when met. Read it with the task.`;
+}
+
+/**
  * Forward a workspace-board event as a compact channel message. Two §3.7-style
  * suppressions, both deliberate: `agent.heartbeat` never forwards (a
  * clock tick every few minutes is pure context noise), and an event whose
@@ -228,6 +260,12 @@ async function emitBoardChannelMessage(
   // not cost this session a wake turn — and, relayed, its own Stop hook
   // would post a note that wakes the first agent back.
   if (event === 'task.noted') return;
+  // The lead asking for a lane. Kept off the workspace stream by the server
+  // for the same reason `task.noted` is; this is the belt to that suspender,
+  // so a replayed or older-server frame still costs no session a turn. Its
+  // twin `dispatch.reported` is deliberately NOT here — a builder's closing
+  // report is the one event of the pair a person acts on.
+  if (event === 'dispatch.requested') return;
   if (p.actor?.id === deps.authorId) return;
 
   const by = p.actor?.name ? ` by ${p.actor.name}` : '';
@@ -325,6 +363,12 @@ async function emitBoardChannelMessage(
     // the one who says it is ready, so the line names the call that does.
     case 'workspace.done_when_ready':
       body = doneWhenReadyLine(p);
+      break;
+    // A builder's closing report. Counts and ids only: the reader's next act
+    // is to open the record, and the frame's job is to say that there is one
+    // and whether it needs attention first.
+    case 'dispatch.reported':
+      body = dispatchReportedLine(p);
       break;
     case 'agent.attached':
     case 'agent.detached':

@@ -2549,6 +2549,70 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'report_dispatch',
+      description:
+        'End your dispatch with ONE report on the build you just finished, so the lead reads a board record instead of your closing message. Send it once, after the gates have run: the PR number, the commit those gates ran on, what each gate did, and a verdict on every done-when line the task carries. A report missing any of those is refused with a message naming the part. Reporting the SAME commit again is recorded but wakes nobody, so a nudge you already answered costs the lead nothing; a report on a NEW commit is a new build and does wake them.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description:
+              'The board this resource is on. get_workspace lists the boards you are attached to.',
+          },
+          taskId: { type: 'string', description: 'The task you were dispatched on.' },
+          prNumber: {
+            type: 'integer',
+            description: 'The pull request this build is on.',
+          },
+          headCommit: {
+            type: 'string',
+            description:
+              'The commit the reported checks actually ran on — `git rev-parse HEAD`. Seven characters or more.',
+          },
+          checks: {
+            type: 'array',
+            description:
+              'One entry per gate you ran. `held` is for a gate the run did not execute, such as a browser-gated member on a machine that opts out — neither a pass nor a failure.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                status: { type: 'string', enum: ['pass', 'fail', 'held'] },
+                detail: {
+                  type: 'string',
+                  description: 'The line a reader would otherwise open the log for.',
+                },
+              },
+              required: ['name', 'status'],
+            },
+          },
+          doneWhen: {
+            type: 'array',
+            description:
+              "A verdict on EVERY done-when line the task carries — list_tasks and next_tasks give you the ids. Leave one out and the report is refused naming that line. The verdict words are the board's own: met, not-met, unchecked, owner.",
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: "The done-when line's id (`d-…`)." },
+                verdict: {
+                  type: 'string',
+                  enum: ['met', 'not-met', 'unchecked', 'owner'],
+                },
+                note: {
+                  type: 'string',
+                  description:
+                    'What you measured, or why you could not. Required — a bare `unchecked` is the empty report this refuses.',
+                },
+              },
+              required: ['id', 'verdict', 'note'],
+            },
+          },
+        },
+        required: ['workspaceId', 'taskId', 'prNumber', 'headCommit', 'checks', 'doneWhen'],
+      },
+    },
+    {
       name: 'set_parallelism_cap',
       description:
         'Set how many builders a board may have dispatched at once. Every board starts on the default of 4. Lower it to keep this board from starving higher-priority projects. The change takes effect on the next dispatch, so nothing running is touched and register_dispatch refuses past the new number. The reply carries the cap, the slots in use, the free slots and lastChange. The floor is one.',

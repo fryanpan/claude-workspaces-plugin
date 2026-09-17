@@ -189,6 +189,7 @@ export const ACTIVITY_REFRESH_EVENTS = [
   'decision.answer_withdrawn',
   'decision.info_requested',
   'workspace.goals_changed',
+  'dispatch.reported',
 ] as const;
 
 /**
@@ -255,6 +256,24 @@ export function describeEvent(ev: ActivityEvent, titleOf: (taskId: string) => st
       if (!to) return `${actorName(ev)} un-parked ${title()}`;
       if (from) return `${actorName(ev)} moved the park on ${title()} to ${to}${why}`;
       return `${actorName(ev)} parked ${title()} until ${to}${why}`;
+    }
+    // A builder's closing report on the build it just finished. The trail is
+    // where the lead reads it, so the line carries the decision-shaped parts —
+    // a failing gate, an unmet line — rather than the whole record.
+    case 'dispatch.reported': {
+      const who = typeof ev.agentName === 'string' && ev.agentName ? ev.agentName : actorName(ev);
+      const pr = typeof ev.prNumber === 'number' ? `PR #${ev.prNumber}` : 'no PR';
+      const commit = typeof ev.headCommit === 'string' ? ev.headCommit.slice(0, 7) : '';
+      const failed = typeof ev.checksFailed === 'number' ? ev.checksFailed : 0;
+      const total = typeof ev.checksTotal === 'number' ? ev.checksTotal : 0;
+      const held = typeof ev.checksHeld === 'number' ? ev.checksHeld : 0;
+      const gates =
+        failed > 0
+          ? `${failed} of ${total} gates failed`
+          : `${total} gates passed${held > 0 ? ` (${held} held)` : ''}`;
+      const met = typeof ev.doneWhenMet === 'number' ? ev.doneWhenMet : 0;
+      const lines = typeof ev.doneWhenTotal === 'number' ? ev.doneWhenTotal : 0;
+      return `${who} reported ${title()}: ${pr}${commit ? ` at ${commit}` : ''} — ${gates}, ${met}/${lines} done-when met`;
     }
     case 'task.archived': {
       // The title comes off the EVENT, not from `titleOf`: an archived row is
