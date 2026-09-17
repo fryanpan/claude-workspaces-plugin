@@ -53,11 +53,12 @@ import { normalizeAgent } from './chat-audit.ts';
  *  other agents'. The byte cap alone would not bound it — four megabytes of
  *  short lines is twenty thousand parses on a route that answers a hook. */
 const PARSE_LINES_CAP = 5000;
-/** How many bytes are read off the tail to find those lines. Sized for the
- *  worst case above with headroom; a file under it is read whole. Overridable
- *  per instance so a test can drive the seek branch without writing four
- *  megabytes — the branch is the one that cannot be reasoned about by
- *  reading it. */
+/** How many bytes off the tail a read may look at. The other bound, and the
+ *  one that decides REACH: a note is at most `NOTE_TEXT_MAX` (4000) chars, so
+ *  this holds a thousand of the largest notes a board can write and far more
+ *  real ones. A file under it is read whole. Overridable per instance so a
+ *  test can drive the seek branch without writing four megabytes — that
+ *  branch is the one that cannot be reasoned about by reading it. */
 export const READ_BYTES_CAP = 4 * 1024 * 1024;
 /** How many notes one `readFor` hands back, newest first. Matches the ring's
  *  own per-agent cap so the two reads agree on length. */
