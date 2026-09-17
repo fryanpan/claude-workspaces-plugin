@@ -37,6 +37,7 @@ import {
   type UptimeReport,
 } from './board-presence-model.ts';
 import { type ReviewThreadItem, applyRefresh, refreshReviewItems } from './board-review-model.ts';
+import type { UnplacedNote } from './unplaced-note-feed.ts';
 
 /** Everything the loads need from `bootBoard`, and nothing else. */
 export interface BoardLoadDeps {
@@ -186,11 +187,17 @@ export function createBoardLoads(deps: BoardLoadDeps): BoardLoads {
 
   async function loadEvents(): Promise<void> {
     if (!eventsConsumerActive()) return;
-    const res = await fetchJson<{ events: ActivityEvent[]; uptime: UptimeReport | null }>(
-      `/workspaces/${encodeURIComponent(workspaceId)}/events`,
-    );
+    const res = await fetchJson<{
+      events: ActivityEvent[];
+      uptime: UptimeReport | null;
+      unplacedNotes?: UnplacedNote[];
+    }>(`/workspaces/${encodeURIComponent(workspaceId)}/events`);
     state.events = applyRefresh(state.events, res, (r) => r.events ?? []);
     state.uptime = applyRefresh(state.uptime, res, (r) => r.uptime ?? null);
+    // Under the same guard as the other two: a read that never reached the
+    // server leaves the last good list on screen. A read that ARRIVED without
+    // the field is a server older than it, and empty is what that board has.
+    state.unplacedNotes = applyRefresh(state.unplacedNotes, res, (r) => r.unplacedNotes ?? []);
     schedule(repaintActivityRegions);
   }
 

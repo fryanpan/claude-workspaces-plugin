@@ -50,6 +50,7 @@ import type {
 } from './board-presence-model.ts';
 import type { ReviewItem, ReviewThreadItem } from './board-review-model.ts';
 import type { DetailTab } from './task-detail-island.tsx';
+import type { UnplacedNote } from './unplaced-note-feed.ts';
 import type { WalkProgress } from './walkthrough-island.tsx';
 
 export interface BoardState {
@@ -97,6 +98,11 @@ export interface BoardState {
   showArchived: boolean;
   activityFilter: ActivityFilter;
   events: ActivityEvent[];
+  /** The end-of-turn notes no task took, as the events read sends them. They
+   *  are NOT in `events` — they never entered the audit trail — and the
+   *  Activity tab merges the two lists in time order. Empty on any server
+   *  older than the field, which is the same thing as none. */
+  unplacedNotes: UnplacedNote[];
   /** Deploy readiness (§3.12 commit 11) — null until the log has lines. */
   uptime: UptimeReport | null;
   agents: PresenceAgent[];

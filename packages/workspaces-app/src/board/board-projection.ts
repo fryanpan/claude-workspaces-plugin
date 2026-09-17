@@ -51,6 +51,7 @@ export function initialBoardState(bootLoc: BoardLocation): BoardState {
     showArchived: bootLoc.archived,
     activityFilter: 'all',
     events: [],
+    unplacedNotes: [],
     uptime: null,
     agents: [],
     pluginRelease: null,

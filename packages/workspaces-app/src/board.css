@@ -4066,6 +4066,46 @@ html:has(.board-walk-cred-form) {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+/* An end-of-turn note no task took (`board/unplaced-note-feed.ts`). It rides
+   the same grid as an audit row so the feed stays one column of times, and
+   says what it is in words rather than in a badge or a tint — calm by
+   default. The label is the muted line and the agent's own words are the
+   unmuted one, because the words are what the reader came for. */
+.board-activity-unplaced .board-activity-what {
+  display: grid;
+  gap: 2px;
+}
+.board-activity-unplaced-label {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.board-activity-unplaced-text {
+  margin: 0;
+}
+/* The expander for a note longer than its first line. `list-style: none` on
+   both spellings: Safari draws the marker through `::-webkit-details-marker`
+   and ignores the standard one. The caret is the affordance instead, and it
+   turns with the state so the row never needs a word telling the reader it
+   opens. */
+.board-activity-unplaced-more > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.board-activity-unplaced-more > summary::-webkit-details-marker {
+  display: none;
+}
+.board-activity-unplaced-more > summary::after {
+  content: " ▸";
+  color: var(--fg-muted);
+}
+.board-activity-unplaced-more[open] > summary::after {
+  content: " ▾";
+}
+.board-activity-unplaced-full {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  color: var(--fg-muted);
+}
 
 /* ################# BOARD · LIBRARY #################
    The Library tab (`board/library-page.ts`), ported from the approved mock

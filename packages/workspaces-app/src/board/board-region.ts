@@ -285,6 +285,7 @@ export function createBoardRegion(deps: BoardDeps): BoardRegion {
           renderActivityRegion();
         },
         state.uptime,
+        state.unplacedNotes,
       );
     }
   }

@@ -25,7 +25,6 @@ import {
   type HomePayload,
   type LeadSeatView,
   type UptimeReport,
-  activityRows,
   describeEvent,
   homeSinceLabel,
   leadSeatLabel,
@@ -34,6 +33,12 @@ import {
 } from './board-presence-model.ts';
 import { type ReviewQueue, reviewBannerText } from './board-review-model.ts';
 import { caretOffsetIn } from './inline-rename.ts';
+import {
+  type UnplacedNote,
+  activityFeed,
+  unplacedNoteBody,
+  unplacedNoteLabel,
+} from './unplaced-note-feed.ts';
 /**
  * Swap a title element for an input; Enter or blur commits a changed title,
  * Escape cancels (§3.9: tap the title text to edit, Enter commits). Cancel
@@ -716,6 +721,10 @@ export function renderActivity(
   titleOf: (taskId: string) => string,
   onFilter: (f: ActivityFilter) => void,
   uptime: UptimeReport | null = null,
+  /** The end-of-turn notes no task took (`unplaced-note-feed.ts`), merged
+   *  into the same time order as the audit rows. Defaulted so an older
+   *  caller — and every test that predates them — still compiles. */
+  unplaced: UnplacedNote[] = [],
 ): void {
   container.replaceChildren();
   // Deploy readiness (§3.12 commit 11): the 99% availability target (goal
@@ -747,7 +756,7 @@ export function renderActivity(
   }
   container.append(bar);
 
-  const rows = activityRows(events, filter);
+  const rows = activityFeed(events, unplaced, filter);
   const list = document.createElement('div');
   list.className = 'board-activity-list';
   if (rows.length === 0) {
@@ -758,18 +767,70 @@ export function renderActivity(
     list.append(empty);
   }
   const now = Date.now();
-  for (const ev of rows) {
+  for (const entry of rows) {
     const row = document.createElement('div');
-    row.className = 'board-activity-row';
+    row.className =
+      entry.row === 'unplaced'
+        ? 'board-activity-row board-activity-unplaced'
+        : 'board-activity-row';
     const when = document.createElement('span');
     when.className = 'board-activity-when';
-    when.textContent = timeAgo(ev.ts, now);
-    when.title = new Date(ev.ts).toLocaleString();
-    const what = document.createElement('span');
-    what.className = 'board-activity-what';
-    what.textContent = describeEvent(ev, titleOf);
-    row.append(when, what);
+    when.textContent = timeAgo(entry.at, now);
+    when.title = new Date(entry.at).toLocaleString();
+    row.append(
+      when,
+      entry.row === 'unplaced' ? unplacedWhat(entry.note) : eventWhat(entry.event, titleOf),
+    );
     list.append(row);
   }
   container.append(list);
+}
+
+/** One audit row's sentence. */
+function eventWhat(ev: ActivityEvent, titleOf: (taskId: string) => string): HTMLElement {
+  const what = document.createElement('span');
+  what.className = 'board-activity-what';
+  what.textContent = describeEvent(ev, titleOf);
+  return what;
+}
+
+/**
+ * One unplaced note's cell: whose note it is and that no task took it, then
+ * the note itself.
+ *
+ * The note is the agent's WHOLE end-of-turn message and this tab is its only
+ * surface — there is no task panel to send the reader to — so a message
+ * longer than its first line keeps the rest behind a `<details>` the reader
+ * opens. An expander rather than a clipped line: clipping loses the record,
+ * which is the defect this whole change exists to end.
+ *
+ * Calm by default: no badge, no count, no tint. The row reads as a different
+ * KIND of entry because it says so in words.
+ */
+function unplacedWhat(note: UnplacedNote): HTMLElement {
+  const what = document.createElement('div');
+  what.className = 'board-activity-what';
+  const label = document.createElement('span');
+  label.className = 'board-activity-unplaced-label';
+  label.textContent = unplacedNoteLabel(note);
+  what.append(label);
+  const body = unplacedNoteBody(note.text);
+  if (body.rest === undefined) {
+    const line = document.createElement('p');
+    line.className = 'board-activity-unplaced-text';
+    line.textContent = body.line;
+    what.append(line);
+    return what;
+  }
+  const details = document.createElement('details');
+  details.className = 'board-activity-unplaced-more';
+  const summary = document.createElement('summary');
+  summary.className = 'board-activity-unplaced-text';
+  summary.textContent = body.line;
+  const full = document.createElement('p');
+  full.className = 'board-activity-unplaced-full';
+  full.textContent = body.rest;
+  details.append(summary, full);
+  what.append(details);
+  return what;
 }

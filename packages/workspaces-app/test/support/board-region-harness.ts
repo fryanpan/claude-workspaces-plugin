@@ -38,6 +38,7 @@ export function boardState(over: Partial<BoardState> = {}): BoardState {
     showArchived: false,
     activityFilter: 'all',
     events: [],
+    unplacedNotes: [],
     uptime: null,
     agents: [],
     pluginRelease: null,
