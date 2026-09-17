@@ -89,6 +89,7 @@ import {
   STALL_QUIET_DEFAULT_MS,
   type StallUndeterminedRow,
   type StalledRow,
+  type UnresumedRow,
   type WaitingRow,
 } from './stall-gate.ts';
 import type { UngatedUiRow } from './ui-review-gate.ts';
@@ -159,6 +160,13 @@ export interface StallSnapshot {
   stalled: readonly StalledRow[];
   /** Rows waiting on a person with no question filed where they would see it. */
   unfiled: readonly StalledRow[];
+  /**
+   * Rows whose blockage LIFTED — an ask on them answered, or a done-when line
+   * met with later lines still open — and which nothing has touched since
+   * (`blockage-lift.ts`). Absent when none, and absent from a caller that
+   * does not compute them, which is the same thing.
+   */
+  unresumed?: readonly UnresumedRow[];
   /** Rows waiting on a person with the question filed, by address. Not a
    *  finding and never woken over; carried so the verdict and the escalation
    *  can check the ask. Absent when none, the same as empty. */
@@ -423,6 +431,15 @@ export interface StallNudgeFrame {
    */
   ungatedUi?: readonly UngatedUiRow[];
   /**
+   * Rows whose blockage lifted and whose work has not restarted, longest
+   * since the lift first. Absent when none. A frame carrying only this is a
+   * real wake, and it is the one finding here that reports something GOOD
+   * that nobody acted on: the answer this row was waiting for is already in.
+   * Every row names the lift and its timestamp, so the reader can check the
+   * event rather than take the frame's word for it.
+   */
+  unresumed?: readonly UnresumedRow[];
+  /**
    * Rows whose holder owes a check-in: somebody IS on them, and has said
    * nothing for half an hour. Absent when none. A frame carrying only this is
    * a real wake — the remedy is a message to the builder, which nothing else
@@ -468,6 +485,9 @@ export interface StallNudgeFrame {
     unanswered?: readonly UnansweredThreadRow[];
     /** Rows that went past the UI gate since the last wake. */
     ungatedUi?: readonly UngatedUiRow[];
+    /** Rows whose blockage lifted since the last wake — a first answer, or a
+     *  second one on a row the lead had already been told about. */
+    unresumed?: readonly UnresumedRow[];
     /** Rows that became due for a check-in since the last wake — a first
      *  miss, or another half hour on a row that had already missed one. */
     checkIn?: readonly StalledRow[];
@@ -650,6 +670,7 @@ function stallAnchor(
   unanswered: readonly UnansweredThreadRow[],
   ungatedUi: readonly UngatedUiRow[],
   checkIn: readonly StalledRow[],
+  unresumed: readonly UnresumedRow[],
 ): StallAnchor | undefined {
   const task = (row?: { id: string; title: string }): StallAnchor | undefined =>
     row ? { kind: 'task', id: row.id, title: row.title } : undefined;
@@ -664,6 +685,11 @@ function stallAnchor(
   return (
     task(board.stalled[0]) ??
     task(board.unfiled[0]) ??
+    // Above the item findings and below the two silences: a row whose answer
+    // is already in is the cheapest thing on the frame for the lead to move,
+    // and it is a ROW, so it anchors before the lists that name a surface
+    // somebody else owns.
+    task(unresumed[0]) ??
     heldAnchor(held[0]) ??
     task(askedBack[0]) ??
     docAnchor(unanswered[0]) ??
@@ -975,6 +1001,10 @@ export class StallNudger {
     // a check that omitted it would report the board healthy at exactly the
     // moment the rule it exists for is being broken.
     const ungatedUi = board.ungatedUi ?? [];
+    // Already the lead's subset: the gate applies the quiet window to the
+    // lift before the snapshot is built, and there is nobody to tap first —
+    // the answer is in, and handing it back is the lead's own move.
+    const unresumed = board.retired ? [] : (board.unresumed ?? []);
     // The rows owing a check-in whose window has actually come round again.
     // Filtered HERE rather than in `changeOn`, because this finding's repeat
     // is its own clock and the stamp must never see a row it is holding back.
@@ -987,6 +1017,7 @@ export class StallNudger {
       askedBack.length === 0 &&
       unanswered.length === 0 &&
       ungatedUi.length === 0 &&
+      unresumed.length === 0 &&
       checkIn.length === 0
     ) {
       this.armed.delete(key);
@@ -999,7 +1030,7 @@ export class StallNudger {
     // high-water mark, because a row excluded from one and counted in the
     // other would put the clock back through the side door.
     const clock = this.clockRows(board, held, askedBack);
-    const stamp = this.stampFor(board, held, askedBack, unanswered, ungatedUi, clock);
+    const stamp = this.stampFor(board, held, askedBack, unanswered, ungatedUi, unresumed, clock);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -1016,6 +1047,7 @@ export class StallNudger {
       askedBack,
       unanswered,
       ungatedUi,
+      unresumed,
       checkIn,
     );
     if (!change) {
@@ -1034,7 +1066,7 @@ export class StallNudger {
     // has ANYBODY on it is the escalation's question, and it answers it from
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
-    const anchor = stallAnchor(board, held, askedBack, unanswered, ungatedUi, checkIn);
+    const anchor = stallAnchor(board, held, askedBack, unanswered, ungatedUi, checkIn, unresumed);
     const delivered = this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
@@ -1060,6 +1092,7 @@ export class StallNudger {
       ...(askedBack.length > 0 ? { askedBack } : {}),
       ...(unanswered.length > 0 ? { unanswered } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
+      ...(unresumed.length > 0 ? { unresumed } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
       // Awareness only. Never a reason for the frame — `changeOn` above has
       // already decided that on the findings themselves — and a standing
@@ -1444,6 +1477,7 @@ export class StallNudger {
     askedBack: readonly AskedBackRow[],
     unanswered: readonly UnansweredThreadRow[],
     ungatedUi: readonly UngatedUiRow[],
+    unresumed: readonly UnresumedRow[],
     clock: readonly StalledRow[],
   ): string {
     const rows = [...board.stalled, ...board.unfiled];
@@ -1488,6 +1522,13 @@ export class StallNudger {
         // past the gate, and folding the two together would let a wake about
         // the silence stand in for the one about the rule.
         ...ungatedUi.map((row) => `ui:${row.id}`),
+        // Under its own key AND its LIFT's time, for the two reasons a hold
+        // carries both: a row can be stalled and unresumed at once, so
+        // folding it into the row id would let a wake about the silence stand
+        // in for the one about the answer; and a SECOND answer on the same
+        // row is a second thing nobody acted on, which an id-only token would
+        // swallow.
+        ...unresumed.map((row) => `lift:${row.id}@${row.liftedAt}`),
       ]),
     ).sort();
     // The oldest row speaks for the board — of the rows the clock may speak
@@ -1567,6 +1608,7 @@ export class StallNudger {
     askedBack: readonly AskedBackRow[],
     unanswered: readonly UnansweredThreadRow[],
     ungatedUi: readonly UngatedUiRow[],
+    unresumed: readonly UnresumedRow[],
     checkIn: readonly StalledRow[],
   ): StallNudgeFrame['changed'] | undefined {
     const before = prior === undefined ? undefined : parseStamp(prior);
@@ -1602,6 +1644,11 @@ export class StallNudger {
     const ungated = ungatedUi.filter(
       (row) => before === undefined || !before.ids.has(`ui:${row.id}`),
     );
+    // Keyed on the same token the stamp writes, so the lead hears about each
+    // lift once and about a second one on the same row afresh.
+    const lifted = unresumed.filter(
+      (row) => before === undefined || !before.ids.has(`lift:${row.id}@${row.liftedAt}`),
+    );
     // Already filtered to the rows whose window has come round (`dueCheckIns`)
     // — so every row still here is news by its own clock, and it does not ride
     // the stamp. That is the one departure from the stamp rule in this method,
@@ -1614,6 +1661,7 @@ export class StallNudger {
       asked.length === 0 &&
       waiting.length === 0 &&
       ungated.length === 0 &&
+      lifted.length === 0 &&
       checkIn.length === 0
     )
       return undefined;
@@ -1624,6 +1672,7 @@ export class StallNudger {
       ...(asked.length > 0 ? { askedBack: asked } : {}),
       ...(waiting.length > 0 ? { unanswered: waiting } : {}),
       ...(ungated.length > 0 ? { ungatedUi: ungated } : {}),
+      ...(lifted.length > 0 ? { unresumed: lifted } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
       ...(escalated ? { escalated: true as const } : {}),
     };
