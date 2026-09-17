@@ -59,7 +59,7 @@ describe('the supervisor log', () => {
     const dog = createHealthWatchdog({
       probe: async () => ({ verdict: 'not-listening' }),
       maxFails: 1,
-      ledger: { load: () => [], save: () => {} },
+      ledger: { load: () => ({ restarts: [], unbound: [] }), save: () => {} },
       log: (line) => lines.push(line),
       restart: () => {},
       label: ':8873',

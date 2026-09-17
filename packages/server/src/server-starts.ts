@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { uptime } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { DeployResult } from './deploy-log.ts';
-import { fileRestartLedger, restartLedgerPath } from './supervisor-health.ts';
+import { fileRestartLedger, restartLedgerPath } from './supervisor-restarts.ts';
 
 export const SERVER_STARTS_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 export const SERVER_STARTS_MAX_ENTRIES = 500;
@@ -161,7 +161,7 @@ export function recordThisServerStart(dataDir: string): ServerStart {
       pid: process.pid,
       hostBootAt: Math.round(now - uptime() * 1000),
     },
-    fileRestartLedger(restartLedgerPath(dataDir)).load(),
+    fileRestartLedger(restartLedgerPath(dataDir)).load().restarts,
   );
 }
 

@@ -10,23 +10,18 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { type Server as NetServer, createServer as createNetServer } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
   type HealthProbeResult,
   type HealthVerdict,
-  type RestartLedger,
   SUPERVISOR_PROBE_HEADER,
   SUPERVISOR_PROBE_PATH,
   type WatchdogTick,
   createHealthWatchdog,
-  fileRestartLedger,
   healthStep,
   probeHealth,
-  restartDecision,
 } from '../src/supervisor-health.ts';
+import { memoryLedger } from './supervisor-ledger-stub.ts';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -177,43 +172,6 @@ describe('healthStep: only an unanswered probe counts', () => {
 const MIN = 60_000;
 const POLICY = { max: 3, windowMs: 60 * MIN };
 
-describe('restartDecision: at most `max` restarts in any window', () => {
-  it('allows three in an hour and refuses the fourth until the first ages out', () => {
-    let history: number[] = [];
-    for (const t of [0, 2 * MIN, 4 * MIN]) {
-      const d = restartDecision(history, t, POLICY);
-      if (!d.allowed) throw new Error(`restart at ${t} refused`);
-      history = d.history;
-    }
-    expect(restartDecision(history, 6 * MIN, POLICY)).toEqual({
-      allowed: false,
-      recent: 3,
-      retryAt: 60 * MIN,
-    });
-    expect(restartDecision(history, 60 * MIN - 1, POLICY).allowed).toBe(false);
-    expect(restartDecision(history, 60 * MIN, POLICY)).toEqual({
-      allowed: true,
-      history: [2 * MIN, 4 * MIN, 60 * MIN],
-    });
-  });
-
-  it('does not trust a timestamp from the future (a clock that stepped back)', () => {
-    const d = restartDecision([10 * MIN, 11 * MIN, 12 * MIN], 5 * MIN, POLICY);
-    expect(d).toEqual({ allowed: true, history: [5 * MIN] });
-  });
-});
-
-function memoryLedger(): RestartLedger & { history: number[] } {
-  const ledger = {
-    history: [] as number[],
-    load: () => [...ledger.history],
-    save: (h: number[]) => {
-      ledger.history = [...h];
-    },
-  };
-  return ledger;
-}
-
 function scripted(verdicts: HealthVerdict[]): () => Promise<HealthProbeResult> {
   let i = 0;
   return async () => ({ verdict: verdicts[Math.min(i++, verdicts.length - 1)] as HealthVerdict });
@@ -271,6 +229,8 @@ describe('the watchdog, on an injected clock', () => {
       clock += 90_000;
     }
     expect(restarts).toEqual([30_000, 150_000, 270_000]);
+    // Every one of them was a wedge, not a boot: nothing lengthens.
+    expect(ledger.history.unbound).toEqual([]);
 
     // The fourth lifetime holds, and says so once rather than every tick.
     const fourth = lifetime();
@@ -325,25 +285,6 @@ describe('the watchdog, on an injected clock', () => {
     expect(await dog.tick()).toBe('skipped');
     release({ verdict: 'answering', status: 200 });
     expect(await first).toBe('ok');
-  });
-});
-
-describe('the ledger file', () => {
-  it('carries restarts from one supervisor to the next', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'restart-ledger-'));
-    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-    const path = join(dir, 'nested', 'supervisor-restarts.json');
-    fileRestartLedger(path).save([1, 2, 3]);
-    expect(fileRestartLedger(path).load()).toEqual([1, 2, 3]);
-  });
-
-  it('reads a missing or corrupt file as empty, so the watchdog can still act', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'restart-ledger-'));
-    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-    const path = join(dir, 'supervisor-restarts.json');
-    expect(fileRestartLedger(path).load()).toEqual([]);
-    writeFileSync(path, '{ not json');
-    expect(fileRestartLedger(path).load()).toEqual([]);
   });
 });
 
