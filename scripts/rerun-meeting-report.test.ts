@@ -206,6 +206,76 @@ describe('renderRerunReport', () => {
     expect(text).toContain('no price for claude-experimental-9');
   });
 
+  /**
+   * THE LEAD'S LINE ON THE 15 SEPTEMBER MEETING: a rerun whose tidy-up
+   * applies nothing has to print a reason per edit it did not apply. The
+   * counts row already said that nothing landed; nothing said what to change.
+   */
+  it('prints why the tidy-up did not apply what it proposed, grouped by rule', () => {
+    const text = renderRerunReport(
+      buildRerunReport(
+        input({
+          tidy: {
+            ok: true,
+            proposed: 4,
+            applied: 0,
+            refused: 3,
+            refusals: [
+              'replace_block b1: the document does not record the block as the note-taker’s own',
+              'replace_block b2: the document does not record the block as the note-taker’s own',
+              'delete_block b3: somebody has commented on the block',
+            ],
+            failures: ['nest_blocks: nothing to nest'],
+          },
+        }),
+      ),
+    );
+    expect(text).toContain('4 proposed, 0 applied, 3 refused');
+    // One line per rule with a count, commonest first — and the applier's own
+    // failure beside the gate's refusals, because both are edits that did not
+    // reach the notes.
+    expect(text).toContain(
+      '- 2 edits — the document does not record the block as the note-taker’s own',
+    );
+    expect(text).toContain('- 1 edit — somebody has commented on the block');
+    expect(text).toContain('- 1 edit — nothing to nest');
+  });
+
+  it('says a count with no reasons behind it is unreported, never "nothing was refused"', () => {
+    // A run against a server that predates the two arrays. Printing nothing
+    // here would read as a clean pass on the exact run where the most was
+    // refused.
+    const text = renderRerunReport(
+      buildRerunReport(input({ tidy: { ok: true, proposed: 16, applied: 0, refused: 16 } })),
+    );
+    expect(text).toContain(
+      'Why the tidy-up did not apply 16 edit(s): not reported by this server.',
+    );
+  });
+
+  it('counts an applier failure among the unreported losses, not only a refusal', () => {
+    // Against an older server a pass whose only losses were in the APPLIER
+    // sends `failed` and no lines. Keying the sentence on `refused` alone
+    // printed nothing there, which reads as a pass that applied everything.
+    const text = renderRerunReport(
+      buildRerunReport(
+        input({ tidy: { ok: true, proposed: 3, applied: 1, refused: 0, failed: 2 } }),
+      ),
+    );
+    expect(text).toContain('Why the tidy-up did not apply 2 edit(s): not reported by this server.');
+  });
+
+  it('says nothing about reasons for a tidy-up that applied what it proposed', () => {
+    const text = renderRerunReport(
+      buildRerunReport(
+        input({
+          tidy: { ok: true, proposed: 3, applied: 3, refused: 0, refusals: [], failures: [] },
+        }),
+      ),
+    );
+    expect(text).not.toContain('Why the tidy-up');
+  });
+
   it('says so rather than dividing by zero when nothing read as an idea', () => {
     const text = renderRerunReport(buildRerunReport(input({ ideasVoiced: 0, ideasCovered: 0 })));
     expect(text).toContain('nothing in this meeting read as an idea');
