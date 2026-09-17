@@ -106,8 +106,18 @@ describe('minifyCss', () => {
     });
 
     it('preserves every declaration', () => {
-      const decls = (s: string) => (s.match(/[a-z-]+\s*:\s*[^;{}]+/g) ?? []).length;
+      // Comments come off BOTH sides first. The pattern below is `word: value`,
+      // which an English sentence inside a `/* */` also is — "Grey in both
+      // states: a delivery is not an event worth colour" counted as a
+      // declaration on the raw side and, correctly, as nothing on the
+      // minified one. That is the minifier doing its job, so counting it as a
+      // lost declaration made this case fail on a prose comment rather than on
+      // a rewrite, which is the opposite of what it is for.
+      const bare = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '');
+      const decls = (s: string) => (bare(s).match(/[a-z-]+\s*:\s*[^;{}]+/g) ?? []).length;
       expect(decls(minifyCss(rawCss))).toBe(decls(rawCss as string));
+      // CONTROL: the counter still sees a declaration go missing.
+      expect(decls(rawCss.replace('display:', 'xx'))).toBeLessThan(decls(rawCss as string));
     });
 
     it('gets meaningfully smaller', () => {
