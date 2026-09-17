@@ -60,7 +60,7 @@ function board(over: Partial<ReadyWorkSnapshot> = {}): ReadyWorkSnapshot {
   };
 }
 
-function harness(opts: { stampFile?: string; start?: number } = {}) {
+function harness(opts: { stampFile?: string; start?: number; sinks?: () => number } = {}) {
   const world = { now: opts.start ?? 10_000_000, boards: [board()] };
   const sent: NudgeFrame[] = [];
   const nudger = new ReadyWorkNudger({
@@ -70,7 +70,7 @@ function harness(opts: { stampFile?: string; start?: number } = {}) {
     canReach: () => true,
     send: (_workspaceId, _agentId, frame) => {
       sent.push(frame);
-      return 1;
+      return opts.sinks ? opts.sinks() : 1;
     },
     report: () => {},
     ...(opts.stampFile !== undefined ? { stampFile: opts.stampFile } : {}),
@@ -187,6 +187,39 @@ describe('a board worked and left idle again', () => {
 
     expect(h.sent).toHaveLength(2);
     expect(h.sent[1]?.taskId).toBe('t-9');
+  });
+});
+
+describe('a frame that reached nobody', () => {
+  it('is not remembered as handed over, so the list is said again', () => {
+    // `canReach` said yes and the send delivered nothing — a stream that went
+    // away between the two. The stamp re-arms on the next activity either
+    // way; what must not happen is this list being buried for good.
+    let sinks = 0;
+    const h = harness({ sinks: () => sinks });
+    idleFromTheStart(h);
+    h.nudger.tick();
+    expect(h.sent).toHaveLength(1);
+
+    sinks = 1;
+    h.run(2 * MIN);
+    h.worked();
+    h.run(2 * READY_IDLE_DEFAULT_MS);
+
+    expect(h.sent).toHaveLength(2);
+  });
+
+  it('MUTATION CONTROL: the same run with the frame DELIVERED is said once', () => {
+    const h = harness({ sinks: () => 1 });
+    idleFromTheStart(h);
+    h.nudger.tick();
+    expect(h.sent).toHaveLength(1);
+
+    h.run(2 * MIN);
+    h.worked();
+    h.run(2 * READY_IDLE_DEFAULT_MS);
+
+    expect(h.sent).toHaveLength(1);
   });
 });
 

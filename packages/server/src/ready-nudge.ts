@@ -859,7 +859,7 @@ export class ReadyWorkNudger {
       board.capacityHeld && board.capacityHeld > 0
         ? { ...(held ?? {}), 'parallelism-cap': board.capacityHeld }
         : held;
-    this.emit(key, lead, {
+    const delivered = this.emit(key, lead, {
       event: READY_IDLE_EVENT,
       workspaceId: key,
       ...(top ? { taskId: top.id, title: top.title } : {}),
@@ -875,7 +875,12 @@ export class ReadyWorkNudger {
       idleMs,
       ts: now,
     });
-    this.sentSets.record(key, lead, named, now);
+    // Only what actually REACHED the lead. A stream that answered `reachable`
+    // and then delivered nothing has told them nothing, and this memory is not
+    // the stamp: the stamp re-arms on the next activity, so a lost frame comes
+    // back, while a set recorded here suppresses every re-arm that follows and
+    // would bury this list for good.
+    if (delivered > 0) this.sentSets.record(key, lead, named, now);
     this.armed.set(key, stamp);
     // A DELIVERED nudge — the numerator the stopping rule reads. Counted here
     // rather than beside the suppressions above so it can never be inflated by
