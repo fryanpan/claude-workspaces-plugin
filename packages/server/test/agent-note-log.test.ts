@@ -229,7 +229,7 @@ describe('AgentNoteLog', () => {
 
   it('reads a declaration back through the board read, and never as a per-agent note', () => {
     log.append(note({ agent: 'Saltmarsh', at: 5, text: '', ambiguous: false, withheld: true }));
-    expect(log.readBoard(WS, 0, 10)).toEqual([
+    expect(log.readBoard(WS, 0, 10).lines).toEqual([
       note({ agent: 'Saltmarsh', at: 5, text: '', ambiguous: false, withheld: true }),
     ]);
     expect(log.readFor(WS, 'Saltmarsh')).toEqual([]);
@@ -239,7 +239,7 @@ describe('AgentNoteLog', () => {
     // Only a declaration may carry no words; anything else empty is foreign.
     mkdirSync(join(dataDir, 'workspaces'), { recursive: true });
     appendFileSync(agentNoteLogPath(dataDir, WS), `${JSON.stringify(note({ text: '' }))}\n`);
-    expect(log.readBoard(WS, 0, 10)).toEqual([]);
+    expect(log.readBoard(WS, 0, 10).lines).toEqual([]);
   });
 
   it('reads every agent on the board since a time, newest first, and never another board', () => {
@@ -247,10 +247,27 @@ describe('AgentNoteLog', () => {
     log.append(note({ at: 10 }));
     log.append(note({ at: 20 }));
     log.append(note({ at: 40, workspaceId: OTHER_WS }));
-    expect(log.readBoard(WS, 15, 10).map((n) => [n.agent, n.at])).toEqual([
+    expect(log.readBoard(WS, 15, 10).lines.map((n) => [n.agent, n.at])).toEqual([
       ['Riverbend', 30],
       ['Cartographer', 20],
     ]);
-    expect(log.readBoard(WS, 0, 1).map((n) => n.at)).toEqual([20]);
+  });
+
+  it('caps each agent separately, so a chatty agent cannot push a quiet one out', () => {
+    log.append(note({ agent: 'Riverbend', at: 1, text: 'the quiet one' }));
+    for (let i = 0; i < 30; i++) log.append(note({ at: 100 + i, text: `chatty ${i}` }));
+    const read = log.readBoard(WS, 0, 2);
+    expect(read.lines.map((n) => n.text)).toEqual(['chatty 29', 'chatty 28', 'the quiet one']);
+    expect(read.skipped.get('cartographer')).toBe(28);
+    expect(read.skipped.get('riverbend')).toBeUndefined();
+  });
+
+  it('keeps only the newest declaration per agent, and counts none of them as notes', () => {
+    for (const at of [5, 6, 7]) {
+      log.append(note({ agent: 'Saltmarsh', at, text: '', ambiguous: false, withheld: true }));
+    }
+    const read = log.readBoard(WS, 0, 10);
+    expect(read.lines.map((n) => n.at)).toEqual([7]);
+    expect(read.skipped.size).toBe(0);
   });
 });

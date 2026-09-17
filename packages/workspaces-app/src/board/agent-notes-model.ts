@@ -66,13 +66,16 @@ const PLACEMENTS: ReadonlySet<string> = new Set<NotePlacement>([
 ]);
 const KINDS: ReadonlySet<string> = new Set(['turn', 'denial', 'status']);
 
-/** The state line. `title` is the attached task's title when the board has it. */
+/** The state line. `title` is the attached task's title when the board has it.
+ *  The two no-task states are past tense: they describe the newest logged
+ *  note, and after a restart the server cannot see that a later note landed
+ *  on a task, so a present-tense "holds" could be false. */
 export function statePhrase(placement: NotePlacement, title?: string): string {
   switch (placement) {
     case 'undecidable':
-      return 'holds several tasks, so no one task took these';
+      return 'held several tasks, so no one task took these';
     case 'unattachable':
-      return 'holds no task, so there was nothing to put these on';
+      return 'held no task, so there was nothing to put these on';
     case 'withheld':
       return 'said it does not post its turns on this board';
     case 'attached':
@@ -134,6 +137,9 @@ export function agentNoteGroups(
     // the window, is not this list's business: the task group shows it.
     if (a.placement === 'attached' && inWindow.length === 0) continue;
     const shown = inWindow.slice(0, ACTIVITY_NOTE_CAP);
+    // The server's `more` is older than every note it sent. Count it only
+    // when none of those notes fell outside the window: if some did, the
+    // older ones the server held back are outside it too.
     const hidden =
       inWindow.length - shown.length + (inWindow.length === a.notes.length ? a.more : 0);
     groups.push({

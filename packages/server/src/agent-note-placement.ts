@@ -17,8 +17,9 @@
  *                     on its owner's call stays parked for days.
  *  - `withheld`     — the session DECLARED that it does not post its turns
  *                     here (a session whose turns concern private material).
- *                     A declaration is a line the session sends each turn with
- *                     no words in it, so "chose not to post" is something the
+ *                     A declaration is a line with no words in it, which the
+ *                     session sends each turn and the board keeps at most
+ *                     once an hour, so "chose not to post" is something the
  *                     board was told, never something a reader infers from a
  *                     blank tab. Silence still means silence.
  *
@@ -39,10 +40,11 @@ export type UnplacedPlacement = Exclude<NotePlacement, 'attached'>;
  *  window (`ACTIVITY_WINDOW_MS` in the app), so the two halves of the pane
  *  cover the same stretch of time. */
 export const AGENT_NOTES_WINDOW_MS = 3 * 60 * 60_000;
-/** How many log lines one board read may hand to the grouping. */
-export const AGENT_NOTES_BOARD_CAP = 400;
 /** Lines kept per agent; the rest are counted in `more`. */
 export const AGENT_NOTES_PER_AGENT = 10;
+/** How long a declaration stands before the next one is written. Well inside
+ *  the three-hour window, so a session still declaring stays listed. */
+export const WITHHELD_REPEAT_MS = 60 * 60_000;
 
 /** The state a logged line records. */
 export function placementOfLogged(
@@ -96,6 +98,8 @@ export function agentNotesByAgent(
   lines: readonly LoggedAgentNote[],
   attachedLatest: AttachedLookup = () => undefined,
   perAgentCap: number = AGENT_NOTES_PER_AGENT,
+  /** Notes the read already left out, per agent (keyed by `normalizeAgent`). */
+  skipped: ReadonlyMap<string, number> = new Map(),
 ): AgentNotesView[] {
   const byAgent = new Map<string, LoggedAgentNote[]>();
   for (const line of lines) {
@@ -105,11 +109,13 @@ export function agentNotesByAgent(
     byAgent.set(key, list);
   }
   const views: AgentNotesView[] = [];
-  for (const list of byAgent.values()) {
+  for (const [key, list] of byAgent) {
     list.sort((a, b) => b.at - a.at);
     const newest = list[0];
     if (!newest) continue;
     const words = list.filter((n) => n.withheld !== true);
+    const more = words.length - Math.min(words.length, Math.max(0, perAgentCap));
+    const hidden = more + (skipped.get(key) ?? 0);
     const notes = words.slice(0, Math.max(0, perAgentCap)).map((n) => ({
       at: n.at,
       kind: n.kind,
@@ -125,18 +131,38 @@ export function agentNotesByAgent(
             taskId: placed.taskId,
             latestAt: placed.at,
             notes,
-            more: words.length - notes.length,
+            more: hidden,
           }
         : {
             agent: newest.agent,
             placement: placementOfLogged(newest),
             latestAt: newest.at,
             notes,
-            more: words.length - notes.length,
+            more: hidden,
           };
     views.push(view);
   }
   return views.sort((a, b) => b.latestAt - a.latestAt || a.agent.localeCompare(b.agent));
+}
+
+/**
+ * Whether a declaration should be written. A withheld session declares on
+ * every turn, and a line per turn would crowd the log's bounded reads and
+ * make every open Home re-read on every turn. One per agent per board per
+ * `WITHHELD_REPEAT_MS` keeps the state inside the surface's window. It is
+ * held in memory, so after a restart the next declaration is written again,
+ * which costs one line.
+ */
+export class WithheldDeclarations {
+  private readonly last = new Map<string, number>();
+
+  shouldWrite(workspaceId: string, agent: string, now: number): boolean {
+    const key = `${workspaceId}/${normalizeAgent(agent)}`;
+    const prev = this.last.get(key);
+    if (prev !== undefined && now >= prev && now - prev < WITHHELD_REPEAT_MS) return false;
+    this.last.set(key, now);
+    return true;
+  }
 }
 
 export type ParseWithheldResult =

@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { agentNoteLogPath } from '../src/agent-note-log.ts';
 import type { AgentNotesView } from '../src/agent-note-placement.ts';
 import { handleDispatchAndNoteRoutes } from '../src/routes/dispatch-and-notes.ts';
-import type { TaskRoutesContext } from '../src/routes/task-routes-context.ts';
+import type { TaskRouteRequest, TaskRoutesContext } from '../src/routes/task-routes-context.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -157,6 +157,15 @@ describe('the board surface for notes no task took', () => {
       await fetch(`${base}/workspaces/${WS}/agents/Saltmarsh/notes`),
     );
     expect(notes).toEqual([]);
+
+    // A session declares every turn; a repeat inside the hour adds no line.
+    const again = await post(`/workspaces/${WS}/agents/Saltmarsh/notes`, {
+      withheld: true,
+      at: Date.now(),
+    });
+    expect(await again.json()).toMatchObject({ placement: 'withheld', repeat: true });
+    const lines = readFileSync(agentNoteLogPath(dataDir, WS), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
   });
 
   it('refuses the read to a share visitor, at the handler as well as the front door', async () => {
@@ -167,7 +176,7 @@ describe('the board surface for notes no task took', () => {
     const ask = (visitor: unknown) =>
       handleDispatchAndNoteRoutes(
         {
-          agentNoteLog: { readBoard: () => [] },
+          agentNoteLog: { readBoard: () => ({ lines: [], skipped: new Map() }) },
           agentNotes: { list: () => [] },
           j: (status: number, body: unknown) => Response.json(body, { status }),
         } as unknown as TaskRoutesContext,
@@ -178,7 +187,7 @@ describe('the board surface for notes no task took', () => {
           pathname: `/workspaces/${WS}/agent-notes`,
           visitor: visitor as never,
           authorFor: (() => undefined) as never,
-        },
+        } as unknown as TaskRouteRequest,
       );
     const refused = await ask({});
     expect(refused?.status).toBe(403);

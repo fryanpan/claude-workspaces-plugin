@@ -8,6 +8,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { LoggedAgentNote } from '../src/agent-note-log.ts';
 import {
+  WITHHELD_REPEAT_MS,
+  WithheldDeclarations,
   agentNotesByAgent,
   parseWithheld,
   placementOfLogged,
@@ -94,6 +96,28 @@ describe('agentNotesByAgent', () => {
     const [view] = agentNotesByAgent(lines, undefined, 2);
     expect(view?.notes.map((n) => n.text)).toEqual(['n5', 'n4']);
     expect(view?.more).toBe(3);
+  });
+
+  it('adds what the read already left out to the count', () => {
+    const [view] = agentNotesByAgent(
+      [line({ at: 1 })],
+      undefined,
+      10,
+      new Map([['harborlight', 7]]),
+    );
+    expect(view?.more).toBe(7);
+  });
+});
+
+describe('WithheldDeclarations', () => {
+  it('writes one declaration per agent per board per hour', () => {
+    const d = new WithheldDeclarations();
+    expect(d.shouldWrite('w-1', 'Saltmarsh', 0)).toBe(true);
+    expect(d.shouldWrite('w-1', 'saltmarsh', WITHHELD_REPEAT_MS - 1)).toBe(false);
+    // Another board, and another agent, are their own.
+    expect(d.shouldWrite('w-2', 'Saltmarsh', 1)).toBe(true);
+    expect(d.shouldWrite('w-1', 'Riverbend', 1)).toBe(true);
+    expect(d.shouldWrite('w-1', 'Saltmarsh', WITHHELD_REPEAT_MS)).toBe(true);
   });
 });
 

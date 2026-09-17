@@ -1,6 +1,7 @@
 import {
-  AGENT_NOTES_BOARD_CAP,
+  AGENT_NOTES_PER_AGENT,
   AGENT_NOTES_WINDOW_MS,
+  WithheldDeclarations,
   agentNotesByAgent,
   parseWithheld,
   placementOfTarget,
@@ -33,6 +34,11 @@ import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.
  * yesterday's filing does not excuse today's ask.
  */
 const FIRST_TURN_WINDOW_MS = 2 * 60 * 60_000;
+
+/** Which withheld declarations were written lately, so a session declaring
+ *  every turn writes one line an hour. Keyed by board, so one process
+ *  serving several test servers cannot cross them. */
+const declarations = new WithheldDeclarations();
 
 /**
  * Judge a turn note as it arrives, and record the verdict.
@@ -111,13 +117,18 @@ export async function handleDispatchAndNoteRoutes(
     if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
     const board = scope.workspaceId;
     const since = Date.now() - AGENT_NOTES_WINDOW_MS;
-    const lines = agentNoteLog.readBoard(board, since, AGENT_NOTES_BOARD_CAP);
-    const agents = agentNotesByAgent(lines, (agent) => {
-      const placed = agentNotes
-        .list(agent)
-        .find((n) => n.workspaceId === board && n.taskId !== undefined);
-      return placed?.taskId !== undefined ? { at: placed.at, taskId: placed.taskId } : undefined;
-    });
+    const read = agentNoteLog.readBoard(board, since, AGENT_NOTES_PER_AGENT);
+    const agents = agentNotesByAgent(
+      read.lines,
+      (agent) => {
+        const placed = agentNotes
+          .list(agent)
+          .find((n) => n.workspaceId === board && n.taskId !== undefined);
+        return placed?.taskId !== undefined ? { at: placed.at, taskId: placed.taskId } : undefined;
+      },
+      AGENT_NOTES_PER_AGENT,
+      read.skipped,
+    );
     return j(200, { workspaceId: board, since, agents });
   }
   // --- REST: builder dispatches ---
@@ -340,6 +351,10 @@ export async function handleDispatchAndNoteRoutes(
     ) {
       const decl = parseWithheld(raw as Record<string, unknown>, Date.now());
       if (!decl.ok) return j(400, { error: decl.error, message: decl.message });
+      // A repeat inside the hour is already on record: no line, no push.
+      if (!declarations.shouldWrite(boardId, agent, Date.now())) {
+        return j(202, { ok: true, workspaceId: boardId, placement: 'withheld', repeat: true });
+      }
       const logged = agentNoteLog.append({
         agent,
         kind: 'turn',

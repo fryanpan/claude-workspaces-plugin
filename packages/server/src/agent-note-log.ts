@@ -141,6 +141,13 @@ function parseLine(line: string): LoggedAgentNote | undefined {
  * nothing here enumerates them. Enumerating a server's boards is how a sweep
  * once hydrated every dormant doc on this machine.
  */
+/** `readBoard`'s answer: the kept lines, and per agent how many notes the
+ *  per-agent cap left out. */
+export interface BoardNotesRead {
+  lines: LoggedAgentNote[];
+  skipped: ReadonlyMap<string, number>;
+}
+
 export class AgentNoteLog {
   private readonly bytesCap: number;
 
@@ -205,15 +212,43 @@ export class AgentNoteLog {
   }
 
   /**
-   * Every agent's lines on this board at or after `since`, declarations
-   * included, newest first, at most `cap` — the read behind the board's
-   * per-agent surface (`agent-note-placement.ts`). Same tail walk and the
-   * same two bounds as `readFor`, so a months-old board costs what a new one
-   * does.
+   * Every agent's lines on this board at or after `since`, newest first —
+   * the read behind the board's per-agent surface (`agent-note-placement.ts`).
+   *
+   * The cap is PER AGENT and applied inside the walk, for the reason
+   * `tailMatching` filters inside it: a board-wide cap let one chatty agent
+   * fill the read and drop a quiet agent from the surface. Each agent keeps
+   * its newest `perAgent` notes and its newest declaration. Notes past the cap
+   * are counted in `skipped` (keyed by `normalizeAgent`), not kept. The walk
+   * has the same two bounds as every read here. "Newest" for the cut is file
+   * order, which is `at` order except across a clock change.
    */
-  readBoard(workspaceId: string, since: number, cap: number): LoggedAgentNote[] {
-    const found = this.tailMatching(workspaceId, (n) => n.at >= since, Math.max(0, cap));
-    return found.sort((a, b) => b.at - a.at);
+  readBoard(workspaceId: string, since: number, perAgent: number): BoardNotesRead {
+    const cap = Math.max(0, perAgent);
+    const seen = new Map<string, { words: number; declared: boolean }>();
+    const skipped = new Map<string, number>();
+    const lines = this.tailMatching(
+      workspaceId,
+      (n) => {
+        if (n.at < since) return false;
+        const key = normalizeAgent(n.agent);
+        const mine = seen.get(key) ?? { words: 0, declared: false };
+        seen.set(key, mine);
+        if (n.withheld === true) {
+          if (mine.declared) return false;
+          mine.declared = true;
+          return true;
+        }
+        if (mine.words < cap) {
+          mine.words++;
+          return true;
+        }
+        skipped.set(key, (skipped.get(key) ?? 0) + 1);
+        return false;
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+    return { lines: lines.sort((a, b) => b.at - a.at), skipped };
   }
 
   /**
