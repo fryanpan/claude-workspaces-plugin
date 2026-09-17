@@ -117,13 +117,22 @@ export const MIN_IDEAS_FOR_COVERAGE = 10;
  *
  * MEASURED, and here is the denominator so the next reader can weigh it: a
  * synthetic six-leg meeting growing from 40 to 240 settled sentences, with
- * the note-taker's hit rate PINNED at 55% so that every movement is sampling
- * noise by construction, 200 seeded runs, driven through
- * `buildNotesQualityReport`. Of 1,000 leg-to-leg transitions, 815 moved the
- * rounded percentage at all; the movement was a median of 2 points, a 90th
- * percentile of 5, and a maximum of 15. Ten points sits above the noise and
- * well below a real change — a meeting going from a third of what was said
- * missed to two thirds still crosses it at once.
+ * the note-taker's hit rate PINNED so that every movement is sampling noise
+ * by construction, 200 seeded runs, driven through `buildNotesQualityReport`.
+ * Run at a 40% hit rate, so the uncovered share sits near 60% and these are
+ * meetings that really do raise the flag — 146 of the 200 raised it at every
+ * leg. Of 1,000 leg-to-leg transitions, 823 moved the rounded percentage at
+ * all: a median of 2 points, a 90th percentile of 6, a maximum of 16. The
+ * same shape at a 55% hit rate gives 815, median 2, p90 5.
+ *
+ * What the band is worth, on that same run: 823 revisions become 54. Ten
+ * points sits above the noise and well below a real change — a meeting going
+ * from a third of what was said missed to two thirds crosses it at once.
+ *
+ * It is a SYNTHETIC measurement, and the one thing it cannot speak to is
+ * whether a real note-taker's quality drifts within a meeting. It holds the
+ * hit rate fixed on purpose, because the question the band answers is what
+ * the arithmetic does when nothing else changes.
  *
  * It is a band on the RATES only. A count moves because the notes gained a
  * defect, and its reader should hear about that; see the header of

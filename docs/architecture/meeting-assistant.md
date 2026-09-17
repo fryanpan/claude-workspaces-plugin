@@ -1397,8 +1397,9 @@ moving is the denominator talking; a count moving is the meeting talking.** A
 second repeated bullet is a second defect and revises; an uncovered share
 drifting from 55% to 60% while the note-taker does exactly as well as before
 does not. The band is ten points, against a measured noise floor: a synthetic
-six-leg meeting with the hit rate pinned moved the rounded share on 815 of
-1,000 leg transitions, by a median of 2 points and a 90th percentile of 5.
+six-leg meeting with the hit rate pinned moved the rounded share on 823 of
+1,000 leg transitions, by a median of 2 points and a 90th percentile of 6 —
+and banding it turns those 823 revisions into 54.
 
 **And the band is measured against the value on the ITEM**, not against the
 previous leg. Against the previous leg, 55, 59, 63, 67 clears the band three
