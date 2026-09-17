@@ -94,7 +94,7 @@ describe('a delivery receipt wakes nobody', () => {
     expect(frames).toEqual([]);
   });
 
-  it('says nothing when the receipt is for this session own comment either', async () => {
+  it('says nothing when the receipt is for a comment this session wrote either', async () => {
     // The self-echo rule could not have dropped this one: a receipt names no
     // actor, so it fails open there. This rule reads the event name.
     const { frames, messages } = renderer();
