@@ -2566,7 +2566,29 @@ and there is no setting that turns it into a default. **A bad end is still an
 end**: a server error, a dropped connection and a reconnect that gave up all
 raise the offer too, because each leaves a transcript on disk and each leaves
 live notes with a gap in them — which is the case a tidy-up helps most. A
-start that never became a meeting raises nothing, because it named none. `POST
+start that never became a meeting raises nothing, because it named none.
+
+**But a recording that ended ITSELF raises no dialog at all**
+(`meeting-tidy-line.ts`). Fifteen minutes of silence is fifteen minutes of
+nobody there, so a card raised at that moment dims the doc and waits, and
+whoever comes back has to dismiss a question before they can read a word. The
+notes are still real, so the offer is still made — as a control on the strip's
+idle line, beside the sentence that says the recording timed out, where the
+same reader will find it. The press means exactly what it means in the dialog,
+and where the words were never spoken there is nothing to offer.
+
+**Both surfaces read one reply through one reader.** `readCleanupReply` is in
+`packages/core` so that the dialog and the line cannot answer the same reply
+differently, and the line calls it: the cause it names is the dialog's own
+sentence, and the report's `retry` decides whether a control survives — an
+offer that another press could not answer differently is taken down, exactly
+as the dialog REMOVES its primary rather than greying it. A server with no
+model key therefore says so once and stops offering, where the line used to
+read `body.error` — a field the route does not send for a refusal — and so
+collapsed every cause into one sentence under a control that stayed live for
+ever. What the pass reported does NOT replace the ending's own sentence: both
+are news, about different things, and the row grows for the second one.
+`POST
 /workspaces/:ws/docs/:docId/meetings/:meetingId/notes-cleanup` refuses a
 share visitor, refuses a doc that is recording — ANY meeting on it, not just
 the one addressed — and 404s a meeting the doc never held.

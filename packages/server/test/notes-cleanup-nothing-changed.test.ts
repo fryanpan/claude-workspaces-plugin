@@ -147,6 +147,8 @@ describe('a tidy-up whose every edit the gate refuses', () => {
       touched: number;
       blanks?: number;
       merged?: number;
+      refusals?: string[];
+      failures?: string[];
     };
     // The pass ran and answered — this is not an error, which is exactly why
     // the count alone could never be read as one.
@@ -162,5 +164,36 @@ describe('a tidy-up whose every edit the gate refuses', () => {
     // whether the notes were rewritten or never touched.
     expect(body.changed).toBe(false);
     expect(markdownNow()).toBe(before);
+  });
+
+  /**
+   * THE HALF A PERSON READS. The count has always crossed the wire; the
+   * REASONS were built by the gate and then thrown away at the route, so the
+   * only place they existed was the server log — which is precisely where
+   * the person who asked for the tidy-up cannot look. The dialog groups these
+   * by rule and shows them.
+   */
+  it('sends a reason for every edit it did not apply, naming the rule', async () => {
+    const res = await fetch(
+      `${base}/workspaces/${WS}/docs/${docId}/meetings/${MEETING}/notes-cleanup`,
+      { method: 'POST' },
+    );
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as {
+      refused: number;
+      refusals?: string[];
+      failures?: string[];
+    };
+    // ONE LINE PER REFUSED EDIT, not one per pass: a reader chasing "why did
+    // nothing change" has to be able to account for every edit.
+    expect(body.refusals).toHaveLength(body.refused);
+    // And each names the operation and the rule that dropped it, in words.
+    for (const line of body.refusals ?? []) {
+      expect(line).toContain('delete_block');
+      expect(line).toContain('the document does not record the block as the note-taker');
+    }
+    // Nothing the gate kept went on to fail, so this stays empty — the two
+    // lists answer different questions and must not be one field.
+    expect(body.failures).toEqual([]);
   });
 });

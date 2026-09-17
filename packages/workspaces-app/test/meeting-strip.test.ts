@@ -31,6 +31,7 @@ import {
   formatElapsed,
   mountMeetingStrip,
 } from '../src/meeting-strip.ts';
+import type { MeetingTidyOutcome } from '../src/meeting-tidy-line.ts';
 import type { PanelLine } from '../src/meeting-transcript-panel.ts';
 import { lockDocToReading } from '../src/signin/write-gate.ts';
 import type { DocSpeakers } from '../src/speaker-voices.ts';
@@ -278,6 +279,10 @@ interface Harness {
   elapsed(): string;
   caption(): string;
   note(): string;
+  /** The control beside a timed-out recording's sentence, when there is one. */
+  tidy(): HTMLButtonElement | null;
+  /** What the last tidy-up press reported, beside that sentence. */
+  tidyReport(): string;
   /** The speaker tags on the caption, in turn order. */
   tags(): string[];
   /** The rename rows in whichever popover is open. */
@@ -315,6 +320,7 @@ function mount(
     loadSpeakers?: () => Promise<DocSpeakers | null>;
     onMeetingChange?: (meetingId: string | null) => void;
     onMeetingEnded?: (meetingId: string) => void;
+    tidyUpNotes?: (meetingId: string) => Promise<MeetingTidyOutcome>;
     loadTranscript?: () => Promise<{ lines: PanelLine[] } | null>;
     postName?: (meetingId: string, speaker: string, name: string) => Promise<boolean>;
     bot?: MeetingBotClient;
@@ -412,6 +418,8 @@ function mount(
     elapsed: () => q('.meeting-elapsed'),
     caption: () => q('.meeting-caption-line'),
     note: () => q('.meeting-note'),
+    tidy: () => root.querySelector<HTMLButtonElement>('.meeting-note-tidy'),
+    tidyReport: () => root.querySelector('.meeting-note-report')?.textContent ?? '',
     tags: () => [...root.querySelectorAll('.meeting-speaker')].map((el) => el.textContent ?? ''),
     popNames: () =>
       [...pop().querySelectorAll('.meeting-pop-speaker-name')].map((el) => el.textContent ?? ''),
@@ -1123,11 +1131,17 @@ describe('the strip when no words are coming', () => {
   });
 
   /**
-   * The tidy-up card offers to re-read what a meeting wrote. A recording that
-   * timed out having heard nothing wrote nothing, so the card would ask about
-   * an empty transcript — on the one ending nobody asked for.
+   * THE DIALOG IS FOR AN ENDING SOMEBODY ASKED FOR. A recording that timed
+   * itself out is by construction one nobody was there for, so a card raised
+   * at that moment dims the doc and waits — and whoever comes back has to
+   * dismiss a question before they can read a word.
+   *
+   * Both timeouts are here in one case because the old rule split on the
+   * words: nothing said raised nothing, something said raised the card. The
+   * words now decide only whether there is an OFFER, never whether a dialog
+   * appears.
    */
-  it('offers no tidy-up for a timeout with no words, and still offers one after speech', async () => {
+  it('raises no dialog when a recording ends itself, however much was said', async () => {
     const onMeetingEnded = vi.fn();
     const h = mount(undefined, { onMeetingEnded });
     h.pressStart({ pick: 'Just me' });
@@ -1137,15 +1151,152 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 2_000, reason: 'silence' });
     expect(onMeetingEnded).not.toHaveBeenCalled();
 
-    // A timeout after somebody spoke is an ordinary end: there is a
-    // transcript, and the offer is worth making.
+    // And a timeout AFTER somebody spoke — the case that used to raise it.
     h.pressStart({ pick: 'Just me' });
     await settle();
     h.sockets[1]?.onopen?.();
     h.sockets[1]?.serve({ type: 'ready', meetingId: 'm2', startedAt: 3_000, engine: 'test' });
     h.sockets[1]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
     h.sockets[1]?.serve({ type: 'stopped', meetingId: 'm2', endedAt: 9_000, reason: 'silence' });
-    expect(onMeetingEnded).toHaveBeenCalledWith('m2');
+    expect(onMeetingEnded).not.toHaveBeenCalled();
+    // The doc is readable, and the sentence is the only thing on the strip.
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+  });
+
+  /**
+   * The notes are real, so the offer to re-read them is still worth making —
+   * as a control on the line the person comes back to.
+   */
+  it('offers the tidy-up on the line when a timeout followed speech', async () => {
+    const tidyUpNotes = vi.fn(async () => ({ kind: 'changed' }) as const);
+    const h = mount(undefined, { tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 9_000, reason: 'silence' });
+    expect(h.tidy()?.textContent).toBe('Tidy up the notes');
+
+    h.tidy()?.click();
+    // The press is the approval, and the meeting it names is the one that
+    // just ended.
+    expect(tidyUpNotes).toHaveBeenCalledWith('m1');
+    await settle();
+    // The notes moved, so they are the receipt: the line has nothing left to
+    // say and the strip goes back to a zero-height row.
+    expect(h.tidy()).toBe(null);
+    expect(h.note()).toBe('');
+    expect(h.root.hidden).toBe(true);
+  });
+
+  /**
+   * BOTH FACTS SURVIVE A PRESS. The report used to be handed to the strip AS
+   * the ending's sentence, so asking for a tidy-up erased the one piece of
+   * news the returning reader came back for.
+   */
+  it('reports the pass beside the ending sentence, not over it', async () => {
+    const tidyUpNotes = vi.fn(
+      async () =>
+        ({
+          kind: 'reported',
+          note: 'The tidy-up could not run — a recording is going on this doc.',
+          retry: true,
+        }) as const,
+    );
+    const h = mount(undefined, { tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 9_000, reason: 'silence' });
+    h.tidy()?.click();
+    await settle();
+    // The ending still says what ended the recording…
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+    // …and the pass says what it did, on the same line.
+    expect(h.tidyReport()).toBe('The tidy-up could not run — a recording is going on this doc.');
+    // A person can stop the recording and press again, so the control stays —
+    // saying what it now is.
+    expect(h.tidy()?.textContent).toBe('Try again');
+    expect(h.tidy()?.disabled).toBe(false);
+  });
+
+  /**
+   * And an answer that cannot change takes the control with it. A server with
+   * no model key would otherwise hand the reader an underlined offer that
+   * fails identically on every press, for ever.
+   */
+  it('retires the offer when another press could not answer differently', async () => {
+    const tidyUpNotes = vi.fn(
+      async () =>
+        ({
+          kind: 'reported',
+          note: 'The tidy-up could not run — this server has no model key configured.',
+          retry: false,
+        }) as const,
+    );
+    const h = mount(undefined, { tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 9_000, reason: 'silence' });
+    h.tidy()?.click();
+    await settle();
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+    expect(h.tidyReport()).toBe(
+      'The tidy-up could not run — this server has no model key configured.',
+    );
+    // Nothing left to press, and the sentence saying why is still there.
+    expect(h.tidy()).toBe(null);
+    expect(tidyUpNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers nothing to tidy when the room was silent the whole time', async () => {
+    const tidyUpNotes = vi.fn(async () => ({ kind: 'changed' }) as const);
+    const h = mount(undefined, { tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 2_000, reason: 'silence' });
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+    // Nothing was written, so there is nothing to re-read.
+    expect(h.tidy()).toBe(null);
+    expect(tidyUpNotes).not.toHaveBeenCalled();
+  });
+
+  it('takes the offer away with the sentence when the line is tapped off', async () => {
+    const tidyUpNotes = vi.fn(async () => ({ kind: 'changed' }) as const);
+    const h = mount(undefined, { tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 9_000, reason: 'silence' });
+    h.root.querySelector<HTMLButtonElement>('.meeting-note-dismiss')?.click();
+    expect(h.tidy()).toBe(null);
+    expect(h.root.hidden).toBe(true);
+  });
+
+  /** A press of Stop is unchanged: it is the ending somebody asked for. */
+  it('still offers the dialog when a person pressed Stop', async () => {
+    const onMeetingEnded = vi.fn();
+    const tidyUpNotes = vi.fn(async () => ({ kind: 'changed' }) as const);
+    const h = mount(undefined, { onMeetingEnded, tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.pressStop();
+    expect(onMeetingEnded).toHaveBeenCalledWith('m1');
+    // And the line carries no second offer: one surface asks at a time.
+    expect(h.tidy()).toBe(null);
   });
 
   it('says nothing extra when a person stopped the recording', async () => {

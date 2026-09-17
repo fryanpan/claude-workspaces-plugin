@@ -17,17 +17,49 @@
  * which it is part of the page. It is raised by `offer()` and by nothing
  * else; a doc that mounts this and never records shows a scrim-free page.
  *
- * WHAT IT SAYS. A question, two answers, and one line that reports. No
- * caption explaining what a tidy-up is: the notes are on screen behind it and
- * "Tidy up" says what pressing it does. It leaves on the first of four
- * things — the pass finishing, "Not now", Escape or the scrim, or the next
- * recording starting.
+ * WHAT IT SAYS. One loud line, the answers, and a report that appears only
+ * when there is something to report. No caption explaining what a tidy-up is:
+ * the notes are on screen behind it and "Tidy up" says what pressing it does.
+ * It leaves on the first of four things — the pass LANDING, the dismiss
+ * answer, Escape or the scrim, or the next recording starting.
  *
- * WHILE IT RUNS. The dialog stays up and the report line says so, because the
+ * THE LOUD LINE IS WHATEVER MATTERS NOW, and it is one line rather than two.
+ * It asks the question, then says the pass is running, then names what
+ * happened. This shipped as a fixed 17px question with the outcome under it
+ * at 13px muted, which left the loudest text on screen the one thing the
+ * reader had already answered — quieter even than the recovery line beneath
+ * it. The three states are on `data-phase`, so the stylesheet can dress the
+ * answers for each without a second copy of the logic.
+ *
+ * WHAT A FAILURE SAYS, WHICH IS THE POINT OF THE REPORT (2026-09-16). On
+ * 2026-09-15 a pass read 355 turns, proposed sixteen edits, had every one
+ * refused, and this dialog said nothing a person could act on. Three lines
+ * now stand in its place, and `readCleanupReply` in `@claude-workspaces/core`
+ * decides all three so that this dialog and `meeting:rerun`'s report cannot
+ * drift apart:
+ *
+ * - the HEADLINE names which of the four happened — it changed the notes, it
+ *   found nothing to improve, every edit was out of reach, or it never ran;
+ * - the REASONS list every rule that dropped an edit, with how many it
+ *   dropped. Grouped by rule and not listed per edit: block ids are not
+ *   something a reader can act on and sixteen of them are sixteen things to
+ *   read past on the way to the one sentence that is;
+ * - the RECOVERY line says what to do or what will not happen on its own —
+ *   and never names a button, because the button says it. The primary answer
+ *   relabels to "Try again" exactly when another press could answer
+ *   differently (`retry`), and is REMOVED when it could not: a control that
+ *   can never be pressed is one more thing to weigh on the way to the only
+ *   one that can. The remaining answer then says "Close" rather than "Not
+ *   now", which is an answer to a question the pass has already answered.
+ *
+ * WHILE IT RUNS. The dialog stays up and the loud line says so, because the
  * pass is a request over a whole transcript and a dialog that vanished on the
  * press would leave nothing on screen saying anything was happening. Both
  * answers are refused while it is on the wire — this is the one moment where
- * "Not now" would be a lie, since the writes are already coming.
+ * "Not now" would be a lie, since the writes are already coming. The primary
+ * carries a spinner for that window: refused-for-ever and on-the-wire used to
+ * be the same filled blue at 0.6 opacity, and on a touch screen there is no
+ * hover to correct the guess.
  *
  * THE TINT. Notes the pass writes arrive over the doc stream like any other
  * remote edit, and `settle-wash.ts` decides whether to tint one by asking the
@@ -39,26 +71,13 @@
  * feature, so it is held here rather than left to the grace window.
  */
 
+import {
+  type NotesCleanupReply,
+  cleanupReasonLine,
+  readCleanupReply,
+} from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
-
-/** What the route answers with; every field optional to a hostile reader. */
-interface CleanupReply {
-  ok?: boolean;
-  error?: string;
-  /**
-   * Whether the document actually moved — the server's own sum over every
-   * kind of change a pass can make, which is not the same question as `ok`.
-   *
-   * ONLY AN EXPLICIT `false` KEEPS THE DIALOG UP. A server that predates this
-   * field sends nothing, and the honest reading of nothing is the old one: it
-   * says the pass ran and says no more. A missing field is not a claim.
-   */
-  changed?: boolean;
-  touched?: number;
-  refused?: number;
-  proposed?: number;
-}
 
 /**
  * How long the wash is held open around a pass.
@@ -71,27 +90,29 @@ interface CleanupReply {
  */
 export const CLEANUP_WASH_HOLD_MS = 90_000;
 
-/** The line under the question, while the pass is on the wire. */
-const WORKING_NOTE = 'Tidying up these notes…';
-/** What a failure says when the server sends no sentence of its own. */
-const FAILED_NOTE = 'The tidy-up could not run. The notes are unchanged.';
+/** The question, before anything has been pressed. */
+const ASKING = 'Tidy up these notes?';
+/** What the loud line says while the pass is on the wire. */
+const WORKING = 'Tidying up these notes…';
+/** What the one live control says once the pass has run. "Not now" is an
+ *  answer to a question, and by then the question has been answered — on a
+ *  pass that found nothing to improve it is the ONLY control, so it has to
+ *  say what it does rather than defer something already done. */
+const DISMISS_WORDS = { asking: 'Not now', reported: 'Close' };
 /**
- * The two ways a pass can finish having changed nothing, and they are said
- * differently because they are different news.
+ * What a request that never arrived says. A reply that ARRIVED says its own
+ * words through `readCleanupReply`; this is the one case with no reply at
+ * all, so the recovery has to be written here.
  *
- * A pass whose edits were all refused is a pass that TRIED and could not:
- * something about the doc — a section the notes never landed in, a bullet
- * somebody is discussing — put every one of them out of reach, and pressing
- * again after moving the notes is a reasonable thing to do. A pass that
- * proposed nothing read the notes and found them finished, which is a
- * documented success of the feature and not a fault to chase.
- *
- * Neither of them closes the dialog. Both used to: `ok` was the whole test,
- * so the offer vanished, the notes were exactly as they had been, and nothing
- * on screen said which of the two had happened — or that anything had.
+ * Exported because the strip's idle-line offer is the second surface that can
+ * fail to reach the server, and two surfaces writing this sentence twice is
+ * the drift `readCleanupReply` exists to stop — the only difference being
+ * that this one reply never came, so core has nothing to read.
  */
-const NOTHING_LANDED_NOTE = 'Nothing changed — none of the edits could be made to these notes.';
-const NOTHING_TO_CHANGE_NOTE = 'Nothing changed — the tidy-up found nothing to improve.';
+export const CLEANUP_UNREACHABLE = {
+  headline: 'The tidy-up could not run — the request did not reach the server.',
+  recovery: 'The notes are unchanged, and nothing runs it again on its own.',
+};
 
 export interface MeetingCleanupOffer {
   /** A recording just ended: offer a pass over this meeting. */
@@ -125,20 +146,32 @@ export function mountMeetingCleanupOffer(opts: {
   card.setAttribute('aria-modal', 'true');
   card.setAttribute('aria-labelledby', 'cleanup-offer-title');
 
+  // ONE LOUD LINE, AND IT IS WHATEVER MATTERS NOW. It asks the question, then
+  // says the pass is running, then names what happened. It used to be a fixed
+  // question with the outcome in a 13px muted paragraph beneath it, which
+  // left the loudest text on screen the one thing the reader had already
+  // answered — quieter even than the recovery line under it (2026-09-16).
   const title = document.createElement('h2');
   title.id = 'cleanup-offer-title';
   title.className = 'cleanup-offer-title';
-  title.textContent = 'Tidy up these notes?';
+  title.textContent = ASKING;
+  // Read out when it changes. It is the dialog's own accessible name, so the
+  // name and the news stay one thing rather than drifting apart; `aria-live`
+  // on a heading announces the change without altering its role.
+  title.setAttribute('aria-live', 'polite');
 
-  // One line, doing both jobs a person needs from it: saying the pass is
-  // running, and saying why it did not. A success needs no line — the notes
-  // behind the dialog are the receipt, and the wash above says which ones.
-  const note = document.createElement('p');
-  note.className = 'cleanup-offer-note';
-  note.hidden = true;
-  // Read out when it changes: the working line and the refusal both appear
-  // without the focus moving, so nothing else would announce them.
-  note.setAttribute('role', 'status');
+  // WHY A LIST AND NOT A SENTENCE. The rules that drop edits are several at
+  // once on a real pass, and a reader wants the one that dropped the most.
+  // A list with a count per row answers that at a glance; the same content
+  // joined with semicolons does not.
+  const reasons = document.createElement('ul');
+  reasons.className = 'cleanup-offer-reasons';
+  reasons.hidden = true;
+
+  // Said after the reasons, because it is the answer to them.
+  const recovery = document.createElement('p');
+  recovery.className = 'cleanup-offer-recovery';
+  recovery.hidden = true;
 
   const actions = document.createElement('div');
   actions.className = 'cleanup-offer-actions';
@@ -151,10 +184,21 @@ export function mountMeetingCleanupOffer(opts: {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'cleanup-offer-go';
-  button.textContent = 'Tidy up';
+  // THE BUSY STATE IS A MARK, NOT A SHADE. Disabled-for-ever and
+  // on-the-wire used to be one appearance — filled blue at 0.6 opacity,
+  // default cursor — and on an iPad there is no hover to correct the guess.
+  // The spinner is `styles.css`'s own, so reduced motion is already answered
+  // there; the phase attribute below is what shows it.
+  const spinner = document.createElement('span');
+  spinner.className = 'voice-spinner cleanup-offer-spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  const goLabel = document.createElement('span');
+  goLabel.className = 'cleanup-offer-go-label';
+  goLabel.textContent = 'Tidy up';
+  button.append(spinner, goLabel);
 
   actions.append(dismiss, button);
-  card.append(title, note, actions);
+  card.append(title, reasons, recovery, actions);
   root.append(card);
   (opts.parent ?? document.body).append(root);
 
@@ -178,24 +222,63 @@ export function mountMeetingCleanupOffer(opts: {
     back?.focus?.();
   };
 
-  const say = (message: string | null): void => {
-    note.textContent = message ?? '';
-    note.hidden = message === null;
+  /**
+   * Put the dialog into one of its three states, with nothing left over from
+   * the last one.
+   *
+   * The reasons and the recovery belong to ONE reply, so every state change
+   * clears them. Leaving them is worse than saying nothing: they explain a
+   * run that is no longer the one on screen.
+   */
+  const say = (phase: 'asking' | 'working' | 'reported', headline: string): void => {
+    root.dataset.phase = phase;
+    title.textContent = headline;
+    reasons.replaceChildren();
+    reasons.hidden = true;
+    recovery.textContent = '';
+    recovery.hidden = true;
+    goLabel.textContent = 'Tidy up';
+    button.hidden = false;
+    dismiss.textContent = DISMISS_WORDS.asking;
   };
 
   /**
-   * Leave the dialog where it is, saying `message`, with both answers live
-   * again.
+   * Put one finished pass on screen and leave the dialog open.
    *
-   * THIS IS THE ANSWER TO EVERYTHING EXCEPT NOTES THAT CHANGED. A refusal, a
-   * request that never arrived, a pass that ran and moved nothing — in every
-   * one of them the offer is still the offer to make, and the person is the
-   * one who decides whether to press again or to say Not now.
+   * THE HEADLINE TAKES THE LOUD LINE. By now the question has been answered,
+   * so what happened is the thing to lead with, and it is also the dialog's
+   * accessible name.
+   *
+   * THE PRIMARY IS THERE WHEN IT CAN BE PRESSED AND GONE WHEN IT CANNOT. It
+   * says "Try again" and stays live when another press could answer
+   * differently; when the answer would be the same for ever it is removed
+   * rather than greyed, because a control that can never be pressed is one
+   * more thing to weigh on the way to the only one that can. That leaves
+   * exactly one live control on a pass with nothing to retry, which is why
+   * it no longer says "Not now" — the pass has already run.
    */
-  const holdOpen = (message: string): void => {
-    say(message);
-    button.disabled = false;
+  const report = (r: {
+    headline: string;
+    reasons: readonly { rule: string; count: number }[];
+    recovery: string;
+    retry: boolean;
+  }): void => {
+    say('reported', r.headline);
+    reasons.replaceChildren(
+      ...r.reasons.map((group) => {
+        const row = document.createElement('li');
+        row.textContent = cleanupReasonLine(group);
+        return row;
+      }),
+    );
+    reasons.hidden = r.reasons.length === 0;
+    recovery.textContent = r.recovery;
+    recovery.hidden = r.recovery.length === 0;
+    goLabel.textContent = 'Try again';
+    button.hidden = !r.retry;
+    button.disabled = !r.retry;
     dismiss.disabled = false;
+    dismiss.textContent = DISMISS_WORDS.reported;
   };
 
   async function run(): Promise<void> {
@@ -209,7 +292,7 @@ export function mountMeetingCleanupOffer(opts: {
     // one now recording.
     const superseded = (): boolean => meetingId !== id;
     inFlight.add(id);
-    say(WORKING_NOTE);
+    say('working', WORKING);
     button.disabled = true;
     // Refused for as long as the writes are coming: "Not now" after the pass
     // has started would close over notes that are about to change anyway.
@@ -224,25 +307,29 @@ export function mountMeetingCleanupOffer(opts: {
         ),
         { method: 'POST' },
       );
-      const body = (await res.json().catch(() => ({}))) as CleanupReply;
+      const body = (await res.json().catch(() => ({}))) as NotesCleanupReply;
       if (superseded()) return;
-      if (!res.ok || body.ok !== true) {
-        holdOpen(body.error ?? FAILED_NOTE);
-        return;
-      }
+      // ONE READING FOR EVERY ANSWER, INCLUDING THE HTTP ONE. A non-2xx
+      // carries the same shape and the same `reason`, so it is read the same
+      // way rather than collapsed into a generic sentence — that collapse is
+      // how a refusal naming a live recording used to read as "could not
+      // run" with nothing to do about it.
+      const outcome = readCleanupReply(res.ok ? body : { ...body, ok: false });
       // RAN IS NOT THE SAME AS CHANGED. The server sums every kind of change
-      // one pass can make and says so; a pass that moved nothing leaves the
-      // offer up and says which of the two nothings it was, because the
-      // notes behind the dialog are the receipt and there is no receipt here.
-      if (body.changed === false) {
-        holdOpen((body.proposed ?? 0) > 0 ? NOTHING_LANDED_NOTE : NOTHING_TO_CHANGE_NOTE);
+      // one pass can make and says so; only a pass that MOVED the document
+      // closes the dialog, because the notes behind it are that pass's
+      // receipt and none of the others has one.
+      if (outcome.kind === 'changed') {
+        close();
         return;
       }
-      // Done: the notes themselves are the receipt, so the dialog gets out of
-      // the way of the thing the person asked to see.
-      close();
+      report(outcome);
     } catch {
-      if (!superseded()) holdOpen(FAILED_NOTE);
+      // No reply at all, so nothing said anything about the notes. They are
+      // untouched: the writes happen inside the request this never completed.
+      if (!superseded()) {
+        report({ ...CLEANUP_UNREACHABLE, reasons: [], retry: true });
+      }
     } finally {
       inFlight.delete(id);
     }
@@ -275,6 +362,11 @@ export function mountMeetingCleanupOffer(opts: {
    * the dialog could never see.
    */
   const trapTab = (ev: KeyboardEvent): void => {
+    // `disabled` alone, and that is enough for the primary being REMOVED on a
+    // pass that can never be retried: `report` hides and disables it on the
+    // same line, so nothing here can reach a button that paints nothing. A
+    // second clause for the same state would be a guard no case can exercise,
+    // which reads as a promise somebody later relies on.
     const stops = [dismiss, button].filter((b) => !b.disabled);
     const first = stops[0];
     const last = stops[stops.length - 1];
@@ -337,7 +429,7 @@ export function mountMeetingCleanupOffer(opts: {
   return {
     offer(id) {
       meetingId = id;
-      say(null);
+      say('asking', ASKING);
       button.disabled = false;
       dismiss.disabled = false;
       const active = document.activeElement;

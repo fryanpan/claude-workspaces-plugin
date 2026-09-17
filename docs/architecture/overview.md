@@ -836,6 +836,23 @@ meeting's output. Nothing under `routes/` is added: the
 week's rollup rides the existing `GET /api/metrics` reply, for the reason
 `uptimeSec` does.
 
+WHAT A TIDY-UP DID, IN THE WORDS A PERSON READS, is
+`core/notes-cleanup-report.ts` — a new DOMAIN-tier module in `core`, drawing
+no new box: it takes the cleanup route's reply and answers with a headline,
+the rules that dropped edits grouped with a count each, a recovery line and
+whether another press could answer differently. It sits in `core` because
+three surfaces ask the same question about one pass — the offer dialog
+(`workspaces-app/meeting-cleanup-offer.ts`), `meeting:rerun`'s report file,
+and the server's own log line — and a pass that changed nothing has to read
+the same way in all of them. The reasons it groups are the gate's own
+(`notes-cleanup-scope.ts`), carried out of the route on `refusals` /
+`failures`. The two arrays are not written alike — the gate writes a sentence
+per dropped edit, the applier writes its error code — so this module reads
+each applier code into the gate's own wording as it groups. One fact then gets
+one row however it was found, and nothing addressed to a person carries an
+identifier. Its recovery line is the commonest rule a reader can act ON,
+which is not always the commonest rule.
+
 The NOTE-TAKER A DOC USES is five modules and no new box.
 `core/notes-method.ts` is the shared vocabulary — the three methods, their
 labels and prices, the default, and the parser that drops an unknown one
@@ -934,7 +951,7 @@ owns. It is named here only because it is the answer to a question the picture
 did not previously have anywhere to ask: whether a tick's speech produced a
 note, as opposed to whether it reached the composer.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `waiting-unfiled.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `stall-gate.ts`, `waiting-unfiled.ts`, `ui-review-gate.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
@@ -1093,6 +1110,17 @@ whether to read the notes once more, plus the POST that press makes. It is
 the client half of `notes-cleanup-pass.ts` on the server, and it is separate
 from the strip because the strip is chrome for a meeting that is HAPPENING
 and this exists only once one has stopped.
+`meeting-tidy-line.ts` joins that view tier beside it and changes no layer
+either: it is the SAME offer for the ending nobody was present for. A
+recording that timed itself out for silence raises no dialog — there is
+nobody there to answer one — so the tidy-up becomes a control on the strip's
+idle line, beside the sentence saying the recording is over. It holds the
+request and the small state machine that turns a reply into a label; the
+strip draws it and owns every side effect. What the reply MEANS it does not
+decide — `readCleanupReply` in `packages/core` does, for this line and for
+the dialog both, so the two surfaces cannot name one reply differently. The
+line takes that report's headline and its `retry`, and leaves the grouped
+per-edit reasons to the dialog, which has a card where this has one row.
 `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing

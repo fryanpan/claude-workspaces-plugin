@@ -1707,6 +1707,27 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   text-align: left;
   cursor: pointer;
 }
+/* And the same line when it is a READOUT rather than a script. A recording
+   that timed itself out is read once, by the one person who comes back to a
+   meeting nobody attended — at a desk, not across a room — so it takes the
+   strip's own 13px muted chrome instead of the body size above. Sized for a
+   room, it was the loudest text in the strip and the only line claiming an
+   audience that by definition was not there. */
+.meeting-note-ended {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+/* And what a tidy-up press had to say, on the same line AFTER that sentence
+   rather than over it — both are news, about different things. Same 13px
+   readout, but full-strength colour: it is the more recent of the two and the
+   one the reader just asked for, so it is the one their eye should land on. */
+.meeting-note-report {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  margin-left: 8px;
+}
 /* The same line when the tap DOES something — an auto-started huddle whose
    mic is still waiting on a gesture. It has to read as a control at rest:
    hover is not an answer on the iPad, and the words alone read as one more
@@ -1764,6 +1785,23 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
      min-height, so a label that wraps grows the target rather than centring a
      fixed box inside it. */
   padding-block: 7px;
+}
+/* The offer beside it: the notes that recording wrote are real, so a tidy-up
+   is still worth making — as a control on the line the person comes back to,
+   never a dialog raised over a doc nobody is looking at. Takes
+   `.meeting-note-action`'s treatment (it is the same kind of thing: a control
+   that has to read as one at rest on a touch device); this adds only the gap
+   from the sentence and keeps the label off a line of its own. */
+.meeting-note-tidy {
+  margin-left: 10px;
+  white-space: nowrap;
+}
+/* While the pass is on the wire the label says so, and a disabled control has
+   to stop looking like one that can be pressed again. */
+.meeting-note-tidy:disabled {
+  color: var(--fg-muted);
+  text-decoration: none;
+  cursor: default;
 }
 /* And the row gives a held sentence the room, rather than clipping it at
    36px. The shell's strip track is `auto` — the strip RESERVES its height —
@@ -2869,10 +2907,12 @@ button.lz-speaker:hover .lz-speaker-pill {
    without the second rule below the dialog stands open on every doc, over
    the prose, with no meeting to tidy. That is exactly how it shipped, and it
    is the same pair `.meeting-strip[hidden]` and `.plan-float[hidden]` carry.
-   AFFORDANCE, NOT CAPTION. A question, two answers, and one line that
-   reports while the pass runs or says why it did not. No sentence explaining
-   what a tidy-up is: that was text about the button rather than the button
-   (Bryan, 2026-09-03/04). */
+   AFFORDANCE, NOT CAPTION. One loud line, two answers, and a report that
+   appears only when there is something to report. No sentence explaining what
+   a tidy-up is: that was text about the button rather than the button (Bryan,
+   2026-09-03/04). The three states of the dialog are `data-phase` on the
+   scrim, so the answers can be dressed for each — pressable, on the wire,
+   refused — without a shade doing two jobs. */
 .cleanup-offer {
   position: fixed;
   inset: 0;
@@ -2903,23 +2943,81 @@ button.lz-speaker:hover .lz-speaker-pill {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
+  /* NEVER TALLER THAN THE SCRIM, which is the viewport less its 16px padding.
+     A twenty-rule report measured 942px on the iPad's 820: the headline was
+     41px off the top of the screen, both answers were 41px below the bottom,
+     and `overflow: visible` on the scrim meant there was nothing to scroll to
+     reach either. The card is a column so the report can take the slack and
+     the answers stay on screen whatever the report's length. */
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* The fallback, for a viewport too short even for the fixed parts: the card
+     scrolls rather than clipping. The report below absorbs the slack first,
+     so in practice only one of the two ever scrolls. */
+  overflow-y: auto;
 }
+/* THE LOUD LINE, and it says whatever matters now: the question, then that
+   the pass is running, then what happened. It carried the question alone at
+   full strength through all four outcomes, which left the reader's own
+   answered question louder than the news (2026-09-16). */
 .cleanup-offer-title {
   margin: 0;
+  flex: none;
   font-size: 17px;
   line-height: 1.3;
   color: var(--fg);
 }
-/* The working line and the refusal, in the same place. A pass that worked is
-   reported by the notes changing, so nothing is written here for it. */
-.cleanup-offer-note {
-  margin: 8px 0 0;
+/* THE REPORT: why a pass changed nothing, and what to do about it.
+   One row per RULE with a count, not one per edit — sixteen block ids are
+   sixteen things to read past on the way to the one sentence a reader can
+   act on (2026-09-16; the pass that taught this refused all sixteen and said
+   only that it had). The rule is quoted verbatim from the server, so a rule
+   this build has never heard of still reads as a sentence. */
+.cleanup-offer-reasons {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style-type: none;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--fg-muted);
+  /* WHERE A LONG REPORT GIVES WAY. `min-height: 0` is the load-bearing half:
+     a flex item's default `min-height: auto` refuses to shrink below its
+     content, which is how a card with `max-height` still overflowed. It
+     shrinks only when it has to — `flex-grow: 0` keeps a two-rule report the
+     height of two rules rather than stretching it down the card. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.cleanup-offer-reasons[hidden] {
+  display: none;
+}
+.cleanup-offer-reasons li {
+  margin-top: 5px;
+  /* A rule, not a bullet: the marker would read as a note the tidy-up wrote.
+     The count at the head of each row is what separates them. */
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+/* What to do next, in the page's own foreground rather than the muted grey
+   the reasons take: it is the sentence the reader acts on. */
+.cleanup-offer-recovery {
+  margin: 12px 0 0;
+  flex: none;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+.cleanup-offer-recovery[hidden] {
+  display: none;
 }
 .cleanup-offer-actions {
   display: flex;
+  /* Never scrolled past: the answers are the one thing that must be reachable
+     however long the report above them runs. */
+  flex: none;
   justify-content: flex-end;
   /* The two answers wrap rather than shrink below a finger's width on a
      phone; the primary stays last, so it is nearest the thumb. */
@@ -2930,6 +3028,10 @@ button.lz-speaker:hover .lz-speaker-pill {
 .cleanup-offer-go,
 .cleanup-offer-dismiss {
   font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-size: 15px;
   line-height: 1.3;
   /* A target for a finger on an iPad — 12px over a 20px line box clears the
@@ -2956,10 +3058,38 @@ button.lz-speaker:hover .lz-speaker-pill {
   color: var(--fg);
   background: var(--bg-hover);
 }
+/* NOT PRESSABLE, SO NOT THE PRIMARY'S BLUE. Filled blue at 0.6 opacity is
+   still filled blue, and on an iPad there is no hover to correct the guess —
+   so an answer that is refused drops the fill entirely and reads as the flat,
+   inert thing it is. The one case this leaves is the pass ON THE WIRE, which
+   is not refused for ever but for a few seconds, and which says so below. */
 .cleanup-offer-go:disabled,
 .cleanup-offer-dismiss:disabled {
-  opacity: 0.6;
+  color: var(--fg-muted);
+  background: var(--bg-panel);
+  border-color: var(--border);
+  opacity: 1;
   cursor: default;
+}
+/* THE BUSY STATE, told apart from the refused one by a mark rather than by a
+   shade. The spinner is `styles.css`'s own `.voice-spinner`, so reduced
+   motion is already answered there; it paints only while the request is out,
+   and takes no room the rest of the time. */
+.cleanup-offer-spinner {
+  display: none;
+}
+.cleanup-offer[data-phase="working"] .cleanup-offer-spinner {
+  display: block;
+}
+.cleanup-offer[data-phase="working"] .cleanup-offer-go,
+.cleanup-offer[data-phase="working"] .cleanup-offer-dismiss {
+  cursor: progress;
+}
+/* The primary is REMOVED, not greyed, on a pass that can never be retried —
+   `hidden` on a flex child needs saying, because `display: flex` on the rule
+   above outranks the UA's `[hidden]` exactly as the scrim's did. */
+.cleanup-offer-go[hidden] {
+  display: none;
 }
 
 /* ========== Over-doc bottom sheet on mobile ==========

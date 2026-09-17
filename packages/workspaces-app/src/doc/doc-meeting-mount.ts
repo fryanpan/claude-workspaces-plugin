@@ -30,6 +30,7 @@ import { mountMeetingCleanupOffer } from '../meeting-cleanup-offer.ts';
 import { type MeetingLiveZone, createMeetingLiveZone } from '../meeting-live-zone.ts';
 import { othersOnDoc } from '../meeting-solo.ts';
 import { type MeetingStripHandle, mountMeetingStrip } from '../meeting-strip.ts';
+import { runMeetingTidyUp } from '../meeting-tidy-line.ts';
 import { wantsLatencyTiming } from '../meeting-timing-client.ts';
 import type { MountScope } from '../mount-scope.ts';
 import {
@@ -194,6 +195,10 @@ export function mountDocMeeting(opts: DocMeetingOptions): DocMeetingMount {
       if (meetingId === null) cleanupOffer.withdraw();
     },
     onMeetingEnded: (meetingId) => cleanupOffer.offer(meetingId),
+    // The other half of the same offer, for the ending nobody was there for:
+    // a recording that timed itself out puts the tidy-up on the strip's own
+    // line instead of raising the card above.
+    tidyUpNotes: (meetingId) => runMeetingTidyUp({ docId, meetingId, liveZone: zone }),
     // The other record: what the meeting HEARD, behind the panel's fold.
     // Before this it lived only in the `-raw-transcript.md` beside the
     // server's data dir, which is nowhere for anyone not on that machine.
