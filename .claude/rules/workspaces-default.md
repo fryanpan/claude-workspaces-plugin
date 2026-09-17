@@ -78,8 +78,12 @@ Sweeping every doc on the server is a different animal and stays banned. On
 flushed weeks-old content over files on disk. The binding half of that is fixed;
 the residency half is still exactly what a corpus-wide read would cost.
 
-Gated by `packages/server/test/scan-does-not-activate.test.ts`, which fails if a
-threads read ever arms a binding again. Story: grep `docs/process/learnings.md`
-for "Reading a doc's threads".
+This is the local copy. The fleet copy SHIPS — in the
+`claude-workspaces:working-in-a-workspace` skill and in the `list_threads`,
+`get_thread` and `get_doc` tool descriptions, which is what reaches a peer on
+another board at session launch without anyone telling them. Change one, change
+all four. Gated by `packages/server/test/scan-does-not-activate.test.ts`, which
+fails if a threads read ever arms a binding again. Story: grep
+`docs/process/learnings.md` for "Reading a doc's threads".
 
 **Watch for comments** via `watch_doc(docId)` — comment events arrive as `<channel source="claude-workspaces" doc_id="..." thread_id="..." event="...">` blocks. (Sessions still running a pre-rename bundle emit `source="live-feedback"`; the attribute changes when that session restarts, not when this rule does.) Resolve threads when you've addressed the feedback (`resolve_thread`).
