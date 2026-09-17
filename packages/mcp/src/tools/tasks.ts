@@ -863,6 +863,7 @@ export async function handleTaskTool(
         options,
         reply,
         revisedRange,
+        lessSpecific,
       } = a as {
         taskId?: string;
         reviewItemId?: string;
@@ -874,6 +875,7 @@ export async function handleTaskTool(
         options?: unknown;
         reply?: string;
         revisedRange?: { start: number; end: number };
+        lessSpecific?: string;
       };
       // The correction itself is the same words on either surface; only the
       // handle differs, so the patch is built once and posted at whichever
@@ -883,6 +885,12 @@ export async function handleTaskTool(
         ...(detail !== undefined ? { detail } : {}),
         ...(options !== undefined ? { options } : {}),
         ...(revisedRange !== undefined ? { revisedRange } : {}),
+        // Not a change to the item's words: an ANSWER to the hold standing
+        // over them, saying the source will not support what was asked for.
+        // It rides the same call because it is the same round trip the filer
+        // is already making, and the gate can only honour it while it is the
+        // one holding.
+        ...(lessSpecific !== undefined ? { lessSpecific } : {}),
         author: AUTHOR,
       };
       // An item raised on a doc thread is a review payload on a COMMENT, so

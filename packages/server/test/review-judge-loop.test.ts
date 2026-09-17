@@ -202,15 +202,20 @@ describe('the review-item hold loop', () => {
     });
   });
 
-  describe('a hold names the sentence it wants added', () => {
-    const ADD = 'Nothing ships until the cache size is picked.';
+  describe('a hold names no sentence to add', () => {
+    // It used to answer with a ready-to-paste sentence, and that is where the
+    // gate's invented specifics came from: the judge is handed a headline, a
+    // detail and some options, never the source the item was written from, so
+    // any figure it supplies is one it made up. Four such sentences reached
+    // the owner across five boards on 2026-09-14. The remedy a hold names now
+    // is always the same one, and it is not a draft.
 
-    it('quotes that sentence in the message the filer is handed', async () => {
+    it('quotes the item’s OWN words and asks for a re-read', async () => {
       const { workspaceId, taskId } = await board();
       h.judge = async () => ({
         ok: false,
         reason: 'The detail never says what waits on this.',
-        add: ADD,
+        quote: 'has to finish before the morning sync',
       });
       const filed = await jj<Held>(
         await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
@@ -219,18 +224,19 @@ describe('the review-item hold loop', () => {
         }),
       );
       expect(filed.held).toBe(true);
-      expect(filed.message).toContain(ADD);
-      // The address still has to be there — a sentence to add is no use
-      // without the call that applies it.
+      expect(filed.message).toContain('has to finish before the morning sync');
+      expect(filed.message).toContain('Re-read the source');
+      // The address still has to be there — a gap named with no way to answer
+      // it is a dead end.
       expect(filed.message).toContain('revise_review_item');
     });
 
-    it('keeps it on the item, so the ticket and the wake say the same thing', async () => {
+    it('keeps the quote on the item, so the ticket and the wake say the same thing', async () => {
       const { workspaceId, taskId } = await board();
       h.judge = async () => ({
         ok: false,
         reason: 'The detail never says what waits on this.',
-        add: ADD,
+        quote: 'has to finish before the morning sync',
       });
       const filed = await jj<Held>(
         await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
@@ -238,10 +244,10 @@ describe('the review-item hold loop', () => {
           review: COSTS_IN_OPTIONS,
         }),
       );
-      expect(filed.item?.judge?.add).toBe(ADD);
+      expect(filed.item?.judge?.quote).toBe('has to finish before the morning sync');
     });
 
-    it('says nothing extra when the judge offered no sentence — the control', async () => {
+    it('says nothing extra when the judge quoted nothing — the control', async () => {
       const { workspaceId, taskId } = await board();
       h.judge = async () => ({ ok: false, reason: 'The detail never says what waits on this.' });
       const filed = await jj<Held>(
@@ -251,8 +257,8 @@ describe('the review-item hold loop', () => {
         }),
       );
       expect(filed.message).toContain('The detail never says what waits on this');
-      expect(filed.message).not.toContain('Add this sentence');
-      expect(filed.item?.judge?.add).toBeUndefined();
+      expect(filed.message).not.toContain('The words this is about');
+      expect(filed.item?.judge?.quote).toBeUndefined();
     });
   });
 

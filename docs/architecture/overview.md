@@ -164,7 +164,11 @@ sit there rather than at the top level, while `request-admission.ts`,
 run for a request whatever path it named. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
-need. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
+need. `review-hold-message.ts` joins those two at the top level: it is the
+sentences the gate says to a filer when it holds an item or admits one
+unjudged, out of `review-gate.ts` so that "a hold proposes no replacement
+text" is a rule with a unit test rather than a habit of one long function.
+It sees no `Request` and names no path, so it is not a route. Full rule: [.claude/rules/code-health.md](../../.claude/rules/code-health.md).
 The board-roles work added `routes/workspace-members.ts` — who has access and
 at what level — inside a directory this picture already draws, so the picture
 does not move; what a board's Owner may do that a Regular User may not is
@@ -1070,6 +1074,13 @@ two cannot drift into a suggestion nobody can accept). The `review-item*.ts`
 glob is deliberate: `review-item-look-ask.ts` is the gate's two English
 heuristics lifted out whole when the gate crossed the line, and it changes no
 boundary the diagram draws.
+
+`review-hold.ts` is the newest member of that same glob's neighbourhood, and
+it is there for the usual reason: the BOUND on what a hold may say — a quote
+must be the item's own words, a diagnosis may carry no figure the item does
+not state — is checked on the server before the hold is sent, while the
+derived note a card draws from a stored verdict is read in the browser. One
+definition, two readers, no boundary moved.
 
 `secret-name.ts` joins that third tier for the same reason, with the two
 readers furthest apart in this repo: the server's writer spells the stored
