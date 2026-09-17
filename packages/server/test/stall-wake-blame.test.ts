@@ -35,6 +35,7 @@ import {
   StallNudger,
   type StallSnapshot,
 } from '../src/stall-nudge.ts';
+import type { UngatedUiRow } from '../src/ui-review-gate.ts';
 import type { UnansweredThreadRow } from '../src/unanswered-thread.ts';
 
 const MIN = 60_000;
@@ -45,7 +46,7 @@ const NOW = 2_000_000;
 function board(over: Partial<StallSnapshot> = {}): StallSnapshot {
   return {
     workspaceId: 'w-riverbend',
-    leadAgentId: 'agent-uploader',
+    leadAgentId: 'agent-cartographer',
     retired: false,
     stalled: [],
     unfiled: [],
@@ -68,8 +69,8 @@ function runOver(snapshot: StallSnapshot): StallNudgeFrame[] {
   const nudger = new StallNudger({
     now: () => NOW,
     snapshot: () => [snapshot],
-    canReach: (_ws, agentId) => agentId === 'agent-uploader',
-    attachedAgents: () => ['agent-uploader'],
+    canReach: (_ws, agentId) => agentId === 'agent-cartographer',
+    attachedAgents: () => ['agent-cartographer'],
     send: (_ws, _agentId, frame) => {
       sent.push(frame);
       return 1;
@@ -77,6 +78,56 @@ function runOver(snapshot: StallSnapshot): StallNudgeFrame[] {
     sendToFiler: () => 1,
     report: () => {},
     stampFile: join(stampDir, `stamps-${(stampSeq += 1)}.json`),
+  });
+  nudger.tick();
+  return sent;
+}
+
+/** Two ticks over the SAME nudger, the board changing between them — the
+ *  only way to get a frame carrying `changed`, which rides every wake after a
+ *  board's first and is therefore the key most easily forgotten. */
+function runTwice(first: StallSnapshot, second: StallSnapshot): StallNudgeFrame[] {
+  const sent: StallNudgeFrame[] = [];
+  let current = first;
+  const nudger = new StallNudger({
+    now: () => NOW,
+    snapshot: () => [current],
+    canReach: (_ws, agentId) => agentId === 'agent-cartographer',
+    attachedAgents: () => ['agent-cartographer'],
+    send: (_ws, _agentId, frame) => {
+      sent.push(frame);
+      return 1;
+    },
+    sendToFiler: () => 1,
+    report: () => {},
+    stampFile: join(stampDir, `stamps-twice-${(stampSeq += 1)}.json`),
+  });
+  nudger.tick();
+  current = second;
+  nudger.tick();
+  return sent;
+}
+
+/**
+ * The escalation path: the seat holder holds no stream and a stand-in does,
+ * so the frame carries `escalatedFrom`. Driven rather than hand-built,
+ * because `escalatedFrom` rides no ordinary wake and would otherwise be the
+ * name most easily dropped from the renderer's known set.
+ */
+function runEscalated(snapshot: StallSnapshot): StallNudgeFrame[] {
+  const sent: StallNudgeFrame[] = [];
+  const nudger = new StallNudger({
+    now: () => NOW,
+    snapshot: () => [snapshot],
+    canReach: (_ws, agentId) => agentId === 'agent-millwright',
+    attachedAgents: () => ['agent-cartographer', 'agent-millwright'],
+    send: (_ws, _agentId, frame) => {
+      sent.push(frame);
+      return 1;
+    },
+    sendToFiler: () => 1,
+    report: () => {},
+    stampFile: join(stampDir, `stamps-esc-${(stampSeq += 1)}.json`),
   });
   nudger.tick();
   return sent;
@@ -98,6 +149,13 @@ const ASKED_BACK_ROW: AskedBackRow = {
   askedAt: NOW - 120 * MIN,
   askedMs: 120 * MIN,
   revise: 'revise_review_item(taskId: "t-uploader", reviewItemId: "ri-1", …)',
+};
+
+const UNGATED_ROW: UngatedUiRow = {
+  id: 't-mockup',
+  title: 'Redraw the digest header',
+  file: 'packages/workspaces-app/src/board.css',
+  from: 'dispatch',
 };
 
 /** A question a person asked on a doc thread. `id` IS the doc's — see
@@ -285,35 +343,142 @@ describe('a frame this bundle cannot read blames the bundle, not the wake', () =
     expect(line).not.toContain('a bug in the wake');
   });
 
+  /**
+   * The board that puts every finding on one frame. Every field it produces
+   * is a name `KNOWN_STALL_KEYS` has to hold; the cases below assert that
+   * rendering it says nothing about version skew, which is what makes the set
+   * a discriminator rather than a list nobody checks.
+   */
+  const fullBoard = (over: Partial<StallSnapshot> = {}): StallSnapshot =>
+    board({
+      considered: 9,
+      stalled: [STALLED_ROW],
+      unfiled: [{ ...STALLED_ROW, id: 't-unfiled', bucket: 'waiting-unfiled' }],
+      undetermined: [{ id: 't-unread', reason: 'review-items-unreadable' }],
+      held: [HELD_ON_TASK],
+      askedBack: [ASKED_BACK_ROW],
+      unanswered: [UNANSWERED_ROW],
+      ungatedUi: [UNGATED_ROW],
+      checkIn: [STALLED_ROW],
+      beyondCapacity: 2,
+      parallelismCap: { value: 2 },
+      // Its own row, NOT one of the findings above: a standing wait takes its
+      // row off every list (`withoutStandingWaits`), so a wait naming the
+      // stalled row would have emptied `rows` and quietly shrunk this board
+      // to less than it claims. The key assertion below is what caught that.
+      declaredWaits: [
+        {
+          id: 't-waiting',
+          title: 'Swap the nightly index job',
+          what: 'a key from Harborlight',
+          since: NOW - 60 * MIN,
+          until: NOW + 60 * MIN,
+          by: 'Saltmarsh',
+        },
+      ],
+      ...over,
+    });
+
   it('CRY-WOLF CONTROL: a real frame from the real nudger says none of this', () => {
-    const [frame] = runOver(
-      board({
-        considered: 9,
-        stalled: [STALLED_ROW],
-        unfiled: [{ ...STALLED_ROW, id: 't-unfiled', bucket: 'waiting-unfiled' }],
-        undetermined: [{ id: 't-unread', reason: 'review-items-unreadable' }],
-        held: [HELD_ON_TASK],
-        askedBack: [ASKED_BACK_ROW],
-        unanswered: [UNANSWERED_ROW],
-        checkIn: [STALLED_ROW],
-        beyondCapacity: 2,
-        declaredWaits: [
-          {
-            id: 't-saltmarsh',
-            title: 'Rank the digest by recency',
-            what: 'a key from Harborlight',
-            since: NOW - 60 * MIN,
-            until: NOW + 60 * MIN,
-            by: 'Saltmarsh',
-          },
-        ],
-      }),
-    );
+    const [frame] = runOver(fullBoard());
     expect(frame).toBeDefined();
+    // Every field the board produced is on it — the assertion below is only
+    // a discriminator for the names it actually carries.
+    expect(Object.keys(frame as object).sort()).toEqual(
+      [
+        'askedBack',
+        'beyondCapacity',
+        'checkIn',
+        'consideredCount',
+        'declaredWaits',
+        'event',
+        'heldItems',
+        'parallelismCap',
+        'rows',
+        'stalledCount',
+        'taskId',
+        'title',
+        'ts',
+        'unanswered',
+        'undetermined',
+        'unfiled',
+        'ungatedUi',
+        'workspaceId',
+      ].sort(),
+    );
     const line = stalledLine(frame as unknown as StallPayload);
     expect(line).not.toContain('cannot read');
     expect(line).not.toContain('This frame ALSO carried');
     expect(line).not.toContain('a bug in the wake');
+  });
+
+  it('CRY-WOLF CONTROL: a REPEAT wake, which is the one that carries `changed`', () => {
+    const frames = runTwice(
+      fullBoard({ unanswered: [], ungatedUi: [] }),
+      fullBoard({ checkIn: [] }),
+    );
+    expect(frames).toHaveLength(2);
+    const repeat = frames[1] as unknown as StallPayload;
+    // `changed` rides every wake after a board's first, so a set that omitted
+    // it would cry skew on nearly every wake the fleet sees. Asserted present
+    // before the line is read, or this case proves nothing.
+    expect(repeat.changed).toBeDefined();
+    const line = stalledLine(repeat);
+    expect(line).toContain('NEW since the last wake');
+    expect(line).not.toContain('cannot read');
+    expect(line).not.toContain('This frame ALSO carried');
+  });
+
+  it('CRY-WOLF CONTROL: a doc-anchored frame — the `docId` the anchor now uses', () => {
+    const [frame] = runOver(board({ unanswered: [UNANSWERED_ROW] }));
+    expect((frame as unknown as StallPayload).docId).toBe('d-notes');
+    const line = stalledLine(frame as unknown as StallPayload);
+    expect(line).not.toContain('cannot read');
+    expect(line).not.toContain('This frame ALSO carried');
+  });
+
+  it('CRY-WOLF CONTROL: an ESCALATED frame, the only one carrying `escalatedFrom`', () => {
+    const [frame] = runEscalated(fullBoard());
+    expect(frame?.escalatedFrom).toBe('agent-cartographer');
+    const line = stalledLine(frame as unknown as StallPayload);
+    expect(line).toContain('You are not this board');
+    expect(line).not.toContain('cannot read');
+    expect(line).not.toContain('This frame ALSO carried');
+  });
+
+  it('CRY-WOLF CONTROL: the delivery envelope — `eid` and `actor`', () => {
+    // Neither rides a stall frame today: `SseBus` reads `eid` off a payload
+    // rather than writing one, and no stall frame names an actor. They are in
+    // the known set defensively, so nothing else here would notice them
+    // leaving it. Hand-built for exactly that reason.
+    const [frame] = runOver(board({ stalled: [STALLED_ROW] }));
+    const line = stalledLine({
+      ...(frame as unknown as StallPayload),
+      eid: 'e-1',
+      actor: { id: 'agent-cartographer', name: 'Cartographer' },
+    } as unknown as StallPayload);
+    expect(line).toContain('Rank the digest by recency');
+    expect(line).not.toContain('cannot read');
+    expect(line).not.toContain('This frame ALSO carried');
+  });
+
+  it('a `changed` clause can no longer swallow the notice', () => {
+    // The hole this closes: the caveat was gated on `parts.length > 0` AFTER
+    // the `changed` clause had been unshifted, so a frame whose only readable
+    // content was `changed` rendered as an ordinary wake — naming neither the
+    // unreadable findings nor the plugin.
+    const line = stalledLine({
+      event: STALL_EVENT,
+      workspaceId: 'w-riverbend',
+      stalledCount: 0,
+      consideredCount: 5,
+      ts: NOW,
+      changed: { escalated: true },
+      unreviewedRelease: [{ id: 't-saltmarsh' }],
+    } as unknown as StallPayload);
+    expect(line).toContain('NEW since the last wake');
+    expect(line).toContain('unreviewedRelease');
+    expect(line).toContain('OLDER than this server');
   });
 
   /**
@@ -331,7 +496,7 @@ describe('a frame this bundle cannot read blames the bundle, not the wake', () =
     const key = `ws:${frame?.workspaceId}`;
     const res = openAgentMuxStream({
       bus,
-      agentId: 'agent-harborlight',
+      agentId: 'agent-cartographer',
       keys: () => [key],
       channelFor: (k) => channelForWatchKey(k, (id) => id),
       // A 15s interval would hold the test process open for 15s.
@@ -342,7 +507,7 @@ describe('a frame this bundle cannot read blames the bundle, not the wake', () =
     try {
       bus.sendToAgent(
         channelForWatchKey(key, (id) => id),
-        'agent-harborlight',
+        'agent-cartographer',
         frame as unknown as Parameters<SseBus['sendToAgent']>[2],
       );
       let buf = '';

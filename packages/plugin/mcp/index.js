@@ -14275,31 +14275,37 @@ function changedClause(changed) {
     return "";
   return `NEW since the last wake: ${bits.join("; ")}.`;
 }
-var KNOWN_STALL_KEYS = new Set([
+var STALL_PAYLOAD_KEYS = {
+  taskId: true,
+  docId: true,
+  title: true,
+  stalledCount: true,
+  consideredCount: true,
+  beyondCapacity: true,
+  parallelismCap: true,
+  rows: true,
+  unfiled: true,
+  undetermined: true,
+  heldItems: true,
+  askedBack: true,
+  unanswered: true,
+  ungatedUi: true,
+  checkIn: true,
+  declaredWaits: true,
+  changed: true,
+  escalatedFrom: true,
+  ts: true
+};
+var STALL_ENVELOPE_KEYS = [
   "event",
   "workspaceId",
   "eid",
   "actor",
-  "ts",
-  "watchKey",
-  "taskId",
-  "docId",
-  "title",
-  "stalledCount",
-  "consideredCount",
-  "beyondCapacity",
-  "parallelismCap",
-  "rows",
-  "unfiled",
-  "undetermined",
-  "heldItems",
-  "askedBack",
-  "unanswered",
-  "ungatedUi",
-  "checkIn",
-  "declaredWaits",
-  "changed",
-  "escalatedFrom"
+  "watchKey"
+];
+var KNOWN_STALL_KEYS = new Set([
+  ...Object.keys(STALL_PAYLOAD_KEYS),
+  ...STALL_ENVELOPE_KEYS
 ]);
 function carriesContent(v) {
   if (v === null || v === undefined || v === false || v === "" || v === 0)
@@ -14385,13 +14391,16 @@ function stalledLine(p) {
     parts.push(`${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? "it" : "them"} who has gone ` + `quiet past the check-in window — ${stalledRowsClause(checkIn)}. Ask each holder for a ` + "line now: the protocol is an activity update every 30 minutes, even if it is " + '"still on X, next Y".');
   }
   const unknown3 = unknownStallKeys(p);
-  if (parts.length > 0 && unknown3.length > 0) {
+  const renderedFindings = parts.length > 0;
+  if (renderedFindings && unknown3.length > 0) {
     parts.push(`This frame ALSO carried ${unknown3.join(", ")}, which this plugin cannot read, so there is ` + "more on this board than the sentences above. Update the plugin " + "(command claude plugin update claude-workspaces@claude-workspaces) and restart this session.");
   }
   const changed = changedClause(p.changed);
   if (changed)
     parts.unshift(changed);
-  const body = parts.join(" ") || unrenderableBody(unknown3);
+  if (!renderedFindings)
+    parts.push(unrenderableBody(unknown3));
+  const body = parts.join(" ");
   if (p.escalatedFrom !== undefined && p.escalatedFrom !== "") {
     return `[workspace.stalled] You are not this board's lead — ${p.escalatedFrom} holds the seat and ` + "is not reachable, so this came to you instead. Nothing addressed to that seat is arriving: " + "take it (attach_agent) or hand it to a session that is here. Then, on the board itself: " + body;
   }
