@@ -120,13 +120,13 @@ describe('doc-store suggestion operations', () => {
     });
   });
 
-  it('unknown doc → not-found / empty list', () => {
+  it('unknown doc → not-found / empty list', async () => {
     expect(docStore.acceptSuggestion('nope', 'x')).toEqual({ ok: false, error: 'not-found' });
     expect(docStore.rejectSuggestion('nope', 'x')).toEqual({ ok: false, error: 'not-found' });
     expect(docStore.listSuggestions('nope')).toEqual([]);
     const created = docStore.createSuggestion('nope', { find: 'a', replace: 'b', author });
     expect(created.ok).toBe(false);
-    expect(docStore.resolveAllSuggestions('nope', { action: 'accept' })).toEqual({
+    expect(await docStore.resolveAllSuggestions('nope', { action: 'accept' })).toEqual({
       ok: false,
       error: 'not-found',
     });
@@ -139,7 +139,7 @@ describe('doc-store suggestion operations', () => {
     expect(
       docStore.createSuggestion('sg1', { find: 'paragraph', replace: 'section', author }).ok,
     ).toBe(true);
-    const res = docStore.resolveAllSuggestions('sg1', { action: 'accept' });
+    const res = await docStore.resolveAllSuggestions('sg1', { action: 'accept' });
     expect(res).toEqual({ ok: true, resolved: 2, sids: expect.any(Array) });
     let disk = '';
     for (let i = 0; i < 40; i++) {

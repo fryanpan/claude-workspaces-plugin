@@ -306,7 +306,7 @@ export async function handleDocEditRoutes(
       return j(400, { error: 'action must be accept or reject' });
     }
     const authorId = body?.authorId ? String(body.authorId) : undefined;
-    const res = docStore.resolveAllSuggestions(docId, { action, authorId });
+    const res = await docStore.resolveAllSuggestions(docId, { action, authorId });
     return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(404, res);
   }
   const suggestionMatch = rest.match(/^suggestions\/([^/]+)\/(accept|reject)$/);

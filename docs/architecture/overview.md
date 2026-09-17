@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>unanswered-thread<br/>keep-moving · owner-ask · waiting-unfiled<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts · event-loop.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -973,6 +973,14 @@ check `scripts/serve.ts` runs against the server it supervises — one HTTP
 request to a route that already exists, a verdict, and a restart ledger that
 outlives the supervisor — so the server imports only its probe-marker
 constant, and only so `sentry.ts` can leave the probe out of tracing.
+
+`event-loop.ts` joins Ops and moves no boundary. It is a helper, importing
+nothing from the subsystems that use it: `timeSlice`, the budget a long
+synchronous pass uses to hand the single JS thread back, so that a health probe
+queued behind it is answered while it still runs. `doc-edit-ops.ts` is its
+first caller. The reason it exists is that on 2026-09-16 a pass that could not
+yield held prod for 114,650 ms, and the supervisor's answer to an unanswered
+probe is to restart the process.
 
 `server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
 start of the process in `server-starts.json` beside the deploy log: once at
