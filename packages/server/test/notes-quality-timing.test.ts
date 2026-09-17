@@ -354,10 +354,16 @@ describe('a quality item is taken back when the meeting ends clean', () => {
     expect(board.revised).toEqual([]);
   });
 
-  it('THE CONTROL: a meeting whose last leg still flags keeps its item', async () => {
-    // The same two legs the other way round. This is what fails if a
-    // withdrawal is taken on any clean reading rather than on the meeting's
-    // last one.
+  it('a meeting whose first leg reads clean still files on the second', async () => {
+    // NOT a control on the withdrawal rule, though it was labelled as one:
+    // with the legs reversed there is no item when the clean reading arrives,
+    // so every mutation of the withdrawal passes this. It covers the other
+    // direction — a clean reading routed to the filer and committed must not
+    // stop the NEXT leg's flagged reading from filing.
+    //
+    // The case above ('leaves no standing item…') is the control for the
+    // routing change: skip `file()` on a clean report and it goes red. The
+    // case below is the control for withdrawing too early.
     const board = recordingBoard();
     const filer = filerOver(board, new HandScheduler());
     const leg = meeting(filer, board);
@@ -373,6 +379,10 @@ describe('a quality item is taken back when the meeting ends clean', () => {
   });
 
   it('withdraws nothing while the grace is still running', async () => {
+    // THE MUTATION THIS CATCHES: withdrawing as soon as a reading comes out
+    // clean instead of at the grace's expiry. Under it `board.withdrawn`
+    // reads ['ri-1'] after the middle leg, through the real pass.
+    //
     // A clean leg that DROPPED is not the end of the meeting. Withdrawing
     // there would take the item off the queue and put it straight back when
     // the resumed leg goes wrong again — asserted on the board's calls,

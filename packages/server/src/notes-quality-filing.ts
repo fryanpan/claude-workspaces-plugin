@@ -64,6 +64,21 @@
  * meeting that ends clean withdraws once, and a meeting that ends badly
  * never withdraws at all.
  *
+ * ALL OF WHICH HOLDS WITHIN ONE PROCESS, AND NOT ACROSS A RESTART — say it
+ * here, because a reader of the paragraphs above would otherwise take the
+ * failure for ended. The memory below is a Map in this process, and that is
+ * deliberate: a restart is not held through (`legIsResumable('server-restart')`
+ * is false) because a hold is a timer a restarting server exits before it can
+ * fire, so the item files at once rather than risking being lost outright.
+ * The browser resumes across exactly that gap — `meeting-reconnect.ts` treats
+ * a deploy's restart as invisible to the recording. So a meeting whose item
+ * was filed BY a restart, and which then ends clean in the new process, finds
+ * no `filed` to take back and the item stands. That is the commonest way an
+ * item reaches a person mid-meeting, so the hole is worth naming: closing it
+ * means persisting `filed` the way the heading memory is persisted
+ * (`createNotesHeadingFileStore`), which is a store of its own and is not
+ * what this change did.
+ *
  * AND A REVISION THAT CHANGES NOTHING IS NOT MADE AT ALL. Revising a review
  * item re-judges it, which puts it back in front of its reader — so a flag
  * that cannot clear would walk a person back to the same unanswerable
@@ -130,6 +145,16 @@ interface Held {
    *  STRUCTURE rather than as the words: the rates in it are compared with a
    *  band against what the ITEM says — see `notes-quality-verdict.ts`. */
   verdict?: NotesQualityVerdict;
+  /**
+   * That a withdrawal was already tried on this item and refused.
+   *
+   * Every refusal `withdrawReviewItem` and `withdrawCommentReview` answer is
+   * a standing fact about the item — answered, already withdrawn, not
+   * withdrawable, gone — never a transient one, so a second attempt refuses
+   * identically. Without this a meeting that keeps stopping clean asks the
+   * board once per leg and writes the same refusal line each time.
+   */
+  withdrawRefused?: true;
   /** The resume grace, while one is armed. */
   timer?: unknown;
 }
@@ -209,15 +234,26 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       //
       // NEVER AN ENTRY STILL WAITING TO FILE. The bound exists to cap the
       // memory of where FINISHED meetings' items went; an entry holding a
-      // reading, or holding a grace that has not fired, is the only copy of
-      // an item nothing can recreate. Dropping one would lose it silently,
-      // which is the failure this whole module exists to avoid, so the map is
-      // allowed over its bound rather than evicting one.
+      // FLAGGED reading, or holding a grace that has not fired, is the only
+      // copy of an item nothing can recreate. Dropping one would lose it
+      // silently, which is the failure this whole module exists to avoid, so
+      // the map is allowed over its bound rather than evicting one.
+      //
+      // A CLEAN held reading is not that, and the distinction is what keeps
+      // this bound honest now that every reading arrives here rather than
+      // only the flagged ones. Losing one costs a withdrawal that does not
+      // happen — the behaviour this module had before it could withdraw at
+      // all — while pinning one costs memory for the life of the process.
+      // That matters because a `file()` is not guaranteed a `legEnded`: the
+      // stop path runs `notes.end()` before it knows whether there is a
+      // meeting record to report a leg for (`meeting-protocol.ts`), so an
+      // entry can be left holding a reading nothing will ever commit.
       let evicted = 0;
       for (const [oldestKey, oldest] of state) {
         if (state.size - evicted <= REMEMBERED_MEETINGS) break;
         if (oldestKey === key) continue;
-        if (oldest.input !== undefined || oldest.timer !== undefined) continue;
+        if (oldest.timer !== undefined) continue;
+        if (oldest.input !== undefined && oldest.input.report.flags.length > 0) continue;
         state.delete(oldestKey);
         evicted += 1;
       }
@@ -315,6 +351,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
    * it, which is the outcome this whole module exists to prevent.
    */
   const withdraw = (ids: MeetingIds, filed: Filed, mem: Held): 'withdrawn' | 'failed' => {
+    if (mem.withdrawRefused) return 'failed';
     const board = deps.board?.();
     const res = !board
       ? undefined
@@ -339,7 +376,8 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     }
     if (!res.ok) {
       // An item somebody already answered refuses, and must: withdrawing it
-      // would retract their answer.
+      // would retract their answer. Said once — see `withdrawRefused`.
+      mem.withdrawRefused = true;
       say(
         `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item withdraw refused ` +
           `(${res.error}${res.message !== undefined ? `: ${res.message}` : ''})`,

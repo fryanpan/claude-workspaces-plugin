@@ -69,9 +69,19 @@ describe('an item whose meeting went on to read clean is withdrawn', () => {
     expect(board.revised).toEqual([]);
   });
 
-  it('THE CONTROL: the same two legs in the other order keep the item', () => {
-    // Reversed: clean first, flagged last. A withdrawal decided on anything
-    // other than the meeting's LAST reading takes this item away.
+  it('a clean leg before a flagged one still leaves the flagged one filed', () => {
+    // NOT a control on the withdrawal rule, and it was labelled as one. With
+    // the legs reversed there is no item when the clean reading arrives, so
+    // no policy could withdraw anything here and every mutation of `withdraw`
+    // passes. What it does catch is the OTHER half: a clean reading held and
+    // then committed must not leave the entry in a state where the next leg's
+    // flagged reading files nothing — which is what happens if the clean
+    // commit clears more than the item, or if it marks the meeting done.
+    //
+    // The cases that discriminate the withdrawal rule are the two below: make
+    // `withdraw` unconditional and 'withdraws nothing mid-grace when a clean
+    // leg is followed by a bad one' and 'withdraws when a clean drop is never
+    // picked back up' are the ones that go red.
     const board = recordingBoard();
     const { filer, ids } = scene(board);
 
@@ -88,6 +98,11 @@ describe('an item whose meeting went on to read clean is withdrawn', () => {
   });
 
   it('withdraws nothing mid-grace when a clean leg is followed by a bad one', () => {
+    // THE MUTATION THIS CATCHES: withdrawing the moment a clean reading
+    // arrives instead of at the grace's expiry — 'withdraw when the flag
+    // clears'. Under it `board.withdrawn` reads ['ri-1'] at the first check
+    // below, and the item Bryan needed is gone for a meeting that went on to
+    // go wrong.
     const board = recordingBoard();
     const { filer, schedule, ids } = scene(board);
 
@@ -115,6 +130,11 @@ describe('an item whose meeting went on to read clean is withdrawn', () => {
   it('withdraws when a clean drop is never picked back up', () => {
     // The other side of the grace: nobody reconnected, so the clean reading
     // IS the meeting's last word and the item goes when the grace expires.
+    //
+    // THE MUTATION THIS CATCHES: holding the withdrawal forever — treating a
+    // resumable end as never final, so a meeting whose last word was clean
+    // keeps its item indefinitely. It pairs with the case above: that one
+    // fails if the withdrawal fires too early, this one if it never fires.
     const board = recordingBoard();
     const { filer, schedule, ids } = scene(board);
 
