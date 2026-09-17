@@ -11,12 +11,15 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
+import { MAX_SPEAKER_NAME } from '../packages/core/src/meeting.ts';
 import {
   DEFAULT_NOTES_METHOD,
   type NotesMethod,
   notesMethodInfo,
   parseNotesMethod,
 } from '../packages/core/src/notes-method.ts';
+import { normalizeSpeakerName } from '../packages/core/src/speaker-name.ts';
+import type { SeededCast } from './rerun-meeting-cast.ts';
 
 export const RERUN_ENGINES = ['mock', 'soniox', 'assemblyai', 'assemblyai-pro'] as const;
 export type RerunEngine = (typeof RERUN_ENGINES)[number];
@@ -39,6 +42,12 @@ export const USAGE = `usage: bun run meeting:rerun <meeting folder | segment-N-<
                       list and not through any seam this harness can meter, so
                       --spend-usd cannot and does not cover it. This flag is
                       you saying you know that.
+  --cast <pairs>      label=name,label=name — the voices this doc's EARLIER
+                      meetings named, e.g. \`A=Riverbend,room:B=Harborlight\`.
+                      A rerun's data dir is new, so with no cast nobody has
+                      ever named a voice on the doc and every bullet comes out
+                      pointing at "Speaker A" whatever the note-taker does.
+                      Seed one and the run measures the carry instead.
   --doc <shape>       empty (default) | <file.md> | <file.json>. The .json is
                       { markdown, edits: [{ atMs, find, replace }] } — a prep
                       outline a person edits while the meeting runs.
@@ -94,6 +103,9 @@ export interface RerunArgs {
   engine: RerunEngine;
   mockScript?: string;
   doc: string;
+  /** The voices this doc's earlier meetings named, seeded before the replay's
+   *  own meeting starts. Absent leaves the doc with no cast at all. */
+  cast?: SeededCast;
   out: string;
   spendUsd: number;
   chunkMs: number;
@@ -117,6 +129,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
   let engine: RerunEngine = 'mock';
   let mockScript: string | undefined;
   let doc = 'empty';
+  let cast: SeededCast | undefined;
   let out = 'meeting-reruns';
   let spendUsd: number | undefined;
   let chunkMs = 20;
@@ -147,6 +160,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
     } else if (a === '--mock-script') mockScript = next(a, i++);
     else if (a === '--engine-spend-ok') engineSpendOk = true;
     else if (a === '--doc') doc = next(a, i++);
+    else if (a === '--cast') cast = parseCast(next(a, i++));
     else if (a === '--out') out = next(a, i++);
     else if (a === '--chunk-ms') chunkMs = positive(a, next(a, i++));
     else if (a === '--segment') {
@@ -209,6 +223,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
     port,
     keep,
     engineSpendOk,
+    ...(cast !== undefined ? { cast } : {}),
     ...(compare !== undefined ? { compare } : {}),
     ...(mockScript !== undefined ? { mockScript } : {}),
     ...(segment !== undefined ? { segment } : {}),
@@ -277,6 +292,61 @@ export function checkDocEdits(edits: readonly DocEdit[], audioMs: number): void 
 /** How long a PCM file plays for, at the sample rate its meeting recorded. */
 export function pcmDurationMs(bytes: number, sampleRate: number): number {
   return (bytes / (sampleRate * 2)) * 1000;
+}
+
+/** The cap the audio socket's parser puts on a label before it drops the
+ *  frame (`meeting-parse.ts`). A label this harness could not have named over
+ *  the socket is a label nobody could have named at all. */
+const MAX_SPEAKER_LABEL = 16;
+
+/**
+ * `A=Riverbend,room:B=Harborlight` — the voices this doc's earlier meetings
+ * named, read off `--cast`.
+ *
+ * EVERY ENTRY IS REFUSED RATHER THAN DROPPED, because the whole point of the
+ * flag is that the run's unnamed-voice count means something afterwards. An
+ * entry that silently did not take would leave the report reading "unnamed"
+ * with the operator believing they had named the room — the same unreadable
+ * number the flag exists to remove.
+ */
+export function parseCast(raw: string): SeededCast {
+  const cast: Record<string, string> = {};
+  for (const entry of raw.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) {
+      throw new UsageError(`--cast ${raw}: an empty entry — the form is label=name,label=name`);
+    }
+    const at = trimmed.indexOf('=');
+    if (at < 0) throw new UsageError(`--cast: ${trimmed} is not label=name`);
+    const label = trimmed.slice(0, at).trim();
+    const name = trimmed.slice(at + 1).trim();
+    if (label.length === 0) throw new UsageError(`--cast: ${trimmed} names no label`);
+    if (label.length > MAX_SPEAKER_LABEL) {
+      throw new UsageError(`--cast: label ${label} is longer than ${MAX_SPEAKER_LABEL} characters`);
+    }
+    if (label in cast) throw new UsageError(`--cast: label ${label} is named twice`);
+    if (name.length > MAX_SPEAKER_NAME) {
+      throw new UsageError(
+        `--cast: the name for ${label} is longer than ${MAX_SPEAKER_NAME} characters`,
+      );
+    }
+    // THROUGH THE PRODUCT'S OWN READING OF WHAT A NAME IS. `normalizeSpeakerName`
+    // is what a live rename and a late one both call, and it answers nothing
+    // for a placeholder — "Speaker A", "Room Speaker C" — because saving one
+    // of those AS a name is how that string came back as somebody's name in a
+    // real record. A cast of placeholders would leave every bullet reading
+    // unnamed and the report unable to say why.
+    const given = normalizeSpeakerName(name);
+    if (given === undefined) {
+      throw new UsageError(
+        `--cast: ${JSON.stringify(name)} is not a name for ${label} — it is empty, or the ` +
+          'placeholder a voice reads as until somebody names it.',
+      );
+    }
+    cast[label] = given;
+  }
+  if (Object.keys(cast).length === 0) throw new UsageError('--cast names no voices');
+  return cast;
 }
 
 /**
