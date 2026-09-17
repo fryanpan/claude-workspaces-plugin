@@ -7,19 +7,31 @@
  * as the wake, so the loop and the verdict cannot drift apart. This module
  * owns every decision about what counts as blocked, stalled, or active.
  *
+ * It does NOT own whether a person is owed an answer — that is a separate
+ * question with its own module, `owner-ask.ts`, which each row is put to
+ * alongside the bucketing rather than through it. A rule row is why: it is
+ * never work anybody picks up and can be carrying an unanswered question at
+ * the same time.
+ *
  * "Waiting on a person" is DECLARED, never inferred (rebuild step 2,
  * 2026-09-08): a row is waiting when an open review item is filed for it —
  * on the ticket, on its own thread, or on a doc it links — and the row then
- * carries the ADDRESS of that item (`Classified.waitingOn`). Whether an item
- * is open is the Home queue's own predicate, read by the caller that builds
- * `reviewItems`; this module never reads prose. The note reader that used to
- * guess from an agent's end-of-turn text was removed with that step, and
+ * carries the ADDRESS of that item (`Classified.waitingOn`). The note reader
+ * that used to guess from an agent's end-of-turn text was removed with that
+ * step, and
  * nothing here restored it: `noteClocks` arrives already judged, and the only
  * thing it can do is take a note's movement credit AWAY (`waiting-unfiled.ts`
  * for why that direction is safe when the other was not).
  */
 
 import type { ExternalWait } from '@claude-workspaces/core/task-wire';
+import {
+  type FiledItemAddress,
+  type OwnerAsk,
+  type ReviewItemRow,
+  indexFiledAsks,
+  ownerAskOf,
+} from './owner-ask.ts';
 import type { NoteClock } from './waiting-unfiled.ts';
 
 export interface TaskRow {
@@ -72,26 +84,9 @@ export interface EventRow {
   ts: number;
   actor?: { kind?: string; name?: string };
 }
-/**
- * Where a filed item lives — the thing a waiting row carries so that every
- * later reader (the wake, the verdict, the escalation) can find the ask
- * rather than take the row's word for it. Same three shapes the review gate
- * addresses (`review-gate.ts`), minus nothing: a ticket's own decision is a
- * `task` address under the derived legacy id.
- */
-export type FiledItemAddress =
-  | { kind: 'task'; taskId: string; reviewItemId: string }
-  | { kind: 'thread'; docId: string; threadId: string; commentId: string };
-
-export interface ReviewItemRow {
-  taskId?: string;
-  docId?: string;
-  /** When the ask was filed — a review filing is board activity. */
-  askedAt?: number;
-  /** The item's own address. Absent only from a caller that has none to
-   *  give; the server always does. */
-  address?: FiledItemAddress;
-}
+/** The ask reading's own vocabulary, re-exported so the callers that read a
+ *  classified row keep one import (`owner-ask.ts` is where it is decided). */
+export type { FiledItemAddress, ReviewItemRow } from './owner-ask.ts';
 
 export type Bucket =
   | 'blocked-on-owner'
@@ -129,16 +124,25 @@ export interface Classified {
    *  loop member as its own blocker. */
   cycle?: string[];
   /**
-   * blocked-on-owner only: every open item filed for this row, newest first
-   * — the declaration that makes the wait legitimate, by address. A row
-   * waiting on a person names the ask it waits on; nothing else may put a
-   * row in that bucket.
+   * Whether a person is owed an answer here, and whether the ask is where
+   * they read it: `'filed'` when a pending review item exists, `'unfiled'`
+   * when the board says a person is waited on and nothing is filed, absent
+   * when nobody is waiting. Answered separately from `bucket` — see the
+   * branch that sets it for why the two may never share one.
+   */
+  ownerAsk?: OwnerAsk;
+  /**
+   * `ownerAsk === 'filed'` only: every open item filed for this row, newest
+   * first — the declaration that makes the wait legitimate, by address. A row
+   * waiting on a person names the ask it waits on; nothing else may say a row
+   * is waiting.
    */
   waitingOn?: FiledItemAddress[];
   /** TRUE means this row is waiting on the owner with NO pending review item
-   *  anywhere on its chain's terminal — an ask that exists only in someone's
-   *  head. The owner cannot see it on the Home queue, so it counts toward FAIL
-   *  (7 of 10 "blocked-on-owner" rows on the 08-27 "PASS" board were this). */
+   *  — here or anywhere on its chain's terminal — an ask that exists only in
+   *  someone's head. The owner cannot see it on the Home queue, so it counts
+   *  toward FAIL (7 of 10 "blocked-on-owner" rows on the 08-27 "PASS" board
+   *  were this). Read off `ownerAsk`, never off `bucket`. */
   unfiledAsk: boolean;
   /**
    * TRUE means the task's own newest words ASK a person for something and
@@ -222,33 +226,7 @@ export function classifyOpenTasks(
   noteClocks?: Map<string, NoteClock>,
 ): Classified[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  // Presence in askedTaskIds is what "an ask is FILED" means; newestAskAt
-  // additionally carries the newest pending item's askedAt where one exists,
-  // so old asks can go on the re-verify list; addresses carries the items
-  // themselves, newest first, for the row to name.
-  const askedTaskIds = new Set<string>();
-  const newestAskAt = new Map<string, number>();
-  const addresses = new Map<string, Array<{ at: number; address: FiledItemAddress }>>();
-  for (const r of reviewItems) {
-    const id = r.taskId ?? (r.docId?.startsWith('task:') ? r.docId.slice(5) : undefined);
-    if (!id) continue;
-    askedTaskIds.add(id);
-    if (
-      typeof r.askedAt === 'number' &&
-      r.askedAt > (newestAskAt.get(id) ?? Number.NEGATIVE_INFINITY)
-    )
-      newestAskAt.set(id, r.askedAt);
-    if (r.address) {
-      const list = addresses.get(id) ?? [];
-      list.push({ at: r.askedAt ?? 0, address: r.address });
-      addresses.set(id, list);
-    }
-  }
-  const waitingOnFor = (id: string): FiledItemAddress[] | undefined => {
-    const list = addresses.get(id);
-    if (!list || list.length === 0) return undefined;
-    return [...list].sort((a, b) => b.at - a.at).map((entry) => entry.address);
-  };
+  const asks = indexFiledAsks(reviewItems);
   const lastEventByTask = new Map<string, number>();
   for (const e of events) {
     if (e.taskId && e.ts > (lastEventByTask.get(e.taskId) ?? 0))
@@ -278,7 +256,7 @@ export function classifyOpenTasks(
     // With an ask on the person's queue the task is `blocked-on-owner` below
     // and never stalls anyway, so leaving the note counted there keeps one
     // fewer surprise for the tick after the item is answered.
-    const hasPendingAsk = askedTaskIds.has(t.id);
+    const hasPendingAsk = asks.has(t.id);
     const clock = noteClocks?.get(t.id);
     const waitingNote = !hasPendingAsk && clock?.askedAt !== undefined;
     const noteAt = waitingNote ? (clock?.newestPlainAt ?? 0) : newestNoteAt(t);
@@ -297,22 +275,17 @@ export function classifyOpenTasks(
     // false-FAIL, a live row deferred to 2026-08-28 reported "ready-unpicked
     // stalled" at 07:59Z — and the exclusion now does that job one step
     // earlier, for the unfiled-ask bucket below as well.
-    //
-    // Owner-blocked is only LEGITIMATE waiting when a pending review item
-    // exists — that is what puts the ask on the owner's Home queue. An
-    // owner-band row, or a person-owned row (`ownerKind`, the server's
-    // authoritative call), with no pending item is an ask that exists nowhere
-    // he reads: blocked-on-owner-unfiled, a protocol violation counting toward
-    // FAIL (the 08-27 review: 7 of 10 "blocked-on-owner" rows were invisible
-    // on his queue). Prose is not a third way in — a "waiting on Bryan" note
-    // only loses its movement credit. UNLESS the row is in the BACKLOG — the
-    // band the board runs for nobody, outside the dispatch order AND the owner
-    // band — where there is no ask anyone could file, so the owner branch
-    // returns THAT verdict instead, whatever the row's status. Only the person
-    // half narrows: `dispatchable` SUBTRACTS the owner band (stall-wiring.ts),
-    // so a plain reorder would have silenced the owner band's asks entirely.
     const inBacklog = !bands.dispatchable.has(t.goal ?? '') && !bands.ownerBand.has(t.goal ?? '');
     const boardSaysOwnerWaits = t.ownerKind === 'person' || bands.ownerBand.has(t.goal ?? '');
+    // TWO QUESTIONS, ANSWERED SEPARATELY (2026-09-17). Is a person owed an
+    // answer here (`owner-ask.ts`, which is also where what counts as an ask
+    // is written down), and is this row work somebody picks up (the bucket
+    // below). They shared one branch until a rule row showed why they cannot:
+    // `scheduled-rule` is decided FIRST, so no scheduled row ever reached the
+    // unfiled reading, and a question left on one went unread while the rule
+    // kept closing green. That precedence is right for dispatch and was never
+    // right for asks, so the ask is read off the same facts, separately.
+    const ownerAsk = ownerAskOf({ hasPendingAsk, boardSaysOwnerWaits, inBacklog });
     let bucket: Bucket;
     // A rule row first: not work anyone picks up whatever else is true of it,
     // and reading it as ready-unpicked sent a session at a runbook
@@ -338,18 +311,24 @@ export function classifyOpenTasks(
       stalled:
         (bucket === 'in-progress' || bucket === 'ready-unpicked') && sinceActivityMs > stallMs,
       ...(unmet.length > 0 ? { blockers: unmet } : {}),
-      ...(bucket === 'blocked-on-owner' && newestAskAt.has(t.id)
-        ? { askAgeMs: now - (newestAskAt.get(t.id) ?? now) }
+      ...(ownerAsk !== undefined ? { ownerAsk } : {}),
+      ...(ownerAsk === 'filed' && asks.newestAt(t.id) !== undefined
+        ? { askAgeMs: now - (asks.newestAt(t.id) ?? now) }
         : {}),
-      ...(bucket === 'blocked-on-owner' && waitingOnFor(t.id) !== undefined
-        ? { waitingOn: waitingOnFor(t.id) }
+      ...(ownerAsk === 'filed' && asks.addressesFor(t.id) !== undefined
+        ? { waitingOn: asks.addressesFor(t.id) }
         : {}),
-      unfiledAsk: bucket === 'blocked-on-owner-unfiled',
-      // Only on a task that would otherwise read as work in flight. A task
-      // the BOARD already says waits on a person with nothing filed is the
-      // `blocked-on-owner-unfiled` finding, and naming the same failure twice
-      // under two words would hand the lead one action wearing two hats.
-      waitingUnfiled: waitingNote && (bucket === 'in-progress' || bucket === 'ready-unpicked'),
+      unfiledAsk: ownerAsk === 'unfiled',
+      // Only on a task that would otherwise read as work in flight, or as a
+      // rule. A task the BOARD already says waits on a person with nothing
+      // filed is the `blocked-on-owner-unfiled` finding, and naming one
+      // failure twice would hand the lead one action wearing two hats; a
+      // dependency-blocked or backlog row has its silence explained already.
+      // A rule row is here because its agent's words ask a person for
+      // something whether or not anybody picks the row up.
+      waitingUnfiled:
+        waitingNote &&
+        (bucket === 'in-progress' || bucket === 'ready-unpicked' || bucket === 'scheduled-rule'),
     });
   }
   // Second pass: attribute each dependency chain to its TERMINAL blocker —
@@ -392,12 +371,17 @@ export function classifyOpenTasks(
     if (rootTask) walk(rootTask, [r.id]);
     if (cycle) r.cycle = cycle;
     const bucketOf = (task: TaskRow): Bucket | undefined => rowById.get(task.id)?.bucket;
-    const anyUnfiled = terminals.some((d) => bucketOf(d) === 'blocked-on-owner-unfiled');
+    // Off the terminal's ASK, not its bucket: a chain ending on a rule row
+    // that carries an unanswered question waits on that question. Terminals
+    // are never `blocked-on-dependency` and this loop writes only to rows
+    // that are, so no terminal's reading here has been touched already.
+    const askOf = (task: TaskRow): Classified['ownerAsk'] => rowById.get(task.id)?.ownerAsk;
+    const anyUnfiled = terminals.some((d) => askOf(d) === 'unfiled');
     // One terminal is displayed; the worst branch wins the slot: an unfiled
     // ask, else a filed owner-block, else whatever came first.
     const pick =
-      terminals.find((d) => bucketOf(d) === 'blocked-on-owner-unfiled') ??
-      terminals.find((d) => bucketOf(d) === 'blocked-on-owner') ??
+      terminals.find((d) => askOf(d) === 'unfiled') ??
+      terminals.find((d) => askOf(d) === 'filed') ??
       terminals[0];
     // A pure cycle sets no terminal: a loop member is not its own blocker,
     // and `cycle` above is what the report presents instead.
