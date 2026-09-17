@@ -587,9 +587,25 @@ describe('stalledLine', () => {
     // Nine open rows checked, five judged — the four beyond the cap are idle
     // by rule, and a reader must not count them as healthy.
     expect(stalledLine({ ...STALL, beyondCapacity: 4 })).toContain(
-      '9 open task(s) checked; 4 beyond the parallelism cap and not judged',
+      '9 open task(s) checked; 4 beyond the parallelism cap and not judged for stalling',
     );
     expect(stalledLine(STALL)).not.toContain('beyond the parallelism cap');
+  });
+
+  it('says WHAT the cap held back, because it no longer holds back everything', () => {
+    // The clause read a bare "and not judged" while the frame went on to list
+    // beyond-cap rows a few lines later, which read as a contradiction. Since
+    // PR 1078 it is also false: `stall-gate.ts` applies the cap to the stall,
+    // builder-silence and check-in readings only, and a beyond-cap row IS
+    // checked for a wait nobody filed a question for. A reader who trusts the
+    // old words skips exactly the rows the unfiled list is naming.
+    const line = stalledLine({
+      ...STALL,
+      beyondCapacity: 4,
+      unfiled: [{ id: 't-d1', title: 'Fold the CSV writer', bucket: 'in-progress' }],
+    });
+    expect(line).toContain('not judged for stalling');
+    expect(line).toContain('still checked for an unfiled ask');
   });
 
   it('names who set the cap and when, in the same sentence as the rows it held', () => {
@@ -608,13 +624,13 @@ describe('stalledLine', () => {
       },
     });
     expect(line).toContain(
-      '9 open task(s) checked; 4 beyond the parallelism cap of 1, set by Jordan 2h ago (was 4), and not judged',
+      '9 open task(s) checked; 4 beyond the parallelism cap of 1, set by Jordan 2h ago (was 4), and not judged for stalling',
     );
   });
 
   it('a cap nobody moved is stated bare, never with an invented setter', () => {
     const line = stalledLine({ ...STALL, beyondCapacity: 2, parallelismCap: { value: 4 } });
-    expect(line).toContain('2 beyond the parallelism cap of 4 and not judged');
+    expect(line).toContain('2 beyond the parallelism cap of 4 and not judged for stalling');
     expect(line).not.toContain('set by');
   });
 

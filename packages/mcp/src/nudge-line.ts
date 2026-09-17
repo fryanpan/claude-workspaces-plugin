@@ -565,9 +565,18 @@ export function stalledLine(p: StallPayload): string {
   const count = p.stalledCount ?? rows.length;
   // The cap's unjudged rows ride inside the denominator clause, so "of 9
   // open rows checked" cannot read as nine judged when five were.
+  //
+  // It says WHICH reading the cap held, because it no longer holds all of
+  // them. The clause used to end "and not judged" flat, which read as a
+  // contradiction of the beyond-cap rows the frame lists a few lines later —
+  // and since PR 1078 it is also untrue: `stall-gate.ts` applies the cap to
+  // the stall, builder-silence and check-in readings ONLY, and still asks
+  // every beyond-cap row whether somebody is waiting on a question nobody
+  // filed. A reader who believes the flat version skips the rows the unfiled
+  // sentence is about.
   const beyond =
     p.beyondCapacity !== undefined && p.beyondCapacity > 0
-      ? `; ${p.beyondCapacity} beyond the parallelism cap${capClause(p.parallelismCap, p.ts, 'stall')} and not judged`
+      ? `; ${p.beyondCapacity} beyond the parallelism cap${capClause(p.parallelismCap, p.ts, 'stall')} and not judged for stalling — still checked for an unfiled ask`
       : '';
   const denominator =
     p.consideredCount === undefined
