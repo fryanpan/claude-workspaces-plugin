@@ -567,6 +567,15 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
+**An agent is never sent news of its own action.** Every board and doc event
+names who caused it, and the MCP child drops a frame whose actor is this
+session before it becomes a wake, so an agent's own comment, review item, task
+move or attach costs it no turn. The drop is the child's and never the
+server's: every other reader still gets the frame, the state is still there for
+the next read, and a frame whose actor cannot be identified is always delivered
+— silence is the one failure an agent cannot detect. The rule and every
+family's attribution field live in `packages/mcp/src/self-authored.ts`.
+
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
 doc's `tasks` and `workspace` maps are a read-only PROJECTION of that store

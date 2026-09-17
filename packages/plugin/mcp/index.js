@@ -14514,6 +14514,9 @@ function spawnRequestedLine(p) {
 // packages/mcp/src/self-authored.ts
 var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
+var ACTOR_ID_EVENTS = new Set(["review_item.viewed", "review_item.answered"]);
+var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item)\./;
+var AGENT_FAMILY_RE = /^agent\./;
 function identifiesOneSession(selfId) {
   const id = selfId.trim();
   return id.length > 0 && !id.startsWith("known-");
@@ -14524,11 +14527,22 @@ function idOf(who) {
   const id = who.id;
   return typeof id === "string" && id.trim() !== "" ? id.trim() : undefined;
 }
-function frameAuthorId(event, payload) {
+function stringOf(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+function frameActorId(event, payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload))
     return;
   const p = payload;
   if (STATUS_EVENTS.has(event))
+    return idOf(p.actor);
+  if (ACTOR_ID_EVENTS.has(event))
+    return stringOf(p.actorId);
+  if (event === "suggestion.created")
+    return idOf(p.suggestion?.author);
+  if (AGENT_FAMILY_RE.test(event))
+    return stringOf(p.agentId);
+  if (ACTOR_FAMILY_RE.test(event))
     return idOf(p.actor);
   if (!COMMENT_EVENTS.has(event))
     return;
@@ -14545,8 +14559,8 @@ function frameAuthorId(event, payload) {
 function isSelfAuthoredEvent(event, payload, selfId) {
   if (!identifiesOneSession(selfId))
     return false;
-  const author = frameAuthorId(event, payload);
-  return author !== undefined && author.toLowerCase() === selfId.trim().toLowerCase();
+  const actor = frameActorId(event, payload);
+  return actor !== undefined && actor.toLowerCase() === selfId.trim().toLowerCase();
 }
 
 // packages/mcp/src/voice-line.ts
@@ -14591,7 +14605,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
     return;
   if (event === "task.noted")
     return;
-  if (p.actor?.id === deps.authorId)
+  if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
     return;
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
   let body;
