@@ -144,6 +144,24 @@ describe('the activity log loads only when something reads it', () => {
     expect(after.length).toBeGreaterThan(0);
   });
 
+  it('a deep link STRAIGHT to /activity loads it, without a nav tap', async () => {
+    // A link to the tab is how somebody is sent to it, and that path never
+    // passes through `setNav`. It used to paint "No activity yet" until the
+    // reader tapped a nav item — so a link to the Activity tab was worthless
+    // to whoever was sent one.
+    await boot(`https://board.test/workspaces/${WS}/activity`);
+    expect(eventReads().length, `asked: ${pathsAsked(server).join(', ')}`).toBeGreaterThan(0);
+  });
+
+  it('...and the boards nobody asked for the tab on still pay nothing', async () => {
+    // The narrowness IS the fix: the ~590KB stays off every other landing,
+    // which is what the measured reason for the lazy load was about. The two
+    // absences above are this case; asserted again here beside its positive
+    // so the pair cannot drift apart.
+    await boot(`https://board.test/workspaces/${WS}/tasks`);
+    expect(eventReads(), `asked: ${pathsAsked(server).join(', ')}`).toEqual([]);
+  });
+
   it('opening the Activity view loads it', async () => {
     // The positive half, and the reason the two absences above are about the
     // GATE rather than about a route nothing ever calls. Boot on the board

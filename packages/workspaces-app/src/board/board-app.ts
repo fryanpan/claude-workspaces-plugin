@@ -952,4 +952,20 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   });
   // A deep link straight to /home needs its payload without a nav tap.
   if (state.pane === 'home') void loadHome();
+  // …and so does one straight to /activity. The comment above says the
+  // Activity view and the detail panel each fetch on their own open, and for
+  // the panel that is true — `renderDetail` loads on the first paint of a
+  // task, so a deep link to a ticket arrives with its history. The view had
+  // only `setNav`, which a deep link never passes through: landing on
+  // `/workspaces/<id>/activity` painted "No activity yet" until the reader
+  // tapped a nav item, and a link to that tab was worthless to whoever was
+  // sent one.
+  //
+  // The general case is UNCHANGED and deliberately so: a board landing still
+  // fetches nothing, because the ~590KB was a measured slice of the iPad's
+  // ten-second load and nobody on the board is looking at it. This costs it
+  // only for a reader who asked for the tab by URL — which is the same reader
+  // `eventsConsumerActive` already calls a consumer, so `loadEvents` returns
+  // immediately for everybody else whatever this line does.
+  if (state.view === 'activity') void loadEvents();
 }
