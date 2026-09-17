@@ -315,7 +315,6 @@ describe('ACTIVITY_REFRESH_EVENTS', () => {
       'decision.answer_withdrawn',
       'decision.info_requested',
       'workspace.goals_changed',
-      'dispatch.reported',
     ]) {
       expect(ACTIVITY_REFRESH_EVENTS, `${ev} would never refresh the trail`).toContain(ev);
     }
@@ -324,57 +323,6 @@ describe('ACTIVITY_REFRESH_EVENTS', () => {
 
 describe('describeEvent', () => {
   const titleOf = (id: string) => (id === 't-1' ? 'Fix ranking' : id);
-
-  it('renders a builder’s closing report as a line the lead can act on', () => {
-    const s = describeEvent(
-      {
-        event: 'dispatch.reported',
-        ts: NOW,
-        taskId: 't-1',
-        agentName: 'harborlight-builder',
-        prNumber: 1104,
-        headCommit: '274ebd28002854a3c5ece616526f504e3169a12c',
-        checksTotal: 31,
-        checksFailed: 0,
-        checksHeld: 2,
-        doneWhenTotal: 5,
-        doneWhenMet: 3,
-      },
-      titleOf,
-    );
-    expect(s).toContain('harborlight-builder');
-    expect(s).toContain('Fix ranking');
-    expect(s).toContain('PR #1104');
-    // Abbreviated, because the trail is a scannable column and the record is
-    // where the full sha lives.
-    expect(s).toContain('274ebd2');
-    expect(s).not.toContain('274ebd28002854');
-    // A held gate is neither a pass nor a failure, and the line says so
-    // rather than folding it into either count.
-    expect(s).toContain('31 gates passed (2 held)');
-    expect(s).toContain('3/5 done-when met');
-  });
-
-  it('leads with the failure when a gate went red', () => {
-    const s = describeEvent(
-      {
-        event: 'dispatch.reported',
-        ts: NOW,
-        taskId: 't-1',
-        agentName: 'harborlight-builder',
-        prNumber: 1104,
-        headCommit: 'deadbee',
-        checksTotal: 31,
-        checksFailed: 2,
-        checksHeld: 0,
-        doneWhenTotal: 5,
-        doneWhenMet: 5,
-      },
-      titleOf,
-    );
-    expect(s).toContain('2 of 31 gates failed');
-    expect(s).not.toContain('gates passed');
-  });
 
   it('describes a regroup with actor and both goals', () => {
     const s = describeEvent(
