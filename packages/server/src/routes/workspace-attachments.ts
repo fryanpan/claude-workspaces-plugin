@@ -223,11 +223,17 @@ export async function handleWorkspaceAttachments(
     // lives in the session's own plugin store, keyed on its launch path, and
     // nothing here can read it. So the slugs go out every time and the
     // session compares them against `sentry_list_my_watches`.
+    // What this board's project has MOUNTED, and what to do when it has
+    // nothing. Sent unconditionally for the same reason `sentry` is: the
+    // server cannot see whether the session knows the capability exists, and
+    // a capability announced only in a skill goes unused — measured on this
+    // board three days after the mount pointer shipped in both skills.
     return j(200, {
       ...res,
       watching,
       notes: attachNotes(res, watching),
       sentry: sentryWatchPlan(),
+      mounts: ctx.mountsBriefFor(workspaceId, req),
     });
   }
   const wsAgentHeartbeatMatch = pathname.match(

@@ -14,7 +14,7 @@ import { haikuReviewJudge } from '../src/review-judge.ts';
 const MAXIMAL_REPLY = JSON.stringify({
   ok: false,
   reason: 'x'.repeat(REVIEW_JUDGE_REASON_MAX),
-  add: 'y'.repeat(REVIEW_JUDGE_REASON_MAX),
+  quote: 'y'.repeat(REVIEW_JUDGE_REASON_MAX),
 });
 
 function stubFetch(reply: string, sent: { body?: Record<string, unknown> }) {
@@ -51,7 +51,7 @@ describe('the judge asks for enough tokens to answer', () => {
     });
     const out = await judge?.({ criteria: 'be clear', item: { headline: 'Which cache size' } });
     expect(out?.reason).toHaveLength(REVIEW_JUDGE_REASON_MAX);
-    expect(out?.add).toHaveLength(REVIEW_JUDGE_REASON_MAX);
+    expect(out?.quote).toHaveLength(REVIEW_JUDGE_REASON_MAX);
   });
 
   it('a reply truncated mid-JSON is null — not a half-read verdict', async () => {

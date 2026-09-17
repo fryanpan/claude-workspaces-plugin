@@ -32,6 +32,7 @@ import {
  * run on every start.
  */
 import type { DoneWhenLine, DoneWhenProof } from '@claude-workspaces/core/done-when';
+import { refusalProof } from '@claude-workspaces/core/done-when-refusal';
 import type { StoredReviewItem, Task } from '@claude-workspaces/core/task-wire';
 import { classifyActor } from '../actor-identity.ts';
 
@@ -212,9 +213,15 @@ export function ownerCheckReview(
   const proofs = (line.proof ?? []).slice(0, 3);
   const lead = proofs.find((p) => isHttp(p.url));
   const check = unpunctuated(line.text);
+  // A REFUSED check has nothing for the agent to have opened, so "find it
+  // first" would be a lie about why the reader is holding it. Say what
+  // happened instead: the machine would not let the agent run the check.
+  const refused = refusalProof(line);
   const opening = lead
     ? `Open [${linkLabel(lead)}](${lead.url}).`
-    : 'Nothing is linked to open, so find it first.';
+    : refused
+      ? 'Nothing was run: this machine refused the agent permission to check it, so the check is yours.'
+      : 'Nothing is linked to open, so find it first.';
   // The lead proof's own words, unless the label already said them. Not
   // possessive on the reporter's name: half the fleet's names end in s.
   const leadWords = lead ? plain(lead.text) : '';
@@ -222,11 +229,22 @@ export function ownerCheckReview(
     lead !== undefined && leadWords !== '' && leadWords !== linkLabel(lead)
       ? ` The note attached with it: \u201c${sentence(clipWords(leadWords, NOTE_MAX))}\u201d`
       : '';
-  const also = proofs.filter((p) => p !== lead).map(attachment);
+  // What the agent was refused, in its own words — unless the note above is
+  // already those words, which it is when the refusal is the lead proof.
+  const refusedWords = refused && refused !== lead ? plain(refused.text) : '';
+  const refusedNote =
+    refusedWords !== ''
+      ? ` What it was refused: “${sentence(clipWords(refusedWords, NOTE_MAX))}”`
+      : '';
+  // The refusal is quoted above when it is quoted at all, so it is not also
+  // listed as an attachment — one proof, said once.
+  const also = proofs
+    .filter((p) => p !== lead && !(refusedWords !== '' && p === refused))
+    .map(attachment);
   const detail = [
     opening,
     '',
-    `Check: ${check}.${note}`,
+    `Check: ${check}.${note}${refusedNote}`,
     '',
     `Looks right marks this line of \u201c${task.title}\u201d met, and the task closes once every line is; Not met sends it back to ${line.by || 'the builder'} with your words.${
       also.length > 0 ? ` Also attached: ${also.join('; ')}.` : ''

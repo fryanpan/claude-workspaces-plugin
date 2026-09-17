@@ -232,7 +232,11 @@ export function readDoneWhenProof(
     const given = typeof source?.url === 'string' ? source.url : '';
     const url = given !== '' ? resolveProofUrl(given, baseUrl) : undefined;
     if (url === 'needs-base') return { unresolved: given };
-    out.push({ text, ...(url !== undefined ? { url } : {}) });
+    // `refused` is the reporter's word that the check was denied on this
+    // machine — stored only when it is literally `true`, so a caller sending
+    // a string or a stray object cannot mark a line terminal by accident.
+    const refused = source?.refused === true;
+    out.push({ text, ...(url !== undefined ? { url } : {}), ...(refused ? { refused } : {}) });
   }
   return out.length > 0 ? { proof: out } : {};
 }
