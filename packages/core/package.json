@@ -15,6 +15,7 @@
     "./prose": "./src/prose.ts",
     "./asset-manifest": "./src/asset-manifest.ts",
     "./comment-receipt": "./src/comment-receipt.ts",
+    "./discovery-file": "./src/discovery-file.ts",
     "./done-when": "./src/done-when.ts",
     "./done-when-refusal": "./src/done-when-refusal.ts",
     "./env-names": "./src/env-names.ts",

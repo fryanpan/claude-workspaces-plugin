@@ -105,13 +105,12 @@ const { readDeploySource } = await import('../packages/server/src/deploy-source.
 const { acquirePort, probeLocalPort, shouldWalkPorts } = await import(
   '../packages/server/src/port-bind.ts'
 );
-const {
-  FIRST_BIND_GRACE_MS,
-  createHealthWatchdog,
-  fileRestartLedger,
-  probeHealth,
-  restartLedgerPath,
-} = await import('../packages/server/src/supervisor-health.ts');
+const { createHealthWatchdog, probeHealth } = await import(
+  '../packages/server/src/supervisor-health.ts'
+);
+const { FIRST_BIND_GRACE_MS, fileRestartLedger, restartLedgerPath } = await import(
+  '../packages/server/src/supervisor-restarts.ts'
+);
 
 /**
  * DEV only. Walk to the next port when this one is occupied, so two agents on
@@ -511,6 +510,12 @@ if (noWatch) {
     // every persisted document before its bind, so the first bind gets its own,
     // much longer window — see FIRST_BIND_GRACE_MS for what it is derived from.
     // Passed rather than defaulted so this block names every timing it runs on.
+    //
+    // It is the BASE, not the whole story: the watchdog reads the ledger when
+    // it arms and doubles this for each restart in the last hour that killed a
+    // boot which had never bound, up to FIRST_BIND_GRACE_MAX_MS. That is the
+    // difference between surviving one slow boot and surviving a machine on
+    // which no boot finishes — 23:12Z on 16 September was the second.
     firstBindGraceMs: FIRST_BIND_GRACE_MS,
   });
   setTimeout(() => {

@@ -28,7 +28,7 @@ import {
   serverStartsPath,
   summarizeStarts,
 } from '../src/server-starts.ts';
-import { restartLedgerPath } from '../src/supervisor-health.ts';
+import { restartLedgerPath } from '../src/supervisor-restarts.ts';
 
 const T0 = 1_700_000_000_000;
 const HOUR = 60 * 60_000;

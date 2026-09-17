@@ -46,6 +46,7 @@ import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
+import { describeLiveness } from './liveness.ts';
 import { meetingFilingFor } from './meeting-home.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { withServerNotesSinks } from './meeting-notes-doc.ts';
@@ -407,6 +408,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const summarizer = opts.summarizer ?? null;
   const pluginRefresher = opts.pluginRefresher ?? null;
   const deployer = opts.deployer ?? null;
+  /**
+   * When `Bun.serve` returned — the moment this process actually started
+   * listening. Null until then, which is what makes `liveness.ok` a claim
+   * about the port rather than about the code that would like to bind it.
+   */
+  let boundAt: number | null = null;
+  /**
+   * The machine-wide discovery slot, or nothing. Defaulted to "no entry"
+   * rather than to a real read: a server built without the seam (every test,
+   * every embedded server) has no business resolving the developer's own
+   * `~/.claude`, and `bin.ts` is the one place that passes the real reader.
+   */
+  const readDiscoveryEntry =
+    opts.discoveryEntry ?? ((): { port: number; pid: number } | null => null);
   // Same opt-in seam: no engine here means no socket can start a billed
   // streaming session. See ServerOptions.transcription.
   const meetingStore: MeetingStore = new MeetingStore(dataDir, {
@@ -1987,6 +2002,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // at the same claim.
     notesQualityRollup: () =>
       rollupNotesQuality(dataDir, { now: Date.now(), windowMs: NOTES_QUALITY_WINDOW_MS }),
+    // The OTHER claim `GET /api/deploy` answers: not "did the last deploy
+    // come up" but "is this process bound and discoverable, now". Both halves
+    // are read per request — `Bun.serve` has not returned when this object is
+    // built, and the discovery slot can change hands under a running server.
+    liveness: () =>
+      describeLiveness({
+        boundPort: boundAt === null ? null : (server.port ?? port),
+        boundAt,
+        pid: process.pid,
+        discovery: readDiscoveryEntry(),
+      }),
     j,
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
@@ -3142,6 +3168,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // stores its writes land in are still up.
     websocket: socketHandlers,
   });
+
+  // The port is bound. Stamped HERE rather than at the top of `createServer`
+  // because `Bun.serve` THROWS on a taken port and `bin.ts` retries on
+  // another — a server that never reached this line is one no request can
+  // reach either, and `liveness.ok` has to say so.
+  boundAt = Date.now();
 
   // Every agent the previous process was hosting is subscribed again HERE:
   // after the port is bound (so a server that loses the port race and is

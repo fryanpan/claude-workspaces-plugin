@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>unanswered-thread<br/>keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts · event-loop.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · server-starts.ts<br/>liveness.ts · event-loop.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -986,6 +986,23 @@ check `scripts/serve.ts` runs against the server it supervises — one HTTP
 request to a route that already exists, a verdict, and a restart ledger that
 outlives the supervisor — so the server imports only its probe-marker
 constant, and only so `sentry.ts` can leave the probe out of tracing.
+
+`supervisor-restarts.ts` joins Ops beside it and moves no boundary. It is the
+half of that check which has to remember something across a process: the
+three-per-hour limit, the `supervisor-restarts.json` ledger it reads, and the
+first-bind grace the ledger lengthens. The split is one-way —
+`supervisor-health.ts` imports it and nothing imports back — and it exists
+because the two halves answer different questions: the health file reads a
+socket, this one reads a file written by a supervisor that no longer exists.
+`server-starts.ts` reads the same ledger, and now reads its `restarts` field
+rather than a bare array.
+
+`liveness.ts` joins Ops and moves no boundary. It is a pure description of
+whether THIS process is bound and owns the machine's discovery slot, which
+`GET /api/deploy` carries beside the deploy verdict. It sees no `Request` and
+does no I/O: `bin.ts` constructs the one real discovery reader, on the same
+seam rule as `deployer` and `secretWriter`, so no test resolves the
+developer's own `~/.claude`.
 
 `event-loop.ts` joins Ops and moves no boundary. It is an observer plus a
 helper, importing nothing from the subsystems it watches: a lag monitor that

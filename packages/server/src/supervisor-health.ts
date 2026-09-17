@@ -17,9 +17,11 @@
  *
  *   probeHealth        — one request, one of five verdicts
  *   healthStep         — what one verdict does to the consecutive-fail count
- *   restartDecision    — whether a restart is allowed yet, from a ledger that
- *                        outlives the process (a restart ends the supervisor,
- *                        so only a file can remember the last one)
+ *
+ * The third piece — whether a restart is allowed yet, and how long the next
+ * boot gets before one may be asked for — is `supervisor-restarts.ts`, which
+ * reads a ledger that outlives the process (a restart ends the supervisor, so
+ * only a file can remember the last one).
  *
  * And one rule that cuts across them: A BOOT IN PROGRESS IS NOT A DEAD
  * SERVER. `createServer` hydrates every persisted document BEFORE it binds,
@@ -32,13 +34,26 @@
  * supervisor's life gets `FIRST_BIND_GRACE_MS` before an unopened connection
  * counts against it; a bound server that stops answering is untouched.
  *
+ * And because one grace does not fix a machine on which NO boot finishes,
+ * this file also classifies the restart it asks for: a never-bound restart is
+ * written into the ledger's `unbound` list, and the next supervisor doubles
+ * its grace for each one inside the window (`firstBindGraceFor`). The
+ * classification is the whole content of the distinction — a restart of a
+ * server that had bound and stopped answering must never lengthen anything.
+ *
  * `createHealthWatchdog` composes them against an injected probe, clock and
  * ledger; `scripts/serve.ts` only schedules its ticks.
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { connect as netConnect } from 'node:net';
-import { dirname, join } from 'node:path';
 import { classifyConnectError } from './port-bind.ts';
+import {
+  FIRST_BIND_GRACE_MS,
+  type RestartLedger,
+  type RestartPolicy,
+  WATCHDOG_RESTART_POLICY,
+  firstBindGraceFor,
+  restartDecision,
+} from './supervisor-restarts.ts';
 
 /**
  * The route the supervisor asks. `GET /api/deploy` because it is cheap and
@@ -201,30 +216,6 @@ export interface HealthStep {
   action: 'ok' | 'wait' | 'booting' | 'restart';
 }
 
-/**
- * How long the FIRST bind of a supervisor's life gets before an unbound port
- * counts against it. A boot in progress is not a dead server.
- *
- * Measured, not chosen. `server-starts.ts` records `startedAt` (the child's
- * time origin) and `servingAt` (port bound, documents hydrated) for every
- * boot, and that pair is exactly the window this has to cover — the two
- * client builds finish before the child is spawned, so they are outside it.
- * Over 171 served boots in prod's record (2026-09-11 → 2026-09-17): p50 2.9s,
- * p90 4.0s, p95 8.8s, p99 35.6s, largest 109.9s.
- *
- * **That 109.9s is right-censored, and the censoring is the argument for the
- * margin.** It is the largest boot that COMPLETED. Three more were killed by
- * this very watchdog at ~75s with no `servingAt` ever written, so how long
- * they would have taken is unobserved — the distribution above 75s was
- * truncated by the mechanism this constant exists to change. 109.9s is
- * therefore a floor on the maximum, not the maximum, which is why the margin
- * is 2.2x rather than the 1.5x a reader who took 109.9s for the true maximum
- * would think sufficient. Do not tighten this without a record gathered while
- * the grace was in force. 240_000 is also exactly 8 check intervals, so the
- * grace expires on a tick boundary rather than mid-interval.
- */
-export const FIRST_BIND_GRACE_MS = 240_000;
-
 /** Context a verdict is read in. Only `not-listening` consults it. */
 export interface HealthStepContext {
   /**
@@ -262,85 +253,6 @@ export function healthStep(
   return { fails: next, action: next >= maxFails ? 'restart' : 'wait' };
 }
 
-// ---------------------------------------------------------------------------
-// Rate limit. A restart exits the supervisor and launchd starts a new one, so
-// the limit has to survive the process: the ledger is a file of timestamps.
-//
-// Why a limit at all: a server that is slow under load, rather than stuck,
-// can miss two probes in a row. Restarting it drops every client, and every
-// client reconnecting at once is more load — the 2026-09-04 socket shortage
-// had exactly that shape. And a wedge a restart cannot cure (a boot parked on
-// a consent dialog) would otherwise become a restart every ~75s.
-// ---------------------------------------------------------------------------
-
-export interface RestartPolicy {
-  /** Restarts allowed inside any `windowMs`. */
-  max: number;
-  windowMs: number;
-}
-
-/** At most three watchdog restarts in any rolling hour. */
-export const WATCHDOG_RESTART_POLICY: RestartPolicy = { max: 3, windowMs: 60 * 60_000 };
-
-export type RestartDecision =
-  | { allowed: true; history: number[] }
-  | { allowed: false; recent: number; retryAt: number };
-
-/**
- * May the watchdog restart at `now`, given when it last did? On `allowed`,
- * `history` is the ledger to write back: the window's entries plus this one.
- * Entries outside the window, or in the future (a clock that stepped back),
- * are dropped rather than trusted.
- */
-export function restartDecision(
-  history: readonly number[],
-  now: number,
-  policy: RestartPolicy = WATCHDOG_RESTART_POLICY,
-): RestartDecision {
-  const recent = history
-    .filter((t) => Number.isFinite(t) && t > now - policy.windowMs && t <= now)
-    .sort((a, b) => a - b);
-  if (recent.length < policy.max) return { allowed: true, history: [...recent, now] };
-  const oldestCounted = recent[recent.length - policy.max];
-  return { allowed: false, recent: recent.length, retryAt: oldestCounted + policy.windowMs };
-}
-
-export interface RestartLedger {
-  load(): number[];
-  save(history: number[]): void;
-}
-
-export function restartLedgerPath(dataDir: string): string {
-  return join(dataDir, 'supervisor-restarts.json');
-}
-
-/**
- * The ledger as a JSON file. A missing or unreadable file reads as empty —
- * the watchdog fails OPEN, because a limit that cannot be read must not
- * become a watchdog that can never act. Written via rename so a crash
- * mid-write leaves the old ledger, not half a new one.
- */
-export function fileRestartLedger(path: string): RestartLedger {
-  return {
-    load() {
-      try {
-        const parsed = JSON.parse(readFileSync(path, 'utf8')) as { restarts?: unknown };
-        return Array.isArray(parsed.restarts)
-          ? parsed.restarts.filter((t): t is number => typeof t === 'number')
-          : [];
-      } catch {
-        return [];
-      }
-    },
-    save(history) {
-      mkdirSync(dirname(path), { recursive: true });
-      const tmp = `${path}.tmp`;
-      writeFileSync(tmp, `${JSON.stringify({ restarts: history })}\n`);
-      renameSync(tmp, path);
-    },
-  };
-}
-
 export interface HealthWatchdogOptions {
   probe: () => Promise<HealthProbeResult>;
   maxFails: number;
@@ -352,8 +264,15 @@ export interface HealthWatchdogOptions {
   restart: () => void;
   /** How log lines name the server, e.g. `:8787`. */
   label: string;
-  /** Defaults to `FIRST_BIND_GRACE_MS`; 0 turns the grace off. */
+  /**
+   * The BASE first-bind grace — what a supervisor gets with no never-bound
+   * restart behind it. Defaults to `FIRST_BIND_GRACE_MS`; 0 turns the grace
+   * off, and stays off however bad the history is.
+   */
   firstBindGraceMs?: number;
+  /** The ceiling the backoff doubles up to. Defaults to
+   *  `FIRST_BIND_GRACE_MAX_MS`. */
+  firstBindGraceMaxMs?: number;
 }
 
 export type WatchdogTick = 'ok' | 'wait' | 'booting' | 'held' | 'restart' | 'skipped';
@@ -372,10 +291,32 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
 } {
   const { maxFails, ledger, log, label } = opts;
   const now = opts.now ?? Date.now;
-  const firstBindGraceMs = opts.firstBindGraceMs ?? FIRST_BIND_GRACE_MS;
+  const policy = opts.policy ?? WATCHDOG_RESTART_POLICY;
   // When this supervisor armed. The grace is measured from here, so it covers
   // the child it spawned and nothing else.
   const armedAt = now();
+  // The backoff, read ONCE at arm time rather than per tick: the answer is a
+  // property of the generations before this one, and a ledger that changed
+  // under a running watchdog would mean some other supervisor is alive on the
+  // same box — not a case to give a longer grace to.
+  const grace = firstBindGraceFor(ledger.load().unbound, armedAt, {
+    base: opts.firstBindGraceMs ?? FIRST_BIND_GRACE_MS,
+    ...(opts.firstBindGraceMaxMs === undefined ? {} : { maxMs: opts.firstBindGraceMaxMs }),
+    windowMs: policy.windowMs,
+  });
+  const firstBindGraceMs = grace.graceMs;
+  if (grace.priorUnboundRestarts > 0 && firstBindGraceMs > 0) {
+    // Said at arm time, not at the restart it prevents, because this is the
+    // line that explains why the NEXT 240s of not-listening logs are silence
+    // rather than a restart. Without it the backoff is invisible in the log
+    // that a person reads after an outage.
+    log(
+      `[supervisor] health: ${grace.priorUnboundRestarts} restart(s) in the last ` +
+        `${Math.round(policy.windowMs / 60_000)}min killed a boot that had never bound ${label}, ` +
+        `so this boot gets ${Math.round(firstBindGraceMs / 1000)}s of first-bind grace rather ` +
+        'than the usual — restarting a boot that is still hydrating is what made the last one slow',
+    );
+  }
   let fails = 0;
   let inFlight = false;
   let done = false;
@@ -412,7 +353,8 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
     if (step.action === 'booting') {
       // Logged every tick, not once: the elapsed seconds are the diagnostic,
       // and they are what says afterwards whether the grace was generous or
-      // barely enough. Bounded by the grace itself — eight lines at most.
+      // barely enough. Bounded by the grace itself — eight lines at the base
+      // grace, thirty-two at the backoff's ceiling (960s over a 30s tick).
       log(
         `[supervisor] health: ${label} not listening ${Math.round(sinceArmed / 1000)}s into ` +
           `boot — nothing has bound in this supervisor's life yet, so this is a boot in ` +
@@ -446,7 +388,8 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
     if (step.action !== 'restart') return 'wait';
 
     const at = now();
-    const decision = restartDecision(ledger.load(), at, opts.policy);
+    const history = ledger.load();
+    const decision = restartDecision(history.restarts, at, policy);
     if (!decision.allowed) {
       if (heldUntil !== decision.retryAt) {
         heldUntil = decision.retryAt;
@@ -458,8 +401,21 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
       }
       return 'held';
     }
+    // THE classification the backoff runs on, and the only place it is made.
+    // A never-bound restart is one that ends a boot which has not yet put
+    // anything on the port in this supervisor's life. `everBound` is what
+    // separates it from the wedge the watchdog was built for — a server that
+    // bound, answered, and then stopped — and only the first kind may
+    // lengthen the next generation's grace. Widening this to every restart
+    // would let a repeating wedge talk the watchdog out of catching it.
+    const neverBound = result.verdict === 'not-listening' && !everBound;
     try {
-      ledger.save(decision.history);
+      ledger.save({
+        restarts: decision.history,
+        unbound: neverBound
+          ? [...history.unbound.filter((t) => decision.history.includes(t)), at]
+          : history.unbound.filter((t) => decision.history.includes(t)),
+      });
     } catch (err) {
       log(`[supervisor] health: could not record this restart (${codeOf(err)}); restarting anyway`);
     }

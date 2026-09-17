@@ -104,6 +104,43 @@ The cost in the other direction: a server that is alive, unbound, and would
 have been cured by a restart now waits 240s plus two ticks — about 285s —
 instead of 75s. The next section is why that trade is the right one.
 
+## And each never-bound restart doubles it for the boot after
+
+One grace saves one slow boot. It does not save a machine on which *no* boot
+finishes, and that is the state prod was in at 23:12Z: each restart re-ran a
+full hydration on an already-loaded machine, so restarting on a fixed cadence
+made the thing it was waiting for less likely.
+
+So the grace is a base, not a constant. When a supervisor arms it reads the
+ledger, counts the restarts inside the limiter's hour that killed a boot which
+had **never bound**, and doubles the base once per count —
+240s → 480s → 960s — up to `FIRST_BIND_GRACE_MAX_MS` = **960s**. That ceiling
+is 4× the base, so it saturates after two; without one, a machine that spent a
+bad hour would carry an hours-long grace into the next generation and the
+watchdog would stop being able to act at all. 240 + 480 + 960 = 28 minutes
+across the three generations the limiter allows in its hour, so **the limiter
+stays the outer bound** — which is what keeps episode one's story true.
+
+Two things decide whether this is right, and both are about the word *unbound*:
+
+- **Only a never-bound restart counts.** `supervisor-health.ts` classifies the
+  restart it is about to ask for — `not-listening` with nothing ever bound in
+  this supervisor's life — and writes only those into the ledger's `unbound`
+  list. A restart of a server that bound, answered and then went silent is the
+  wedge this watchdog was *built* for: it is cured by restarting, it says
+  nothing about how long a boot takes, and feeding it in here would slowly
+  blind the watchdog to its own purpose.
+- **`unbound` is a subset of `restarts`**, in the same file, and a ledger
+  written before the field existed reads as "no never-bound restarts" — the
+  base grace, which is the safe direction. The loader drops any `unbound`
+  entry that `restarts` does not also name, because the count only means
+  something while the subset invariant holds.
+
+The supervisor says so at arm time rather than at the restart it prevents:
+one line naming how many never-bound restarts it found and how much grace
+that bought. Without it the backoff is invisible in the log a person reads
+after an outage — the next four minutes are silence either way.
+
 ## Where 240s comes from, and why it is not tighter
 
 `server-starts.ts` records `startedAt` (the child's time origin) and
@@ -264,6 +301,15 @@ anything cured it.
 Under the current grace both of those boots would have been left alone: 76.0s
 and 75.5s are well inside 240s.
 
+**The whole episode now reads as one restart rather than three**, and that is
+measured rather than asserted. `supervisor-boot-replay.test.ts` replays this shape
+across supervisor generations on an injected clock — one wedge (`no-answer`,
+a fair restart) followed by a port held unbound — and counts restarts inside
+the 253 seconds the log above covers, 23:13:21 to 23:17:34. With the grace
+off, the replay produces exactly what the log shows: three restarts and then
+the limiter refusing a fourth. With it on, one. The restart that remains is
+23:13:21, the only one of the three that was right.
+
 ### What it looked like from outside, and what was not at fault
 
 A peer on the same machine saw 8787 refusing connections while staging on 8788
@@ -285,6 +331,37 @@ what kept the content safe.
   blocked <n>ms` and names the requests in flight, because the 16 September
   blocks were legible only as a 404 that took 56 seconds.
 - **PR 1092** — the first-bind grace, and the measurement it is derived from.
+- **PR 1094** — this document.
+- **The backoff on that grace**, plus the `liveness` field below, which is the
+  answer to the reading failure in the section above it.
+
+## The reading failure: `liveness` beside the deploy verdict
+
+Two peers read `GET /api/deploy` as liveness, and the route did not carry it.
+Its `verification` field describes the boot that followed the last
+`POST /api/deploy` — it reads `healthy` for as long as nothing deploys again,
+including through the seven minutes prod was unreachable.
+
+So the GET now answers two claims, side by side:
+
+| field | the question it answers |
+| --- | --- |
+| `deploy` | what the last deploy did, and whether the boot it asked for came up |
+| `liveness` | is **this** process bound, right now, and does it own the machine's discovery slot |
+
+`liveness.ok` is true only when both halves hold. It goes false for a server
+that has not bound yet, and for one that is bound while **another** server
+owns `~/.claude/claude-workspaces/server.json` — staging's normal state, up
+and reached by no local agent. The field carries a `detail` line naming which
+claim it is, because the failure it exists for was a reading failure rather
+than a measurement one.
+
+It changes nothing about the watchdog, which already knows whether the port is
+bound: it is the thing probing it. The gate is unchanged too — the read stays
+trusted-local, and a share visitor is refused before either field is built.
+`packages/server/src/liveness.ts` is the pure description; `bin.ts`
+constructs the one real discovery reader, cached so the route the supervisor
+probes every 30s performs a bounded number of synchronous opens.
 
 ## One phrase the log must keep
 
@@ -300,7 +377,9 @@ serious of the two faults the invisible one.
 
 | What | Where |
 | --- | --- |
-| Probe, verdicts, fail-counting, restart ledger, watchdog | `packages/server/src/supervisor-health.ts` |
+| Probe, verdicts, fail-counting, watchdog | `packages/server/src/supervisor-health.ts` |
+| Restart limit, ledger, first-bind grace and its backoff | `packages/server/src/supervisor-restarts.ts` |
+| The `liveness` field on `GET /api/deploy` | `packages/server/src/liveness.ts` |
 | `GRACE_MS` / `CHECK_MS` / `MAX_FAILS`, and arming the ticks | `scripts/serve.ts` |
 | Fast-crash damper for a child that dies young | `scripts/serve.ts` |
 | Per-boot `startedAt` → `servingAt` record | `packages/server/src/server-starts.ts` → `server-starts.json` |

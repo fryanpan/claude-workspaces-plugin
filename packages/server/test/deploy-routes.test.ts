@@ -37,9 +37,17 @@ describe('/api/deploy', () => {
   let handle: ServerHandle | null = null;
   let dataDir: string | null = null;
 
-  const start = (deployer?: Deployer) => {
+  const start = (
+    deployer?: Deployer,
+    discoveryEntry?: () => { port: number; pid: number } | null,
+  ) => {
     dataDir = mkdtempSync(join(tmpdir(), 'deploy-route-'));
-    handle = createServer({ port: 0, dataDir, ...(deployer ? { deployer } : {}) });
+    handle = createServer({
+      port: 0,
+      dataDir,
+      ...(deployer ? { deployer } : {}),
+      ...(discoveryEntry ? { discoveryEntry } : {}),
+    });
     return `http://127.0.0.1:${handle.port}`;
   };
 
@@ -113,6 +121,60 @@ describe('/api/deploy', () => {
     };
     expect(after.deploy?.after).toBe('bbbbbbb');
     expect(seen).toHaveLength(1);
+  });
+
+  // The route answers TWO claims, and the outage that produced this ticket
+  // was somebody reading the first as the second. `deploy.verification`
+  // describes the boot after the last deploy and reads `healthy` for as long
+  // as nothing deploys again — including through seven minutes of prod being
+  // unreachable on 16 September. `liveness` is this process, now.
+  interface LivenessBody {
+    deploy: DeployResult | null;
+    liveness: { ok: boolean; port: number | null; discovery: string; detail: string };
+  }
+
+  it('GET carries liveness beside the deploy verdict, not inside it', async () => {
+    const seen: DeployRequest[] = [];
+    const base = start(fake(seen), () => ({ port: handle?.port ?? 0, pid: process.pid }));
+    const body = (await (await call(base, 'GET', handle?.port ?? 0)).json()) as LivenessBody;
+    // The deploy verdict is still absent — nothing has deployed — while the
+    // server is plainly alive. One field cannot say both.
+    expect(body.deploy).toBeNull();
+    expect(body.liveness.ok).toBe(true);
+    expect(body.liveness.port).toBe(handle?.port ?? 0);
+    expect(body.liveness.discovery).toBe('ours');
+  });
+
+  it('GET reports NOT ok when another server owns the discovery slot', async () => {
+    // Staging's normal state: bound, running, and reached by no local agent.
+    // A liveness field that could not go false would be decoration.
+    const seen: DeployRequest[] = [];
+    const base = start(fake(seen), () => ({ port: (handle?.port ?? 0) + 1, pid: 999_999 }));
+    const body = (await (await call(base, 'GET', handle?.port ?? 0)).json()) as LivenessBody;
+    expect(body.liveness.ok).toBe(false);
+    expect(body.liveness.discovery).toBe('another-server');
+  });
+
+  it('liveness does not move when a deploy is recorded', async () => {
+    // The two claims are independent, and this is the case that says so: a
+    // deploy lands, `deploy` changes, `liveness` does not.
+    const seen: DeployRequest[] = [];
+    const base = start(fake(seen), () => ({ port: handle?.port ?? 0, pid: process.pid }));
+    const before = (await (await call(base, 'GET', handle?.port ?? 0)).json()) as LivenessBody;
+    await call(base, 'POST', handle?.port ?? 0);
+    const after = (await (await call(base, 'GET', handle?.port ?? 0)).json()) as LivenessBody;
+    expect(before.deploy).toBeNull();
+    expect(after.deploy?.after).toBe('bbbbbbb');
+    expect(after.liveness).toEqual(before.liveness);
+  });
+
+  it('a server with no deployer still answers what it is: alive, not deploying', async () => {
+    const base = start(undefined, () => ({ port: handle?.port ?? 0, pid: process.pid }));
+    const res = await call(base, 'GET', handle?.port ?? 0);
+    expect(res.status).toBe(501);
+    const body = (await res.json()) as { error: string; liveness: LivenessBody['liveness'] };
+    expect(body.error).toContain('not enabled');
+    expect(body.liveness.ok).toBe(true);
   });
 
   it('says so plainly when this server is not the deploy', async () => {

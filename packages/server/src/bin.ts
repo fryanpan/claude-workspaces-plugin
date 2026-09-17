@@ -1,9 +1,12 @@
 #!/usr/bin/env bun
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readDiscovery } from '@claude-workspaces/core/discovery-file';
 import { dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
+import { cacheDiscoveryReads } from './liveness.ts';
 import { installLogSquelch } from './log-squelch.ts';
 import { acquirePort, classifyBindError, probeLocalPort, shouldWalkPorts } from './port-bind.ts';
 import { lanHostnames, tailscaleHost } from './public-host.ts';
@@ -280,6 +283,12 @@ while (!handle) {
         : {}),
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
+      // The one construction of the real discovery reader — the seam rule
+      // again, and for a machine-wide file the rule is at its most useful: a
+      // test that fell through to this would be reading whichever server the
+      // developer's own `~/.claude` happens to name. Cached because
+      // `GET /api/deploy` is the route the supervisor probes every 30s.
+      discoveryEntry: cacheDiscoveryReads(() => readDiscovery(homedir())),
       // The one construction of the secret writer, and the reason the option
       // has no default. macOS only: the store IS the login Keychain, so on
       // any other platform there is nowhere to put a value and the door
