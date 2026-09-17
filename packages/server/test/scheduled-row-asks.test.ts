@@ -25,6 +25,7 @@
  * is public.
  */
 import { describe, expect, it } from 'bun:test';
+import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
 import { type ReviewItemRow, type TaskRow, classifyOpenTasks } from '../src/keep-moving.ts';
 import { indexFiledAsks, ownerAskOf } from '../src/owner-ask.ts';
 import { OWNER_UNFILED_BUCKET, evaluateStalls } from '../src/stall-gate.ts';
@@ -36,7 +37,25 @@ const STALL = 30 * MIN;
 const bands = { dispatchable: new Set(['g1']), ownerBand: new Set(['decisions']) };
 const OWNERS = ['Harborlight'];
 
-const RULE = { rule: { kind: 'every', everyMs: 86_400_000 }, armedAt: 1 };
+/**
+ * A rule that has ALREADY come due — armed three days ago on a daily cadence,
+ * so its first occurrence sits two days behind `now`. Deliberately past-due:
+ * every case below that expects a rule row to read as an ask needs the rule
+ * to be owed, because a rule whose date has not arrived is a deferral rather
+ * than a question (`FUTURE_RULE`). The old fixture was armed at epoch+1 with
+ * a daily cadence and `now` two-thirds of a day later, which made it
+ * not-yet-due by accident while nothing read dueness.
+ */
+const RULE: TaskSchedule = {
+  rule: { kind: 'every', everyMs: 86_400_000 },
+  armedAt: now - 3 * 86_400_000,
+};
+
+/** The Octoturtle shape: a one-off deferred a month out, armed an hour ago. */
+const FUTURE_RULE: TaskSchedule = {
+  rule: { kind: 'once', at: now + 30 * 86_400_000 },
+  armedAt: now - 60 * MIN,
+};
 
 /** A row in the dispatch band that nothing has touched since it was filed. */
 function quietRow(over: Partial<TaskRow> & { id: string }): TaskRow {
@@ -63,26 +82,26 @@ function classify(tasks: TaskRow[], reviewItems: ReviewItemRow[] = []) {
 
 describe('ownerAskOf — the reading, driven on its own', () => {
   it('a pending item is a filed ask whatever else is true of the task', () => {
-    expect(ownerAskOf({ hasPendingAsk: true, boardSaysOwnerWaits: false, inBacklog: true })).toBe(
-      'filed',
-    );
+    expect(
+      ownerAskOf({ hasPendingAsk: true, boardSaysOwnerWaits: false, inBacklog: true, now }),
+    ).toBe('filed');
   });
 
   it('the board saying a person waits, with nothing filed, is an unfiled ask', () => {
-    expect(ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: false })).toBe(
-      'unfiled',
-    );
+    expect(
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: false, now }),
+    ).toBe('unfiled');
   });
 
   it('the backlog carries no ask, because there is none anyone could file', () => {
     expect(
-      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: true }),
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: true, now }),
     ).toBeUndefined();
   });
 
   it('a task nobody is waiting on reads as no ask at all, not as a filed one', () => {
     expect(
-      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: false, inBacklog: false }),
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: false, inBacklog: false, now }),
     ).toBeUndefined();
   });
 });
@@ -334,5 +353,137 @@ describe("a rule row's agent saying it is stuck reaches the person too", () => {
     const verdict = gate(WAIT_NOTE, [filedFor('t-rule')]);
     expect(verdict.unfiled).toHaveLength(0);
     expect(verdict.waiting).toHaveLength(1);
+  });
+});
+
+/**
+ * The other half of #1077, found live on a peer board the day after it
+ * shipped. Reading the ask off the same facts as the bucket made every
+ * FUTURE-DATED person-owned row an unfiled ask: six rows on one board were
+ * named "waiting on a person with NO question filed" at 06:10 PT, scheduled
+ * for dates between 2026-09-22 and 2027-01-12, and the quiet time reported
+ * was just the time since the rule was armed. One of them had been deferred
+ * by its owner in as many words, so an agent following the notice would
+ * re-ask a question he had closed — the prescribed remedy producing the
+ * failure it exists to prevent.
+ *
+ * A row deferred to January owes nobody an answer today. What stays is
+ * #1077's actual subject: a rule row whose AGENT asks a person in its own
+ * words is still readable, because those words were written now.
+ */
+describe('a rule whose date has not arrived defers the ask with the work', () => {
+  it('ownerAskOf reads no ask on a row whose rule has not fired yet', () => {
+    expect(
+      ownerAskOf({
+        hasPendingAsk: false,
+        boardSaysOwnerWaits: true,
+        inBacklog: false,
+        schedule: FUTURE_RULE,
+        now,
+      }),
+    ).toBeUndefined();
+    // Control: the same facts on a rule that HAS come due still ask.
+    expect(
+      ownerAskOf({
+        hasPendingAsk: false,
+        boardSaysOwnerWaits: true,
+        inBacklog: false,
+        schedule: RULE,
+        now,
+      }),
+    ).toBe('unfiled');
+    // Control: and so does the same row with no rule at all, which is the
+    // reading this narrowing must not touch.
+    expect(
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: false, now }),
+    ).toBe('unfiled');
+  });
+
+  it("an item already on the person's queue is still filed, deferred or not", () => {
+    // A deferral says nothing about a question already asked: withdrawing the
+    // reading here would drop the row off the `waiting` list and lose the
+    // address of the item excusing it.
+    expect(
+      ownerAskOf({
+        hasPendingAsk: true,
+        boardSaysOwnerWaits: true,
+        inBacklog: false,
+        schedule: FUTURE_RULE,
+        now,
+      }),
+    ).toBe('filed');
+  });
+
+  it('the classifier leaves a future-dated person-owned row asking nothing', () => {
+    const rows = classify([
+      quietRow({ id: 't-later', ownerKind: 'person', schedule: FUTURE_RULE }),
+      // Control: the same row on a rule that has come due is still an ask.
+      quietRow({ id: 't-due', ownerKind: 'person', schedule: RULE }),
+    ]);
+    expect(rows.get('t-later')?.ownerAsk).toBeUndefined();
+    expect(rows.get('t-later')?.unfiledAsk).toBe(false);
+    // …and the dispatch answer is untouched: it is still a rule row.
+    expect(rows.get('t-later')?.bucket).toBe('scheduled-rule');
+    expect(rows.get('t-due')?.ownerAsk).toBe('unfiled');
+    expect(rows.get('t-due')?.unfiledAsk).toBe(true);
+  });
+
+  it('an owner-BAND future-dated row is equally quiet', () => {
+    const rows = classify([
+      quietRow({ id: 't-later', goal: 'decisions', schedule: FUTURE_RULE }),
+      quietRow({ id: 't-due', goal: 'decisions', schedule: RULE }),
+    ]);
+    expect(rows.get('t-later')?.ownerAsk).toBeUndefined();
+    expect(rows.get('t-due')?.ownerAsk).toBe('unfiled');
+  });
+
+  it('the gate names it nowhere, so no frame tells anyone to file an ask', () => {
+    const verdict = evaluateStalls({
+      tasks: [quietRow({ id: 't-later', ownerKind: 'person', schedule: FUTURE_RULE })],
+      events: [],
+      reviewItems: [],
+      bands,
+      now,
+      quietMs: STALL,
+    });
+    expect(verdict.unfiled).toHaveLength(0);
+    expect(verdict.stalled).toHaveLength(0);
+    expect(verdict.waiting).toHaveLength(0);
+  });
+
+  it('nothing behind it inherits an ask it does not have', () => {
+    const rows = classify([
+      quietRow({ id: 't-later', ownerKind: 'person', schedule: FUTURE_RULE }),
+      quietRow({ id: 't-behind', status: 'in-progress', after: ['t-later'] }),
+    ]);
+    expect(rows.get('t-behind')?.unfiledAsk).toBe(false);
+    expect(rows.get('t-behind')?.terminal?.id).toBe('t-later');
+  });
+
+  it("#1077's subject survives: the agent's own words still reach the person", () => {
+    // The whole point of the narrowing: board STATE about a future date is
+    // not an ask, while an agent asking a person today is — on the same row.
+    const note = {
+      ts: now - 5 * MIN,
+      kind: 'turn',
+      text: 'Draft is ready. Waiting on Harborlight to pick the launch date.',
+      agent: 'Millwright',
+    };
+    const row = quietRow({
+      id: 't-later',
+      ownerKind: 'person',
+      schedule: FUTURE_RULE,
+      notes: [note],
+    });
+    const verdict = evaluateStalls({
+      tasks: [row],
+      events: [],
+      reviewItems: [],
+      bands,
+      now,
+      quietMs: STALL,
+      noteClocks: noteClocks([{ id: row.id, notes: row.notes ?? [] }], OWNERS),
+    });
+    expect(verdict.unfiled.map((r) => r.bucket)).toEqual([WAITING_UNFILED_BUCKET]);
   });
 });

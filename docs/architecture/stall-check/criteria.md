@@ -18,25 +18,41 @@ today's code fails is flagged.
 - **Measured by:** its unit tests, and the verdict's `unfiled` line reading
   zero on a board where every waiting task carries an item address.
 
+## `owner-ask.ts` — is a person owed an answer
+
+- **Must:** answer from explicit state alone — a filed item, the board's
+  ownership, the band, and the date of the row's own schedule rule — and
+  distinguish "the ask is on their queue" from "it exists only in somebody's
+  head" from "nobody is waiting at all".
+- **Must never:** read a bucket, or read prose. And never call a row an
+  unfiled ask because its rule is dated in the future: the work has not
+  started, so nobody has been asked anything yet. That reading shipped for a
+  day in September 2026 and named six future-dated rows on one board,
+  one of them deferred by its owner in as many words.
+- **Measured by:** its unit cases in `scheduled-row-asks.test.ts`, each
+  paired with the same row carrying no rule, so "a rule row's ask reads
+  exactly like any other row's" is asserted rather than assumed.
+
 ## `stall-gate.ts` — the findings
 
 - **Must:** produce `stalled`, `unfiled` and `undetermined` from the
   classifier, gated on the same quiet window, and name a watched builder's
   silence as `builder-silent`.
 - **Must never:** report as STALLED a task the parallelism cap keeps out of
-  flight, or report at all a task under a triage band. Both exclusions are
-  about work nobody was supposed to be doing, but they are not the same
-  shape: a triage-band row is dropped in `keep-moving.ts` before any bucket
-  is decided, so it reaches no list here at all, while a capped row is
-  classified like any other and only its STALL reading is withheld. So the
-  claim is about the cap — a capped row still reaches the `unfiled` list,
-  and so does a schedule-rule row, because an unanswered question is a
-  finding whatever the capacity or the row's kind. The cap held one anyway
-  until 2026-09-17: it skipped the row outright, and `waiting-unfiled` rides
-  runnable buckets the cap is built from.
-- **Measured by:** unit tests per exclusion, including a `waiting-unfiled`
-  row ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the
-  verdict's `considered` denominator.
+  flight, report at all a task under a triage band, or report a schedule rule
+  task AS WORK. The three are not one shape. A triage-band row is dropped in
+  `keep-moving.ts` before any bucket is decided, so it reaches no list here at
+  all. A capped row is classified like every other and only its stall reading
+  is withheld — it still reaches the `unfiled` list, because an unanswered
+  question is a finding whatever the capacity; the cap held one anyway until
+  2026-09-17, when it skipped the row outright and `waiting-unfiled` rides
+  runnable buckets the cap is built from. And a rule row's own unanswered ask
+  is a different finding from the rule, so it is reported (#1077) — unless the
+  rule's date has not arrived, which is a deferral rather than a question
+  (`owner-ask.ts`, above).
+- **Measured by:** unit tests per exclusion, including a `waiting-unfiled` row
+  ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the verdict's
+  `considered` denominator.
 
 ## `stall-nudge.ts` — the lead wake
 
