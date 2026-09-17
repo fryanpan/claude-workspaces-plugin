@@ -48,12 +48,30 @@ export const READER_CUTS: readonly ReaderCut[] = [
       '          ...(via ? { via } : {}),\n',
       "  const statusVia = readWriteVia(threadMap.get('statusVia'));\n",
       '    ...(statusVia ? { statusVia } : {}),\n',
+      // Two DERIVED fields rather than two lifts, and cut for the same
+      // reason: the widget draws a pin, a row, a popover and the dock, and
+      // reads neither the count nor the clock. `createdAt` stays — the
+      // reader's own guard reads it.
+      '  const lastActivity =\n' +
+        '    comments.length > 0 ? (comments[comments.length - 1]?.ts ?? createdAt) : createdAt;\n',
+      '    commentCount: comments.length,\n',
+      '    lastActivity,\n',
     ],
     blocks: [],
   },
   {
     file: 'core/src/review-item-wire.ts',
     lines: [
+      // The judge's HOLD REASONS. The widget reads one thing off a verdict —
+      // whether the item is gated, which `isReviewPayloadGated` answers from
+      // `verdict` alone — so the list of what the judge held it for is read
+      // by nobody in this bundle. `reason` and `add` stay: their names are
+      // too common to guard a bundle against reading (`classList.add`), and
+      // an unguarded cut is the one that ships `undefined` to a new reader.
+      '  const heldFor = Array.isArray(value.heldFor)\n' +
+        "    ? value.heldFor.filter((r): r is string => typeof r === 'string')\n" +
+        '    : [];\n',
+      '    ...(heldFor.length > 0 ? { heldFor } : {}),\n',
       "  if (typeof value.answeredBy === 'string') out.answeredBy = value.answeredBy;\n",
       "  if (typeof value.withdrawnBy === 'string') out.withdrawnBy = value.withdrawnBy;\n",
       "  if (typeof value.withdrawnReason === 'string') out.withdrawnReason = value.withdrawnReason;\n",
@@ -72,6 +90,9 @@ export const STRIPPED_FIELDS: readonly string[] = [
   'edits',
   'via',
   'statusVia',
+  'commentCount',
+  'lastActivity',
+  'heldFor',
   'answeredBy',
   'withdrawnBy',
   'withdrawnReason',
