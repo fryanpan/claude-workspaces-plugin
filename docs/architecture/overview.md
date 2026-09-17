@@ -846,7 +846,12 @@ three surfaces ask the same question about one pass — the offer dialog
 and the server's own log line — and a pass that changed nothing has to read
 the same way in all of them. The reasons it groups are the gate's own
 (`notes-cleanup-scope.ts`), carried out of the route on `refusals` /
-`failures`.
+`failures`. The two arrays are not written alike — the gate writes a sentence
+per dropped edit, the applier writes its error code — so this module reads
+each applier code into the gate's own wording as it groups. One fact then gets
+one row however it was found, and nothing addressed to a person carries an
+identifier. Its recovery line is the commonest rule a reader can act ON,
+which is not always the commonest rule.
 
 The NOTE-TAKER A DOC USES is five modules and no new box.
 `core/notes-method.ts` is the shared vocabulary — the three methods, their
