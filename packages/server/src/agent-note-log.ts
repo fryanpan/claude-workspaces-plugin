@@ -52,8 +52,11 @@ import { normalizeAgent } from './chat-audit.ts';
  *  case and a single-digit KB in the normal one. */
 const READ_LINES_CAP = 500;
 /** How many bytes are read off the tail to find those lines. Sized for the
- *  worst case above with headroom; a file under it is read whole. */
-const READ_BYTES_CAP = 4 * 1024 * 1024;
+ *  worst case above with headroom; a file under it is read whole. Overridable
+ *  per instance so a test can drive the seek branch without writing four
+ *  megabytes — the branch is the one that cannot be reasoned about by
+ *  reading it. */
+export const READ_BYTES_CAP = 4 * 1024 * 1024;
 /** How many notes one `readFor` hands back, newest first. Matches the ring's
  *  own per-agent cap so the two reads agree on length. */
 export const LOG_READ_CAP = 20;
@@ -113,7 +116,14 @@ function parseLine(line: string): LoggedAgentNote | undefined {
  * once hydrated every dormant doc on this machine.
  */
 export class AgentNoteLog {
-  constructor(private readonly dataDir: string) {}
+  private readonly bytesCap: number;
+
+  constructor(
+    private readonly dataDir: string,
+    bytesCap: number = READ_BYTES_CAP,
+  ) {
+    this.bytesCap = Math.max(1, bytesCap);
+  }
 
   /**
    * Record one unplaced note.
@@ -183,19 +193,32 @@ export class AgentNoteLog {
     try {
       if (!existsSync(path)) return [];
       const size = statSync(path).size;
-      if (size <= READ_BYTES_CAP) {
+      if (size <= this.bytesCap) {
         text = readFileSync(path, 'utf8');
       } else {
         // Seek, do not read the whole file and slice it — the point of the
         // cap is that a months-old log costs a fixed read.
-        const buf = Buffer.alloc(READ_BYTES_CAP);
+        //
+        // Decoded only as far as `readSync` actually filled, because decoding
+        // the whole buffer would append the allocation's zero bytes to the
+        // LAST line — turning the newest note into invalid JSON and dropping
+        // exactly the one a caller came for. DEFENSIVE AND UNTESTED: a local
+        // append-only file never shrinks, so a full-length read off a
+        // known-good offset does not come back short here, and a mutation
+        // control that ignored `read` passed every case in
+        // `agent-note-log.test.ts`. Kept because the failure it guards is
+        // silent and the guard is one argument.
+        const buf = Buffer.alloc(this.bytesCap);
         const fd = openSync(path, 'r');
+        let read = 0;
         try {
-          readSync(fd, buf, 0, READ_BYTES_CAP, size - READ_BYTES_CAP);
+          read = readSync(fd, buf, 0, this.bytesCap, size - this.bytesCap);
         } finally {
           closeSync(fd);
         }
-        text = buf.toString('utf8');
+        // The seek lands mid-character as readily as mid-line; the partial
+        // first line is dropped by `parseLine` either way.
+        text = buf.toString('utf8', 0, read);
       }
     } catch (err) {
       console.error(`[agent-notes] failed to read the unplaced-note log: ${String(err)}`);

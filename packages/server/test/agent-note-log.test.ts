@@ -129,6 +129,39 @@ describe('AgentNoteLog', () => {
     }
   });
 
+  describe('when the file is past the byte cap and the read has to seek', () => {
+    // The branch that cannot be reasoned about by reading it: a seek lands
+    // mid-line and mid-character, and the buffer is longer than the read.
+    // Driven with a small cap rather than a four-megabyte fixture.
+    const smallCap = 400;
+
+    it('still returns the newest note, not a line padded with the buffer’s zeros', () => {
+      const seeking = new AgentNoteLog(dataDir, smallCap);
+      for (let i = 0; i < 40; i++) seeking.append(note({ at: 1000 + i, text: `note ${i}` }));
+      expect(seeking.readFor(WS, 'Cartographer', 1).map((n) => n.text)).toEqual(['note 39']);
+      expect(seeking.lastTurnAt(WS, 'Cartographer')).toBe(1039);
+    });
+
+    it('drops only the line the seek cut, not the ones after it', () => {
+      const seeking = new AgentNoteLog(dataDir, smallCap);
+      for (let i = 0; i < 40; i++) seeking.append(note({ at: 1000 + i, text: `note ${i}` }));
+      const got = seeking.readFor(WS, 'Cartographer', 100);
+      // Fewer than all forty (the cap cut the file), but every one it did
+      // return parsed — a partial line would have thrown or come back junk.
+      expect(got.length).toBeGreaterThan(0);
+      expect(got.length).toBeLessThan(40);
+      expect(got.every((n) => n.text.startsWith('note '))).toBe(true);
+      // Contiguous from the newest backwards: nothing in the middle was lost.
+      expect(got.map((n) => n.at)).toEqual(got.map((_, i) => 1039 - i));
+    });
+
+    it('does not mangle a multi-byte character in a line it keeps whole', () => {
+      const seeking = new AgentNoteLog(dataDir, smallCap);
+      for (let i = 0; i < 40; i++) seeking.append(note({ at: 1000 + i, text: `café ${i} ✅` }));
+      expect(seeking.readFor(WS, 'Cartographer', 1).map((n) => n.text)).toEqual(['café 39 ✅']);
+    });
+  });
+
   it('keeps the sessionId it was given and omits one it was not', () => {
     log.append(note({ at: 1, sessionId: 'sess-7' }));
     log.append(note({ at: 2 }));
