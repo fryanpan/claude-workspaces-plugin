@@ -74,6 +74,7 @@ function queueRow(id: string, opts: { drifting?: boolean } = {}): Record<string,
     status: 'todo',
     assignee: 'Saltmarsh',
     assigneeId: 'agent-saltmarsh',
+    needs: 'action',
     blockedBy: [],
     ready: true,
     blocked: false,
@@ -97,23 +98,25 @@ const QUEUE = {
 
 /** Stored tasks, as `/workspaces/<id>/tasks?format=json` returns them. The
  *  queue row's keys — `goalTitle`, `ready` — are deliberately absent. */
-const STORED = [
-  {
-    id: 't-1',
+function storedRow(id: string, order: number): Record<string, unknown> {
+  return {
+    id,
     workspaceId: 'w-1',
-    title: 'Agent can read t-1 without paying for the whole board',
+    title: `Agent can read ${id} without paying for the whole board`,
     status: 'todo',
     assignee: 'Saltmarsh',
     goal: 'g-riverbend',
-    order: 1,
+    order,
     after: [],
     links: [],
-    body: body('row t-1'),
+    body: body(`row ${id}`),
     transitions: [{ to: 'todo' }, { to: 'in-progress' }],
     createdAt: 1_000,
     updatedAt: 2_000,
-  },
-];
+  };
+}
+
+const STORED = [storedRow('t-1', 1), storedRow('t-2', 2), storedRow('t-3', 3)];
 
 describe('projectQueueRows — the default is the picker shape', () => {
   const rows = projectQueueRows(QUEUE.tasks);
@@ -131,6 +134,7 @@ describe('projectQueueRows — the default is the picker shape', () => {
       'goalTitle',
       'id',
       'inGoalBand',
+      'needs',
       'ownerSession',
       'ready',
       'status',
@@ -150,9 +154,20 @@ describe('projectQueueRows — the default is the picker shape', () => {
     );
     expect(drifting.noteCount).toBe(6);
     expect(drifting).not.toHaveProperty('notes');
-    // Not merely trimmed: the advice says "read the notes below", so a row
-    // carrying it without them would point the caller at nothing.
-    expect(drifting).not.toHaveProperty('advice');
+  });
+
+  it('re-aims the advice at the call that brings the notes, keeping the done guard', () => {
+    const drifting = rows[0]?.premise as Record<string, unknown>;
+    const advice = String(drifting.advice);
+    // The server's own advice says "read the N notes BELOW", and a row saying
+    // that while carrying none points the caller at nothing.
+    expect(advice).not.toContain('below');
+    expect(advice).toContain('next_tasks(fields: ["id","premise"])');
+    // The second sentence is the guard behind `decidePremiseDrift`'s first
+    // silence and nothing else on the row carries it, so it survives verbatim.
+    expect(advice).toContain('This says nothing about whether the task is done.');
+    // And it counts what it is pointing at, so the caller knows the size.
+    expect(advice).toContain('6 notes');
   });
 
   it('says nothing about a row that is not drifting', () => {
@@ -214,9 +229,15 @@ describe('unsatisfiableFields — declared vocabulary OR a key some row carries'
 let mcp: BundleHarness;
 
 beforeAll(async () => {
-  mcp = await startBundle((req: Recorded) =>
-    req.path.includes('/next') ? QUEUE : { workspaceId: 'w-1', tasks: STORED },
-  );
+  // `w-empty` is the board with nothing on it — a queue where everything is
+  // blocked, a task list filtered to nothing. It is what the refusal's
+  // empty-result branch needs, and no fixture can stand in for it: the
+  // branch fires on `rows.length === 0` at the handler.
+  mcp = await startBundle((req: Recorded) => {
+    const empty = req.path.includes('/w-empty/');
+    if (req.path.includes('/next')) return empty ? { tasks: [] } : QUEUE;
+    return { workspaceId: empty ? 'w-empty' : 'w-1', tasks: empty ? [] : STORED };
+  });
 }, 60_000);
 afterAll(async () => {
   await mcp?.stop();
@@ -233,31 +254,52 @@ describe('next_tasks declares what it takes and what it always returns', () => {
     expect(decl?.inputSchema?.required).not.toContain('fields');
   });
 
-  it('names every key the default returns, so a caller can predict the size', () => {
+  // AC 4 is "anything always returned is named in the tool description, so a
+  // caller can predict the size before the call". The two cases below read
+  // the LIST out of each description and compare it to the keys the verb
+  // actually returns, rather than asking whether a word appears somewhere in
+  // a paragraph: `expect(description).toContain('id')` passed on any
+  // description with the word "id" in it, which is nearly all of them, and it
+  // would have gone on passing if the default had grown a key.
+  it('the keys next_tasks names are exactly the ones its default returns', () => {
     const description = mcp.tool('next_tasks')?.description ?? '';
-    for (const key of [
-      'id',
-      'title',
-      'status',
-      'assignee',
-      'goalTitle',
-      'ready',
-      'blocked',
-      'blockedBy',
-      'bodyWrittenAt',
-      'ownerSession',
-      'claimedBy',
-      'premise',
-    ]) {
-      expect(description).toContain(key);
-    }
+    const listed = /carries exactly these keys: ([^—]+)—/.exec(description);
+    // A description that stopped naming them at all must fail here rather
+    // than compare an empty list against an empty list.
+    expect(listed).not.toBeNull();
+    const named = (listed?.[1] ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    // The non-drifting row: every key the default ever returns unconditionally.
+    const always = Object.keys(projectQueueRows(QUEUE.tasks)[1] ?? {});
+    expect([...named].sort()).toEqual([...always].sort());
+  });
+
+  it('next_tasks names premise as the conditional key, and the body as absent', () => {
+    const description = mcp.tool('next_tasks')?.description ?? '';
+    const drifting = Object.keys(projectQueueRows(QUEUE.tasks)[0] ?? {});
+    const always = Object.keys(projectQueueRows(QUEUE.tasks)[1] ?? {});
+    // Whatever a drifting row carries beyond the unconditional set is what
+    // the description has to call out separately.
+    expect(drifting.filter((k) => !always.includes(k))).toEqual(['premise']);
+    expect(description).toContain('`premise`');
     expect(description).toMatch(/does NOT carry the task body/);
   });
 
-  it('list_tasks names what it always returns too', () => {
+  it('list_tasks names the three keys its default does not pass through whole', async () => {
     const description = mcp.tool('list_tasks')?.description ?? '';
-    expect(description).toMatch(/transitionCount/);
-    expect(description).toMatch(/body/);
+    const res = await mcp.call('list_tasks', { workspaceId: 'w-1' });
+    const out = res.json as { tasks: Array<Record<string, unknown>> };
+    const returned = Object.keys(out.tasks[0] ?? {});
+    const stored = Object.keys(STORED[0] ?? {});
+    expect(stored.filter((k) => !returned.includes(k)).sort()).toEqual(['body', 'transitions']);
+    expect(returned.filter((k) => !stored.includes(k))).toEqual(['transitionCount']);
+    // Named as code spans: "the task body" in prose is not a claim about the
+    // `body` key, and the old /body/ match could not tell them apart.
+    for (const key of ['body', 'transitions', 'transitionCount']) {
+      expect(description).toContain(`\`${key}\``);
+    }
   });
 });
 
@@ -310,6 +352,92 @@ describe('next_tasks over the committed bundle', () => {
     const res = await mcp.call('next_tasks', { workspaceId: 'w-1', fields: ['title'] });
     const get = res.sent.find((r) => r.path.endsWith('/next'));
     expect(get?.query.get('fields')).toBeNull();
+  });
+});
+
+describe('an empty result narrows what the refusal can mean, and it says so', () => {
+  // The row scan that lets a server-added key through has nothing to scan on
+  // a board with no rows, so a real but unrecognised name IS refused there.
+  // The hole is documented in `unsatisfiableFields`; these two cases are what
+  // keep the documentation and the message from drifting apart.
+  it('a key some row carries is accepted — and the same key is refused when no row came back', async () => {
+    const accepted = await mcp.call('next_tasks', {
+      workspaceId: 'w-1',
+      fields: ['claimedBy'],
+    });
+    expect(accepted.isError).toBe(false);
+
+    const refused = await mcp.call('next_tasks', {
+      workspaceId: 'w-empty',
+      fields: ['somethingTheServerAddedToday'],
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('somethingTheServerAddedToday');
+    expect(refused.text).toContain('no rows to check it against');
+  });
+
+  it('with rows to check against, the refusal does not blame the empty result', async () => {
+    const res = await mcp.call('next_tasks', {
+      workspaceId: 'w-1',
+      fields: ['somethingTheServerAddedToday'],
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).not.toContain('no rows to check it against');
+    expect(res.text).toContain('no row returned carries it');
+  });
+
+  it('list_tasks says the same thing on an empty board', async () => {
+    const res = await mcp.call('list_tasks', {
+      workspaceId: 'w-empty',
+      fields: ['somethingTheServerAddedToday'],
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('no rows to check it against');
+  });
+});
+
+describe('list_tasks reads one named row, which is what makes the small queue row usable', () => {
+  it('gives the description of the row next_tasks handed back without a body', async () => {
+    const res = await mcp.call('list_tasks', {
+      workspaceId: 'w-1',
+      taskIds: ['t-2'],
+      fields: ['id', 'body'],
+    });
+    expect(res.isError).toBe(false);
+    const out = res.json as { tasks: Array<Record<string, unknown>> };
+    expect(out.tasks).toHaveLength(1);
+    expect(out.tasks[0]).toEqual({ id: 't-2', body: body('row t-2') });
+  });
+
+  it('takes several ids at once, in board order rather than the order asked', async () => {
+    const res = await mcp.call('list_tasks', {
+      workspaceId: 'w-1',
+      taskIds: ['t-3', 't-1'],
+      fields: ['id'],
+    });
+    const out = res.json as { tasks: Array<Record<string, unknown>> };
+    expect(out.tasks.map((t) => t.id)).toEqual(['t-1', 't-3']);
+  });
+
+  it('refuses an id that matches nothing, naming it and the archived case', async () => {
+    const res = await mcp.call('list_tasks', {
+      workspaceId: 'w-1',
+      taskIds: ['t-1', 't-gone'],
+      fields: ['id'],
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain('t-gone');
+    // A short list that reads like a correct answer is the defect; the
+    // recovery has to name the reason an id can be real and still absent.
+    expect(res.text).toContain('includeArchived');
+    expect(res.text).not.toContain('t-1`');
+  });
+
+  it('filters handler-side — the route is asked for the board, not for the ids', async () => {
+    const res = await mcp.call('list_tasks', { workspaceId: 'w-1', taskIds: ['t-2'] });
+    const get = res.sent.find((r) => r.path.endsWith('/tasks'));
+    expect(get?.query.get('taskIds')).toBeNull();
+    expect(get?.query.get('format')).toBe('json');
   });
 });
 

@@ -381,10 +381,18 @@ export async function handleTaskTool(
       // caller's only evidence was a response it could not tell from the
       // right one. Checked against the queue row's vocabulary, which is not
       // the stored task's: `reviews` here is the wrong verb, not a typo.
+      //
+      // Deliberately BEFORE the retired notice below, so a retired board
+      // plus a bad field name answers the field name. The caller cannot read
+      // any answer until its own call is well formed, and the retirement is
+      // still there on the next call; the other order hands back a queue
+      // shaped differently from the one that was asked for.
       if (fields !== undefined && fields.length > 0) {
         const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
         if (missing.length > 0) {
-          return err(unknownFieldsMessage('next_tasks', missing, NEXT_TASK_FIELDS));
+          return err(
+            unknownFieldsMessage('next_tasks', missing, NEXT_TASK_FIELDS, res.tasks.length),
+          );
         }
       }
       // This is the "what should I do next" call, so a retired board has to
@@ -401,9 +409,10 @@ export async function handleTaskTool(
       // Trimmed handler-side for the same reason `list_tasks` is, and the
       // REST route is left alone for the same reason too. Default: the
       // picker's shape — no `body`, and a drifting row's `premise` without
-      // its verbatim discussion. Measured on a seeded local board, the
-      // default is a fraction of the raw rows, and the bulk of what goes is
-      // the note histories.
+      // its verbatim discussion. Measured on a seeded local board the default
+      // was a fifth of the raw rows, and the bodies were the larger half of
+      // what left (8,348 bytes against the note histories' 5,405) — which way
+      // that split falls depends on how much a board has been discussed.
       return ok({
         workspaceId,
         ...(res.retired ? { retired: res.retired } : {}),
@@ -412,15 +421,17 @@ export async function handleTaskTool(
       });
     }
     case 'list_tasks': {
-      const { workspaceId, goal, status, assignee, needs, fields, includeArchived } = a as {
-        workspaceId: string;
-        goal?: string;
-        status?: string;
-        assignee?: string;
-        needs?: string;
-        fields?: string[];
-        includeArchived?: boolean;
-      };
+      const { workspaceId, goal, status, assignee, needs, fields, includeArchived, taskIds } =
+        a as {
+          workspaceId: string;
+          goal?: string;
+          status?: string;
+          assignee?: string;
+          needs?: string;
+          fields?: string[];
+          includeArchived?: boolean;
+          taskIds?: string[];
+        };
       // `format=json` is what tells `/workspaces/<id>/tasks` apart from the
       // board's Tasks TAB, which is the same address in a browser now that
       // the `/api` prefix is gone. Set unconditionally rather than folded
@@ -435,19 +446,48 @@ export async function handleTaskTool(
         'GET',
         `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`,
       )) as { tasks: TaskPayload[] };
+      // NAMED ROWS — the read that makes the queue's small default usable.
+      //
+      // `next_tasks` now hands back a picker's row with no body, on the
+      // premise that a picker "can fetch the one body it takes". It could
+      // not: neither verb could address a task by id, so the only way to get
+      // one description was to ask for everybody's. That is a round trip
+      // added for the same bytes, which is worse than what it replaced.
+      //
+      // Filtered HERE rather than at the route, like `fields` and for the
+      // same reason: the REST route's shape is what an old bundle keeps
+      // reading. The saving is the caller's context, which is what the whole
+      // projection is about — the MCP process sits beside the server, so the
+      // bytes on that hop were never the cost.
+      //
+      // An id that matches nothing is an ERROR naming it. Dropping it would
+      // hand back a shorter list that reads exactly like a correct answer,
+      // which is the defect this whole change is about; and an archived row
+      // is invisible here unless asked for, so the message says that too.
+      let rows = res.tasks;
+      if (taskIds !== undefined && taskIds.length > 0) {
+        const wanted = new Set(taskIds);
+        rows = res.tasks.filter((t) => wanted.has(t.id));
+        const found = new Set(rows.map((t) => t.id));
+        const absent = taskIds.filter((id) => !found.has(id));
+        if (absent.length > 0) {
+          return err(
+            `list_tasks found no task on this board for ${absent.map((id) => `\`${id}\``).join(', ')}. ` +
+              'Check the id, and note that an archived task needs includeArchived: true and that ' +
+              'the other filters (goal, status, assignee, needs) apply to named ids as well.',
+          );
+        }
+      }
       // A name this verb cannot answer is an error, not a quietly missing
       // key. `projectTaskRows` copies a key only `if (key in t)`, so before
       // this check `fields: ['goalTitle', 'ready']` came back as bare ids
       // with nothing said — indistinguishable from a board whose rows really
       // do lack those keys.
       if (fields !== undefined && fields.length > 0) {
-        const missing = unsatisfiableFields(
-          fields,
-          LIST_TASK_FIELDS,
-          res.tasks as unknown as Array<Record<string, unknown>>,
-        );
+        const asRows = rows as unknown as Array<Record<string, unknown>>;
+        const missing = unsatisfiableFields(fields, LIST_TASK_FIELDS, asRows);
         if (missing.length > 0) {
-          return err(unknownFieldsMessage('list_tasks', missing, LIST_TASK_FIELDS));
+          return err(unknownFieldsMessage('list_tasks', missing, LIST_TASK_FIELDS, asRows.length));
         }
       }
       // Trimmed handler-side, NOT at the route — an old bundle keeps
@@ -456,7 +496,7 @@ export async function handleTaskTool(
       // exactly the picked keys per row.
       return ok({
         workspaceId,
-        tasks: projectTaskRows(res.tasks, fields),
+        tasks: projectTaskRows(rows, fields),
       });
     }
     case 'task_transition': {

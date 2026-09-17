@@ -18,76 +18,89 @@
  * the row genuinely lacks are indistinguishable to the caller, which is the
  * same shape as a check that reports passed when it could not run.
  */
+import type { Task } from '@claude-workspaces/core/task-wire';
 
 /**
- * Every key a `list_tasks` row can carry: the stored `Task` (see
- * `@claude-workspaces/core/task-wire`), the two the route resolves on top of
- * it (`ownerKind`, `ownerSession`), and the one this module computes
+ * Every key a `list_tasks` row can carry: the stored `Task`, the two the
+ * route resolves on top of it (`ownerKind`, `ownerSession`, see
+ * `routes/tasks-list-create.ts`), and the one this module computes
  * (`transitionCount`).
  *
  * Written down rather than derived because the check it backs is an error
  * message: a caller that asks for `goalTitle` here needs to be told that this
  * verb has no such key, and a list of what it does have is the cheapest way
- * to say so. Kept honest by `unsatisfiableFields` widening to the keys the
- * rows actually carry, so a field the server adds tomorrow is accepted today.
+ * to say so.
+ *
+ * A TABLE rather than an array, and the type is the point. `Record<keyof
+ * Task | …, true>` is exhaustive in both directions: a field added to `Task`
+ * fails to compile until it is listed here, and a name listed here that is
+ * not a key of `Task` fails too. A plain `string[]` would have let a typo or
+ * a removed field sit unnoticed until a caller was refused a name that is
+ * real — which is the failure this whole module exists to stop, reappearing
+ * in the check itself.
  */
-export const LIST_TASK_FIELDS: readonly string[] = [
-  'after',
-  'afterEnforce',
-  'answer',
-  'answerHistory',
-  'archiveReason',
-  'archivedAt',
-  'archivedBy',
-  'archivedWithGoal',
-  'artifactCheck',
-  'assignee',
-  'assigneeId',
-  'assigneeKind',
-  'body',
-  'bodyWrittenAt',
-  'createdAt',
-  'createdBy',
-  'decisionFiledBy',
-  'decisionJudge',
-  'decisionRevisions',
-  'doneWhen',
-  'dueAt',
-  'effortEstimate',
-  'externalWait',
-  'goal',
-  'id',
-  'infoRequests',
-  'kind',
-  'links',
-  'needs',
-  'notes',
-  'options',
-  'order',
-  'origin',
-  'originDocRevision',
-  'ownerKind',
-  'ownerSession',
-  'planHold',
-  'possiblyStale',
-  'quote',
-  'readingTime',
-  'recurrenceOf',
-  'reviews',
-  'schedule',
-  'status',
-  'title',
-  'titleHead',
-  'titleWrittenAt',
-  'transitionCount',
-  'transitions',
-  'triagedAgainst',
-  'unplacedSince',
-  'untitled',
-  'updatedAt',
-  'wordsRevision',
-  'workspaceId',
-];
+const LIST_TASK_FIELD_TABLE: Record<
+  keyof Task | 'ownerKind' | 'ownerSession' | 'transitionCount',
+  true
+> = {
+  after: true,
+  afterEnforce: true,
+  answer: true,
+  answerHistory: true,
+  archiveReason: true,
+  archivedAt: true,
+  archivedBy: true,
+  archivedWithGoal: true,
+  artifactCheck: true,
+  assignee: true,
+  assigneeId: true,
+  assigneeKind: true,
+  body: true,
+  bodyWrittenAt: true,
+  createdAt: true,
+  createdBy: true,
+  decisionFiledBy: true,
+  decisionJudge: true,
+  decisionRevisions: true,
+  doneWhen: true,
+  dueAt: true,
+  effortEstimate: true,
+  externalWait: true,
+  goal: true,
+  id: true,
+  infoRequests: true,
+  kind: true,
+  links: true,
+  needs: true,
+  notes: true,
+  options: true,
+  order: true,
+  origin: true,
+  originDocRevision: true,
+  ownerKind: true,
+  ownerSession: true,
+  planHold: true,
+  possiblyStale: true,
+  quote: true,
+  readingTime: true,
+  recurrenceOf: true,
+  reviews: true,
+  schedule: true,
+  status: true,
+  title: true,
+  titleHead: true,
+  titleWrittenAt: true,
+  transitionCount: true,
+  transitions: true,
+  triagedAgainst: true,
+  unplacedSince: true,
+  untitled: true,
+  updatedAt: true,
+  wordsRevision: true,
+  workspaceId: true,
+};
+
+export const LIST_TASK_FIELDS: readonly string[] = Object.keys(LIST_TASK_FIELD_TABLE);
 
 /**
  * Every key a `next_tasks` row can carry: the queue row `buildQueue` returns,
@@ -125,11 +138,21 @@ export const NEXT_TASK_FIELDS: readonly string[] = [
  * them — empty when every entry is satisfiable.
  *
  * Satisfiable means EITHER declared in the vocabulary above OR present on at
- * least one row that came back. The union is what makes the check safe in
- * both directions: a key the server adds and this module has not heard of
- * still arrives (the rows carry it), and a declared key that no row on this
- * particular board happens to hold — `archiveReason` with nothing archived —
- * is still accepted rather than reported as a mistake.
+ * least one row that came back. Each half covers a different drift: the
+ * declared list accepts a real key that no row on this board happens to hold
+ * (`archiveReason` with nothing archived), and the row scan accepts a key the
+ * server has added since this module was written.
+ *
+ * **The row scan is worth exactly what the result set is worth.** On an empty
+ * result — a queue where everything is blocked, `list_tasks(status: 'done')`
+ * on a board with none — there are no keys to widen with, so a server-added
+ * field this module has not heard of IS refused, by name, though it is real.
+ * That is the narrow hole, and the refusal says so rather than leaving the
+ * caller to work it out: the check's verdict depends on whether there was
+ * anything to check, which is the failure class this module exists to stop,
+ * so it is stated aloud instead of being papered over. Accepting every name
+ * on an empty result is the other direction and worse — a typo would then go
+ * unreported exactly where the caller has no rows to notice it in.
  */
 export function unsatisfiableFields(
   fields: readonly string[],
@@ -155,13 +178,18 @@ export function unknownFieldsMessage(
   verb: string,
   missing: readonly string[],
   known: readonly string[],
+  /** How many rows the check could scan. Zero changes what the refusal
+   *  MEANS — see `unsatisfiableFields` — so it changes what it says. */
+  rowsSeen = 1,
 ): string {
   const plural = missing.length === 1 ? 'field' : 'fields';
-  return (
-    `${verb} cannot return the ${plural} ${missing.map((m) => `\`${m}\``).join(', ')} — ` +
-    `no such key on a ${verb} row, and no row returned carries it. ` +
-    `Ask for any of: ${[...known].sort().join(', ')}.`
-  );
+  const named = missing.map((m) => `\`${m}\``).join(', ');
+  const because =
+    rowsSeen === 0
+      ? `no such key on a ${verb} row, and this call returned no rows to check it against — ` +
+        'a key newer than this bundle cannot be recognised on an empty result'
+      : `no such key on a ${verb} row, and no row returned carries it`;
+  return `${verb} cannot return the ${plural} ${named} — ${because}. Ask for any of: ${[...known].sort().join(', ')}.`;
 }
 
 /**
@@ -230,19 +258,32 @@ const NEXT_DEFAULT_KEYS: readonly string[] = [
 ];
 
 /**
- * The drift warning without its transcript: the dates, the gap, the headline
- * and HOW MANY notes there are.
+ * The drift warning without its transcript: the dates, the gap, the headline,
+ * HOW MANY notes there are, and advice rewritten for a row that does not
+ * carry them.
  *
- * `advice` is dropped along with the notes on purpose. The server writes it
- * as "read the N notes below", and a row saying that while carrying no notes
- * is exactly the answer-a-caller-cannot-tell-from-a-correct-one this
- * projection exists to stop. `noteCount` states the same fact without
- * pointing at content that is not there, and the tool description says which
- * call brings the notes themselves.
+ * The server's own `advice` cannot ride along, because its first sentence is
+ * "read the N notes below" and a row saying that while carrying no notes is
+ * exactly the answer-a-caller-cannot-tell-from-a-correct-one this projection
+ * exists to stop. But its SECOND sentence is load-bearing and nothing else
+ * carries it: "this says nothing about whether the task is done" is the guard
+ * behind `decidePremiseDrift`'s first silence, which exists so a stale
+ * premise can never be read as a finished task. So the sentence is kept
+ * verbatim and only the pointer is re-aimed, at the call that really does
+ * bring the notes.
  */
 function summarizePremise(premise: Record<string, unknown>): Record<string, unknown> {
   const { notes, advice: _advice, ...rest } = premise;
-  return { ...rest, noteCount: Array.isArray(notes) ? notes.length : 0 };
+  const count = Array.isArray(notes) ? notes.length : 0;
+  return {
+    ...rest,
+    noteCount: count,
+    advice:
+      `Read the ${count} note${count === 1 ? '' : 's'} with ` +
+      'next_tasks(fields: ["id","premise"]) before you reproduce what the description ' +
+      'claims — they postdate it and may already have corrected it. ' +
+      'This says nothing about whether the task is done.',
+  };
 }
 
 /**

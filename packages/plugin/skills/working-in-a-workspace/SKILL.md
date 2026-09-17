@@ -58,8 +58,8 @@ DO NOT use regular chat messages in Claude Code to share progress or ask for hel
 
 `next_tasks(workspaceId)` is the queue, already filtered to what you can do.
 
-- **Take every ready task that does not collide with another.** The queue row is a picker's row — title, owner, band, ready-state, who is on it — and not the description. Read the description of the row you are taking with `next_tasks(workspaceId, fields: ["id","body"])`, or of one row with `list_tasks`. Call `next_tasks` again whenever a line of work finishes, because priorities move while you work.
-- **A row that says `premise` has been discussed since its description was written.** The row carries the headline and `noteCount`; read the notes themselves with `fields: ["id","premise"]` before you act on the description they may already have corrected.
+- **Take every ready task that does not collide with another.** The queue row is a picker's row — title, owner, band, ready-state, who is on it — and not the description. Read the descriptions you need with `list_tasks(workspaceId, taskIds: [...], fields: ["id","body"])`: one id for the row you are taking, or the handful you are judging for collision. Call `next_tasks` again whenever a line of work finishes, because priorities move while you work.
+- **A row that says `premise` has been discussed since its description was written.** The row carries the headline and `noteCount`; read the notes themselves with `next_tasks(workspaceId, fields: ["id","premise"])` before you act on the description they may already have corrected.
 - **Read** `bodyWrittenAt` **and update it**
   - When you start (or restart) work on a task, the task may have changed over time
   - Review comments and activity on the task and modify the `description` if the task has changed

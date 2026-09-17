@@ -16884,7 +16884,7 @@ var TOOL_LIST = {
     },
     {
       name: "next_tasks",
-      description: "The work queue: what to pick up next, in priority order, filtered to what you can do. Take the whole ready set, not just the first task. Skip a task whose claimedBy is an active session that is not you. The todo tasks are trimmed to the board's free parallelism slots, and `capacity` names the cap, the slots in use, and the ready tasks held back. Each row carries exactly these keys: id, title, status, assignee, assigneeId, needs, goal, goalTitle, inGoalBand, goalInTriage, ready, blocked, blockedBy, bodyWrittenAt, ownerSession, claimedBy — plus `premise` on a row whose description has stood still while the task was discussed, with the headline and the note count. It does NOT carry the task body, and it does not carry the premise notes themselves. Read the one row you take with `fields`.",
+      description: 'The work queue: what to pick up next, in priority order, filtered to what you can do. Take the whole ready set, not just the first task. Skip a task whose claimedBy is an active session that is not you. The todo tasks are trimmed to the board\'s free parallelism slots, and `capacity` names the cap, the slots in use, and the ready tasks held back. Each row carries exactly these keys: id, title, status, assignee, assigneeId, needs, goal, goalTitle, inGoalBand, goalInTriage, ready, blocked, blockedBy, bodyWrittenAt, ownerSession, claimedBy — plus `premise` on a row whose description has stood still while the task was discussed, with the headline and the note count. It does NOT carry the task body, and it does not carry the premise notes themselves. Read the description of the row you are taking with `list_tasks(workspaceId, taskIds: ["<id>"], fields: ["id","body"])`, and a drifting row\'s notes with `next_tasks(workspaceId, fields: ["id","premise"])`.',
       inputSchema: {
         type: "object",
         properties: {
@@ -16902,7 +16902,7 @@ var TOOL_LIST = {
           fields: {
             type: "array",
             items: { type: "string" },
-            description: 'Project each row to these keys instead of the default set, with `id` always included. Use it to read the body of the row you picked (`fields: ["id","body"]`) or a drifting row\'s notes (`fields: ["id","premise"]`), which the default leaves out. A name this verb has no key for is REFUSED and named; the queue row is not the stored task, so `reviews`, `doneWhen` and `transitions` belong to list_tasks.'
+            description: 'Project each row to these keys instead of the default set, with `id` always included. Use it for a drifting row\'s notes (`fields: ["id","premise"]`), which the default leaves out. For ONE row\'s description use list_tasks with taskIds instead — `fields: ["id","body"]` here returns every queue row\'s body. A name this verb has no key for is REFUSED and named; the queue row is not the stored task, so `reviews`, `doneWhen` and `transitions` belong to list_tasks.'
           }
         },
         required: ["workspaceId"]
@@ -16910,7 +16910,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_tasks",
-      description: "List a board's tasks, filtered by goal, status, assignee or needs. Every row comes back whole except for `body` and `transitions`, which are dropped, and `transitionCount`, which is added — so reviews, doneWhen lines, options and notes ride along unless you pass fields. Pass fields to narrow further, because the default shape runs large on a big board. Archived tasks need includeArchived: true.",
+      description: 'List a board\'s tasks, filtered by goal, status, assignee, needs, or named by taskIds. Every row comes back whole except for `body` and `transitions`, which are dropped, and `transitionCount`, which is added — so reviews, doneWhen lines, options and notes ride along unless you pass fields. A single board\'s default answer has run past 600,000 characters, so pass fields on anything wider than a few rows. Reading one task: taskIds plus fields, e.g. `taskIds: ["<id>"], fields: ["id","body"]`. Archived tasks need includeArchived: true.',
       inputSchema: {
         type: "object",
         properties: {
@@ -16923,6 +16923,11 @@ var TOOL_LIST = {
           },
           assignee: { type: "string" },
           needs: { type: "string", enum: ["action", "decision"] },
+          taskIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Return only these tasks, by id. This is the one-task read: pair it with fields to fetch the description of a row next_tasks handed you, whose queue row carries no body. An id that matches no task on this board is REFUSED and named rather than dropped, so a short answer is never a wrong id you did not notice. The other filters still apply, and an archived task still needs includeArchived: true."
+          },
           fields: {
             type: "array",
             items: { type: "string" },
@@ -18674,63 +18679,64 @@ function scheduleOutputLine(schedule) {
 }
 
 // packages/mcp/src/task-projection.ts
-var LIST_TASK_FIELDS = [
-  "after",
-  "afterEnforce",
-  "answer",
-  "answerHistory",
-  "archiveReason",
-  "archivedAt",
-  "archivedBy",
-  "archivedWithGoal",
-  "artifactCheck",
-  "assignee",
-  "assigneeId",
-  "assigneeKind",
-  "body",
-  "bodyWrittenAt",
-  "createdAt",
-  "createdBy",
-  "decisionFiledBy",
-  "decisionJudge",
-  "decisionRevisions",
-  "doneWhen",
-  "dueAt",
-  "effortEstimate",
-  "externalWait",
-  "goal",
-  "id",
-  "infoRequests",
-  "kind",
-  "links",
-  "needs",
-  "notes",
-  "options",
-  "order",
-  "origin",
-  "originDocRevision",
-  "ownerKind",
-  "ownerSession",
-  "planHold",
-  "possiblyStale",
-  "quote",
-  "readingTime",
-  "recurrenceOf",
-  "reviews",
-  "schedule",
-  "status",
-  "title",
-  "titleHead",
-  "titleWrittenAt",
-  "transitionCount",
-  "transitions",
-  "triagedAgainst",
-  "unplacedSince",
-  "untitled",
-  "updatedAt",
-  "wordsRevision",
-  "workspaceId"
-];
+var LIST_TASK_FIELD_TABLE = {
+  after: true,
+  afterEnforce: true,
+  answer: true,
+  answerHistory: true,
+  archiveReason: true,
+  archivedAt: true,
+  archivedBy: true,
+  archivedWithGoal: true,
+  artifactCheck: true,
+  assignee: true,
+  assigneeId: true,
+  assigneeKind: true,
+  body: true,
+  bodyWrittenAt: true,
+  createdAt: true,
+  createdBy: true,
+  decisionFiledBy: true,
+  decisionJudge: true,
+  decisionRevisions: true,
+  doneWhen: true,
+  dueAt: true,
+  effortEstimate: true,
+  externalWait: true,
+  goal: true,
+  id: true,
+  infoRequests: true,
+  kind: true,
+  links: true,
+  needs: true,
+  notes: true,
+  options: true,
+  order: true,
+  origin: true,
+  originDocRevision: true,
+  ownerKind: true,
+  ownerSession: true,
+  planHold: true,
+  possiblyStale: true,
+  quote: true,
+  readingTime: true,
+  recurrenceOf: true,
+  reviews: true,
+  schedule: true,
+  status: true,
+  title: true,
+  titleHead: true,
+  titleWrittenAt: true,
+  transitionCount: true,
+  transitions: true,
+  triagedAgainst: true,
+  unplacedSince: true,
+  untitled: true,
+  updatedAt: true,
+  wordsRevision: true,
+  workspaceId: true
+};
+var LIST_TASK_FIELDS = Object.keys(LIST_TASK_FIELD_TABLE);
 var NEXT_TASK_FIELDS = [
   "assignee",
   "assigneeId",
@@ -18763,9 +18769,11 @@ function unsatisfiableFields(fields, known, rows) {
   }
   return missing;
 }
-function unknownFieldsMessage(verb, missing, known) {
+function unknownFieldsMessage(verb, missing, known, rowsSeen = 1) {
   const plural = missing.length === 1 ? "field" : "fields";
-  return `${verb} cannot return the ${plural} ${missing.map((m) => `\`${m}\``).join(", ")} — ` + `no such key on a ${verb} row, and no row returned carries it. ` + `Ask for any of: ${[...known].sort().join(", ")}.`;
+  const named = missing.map((m) => `\`${m}\``).join(", ");
+  const because = rowsSeen === 0 ? `no such key on a ${verb} row, and this call returned no rows to check it against — ` + "a key newer than this bundle cannot be recognised on an empty result" : `no such key on a ${verb} row, and no row returned carries it`;
+  return `${verb} cannot return the ${plural} ${named} — ${because}. Ask for any of: ${[...known].sort().join(", ")}.`;
 }
 function projectTaskRows(tasks, fields) {
   const rows = tasks;
@@ -18808,7 +18816,12 @@ var NEXT_DEFAULT_KEYS = [
 ];
 function summarizePremise(premise) {
   const { notes, advice: _advice, ...rest } = premise;
-  return { ...rest, noteCount: Array.isArray(notes) ? notes.length : 0 };
+  const count = Array.isArray(notes) ? notes.length : 0;
+  return {
+    ...rest,
+    noteCount: count,
+    advice: `Read the ${count} note${count === 1 ? "" : "s"} with ` + 'next_tasks(fields: ["id","premise"]) before you reproduce what the description ' + "claims — they postdate it and may already have corrected it. " + "This says nothing about whether the task is done."
+  };
 }
 function projectQueueRows(rows, fields) {
   const isDefault = !fields || fields.length === 0;
@@ -18954,7 +18967,7 @@ async function handleTaskTool(name, a, ctx) {
       if (fields !== undefined && fields.length > 0) {
         const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
         if (missing.length > 0) {
-          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS));
+          return err2(unknownFieldsMessage("next_tasks", missing, NEXT_TASK_FIELDS, res.tasks.length));
         }
       }
       return ok2({
@@ -18965,7 +18978,7 @@ async function handleTaskTool(name, a, ctx) {
       });
     }
     case "list_tasks": {
-      const { workspaceId, goal, status, assignee, needs, fields, includeArchived } = a;
+      const { workspaceId, goal, status, assignee, needs, fields, includeArchived, taskIds } = a;
       const qs = new URLSearchParams({ format: "json" });
       if (goal !== undefined)
         qs.set("goal", goal);
@@ -18978,15 +18991,26 @@ async function handleTaskTool(name, a, ctx) {
       if (includeArchived === true)
         qs.set("includeArchived", "true");
       const res = await http("GET", `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`);
+      let rows = res.tasks;
+      if (taskIds !== undefined && taskIds.length > 0) {
+        const wanted = new Set(taskIds);
+        rows = res.tasks.filter((t) => wanted.has(t.id));
+        const found = new Set(rows.map((t) => t.id));
+        const absent = taskIds.filter((id) => !found.has(id));
+        if (absent.length > 0) {
+          return err2(`list_tasks found no task on this board for ${absent.map((id) => `\`${id}\``).join(", ")}. ` + "Check the id, and note that an archived task needs includeArchived: true and that " + "the other filters (goal, status, assignee, needs) apply to named ids as well.");
+        }
+      }
       if (fields !== undefined && fields.length > 0) {
-        const missing = unsatisfiableFields(fields, LIST_TASK_FIELDS, res.tasks);
+        const asRows = rows;
+        const missing = unsatisfiableFields(fields, LIST_TASK_FIELDS, asRows);
         if (missing.length > 0) {
-          return err2(unknownFieldsMessage("list_tasks", missing, LIST_TASK_FIELDS));
+          return err2(unknownFieldsMessage("list_tasks", missing, LIST_TASK_FIELDS, asRows.length));
         }
       }
       return ok2({
         workspaceId,
-        tasks: projectTaskRows(res.tasks, fields)
+        tasks: projectTaskRows(rows, fields)
       });
     }
     case "task_transition": {

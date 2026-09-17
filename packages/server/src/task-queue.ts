@@ -58,7 +58,14 @@ export interface QueueRow {
   title: string;
   /** The full description. A row has to be pickup-able as it stands — a
    *  truncated one sends the reader for a second call to find out what the
-   *  task is, which is the navigation this queue exists to remove. */
+   *  task is, which is the navigation this queue exists to remove.
+   *
+   *  **The `next_tasks` MCP tool no longer passes this on.** Its default row
+   *  is a picker's row and drops `body`; the description of a row an agent
+   *  takes comes from `list_tasks(taskIds, fields)`. So the second call above
+   *  is exactly what an agent now makes — deliberately, because measuring it
+   *  showed the queue was paying for every body to save a fetch of one. This
+   *  field is unchanged for every other reader of the route. */
   body: string;
   goal: string;
   /** The goal's own title, verbatim. The band numbering ("1.2 …") is typed
@@ -125,6 +132,12 @@ export interface QueueRow {
    * Omitted, never false: an absent field costs nothing on the rows that
    * are fine, which is what keeps the notes affordable on the rows that
    * are not.
+   *
+   * **The `next_tasks` MCP tool summarises this block** — dates, headline and
+   * a note count, with the notes themselves on `fields: ["id","premise"]`. So
+   * the "arrives WITH the description" above holds for the WARNING and not
+   * for the notes: an agent is still told unprompted that this row has been
+   * contradicted. Everything here still reaches every reader of the route.
    */
   premise?: PremiseDrift;
 }

@@ -16,6 +16,17 @@
  * `body` and drops the discussion. So the body's own correction was sitting
  * one API call away from every agent that re-derived it from scratch.
  *
+ * **What the MCP verb does with this changed, and the sentence above is now
+ * about the ROUTE.** `/workspaces/<id>/next` still returns everything below,
+ * notes included. The `next_tasks` tool projects it: a drifting row reaches
+ * the agent with this block's dates, `headline` and a note COUNT, and the
+ * notes themselves come back on `fields: ["id","premise"]`. The half that had
+ * to arrive unprompted still does — an agent is told, without asking, that
+ * the description it is about to act on has been contradicted — and only the
+ * transcript moved behind an advertised fetch, because carrying every note of
+ * every drifting row on the queue read cost more than the queue was worth.
+ * See `packages/mcp/src/task-projection.ts`.
+ *
  * This is deliberately NOT a claim that the body is WRONG. It is the much
  * weaker, checkable claim that the description has stood still while the
  * conversation moved on — and the remedy is to hand the reader the notes
@@ -54,6 +65,14 @@ export interface PremiseDrift {
    * smaller form (the same reasoning that kept `taskIds` uncapped on the
    * live triage payload). The arming rule below is what keeps the cost
    * bounded: rows that are not drifting carry nothing at all.
+   *
+   * Uncapped HERE, and still uncapped on every read of this route. The
+   * `next_tasks` MCP tool is the one reader that summarises them — a note
+   * count in place of the text, with the text one named `fields` call away.
+   * That is a preview, and the paragraph above is the argument against one;
+   * the argument was weighed and lost to the measured cost of carrying every
+   * note of every drifting row on the most frequent read on the board. Read
+   * `packages/mcp/src/task-projection.ts` before assuming an agent has these.
    */
   notes: PremiseNote[];
 }
