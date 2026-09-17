@@ -41,6 +41,7 @@ import {
 } from '@claude-workspaces/core';
 import { ListeningAnnouncer } from './agent-listening.ts';
 import type { AgentWatches } from './agent-watches.ts';
+import { type AnsweredAsk, type Lift, liftOf } from './blockage-lift.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { commentOfEvent, handedToAgent, recordDelivery } from './comment-receipt.ts';
 import type { DispatchRegistry } from './dispatch-registry.ts';
@@ -603,6 +604,19 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     };
     const reviewItems: ReviewItemRow[] = [];
     const unreadableReviewTaskIds = new Set<string>();
+    /**
+     * When each row's blockage last LIFTED (`blockage-lift.ts`). Read here,
+     * on the same walk that reads the open asks, for the same reason the note
+     * clocks are read here: the stores live in this wiring and the gate stays
+     * pure over what it is handed.
+     *
+     * Both surfaces an answer can live on, like `answeredReviewItemOn`
+     * below — a ticket-borne item keeps the verbatim answer and its stamp on
+     * the row, a comment-borne one keeps `answeredAt` inside its payload —
+     * because an answer the check cannot see is a check that stays silent
+     * about exactly the row a person has already dealt with.
+     */
+    const lifts = new Map<string, Lift>();
     for (const t of tasks) {
       const state = taskStore.reviewState(t.id);
       // Absent means the row vanished between the list and this read. Treated
@@ -626,6 +640,29 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
         });
       }
       reviewItems.push(...declaredAsks(taskBodyDocId(t.id), t.id));
+      const answered: AnsweredAsk[] = [];
+      for (const item of taskStore.listReviewItems(t.id)) {
+        // The board's OWN escalation item is skipped for the reason it is
+        // skipped as an open ask above: it is the board reporting that this
+        // row is stuck, not an ask the row's work waits on, so an answer to
+        // it would name the anchor row as newly unblocked when nothing about
+        // the work changed.
+        if (item.createdBy === STALL_ESCALATION_ACTOR.name) continue;
+        if (item.answer !== undefined)
+          answered.push({ at: item.answer.ts, headline: item.review.headline });
+      }
+      for (const thread of docStore.listThreads(taskBodyDocId(t.id))) {
+        for (const comment of thread.comments) {
+          const review = comment.review;
+          if (review?.answeredAt !== undefined)
+            answered.push({ at: review.answeredAt, headline: review.headline });
+        }
+      }
+      const lift = liftOf({
+        ...(answered.length > 0 ? { answered } : {}),
+        ...(t.doneWhen !== undefined ? { doneWhen: t.doneWhen } : {}),
+      });
+      if (lift !== undefined) lifts.set(t.id, lift);
     }
 
     const now = Date.now();
@@ -658,6 +695,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       events,
       reviewItems,
       ...(noteClocks.size > 0 ? { noteClocks } : {}),
+      ...(lifts.size > 0 ? { lifts } : {}),
       bands: { dispatchable, ownerBand, triage: triageGoals },
       unreadableReviewTaskIds,
       now,
@@ -679,7 +717,26 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // worktree for the whole half hour still owes a check-in on the first
     // pass's board-only clock, which is the false wake the worktree witness
     // was added to stop, arriving through a second door.
-    const suspect = [...first.stalled, ...first.unfiled, ...first.checkIn];
+    // …and the unresumed rows ride with them for the same reason: a row whose
+    // only recent movement is a comment on its thread would otherwise read as
+    // untouched since the lift, which is precisely the claim this finding
+    // makes. Almost all of them are already here as stalled rows; the ones
+    // that are not — a row the parallelism cap holds back, a row whose
+    // declared wait still stands — are exactly the ones with no other reason
+    // to be looked at, so leaving them out would aim the gap at them.
+    //
+    // DEDUPED, which the other three lists never needed: they are disjoint by
+    // construction (`evaluateStalls`'s else-if chain) and this one is not, so
+    // without it a row that is both stalled and unresumed would have its
+    // linked docs walked twice and push every ask on them twice — the same
+    // item arriving as two addresses on the `waiting` line.
+    const suspect = [
+      ...new Map(
+        [...first.stalled, ...first.unfiled, ...first.checkIn, ...first.unresumed].map(
+          (row) => [row.id, row] as const,
+        ),
+      ).values(),
+    ];
     if (suspect.length === 0) return first;
     // Second pass over the handful the first pass named. A doc that was never
     // opened holds no threads and answers nothing, which is the right answer:
@@ -1107,6 +1164,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       retired: workspace.retiredAt !== undefined,
       stalled: verdict.stalled,
       unfiled: verdict.unfiled,
+      ...(verdict.unresumed.length > 0 ? { unresumed: verdict.unresumed } : {}),
       ...(verdict.waiting.length > 0 ? { waiting: verdict.waiting } : {}),
       ...(verdict.declaredWaits.length > 0 ? { declaredWaits: verdict.declaredWaits } : {}),
       considered: verdict.considered,

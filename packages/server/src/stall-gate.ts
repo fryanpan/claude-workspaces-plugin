@@ -50,7 +50,15 @@
  * open question is precisely what would have exonerated it. Such a row is not
  * named as stalled and is not counted healthy either. It is named as unread,
  * so the silence about it belongs to somebody.
+ *
+ * `unresumed` is the fourth, and it is the only one that says something GOOD
+ * happened: a row whose ask was answered, or whose done-when line went met
+ * with later lines still open, and which nothing has touched since. The lead's
+ * act is to hand the answer back to whoever was waiting on it, not to look for
+ * an owner — so it is its own list and its own sentence. What it rests on is
+ * `blockage-lift.ts`; every gate it passes is applied at the reading below.
  */
+import { type Lift, type LiftKind, unresumedSince } from './blockage-lift.ts';
 import {
   type EventRow,
   type FiledItemAddress,
@@ -225,6 +233,42 @@ export interface DeclaredWaitRow {
   lapsed?: true;
 }
 
+/**
+ * A row whose blockage LIFTED and whose work has not restarted
+ * (`blockage-lift.ts`): an ask on it was answered, or a done-when line went
+ * met with later lines still open, and nothing has touched the row since.
+ *
+ * Its own list, beside `stalled` rather than inside it, because the lead's
+ * act differs and so does the evidence. A stalled row says nobody is on this
+ * and the lead goes looking for somebody; this row says the answer that was
+ * being waited for is IN, and names it — the lead hands it back to whoever
+ * asked. It is also the only list that can speak for a row whose declared
+ * wait is still standing (`stall-nudge.ts`'s `withoutStandingWaits` takes
+ * those off `stalled` and nothing else), which is exactly the 21-hour shape:
+ * a wait declared on a person who had already answered.
+ */
+export interface UnresumedRow {
+  id: string;
+  title: string;
+  /** The classifier's bucket, as `StalledRow` carries it. */
+  bucket: string;
+  /** How long since anything touched the row — the same reading every other
+   *  finding here runs on. */
+  quietMs: number;
+  /** Which signal said the blockage lifted. */
+  lift: LiftKind;
+  /** When it lifted, and how long ago. Carried so a reader can check the
+   *  event — the way `ungatedUi` carries the file that convicted a row —
+   *  rather than take the finding's word for it. */
+  liftedAt: number;
+  liftedMs: number;
+  /** What is now unblocked, in the board's own words. */
+  what: string;
+  /** What is open now: the first open line after the met one. `done-when-met`
+   *  only. */
+  next?: string;
+}
+
 /** A row the gate could not evaluate. */
 export interface StallUndeterminedRow {
   id: string;
@@ -243,6 +287,15 @@ export interface StallVerdict {
    * two words.
    */
   unfiled: StalledRow[];
+  /**
+   * Rows whose blockage lifted and whose work has not restarted, longest
+   * since the lift first. NOT disjoint from `stalled`: a quiet row that was
+   * answered is usually both, and the two sentences say different things
+   * about it — one that nobody is driving it, one that the answer it was
+   * waiting for is already in. The check-in list is the only one here that
+   * has to be disjoint, because its remedy contradicts a stall's.
+   */
+  unresumed: UnresumedRow[];
   /** Rows waiting on a person WITH the question filed — by address. Listed
    *  so the wait is checkable, not so anyone is woken. */
   waiting: WaitingRow[];
@@ -313,6 +366,16 @@ export interface EvaluateStallsInput {
    * the check existed.
    */
   noteClocks?: Map<string, import('./waiting-unfiled.ts').NoteClock>;
+  /**
+   * When each row's blockage last LIFTED, by row id (`blockage-lift.ts`). The
+   * caller reads the two surfaces an answer can live on and the row's
+   * done-when lines; this gate only ever consumes the verdict, exactly as it
+   * does for `noteClocks`.
+   *
+   * Absent — every caller that does not compute it — leaves `unresumed`
+   * empty, which is what every caller saw before the finding existed.
+   */
+  lifts?: Map<string, Lift>;
   /**
    * Rows with an OPEN dispatch whose worktree watcher is WATCHING — and only
    * those. The caller must exclude a dispatch whose watcher failed to arm or
@@ -412,6 +475,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
   const stalled: StalledRow[] = [];
   const checkIn: StalledRow[] = [];
   const unfiled: StalledRow[] = [];
+  const unresumed: UnresumedRow[] = [];
   const waiting: WaitingRow[] = [];
   const undetermined: StallUndeterminedRow[] = [];
   for (const row of rows) {
@@ -523,7 +587,42 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
       row.sinceActivityMs > checkInMs
     )
       checkIn.push({ ...named, bucket: CHECK_IN_BUCKET });
+
+    // A blockage that lifted with nothing done since (`blockage-lift.ts`).
+    // Judged on its own, after every list above and independent of all of
+    // them, because it answers a different question: not "is anybody on this"
+    // but "did the thing this was waiting for already arrive".
+    //
+    // Restricted to the two RUNNABLE buckets, and that is the exclusion that
+    // keeps it honest. A row still blocked on an unfinished dependency, on
+    // another open ask, or sitting under an unranked band cannot restart
+    // whatever was answered on it — naming it would tell the lead to drive
+    // work the board itself says is not startable. `in-progress` and
+    // `ready-unpicked` are the only buckets where "the work has not restarted"
+    // is a statement about anybody's behaviour.
+    //
+    // The parallelism cap is deliberately NOT applied, for the reason it is
+    // not applied to an unfiled ask: the cap says why nobody picked the row
+    // up and says nothing about an answer already given and read by nobody.
+    // It is one line for the lead and no slot is needed to read it.
+    const lift = input.lifts?.get(row.id);
+    if (
+      lift !== undefined &&
+      (row.bucket === 'in-progress' || row.bucket === 'ready-unpicked') &&
+      unresumedSince(lift, { now: input.now, sinceActivityMs: row.sinceActivityMs, quietMs })
+    )
+      unresumed.push({
+        ...named,
+        lift: lift.kind,
+        liftedAt: lift.at,
+        liftedMs: input.now - lift.at,
+        what: lift.what,
+        ...(lift.next !== undefined ? { next: lift.next } : {}),
+      });
   }
+  // Longest since the lift first: the answer nobody has acted on for longest
+  // is the one to hand back first.
+  unresumed.sort((a, b) => b.liftedMs - a.liftedMs);
   // Every NAMED row's declaration, after the lists are settled: a wait is an
   // annotation on a finding, never a finding of its own, so a row nothing
   // named contributes nothing here. Longest-standing first, matching the
@@ -547,6 +646,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
   return {
     stalled,
     unfiled,
+    unresumed,
     waiting,
     declaredWaits,
     considered: rows.length,
