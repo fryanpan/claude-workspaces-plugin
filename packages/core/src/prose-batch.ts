@@ -40,6 +40,7 @@ import { parseMarkdownBlocks } from './prose-markdown.ts';
 import type { MarkdownParseOptions } from './prose-mdx.ts';
 import { type NestBlocksError, nestBlocksOutcome } from './prose-nest.ts';
 import { addressableBlocks, claimSubtree, findBlockById, newBlockId } from './prose-outline.ts';
+import { type SplitBeforeError, splitBeforeBlock } from './prose-split.ts';
 import { blockText, markBlockProposal, offerWhole } from './suggest-blocks.ts';
 import type { SuggestionAuthor } from './suggest-ops.ts';
 
@@ -47,6 +48,10 @@ import type { SuggestionAuthor } from './suggest-ops.ts';
 export type BlockEdit =
   | { op: 'insert_under_heading'; headingId: string; markdown: string }
   | { op: 'insert_at_end'; markdown: string }
+  // The only insert that lands anywhere but an END, and so the only one that
+  // can put a heading ABOVE the notes it names. See `prose-split.ts` for why
+  // that re-parents them without moving one of them.
+  | { op: 'insert_before_block'; blockId: string; markdown: string }
   // `propose` makes a replace a proposal whoever owns the block — for an edit
   // whose cost to a reader is not what ownership measures. The heading rename
   // is the one that asked for it (`notes-heading-rename.ts`).
@@ -64,7 +69,8 @@ export type BlockEditError =
   | 'empty'
   | 'no-range'
   | 'suggest-failed'
-  | NestBlocksError;
+  | NestBlocksError
+  | SplitBeforeError;
 
 export interface BlockEditOutcome {
   op: BlockEditOp;
@@ -446,6 +452,35 @@ export function applyBlockEdits(
             break;
           }
           for (const el of created) claimSubtree(el, opts.author);
+          outcomes.push({ op: edit.op, status: 'applied' });
+          break;
+        }
+        case 'insert_before_block': {
+          if (edit.markdown.trim().length === 0) {
+            outcomes.push({ op: edit.op, status: 'failed', error: 'empty' });
+            break;
+          }
+          const target = findBlockById(fragment, edit.blockId);
+          if (!target) {
+            outcomes.push({ op: edit.op, status: 'failed', error: 'unknown-block' });
+            break;
+          }
+          const slot = splitBeforeBlock(fragment, target, opts.author, opts.moveOthers === true);
+          if (slot.index === undefined) {
+            outcomes.push({ op: edit.op, status: 'failed', error: slot.error ?? 'unknown-block' });
+            break;
+          }
+          // NOT `insertBlocksMerging`: a slot opened in the middle of a run
+          // has a list of ours on BOTH sides, and merging would grow the one
+          // above rather than write between them — which is the end-placement
+          // this op exists to escape, arrived at by a second route.
+          const blocks = parseMarkdownBlocks(edit.markdown, opts.parse);
+          if (blocks.length === 0) {
+            outcomes.push({ op: edit.op, status: 'failed', error: 'parse-failed' });
+            break;
+          }
+          for (const el of insertParsed(fragment, slot.index, blocks))
+            claimSubtree(el, opts.author);
           outcomes.push({ op: edit.op, status: 'applied' });
           break;
         }

@@ -1,18 +1,29 @@
 /**
  * Never deliver an event back to the session that caused it.
  *
- * THE DEFECT. A session posts a comment (`create_thread` / `post_reply`); the
- * server fires `thread.created` / `thread.replied`; the fan-out reaches every
- * stream on the doc's channel and on every board channel holding that doc —
- * including the author's own `watch_doc` stream. The MCP child then rendered
- * it into the session as a `<channel source="claude-workspaces" …>` block
- * carrying the full comment body. Measured 2026-08-24 by four sessions, on
- * every comment, across workspaces and docs. The wake carries zero
- * information — the session wrote the words — and its cost is the payload, so
- * a long review comment is thousands of tokens re-injected into the context
- * that produced it.
+ * THE DEFECT. A session acts on the board — it posts a comment, files a
+ * review item, attaches — the server fires the event, and the fan-out reaches
+ * every stream on the doc's channel and on every board channel holding it,
+ * INCLUDING the acting session's own. The MCP child then rendered it into
+ * that session as a `<channel source="claude-workspaces" …>` block. The wake
+ * carries zero information — the session did the thing — and it costs a turn
+ * plus the payload, so a long review comment is thousands of tokens
+ * re-injected into the context that produced it. Measured 2026-08-24 on
+ * comments by four sessions; measured again 2026-09-17 across the fleet's
+ * week at 6.3–10.2% of its wakes once review items and attaches are counted.
  *
- * WHY HERE AND NOT IN THE SERVER. Three reasons, in order of weight:
+ * ONE RULE, ONE MODULE. This file used to hold only the comment half, with
+ * the board half spelled inline in `channel-messages.ts` as
+ * `p.actor?.id === deps.authorId`. Two homes meant two coverages: the inline
+ * check ran only for the five board prefixes its regex named, so
+ * `review_item.added` / `.revised` / `.withdrawn` — which carry a perfectly
+ * good `actor` — took the doc path and were never tested against it, and
+ * `agent.attached` / `.detached` matched the board path but name their actor
+ * as `agentId` rather than `actor`, so the check could not see it. Every
+ * renderer now asks THIS function, and every attribution rule is in the table
+ * below.
+ *
+ * WHY HERE AND NOT IN THE SERVER. Four reasons, in order of weight:
  *
  *  1. The same frame rides several transports — the doc's own channel, each
  *     board's `ws~<id>` channel, and the REPLAY buffer a reconnecting stream
@@ -20,15 +31,30 @@
  *     filter in `SseBus.broadcast` would cover the live sends and leak the
  *     replay straight back, because a broadcast frame is buffered once with
  *     no addressee and replayed to everyone.
- *  2. `/events/<docId>` carries no `agentId` at all — only the workspace
- *     stream names its agent — so a server-side gate could not even see the
- *     author's stream on the doc channel without an MCP change here anyway.
- *  3. It narrows nothing on the shared server. Per CLAUDE.md the real
+ *  2. A frame the server withheld is a frame the child cannot ACK. The
+ *     comment queue and the voice queue are both receipt-driven
+ *     (`frame-handler.ts`, `channel-messages.ts`): a row stays durable until
+ *     the child posts back that it holds the frame. Dropping the frame on the
+ *     wire would strand those rows and have the server re-offer them after
+ *     every grace window, forever. Dropping it HERE removes the wake and
+ *     leaves both receipts on their existing path — `handleFrame` acks
+ *     outside this gate on purpose.
+ *  3. `/events/<docId>` carries no `agentId`, and the multiplexed route
+ *     registers one on BOARD channels only (`sse-mux.ts`), so a server-side
+ *     gate could not see the actor's own doc stream without an MCP change
+ *     here anyway.
+ *  4. It narrows nothing on the shared server. Per CLAUDE.md the real
  *     compatibility hazard is a peer on an older bundle calling a route it
  *     cannot be restarted away from; a server-side suppression would change
  *     what those sessions RECEIVE, while this changes only what a bundle does
  *     with what it already received. Old bundles keep today's behaviour until
  *     they restart.
+ *
+ * WHAT IS NOT LOST. Suppressing the wake never hides the STATE: nothing here
+ * touches the store, the `.ydoc` or any read path, so the item, the comment
+ * and the roster row are all exactly where the next `get_doc`, `list_threads`,
+ * `next_tasks` or `get_workspace` will find them. The only thing removed is
+ * being told about it a second time.
  *
  * A browser is untouched by construction: it never runs this code, and a
  * reviewer must still watch their own comment appear.
@@ -36,26 +62,63 @@
  * WHY IT FAILS OPEN — the whole design. A duplicated wake is a visible
  * annoyance. A dropped one is silence, and an agent cannot tell silence from
  * "nobody commented", which is the failure class watches exist to close. So
- * this answers `true` only when the author is POSITIVELY identified and is
- * unambiguously this session; every gap — no comment on the payload, no
- * author id, a non-string id, an event with no attribution rule, a shared
- * identity — resolves to delivering.
+ * this answers `true` only when the actor is POSITIVELY identified and is
+ * unambiguously this session; every gap — no attribution on the payload, no
+ * id, a non-string id, an event with no rule, a shared identity — resolves to
+ * delivering.
  *
- * The board half of this rule already existed (`emitBoardChannelMessage` drops a
- * frame whose `actor.id` is this agent). This is its doc-shaped companion.
+ * WHAT IT CANNOT TELL APART. A session and its subagent both resolve to one
+ * `agent-<slug>`, so the subagent's act is suppressed for the parent and the
+ * parent's for the subagent. That is the same trade the board half has made
+ * since it shipped, and it is the safe direction: the state is still there to
+ * be read, and the alternative — matching on something narrower than the
+ * identity every other MCP call carries — has nothing to match on.
  */
 
 /**
- * Comment events. The author of one of these is the person who spoke, and it
- * is the only attribution that may suppress a comment body.
+ * Comment events. The actor is the person who spoke, and their authorship is
+ * the only attribution that may suppress a comment body.
  */
 const COMMENT_EVENTS = new Set(['thread.created', 'thread.replied']);
 
 /**
- * Status changes. `doc-store.ts` stamps `actor` on these precisely because there
- * is no comment to read an author off — see the `fireEvent` signature.
+ * Status changes on a thread. `doc-store.ts` stamps `actor` on these
+ * precisely because there is no comment to read an author off — see the
+ * `fireEvent` signature.
  */
 const STATUS_EVENTS = new Set(['thread.resolved', 'thread.reopened']);
+
+/**
+ * The review-item MEASUREMENT rows, which name their actor as a bare
+ * `actorId` string rather than a `TaskActor`. `tasks.ts` says why: the name
+ * adds nothing to a subtraction and these rows are written far more often
+ * than any other. Listed explicitly so the board rule below can stay a rule
+ * about `actor`.
+ */
+const ACTOR_ID_EVENTS = new Set(['review_item.viewed', 'review_item.answered']);
+
+/**
+ * Board and ticket events: the actor is the top-level `actor`.
+ *
+ * A PREFIX rather than a list of event names, deliberately. A name list goes
+ * stale the moment somebody adds an event, and the way it goes stale is that
+ * the new event echoes — which is the defect this file exists to close, back
+ * again under a new name. Every family here already carries `actor` on every
+ * member that an agent can cause, and the ones a SERVER causes
+ * (`workspace.ready_idle`, `workspace.stalled`, `workspace.review_item_held`,
+ * `workspace.review_answered`, `workspace.done_when_ready`) carry no
+ * top-level actor at all, so they fail open and keep waking their addressee.
+ */
+const ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch)\./;
+
+/**
+ * The attachment family, whose subject IS its actor: `agent.attached` and
+ * `agent.detached` are caused by the agent they name, and name it as
+ * `agentId`. (`agent.heartbeat` never reaches a renderer and
+ * `agent.listening` never reaches an agent stream at all, but both read the
+ * same way here and cost nothing.)
+ */
+const AGENT_FAMILY_RE = /^agent\./;
 
 /**
  * An id that names a CATEGORY or a PERSON rather than this session.
@@ -81,8 +144,12 @@ function idOf(who: unknown): string | undefined {
   return typeof id === 'string' && id.trim() !== '' ? id.trim() : undefined;
 }
 
+function stringOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
 /**
- * The author this frame can be attributed to, or `undefined` when it cannot
+ * The actor this frame can be attributed to, or `undefined` when it cannot
  * be — which is a real outcome, not a defect, and the caller must deliver.
  *
  * `thread.created` fires with `comment: undefined` and the opening comment
@@ -94,15 +161,28 @@ function idOf(who: unknown): string | undefined {
  * undo-answer path (doc-store.ts:1023), where nothing was said and a stamp was
  * removed; the thread's newest comment is somebody's words, not the actor, and
  * reading it there would suppress on a stranger's identity.
+ *
+ * `suggestion.created` reads the SUGGESTION's author, because that is who
+ * proposed it. Its two verdicts are deliberately absent: `suggestion.accepted`
+ * and `suggestion.rejected` carry the SUGGESTER as author too, and the
+ * accepting party is not on the frame at all — so matching on the author
+ * would swallow exactly the outcome the suggesting agent is waiting on.
  */
-function frameAuthorId(event: string, payload: unknown): string | undefined {
+function frameActorId(event: string, payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
   const p = payload as {
     comment?: unknown;
     thread?: { comments?: unknown };
     actor?: unknown;
+    actorId?: unknown;
+    agentId?: unknown;
+    suggestion?: unknown;
   };
   if (STATUS_EVENTS.has(event)) return idOf(p.actor);
+  if (ACTOR_ID_EVENTS.has(event)) return stringOf(p.actorId);
+  if (event === 'suggestion.created') return idOf((p.suggestion as { author?: unknown })?.author);
+  if (AGENT_FAMILY_RE.test(event)) return stringOf(p.agentId);
+  if (ACTOR_FAMILY_RE.test(event)) return idOf(p.actor);
   if (!COMMENT_EVENTS.has(event)) return undefined;
   const direct = idOf((p.comment as { author?: unknown } | undefined)?.author);
   if (direct) return direct;
@@ -115,13 +195,10 @@ function frameAuthorId(event: string, payload: unknown): string | undefined {
 /**
  * Whether this frame is the session's own act coming back to it.
  *
- * `true` means "suppress"; anything uncertain answers `false`. Suggestion
- * verdicts are deliberately absent from every rule above: `suggestion.accepted`
- * and `suggestion.rejected` carry the SUGGESTER as author, so matching on it
- * would swallow exactly the outcome the suggesting agent is waiting on.
+ * `true` means "suppress"; anything uncertain answers `false`.
  */
 export function isSelfAuthoredEvent(event: string, payload: unknown, selfId: string): boolean {
   if (!identifiesOneSession(selfId)) return false;
-  const author = frameAuthorId(event, payload);
-  return author !== undefined && author.toLowerCase() === selfId.trim().toLowerCase();
+  const actor = frameActorId(event, payload);
+  return actor !== undefined && actor.toLowerCase() === selfId.trim().toLowerCase();
 }

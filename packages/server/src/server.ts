@@ -90,6 +90,7 @@ import {
   readDocArchiveManifest,
 } from './review-archive.ts';
 import { createReviewGate } from './review-gate.ts';
+import { isAnalyticsOnlyEvent } from './review-items/analytics.ts';
 import { gateOwnerItems } from './review-items/done-when-owner.ts';
 import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
@@ -1029,8 +1030,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // the board every time the lead started a builder. The measurement it exists
   // for is read out of `events.jsonl` after the fact, so the stream is not a
   // path it needs.
+  //
+  // `review_item.viewed` is the third, and it is the same rule stated for
+  // measurement rather than for noise: an event that exists for analytics
+  // does not reach a listening agent. A person opening a card changes no task
+  // and no status, and no page reads the frame either — the board POSTs the
+  // beacon and never listens for it. `ANALYTICS_ONLY_EVENTS` in
+  // `review-items/analytics.ts` holds the list and says why
+  // `review_item.answered` is not on it.
   taskStore.onEvent((ev) => {
     if (ev.type === 'task.noted' || ev.type === 'dispatch.requested') return;
+    if (isAnalyticsOnlyEvent(ev.type)) return;
     const { type, ...rest } = ev;
     sse.broadcast(`ws~${ev.workspaceId}`, { event: type, ...rest });
   });

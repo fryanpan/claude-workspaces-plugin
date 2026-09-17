@@ -243,9 +243,14 @@ function dispatchReportedLine(p: BoardEventPayload): string {
 /**
  * Forward a workspace-board event as a compact channel message. Two §3.7-style
  * suppressions, both deliberate: `agent.heartbeat` never forwards (a
- * clock tick every few minutes is pure context noise), and an event whose
- * actor is THIS agent never forwards (never deliver an author's own events
- * back to them — §3.10 companion rule).
+ * clock tick every few minutes is pure context noise), and an event this agent
+ * itself caused never forwards.
+ *
+ * The second one used to be spelled here as `p.actor?.id === deps.authorId`,
+ * which read the only attribution this file knew about. It now asks
+ * `self-authored.ts`, the one module that holds the rule and every family's
+ * attribution — including `agent.attached` / `agent.detached`, whose actor is
+ * the `agentId` they name and which this inline check could not see.
  */
 async function emitBoardChannelMessage(
   deps: ChannelDeps,
@@ -266,7 +271,7 @@ async function emitBoardChannelMessage(
   // twin `dispatch.reported` is deliberately NOT here — a builder's closing
   // report is the one event of the pair a person acts on.
   if (event === 'dispatch.requested') return;
-  if (p.actor?.id === deps.authorId) return;
+  if (isSelfAuthoredEvent(event, rawPayload, deps.authorId)) return;
 
   const by = p.actor?.name ? ` by ${p.actor.name}` : '';
   let body: string;
@@ -440,13 +445,13 @@ async function emitChannelMessage(
     await emitBoardChannelMessage(deps, event, rawPayload);
     return;
   }
-  // The doc-shaped companion to the actor check in emitBoardChannelMessage:
-  // never deliver an author's own thread event back to them. The fan-out
-  // reaches the author's own watch stream by design (it is one subscriber
-  // among many), so the suppression belongs at the render point, where it
-  // covers the doc channel, every board channel, and the replay buffer with
-  // one gate — and where it cannot affect a browser, which must still watch
-  // its own comment appear. Fails OPEN on any ambiguity; see self-authored.ts.
+  // The same gate the board path runs, on the doc-shaped events: never
+  // deliver an actor's own event back to them. The fan-out reaches the
+  // actor's own watch stream by design (it is one subscriber among many), so
+  // the suppression belongs at the render point, where it covers the doc
+  // channel, every board channel, and the replay buffer with one gate — and
+  // where it cannot affect a browser, which must still watch its own comment
+  // appear. Fails OPEN on any ambiguity; see self-authored.ts.
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId)) return;
   const p = (rawPayload ?? {}) as ChannelPayload;
   const docId = p.docId ?? 'unknown';

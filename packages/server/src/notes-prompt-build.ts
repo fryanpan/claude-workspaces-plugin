@@ -67,7 +67,7 @@ import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts
 import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
-import { regroupDirective } from './notes-regroup.ts';
+import { regroupDirective } from './notes-regroup-ask.ts';
 
 /**
  * How many blocks at the live end of the doc stay OUT of the cached half.

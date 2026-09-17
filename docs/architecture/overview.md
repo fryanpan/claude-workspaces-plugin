@@ -567,6 +567,21 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
+**An agent gets no wake for an event it cannot act on.** Two rules give that,
+and neither hides state.
+
+*Its own action.* The MCP child drops a frame whose actor is this session, so
+an agent's own comment, review item or task move costs it no turn. Every other
+reader still gets the frame, and one whose actor the child cannot identify is
+always delivered, because an agent cannot detect silence. Rules in
+`packages/mcp/src/self-authored.ts`.
+
+*An analytics event.* `review_item.viewed` records that a person opened a card
+and changes nothing, so the server keeps it off the fan-out while the audit log
+still gets the row. `review_item.answered` stays on the stream, because an
+answer is the wake an agent waits for. The list is in
+`packages/server/src/review-items/analytics.ts`.
+
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
 doc's `tasks` and `workspace` maps are a read-only PROJECTION of that store
@@ -904,7 +919,17 @@ policy: it reads the outline a tick is about to be composed against, finds the
 topics whose flat run has reached the bar `notes-quality.ts` scores, and writes
 the block ids into the prompt so the note-taker groups that topic instead of
 extending it. It counts runs the way `flatBulletRuns` does, deliberately, so
-the directive can never fire on a topic the eval calls fine.
+the directive can never fire on a topic the eval calls fine. It counts a
+SECOND thing beside the run — how many notes one heading stands over at all —
+because a heading may swallow half an hour without ever holding five bullets
+flat, and nesting cannot repair that: the reader meets the same stretch, in
+groups. `notes-regroup-ask.ts` is the other half, split off it: the scan
+decides what is wrong, the ask decides how to say it to a model, and only the
+second is paid for on every tick at full rate. It offers the three remedies
+Bryan asked for rather than one — a subtopic bullet with `nest_blocks`, a
+subheading or a topic heading placed in front of the note a new part starts at
+with `insert_before_block`, and the two composed in a single update, which is
+what takes a stretch already on the page apart.
 `notes-unconfirmed.ts` joins the same DOMAIN tier as the half that settles the
 guesses a meeting marked "(unconfirmed)" — it finds them and names their ids to
 the cleanup pass, which counts what is left afterwards.
@@ -1304,7 +1329,19 @@ insert, and a block with no words, which applies directly whoever owns it.
 `prose-nest.ts` is one of those edits given a
 module of its own: `nest_blocks` MOVES existing list items under a lead bullet
 rather than restating them, which is what lets a note-taker regroup a topic
-without retyping a point or orphaning the comment threads anchored to it. Server-side they are reached through
+without retyping a point or orphaning the comment threads anchored to it.
+`prose-split.ts` is the second, and it is the only insert in the product that
+lands anywhere but an END. Every other one appends — to the document, or to
+the end of the section it names — so a heading could be written and never
+PLACED, and a topic that had swallowed half an hour could not be broken up at
+all. `insert_before_block` opens a slot in front of a named block, splitting
+its list when the block is in the middle of one, and a heading written there
+re-parents every note below it by ARRIVING: an outline reads a block's topic
+as the nearest heading above it, so nothing is moved, nothing is retyped, and
+every note keeps its words, its id and its comment threads. What it does
+disturb is the list it splits, whose tail is carried by the same clone
+`prose-nest.ts` uses — so it asks the same ownership question before it does,
+and refuses rather than carry a line a person owns. Server-side they are reached through
 `doc-outline-ops.ts`, which sits beside `doc-edit-ops.ts` in the services tier
 for the reason that module already gives: `doc-edit-ops.ts` was at the
 500-line bar, and the outline verbs are a family of their own.
