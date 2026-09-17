@@ -172,8 +172,17 @@ export function connect(url: string, protocol?: () => string | undefined): Feedb
       encoding.writeVarUint(enc, MSG_SYNC);
       syncProtocol.writeSyncStep1(enc, ydoc);
       ws.send(encoding.toUint8Array(enc));
-      // Push our local awareness so peers see us after a (re)connect. No-op
-      // for clients (like the widget) that never set local awareness state.
+      // Push our local awareness so peers see us after a (re)connect.
+      //
+      // Skipped only when `getStates()` is genuinely empty. This used to say
+      // it was a no-op "for clients (like the widget) that never set local
+      // awareness state", which was wrong in the one case it named: the real
+      // `Awareness` constructor ends with `this.setLocalState({})`, so a
+      // client that never touches presence still holds one entry and still
+      // sends this frame. It is true of the widget now because its build
+      // stands a stand-in in for the module — see
+      // `packages/widget/scripts/shims/y-protocols-awareness.ts` — and false
+      // of anything else that has not.
       const states = awareness.getStates();
       if (states.size > 0) {
         const enc2 = encoding.createEncoder();
