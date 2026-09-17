@@ -334,9 +334,13 @@ nameless voice holding 63% of the words.
   September meeting it reads 4 labels, 355 turns and 5,890 words. 64.5% of
   the words are nameless under BOTH folds, and one label alone holds 62.7%,
   which matches the 63% above by a separate route. The folds agree because
-  the carry only copies a typed name onto the other labels of the same voice.
-  A label nobody named in any leg has no name to copy. So if the bullet count
-  stays flat after a replay, a name is missing; the fix has not failed.
+  the carry only copies a name typed for a label onto that label in the doc's
+  other legs. A label nobody named in any leg has no name to copy. So while
+  this audit shows the two folds agreeing, a flat bullet count after a replay
+  means a name is missing, not that the fix failed. Two limits: turns with no
+  label count toward total words but never as nameless, and a meeting recorded
+  after the carry shipped already has carried names in its own record, so its
+  per-meeting column is no longer a "before".
 
 ## A recording with nothing in it ends itself (2026-09-12)
 

@@ -231,6 +231,22 @@ describe('when there is nothing to read', () => {
     expect(stdout).toBe('');
   });
 
+  it('says so and exits non-zero when the index exists but lists no meeting', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-carry-noindex-'));
+    const meetings = join(dir, 'meetings', DOC);
+    mkdirSync(meetings, { recursive: true });
+    // A naming line with no start line is not a meeting.
+    writeFileSync(
+      join(meetings, 'meetings.jsonl'),
+      jsonl([{ meetingId: 'm-1', speakers: { A: TYPED_NAME } }]),
+    );
+    const { code, stdout, stderr } = run(['--data-dir', dir, '--doc', DOC]);
+    expect(code).not.toBe(0);
+    expect(stderr).toContain('its index lists none');
+    expect(stdout).toBe('');
+    expect(stderr).not.toContain(TYPED_NAME);
+  });
+
   it('says so and exits non-zero when the data dir does not exist', () => {
     const { code, stdout, stderr } = run([
       '--data-dir',
