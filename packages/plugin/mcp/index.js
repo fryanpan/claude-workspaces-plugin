@@ -14584,12 +14584,24 @@ function nowMs(deps) {
 function nowIso(deps) {
   return new Date(nowMs(deps)).toISOString();
 }
-var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice)\./;
+var BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch)\./;
+function dispatchReportedLine(p) {
+  const who = p.agentName ?? p.actor?.name ?? "a builder";
+  const commit = (p.headCommit ?? "").slice(0, 7);
+  const failed = p.checksFailed ?? 0;
+  const held = p.checksHeld ?? 0;
+  const gates = failed > 0 ? `${failed} of ${p.checksTotal ?? 0} gates FAILED` : `${p.checksTotal ?? 0} gates passed${held > 0 ? ` (${held} held)` : ""}`;
+  const met = p.doneWhenMet ?? 0;
+  const total = p.doneWhenTotal ?? 0;
+  return `[dispatch.reported] ${who} finished ${p.taskId ?? "a task"}: PR #${p.prNumber ?? "?"} at ${commit} — ${gates}, ${met}/${total} done-when met. Read it with the task.`;
+}
 async function emitBoardChannelMessage(deps, event, rawPayload) {
   const p = rawPayload ?? {};
   if (event === "agent.heartbeat")
     return;
   if (event === "task.noted")
+    return;
+  if (event === "dispatch.requested")
     return;
   if (p.actor?.id === deps.authorId)
     return;
@@ -14648,6 +14660,9 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       break;
     case "workspace.done_when_ready":
       body = doneWhenReadyLine(p);
+      break;
+    case "dispatch.reported":
+      body = dispatchReportedLine(p);
       break;
     case "agent.attached":
     case "agent.detached":
@@ -17609,6 +17624,64 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "report_dispatch",
+      description: "End your dispatch with ONE report on the build you just finished, so the lead reads a board record instead of your closing message. Send it once, after the gates have run: the PR number, the commit those gates ran on, what each gate did, and a verdict on every done-when line the task carries. A report missing any of those is refused with a message naming the part. Reporting the SAME commit again is recorded but wakes nobody, so a nudge you already answered costs the lead nothing; a report on a NEW commit is a new build and does wake them.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
+          },
+          taskId: { type: "string", description: "The task you were dispatched on." },
+          prNumber: {
+            type: "integer",
+            description: "The pull request this build is on."
+          },
+          headCommit: {
+            type: "string",
+            description: "The commit the reported checks actually ran on — `git rev-parse HEAD`. Seven characters or more."
+          },
+          checks: {
+            type: "array",
+            description: "One entry per gate you ran. `held` is for a gate the run did not execute, such as a browser-gated member on a machine that opts out — neither a pass nor a failure.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                status: { type: "string", enum: ["pass", "fail", "held"] },
+                detail: {
+                  type: "string",
+                  description: "The line a reader would otherwise open the log for."
+                }
+              },
+              required: ["name", "status"]
+            }
+          },
+          doneWhen: {
+            type: "array",
+            description: "A verdict on EVERY done-when line the task carries — list_tasks and next_tasks give you the ids. Leave one out and the report is refused naming that line. The verdict words are the board's own: met, not-met, unchecked, owner.",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "The done-when line's id (`d-…`)." },
+                verdict: {
+                  type: "string",
+                  enum: ["met", "not-met", "unchecked", "owner"]
+                },
+                note: {
+                  type: "string",
+                  description: "What you measured, or why you could not. Required — a bare `unchecked` is the empty report this refuses."
+                }
+              },
+              required: ["id", "verdict", "note"]
+            }
+          }
+        },
+        required: ["workspaceId", "taskId", "prNumber", "headCommit", "checks", "doneWhen"]
+      }
+    },
+    {
       name: "set_parallelism_cap",
       description: "Set how many builders a board may have dispatched at once. Every board starts on the default of 4. Lower it to keep this board from starving higher-priority projects. The change takes effect on the next dispatch, so nothing running is touched and register_dispatch refuses past the new number. The reply carries the cap, the slots in use, the free slots and lastChange. The floor is one.",
       inputSchema: {
@@ -19810,6 +19883,17 @@ async function handleWorkspaceTool(name, a, ctx) {
       const { taskId } = a;
       return ok2(await http("DELETE", `${board()}/dispatches/${encodeURIComponent(taskId)}`));
     }
+    case "report_dispatch": {
+      const { taskId, prNumber, headCommit, checks: checks3, doneWhen } = a;
+      return ok2(await http("POST", `${board()}/dispatches/${encodeURIComponent(taskId)}/report`, {
+        prNumber,
+        headCommit,
+        checks: checks3,
+        doneWhen,
+        agentName: AUTHOR.name,
+        author: AUTHOR
+      }));
+    }
     case "set_parallelism_cap": {
       const { workspaceId, cap: rawCap } = a;
       const parsed = parseCapArg(rawCap);
@@ -20380,7 +20464,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.252";
+var PLUGIN_VERSION = "0.1.256";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

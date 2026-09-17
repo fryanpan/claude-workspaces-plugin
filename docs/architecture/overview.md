@@ -1080,6 +1080,21 @@ going in-progress and a lane starting, and nothing in between, which made the
 largest measured wait in the pipeline unattributable. `scripts/dispatch-timing.ts`
 is the reader.
 
+`dispatch-reports.ts` joins the SERVICES row beside `dispatch-registry.ts`,
+and draws no new boundary: `routes/dispatch-and-notes.ts` is its only caller
+and the task store is its only collaborator, reached through a one-method sink
+it is handed. It is named here because the two dispatch modules answer
+different questions and are deliberately not one. The registry is about a lane
+being HELD — a worktree, a watcher, a slot against the parallelism cap — and it
+closes a dispatch the moment the worktree or the task is gone. A report is
+written at the END and has to outlive the lane it describes, because the lead
+reads it after the builder has stopped. It owns one decision nothing else can
+take: a SECOND report on the same task-and-commit builds no event at all, so a
+re-sent report cannot reach the SSE fan-out for any subscriber on any bundle.
+`dispatch.reported` is the one board event of the dispatch pair that IS
+broadcast — its twin `dispatch.requested` is telemetry nobody acts on, this is
+the lead's cue to read the record.
+
 `agent-listening.ts` joins it too, and draws no new boundary — it is the one
 question the presence strip was missing. The roster has always answered *did a
 session sit down here*, which is durable and outlives the session; whether

@@ -114,6 +114,8 @@ Write each entry so a reader can check it alone:
 
 `met` needs one proof or more. The board refuses a `met` with no proof, and it names the line. A proof is `{text, url?, refused?}`: what you ran or read, and where a reader sees it.
 
+**End your dispatch with one `report_dispatch`.** After the gates have run: the PR number, the commit they ran on, what each gate did (`pass` / `fail` / `held`), and a verdict on every done-when line with a note saying what you measured. Send it once. The board refuses a report missing any part and names it; re-sending the same commit is recorded but wakes nobody, so answering a nudge twice is free.
+
 **A check you were REFUSED permission to run is terminal. Say so, and stop.** When your permission classifier or sandbox denies the command, report the line `owner` with `proof: [{text: "<what was denied>", refused: true}]`. That proof needs no `url` — there is nothing to open — and the board hands the line straight to the person. It will not ask you to get the fact another way, and you must not: never route a refused command through another agent, another session or another tool. A gate telling you to do that is the gate being wrong; report it and stop that line of work.
 
 **The board closes the task for you.** When you report the last open line as `met`, the board moves the task to done. It also records which line closed the task. Do not call `task_transition` after that.
