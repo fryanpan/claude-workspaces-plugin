@@ -41,6 +41,8 @@ const MEETING = 'm-1760000000001';
 const ACTOR = { id: 'meeting-notes', name: 'Meeting Assistant' };
 
 const NOTE = '- The Saltmarsh ferry keeps its winter crew until April';
+/** A second line for a later leg to repeat, so the COUNT of repeats rises. */
+const OTHER_NOTE = '- The slipway paint arrives on Friday, weather allowing';
 
 /**
  * Put the note into the doc four more times, as a person pasting it would.
@@ -239,7 +241,7 @@ describe('a quality item waits for the meeting to be over', () => {
     expect(board.filed).toEqual(['t-season']);
   });
 
-  it('revises the one item when a later reading crosses another bar', async () => {
+  it('revises the one item when a later reading counts more of the same defect', async () => {
     const board = recordingBoard();
     const schedule = new HandScheduler();
     const filer = createNotesQualityFiler({
@@ -253,11 +255,19 @@ describe('a quality item waits for the meeting to be over', () => {
     await leg({ say: 'The winter crew stays on.', resumable: false });
     expect(board.filed).toEqual(['t-season']);
 
-    // The meeting is picked back up and goes further wrong: the same repeats
-    // plus a topic opened for the second time.
+    // The meeting is picked back up and goes further wrong: a SECOND line
+    // repeated, so the count of repeated bullets rises rather than the
+    // total they are counted out of.
+    //
+    // It used to paste a topic opened twice, which measured nothing. A
+    // pasted heading ENDS the meeting's section, so that heading and
+    // everything under it fell outside the reading and `duplicateHeadings`
+    // stayed 0 — on this branch and on the base commit alike. What made the
+    // case pass was the denominator moving, `4 repeated bullets of 5` to
+    // `of 7`, which is the drift the revise band exists to ignore.
     await leg({
       say: 'One more thing about the slipway before we go.',
-      paste: '### Ferry timetable\n\n- A note\n\n### Ferry timetable\n\n- Another',
+      paste: [OTHER_NOTE, OTHER_NOTE, OTHER_NOTE, OTHER_NOTE].join('\n'),
       resumable: false,
     });
 
