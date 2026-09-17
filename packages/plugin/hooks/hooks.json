@@ -1,12 +1,22 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" --tell-agent \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-note.ts\""
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "mcp__claude-in-chrome__navigate",
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/auto-approve-preview-nav.ts"
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/auto-approve-preview-nav.ts\""
           }
         ]
       },
@@ -15,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/auto-approve-plugin-ops.ts"
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/auto-approve-plugin-ops.ts\""
           }
         ]
       },
@@ -24,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/auto-approve-plugin-ops.ts"
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/auto-approve-plugin-ops.ts\""
           }
         ]
       }
@@ -34,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/stop-note.ts"
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-note.ts\""
           }
         ]
       }
@@ -44,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/permission-denied-note.ts"
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/bin/claude-workspaces-hook.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/permission-denied-note.ts\""
           }
         ]
       }
