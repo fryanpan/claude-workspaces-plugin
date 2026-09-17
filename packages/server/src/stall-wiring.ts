@@ -100,6 +100,12 @@ import {
   type TaskStore,
 } from './tasks.ts';
 import { type ChangedWork, collectUngatedUiRows } from './ui-review-gate.ts';
+import {
+  UNANSWERED_THREAD_DEFAULT_MS,
+  type UnansweredThreadInput,
+  overdueUnansweredThreads,
+  personAwaitingReply,
+} from './unanswered-thread.ts';
 
 /** The cap as a wake names it — `capSummary`'s answer, built in
  *  `createServer` so every reader of the number shares one spelling. */
@@ -216,6 +222,10 @@ export interface StallWiringContext {
   /** How long a hold may stand unrevised before the item goes to the reader
    *  as filed (ms). Default `REVIEW_GATE_RELEASE_MS`, one hour. */
   heldReleaseMs?: number;
+  /** How long a PERSON's question on a doc thread may stand with no agent
+   *  reply before the lead is told (ms). Default
+   *  `UNANSWERED_THREAD_DEFAULT_MS`, a day. */
+  unansweredThreadMs?: number;
   /** How long a board must be without any live session — no stream, no
    *  heartbeat, no agent write — before it files past its lead (ms). */
   stallEscalateMs?: number;
@@ -825,6 +835,37 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
    * is the "held for hours, nobody told" shape the five-minute window exists
    * to prevent.
    */
+  /**
+   * Every doc on this board with an open thread whose last speaker is a
+   * PERSON — a question nobody has answered — past the day window.
+   *
+   * The counterpart to `heldThreadReviewItems` above, and bounded more
+   * tightly on purpose: `workspace.docIds` only, not task and goal bodies.
+   * A ticket body's unanswered comment sits on a row the lead is already
+   * driving and that every other finding here can speak about; a doc's sits
+   * on a surface that may hang on no task at all, which is the case the
+   * board could not see. Widening it later is one loop; starting wide would
+   * have made the first deploy's volume unreadable.
+   *
+   * Archived docs are skipped — a retired surface's open thread is not work
+   * anybody owes an answer on.
+   */
+  function unansweredDocThreads(workspace: BoardWorkspace): UnansweredThreadInput[] {
+    const out: UnansweredThreadInput[] = [];
+    for (const docId of workspace.docIds) {
+      // No archived check: archiving MOVES a doc's files out of the data dir
+      // (`doc-store-workspaces.ts`), so a retired surface is not on this list
+      // to begin with.
+      const meta = docStore.peekMeta(docId);
+      const title = meta?.title || meta?.relPath?.split('/').pop() || docId;
+      for (const thread of docStore.listThreads(docId, { status: 'open' })) {
+        const ask = personAwaitingReply(thread);
+        if (ask === undefined) continue;
+        out.push({ ...ask, id: docId, docId, title, threadId: thread.id });
+      }
+    }
+    return out;
+  }
   function heldThreadReviewItems(workspace: BoardWorkspace): HeldItemInput[] {
     const out: HeldItemInput[] = [];
     const scan = (docId: string, title: string, taskId?: string) => {
@@ -1016,6 +1057,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       Date.now(),
       ctx.stallNudgeQuietMs ?? STALL_QUIET_DEFAULT_MS,
     );
+    // A person's question on a doc that no agent has answered. Its own
+    // window — a day, not the board's quiet window — because the clock it
+    // runs on is a person's patience rather than an agent's silence.
+    const unanswered = overdueUnansweredThreads(
+      unansweredDocThreads(workspace),
+      now,
+      ctx.unansweredThreadMs ?? UNANSWERED_THREAD_DEFAULT_MS,
+    );
     // The board's PULSE: when a session last reported here. Notes are written
     // by sessions and by nothing else — the Stop hook posts one per turn — so
     // the newest note across the board is the cheapest honest answer to "is
@@ -1066,6 +1115,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(capRead ? { parallelismCap: capSummary(capRead) } : {}),
       ...(held.length > 0 ? { held } : {}),
       ...(askedBackRows.length > 0 ? { askedBack: askedBackRows } : {}),
+      ...(unanswered.length > 0 ? { unanswered } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
       ...(verdict.checkIn.length > 0 ? { checkIn: verdict.checkIn } : {}),
     };
