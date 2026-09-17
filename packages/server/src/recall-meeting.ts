@@ -554,6 +554,13 @@ export class RecallMeetingRelay {
         endedAt: record.endedAt ?? this.now(),
         turns: record.turns ?? 0,
       });
+      // A bot leaves a call once. There is no reconnect that picks this
+      // recording back up, so the meeting is over and anything held for it
+      // may reach a person now.
+      this.deps.notes?.onLegEnded?.(
+        { docId: rec.docId, meetingId: record.meetingId },
+        { resumable: false },
+      );
     }
     this.broadcastBot(rec);
     this.byToken.delete(rec.token);

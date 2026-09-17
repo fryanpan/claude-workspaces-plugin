@@ -245,3 +245,30 @@ describe('no gate runs it', () => {
     expect(MEMBERS.filter((m) => m.argv.includes('typecheck')).length).toBeGreaterThan(0);
   });
 });
+
+describe('--compare', () => {
+  it('carries the run to print beside this one', () => {
+    const args = parseRerunArgs(['/meetings/m1', '--spend-usd', '1', '--compare', '/runs/rerun-1']);
+    expect(args.compare).toBe('/runs/rerun-1');
+  });
+
+  it('is absent when nobody asked for a comparison', () => {
+    expect(parseRerunArgs(['/meetings/m1', '--spend-usd', '1']).compare).toBeUndefined();
+  });
+
+  it('needs a value rather than swallowing the next flag', () => {
+    expect(() => parseRerunArgs(['/m1', '--spend-usd', '1', '--compare', '--keep'])).toThrow(
+      UsageError,
+    );
+  });
+
+  it('is in the usage text, because a flag nobody is told about is not a flag', () => {
+    let thrown: unknown;
+    try {
+      parseRerunArgs(['--help']);
+    } catch (err) {
+      thrown = err;
+    }
+    expect((thrown as UsageError).message).toContain('--compare');
+  });
+});

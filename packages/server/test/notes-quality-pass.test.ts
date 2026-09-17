@@ -21,10 +21,11 @@ import { prose } from '@claude-workspaces/core';
 import type { Ref, TaskReviewItem } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import * as Y from 'yjs';
-import { meetingDirPath, meetingIndexPath } from '../src/meetings.ts';
+import { meetingDirPath, meetingIndexPath, meetingTranscriptPath } from '../src/meetings.ts';
 import type { NotesDocStore } from '../src/notes-doc-access.ts';
+import { NOTES_AUTHOR_ID } from '../src/notes-doc-access.ts';
 import { readSectionMarkdown, runNotesQualityPass } from '../src/notes-quality-pass.ts';
-import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
+import { type NotesQualityBoard, fileNotesQualityReview } from '../src/notes-quality-review.ts';
 import { readNotesQuality } from '../src/notes-quality-store.ts';
 
 const dirs: string[] = [];
@@ -66,7 +67,7 @@ const TWO_MEETINGS = [
   '## Meeting notes',
   '### Ferry timetable',
   '- The harbour run moves to the half hour',
-  '- Kestrel Lane keeps the winter crew until April',
+  '- The winter crew stays on until April until April',
   '',
   '## Meeting notes',
   '### Slipway signage',
@@ -142,7 +143,9 @@ describe('the whole pass', () => {
     const result = runNotesQualityPass(
       {
         docStore: () => store,
-        board: () => board,
+        // The immediate filing policy: the pass's own unit tests care WHERE a
+        // reading goes, not when. `notes-quality-timing.test.ts` covers when.
+        file: (input) => fileNotesQualityReview(board, ACTOR, input),
         boardOf: () => 'w-1',
         dataDir,
         headingIdOf: () => headingIdAt(store, 0),
@@ -195,7 +198,7 @@ describe('the whole pass', () => {
 
   it('files on the doc’s row and says so in the line when the notes went badly', () => {
     const dataDir = freshDir();
-    const repeat = '- Kestrel Lane keeps the winter crew until April';
+    const repeat = '- The winter crew stays on until April until April';
     const { store } = docStoreFrom(
       ['## Meeting notes', repeat, repeat, repeat, repeat, repeat].join('\n'),
     );
@@ -203,7 +206,9 @@ describe('the whole pass', () => {
     const result = runNotesQualityPass(
       {
         docStore: () => store,
-        board: () => board,
+        // The immediate filing policy: the pass's own unit tests care WHERE a
+        // reading goes, not when. `notes-quality-timing.test.ts` covers when.
+        file: (input) => fileNotesQualityReview(board, ACTOR, input),
         boardOf: () => 'w-1',
         dataDir,
         headingIdOf: () => headingIdAt(store, 0),
@@ -221,7 +226,7 @@ describe('the whole pass', () => {
 
   it('still counts and still stores when there is no board to file on', () => {
     const dataDir = freshDir();
-    const repeat = '- Kestrel Lane keeps the winter crew until April';
+    const repeat = '- The winter crew stays on until April until April';
     const { store } = docStoreFrom(
       ['## Meeting notes', repeat, repeat, repeat, repeat, repeat].join('\n'),
     );
@@ -256,5 +261,79 @@ describe('the whole pass', () => {
     expect(result.stored).toBe(false);
     expect(result.report.ideas).toBe(0);
     expect(result.report.lateness.source).toBe('unavailable');
+  });
+});
+
+describe('coverage over notes filed under the document’s own headings', () => {
+  const ACTOR = { id: 'meeting-notes', name: 'Meeting Assistant' };
+
+  /** A prepared doc whose headings the meeting wrote under, plus the small
+   *  section it opened for one late point. This is the shape whole-doc
+   *  note-taking produces, and the shape the section reading could not see. */
+  const PREPARED = [
+    '## Timetable',
+    '',
+    '- The harbour run moves to the half hour from April',
+    '- The winter crew stays on until the season opens',
+    '',
+    '## Meeting notes',
+    '',
+    '- Paint arrives on Friday for the slipway boards',
+  ].join('\n');
+
+  const SPOKEN = [
+    { text: 'The harbour run moves to the half hour from April.', ts: 1 },
+    { text: 'The winter crew stays on until the season opens.', ts: 2 },
+  ];
+
+  /** The same doc with the note-taker's mark on the two bullets it wrote
+   *  under the person's heading. */
+  function preparedStore(): NotesDocStore {
+    const { store, ydoc } = docStoreFrom(PREPARED);
+    for (const el of prose.addressableBlocks(prose.getProseFragment(ydoc))) {
+      const text = el.toString();
+      if (text.includes('harbour run moves') || text.includes('winter crew stays on')) {
+        prose.setBlockAuthor(el, NOTES_AUTHOR_ID);
+      }
+    }
+    return store;
+  }
+
+  function passOver(store: NotesDocStore): ReturnType<typeof runNotesQualityPass> {
+    const dataDir = freshDir();
+    mkdirSync(meetingDirPath(dataDir, 'd-harbour'), { recursive: true });
+    writeFileSync(
+      meetingTranscriptPath(dataDir, 'd-harbour', 'm-1'),
+      `${SPOKEN.map((t, i) => JSON.stringify({ turn: i, ...t })).join('\n')}\n`,
+    );
+    writeFileSync(
+      meetingIndexPath(dataDir, 'd-harbour'),
+      `${JSON.stringify({ meetingId: 'm-1', docId: 'd-harbour', startedAt: 1 })}\n`,
+    );
+    return runNotesQualityPass(
+      {
+        docStore: () => store,
+        dataDir,
+        headingIdOf: () => headingIdAt(store, 1),
+        actor: ACTOR,
+        now: () => 5_000,
+      },
+      { docId: 'd-harbour', meetingId: 'm-1' },
+    );
+  }
+
+  it('counts an idea as covered when its note sits under the person’s heading', () => {
+    const result = passOver(preparedStore());
+    expect(result.report.ideas).toBe(2);
+    expect(result.report.uncoveredIdeas).toBe(0);
+  });
+
+  it('THE CONTROL: with no mark to find, the same run reads both ideas as lost', () => {
+    // The unmarked doc is what the section reading always saw — the notes
+    // outside the meeting's own section are invisible, so every idea they
+    // carry reads as an idea that reached no note.
+    const result = passOver(docStoreFrom(PREPARED).store);
+    expect(result.report.ideas).toBe(2);
+    expect(result.report.uncoveredIdeas).toBe(2);
   });
 });

@@ -71,24 +71,41 @@ function apply(doc: Y.Doc, edits: readonly prose.BlockEdit[]): void {
 }
 
 describe('the meeting section heading is not an editable block', () => {
-  test('CONTROL: replacing the heading takes the id the memory holds out of the doc', () => {
+  test('the id survives the replace now, so that route to a second section is shut', () => {
+    // THIS ASSERTION USED TO READ THE OTHER WAY, and the change is deliberate.
+    // A rewrite is a delete and an insert, so the heading used to come back
+    // under a new address and the memory correctly concluded it was gone.
+    // `prose-batch.ts` now hands the replacement the address it replaced, so
+    // the memory still finds its heading. The guard below is no longer what
+    // stands between this edit and a lost id.
     const { doc, headingId } = docWithNotes(12);
     apply(doc, [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting notes' }]);
-    expect(prose.readOutline(doc).some((e) => e.id === headingId)).toBe(false);
+    expect(prose.readOutline(doc).some((e) => e.id === headingId)).toBe(true);
   });
 
-  test('CONTROL: with the id gone, the next tick opens a SECOND Meeting notes section', () => {
+  test('CONTROL: an unguarded replace still takes the section away from every reader', () => {
+    // WHAT THE GUARD IS FOR NOW. The id is safe; the TEXT is not, and the
+    // section is found by text — the client's `notesSectionStart` and the
+    // server's own finder both look for the heading's words. A replace that
+    // rewords it leaves the memory happily pointing at a block no reader can
+    // recognise, and the twelve bullets under it are in the doc and out of
+    // the notes.
     const { doc, headingId } = docWithNotes(12);
-    apply(doc, [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting notes' }]);
-    // The memory checks its remembered id against the outline, finds nothing,
-    // and that is precisely the state in which the pipeline opens a section.
+    apply(doc, [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting summary' }]);
+    expect(sectionCount(doc)).toBe(0);
+    const stranded = prose.readOutline(doc).filter((e) => e.text.startsWith('point'));
+    expect(stranded).toHaveLength(12);
+  });
+
+  test('CONTROL: so the next tick opens a SECOND Meeting notes section', () => {
+    const { doc, headingId } = docWithNotes(12);
+    apply(doc, [{ op: 'replace_block', blockId: headingId, markdown: '## Meeting summary' }]);
     apply(doc, [{ op: 'insert_at_end', markdown: '## Meeting notes\n\n- a later point' }]);
-    expect(sectionCount(doc)).toBe(2);
-    // Both readers of a notes section — the client's `notesSectionStart` and
-    // the server's finder — take the LAST heading with that text, so the
-    // twelve bullets above are still in the doc and no longer in the notes.
-    const last = prose.readOutline(doc).filter((e) => e.text.startsWith('point'));
-    expect(last).toHaveLength(12);
+    // One section reading `Meeting notes`, and it is not the one holding the
+    // meeting: the twelve bullets are stranded under the reworded heading.
+    expect(sectionCount(doc)).toBe(1);
+    const later = prose.readOutline(doc).filter((e) => e.text.includes('a later point'));
+    expect(later).toHaveLength(1);
   });
 
   test('the guard refuses the replace, and the heading keeps its id', () => {

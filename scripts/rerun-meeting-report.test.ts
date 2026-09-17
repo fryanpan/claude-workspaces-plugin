@@ -42,15 +42,20 @@ function input(over: Partial<RerunReportInput> = {}): RerunReportInput {
     turnsSettled: 17,
     ideasVoiced: 24,
     ideasCovered: 19,
+    sectionIdeasVoiced: 24,
+    sectionIdeasCovered: 4,
+    commit: 'abc1234',
     tidy: { ok: true, proposed: 3, applied: 2, refused: 1 },
     billedUsd: 0.0431,
     billedCalls: 12,
     unpricedModels: [],
     firstNoteMs: 9_400,
     notesPath: '/runs/rerun-1/notes.md',
+    writtenNotesPath: '/runs/rerun-1/notes-meeting.md',
     logPath: '/runs/rerun-1/run.log',
     document: SECTION,
     section: SECTION,
+    written: SECTION,
     ...over,
   };
 }
@@ -66,7 +71,7 @@ describe('buildRerunReport', () => {
   it('reads a headingless wall of bullets as one flat run and no heading', () => {
     // The shape the harness exists to catch.
     const section = ['- one', '- two', '- three', '- four', '- five'].join('\n');
-    const report = buildRerunReport(input({ document: section, section }));
+    const report = buildRerunReport(input({ document: section, section, written: section }));
     expect(report.topicHeadings).toBe(0);
     expect(report.longestFlatRun).toBe(5);
   });
@@ -84,10 +89,13 @@ describe('buildRerunReport', () => {
 - Draft timetable due by the ninth
 `;
     const section = '## Meeting notes\n- Draft timetable due by the ninth\n';
-    const report = buildRerunReport(input({ document, section }));
+    const written = '- Confirm the start date\n- Draft timetable due by the ninth\n';
+    const report = buildRerunReport(input({ document, section, written }));
     expect(report.topicHeadings).toBe(2);
     expect(report.bullets).toBe(3);
     expect(report.bulletsInSection).toBe(1);
+    // The measure that replaced it: what the meeting wrote, wherever it sits.
+    expect(report.bulletsWritten).toBe(2);
   });
 
   it('carries every other measure through untouched', () => {
@@ -112,7 +120,7 @@ describe('the unnamed-voice measure', () => {
   ].join('\n');
 
   it('counts the bullets pointing at a voice nobody named, and names the labels', () => {
-    const report = buildRerunReport(input({ document, section: document }));
+    const report = buildRerunReport(input({ document, section: document, written: document }));
     // Three tagged bullets, one of them named: the two placeholders are what
     // a reader cannot trace back to a person.
     expect(report.unnamedVoiceBullets).toBe(2);
@@ -123,13 +131,15 @@ describe('the unnamed-voice measure', () => {
     const named = document
       .replaceAll('Room Speaker B', 'Dockmaster')
       .replaceAll('Speaker C', 'Crane Lead');
-    const report = buildRerunReport(input({ document: named, section: named }));
+    const report = buildRerunReport(input({ document: named, section: named, written: named }));
     expect(report.unnamedVoiceBullets).toBe(0);
     expect(report.unnamedVoiceLabels).toEqual([]);
   });
 
   it('puts the count in the rendered table beside the labels', () => {
-    const text = renderRerunReport(buildRerunReport(input({ document, section: document })));
+    const text = renderRerunReport(
+      buildRerunReport(input({ document, section: document, written: document })),
+    );
     expect(text).toContain('| Bullets on an unnamed voice | 2 of 4 bullet(s) — C, room:B |');
   });
 });
@@ -151,19 +161,31 @@ describe('renderRerunReport', () => {
       for (const cell of cells) expect(cell.trim().length).toBeGreaterThan(0);
     }
     expect(text).toContain('| Bullets on an unnamed voice | 0 of 6 bullet(s) |');
-    expect(rows).toHaveLength(9); // the header plus the eight
+    expect(text).toContain('| Bullets this meeting wrote | 6 of 6 in the document |');
+    // The measures table (header + nine) and the coverage table (header + the
+    // two readings).
+    expect(rows).toHaveLength(13);
   });
 
-  it('says when the coverage figure read only the section, not the whole doc', () => {
+  it('prints both coverage readings of the run, each saying what it counted', () => {
+    // The definition of "ideas covered" changed on 2026-09-16, so a report
+    // that printed one number would read as a note-taker that improved.
     const document = '## Prep\n\n- one\n- two\n\n## Meeting notes\n\n- three\n';
     const section = '## Meeting notes\n- three\n';
-    const text = renderRerunReport(buildRerunReport(input({ document, section })));
-    expect(text).toContain('read over the 1 bullet(s) in the section this meeting opened');
-    expect(text).toContain("2 it wrote into the starting document's own headings");
+    const written = '- one\n- three\n';
+    const text = renderRerunReport(
+      buildRerunReport(input({ document, section, written, ideasCovered: 19 })),
+    );
+    expect(text).toContain('Whole doc — every bullet this meeting wrote, wherever it sits');
+    expect(text).toContain('Section only — bullets under the heading this meeting opened');
+    // The whole-doc row is read over the bullets of `notes-meeting.md`, and
+    // says which file, so the count can be checked.
+    expect(text).toContain('| 19 of 24 (79%) | 2 bullet(s), `/runs/rerun-1/notes-meeting.md` |');
+    expect(text).toContain('| 4 of 24 (17%) | 1 bullet(s) of the 3 in the document |');
   });
 
-  it('leaves that caveat out when the section IS the document', () => {
-    expect(renderRerunReport(buildRerunReport(input()))).not.toContain('read over the');
+  it('names the commit each run was measured on', () => {
+    expect(renderRerunReport(buildRerunReport(input()))).toContain('abc1234');
   });
 
   it('says a missing latency in words rather than leaving a blank cell', () => {

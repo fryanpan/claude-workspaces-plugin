@@ -41,7 +41,7 @@ import {
 } from '@claude-workspaces/core/effort-estimate-prompt';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { resolveKeySlotFrom } from './summarize.ts';
 
 export type { EffortEstimateVerdict } from '@claude-workspaces/core/effort-estimate-prompt';
 
@@ -103,8 +103,9 @@ export function effortEstimateEnabled(env: NodeJS.ProcessEnv = process.env): boo
  */
 export function haikuEffortEstimator(opts: HaikuEffortEstimatorOpts = {}): EffortEstimator | null {
   if (!effortEstimateEnabled()) return null;
-  const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
-  if (!key) return null;
+  const resolved = resolveKeySlotFrom('effort-estimate', opts.apiKey, readKeychainPassword);
+  if (!resolved) return null;
+  const key = resolved.key;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = opts.timeoutMs ?? EFFORT_ESTIMATE_TIMEOUT_MS;
   return async (input) => {

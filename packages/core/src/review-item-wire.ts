@@ -381,7 +381,22 @@ function readJudgement(value: unknown): ReviewItemJudgement | undefined {
     verdict: value.verdict as ReviewJudgeVerdictKind,
     reason: str(value.reason, ''),
     ...(heldFor.length > 0 ? { heldFor } : {}),
-    ...(typeof value.add === 'string' && value.add.trim() !== '' ? { add: value.add } : {}),
+    ...(typeof value.quote === 'string' && value.quote.trim() !== '' ? { quote: value.quote } : {}),
+    // How it got to the reader without passing, and the filer's reason when
+    // that is why. Both are facts about the item's history, so both are read
+    // back off disk rather than re-derived — nothing else records them.
+    ...(value.admitted === 'holds' || value.admitted === 'less-specific'
+      ? { admitted: value.admitted }
+      : {}),
+    ...(typeof value.lessSpecific === 'string' && value.lessSpecific.trim() !== ''
+      ? { lessSpecific: value.lessSpecific }
+      : {}),
+    ...(typeof value.lessSpecificFor === 'string' && value.lessSpecificFor.trim() !== ''
+      ? { lessSpecificFor: value.lessSpecificFor }
+      : {}),
+    ...(typeof value.gapKey === 'string' && value.gapKey.trim() !== ''
+      ? { gapKey: value.gapKey }
+      : {}),
   };
 }
 

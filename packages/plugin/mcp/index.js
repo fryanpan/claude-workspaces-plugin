@@ -15429,7 +15429,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_threads",
-      description: "List the comment threads on a doc. Pass status to return only the threads in that state.",
+      description: "List the comment threads on a doc. Pass status to return only the threads in that state. Safe to call freely on any doc, including a file-bound one: threads live in the CRDT, so this binds no file — it never reads, polls or writes back the doc on disk, and auditing comments cannot clobber anything. Bounded, not free: a doc not already in memory is loaded and stays resident, so read the docs you have a reason to read rather than enumerating every doc on the server.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15445,7 +15445,7 @@ var TOOL_LIST = {
     },
     {
       name: "get_thread",
-      description: "Read one thread by id, with all of its comments.",
+      description: "Read one thread by id, with all of its comments. Binds no file, exactly like list_threads.",
       inputSchema: {
         type: "object",
         properties: {
@@ -15602,7 +15602,7 @@ var TOOL_LIST = {
     },
     {
       name: "get_doc",
-      description: "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape.",
+      description: "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape. Unlike list_threads this reaches for CONTENT, so it binds the doc's file and puts it in the file poll's fast lane — right for a doc you are about to work on, and the reason to use list_threads when comments are all you want.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17005,7 +17005,7 @@ var TOOL_LIST = {
     },
     {
       name: "report_done_when",
-      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. `owner` is also how you say a line written with `needs: 'owner'` is READY for its person — until you report it, they are not asked. If they already answered it elsewhere, report it `met` with that answer as proof instead. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
+      description: "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. `owner` is also how you say a line written with `needs: 'owner'` is READY for its person — until you report it, they are not asked. If they already answered it elsewhere, report it `met` with that answer as proof instead. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool. If the check was REFUSED — your permission classifier or sandbox denied the command, so there is no way for you to run it — send the proof with `refused: true` and say what was denied. That is terminal: the board hands the line straight to the reader, needs no `url` for it, and will never answer it by telling you to get the fact another way. Never route a refused check through another agent or session.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17016,7 +17016,7 @@ var TOOL_LIST = {
           taskId: { type: "string" },
           lines: {
             type: "array",
-            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. A `url` is an absolute http(s) url, or a board path starting with one `/` (like `/workspaces/<id>?task=<id>`), which the board makes absolute on its own address; any other url is dropped. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
+            description: "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?, refused?}]: what you ran or read, and where a reader sees it for themselves. `refused: true` says this machine denied you permission to run that check, with `text` naming what was denied — use it only for a real refusal, because it is what tells the board the check is the reader's and stops the gate asking you to run it. A `url` is an absolute http(s) url, or a board path starting with one `/` (like `/workspaces/<id>?task=<id>`), which the board makes absolute on its own address; any other url is dropped. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
             items: { type: "object" }
           }
         },
@@ -17173,7 +17173,7 @@ var TOOL_LIST = {
     },
     {
       name: "revise_review_item",
-      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again.",
+      description: "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again. When the source cannot support what a hold asked for, answer with lessSpecific rather than inventing a specific.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17213,6 +17213,10 @@ var TOOL_LIST = {
             description: "Which span of the NEW detail changed, as character offsets, for when the diff would not show it well. Omitted, the changed span is derived.",
             properties: { start: { type: "number" }, end: { type: "number" } },
             required: ["start", "end"]
+          },
+          lessSpecific: {
+            type: "string",
+            description: "Your answer to a hold when the source does not support what it asked for: why the honest answer is less specific, in your own words. Pass it alongside the revision you can honestly make. The revision is judged as usual, but the gap you answered is not raised against you again, and your note is shown to the reader on the item card. Never invent a figure, a name or a mechanism to satisfy a hold - say this instead. Ignored when the item is not currently held."
           }
         },
         required: ["workspaceId"]
@@ -17308,7 +17312,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_schedule",
-      description: "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish.",
+      description: "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish. Read `output` in the reply: a rule can declare the folder its runs write into, and then each run files one Home item linking the files it wrote.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17405,7 +17409,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_agent",
-      description: "Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here.",
+      description: "Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here. READ `mounts`: it says which folders of the project behind this board are served, or what mount_folder would do when none is.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17534,13 +17538,18 @@ var TOOL_LIST = {
     },
     {
       name: "mount_folder",
-      description: "Mount a subfolder of a project as the project's attachment storage. Every file under it gets ONE address that keeps working. A new version overwrites the old under the same link and keeps its comments. A move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served.",
+      description: "Mount a subfolder of a project so the board can serve the files in it. The server WALKS THE FOLDER ON DISK and serves everything under it, ignored and uncommitted files included — .gitignore is not a privacy control here. Every file gets ONE address that keeps working: a new version overwrites the old under the same link and keeps its comments, and a move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served. Mount a folder you would show the whole board; set_project_privacy keeps a project whose bytes must not leave the machine local-only.",
       inputSchema: {
         type: "object",
         properties: {
           path: {
             type: "string",
             description: "Absolute path to the folder. It must be inside a git checkout, because the repo is what gives its files an address that survives a move. A dot-directory is refused."
+          },
+          privacy: {
+            type: "string",
+            enum: ["workspace", "local-only"],
+            description: "This folder's own privacy. Omit it and the folder follows the project, which is what every mount did before this field existed. 'local-only' serves this folder's files on the box alone while the project's other mounts stay reachable — use it for one folder of an outside party's material. It never widens: a project set to 'local-only' stays local-only whatever a mount says."
           }
         },
         required: ["path"]
@@ -17548,7 +17557,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_mounts",
-      description: "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, and where its conventions index lives. Pass `mountId` to page through one mount's files instead. Machine-scoped: no workspaceId.",
+      description: "Read a project's mount table: which folders are mounted, how many files each holds, whether the project is local-only, what each mount's own privacy is and what it is actually served against (`effectivePrivacy`), and where its conventions index lives. Pass `mountId` to page through one mount's files instead. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17591,7 +17600,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_project_privacy",
-      description: "Set whether this project's mounted files may leave the machine. It applies to the PROJECT, over all its mounts at once. 'local-only' serves the files to callers on the box alone, not over the tunnel, the tailnet, a share or a collab visitor. 'workspace' is the default and means everyone in the workspace sees them. Machine-scoped: no workspaceId.",
+      description: "Set whether mounted files may leave the machine. With no `mountId` it applies to the PROJECT, over all its mounts at once; with one it applies to that folder alone, for the project that has one sensitive folder and a dozen harmless ones. 'local-only' serves the files to callers on the box alone, not over the tunnel, the tailnet, a share or a collab visitor. 'workspace' is the default and means everyone in the workspace sees them. The two settings combine by taking the NARROWER, so a project set to 'local-only' cannot be reopened one folder at a time. Machine-scoped: no workspaceId.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17603,6 +17612,10 @@ var TOOL_LIST = {
             type: "string",
             enum: ["workspace", "local-only"],
             description: "'local-only' for material that must not leave this machine. 'workspace' otherwise."
+          },
+          mountId: {
+            type: "string",
+            description: "One mount's id, from list_mounts or mount_folder, to set that folder alone. Omit to set the whole project."
           }
         },
         required: ["path", "privacy"]
@@ -18549,6 +18562,20 @@ function nextOccurrence(schedule, cursor = {}) {
   return next;
 }
 
+// packages/mcp/src/schedule-output-line.ts
+var NONE = 'This rule declares no output folder. Pass output: {folder: "digests"} and every ' + "run that writes files there files ONE review item on Home linking them, which the " + "next run replaces. Without it a run that writes files tells nobody it did.";
+function scheduleOutputLine(schedule) {
+  if (schedule === null || schedule === undefined)
+    return null;
+  const folder = schedule.output?.folder;
+  if (typeof folder !== "string" || folder.trim() === "")
+    return { folder: null, note: NONE };
+  return {
+    folder,
+    note: `Runs of this rule write into ${folder}. Every run that changes a file there files ` + "ONE review item on Home linking those files, and the next run replaces it. The " + "folder is read relative to the board’s project root."
+  };
+}
+
 // packages/mcp/src/task-projection.ts
 function projectTaskRows(tasks, fields) {
   const rows = tasks;
@@ -18996,13 +19023,15 @@ async function handleTaskTool(name, a, ctx) {
         detail,
         options,
         reply,
-        revisedRange
+        revisedRange,
+        lessSpecific
       } = a;
       const patch = {
         ...headline !== undefined ? { headline } : {},
         ...detail !== undefined ? { detail } : {},
         ...options !== undefined ? { options } : {},
         ...revisedRange !== undefined ? { revisedRange } : {},
+        ...lessSpecific !== undefined ? { lessSpecific } : {},
         author: AUTHOR
       };
       if (docId !== undefined || threadId !== undefined || commentId !== undefined) {
@@ -19152,7 +19181,8 @@ async function handleTaskTool(name, a, ctx) {
       return ok2({
         taskId,
         schedule,
-        ...nextAt !== undefined ? { nextAt, nextAtIso: new Date(nextAt).toISOString() } : { nextAt: null }
+        ...nextAt !== undefined ? { nextAt, nextAtIso: new Date(nextAt).toISOString() } : { nextAt: null },
+        ...scheduleOutputLine(schedule) !== null ? { output: scheduleOutputLine(schedule) } : {}
       });
     }
     case "import_tasks_markdown": {
@@ -19458,7 +19488,8 @@ async function handleWorkspaceTool(name, a, ctx) {
         ...res.watching !== undefined ? { watching: res.watching } : {},
         ...res.seat !== undefined ? { seat: res.seat } : {},
         ...res.seatTakenFrom !== undefined ? { seatTakenFrom: res.seatTakenFrom } : {},
-        ...res.sentry !== undefined ? { sentry: res.sentry } : {}
+        ...res.sentry !== undefined ? { sentry: res.sentry } : {},
+        ...res.mounts !== undefined ? { mounts: res.mounts } : {}
       });
     }
     case "heartbeat": {
@@ -19523,8 +19554,8 @@ async function handleWorkspaceTool(name, a, ctx) {
       return ok2(await http("DELETE", "/api/repos/checkouts", { path }));
     }
     case "mount_folder": {
-      const { path } = a;
-      return ok2(await http("POST", "/api/mounts", { path }));
+      const { path, privacy } = a;
+      return ok2(await http("POST", "/api/mounts", { path, ...privacy === undefined ? {} : { privacy } }));
     }
     case "list_mounts": {
       const { path, mountId, after, limit } = a;
@@ -19546,8 +19577,12 @@ async function handleWorkspaceTool(name, a, ctx) {
       return ok2(await http("DELETE", "/api/mounts", { path, mountId }));
     }
     case "set_project_privacy": {
-      const { path, privacy } = a;
-      return ok2(await http("PUT", "/api/mounts/privacy", { path, privacy }));
+      const { path, privacy, mountId } = a;
+      return ok2(await http("PUT", "/api/mounts/privacy", {
+        path,
+        privacy,
+        ...mountId === undefined ? {} : { mountId }
+      }));
     }
     case "set_project_conventions": {
       const { path, conventionsPath } = a;
@@ -20060,7 +20095,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.236";
+var PLUGIN_VERSION = "0.1.242";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

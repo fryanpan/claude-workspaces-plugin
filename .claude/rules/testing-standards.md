@@ -164,14 +164,36 @@ Give each its own number.
   a branch whose diff touched neither ui-shot nor the page under test —
   a cold start inside a shard running a hundred other files.
 
-**And check the guard actually lets the test run.** A real-browser case behind
-`skipIf` reads identically to a passing one in a green log. Resolve the binary
-through `resolveChromeBin(undefined)`, which reaches `CHROME_CANDIDATES` and
-so finds the runner's own Chrome with no path named; `CW_CHROME_BIN ??
-DEFAULT_CHROME_BIN` names the macOS `/Applications` path and skips everywhere
-else. Prove it by reading the test COUNT off a CI run, not the colour.
+### The browser gate: off here, on in CI
 
-*Check:* no check yet.
+**A real-browser case only runs when somebody opted the run in.** Ask for the
+binary with `chromeForSuite()` from `scripts/browser-tests.ts` and gate the
+suite on it — `describe.skipIf(CHROME === null)`. It answers `null` unless
+`CW_BROWSER_TESTS` is set, so `bun run verify` on a developer's machine
+launches no browser at all; ci.yml sets the variable on the three steps that
+need one, so coverage there is unchanged.
+
+The old guard asked `resolveChromeBin(undefined)` whether Chrome existed,
+which on a Mac is always yes. That is how one `bun run verify` came to open
+sixteen headless Chromes in forty seconds, over the top of whatever the owner
+was doing. Telling the builder who happened to be running to skip those
+members fixed it for that builder and nobody after. `resolveChromeBin` itself
+is unchanged and `bun run ui:shot` still works with the gate shut — a
+screenshot somebody asked for is not the problem.
+
+**So a local green covers less than CI's, and has to say so.** `bun run
+verify` prints `N of M` and names every member it held; report it that way
+rather than as a plain green. Inside `test:vitest` the browser cases skip
+themselves, and vitest's own skipped count is the only signal — a
+module-level notice does not survive a file whose suites all skip.
+
+**And check the guard lets the test run where it is meant to.** A case behind
+`skipIf` reads identically to a passing one in a green log, so prove it by
+reading the test COUNT off a CI run, not the colour.
+
+*Check:* `scripts/browser-tests.test.ts` holds the gate's own cases,
+including that ci.yml still opts in. Whether a new browser-launching member
+got marked `browser: true` is still the reviewer's eye.
 
 ## 6. The gates, and what each one catches
 

@@ -7,6 +7,7 @@ import {
   agentIdForName,
   attachmentIdOf,
   contentKind,
+  hashToColor,
   isReviewPayloadGated,
   parseThreadReviewItemId,
   pendingDeclaration,
@@ -17,6 +18,7 @@ import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
 import { AllowRuleProposals } from './allow-rules.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
+import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import {
   createLegacyAgentWarner,
@@ -50,6 +52,7 @@ import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
 import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
+import { isLoopbackAddress } from './middleware/host-guard.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
 import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
 import { MountStore } from './mount-store.ts';
@@ -486,6 +489,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
             backlinksFor: (ref) => taskStore.backlinksFor(ref),
             addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
             fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(docStore, docId, review, actor),
+            // A meeting that crosses another bar after its item exists
+            // rewrites those words rather than raising a second ask. The
+            // same two revise paths every other server-filed item uses.
+            reviseReviewItem: (taskId, itemId, patch, o) =>
+              taskStore.reviseReviewItem(taskId, itemId, patch, o),
+            reviseOnDoc: (docId, threadId, commentId, patch, actor) =>
+              docStore.reviseCommentReview(docId, threadId, commentId, patch, {
+                // Only the NAME reaches the revision stamp; the rest is the
+                // `User` shape the doc side takes.
+                actor: {
+                  id: actor.id,
+                  name: actor.name,
+                  kind: 'known',
+                  color: hashToColor(actor.name),
+                },
+              }),
           }),
           // Where "pull up last week's notes" looks. Board docs and when
           // each last carried a meeting; the meeting's own doc is dropped
@@ -2037,6 +2056,33 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return home ? { repoKey, ...home } : null;
   };
 
+  /**
+   * What a board's project has mounted, for the attach answer.
+   *
+   * The project is resolved exactly as `meetingHomeFor` above resolves it —
+   * the repo most of the board's own docs sit in — so the two answers cannot
+   * name different projects for the same board.
+   */
+  const mountsBriefFor = (workspaceId: string, req: Request): AttachMountsBrief => {
+    const board = taskStore.getWorkspace(workspaceId);
+    const ids = new Set(board?.docIds ?? []);
+    const repoKey = board
+      ? projectRepoKey(
+          docStore.list().filter((m) => ids.has(m.docId)),
+          (docId) => docStore.repos.primaryKeyFor(docId),
+        )
+      : null;
+    if (!repoKey) return attachMountsBrief({ repoKey: null, folders: [], mayNameFolders: true });
+    // A local-only project's file NAMES stop at the edge with its bytes.
+    const onBox =
+      !req.headers.has('cf-ray') && isLoopbackAddress(server.requestIP(req)?.address ?? undefined);
+    return attachMountsBrief({
+      repoKey,
+      folders: mountStore.registry.liveMounts(repoKey).map((m) => m.relPath),
+      mayNameFolders: onBox || mountStore.privacyOf(repoKey) !== 'local-only',
+    });
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2288,6 +2334,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     watchKeyExists,
     keepMovingVerdicts: stallWiring.keepMoving,
     meetingHomeFor,
+    mountsBriefFor,
   };
 
   /**

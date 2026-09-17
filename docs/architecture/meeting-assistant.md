@@ -242,6 +242,24 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   five-reconnect meeting it means most of the minutes stop being editable by
   the hand that wrote them. **Left as measured; changing it is a separate
   decision, not a bug fix.**
+- **Held, since 2026-09-16: the meeting's quality item.** The at-stop quality
+  pass runs at every leg's stop, because `end()` is what runs it — so a
+  reconnecting meeting used to put a "the notes came out badly" item in front
+  of Bryan while he was still in the room, and file a SECOND one at the next
+  leg's stop. The pass no longer files: it hands its reading to
+  `notes-quality-filing.ts`, and the socket layer calls `onLegEnded` once the
+  record is stopped, which is the first moment anything knows how the leg
+  ended. A leg that ended the way a person ends a meeting (Stop, the silence
+  deadline, the tab closing) files at once; a leg that ended the way a network
+  ends one holds the reading for two minutes — the browser's own
+  `RECONNECT_WINDOW_MS` — and a resume inside that window cancels the hold and
+  throws the reading away, because the next stop reads the whole meeting's
+  notes. One meeting therefore files at most one item, after it is over, and a
+  later reading REVISES those words through `reviseReviewItem` (or
+  `reviseCommentReview`, for a doc no row links) rather than raising a second
+  ask. A refused revision leaves the standing item alone; it never becomes a
+  second filing. `notes-quality-timing.test.ts` drives it, and carries the
+  base policy as a live control.
 
 ## A voice keeps its name across every session of a doc (2026-09-16)
 
@@ -1324,6 +1342,22 @@ carries a sentence that by definition never settled.
 meeting started`. It holds ids and a duration only. The tick timings start at
 the first pause, so until this line a slow first note looked the same as a
 quick one.
+
+**The notes a meeting is judged on are the blocks it WROTE, not a section.**
+Whole-doc note-taking files each note under the heading for its topic,
+wherever that heading already is, so a meeting on a prepared document opens no
+section of its own. Every reading keyed on a heading id then reads the tail
+and misses the rest: a real run on 2026-09-16 read 4 bullets and skipped the
+182 the same meeting had written elsewhere, and reported coverage over the 4.
+The address is now `notes-written.ts` — the note-taker's own authorship marks
+anywhere in the doc, union the section it opened, with the heading each note
+sits under brought along so the structure checks still see topics. The union's
+two halves cover each other: the marks find notes under somebody else's
+headings, and the section finds notes whose mark a person's edit or a markdown
+round trip took off. The at-stop quality pass and the tidy-up's
+"(unconfirmed)" scan both read the notes this way, and the rerun report prints
+the coverage reading over each slice so the change of definition is visible
+beside the change in the notes.
 
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw

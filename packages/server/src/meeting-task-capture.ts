@@ -72,6 +72,7 @@
 
 import { type TokenUsage, readyToWork, spinoffBody, spinoffDocHref } from '@claude-workspaces/core';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import type { ClaudeKeySlot } from './claude-key-slot.ts';
 import {
   type SpentCues,
   captureWindow,
@@ -92,7 +93,7 @@ import {
 } from './meeting-lookup.ts';
 import type { NoteDocLink, NoteTaskLink, NotesTurn, SpokenCorrection } from './meeting-notes.ts';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { resolveKeySlotFrom } from './summarize.ts';
 import { parseTaskCreate } from './task-create.ts';
 import { clipToWordBoundary } from './task-title.ts';
 import { CHORES_GOAL_ID, type CreateTaskOpts, type TaskStatus } from './tasks.ts';
@@ -240,6 +241,9 @@ export interface TaskCaptureInput {
 export interface NotesCallMeasure {
   model: string;
   usage: TokenUsage;
+  /** The configured slot this call billed. Names only — see
+   *  `claude-key-slot.ts`. Absent on an extractor that spends nothing. */
+  keySlot?: ClaudeKeySlot;
 }
 
 export type NotesCallMeasureSink = (m: NotesCallMeasure) => void;
@@ -810,8 +814,10 @@ export function createHaikuTaskCaptureExtractor(
   opts: HaikuTaskCaptureOpts = {},
 ): TaskCaptureExtractor | null {
   if (readRenamedEnv(process.env, 'CW_MEETING_TASKS') === '0') return null;
-  const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
-  if (!key) return null;
+  const resolved = resolveKeySlotFrom('meeting-task-capture', opts.apiKey, readKeychainPassword);
+  if (!resolved) return null;
+  const key = resolved.key;
+  const keySlot = resolved.slot;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const instructions = opts.instructions;
 
@@ -866,6 +872,7 @@ export function createHaikuTaskCaptureExtractor(
         if (u) {
           input.measure?.({
             model: CAPTURE_MODEL,
+            keySlot,
             usage: {
               inputTokens: u.input_tokens ?? 0,
               outputTokens: u.output_tokens ?? 0,

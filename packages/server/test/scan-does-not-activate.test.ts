@@ -15,13 +15,15 @@
  * Synthetic fixtures, port 0. No production server is touched.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { DocStore } from '../src/doc-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 /** The board this file's docs, tasks and reviews are filed under. */
@@ -164,6 +166,204 @@ describe('a scan does not activate the docs it enumerates', () => {
 
       const after = (await (await local('/api/metrics')).json()) as { activeBindings: number };
       expect(after.activeBindings).toBe(0);
+    });
+  });
+});
+
+/**
+ * Reading a doc's THREADS is not reaching for the doc.
+ *
+ * The case above is about `peek` vs `get` — metadata. This one is about the
+ * request an agent auditing comments actually makes, `GET …/docs/:id/threads`,
+ * and it has to clear a higher bar than "does not activate": it must arm no
+ * file binding at all. Threads live in the `.ydoc`, so the file is not needed
+ * to answer, and the read path hydrates with `bind: false` for exactly that
+ * reason (`DocStore.getForRead`).
+ *
+ * Two regression sites, one per test: `DocStore.listThreads`, which resolves
+ * read-only, and `routes/docs.ts`, which picks `getForRead` over `get` from
+ * the method and the subroute. A change at either turns "auditing comments is
+ * cheap" back into "auditing comments wakes every dormant binding on the
+ * board, which then flushes weeks-old content over files on disk".
+ *
+ * Synthetic fixtures, port 0. No production server is touched.
+ */
+describe('reading a doc thread does not wake its file binding', () => {
+  const AUDITOR: User = {
+    id: 'agent-harborlight-audit',
+    name: 'Harborlight Audit',
+    kind: 'known',
+    color: '#4488aa',
+  };
+
+  let dataDir: string;
+  let srcDir: string;
+  const stores: DocStore[] = [];
+
+  const makeStore = (): DocStore => {
+    const store = new DocStore({
+      dataDir,
+      sse: new SseBus(),
+      webhooks: createWebhookDispatcher({ onLog: () => {} }),
+    });
+    stores.push(store);
+    return store;
+  };
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'thread-read-data-'));
+    srcDir = mkdtempSync(join(tmpdir(), 'thread-read-src-'));
+  });
+  afterEach(() => {
+    for (const store of stores.splice(0)) store.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(srcDir, { recursive: true, force: true });
+  });
+
+  /** A file-bound doc carrying one thread, in a store that is about to die. */
+  const seedBoundDocWithThread = async (
+    store: DocStore,
+    docId: string,
+    file: string,
+    line: string,
+    find: string,
+    comment: string,
+  ): Promise<string> => {
+    const path = join(srcDir, file);
+    writeFileSync(path, `# ${docId}\n\n${line}\n`);
+    store.getOrCreate(docId, { type: 'markdown', sourceUrl: path });
+    expect((await store.attachFileAsync(docId, path)).ok).toBe(true);
+    const made = await store.createThreadByFind(docId, { find }, AUDITOR, comment);
+    expect(made.ok).toBe(true);
+    await waitFor(() => existsSync(join(dataDir, `${docId}.ydoc`)) || undefined, {
+      describe: `the .ydoc snapshot the next process hydrates ${docId} from`,
+    });
+    return path;
+  };
+
+  it('answers from the .ydoc of a dormant doc, arming no binding and no fast lane', async () => {
+    const first = makeStore();
+    // Two docs in the same state, so the assertion below has a control that
+    // is a peer in TIME as well as in kind. A hydrate that needs bytes it
+    // does not hold defers its bind to a read pool, so "no binding a
+    // microsecond later" is a claim about scheduling, not about binding: the
+    // control doc's bind landing is what proves the pool ran at all and got
+    // past the moment the read under test sat at.
+    await seedBoundDocWithThread(
+      first,
+      'harborlight-plan',
+      'harborlight-plan.md',
+      'The ferry service runs hourly.',
+      'runs hourly',
+      'Is the winter timetable the same?',
+    );
+    const controlPath = await seedBoundDocWithThread(
+      first,
+      'harborlight-ledger',
+      'harborlight-ledger.md',
+      'The lock keeper opens at dawn.',
+      'opens at dawn',
+      'Does that hold in winter?',
+    );
+
+    // A restart: both docs are on disk with a sourceUrl, nothing is resident,
+    // and both bindings are dormant — the state every doc on a board is in
+    // when an agent starts walking it.
+    first.simulateCrash();
+    const second = makeStore();
+    expect(second.stats().bindings).toBe(0);
+
+    // The read under test.
+    const threads = second.listThreads('harborlight-plan');
+    // Non-vacuous: the `.ydoc` alone really did answer. Without this the
+    // assertions below would pass just as well on a read that found nothing.
+    expect(threads.map((t) => t.comments[0]?.text)).toEqual(['Is the winter timetable the same?']);
+
+    // The control, queued after it: a CONTENT read of the other doc, which is
+    // supposed to bind. Waiting for it to land is what makes the zero below
+    // mean "never bound" rather than "not bound yet".
+    expect(second.get('harborlight-ledger')).toBeDefined();
+    await waitFor(() => second.boundPathOf('harborlight-ledger') === controlPath || undefined, {
+      describe: 'the content read to bind the doc it was dormant against',
+    });
+    expect(second.stats().bindings).toBe(1);
+    expect(second.stats().activeBindings).toBe(1);
+
+    // And the doc whose threads were read is the one still unbound.
+    expect(second.boundPathOf('harborlight-plan')).toBeUndefined();
+  });
+
+  describe('over HTTP', () => {
+    let handle: ServerHandle;
+    let base: string;
+    let ws = '';
+
+    beforeEach(async () => {
+      handle = createServer({ port: 0, dataDir });
+      base = `http://127.0.0.1:${handle.port}`;
+      ws = await seedBoard(base);
+    });
+    afterEach(async () => {
+      await handle.stop();
+    });
+
+    const local = (path: string) =>
+      fetch(`${base}${path}`, { headers: { host: `localhost:${handle.port}` } });
+
+    const post = (path: string, body: unknown) =>
+      fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    it('leaves a bound doc idle when an agent lists its threads', async () => {
+      const docId = 'riverbend-notes';
+      const path = join(srcDir, 'riverbend-notes.md');
+      writeFileSync(path, '# Riverbend notes\n\nThe lock keeper opens at dawn.\n');
+      expect(
+        (await post(`/workspaces/${ws}/docs`, { docId, type: 'markdown', sourceUrl: path })).status,
+      ).toBe(200);
+      expect(
+        (
+          await post(`/workspaces/${ws}/docs/${docId}/threads/by_find`, {
+            author: AUDITOR,
+            text: 'Does that hold in winter?',
+            find: 'opens at dawn',
+          })
+        ).status,
+      ).toBe(200);
+
+      const metrics = async () =>
+        (await (await local('/api/metrics')).json()) as { activeBindings: number };
+
+      // Control: reading this doc's CONTENT over the same HTTP surface does
+      // activate it. The threads assertion below is only worth something
+      // because this one is on the same doc, through the same server.
+      handle.docStore.resetDerivedCaches();
+      expect((await local(`/workspaces/${ws}/docs/${docId}?format=json`)).status).toBe(200);
+      expect((await metrics()).activeBindings).toBe(1);
+
+      handle.docStore.resetDerivedCaches();
+      expect((await metrics()).activeBindings).toBe(0);
+
+      // The request `list_threads` makes.
+      const res = await local(`/workspaces/${ws}/docs/${docId}/threads`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        threads: Array<{ id: string; comments: Array<{ text: string }> }>;
+      };
+      // Non-vacuous: the route answered with the thread, not with an empty list.
+      expect(body.threads.map((t) => t.comments[0]?.text)).toEqual(['Does that hold in winter?']);
+      expect((await metrics()).activeBindings).toBe(0);
+
+      // `get_thread` takes the same read-only path, and is the other half of
+      // an audit: the list, then the thread it is worth opening.
+      const threadId = body.threads[0]?.id ?? '';
+      expect(threadId).not.toBe('');
+      handle.docStore.resetDerivedCaches();
+      expect((await local(`/workspaces/${ws}/docs/${docId}/threads/${threadId}`)).status).toBe(200);
+      expect((await metrics()).activeBindings).toBe(0);
     });
   });
 });

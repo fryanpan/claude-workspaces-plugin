@@ -8,17 +8,18 @@
  * has to be that the notes survive.
  *
  * RULE 1 — THE SECTION HEADING IS NOT AN EDITABLE BLOCK. A `replace_block`
- * against the meeting's own `## Meeting notes` heading replaces the element,
- * so the block id changes. `NotesHeadingMemory` checks its remembered id
- * against the outline every tick and correctly concludes the heading is gone,
- * so the next tick opens a SECOND section. From that moment every reader that
- * finds the section by heading text — `settle-wash.ts` in the client, and the
- * server's own finder — takes the LAST match, and everything written before,
- * including any line a person typed, drops out of the notes view while
- * staying in the doc. Measured on AMI fixture ES2002c: the composer replaced
- * its heading at tick 30, and for the remaining thirteen ticks the doc's
- * outline grew from 55 entries to 76 while the notes section stayed frozen at
- * 21 bullets. The meeting kept being noted; none of it arrived.
+ * against the meeting's own `## Meeting notes` heading writes whatever the
+ * model composed, and the section is found BY ITS WORDS — `settle-wash.ts`
+ * in the client and the server's own finder both look for the heading's text
+ * and both take the LAST match. Reword it and the next tick opens a SECOND
+ * section; everything written before, including any line a person typed,
+ * drops out of the notes view while staying in the doc. Measured on AMI
+ * fixture ES2002c: the composer replaced its heading at tick 30, and for the
+ * remaining thirteen ticks the doc's outline grew from 55 entries to 76 while
+ * the notes section stayed frozen at 21 bullets. That run lost the heading's
+ * ADDRESS too — a rewrite was a delete and an insert, so `NotesHeadingMemory`
+ * found nothing — but `prose-batch.ts` now hands a rewrite the address it
+ * replaced. The id is no longer what this rule protects. The words are.
  *
  * RULE 2 — A REVISION MAY NOT THROW AWAY THE NOTE IT REPLACES. The prompt
  * lets the note-taker rewrite its own bullet, because a note-taker revises

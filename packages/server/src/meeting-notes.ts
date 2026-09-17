@@ -62,6 +62,7 @@ import {
   speakerDisplayName,
 } from '@claude-workspaces/core';
 import type { prose } from '@claude-workspaces/core';
+import type { ClaudeKeySlot } from './claude-key-slot.ts';
 import { isQuotaFailure } from './model-quota.ts';
 import { notesTopicHashes } from './notes-heading-level.ts';
 import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
@@ -81,6 +82,7 @@ import { type MeetingSpend, meetingSpend } from './notes-spend.ts';
 import {
   type NotesCallUsage,
   type NotesComposeMeasure,
+  type NotesDroppedEdit,
   type NotesTickTiming,
   type NotesTimingLog,
   type NotesTokenUsage,
@@ -543,6 +545,22 @@ export interface NotesUpdate {
    * given must not have every link in the batch judged as invented.
    */
   linkSources?: NotesLinkSources;
+  /**
+   * Called by the write path with every edit of this batch the doc would not
+   * take where it was addressed, and whether its words were re-homed anyway.
+   *
+   * IT RIDES THE UPDATE for the same reason `linkSources` does, in the other
+   * direction: only the TICK can put these on the record. `onNotes` answers
+   * one value — landed, refused, or no-words — and a tick that wrote four
+   * notes and dropped its correction answers `true` on every one of them. The
+   * session passes this down with the batch and reads it back into the
+   * timing row (`NotesTickTiming.dropped`), so a correction that did not
+   * happen is stated rather than inferred from silence.
+   *
+   * Optional, and absent means the caller is not recording — the direct
+   * callers in the tests are all in that position.
+   */
+  onDropped?: (dropped: readonly NotesDroppedEdit[]) => void;
 }
 
 /**
@@ -762,7 +780,7 @@ export interface MeetingNotesDeps {
      *
      * Sizes and counts only, never the words.
      */
-    measure: (m: { model: string; usage: NotesTokenUsage }) => void;
+    measure: (m: { model: string; usage: NotesTokenUsage; keySlot?: ClaudeKeySlot }) => void;
     /**
      * The turns the PREVIOUS tick's capture saw, so an ask that straddles the
      * boundary between them still files the right row. Marked as already read
@@ -891,6 +909,21 @@ export interface MeetingNotesDeps {
    * so the frames reach the one client whose meeting it is.
    */
   onTickLifecycle?: (event: NotesTickLifecycle) => void;
+  /**
+   * A recording LEG of this meeting ended, called by whoever owns the socket
+   * AFTER the meeting record has been stopped — which is the first moment
+   * anybody knows how it ended.
+   *
+   * `resumable` is true for the endings a browser reconnects from, and those
+   * are not the end of the meeting: the same recording is picked back up
+   * under the same id. The server sink uses it to decide when a quality item
+   * may reach a person; a caller that never resumes a meeting passes false.
+   *
+   * NOT emitted from `end()`, deliberately. `end()` runs before the record is
+   * stopped and before the close code has been classified, so a sink called
+   * from there cannot tell a person pressing Stop from a Wi-Fi drop.
+   */
+  onLegEnded?: (ids: { docId: string; meetingId: string }, opts: { resumable: boolean }) => void;
 }
 
 /**
@@ -1491,6 +1524,8 @@ export function beginNotesSession(
       let measured: NotesComposeMeasure = {};
       let composeMs = 0;
       let applyMs = 0;
+      let beforeComposeMs = 0;
+      let captureMs: number | null = null;
       /**
        * Every model call THIS tick made, in the order they were made —
        * capture first, compose after it.
@@ -1506,6 +1541,11 @@ export function beginNotesSession(
         tickCalls.push(c);
         meetingCalls.push(c);
       };
+      // WHAT THE DOC WOULD NOT TAKE, filled in by the write path while the
+      // batch is being applied and read back by `report` below. Per tick, so
+      // a tick whose batch landed whole records an empty list rather than the
+      // previous tick's.
+      let droppedEdits: readonly NotesDroppedEdit[] = [];
       const report = (outcome: NotesTickTiming['outcome'], edits: readonly prose.BlockEdit[]) => {
         if (timing === undefined) return;
         const end = clock();
@@ -1522,6 +1562,8 @@ export function beginNotesSession(
           lastSpokenAt,
           startedAt,
           waitedMs: composeStart - startedAt,
+          beforeComposeMs,
+          captureMs,
           promptChars: measured.promptChars ?? null,
           replyChars: measured.replyChars ?? null,
           firstTokenMs: measured.firstTokenMs ?? null,
@@ -1529,6 +1571,9 @@ export function beginNotesSession(
           outputTokens: measured.usage?.outputTokens ?? null,
           cacheReadTokens: measured.usage?.cacheReadTokens ?? null,
           cacheWriteTokens: measured.usage?.cacheWriteTokens ?? null,
+          cacheBlocks: measured.cacheBlocks ?? null,
+          cacheFirstBlockChars: measured.cacheFirstBlockChars ?? null,
+          cacheStableBlocks: measured.cacheStableBlocks ?? null,
           calls: [...tickCalls],
           composeMs,
           model: measured.model ?? null,
@@ -1536,6 +1581,7 @@ export function beginNotesSession(
           edits: edits.length,
           blocks: blocks.size,
           merged: mergeCount(tick),
+          dropped: droppedEdits,
           outcome,
           settledToWrittenMs: outcome === 'written' && settledAt !== null ? end - settledAt : null,
           spokenToWrittenMs: outcome === 'written' && spokenAt !== null ? end - spokenAt : null,
@@ -1570,13 +1616,20 @@ export function beginNotesSession(
       const priorTurns = multi ? priorRaw.map(withNames) : priorRaw.map(bare);
       priorRaw = raw;
       if (deps.captureIntents) {
+        const captureStart = clock();
         try {
           const captured = await deps.captureIntents({
             docId: ids.docId,
             meetingId: ids.meetingId,
             turns,
             priorTurns,
-            measure: (m) => recordCall({ call: 'capture', model: m.model, usage: m.usage }),
+            measure: (m) =>
+              recordCall({
+                call: 'capture',
+                model: m.model,
+                usage: m.usage,
+                keySlot: m.keySlot ?? null,
+              }),
           });
           taskLinks = captured.tasks;
           docLinks = captured.docs;
@@ -1605,6 +1658,11 @@ export function beginNotesSession(
           // compose below, and the transcript remains the durable record a
           // later capture could be rebuilt from.
           deps.onError?.(err instanceof Error ? err.message : 'task capture failed');
+        } finally {
+          // In the `finally`, because a capture that fails costs the note the
+          // same wait a slow one does — a timeout is the expensive case, and
+          // booking it only on success would hide exactly that.
+          captureMs = clock() - captureStart;
         }
       }
       // What this tick's words named on the board. A local scan of a list
@@ -1733,6 +1791,7 @@ export function beginNotesSession(
       };
       try {
         const composeCallStart = clock();
+        beforeComposeMs = composeCallStart - composeStart;
         const composed = await deps.composer.compose({
           ...input,
           measure: (m) => {
@@ -1747,6 +1806,7 @@ export function beginNotesSession(
                 call: 'compose',
                 model: measured.model ?? deps.composer.name,
                 usage: m.usage,
+                keySlot: measured.keySlot ?? null,
               });
             }
           },
@@ -1832,6 +1892,9 @@ export function beginNotesSession(
           // is about to be WRITTEN would strip it the moment the doc no
           // longer carried the earlier question.
           linkSources: notesLinkSources({ ...input, ...input.tick }),
+          onDropped: (d) => {
+            droppedEdits = d;
+          },
         });
         const written = answer !== false && answer !== 'refused';
         applyMs = clock() - applyStart;

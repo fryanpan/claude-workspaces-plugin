@@ -16,6 +16,7 @@ import {
 } from '@claude-workspaces/core';
 import type { TaskReviewItem } from '@claude-workspaces/core';
 import { doneWhenMetCount } from '@claude-workspaces/core/done-when';
+import { type ReviewGateNote, gateNoteOf } from '@claude-workspaces/core/review-hold';
 import { TASK_NOTES_READ_CAP } from './agent-notes.ts';
 import { type OwnerKind, resolveOwnerKind } from './task-owner.ts';
 import {
@@ -130,6 +131,23 @@ function projectDecisionState(task: Task): {
   };
 }
 
+/**
+ * What the quality gate did to the ticket's OWN decision before the reader
+ * saw it — the same note `review-queue.ts` puts on a thread-borne or
+ * ticket-borne item, for the third gated surface.
+ *
+ * Separate from `projectDecisionState` because the two answer different
+ * questions: that one is about whose turn it is, and clears itself when the
+ * decision is answered; this is a fact about how these words reached the
+ * reader, and stays true afterwards. Absent when the gate never held the
+ * decision and never admitted it, which is the ordinary case.
+ */
+function projectDecisionGate(task: Task): { decisionGate?: ReviewGateNote } {
+  if (task.needs !== 'decision') return {};
+  const note = gateNoteOf(task.decisionJudge);
+  return note ? { decisionGate: note } : {};
+}
+
 function projectReviews(reviews: TaskReviewItem[] | undefined): {
   reviews?: TaskReviewItem[];
 } {
@@ -236,6 +254,9 @@ export function projectTask(
     // one fact about the derived `r-legacy` row the browser cannot read off
     // `options`/`answer`. See `projectDecisionState`.
     ...projectDecisionState(task),
+    // How the ticket's own decision got to the reader — see
+    // `projectDecisionGate`.
+    ...projectDecisionGate(task),
     // What "finished" means on this ticket, and how much of it is proved.
     //
     // TWO keys for one fact, and the split is the payload: the LINES — words,

@@ -367,6 +367,30 @@ export const widgetStyles = `
 .thread-popover .author { font-size: 11px; color: #6e7781; margin-bottom: 2px; }
 .thread-popover .author .swatch { margin-right: 4px; }
 .thread-popover .author .time { margin-left: 6px; color: #afb8c1; }
+
+/* The receipt: the mark beside a comment the reader wrote — one grey tick,
+   the server has it; two, a watching session was handed it; none once
+   somebody has replied. Same element and same data attribute the board and
+   the review editor draw (packages/core/src/comment-receipt.ts writes the
+   markup for all three), so a reader who learns the mark on the board reads
+   it unchanged on a page the widget is a guest on.
+
+   The invariant, not a hex: the mark is THE SURFACE'S OWN MUTED FOREGROUND at
+   opacity 0.85, a little lighter than the time it sits beside. The app writes
+   that as --fg-muted at 0.85; here the same relationship needs the widget's
+   muted grey, #afb8c1, which is exactly what the two times beside this mark
+   are drawn in. A guest bundle cannot read the app's token, so it resolves it
+   to its own palette rather than copying the app's painted value — copying
+   the hex would agree on a number and invert the relationship, making the
+   mark the darkest grey in its row.
+
+   Both ticks are always in the box and the second is revealed by opacity
+   rather than inserted, so the second tick arriving never nudges the clock
+   beside it. Grey in both states: a delivery is not an event worth colour. */
+.cw-receipt { display: inline-flex; align-items: center; flex: 0 0 auto; width: 15px; height: 11px; margin-left: 4px; color: #afb8c1; opacity: 0.85; }
+.cw-receipt svg { display: block; }
+.cw-receipt .cw-tick-back { opacity: 0; transition: opacity 0.22s ease; }
+.cw-receipt[data-receipt="received"] .cw-tick-back { opacity: 1; }
 .thread-popover .body { color: #1b1f23; }
 .vnote { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: #6e7781; }
 .vnote button { border: 0; background: none; color: #2e7dd7; padding: 0; min-width: 44px; min-height: 44px; margin: -12px 0; font: inherit; cursor: pointer; }

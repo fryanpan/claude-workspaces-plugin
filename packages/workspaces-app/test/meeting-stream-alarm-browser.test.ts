@@ -28,21 +28,12 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { RUN_ID_ENV, profilesOfRun, resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
+import { chromeForSuite } from '../../../scripts/browser-tests.ts';
+import { RUN_ID_ENV, profilesOfRun } from '../../../scripts/ui-shot-lib.ts';
 
-/**
- * Is there a browser to launch — asked the way `ui-shot.ts` itself asks, and
- * for the reason `meeting-prose-measure-css.test.ts` spells out: the macOS
- * `/Applications` constant is not the question, because a `skipIf` on it makes
- * these cases decorative everywhere else.
- */
-const CHROME = ((): string | null => {
-  try {
-    return resolveChromeBin(undefined);
-  } catch {
-    return null;
-  }
-})();
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
 const SRC = join(import.meta.dirname, '../src');
 const SHOT = join(import.meta.dirname, '../../../scripts/ui-shot.ts');
 

@@ -160,6 +160,8 @@ describe('a bad meeting on a doc no row links', () => {
   /** A doc store that records the threads posted on it. */
   function threads(docs: string[]) {
     const posted: Array<{
+      id: string;
+      comments: Array<{ id: string }>;
       docId: string;
       author: User;
       text: string;
@@ -177,7 +179,16 @@ describe('a bad meeting on a doc no row links', () => {
         anchor: Anchor,
         opts: { review: ReviewPayload },
       ) => {
-        posted.push({ docId, author, text, anchor, review: opts.review });
+        const n = posted.length + 1;
+        posted.push({
+          id: `th-${n}`,
+          comments: [{ id: `c-${n}` }],
+          docId,
+          author,
+          text,
+          anchor,
+          review: opts.review,
+        });
         return {};
       },
       listThreads: (docId: string) => posted.filter((p) => p.docId === docId),
@@ -196,7 +207,12 @@ describe('a bad meeting on a doc no row links', () => {
       docTitle: 'Harbour season',
       report: badReport(),
     });
-    expect(filing).toEqual({ filed: true, docId: 'd-harbour' });
+    expect(filing).toEqual({
+      filed: true,
+      docId: 'd-harbour',
+      threadId: 'th-1',
+      commentId: 'c-1',
+    });
     expect(store.posted).toHaveLength(1);
     const [post] = store.posted;
     expect(post?.anchor).toEqual({ kind: 'subject' });
@@ -258,7 +274,7 @@ describe('a bad meeting on a doc no row links', () => {
       ...board([task({ id: 't-season' })]),
       fileOnDoc: (docId) => {
         onDoc.push(docId);
-        return true;
+        return { threadId: 'th-1', commentId: 'c-1' };
       },
     };
     const filing = fileNotesQualityReview(b, ACTOR, {

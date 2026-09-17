@@ -53,6 +53,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { BROWSER_TESTS_ENV, browserTestsEnabled } from './browser-tests.ts';
 import { enterLane } from './verify-lane-lock.ts';
 
 // `import.meta.url`, not `import.meta.dir`: the colocated test runs under
@@ -69,6 +70,8 @@ export interface Member {
   argv: string[];
   /** The token after `bun run` in ci.yml, or null for a local-only member. */
   ci: string | null;
+  /** Launches a real browser, so it runs only when the gate is opened. */
+  browser?: true;
 }
 
 /**
@@ -155,12 +158,14 @@ export const MEMBERS: Member[] = [
     title: 'the BUILT client boots a doc page without throwing',
     argv: ['check:client-boot'],
     ci: 'check:client-boot',
+    browser: true,
   },
   {
     id: 'check:meeting-smoke',
     title: 'a whole meeting leaves usable notes, through a real server and browser',
     argv: ['check:meeting-smoke'],
     ci: 'check:meeting-smoke',
+    browser: true,
   },
   // The last three are a chain: both suites run instrumented and write their
   // lcov under .coverage/, and `coverage` reads it back instead of running
@@ -373,12 +378,31 @@ export function runMembers(
   return results;
 }
 
+/**
+ * Split the run into what it will do and what the browser gate is holding.
+ *
+ * `held` is not a pass and not a failure — it is coverage this run does not
+ * have, which is why it is returned rather than filtered away silently. The
+ * summary names every entry, because a green over a shorter list than CI's
+ * is the exact thing this command exists not to print.
+ */
+export function partitionBrowserMembers(
+  members: Member[],
+  enabled: boolean,
+): { run: Member[]; held: Member[] } {
+  if (enabled) return { run: members, held: [] };
+  return {
+    run: members.filter((m) => !m.browser),
+    held: members.filter((m) => m.browser === true),
+  };
+}
+
 /** Non-zero when any member did not pass. */
 export function overallExit(results: Result[]): number {
   return results.some((r) => r.exitCode !== 0) ? 1 : 0;
 }
 
-function printSummary(results: Result[], total: number): void {
+function printSummary(results: Result[], total: number, held: Member[] = []): void {
   const failed = results.filter((r) => r.exitCode !== 0);
   console.log(`\n${'─'.repeat(72)}`);
   for (const r of results) {
@@ -388,8 +412,18 @@ function printSummary(results: Result[], total: number): void {
   }
   const ran = results.length;
   if (ran < total) console.log(`    (${total - ran} member(s) not run — --bail stopped the run)`);
+  for (const m of held)
+    console.log(`  · ${' '.repeat(7)}  ${m.id.padEnd(22)} not run — browser gate`);
   console.log('─'.repeat(72));
   if (failed.length === 0) {
+    if (held.length > 0) {
+      console.log(
+        `✅ ${ran} gate(s) passed, ${held.length} not run: ${held.map((m) => m.id).join(', ')}.`,
+      );
+      console.log('   That is LESS than CI runs. Browser cases inside test:vitest skipped too.');
+      console.log(`   Run them here with: ${BROWSER_TESTS_ENV}=1 bun run verify`);
+      return;
+    }
     console.log(`✅ ${ran} gate(s) passed. This is the set CI runs.`);
     return;
   }
@@ -412,7 +446,13 @@ async function main(): Promise<void> {
   if (argv.includes('--parity')) process.exit(runParity());
 
   if (argv.includes('--list')) {
-    for (const m of MEMBERS) console.log(`  ${m.id.padEnd(22)} ${m.title}`);
+    for (const m of MEMBERS) {
+      const tag = m.browser ? '  [needs a browser]' : '';
+      console.log(`  ${m.id.padEnd(22)} ${m.title}${tag}`);
+    }
+    if (!browserTestsEnabled()) {
+      console.log(`\n  ${BROWSER_TESTS_ENV} is not set, so the browser members would not run.`);
+    }
     for (const [token, why] of Object.entries(CI_ONLY)) {
       console.log(`\n  CI-only: bun run ${token}\n    ${why}`);
     }
@@ -433,15 +473,19 @@ async function main(): Promise<void> {
     }
   }
 
+  // THE BROWSER GATE. Held members are taken out here, before the lane and
+  // before the base check, so every line below counts what will actually run.
+  const { run, held } = partitionBrowserMembers(members, browserTestsEnabled());
+
   // A suite in this run rewrites its lcov, so anything already in .coverage
   // is from a previous run — and `coverage --reuse` would ratchet it without
   // a word. Cleared here rather than by the suites, because a run of
   // `--only coverage` is deliberately reading what a previous run left.
-  if (members.some((m) => m.id === 'test:vitest' || m.id === 'test:server')) {
+  if (run.some((m) => m.id === 'test:vitest' || m.id === 'test:server')) {
     rmSync(join(REPO_ROOT, '.coverage'), { recursive: true, force: true });
   }
 
-  const needsBase = members.some((m) => m.argv.includes('{base}'));
+  const needsBase = run.some((m) => m.argv.includes('{base}'));
   if (needsBase) {
     const ref = Bun.spawnSync(['git', 'rev-parse', '--verify', `${base}^{commit}`], {
       cwd: REPO_ROOT,
@@ -461,12 +505,19 @@ async function main(): Promise<void> {
   // this run ends, a failing member included.
   const finish = await enterLane(
     REPO_ROOT,
-    members.map((m) => m.id),
+    run.map((m) => m.id),
   );
 
-  console.log(`Running ${members.length} gate(s) — the set .github/workflows/ci.yml runs.\n`);
+  if (held.length > 0) {
+    console.log(
+      `Running ${run.length} of ${members.length} gate(s) — ${held.length} need a browser and ` +
+        `${BROWSER_TESTS_ENV} is not set.\n`,
+    );
+  } else {
+    console.log(`Running ${run.length} gate(s) — the set .github/workflows/ci.yml runs.\n`);
+  }
   const results = runMembers(
-    members,
+    run,
     (m) => {
       console.log(`\n▶ ${m.id} — ${m.title}`);
       if (m.id === 'parity') return runParity();
@@ -482,7 +533,7 @@ async function main(): Promise<void> {
     { bail: argv.includes('--bail') },
   );
 
-  printSummary(results, members.length);
+  printSummary(results, run.length, held);
   finish(overallExit(results));
 }
 

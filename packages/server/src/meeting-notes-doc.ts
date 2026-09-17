@@ -75,6 +75,7 @@ import {
   type NotesUpdate,
   type NotesWriteNoWords,
   type NotesWriteRefusal,
+  type TickScheduler,
 } from './meeting-notes.ts';
 import {
   type ResearchFiled,
@@ -100,6 +101,7 @@ import { repairNotesEditAddresses } from './notes-edit-address.ts';
 import { bulletNotesEdits } from './notes-edit-bullets.ts';
 import { dedupeNotesEdits } from './notes-edit-dedupe.ts';
 import { guardNotesEdits } from './notes-edit-guard.ts';
+import { retagNotesGroups } from './notes-group-tags.ts';
 import { notesTopicLevel } from './notes-heading-level.ts';
 import {
   type NotesHeadingStore,
@@ -112,6 +114,7 @@ import {
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
 import { readNotesMethod } from './notes-method-store.ts';
+import { type NotesQualityFiler, createNotesQualityFiler } from './notes-quality-filing.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
@@ -124,7 +127,7 @@ import {
   relabelNotesSection,
   retagSpeakerInNotes,
 } from './notes-speaker-tags.ts';
-import { createNotesTimingLog } from './notes-timing.ts';
+import { type NotesDroppedEdit, createNotesTimingLog } from './notes-timing.ts';
 
 export type { NotesDocStore } from './notes-doc-access.ts';
 export {
@@ -773,11 +776,26 @@ export function applyNotesUpdate(
   // batch, and only ever for a batch that already failed something.
   const repair = repairNotesEditAddresses(linked.edits, res.outcomes, section);
   let recovered = 0;
+  // Which of the batch's own edits ended up SOMEWHERE, so the record can tell
+  // a correction that landed in the wrong place from one that landed nowhere.
+  const rehomed = new Set<number>();
   if (repair.edits.length > 0) {
     const again = applyNotesBlockEdits(docStore, update.docId, repair.edits);
     recovered = again.ok ? again.applied + again.suggested : 0;
+    if (again.ok) {
+      for (const [j, out] of again.outcomes.entries()) {
+        const source = repair.sources[j];
+        if (out.status !== 'failed' && source !== undefined) rehomed.add(source);
+      }
+    }
     noteAddressRepair(update.docId, update.meetingId, repair.repaired, recovered);
   }
+  // NOTHING THE DOC REFUSED GOES UNSAID. A batch that landed four notes and
+  // dropped a fifth answers `null` below and used to say nothing at all —
+  // and the fifth is nearly always the tick's correction or removal, because
+  // those are the only edits that name a block. Reported to the meeting's own
+  // record, and logged once for the tick (`NotesDroppedEdit`).
+  reportDroppedEdits(update, res.outcomes, rehomed);
   // A TOPIC OPENED TWICE IS FOLDED IN THE TICK THAT OPENED IT. A tick is
   // shown a slice of the doc, so it can open a `### ` heading the section
   // already carries a little further up — which is what put `Note-taker
@@ -820,6 +838,22 @@ export function applyNotesUpdate(
           `${tidied.emptied} topic heading with nothing under it removed`,
       );
     }
+    // A RUN OF NOTES FROM ONE VOICE CARRIES ONE NAME, ON THE BULLET ABOVE
+    // THEM. Run here rather than on the composed edits because a group is
+    // built across ticks and the decision needs the whole of it
+    // (`notes-group-tags.ts`). After the tidy, so a group whose last empty
+    // bullet has just been removed is judged at the size it now is.
+    const retagged = retagNotesGroups(doc.ydoc, section, { author: NOTES_AUTHOR_ID });
+    const moved = retagged.hoisted + retagged.cleared + retagged.restored + retagged.unfolded;
+    if (moved > 0) {
+      console.log(
+        `[meeting-notes] ${update.docId}/${update.meetingId}: ` +
+          `${retagged.cleared} note tag${retagged.cleared === 1 ? '' : 's'} folded into ` +
+          `${retagged.hoisted} newly tagged lead bullet${retagged.hoisted === 1 ? '' : 's'}, ` +
+          `${retagged.restored} note given its own tag back, ` +
+          `${retagged.unfolded} group unfolded`,
+      );
+    }
   }
   // A batch every one of whose edits failed wrote nothing, and saying so is
   // what reports the skip. A batch that landed some of its edits is a
@@ -849,6 +883,45 @@ export function applyNotesUpdate(
   }
   if (res.applied + res.suggested + recovered > 0) return null;
   return failedCarryingWords(res.outcomes) ? 'all-edits-failed' : null;
+}
+
+/**
+ * Say what the doc would not take, to the meeting's own record and to the log.
+ *
+ * ONE LINE PER TICK, AND ONLY WHEN THERE IS SOMETHING TO SAY. A batch that
+ * landed whole is the overwhelmingly common case and costs nothing here.
+ *
+ * WHY THE LOG LINE IS NOT ENOUGH ON ITS OWN, and the record is the point: the
+ * skip line next door fires only when the WHOLE batch failed, so a tick that
+ * wrote its bullets and dropped its correction has always read as a clean
+ * tick everywhere a person or a script can look. `update.onDropped` puts the
+ * verdicts on the tick's timing row, which is the file that survives the
+ * meeting.
+ */
+function reportDroppedEdits(
+  update: NotesUpdate,
+  outcomes: readonly prose.BlockEditOutcome[],
+  rehomed: ReadonlySet<number>,
+): void {
+  const dropped: NotesDroppedEdit[] = [];
+  for (const [i, out] of outcomes.entries()) {
+    if (out.status !== 'failed') continue;
+    dropped.push({ op: out.op, why: out.error ?? 'unknown', recovered: rehomed.has(i) });
+  }
+  if (dropped.length === 0) return;
+  update.onDropped?.(dropped);
+  const lost = dropped.filter((d) => !d.recovered);
+  console.warn(
+    `[meeting-notes] ${update.docId} meeting ${update.meetingId} tick ${update.tick.tick}: ` +
+      `${dropped.length} edit${dropped.length === 1 ? '' : 's'} the doc would not take where ` +
+      `${dropped.length === 1 ? 'it was' : 'they were'} addressed — ` +
+      `${dropped.map((d) => `${d.op}/${d.why}${d.recovered ? ' (re-homed)' : ''}`).join(', ')}` +
+      (lost.length > 0
+        ? `; ${lost.length} carried no words this pipeline could put back, so ${
+            lost.length === 1 ? 'that change' : 'those changes'
+          } did not happen`
+        : ''),
+  );
 }
 
 /** Whether any edit that failed was one that would have PUT WORDS in the doc. */
@@ -1153,6 +1226,16 @@ export function withServerNotesSinks(
     /** Who a filed quality item is attributed to. Defaults to the note-taker
      *  itself, which is the hand that wrote the notes being reported on. */
     qualityActor?: { id: string; name: string; kind?: string };
+    /**
+     * The resume grace the quality filer holds a dropped leg's reading for,
+     * and the clock it runs on. Tests fire the clock by hand; the server
+     * takes the defaults.
+     */
+    qualityGraceMs?: number;
+    qualityGraceSchedule?: TickScheduler;
+    /** Tests: a filer they can share across two harnesses to model the two
+     *  recording legs of one meeting. */
+    qualityFiler?: NotesQualityFiler;
   },
 ): MeetingNotesDeps {
   const extractor = options.taskExtractor;
@@ -1178,6 +1261,18 @@ export function withServerNotesSinks(
     createNotesHeadingMemory(
       deps.dataDir !== undefined ? createNotesHeadingFileStore(deps.dataDir) : undefined,
     );
+  // ONE FILER PER WIRING, i.e. per server, for the reason the heading memory
+  // above is: it is keyed by doc and meeting and it has to outlive a socket,
+  // because the leg that drops and the leg that ends the meeting are two
+  // sessions of one recording.
+  const qualityFiler =
+    deps.qualityFiler ??
+    createNotesQualityFiler({
+      ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+      actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
+      ...(deps.qualityGraceMs !== undefined ? { graceMs: deps.qualityGraceMs } : {}),
+      ...(deps.qualityGraceSchedule ? { schedule: deps.qualityGraceSchedule } : {}),
+    });
   const boardOf = (docId: string): string | undefined => {
     const doc = deps.docStore().get(docId);
     return doc?.meta.setId ?? deps.boardOf?.(docId);
@@ -1216,7 +1311,8 @@ export function withServerNotesSinks(
       return runNotesQualityPass(
         {
           docStore: deps.docStore,
-          ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+          file: (input) =>
+            qualityFiler.file({ docId: summary.docId, meetingId: summary.meetingId }, input),
           boardOf,
           ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
           headingIdOf: (docId, meetingId) =>
@@ -1448,10 +1544,21 @@ export function withServerNotesSinks(
       // lands in.
       releaseNotesAuthorship(deps.docStore(), ids.docId);
       heading.beginMeeting(ids);
+      // A leg of this meeting is running again. Whatever reading the drop
+      // left is about half a meeting, and the grace that would have filed it
+      // is cancelled — the next stop reads the whole of it.
+      qualityFiler.legBegan(ids);
       titler?.onSessionStart(ids.docId);
       reviewAsked.delete(ids.docId);
       spentCues.delete(ids.docId);
       options.onSessionStart?.(ids);
+    },
+    // The socket owner, once it knows how the leg ended. This is where a
+    // quality item becomes a thing a person can see: never inside `end()`,
+    // which runs while the meeting may still be picked back up.
+    onLegEnded: (ids, opts): void => {
+      qualityFiler.legEnded(ids, opts);
+      options.onLegEnded?.(ids, opts);
     },
     resolveContext: (docId: string): NotesProjectContext | undefined => {
       const gathered: NotesProjectContext = {};

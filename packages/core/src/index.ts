@@ -22,6 +22,7 @@ export * from './review-item.ts';
 export * from './review-item-id.ts';
 export * from './review-judge-prompt.ts';
 export * from './notes-cleanup-report.ts';
+export * from './review-hold.ts';
 export * from './notes-method.ts';
 export * from './speaker-name.ts';
 export * from './speaker-roster.ts';

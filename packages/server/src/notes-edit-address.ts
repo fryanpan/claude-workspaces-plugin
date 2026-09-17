@@ -91,6 +91,16 @@ export interface NotesAddressRepair {
   /** One line per recovered note, naming the op and the verdict it is
    *  recovering from — what the log says instead of nothing. */
   repaired: string[];
+  /**
+   * For each entry of `edits`, the index in the ORIGINAL batch of the failed
+   * edit it is recovering — so a caller applying the repair can say which of
+   * its notes ended up somewhere and which ended up nowhere.
+   *
+   * Parallel to `edits` rather than folded into it, because the repair batch
+   * is handed straight to the applier and must carry nothing the applier does
+   * not understand.
+   */
+  sources: number[];
 }
 
 /**
@@ -106,7 +116,7 @@ export function repairNotesEditAddresses(
   outcomes: readonly prose.BlockEditOutcome[],
   notesHeadingId: string | undefined,
 ): NotesAddressRepair {
-  const repair: NotesAddressRepair = { edits: [], repaired: [] };
+  const repair: NotesAddressRepair = { edits: [], repaired: [], sources: [] };
   if (outcomes.length !== edits.length) return repair;
   for (const [i, outcome] of outcomes.entries()) {
     if (outcome.status !== 'failed') continue;
@@ -123,6 +133,7 @@ export function repairNotesEditAddresses(
         ? { op: 'insert_at_end', markdown }
         : { op: 'insert_under_heading', headingId: notesHeadingId, markdown },
     );
+    repair.sources.push(i);
     repair.repaired.push(
       `${outcome.op}/${outcome.error} re-addressed to ` +
         `${notesHeadingId === undefined ? 'the end of the doc' : 'this meeting’s notes section'}`,

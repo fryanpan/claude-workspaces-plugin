@@ -477,7 +477,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     // are not behind `offBox` — but `shareScopeAllows` does not name
     // `/mounts/…`, so a share visitor never reaches them, and the handler
     // refuses one anyway. A project marked `local-only` narrows these two
-    // further, to the box, at serve time.
+    // further, to the box, at serve time — and so does a single MOUNT marked
+    // that way, which is how a project shares its harmless folders while one
+    // sensitive folder stays on the machine.
     ['trusted-local', '/mounts/:fileId', 'GET HEAD'],
     ['trusted-local', '/mounts/:fileId/raw', 'GET HEAD'],
   ]),
