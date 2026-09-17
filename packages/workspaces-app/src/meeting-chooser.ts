@@ -118,6 +118,13 @@ export interface MeetingChooserDeps {
   speakerRow(label: string): HTMLElement;
   /** Redraw whichever popover is open. */
   renderPop(): void;
+  /**
+   * A card was picked, so the two facts the Record button carries may have
+   * moved. The chooser IS the intent the next press honours, so the button's
+   * face has to follow it card by card rather than only at Start — otherwise
+   * the setting on screen is one answer behind whatever a press would do.
+   */
+  onChoiceChanged(): void;
   /** The chooser's one verb, which the strip owns because it starts a meeting. */
   onStartPressed(): void;
   /** Whether the chooser, rather than the menu, is the popover on screen. */
@@ -193,6 +200,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     loadTranscript,
     speakerRow,
     renderPop,
+    onChoiceChanged,
     onStartPressed,
     isChooserView,
     socketOpen,
@@ -494,6 +502,7 @@ export function createMeetingChooser(deps: MeetingChooserDeps): MeetingChooser {
     // runs off card clicks, and only the chooser has cards — a menu that
     // grew one later must not sprout a Start button.
     if (isChooserView()) syncStartActions();
+    onChoiceChanged();
   }
   return { buildChooser, buildAdvancedPanel };
 }

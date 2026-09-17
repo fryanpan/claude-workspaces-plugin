@@ -1400,9 +1400,11 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  /* design-mobile.md tap-target floor; it is a real control on a phone. */
-  min-height: 36px;
-  padding: 0 11px;
+  /* design-mobile.md tap-target floor; it is a real control on a phone. The
+     40 rather than 36 is the setting line under the headline — two lines at
+     13px and 11px do not sit inside 36 with any padding left over. */
+  min-height: 40px;
+  padding: 3px 12px 3px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   background: var(--bg);
@@ -1442,6 +1444,63 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   border-radius: var(--radius-pill);
   background: var(--red);
 }
+/* The dot KEEPS ITS BOX when it is not lit. The pill holds one width across
+   every state (Bryan, on the approved mock: "keep the button the same size
+   across every state"), and a dot that collapsed to nothing while idle would
+   grow the control by its width plus a gap the moment a recording started,
+   moving the chevron and the toolbar beside it. `visibility` leaves it out of
+   hit-testing and out of the accessibility tree, which is all `display: none`
+   was doing here. */
+.meeting-record-dot[hidden] {
+  display: block;
+  visibility: hidden;
+}
+/* Headline over setting: what a press will capture, and for how many voices.
+   Left-aligned because the two lines are read as a pair, not centred text. */
+.meeting-record-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+  text-align: left;
+}
+.meeting-record-setting {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+/* While recording the pill is already red; a muted grey inside it reads as
+   disabled rather than as secondary. */
+.meeting-record.is-live .meeting-record-setting {
+  color: inherit;
+  opacity: 0.85;
+}
+/* THE ONE WIDTH. A copy of every face the button can wear — both headlines
+   and every source × voices setting — taking up width and no height, so the
+   widest of them sets the pill's width once and no change of state can move
+   it. `meeting-record-face.ts` derives the list; nothing here names a string.
+   Measured in `meeting-record-width-browser.test.ts`, whose control takes
+   this rule away and watches the readings spread apart. */
+.meeting-record-sizer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+/* The two marks that carry the same two facts where the words do not fit.
+   Hidden at every width the words survive. */
+.meeting-record-marks {
+  display: none;
+}
+.meeting-record-marks svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
 /* The chooser's door beside Record, for the doc where a tap records at once
    (nobody else on it): a chevron the height of the pill, no border of its
    own so the pair reads as one control. Hidden while recording — Record's
@@ -1451,7 +1510,10 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
+  /* The pill's height, not the 36px floor: the two are one control, so a
+     chevron four pixels shorter sits four pixels lower in a centred dock and
+     the pair stops reading as one box. */
+  min-height: 40px;
   min-width: 32px;
   padding: 0 6px;
   border: 0;
@@ -1467,9 +1529,18 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
    That is the "the menu offers Start, not Stop" the phone report found. The
    strip already hides it (`options.hidden = popForNow() !== 'chooser'`); this
    is what makes hiding it mean anything. Same rule, same reason, as
-   `.meeting-strip[hidden]` below. */
+   `.meeting-strip[hidden]` below.
+
+   It is `visibility`, not `display`, for the same reason the red dot keeps
+   its box: the chevron is unreachable while a meeting runs, but its PLACE
+   stays, so starting a recording does not shift the dock and the toolbar
+   beside it. `visibility: hidden` is out of hit-testing and out of the
+   accessibility tree; `pointer-events` says so a second time, because this
+   rule's whole history is a hidden control that was still tappable. */
 .meeting-record-options[hidden] {
-  display: none;
+  display: inline-flex;
+  visibility: hidden;
+  pointer-events: none;
 }
 .meeting-record-options svg {
   width: 14px;
@@ -1566,6 +1637,18 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
 /* The clock is the microphone's; a bot meeting and every settled failure
    would otherwise show 00:00 forever. */
 .meeting-strip:not([data-state="recording"]) .meeting-elapsed {
+  display: none;
+}
+/* What the running recording is capturing, beside its clock — the same two
+   facts the button carried before the press, so the answer to "what is this
+   recording?" is on screen while it runs and not only before it starts. */
+.meeting-setting {
+  flex: none;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.meeting-setting[hidden] {
   display: none;
 }
 /* One flowing line, newest words at the right, the tail fading out at the
@@ -2493,14 +2576,25 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
      The dock sits outside that scroll container now, so both can keep the
      36px design-mobile.md asks of a control a thumb has to hit. */
   .meeting-record {
-    min-width: 36px;
+    min-width: 52px;
     justify-content: center;
-    padding: 0 9px;
+    padding: 0 7px;
     font-size: 12px;
-    gap: 0;
+    gap: 3px;
   }
-  .meeting-record-label {
+  /* The words go, both lines of them — but the two facts do not. The glyph
+     changes with the source and the mark beside it with the voice count, so
+     a press on a phone still says what it will capture. */
+  .meeting-record-text {
     display: none;
+  }
+  .meeting-record-marks {
+    display: inline-flex;
+    align-items: center;
+    color: var(--fg-muted);
+  }
+  .meeting-record.is-live .meeting-record-marks {
+    color: inherit;
   }
   .meeting-record-options {
     min-width: 36px;
