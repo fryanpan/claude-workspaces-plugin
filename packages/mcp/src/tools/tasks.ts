@@ -31,7 +31,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { AgentAuthor } from '../author.ts';
 import { boardPathOf } from '../board-path.ts';
 import { scheduleOutputLine } from '../schedule-output-line.ts';
-import { projectTaskRows } from '../task-projection.ts';
+import {
+  LIST_TASK_FIELDS,
+  NEXT_TASK_FIELDS,
+  projectQueueRows,
+  projectTaskRows,
+  unknownFieldsMessage,
+  unsatisfiableFields,
+} from '../task-projection.ts';
 
 /** What the board tools read out of `mcp.ts`. */
 export interface TaskToolContext {
@@ -346,12 +353,13 @@ export async function handleTaskTool(
       });
     }
     case 'next_tasks': {
-      const { workspaceId, assignee, limit, includeBlocked, includeArchived } = a as {
+      const { workspaceId, assignee, limit, includeBlocked, includeArchived, fields } = a as {
         workspaceId: string;
         assignee?: string;
         limit?: number;
         includeBlocked?: boolean;
         includeArchived?: boolean;
+        fields?: string[];
       };
       const qs = new URLSearchParams();
       if (assignee !== undefined) qs.set('assignee', assignee);
@@ -363,10 +371,22 @@ export async function handleTaskTool(
         'GET',
         `/workspaces/${encodeURIComponent(workspaceId)}/next${query}`,
       )) as {
-        tasks: unknown[];
+        tasks: Array<Record<string, unknown>>;
         capacity?: { cap: number; inUse: number; free: number; heldForCapacity?: number };
         retired?: { since: number; reason?: string; notice: string };
       };
+      // A `fields` entry this verb cannot answer is an ERROR, never a
+      // silently thinner row. Until this check existed `next_tasks` accepted
+      // `fields` without declaring it and ignored it completely, so the
+      // caller's only evidence was a response it could not tell from the
+      // right one. Checked against the queue row's vocabulary, which is not
+      // the stored task's: `reviews` here is the wrong verb, not a typo.
+      if (fields !== undefined && fields.length > 0) {
+        const missing = unsatisfiableFields(fields, NEXT_TASK_FIELDS, res.tasks);
+        if (missing.length > 0) {
+          return err(unknownFieldsMessage('next_tasks', missing, NEXT_TASK_FIELDS));
+        }
+      }
       // This is the "what should I do next" call, so a retired board has to
       // say so HERE — the queue still ranks (in-flight work is finishable)
       // and would otherwise read exactly like a live board's.
@@ -378,11 +398,17 @@ export async function handleTaskTool(
       // a band with nothing ready. Measured on this board: five unblocked
       // todo rows, two offered, `heldForCapacity: 3` computed by the server
       // and discarded here.
+      // Trimmed handler-side for the same reason `list_tasks` is, and the
+      // REST route is left alone for the same reason too. Default: the
+      // picker's shape — no `body`, and a drifting row's `premise` without
+      // its verbatim discussion. Measured on a seeded local board, the
+      // default is a fraction of the raw rows, and the bulk of what goes is
+      // the note histories.
       return ok({
         workspaceId,
         ...(res.retired ? { retired: res.retired } : {}),
         ...(res.capacity ? { capacity: res.capacity } : {}),
-        tasks: res.tasks,
+        tasks: projectQueueRows(res.tasks, fields),
       });
     }
     case 'list_tasks': {
@@ -409,6 +435,21 @@ export async function handleTaskTool(
         'GET',
         `/workspaces/${encodeURIComponent(workspaceId)}/tasks?${qs.toString()}`,
       )) as { tasks: TaskPayload[] };
+      // A name this verb cannot answer is an error, not a quietly missing
+      // key. `projectTaskRows` copies a key only `if (key in t)`, so before
+      // this check `fields: ['goalTitle', 'ready']` came back as bare ids
+      // with nothing said — indistinguishable from a board whose rows really
+      // do lack those keys.
+      if (fields !== undefined && fields.length > 0) {
+        const missing = unsatisfiableFields(
+          fields,
+          LIST_TASK_FIELDS,
+          res.tasks as unknown as Array<Record<string, unknown>>,
+        );
+        if (missing.length > 0) {
+          return err(unknownFieldsMessage('list_tasks', missing, LIST_TASK_FIELDS));
+        }
+      }
       // Trimmed handler-side, NOT at the route — an old bundle keeps
       // calling the REST route forever and must keep reading its shape.
       // Default: no body snapshot, no transition history. With `fields`:
