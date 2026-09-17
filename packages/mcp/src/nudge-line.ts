@@ -270,6 +270,32 @@ export interface UngatedUiRowPayload {
 }
 
 /**
+ * One row whose blockage LIFTED and whose work has not restarted —
+ * `stall-nudge.ts`'s `unresumed`, read off `blockage-lift.ts`. It is the one
+ * finding on this frame that reports something GOOD nobody acted on, so the
+ * line it renders asks for a different act from every other: hand the answer
+ * back, rather than go looking for an owner.
+ *
+ * `liftedAt` and `lift` are carried so the reader can CHECK the event. A
+ * finding that fires once on a snapshot boundary reads exactly like one that
+ * has been true for two days unless it says what it rests on.
+ */
+export interface UnresumedRowPayload {
+  id: string;
+  title?: string;
+  /** Which signal said so. */
+  lift?: 'review-item-answered' | 'done-when-met';
+  /** When it lifted, and how long ago in ms. */
+  liftedAt?: number;
+  liftedMs?: number;
+  /** What is now unblocked, in the board's own words. */
+  what?: string;
+  /** What is open now — the first open line after the met one. `done-when-met`
+   *  only. */
+  next?: string;
+}
+
+/**
  * One wait an agent DECLARED on a row, for something the board cannot see —
  * `stall-nudge.ts`'s `declaredWaits`. Not a finding: it explains a row the
  * frame already names, which is what makes the wake say something new instead
@@ -318,6 +344,9 @@ export interface StallPayload {
   /** Rows built past the UI gate. A frame carrying only this is a real
    *  wake: the row is MOVING, so no other list here would ever name it. */
   ungatedUi?: UngatedUiRowPayload[];
+  /** Rows whose blockage lifted with nothing done since. A frame carrying
+   *  only this is a real wake: the answer is in and nobody read it. */
+  unresumed?: UnresumedRowPayload[];
   /** Runnable rows past the board's parallelism cap, which the pass did not
    *  judge — idle by rule, not healthy. Absent when none. */
   beyondCapacity?: number;
@@ -332,6 +361,7 @@ export interface StallPayload {
     askedBack?: AskedBackRowPayload[];
     unanswered?: UnansweredRowPayload[];
     ungatedUi?: UngatedUiRowPayload[];
+    unresumed?: UnresumedRowPayload[];
     checkIn?: StalledRowPayload[];
     escalated?: boolean;
   };
@@ -637,6 +667,9 @@ function changedClause(changed: StallPayload['changed']): string {
     bits.push(`${waiting.length} unanswered question(s) from a person on a doc`);
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0) bits.push(`${ungated.length} task built past the UI gate`);
+  const lifted = changed.unresumed ?? [];
+  if (lifted.length > 0)
+    bits.push(`${lifted.length} task(s) newly unblocked with nothing done since`);
   const checkIn = changed.checkIn ?? [];
   if (checkIn.length > 0) bits.push(`${checkIn.length} task(s) owe a check-in`);
   if (changed.escalated === true)
@@ -697,6 +730,7 @@ const STALL_PAYLOAD_KEYS: Record<keyof StallPayload, true> = {
   askedBack: true,
   unanswered: true,
   ungatedUi: true,
+  unresumed: true,
   checkIn: true,
   declaredWaits: true,
   changed: true,
@@ -963,6 +997,23 @@ export function stalledLine(p: StallPayload, frameBoard?: string): string {
         'Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.',
     );
   }
+  // The one finding here that reports something GOOD. Its remedy is to hand
+  // the answer back to whoever was waiting on it — which is not what any
+  // other sentence in this line asks for, and is why it is its own sentence
+  // rather than a qualifier on the stall list that usually names the same
+  // rows. It says nothing about how long the row has been quiet: the number
+  // that matters is how long the ANSWER has been sitting there.
+  const unresumed = p.unresumed ?? [];
+  if (unresumed.length > 0) {
+    const noun = unresumed.length === 1 ? 'task is' : 'tasks are';
+    parts.push(
+      `${unresumed.length} ${noun} unblocked with nothing done since — the answer ` +
+        `${unresumed.length === 1 ? 'it was' : 'they were'} waiting on is already in, and nothing ` +
+        `has touched ${unresumed.length === 1 ? 'it' : 'them'} since it landed: ` +
+        `${unresumedRowsClause(unresumed)}. ` +
+        'Restart each one or say why it is still blocked; the board has no record that anybody read the answer.',
+    );
+  }
   // The one finding here about a row that has somebody on it and is not yet
   // stalled. Its remedy is a message to that somebody, which no other sentence
   // in this line asks for, so it is its own sentence.
@@ -1139,6 +1190,31 @@ function ungatedRowClause(row: UngatedUiRowPayload): string {
 
 function ungatedRowsClause(rows: readonly UngatedUiRowPayload[]): string {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(ungatedRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
+}
+
+/** One row whose blockage lifted: the row, WHICH event lifted it, how long
+ *  ago, and what it said. The event is named rather than summarised because
+ *  the reader's first move is to go and look at it — a finding that fires on
+ *  a snapshot boundary and one that has stood for two days read identically
+ *  otherwise. */
+function unresumedRowClause(row: UnresumedRowPayload): string {
+  const title = row.title ? `"${truncate(row.title, 40)}" ` : '';
+  const ago = row.liftedMs === undefined ? '' : ` ${humanDuration(row.liftedMs)} ago`;
+  const event =
+    row.lift === 'done-when-met'
+      ? `done-when line met${ago}`
+      : row.lift === 'review-item-answered'
+        ? `review item answered${ago}`
+        : `unblocked${ago}`;
+  const what = row.what ? `: "${truncate(row.what, 60)}"` : '';
+  const next = row.next ? `, still open: "${truncate(row.next, 60)}"` : '';
+  return `${title}(${row.id}, ${event}${what}${next})`;
+}
+
+function unresumedRowsClause(rows: readonly UnresumedRowPayload[]): string {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(unresumedRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
 }

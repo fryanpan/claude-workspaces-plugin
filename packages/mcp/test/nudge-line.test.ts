@@ -865,6 +865,63 @@ describe('a UI gate finding says which baseline its file was read from', () => {
   });
 });
 
+const UNRESUMED_ROW = {
+  id: 't-r1',
+  title: 'Agent can rebuild the Riverbend index nightly',
+  lift: 'review-item-answered' as const,
+  liftedAt: 1_700_000_000_000,
+  liftedMs: 21 * 60 * 60_000,
+  what: 'Which key should the nightly rebuild sort on?',
+};
+
+describe('stalledLine names rows whose blockage lifted as their own finding', () => {
+  it('names the row, the event that unblocked it, and how long the answer has sat', () => {
+    const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, unresumed: [UNRESUMED_ROW] });
+    expect(line).toContain('1 task is unblocked with nothing done since');
+    expect(line).toContain('t-r1');
+    expect(line).toContain('review item answered 21h ago');
+    expect(line).toContain('"Which key should the nightly rebuild sort on?"');
+    expect(line).toContain('Restart');
+  });
+
+  it('a met done-when line names what is still open, because that is what restarts', () => {
+    const line = stalledLine({
+      ...STALL,
+      rows: [],
+      stalledCount: 0,
+      unresumed: [
+        {
+          ...UNRESUMED_ROW,
+          lift: 'done-when-met' as const,
+          liftedMs: 2 * 60 * 60_000,
+          what: 'The nightly rebuild runs on its own.',
+          next: 'Search reads the fresh index.',
+        },
+      ],
+    });
+    expect(line).toContain('done-when line met 2h ago');
+    expect(line).toContain('still open: "Search reads the fresh index."');
+  });
+
+  it('a frame carrying only this finding is a real wake, not a bug report', () => {
+    // The regression the UI gate shipped with: a reader that has never heard
+    // of the key renders the frame as "no rows on it". A new finding list
+    // REQUIRES a renderer, and this is what proves this bundle has one.
+    const line = stalledLine({ unresumed: [UNRESUMED_ROW] });
+    expect(line).not.toContain('no tasks on it');
+    expect(line).toContain('unblocked with nothing done since');
+  });
+
+  it('one newly unblocked since the last wake is called out first', () => {
+    const line = stalledLine({ ...STALL, changed: { unresumed: [UNRESUMED_ROW] } });
+    expect(line).toContain('NEW since the last wake: 1 task(s) newly unblocked with nothing done since');
+  });
+
+  it('the control: a frame with no unresumed list says nothing about it', () => {
+    expect(stalledLine(STALL)).not.toContain('unblocked with nothing done since');
+  });
+});
+
 describe('stalledLine names held review items as their own finding', () => {
   it('says how many are held, which, by whom, and what the judge found', () => {
     const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, heldItems: [HELD_ROW] });

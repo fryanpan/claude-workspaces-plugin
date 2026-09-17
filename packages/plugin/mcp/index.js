@@ -14267,6 +14267,9 @@ function changedClause(changed) {
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0)
     bits.push(`${ungated.length} task built past the UI gate`);
+  const lifted = changed.unresumed ?? [];
+  if (lifted.length > 0)
+    bits.push(`${lifted.length} task(s) newly unblocked with nothing done since`);
   const checkIn = changed.checkIn ?? [];
   if (checkIn.length > 0)
     bits.push(`${checkIn.length} task(s) owe a check-in`);
@@ -14291,6 +14294,7 @@ var STALL_PAYLOAD_KEYS = {
   askedBack: true,
   unanswered: true,
   ungatedUi: true,
+  unresumed: true,
   checkIn: true,
   declaredWaits: true,
   changed: true,
@@ -14390,6 +14394,11 @@ function stalledLine(p, frameBoard) {
     const who = ungated.some((row) => row.from === "trunk") ? "its worktree" : "its builder";
     parts.push(`${ungated.length} ${noun} being built past the review gate — an agent filed it, ${who} ` + "has changed a file a person looks at, and nobody answered a review item on it — " + `${ungatedRowsClause(ungated)}. ` + "Only an answered review item clears it: file the item and hold the build, or say why the gate does not apply.");
   }
+  const unresumed = p.unresumed ?? [];
+  if (unresumed.length > 0) {
+    const noun = unresumed.length === 1 ? "task is" : "tasks are";
+    parts.push(`${unresumed.length} ${noun} unblocked with nothing done since — the answer ` + `${unresumed.length === 1 ? "it was" : "they were"} waiting on is already in, and nothing ` + `has touched ${unresumed.length === 1 ? "it" : "them"} since it landed: ` + `${unresumedRowsClause(unresumed)}. ` + "Restart each one or say why it is still blocked; the board has no record that anybody read the answer.");
+  }
   const checkIn = p.checkIn ?? [];
   if (checkIn.length > 0) {
     const noun = checkIn.length === 1 ? "task has" : "tasks have";
@@ -14465,6 +14474,19 @@ function ungatedRowClause(row) {
 }
 function ungatedRowsClause(rows) {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(ungatedRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
+}
+function unresumedRowClause(row) {
+  const title = row.title ? `"${truncate4(row.title, 40)}" ` : "";
+  const ago = row.liftedMs === undefined ? "" : ` ${humanDuration2(row.liftedMs)} ago`;
+  const event = row.lift === "done-when-met" ? `done-when line met${ago}` : row.lift === "review-item-answered" ? `review item answered${ago}` : `unblocked${ago}`;
+  const what = row.what ? `: "${truncate4(row.what, 60)}"` : "";
+  const next = row.next ? `, still open: "${truncate4(row.next, 60)}"` : "";
+  return `${title}(${row.id}, ${event}${what}${next})`;
+}
+function unresumedRowsClause(rows) {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(unresumedRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
 }
@@ -20358,7 +20380,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.249";
+var PLUGIN_VERSION = "0.1.250";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
