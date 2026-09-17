@@ -167,11 +167,16 @@ export interface StalledRow {
   id: string;
   title: string;
   /** Which keep-moving bucket put it here — `in-progress` (claimed and gone
-   *  quiet), `ready-unpicked` (nothing blocking it and nobody on it), or
-   *  `blocked-on-owner-unfiled` on the `unfiled` list — or the gate's own
-   *  `builder-silent` (a watched builder that stopped reporting; probe or
-   *  replace it). The lead's next move differs per bucket, so the frame must
-   *  not flatten them into one word. */
+   *  quiet), `ready-unpicked` (nothing blocking it and nobody on it), or, on
+   *  the `unfiled` list, EITHER `blocked-on-owner-unfiled` (the board says a
+   *  person owns it) or `waiting-unfiled` (the row's own note was READ as an
+   *  ask, by a regex over prose) — or the gate's own `builder-silent` (a
+   *  watched builder that stopped reporting; probe or replace it). The lead's
+   *  next move differs per bucket, so the frame must not flatten them into
+   *  one word. Both `unfiled` buckets were rendered in one sentence until
+   *  `nudge-line.ts` learned to read this field, which told the reader a
+   *  person was waiting when only a regex over an agent's status note had
+   *  said so — the flattening this comment forbids, downstream of it. */
   bucket: string;
   /** How long since anything touched the row — a transition, an edit, or a
    *  comment on its discussion. */
