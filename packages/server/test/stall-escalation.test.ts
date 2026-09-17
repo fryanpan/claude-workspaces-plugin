@@ -196,6 +196,48 @@ describe('a dead board escalates; a live one never does', () => {
       expect(sent).toHaveLength(0);
     });
 
+    it('a dead board whose ONLY finding is an unanswered doc question reaches nobody', () => {
+      // The finding goes to the board's LEAD and stops there. Bryan is the
+      // one WAITING on that thread; filing it onto his queue would tell him
+      // his own question is unanswered, which is the one message it must
+      // never send. Structural, not a rule anybody has to remember: the
+      // escalation anchors on `stalled`/`unfiled` rows and a waiting thread
+      // is neither.
+      const a = make('Draft the Harborlight hardware schedule');
+      const escalations = build();
+      const waiting = [
+        {
+          id: 'doc-harborlight',
+          docId: 'doc-harborlight',
+          title: 'Harborlight door hardware',
+          threadId: 'th-door',
+          commentId: 'c-ask',
+          askedBy: 'Bryan',
+          askedAt: now - 17 * 24 * 60 * 60_000,
+          latestAt: now - 16 * 24 * 60 * 60_000,
+          askedMs: 17 * 24 * 60 * 60_000,
+          excerpt: 'Are the hinges left or right handed?',
+          reply: 'post_reply(docId="doc-harborlight", threadId="th-door", text="…")',
+        },
+      ];
+      escalations.onBoard(board(wsId, { unanswered: waiting }), now + 4 * ESCALATE_MS);
+      expect(items(a.id)).toHaveLength(0);
+      expect(queued()).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+
+      // CONTROL: the same dead board with a stuck ROW does escalate, so the
+      // silence above is this finding's shape and not a broken harness.
+      reachOn.add(wsId);
+      escalations.onBoard(
+        board(wsId, {
+          unanswered: waiting,
+          unfiled: [row(a, 'blocked-on-owner-unfiled', 9 * ESCALATE_MS)],
+        }),
+        now + 4 * ESCALATE_MS,
+      );
+      expect(sent).toHaveLength(1);
+    });
+
     it('a check-in reminder changes nothing: it is the lead’s tap, not an escalation', () => {
       // The reminder is a new finding on the same snapshot the escalation
       // reads, so this pins that the escalation still turns on LIVENESS

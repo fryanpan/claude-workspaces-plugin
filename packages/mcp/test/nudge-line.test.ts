@@ -926,3 +926,46 @@ describe('stalledLine explains a row that was declared to be waiting', () => {
     expect(stalledLine(STALL)).not.toContain('LAPSED');
   });
 });
+
+describe('stalledLine names an unanswered question from a person', () => {
+  const WAITING = {
+    id: 'doc-harborlight',
+    title: 'Harborlight door hardware',
+    threadId: 'th-door',
+    askedBy: 'Bryan',
+    askedMs: 17 * 24 * 60 * 60_000,
+    excerpt: 'Are the hinges left or right handed?',
+    reply: 'post_reply(docId="doc-harborlight", threadId="th-door", text="…")',
+  };
+
+  it('says who asked, how long ago, what they said and how to answer', () => {
+    const line = stalledLine({ ...STALL, rows: [], stalledCount: 0, unanswered: [WAITING] });
+    expect(line).toContain('1 question from a person on a doc has had NO agent reply');
+    expect(line).toContain('Bryan asked');
+    expect(line).toContain('Harborlight door hardware');
+    expect(line).toContain('Are the hinges left or right handed?');
+    expect(line).toContain('post_reply(');
+  });
+
+  it('a waiting question on an otherwise clean board is not a bare slug', () => {
+    // The whole point of the finding: every other list is empty, so without
+    // this sentence the frame renders the "bug in the wake" fallback.
+    const line = stalledLine({ unanswered: [WAITING] });
+    expect(line).not.toContain('no tasks on it');
+    expect(line).toContain('NO agent reply');
+  });
+
+  it('the control: a frame with no waiting list says nothing about replies', () => {
+    expect(stalledLine(STALL)).not.toContain('NO agent reply');
+  });
+
+  it('a repeat wake says what is new before it says what to drive', () => {
+    const line = stalledLine({
+      ...STALL,
+      unanswered: [WAITING],
+      changed: { unanswered: [WAITING] },
+    });
+    expect(line).toContain('NEW since the last wake');
+    expect(line).toContain('1 unanswered question(s) from a person on a doc');
+  });
+});

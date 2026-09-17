@@ -14259,6 +14259,9 @@ function changedClause(changed) {
   const asked = changed.askedBack ?? [];
   if (asked.length > 0)
     bits.push(`${asked.length} review item(s) newly asked back`);
+  const waiting = changed.unanswered ?? [];
+  if (waiting.length > 0)
+    bits.push(`${waiting.length} unanswered question(s) from a person on a doc`);
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0)
     bits.push(`${ungated.length} task built past the UI gate`);
@@ -14313,6 +14316,11 @@ function stalledLine(p) {
     const noun = asked.length === 1 ? "review item has" : "review items have";
     parts.push(`${asked.length} ${noun} an unrevised question from a person and ${asked.length === 1 ? "is" : "are"} OFF their queue until revised — ${askedBackRowsClause(asked)}. ` + "A reply on the thread does not put an item back; only revise_review_item does, with the answer in its words.");
   }
+  const waiting = p.unanswered ?? [];
+  if (waiting.length > 0) {
+    const noun = waiting.length === 1 ? "question" : "questions";
+    parts.push(`${waiting.length} ${noun} from a person on a doc ${waiting.length === 1 ? "has" : "have"} had NO agent reply — ${unansweredRowsClause(waiting)}. ` + "Answer it or give it to somebody who can; nothing else on this board is tracking it.");
+  }
   const ungated = p.ungatedUi ?? [];
   if (ungated.length > 0) {
     const noun = ungated.length === 1 ? "UI task is" : "UI tasks are";
@@ -14362,6 +14370,19 @@ function askedBackRowClause(row) {
 }
 function askedBackRowsClause(rows) {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(askedBackRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
+}
+function unansweredRowClause(row) {
+  const who = row.askedBy ?? "a person";
+  const age = row.askedMs === undefined ? "" : ` ${humanDuration2(row.askedMs)} ago`;
+  const on = row.title ? ` on "${truncate4(row.title, 40)}"` : "";
+  const said = row.excerpt ? ` — "${truncate4(row.excerpt, 60)}"` : "";
+  const how = row.reply ? `, answer with ${row.reply}` : "";
+  return `${who} asked${age}${on}${said}${how}`;
+}
+function unansweredRowsClause(rows) {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(unansweredRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
 }
@@ -20095,7 +20116,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.242";
+var PLUGIN_VERSION = "0.1.243";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

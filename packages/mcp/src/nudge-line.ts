@@ -167,6 +167,28 @@ export interface AskedBackRowPayload {
   revise?: string;
 }
 
+/**
+ * A doc thread whose last speaker is a PERSON and where no agent has replied
+ * (`unanswered-thread.ts` on the server). The doc need hang on no task at
+ * all, which is why nothing else in this frame can name it. Absent from a
+ * server older than this, whose frames carried no such list.
+ */
+export interface UnansweredRowPayload {
+  /** The doc's id — what the reader opens. */
+  id?: string;
+  title?: string;
+  threadId?: string;
+  askedBy?: string;
+  /** How long the person has been waiting, from their first unanswered
+   *  comment rather than their latest. */
+  askedMs?: number;
+  /** The opening of what they wrote, so deciding whether it is yours costs
+   *  no doc read. */
+  excerpt?: string;
+  /** The paste-ready `post_reply(…)` call that answers it. */
+  reply?: string;
+}
+
 /** A row an agent filed that reads as UI work and is being built with no
  *  answered review item on it — the UI gate's breach (`ui-review-gate.ts`
  *  on the server). `file` is the changed file that made it UI work, and it
@@ -225,6 +247,8 @@ export interface StallPayload {
   checkIn?: StalledRowPayload[];
   /** Items a person asked back on, unrevised — off that person's queue. */
   askedBack?: AskedBackRowPayload[];
+  /** Doc threads a person asked something on that no agent has answered. */
+  unanswered?: UnansweredRowPayload[];
   /** Rows built past the UI gate. A frame carrying only this is a real
    *  wake: the row is MOVING, so no other list here would ever name it. */
   ungatedUi?: UngatedUiRowPayload[];
@@ -240,6 +264,7 @@ export interface StallPayload {
     undetermined?: string[];
     heldItems?: HeldRowPayload[];
     askedBack?: AskedBackRowPayload[];
+    unanswered?: UnansweredRowPayload[];
     ungatedUi?: UngatedUiRowPayload[];
     checkIn?: StalledRowPayload[];
     escalated?: boolean;
@@ -528,6 +553,9 @@ function changedClause(changed: StallPayload['changed']): string {
   if (held.length > 0) bits.push(`${held.length} review item(s) newly held`);
   const asked = changed.askedBack ?? [];
   if (asked.length > 0) bits.push(`${asked.length} review item(s) newly asked back`);
+  const waiting = changed.unanswered ?? [];
+  if (waiting.length > 0)
+    bits.push(`${waiting.length} unanswered question(s) from a person on a doc`);
   const ungated = changed.ungatedUi ?? [];
   if (ungated.length > 0) bits.push(`${ungated.length} task built past the UI gate`);
   const checkIn = changed.checkIn ?? [];
@@ -641,6 +669,21 @@ export function stalledLine(p: StallPayload): string {
         asked.length === 1 ? 'is' : 'are'
       } OFF their queue until revised — ${askedBackRowsClause(asked)}. ` +
         'A reply on the thread does not put an item back; only revise_review_item does, with the answer in its words.',
+    );
+  }
+  // Its own sentence, because its remedy is the one nothing else here asks
+  // for: somebody has to REPLY. The other person-shaped finding above is a
+  // review item that needs revising; this one is a person who wrote on a doc
+  // and has been met with silence, on a surface that may hang on no task, so
+  // no row in this frame would ever mention it.
+  const waiting = p.unanswered ?? [];
+  if (waiting.length > 0) {
+    const noun = waiting.length === 1 ? 'question' : 'questions';
+    parts.push(
+      `${waiting.length} ${noun} from a person on a doc ${
+        waiting.length === 1 ? 'has' : 'have'
+      } had NO agent reply — ${unansweredRowsClause(waiting)}. ` +
+        'Answer it or give it to somebody who can; nothing else on this board is tracking it.',
     );
   }
   const ungated = p.ungatedUi ?? [];
@@ -762,6 +805,23 @@ function askedBackRowClause(row: AskedBackRowPayload): string {
 
 function askedBackRowsClause(rows: readonly AskedBackRowPayload[]): string {
   const shown = rows.slice(0, STALL_ROWS_SHOWN).map(askedBackRowClause);
+  const rest = rows.length - shown.length;
+  return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
+}
+
+/** One waiting question: who asked, how long ago, what they said, where it
+ *  is, and the call that answers it. */
+function unansweredRowClause(row: UnansweredRowPayload): string {
+  const who = row.askedBy ?? 'a person';
+  const age = row.askedMs === undefined ? '' : ` ${humanDuration(row.askedMs)} ago`;
+  const on = row.title ? ` on "${truncate(row.title, 40)}"` : '';
+  const said = row.excerpt ? ` — "${truncate(row.excerpt, 60)}"` : '';
+  const how = row.reply ? `, answer with ${row.reply}` : '';
+  return `${who} asked${age}${on}${said}${how}`;
+}
+
+function unansweredRowsClause(rows: readonly UnansweredRowPayload[]): string {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(unansweredRowClause);
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
 }

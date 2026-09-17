@@ -92,6 +92,7 @@ import {
   type WaitingRow,
 } from './stall-gate.ts';
 import type { UngatedUiRow } from './ui-review-gate.ts';
+import type { UnansweredThreadRow } from './unanswered-thread.ts';
 
 /**
  * How long a row must stay quiet before the wake says it AGAIN.
@@ -186,6 +187,11 @@ export interface StallSnapshot {
    *  revised past the quiet window — off the reader's queue until revised
    *  (`stall-gate.ts` `AskedBackRow`). Absent when none. */
   askedBack?: readonly AskedBackRow[];
+  /** Doc threads whose last speaker is a PERSON, past the day window: a
+   *  question nobody has answered, on a doc that may hang on no task at all
+   *  (`unanswered-thread.ts`). Absent when none, and absent from a caller
+   *  that does not compute them, which is the same thing. */
+  unanswered?: readonly UnansweredThreadRow[];
   /**
    * Dispatched, in-progress rows whose holder has not reported inside the
    * check-in window (`stall-gate.ts`, `CHECK_IN_DEFAULT_MS`). Absent when
@@ -335,6 +341,16 @@ export interface StallNudgeFrame {
    */
   askedBack?: readonly AskedBackRow[];
   /**
+   * Doc threads where a PERSON asked something and no agent has answered,
+   * oldest first. Absent when none. A frame carrying only this is a real
+   * wake: nothing else on the board mentions it — the doc need hang on no
+   * task, and `review-queue.ts` walks the other direction only — so a
+   * question addressed to the team can sit for weeks with every other
+   * finding here reading clean. The remedy is a reply, which each row
+   * carries as a paste-ready call.
+   */
+  unanswered?: readonly UnansweredThreadRow[];
+  /**
    * Rows built past the UI gate, each with the word that made it read as UI
    * work. Absent when none. A frame carrying only this is a real wake: the
    * row is moving, so nothing else here would ever mention it, and the whole
@@ -381,6 +397,10 @@ export interface StallNudgeFrame {
     heldItems?: readonly HeldItemRow[];
     /** Questions asked back since the last wake. */
     askedBack?: readonly AskedBackRow[];
+    /** Doc threads that became unanswered news since the last wake — a
+     *  question that crossed the window, or another comment from the person
+     *  on one the lead had already been told about. */
+    unanswered?: readonly UnansweredThreadRow[];
     /** Rows that went past the UI gate since the last wake. */
     ungatedUi?: readonly UngatedUiRow[];
     /** Rows that became due for a check-in since the last wake — a first
@@ -811,6 +831,10 @@ export class StallNudger {
     // Already the lead's subset: the wiring hands over only questions older
     // than the quiet window, and there is no filer tap to come first.
     const askedBack = board.retired ? [] : (board.askedBack ?? []);
+    // Already the lead's subset too: `stall-wiring.ts` applies the day window
+    // before the snapshot is built, and there is no filer to tap first —
+    // whoever owes the reply is whoever the lead assigns it to.
+    const unanswered = board.retired ? [] : (board.unanswered ?? []);
     // Nobody to tell. Drop the arming so a board that becomes woken again
     // starts from a clean slate rather than from a stamp recorded under
     // different conditions.
@@ -842,6 +866,7 @@ export class StallNudger {
       board.undetermined.length === 0 &&
       held.length === 0 &&
       askedBack.length === 0 &&
+      unanswered.length === 0 &&
       ungatedUi.length === 0 &&
       checkIn.length === 0
     ) {
@@ -855,7 +880,7 @@ export class StallNudger {
     // high-water mark, because a row excluded from one and counted in the
     // other would put the clock back through the side door.
     const clock = this.clockRows(board, held, askedBack);
-    const stamp = this.stampFor(board, held, askedBack, ungatedUi, clock);
+    const stamp = this.stampFor(board, held, askedBack, unanswered, ungatedUi, clock);
     // Named before both the wake decision and the reachability check below,
     // and that ordering is the point: the commonest reason a wake is not
     // delivered is a lead holding no stream, which is exactly when an
@@ -870,6 +895,7 @@ export class StallNudger {
       memory.before,
       held,
       askedBack,
+      unanswered,
       ungatedUi,
       checkIn,
     );
@@ -890,7 +916,13 @@ export class StallNudger {
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
     const top =
-      board.stalled[0] ?? board.unfiled[0] ?? held[0] ?? askedBack[0] ?? ungatedUi[0] ?? checkIn[0];
+      board.stalled[0] ??
+      board.unfiled[0] ??
+      held[0] ??
+      askedBack[0] ??
+      unanswered[0] ??
+      ungatedUi[0] ??
+      checkIn[0];
     const delivered = this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
@@ -909,6 +941,7 @@ export class StallNudger {
       // its withheld-row counts, and the plugin reads both frames into one type.
       ...(held.length > 0 ? { heldItems: held } : {}),
       ...(askedBack.length > 0 ? { askedBack } : {}),
+      ...(unanswered.length > 0 ? { unanswered } : {}),
       ...(ungatedUi.length > 0 ? { ungatedUi } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
       // Awareness only. Never a reason for the frame — `changeOn` above has
@@ -949,7 +982,13 @@ export class StallNudger {
     // move.
     // An asked-back item's ticket likewise: its later silence is the same
     // unrevised question the lead was just told about.
-    for (const item of [...held, ...askedBack]) {
+    // A waiting doc thread enters under its DOC's id, which is never a row
+    // id, so it suppresses nothing. It is here for the other half of this
+    // memory's job: `firstWake` is read off it, and a board whose only
+    // findings are waiting questions would otherwise read as never having
+    // been woken and send no `changed` block ever — the second wake would
+    // re-list the whole set with nothing saying why.
+    for (const item of [...held, ...askedBack, ...unanswered]) {
       if (!memory.rows.has(item.id))
         memory.rows.set(item.id, { bucket: UNKNOWN_BUCKET, seenAt: now });
     }
@@ -1165,6 +1204,7 @@ export class StallNudger {
       ...board.unfiled.map((r) => r.id),
       ...(board.held ?? []).map((r) => r.id),
       ...(board.askedBack ?? []).map((r) => r.id),
+      ...(board.unanswered ?? []).map((r) => r.id),
     ]) {
       const seen = rows.get(id);
       if (seen) seen.seenAt = now;
@@ -1285,6 +1325,7 @@ export class StallNudger {
     board: StallSnapshot,
     held: readonly HeldItemRow[],
     askedBack: readonly AskedBackRow[],
+    unanswered: readonly UnansweredThreadRow[],
     ungatedUi: readonly UngatedUiRow[],
     clock: readonly StalledRow[],
   ): string {
@@ -1317,6 +1358,15 @@ export class StallNudger {
         // this question on this item — so a new question is news.
         ...askedBack.map((row) => row.id),
         ...askedBack.map((row) => `ask:${row.reviewItemId}@${row.askedAt}`),
+        // The THREAD and its newest comment, and neither half is spare. The
+        // thread alone would say nothing when the person came back and added
+        // a third comment to a conversation the lead had already been told
+        // about — which is the same silence this whole finding exists to end.
+        // `latestAt` rather than `askedAt`, because `askedAt` is the run's
+        // start and does not move when they speak again. The DOC's id stays
+        // out: a doc is not a row, so folding it in would let one waiting
+        // thread stand in for another on the same document.
+        ...unanswered.map((row) => `unanswered:${row.threadId}@${row.latestAt}`),
         // Under its OWN key, not the row id: a row can be stalled AND built
         // past the gate, and folding the two together would let a wake about
         // the silence stand in for the one about the rule.
@@ -1398,6 +1448,7 @@ export class StallNudger {
     told: Map<string, ToldRow>,
     held: readonly HeldItemRow[],
     askedBack: readonly AskedBackRow[],
+    unanswered: readonly UnansweredThreadRow[],
     ungatedUi: readonly UngatedUiRow[],
     checkIn: readonly StalledRow[],
   ): StallNudgeFrame['changed'] | undefined {
@@ -1424,6 +1475,10 @@ export class StallNudger {
     const asked = askedBack.filter(
       (item) => before === undefined || !before.ids.has(`ask:${item.reviewItemId}@${item.askedAt}`),
     );
+    const waiting = unanswered.filter(
+      (row) =>
+        before === undefined || !before.ids.has(`unanswered:${row.threadId}@${row.latestAt}`),
+    );
     // Keyed on the token the stamp writes, so a row already reported stays
     // silent while the same row reported again after a wake it was absent
     // from is news — the same rule every other finding here follows.
@@ -1440,6 +1495,7 @@ export class StallNudger {
       undetermined.length === 0 &&
       heldItems.length === 0 &&
       asked.length === 0 &&
+      waiting.length === 0 &&
       ungated.length === 0 &&
       checkIn.length === 0
     )
@@ -1449,6 +1505,7 @@ export class StallNudger {
       ...(undetermined.length > 0 ? { undetermined } : {}),
       ...(heldItems.length > 0 ? { heldItems } : {}),
       ...(asked.length > 0 ? { askedBack: asked } : {}),
+      ...(waiting.length > 0 ? { unanswered: waiting } : {}),
       ...(ungated.length > 0 ? { ungatedUi: ungated } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
       ...(escalated ? { escalated: true as const } : {}),
@@ -1681,7 +1738,9 @@ export class StallNudger {
           (frame.escalatedFrom !== undefined ? `to=${agentId} ` : '') +
           `stalled=${frame.stalledCount} unfiled=${frame.unfiled?.length ?? 0} ` +
           `undetermined=${frame.undetermined?.count ?? 0} held=${frame.heldItems?.length ?? 0} ` +
-          `askedBack=${frame.askedBack?.length ?? 0} checkIn=${frame.checkIn?.length ?? 0}`,
+          `askedBack=${frame.askedBack?.length ?? 0} ` +
+          `unanswered=${frame.unanswered?.length ?? 0} ` +
+          `checkIn=${frame.checkIn?.length ?? 0}`,
       );
     } catch {
       // A reporter that throws must not undo a wake that was already
