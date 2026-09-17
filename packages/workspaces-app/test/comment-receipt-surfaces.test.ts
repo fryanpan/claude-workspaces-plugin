@@ -1,6 +1,8 @@
 import type { Comment, Thread, User } from '@claude-workspaces/core';
+import { type ReceiptState, receiptHtml } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { commentRow } from '../src/board/board-discussion-render.ts';
+import { receiptMark } from '../src/comment-view.ts';
 import { ThreadPanel } from '../src/threads.ts';
 
 /**
@@ -146,5 +148,49 @@ describe('the board discussion stream', () => {
         .querySelector('.cw-receipt')
         ?.getAttribute('data-receipt'),
     ).toBe('received');
+  });
+});
+
+/**
+ * The one duplication the repo actually has, and the test that holds it.
+ *
+ * The mark is built twice: `receiptMark` puts an element together for the
+ * app's surfaces, and core's `receiptHtml` writes the same thing as markup
+ * for a surface that builds its rows as strings — which is the widget, a
+ * guest bundle under a gzip ceiling that cannot import the app's renderer.
+ * Two builders of one mark are free to drift, and a reader who learned the
+ * ticks on the board would then meet a different thing on a mock.
+ *
+ * So this compares what each produces, element for element, rather than
+ * either against a literal: a change to one that the other does not get
+ * fails here.
+ */
+describe('the element the app builds and the markup the widget builds', () => {
+  const parsed = (html: string): HTMLElement => {
+    const box = document.createElement('div');
+    box.innerHTML = html;
+    return box.firstElementChild as HTMLElement;
+  };
+  const shape = (el: HTMLElement) => ({
+    tag: el.tagName,
+    className: el.className,
+    receipt: el.dataset.receipt,
+    title: el.title,
+    // The glyph itself: the tag, the class each path carries, and the line it
+    // draws. A tick moved or a class renamed on one side shows up here.
+    paths: Array.from(el.querySelectorAll('path')).map((p) => [
+      p.getAttribute('class'),
+      p.getAttribute('d'),
+    ]),
+  });
+
+  it('agree for every state there is', () => {
+    for (const state of ['sent', 'received'] as ReceiptState[]) {
+      expect(shape(receiptMark(state)), state).toEqual(shape(parsed(receiptHtml(state))));
+    }
+  });
+
+  it('CONTROL: the comparison separates the two states', () => {
+    expect(shape(receiptMark('sent'))).not.toEqual(shape(parsed(receiptHtml('received'))));
   });
 });
