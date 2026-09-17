@@ -567,14 +567,24 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
-**An agent is never sent news of its own action.** Every board and doc event
-names who caused it, and the MCP child drops a frame whose actor is this
-session before it becomes a wake, so an agent's own comment, review item, task
-move or attach costs it no turn. The drop is the child's and never the
-server's: every other reader still gets the frame, the state is still there for
-the next read, and a frame whose actor cannot be identified is always delivered
-— silence is the one failure an agent cannot detect. The rule and every
-family's attribution field live in `packages/mcp/src/self-authored.ts`.
+**An agent gets no wake for an event it cannot act on.** Two rules give that,
+and neither one hides state. The next read shows the same board.
+
+*Its own action.* Every board event and doc event names the actor who caused
+it. The MCP child drops a frame whose actor is this session, before the frame
+becomes a wake. The agent's own comment, review item, task move or attach then
+costs it no turn. The child drops the frame and the server does not, so every
+other reader still gets it. A frame with an actor the child cannot identify is
+always delivered, because an agent cannot detect silence. The rule and each
+family's attribution field are in `packages/mcp/src/self-authored.ts`.
+
+*An analytics event.* `review_item.viewed` records that a person opened a
+card. It changes no task and no status, and no page reads the frame. The
+server keeps it off the fan-out, next to `task.noted` and
+`dispatch.requested`. The audit log still gets the row, which is what the
+measurement reads. `review_item.answered` stays on the stream, because an
+answer is the wake an agent waits for. The list is in
+`packages/server/src/review-items/analytics.ts`.
 
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
