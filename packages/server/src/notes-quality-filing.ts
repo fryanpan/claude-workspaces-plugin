@@ -36,6 +36,15 @@
  * A REFUSED REVISION IS NOT A REASON TO FILE A SECOND ITEM. That is the one
  * outcome this module must never produce, so a refusal is logged and the
  * standing item is left as it is.
+ *
+ * AND A REVISION THAT CHANGES NOTHING IS NOT MADE AT ALL. Revising a review
+ * item re-judges it, which puts it back in front of its reader — so a flag
+ * that cannot clear would walk a person back to the same unanswerable
+ * question at every leg stop, which is what seven identical filings on one
+ * meeting looked like from the reader's side (2026-09-15). The words filed
+ * are remembered and compared, and a reading that produces the same headline
+ * and the same detail is a re-check rather than a change of verdict. One
+ * filing per genuine change, and none for a repeat.
  */
 
 import type { TickScheduler } from './meeting-notes.ts';
@@ -74,6 +83,9 @@ interface Held {
   input?: NotesQualityFileInput;
   /** Where this meeting's one item went, once it has gone anywhere. */
   filed?: Filed;
+  /** The words that item currently carries, so a reading that says exactly
+   *  the same thing does not re-judge it in front of its reader. */
+  words?: string;
   /** The resume grace, while one is armed. */
   timer?: unknown;
 }
@@ -173,16 +185,39 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     h.timer = undefined;
   };
 
-  /** Rewrite the words of the item this meeting already has. */
-  const revise = (ids: MeetingIds, filed: Filed, input: NotesQualityFileInput): boolean => {
+  /** The words a reading would put on the item. */
+  const wordsOf = (input: NotesQualityFileInput): Record<string, unknown> | null =>
+    input.workspaceId === undefined
+      ? null
+      : buildNotesQualityReview({
+          workspaceId: input.workspaceId,
+          docId: input.docId,
+          ...(input.docTitle !== undefined ? { docTitle: input.docTitle } : {}),
+          report: input.report,
+        });
+
+  /** What a filed item's words are compared on. Headline and detail together,
+   *  because a verdict can change in either half alone. */
+  const sameAs = (review: Record<string, unknown>): string =>
+    JSON.stringify([review.headline, review.detail]);
+
+  /**
+   * Rewrite the words of the item this meeting already has.
+   *
+   * `unchanged` is not a failure: it is the answer for a re-check that read
+   * the meeting the same way, and it leaves the item exactly where it is
+   * rather than re-judging it in front of its reader.
+   */
+  const revise = (
+    ids: MeetingIds,
+    filed: Filed,
+    input: NotesQualityFileInput,
+    held: Held,
+  ): 'revised' | 'unchanged' | 'failed' => {
     const board = deps.board?.();
-    if (!board || input.workspaceId === undefined) return false;
-    const review = buildNotesQualityReview({
-      workspaceId: input.workspaceId,
-      docId: input.docId,
-      ...(input.docTitle !== undefined ? { docTitle: input.docTitle } : {}),
-      report: input.report,
-    });
+    const review = wordsOf(input);
+    if (!board || review === null) return 'failed';
+    if (held.words !== undefined && held.words === sameAs(review)) return 'unchanged';
     const patch = { headline: review.headline, detail: review.detail };
     const res =
       filed.kind === 'row'
@@ -193,7 +228,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
         `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: the quality item cannot be ` +
           'revised on this board — the standing item keeps the reading it was filed with',
       );
-      return false;
+      return 'failed';
     }
     if (!res.ok) {
       // Never a second item. The reader's queue carrying one stale ask is
@@ -202,9 +237,10 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
         `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item revise refused ` +
           `(${res.error}${res.message !== undefined ? `: ${res.message}` : ''})`,
       );
-      return false;
+      return 'failed';
     }
-    return true;
+    held.words = sameAs(review);
+    return 'revised';
   };
 
   /** The meeting is over: file the reading it left, or revise the item it has. */
@@ -222,7 +258,12 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     const line = (where: string): void =>
       say(`[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item ${where}`);
     if (h.filed) {
-      if (revise(ids, h.filed, input)) {
+      const outcome = revise(ids, h.filed, input, h);
+      if (outcome === 'unchanged') {
+        line('unchanged — the reading is the same one it already carries');
+        return;
+      }
+      if (outcome === 'revised') {
         line(
           h.filed.kind === 'row'
             ? `revised on ${filingWhere(
@@ -249,6 +290,8 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
             threadId: filing.threadId,
             commentId: filing.commentId,
           };
+    const filedWords = wordsOf(input);
+    if (filedWords !== null) h.words = sameAs(filedWords);
   };
 
   return {

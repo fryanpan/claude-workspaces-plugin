@@ -24,24 +24,30 @@ const ACTOR = { id: 'meeting-notes', name: 'Meeting Assistant' };
 const REPEAT = '- The Saltmarsh ferry keeps its winter crew until April';
 
 /** A reading that crossed the duplicate-bullet bar. */
-function badReading(docId: string): NotesQualityFileInput {
+function badReading(docId: string, repeats = 5): NotesQualityFileInput {
   const report = buildNotesQualityReport({
-    notes: ['## Meeting notes', REPEAT, REPEAT, REPEAT, REPEAT, REPEAT].join('\n'),
+    notes: ['## Meeting notes', ...Array.from({ length: repeats }, () => REPEAT)].join('\n'),
     transcript: [],
   });
   expect(report.flags.length).toBeGreaterThan(0);
   return { workspaceId: 'w-harbour', docId, report };
 }
 
-function recordingBoard(): NotesQualityBoard & { filed: string[] } {
+function recordingBoard(): NotesQualityBoard & { filed: string[]; revised: string[] } {
   const filed: string[] = [];
+  const revised: string[] = [];
   const row = { id: 't-season', status: 'todo' } as Task;
   return {
     filed,
+    revised,
     backlinksFor: (_ref: Ref) => [row],
     addReviewItem: (taskId) => {
       filed.push(taskId);
       return { ok: true as const, task: row, item: { id: 'ri-1' } as TaskReviewItem };
+    },
+    reviseReviewItem: (_taskId, reviewItemId) => {
+      revised.push(reviewItemId);
+      return { ok: true as const };
     },
   };
 }
@@ -117,5 +123,63 @@ describe('which endings are held through', () => {
     filer.legEnded(ids, { resumable: legIsResumable('server-restart') });
     // No timer had to fire: the item is already on the row.
     expect(board.filed).toEqual(['t-season']);
+  });
+});
+
+/* ===== A re-check is not a change of verdict ===== */
+
+describe('a flag that cannot clear stops re-firing the item', () => {
+  /** A filer with a standing item on one meeting, and the board it filed on. */
+  const filedOnce = (): {
+    board: ReturnType<typeof recordingBoard>;
+    filer: ReturnType<typeof createNotesQualityFiler>;
+    ids: { docId: string; meetingId: string };
+  } => {
+    const board = recordingBoard();
+    const filer = createNotesQualityFiler({
+      board: () => board,
+      actor: ACTOR,
+      schedule: new HandScheduler(),
+      say: () => {},
+    });
+    const ids = { docId: 'd-harbour', meetingId: 'm-1' };
+    filer.file(ids, badReading(ids.docId));
+    filer.legEnded(ids, { resumable: false });
+    expect(board.filed).toEqual(['t-season']);
+    return { board, filer, ids };
+  };
+
+  it('leaves the item alone when a later reading says exactly the same thing', () => {
+    // The 2026-09-15 shape: the same verdict at every leg stop, because the
+    // number behind it could not come out any other way. Revising re-judges an
+    // item, so a revision that changes nothing walks its reader back to a
+    // question they have already answered.
+    const { board, filer, ids } = filedOnce();
+    for (let leg = 0; leg < 6; leg++) {
+      filer.file(ids, badReading(ids.docId));
+      filer.legEnded(ids, { resumable: false });
+    }
+    expect(board.filed).toEqual(['t-season']);
+    expect(board.revised).toEqual([]);
+  });
+
+  it('THE CONTROL: a reading whose verdict changed does revise the item', () => {
+    // Same meeting, same filer, one more repeated bullet — so the headline
+    // and the detail both change. Without this the case above would pass on a
+    // filer that had simply stopped revising at all.
+    const { board, filer, ids } = filedOnce();
+    filer.file(ids, badReading(ids.docId, 9));
+    filer.legEnded(ids, { resumable: false });
+    expect(board.filed).toEqual(['t-season']);
+    expect(board.revised).toEqual(['ri-1']);
+  });
+
+  it('revises once for a change and not again for the repeat of it', () => {
+    const { board, filer, ids } = filedOnce();
+    for (let leg = 0; leg < 3; leg++) {
+      filer.file(ids, badReading(ids.docId, 9));
+      filer.legEnded(ids, { resumable: false });
+    }
+    expect(board.revised).toEqual(['ri-1']);
   });
 });
