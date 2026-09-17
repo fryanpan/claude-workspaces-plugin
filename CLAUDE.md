@@ -3,7 +3,9 @@
 Make giving feedback to LLM agents as fast as pointing and saying "this" —
 real-time iteration across three review surfaces: markdown + diagrams, UX
 mockups, and live dev servers, with comment threads that survive edits. Read
-[docs/product/vision.md](docs/product/vision.md) before non-trivial work.
+[docs/product/vision.md](docs/product/vision.md) before non-trivial work, and
+[docs/product/priorities.md](docs/product/priorities.md) before ranking any
+work against other work.
 
 **Stack:** TypeScript + Bun server; Cloudflare Tunnel; the injectable widget
 is vanilla JS / web components only (no framework deps — it must not conflict
