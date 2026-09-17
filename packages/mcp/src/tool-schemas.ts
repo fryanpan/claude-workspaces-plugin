@@ -2594,7 +2594,10 @@ export const TOOL_LIST: ListToolsResult = {
             items: {
               type: 'object',
               properties: {
-                id: { type: 'string', description: "The done-when line's id (`d-…`)." },
+                id: {
+                  type: 'string',
+                  description: 'The id of the `doneWhen` line this verdict answers (`d-…`).',
+                },
                 verdict: {
                   type: 'string',
                   enum: ['met', 'not-met', 'unchecked', 'owner'],

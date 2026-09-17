@@ -150,6 +150,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/comment-queue/:id/ack` | POST | `routes/workspace-attachments.ts` | trusted-local |  |
 | `/workspaces/:ws/dispatches` | GET, POST | `routes/dispatch-and-notes.ts` | trusted-local |  |
 | `/workspaces/:ws/dispatches/:taskId` | DELETE | `routes/dispatch-and-notes.ts` | trusted-local |  |
+| `/workspaces/:ws/dispatches/:taskId/report` | GET, POST | `routes/dispatch-and-notes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs` | GET, POST | `routes/docs.ts` | trusted-local |  |
 | `/workspaces/:ws/docs:attach` | POST | `routes/workspace-content.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId` | DELETE | `routes/doc-resource.ts` | trusted-local |  |
