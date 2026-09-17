@@ -462,6 +462,41 @@ describe('a frame this bundle cannot read blames the bundle, not the wake', () =
     expect(line).not.toContain('This frame ALSO carried');
   });
 
+  it('the news keeps the FRONT of the body, and the verdict comes after it', () => {
+    // The ordering the A1 fix chose, pinned. `unrenderableBody` is pushed
+    // AFTER the `changed` clause is unshifted, so a frame with no readable
+    // finding but renderable news reads "what moved, then why you cannot see
+    // the rest". Flip the two and this case fails; the control below passes
+    // either way, which is why it is not the one that holds the ordering.
+    const line = stalledLine({
+      event: STALL_EVENT,
+      workspaceId: 'w-riverbend',
+      stalledCount: 0,
+      consideredCount: 5,
+      ts: NOW,
+      changed: { escalated: true },
+      unreviewedRelease: [{ id: 't-saltmarsh' }],
+    } as unknown as StallPayload);
+    expect(line.indexOf('NEW since the last wake')).toBeLessThan(
+      line.indexOf('OLDER than this server'),
+    );
+  });
+
+  it('the same ordering on a frame that really does carry nothing', () => {
+    const line = stalledLine({
+      event: STALL_EVENT,
+      workspaceId: 'w-riverbend',
+      stalledCount: 0,
+      consideredCount: 5,
+      ts: NOW,
+      changed: { escalated: true },
+    } as unknown as StallPayload);
+    expect(line.indexOf('NEW since the last wake')).toBeLessThan(line.indexOf('a bug in the wake'));
+    // And the news is not swallowed by the verdict either — both are said.
+    expect(line).toContain('NEW since the last wake');
+    expect(line).toContain('a bug in the wake');
+  });
+
   it('a `changed` clause can no longer swallow the notice', () => {
     // The hole this closes: the caveat was gated on `parts.length > 0` AFTER
     // the `changed` clause had been unshifted, so a frame whose only readable
