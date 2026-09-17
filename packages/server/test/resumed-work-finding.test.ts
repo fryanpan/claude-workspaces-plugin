@@ -373,8 +373,25 @@ describe('a row whose blockage lifted with nothing done since is the lead’s fi
     const lead = await agentStream(workspaceId, LEAD);
     await expectSilence(lead, workspaceId, beaconId, taskId);
 
-    const told = stallFrames(lead.frames).find((f) => stalledIdsOf(f).includes(taskId));
+    // POLLED, not read off the frames the silence assertion happened to
+    // collect. The beacon row is created BEFORE this row and is never touched
+    // again, so its quiet window closes first: on a loaded machine the frame
+    // that names the beacon can be built while this row is still inside its
+    // own window. Reading `lead.frames` at that moment finds no frame naming
+    // the row and fails a rule that holds. Same `waitFor`, same nudge, one
+    // observable later.
+    const told = await waitFor(
+      () => {
+        handle.nudgeStalls();
+        return stallFrames(lead.frames).find((f) => stalledIdsOf(f).includes(taskId));
+      },
+      { timeout: 10_000, interval: 25, describe: 'a stall frame naming the row' },
+    );
     expect(told).toBeDefined();
+    // The silence claim, re-read over every frame the wait above collected —
+    // `expectSilence` could only judge the ones that had arrived by then.
+    for (const f of stallFrames(lead.frames))
+      expect(unresumedOf(f).map((r) => r.id)).not.toContain(taskId);
     const { latest } = await latestVerdict(workspaceId);
     expect(latest?.stalled).toContain(taskId);
     expect(latest?.unresumed ?? []).not.toContain(taskId);
