@@ -1744,7 +1744,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'next_tasks',
       description:
-        "The work queue: what to pick up next, in priority order, filtered to what you can do. Take the whole ready set, not just the first task. Skip a task whose claimedBy is an active session that is not you. The todo tasks are trimmed to the board's free parallelism slots, and `capacity` names the cap, the slots in use, and the ready tasks held back.",
+        'The work queue: what to pick up next, in priority order, filtered to what you can do. Take the whole ready set, not just the first task. Skip a task whose claimedBy is an active session that is not you. The todo tasks are trimmed to the board\'s free parallelism slots, and `capacity` names the cap, the slots in use, and the ready tasks held back. Each row carries exactly these keys: id, title, status, assignee, assigneeId, needs, goal, goalTitle, inGoalBand, goalInTriage, ready, blocked, blockedBy, bodyWrittenAt, ownerSession, claimedBy — plus `premise` on a row whose description has stood still while the task was discussed, with the headline and the note count. It does NOT carry the task body, and it does not carry the premise notes themselves. Read the description of the row you are taking with `list_tasks(workspaceId, taskIds: ["<id>"], fields: ["id","body"])`, and a drifting row\'s notes with `next_tasks(workspaceId, fields: ["id","premise"])`.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1760,6 +1760,12 @@ export const TOOL_LIST: ListToolsResult = {
             description:
               'Include soft-deleted tasks. Default false, and leave it false here, because an archived task is one somebody decided will not happen. Use list_tasks with this flag to FIND archived tasks.',
           },
+          fields: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Project each row to these keys instead of the default set, with `id` always included. Use it for a drifting row\'s notes (`fields: ["id","premise"]`), which the default leaves out. For ONE row\'s description use list_tasks with taskIds instead — `fields: ["id","body"]` here returns every queue row\'s body. A name this verb has no key for is REFUSED and named; the queue row is not the stored task, so `reviews`, `doneWhen` and `transitions` belong to list_tasks.',
+          },
         },
         required: ['workspaceId'],
       },
@@ -1767,7 +1773,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_tasks',
       description:
-        "List a board's tasks, filtered by goal, status, assignee or needs. Tasks come back trimmed, with no body and no transition history. Pass fields to narrow further, because the default shape runs large on a big board. Archived tasks need includeArchived: true.",
+        'List a board\'s tasks, filtered by goal, status, assignee, needs, or named by taskIds. Every row comes back whole except for `body` and `transitions`, which are dropped, and `transitionCount`, which is added — so reviews, doneWhen lines, options and notes ride along unless you pass fields. A single board\'s default answer has run past 600,000 characters, so pass fields on anything wider than a few rows. Reading one task: taskIds plus fields, e.g. `taskIds: ["<id>"], fields: ["id","body"]`. Archived tasks need includeArchived: true.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1781,11 +1787,17 @@ export const TOOL_LIST: ListToolsResult = {
           },
           assignee: { type: 'string' },
           needs: { type: 'string', enum: ['action', 'decision'] },
+          taskIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Return only these tasks, by id. This is the one-task read: pair it with fields to fetch the description of a row next_tasks handed you, whose queue row carries no body. An id that matches no task on this board is REFUSED and named rather than dropped, so a short answer is never a wrong id you did not notice. The other filters still apply, and an archived task still needs includeArchived: true.',
+          },
           fields: {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Project each task to these keys, with `id` always included. Use it for board-wide sweeps, so that heavy fields such as reviews, infoRequests and options do not overflow the result.',
+              "Project each task to these keys, with `id` always included. Use it for board-wide sweeps, so that heavy fields such as reviews, infoRequests and options do not overflow the result. A name this verb has no key for is REFUSED and named, so a projection that comes back thin is the board and never a dropped entry: `goalTitle` and `ready` are the queue row's keys and belong to next_tasks.",
           },
           includeArchived: {
             type: 'boolean',
