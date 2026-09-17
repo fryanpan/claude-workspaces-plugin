@@ -1,4 +1,9 @@
-import { type AgentNoteInput, parseAgentNote, resolveNoteTarget } from '../agent-notes.ts';
+import {
+  AGENT_NOTE_RING_CAP,
+  type AgentNoteInput,
+  parseAgentNote,
+  resolveNoteTarget,
+} from '../agent-notes.ts';
 import { SHARED_IDENTITY_ERROR, SHARED_IDENTITY_MESSAGE } from '../agent-watches.ts';
 import { isSharedAgentName } from '../chat-audit.ts';
 import { isValidDispatchTaskId } from '../dispatch-registry.ts';
@@ -44,8 +49,15 @@ function judgeAndRecord(
 ): string | undefined {
   if (note.kind !== 'turn') return undefined;
   try {
+    // The ring first (it has this board's placed notes too), then the
+    // unplaced-note log, then the bounded window. The log is what makes the
+    // boundary survive a restart: without it a restarted server measured
+    // "filed nothing this turn" over two hours and could nudge an agent for
+    // an ask it had filed inside them.
     const since =
-      ctx.agentNotes.lastTurnAt(note.agent, workspaceId) ?? note.at - FIRST_TURN_WINDOW_MS;
+      ctx.agentNotes.lastTurnAt(note.agent, workspaceId) ??
+      ctx.agentNoteLog.lastTurnAt(workspaceId, note.agent) ??
+      note.at - FIRST_TURN_WINDOW_MS;
     const filing = filingStateFor(ctx.taskStore, workspaceId, note.agent, since);
     const verdict = judgeTurnNote(note.text, filing, filing.owners);
     if (!verdict.ask) return undefined;
@@ -72,6 +84,7 @@ export async function handleDispatchAndNoteRoutes(
     taskStore,
     dispatches,
     agentNotes,
+    agentNoteLog,
     j,
     safeJson,
     holdersClause,
@@ -207,11 +220,15 @@ export async function handleDispatchAndNoteRoutes(
   // `/workspaces/<ws>/agents/<name>/notes`; the server pins it to the
   // agent's current row ON THAT BOARD, only when that is unambiguous —
   // exactly one in-progress claim held there. An agent holding several
-  // rows on the board gets the note kept in its ring marked `needsFiling`
-  // rather than guessed onto the newest claim (the guess measured wrong
-  // ~3 in 4 — see agent-notes.ts). A body `taskId` is an explicit address
-  // and always wins. 202 rather than 200: the hook fires with the turn
-  // already over and never reads the answer.
+  // rows on the board gets the note marked `needsFiling` rather than
+  // guessed onto the newest claim (the guess measured wrong ~3 in 4 — see
+  // agent-notes.ts), and that note is APPENDED TO THE BOARD'S UNPLACED-NOTE
+  // LOG (agent-note-log.ts) as well as kept in the ring. The ring alone was
+  // in-process, 20 deep and read by nothing, so on a board where one session
+  // held many rows every end-of-turn message was written to a buffer and
+  // dropped. A body `taskId` is an explicit address and always wins. 202
+  // rather than 200: the hook fires with the turn already over and never
+  // reads the answer.
   //
   // This was `POST /api/agent-notes`, the one board-owned route the
   // canonical-routes cutover left top-level because a hook has no board
@@ -238,6 +255,21 @@ export async function handleDispatchAndNoteRoutes(
       // task-projection read (projectNotes) already keeps it out. The
       // ring is per agent across boards; the address names one board, so
       // the read is what that board can see of the agent.
+      //
+      // Merged with the board's unplaced-note log so a restart does not
+      // empty this list. The ring is authoritative where both have a note
+      // (it carries the resolved `taskId`); the log supplies what the ring
+      // lost. Keyed on `at` + kind + text because that triple is what a
+      // logged line and its ring entry share — the log deliberately does
+      // not store a taskId, having none.
+      // `\u0000` as an ESCAPE, never the character. A literal NUL in the
+      // source makes the whole file binary: `grep` skips it silently without
+      // `-a`, `file` calls it data, and a scanner that sorts text from binary
+      // by content stops reading it as code. It was a raw byte here for two
+      // commits and no search for anything in this file matched.
+      const seen = new Set<string>();
+      const key = (n: { at: number; kind: string; text: string }) =>
+        `${n.at}\u0000${n.kind}\u0000${n.text}`;
       const notes = agentNotes
         .list(agent)
         .filter((n) => n.workspaceId === boardId)
@@ -250,7 +282,21 @@ export async function handleDispatchAndNoteRoutes(
           ...(n.workspaceId !== undefined ? { workspaceId: n.workspaceId } : {}),
           ...(n.needsFiling ? { needsFiling: true } : {}),
         }));
-      return j(200, { agent, notes });
+      for (const n of notes) seen.add(key(n));
+      for (const logged of agentNoteLog.readFor(boardId, agent)) {
+        if (seen.has(key(logged))) continue;
+        seen.add(key(logged));
+        notes.push({
+          at: logged.at,
+          kind: logged.kind,
+          text: logged.text,
+          agent: logged.agent,
+          workspaceId: logged.workspaceId,
+          ...(logged.ambiguous ? { needsFiling: true } : {}),
+        });
+      }
+      notes.sort((a, b) => b.at - a.at);
+      return j(200, { agent, notes: notes.slice(0, AGENT_NOTE_RING_CAP) });
     }
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
     const raw = await safeJson(req);
@@ -304,6 +350,31 @@ export async function handleDispatchAndNoteRoutes(
       proposeAllowRule(res.task, note);
     }
     const nudge = judgeAndRecord(ctx, boardId, note);
+    // A note no row took is written to the board's unplaced-note log BEFORE
+    // the ring, so the durable record exists whatever happens next. `logged`
+    // rides back on the 202 so a hook — or a person reading the response —
+    // can tell "kept" from "kept nowhere": a full disk is the one case where
+    // this note still vanishes, and it now says so.
+    //
+    // ORDER IS LOAD-BEARING, and it is the reason this sits AFTER
+    // `judgeAndRecord` rather than beside the `appendNote` above. The judge
+    // reads the log for the PREVIOUS turn note; appending first would make
+    // this note its own predecessor, and an ask filed during this very turn
+    // would be measured from a boundary it cannot be on the right side of.
+    // Pinned by "measures 'filed nothing this turn' from the PREVIOUS turn
+    // note" in `turn-note-many-rows.test.ts`, which fails on either half.
+    let logged: boolean | undefined;
+    if (!task) {
+      logged = agentNoteLog.append({
+        agent: note.agent,
+        kind: note.kind,
+        text: note.text,
+        at: note.at,
+        workspaceId: boardId,
+        ambiguous: target.ambiguous,
+        ...(note.sessionId !== undefined ? { sessionId: note.sessionId } : {}),
+      });
+    }
     agentNotes.record({
       ...note,
       workspaceId: boardId,
@@ -315,6 +386,7 @@ export async function handleDispatchAndNoteRoutes(
       workspaceId: boardId,
       ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
+      ...(logged !== undefined ? { logged } : {}),
       ...(nudge ? { unfiledAsk: nudge } : {}),
     });
   }

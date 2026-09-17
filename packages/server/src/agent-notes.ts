@@ -56,6 +56,14 @@ const TASK_ID_MAX = 200;
 export type AgentNoteKind = TaskNote['kind'];
 const KINDS: ReadonlySet<string> = new Set<AgentNoteKind>(['turn', 'denial', 'status']);
 
+/** The wire check for a kind, as a narrowing predicate. Exported because the
+ *  unplaced-note log reads lines written by an older build and must hold them
+ *  to the same three values this route does — one list, so a kind retired
+ *  here cannot come back in through a file. */
+export function isAgentNoteKind(value: unknown): value is AgentNoteKind {
+  return typeof value === 'string' && KINDS.has(value);
+}
+
 /** A validated note body — `POST /api/agent-notes` and `POST /api/tasks/:id/notes`
  *  share it, so an explicit-task status is held to the same rules as a hook's
  *  note (a shared agent name is refused either way). `cwd` is accepted off the wire

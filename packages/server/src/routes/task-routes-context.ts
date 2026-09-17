@@ -1,5 +1,6 @@
 import type { DocMeta, TaskReviewItem, User } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
+import type { AgentNoteLog } from '../agent-note-log.ts';
 import type { AgentNoteRing } from '../agent-notes.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { ChatAudit } from '../chat-audit.ts';
@@ -52,6 +53,9 @@ export interface TaskRoutesContext {
   dispatches: DispatchRegistry;
   /** The per-agent ring of turn / denial / status notes. */
   agentNotes: AgentNoteRing;
+  /** The durable, per-board record of notes no row would take. The ring is
+   *  in-process and bounded; this is what survives a restart. */
+  agentNoteLog: AgentNoteLog;
   /** The unfiled-ask counters. The hook route is the only writer of the live
    *  rows; the chat-audit routes read them and take the daily audit's. */
   chatAudit: ChatAudit;

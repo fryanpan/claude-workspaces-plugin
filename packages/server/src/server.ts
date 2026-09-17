@@ -14,6 +14,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
+import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
 import { AllowRuleProposals } from './allow-rules.ts';
@@ -700,8 +701,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   }
 
   // The per-agent memory of turn / denial notes (agent-notes.ts). In-process
-  // only: the durable copy is the note pinned to the row it landed on.
+  // only: the durable copy is the note pinned to the row it landed on — or,
+  // when no row would take it, the line appended to the board's own
+  // unplaced-note log below.
   const agentNotes = new AgentNoteRing();
+  // Notes no row would take (agent-note-log.ts). A board where one session
+  // holds several in-progress rows can place none of its end-of-turn
+  // messages, and before this they existed only in the ring above: 20 per
+  // agent, read by nothing, gone on restart.
+  const agentNoteLog = new AgentNoteLog(dataDir);
   // The repeated-denial watcher (allow-rules.ts): a third denial of one
   // shape in a week files a paste-ready allow rule as a review item. It
   // reads the task notes the routes below append and writes nothing but its
@@ -2268,6 +2276,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore,
     dispatches,
     agentNotes,
+    agentNoteLog,
     chatAudit,
     readyNudger,
     j,

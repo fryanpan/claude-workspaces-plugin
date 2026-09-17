@@ -1,0 +1,385 @@
+/**
+ * Does a second in-progress row belonging to the same agent stop an
+ * end-of-turn note reaching the store?
+ *
+ * It does, and these cases are the experiment rather than the inference: the
+ * same note, the same agent, the same board, posted once under one row and
+ * once under two. A green result cannot come from the harness refusing every
+ * note, because the one-row post is the control and it lands.
+ *
+ * They also fix what "a second row" MEANS, which the loose reading gets
+ * wrong. A board with several rows in progress is not a dropping board; an
+ * AGENT with several of its own is. Two cases below pin that boundary from
+ * each side — a peer's row is not a second claim, and a row a person started
+ * counts by its assignee.
+ *
+ * All fixtures are synthetic. The repo is public.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { agentNoteLogPath } from '../src/agent-note-log.ts';
+import { localDay } from '../src/chat-audit.ts';
+import { type ServerHandle, createServer } from '../src/server.ts';
+
+const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
+const NOMAD = { id: 'agent-nomad', name: 'Nomad', kind: 'agent' };
+
+/** A decision an agent files and a person then asks back on — the shape
+ *  that leaves a filed item OFF the owner's queue. */
+const DECISION = {
+  shape: 'decision' as const,
+  headline: 'Cache size for the nightly rebuild',
+  detail: 'A full pass reads the index once. A smaller cache makes it read twice.',
+  options: [
+    { id: 'o-keep', label: 'Keep it' },
+    { id: 'o-halve', label: 'Halve it' },
+  ],
+};
+
+/** A closing message that asks the owner something, so the same post
+ *  exercises both halves: the durable note and the unfiled-ask judgement. */
+const ASKING_TURN = 'Both arms are green. Want me to ship it tonight?';
+
+describe('an end-of-turn note when the agent holds several in-progress rows', () => {
+  let handle: ServerHandle;
+  let base: string;
+  let dataDir: string;
+  let WS = '';
+
+  const post = (path: string, body: unknown) =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const jj = async <T>(res: Response): Promise<T> => {
+    expect(res.ok, `${res.status} ${await res.clone().text()}`).toBe(true);
+    return res.json() as Promise<T>;
+  };
+  const turnNote = (text: string) =>
+    post(`/workspaces/${WS}/agents/cartographer/notes`, {
+      agent: 'cartographer',
+      kind: 'turn',
+      text,
+      at: Date.now(),
+    });
+
+  /** Every `task.noted` line the board's audit log holds, newest last. */
+  const notedLines = (): string[] => {
+    const path = join(dataDir, 'workspaces', `${WS}.events.jsonl`);
+    let raw = '';
+    try {
+      raw = readFileSync(path, 'utf8');
+    } catch {
+      return [];
+    }
+    return raw.split('\n').filter((line) => line.includes('"event":"task.noted"'));
+  };
+
+  /** Every line the board's unplaced-note log holds, oldest first. */
+  const unplacedLines = (): string[] => {
+    let raw = '';
+    try {
+      raw = readFileSync(agentNoteLogPath(dataDir, WS), 'utf8');
+    } catch {
+      return [];
+    }
+    return raw.split('\n').filter((line) => line.trim() !== '');
+  };
+
+  /** Every note the store holds across the board's rows. */
+  const storedNotes = (taskIds: string[]): string[] =>
+    taskIds.flatMap((id) => (handle.tasks.getTask(id)?.notes ?? []).map((n) => n.text));
+
+  const counted = () => handle.chatAudit.window(7, localDay(Date.now()));
+
+  beforeEach(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'turn-note-many-rows-'));
+    handle = createServer({ port: 0, dataDir });
+    base = `http://127.0.0.1:${handle.port}`;
+    const { workspace } = await jj<{ workspace: { id: string } }>(
+      await post('/workspaces', { name: 'turn-notes', leadAgentId: LEAD.id }),
+    );
+    WS = workspace.id;
+    await jj(
+      await post(`/workspaces/${WS}/agents`, { agentId: LEAD.id, runtime: 'claude-code-local' }),
+    );
+  });
+
+  afterEach(async () => {
+    await handle.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  /**
+   * A row held in-progress, the way a dispatch leaves it.
+   *
+   * `holder` is both the assignee and the actor that claims it, because that
+   * is the shape a dispatch produces. `claimedBy` splits them for the one
+   * case that needs to: a row a PERSON moved, where the claimant says
+   * nothing and the assignee decides.
+   */
+  async function claimRow(
+    title: string,
+    holder: typeof LEAD = LEAD,
+    claimedBy: typeof LEAD | typeof PERSON = holder,
+  ): Promise<string> {
+    const { task } = await jj<{ task: { id: string } }>(
+      await post(`/workspaces/${WS}/tasks`, {
+        title,
+        body: `Agent can ${title.toLowerCase()} so that the queue keeps moving.`,
+        assignee: holder.name,
+        assigneeKind: 'agent',
+        author: LEAD,
+      }),
+    );
+    for (const to of ['todo', 'in-progress'] as const) {
+      await jj(
+        await post(`/workspaces/${WS}/tasks/${task.id}/transition`, {
+          to,
+          author: to === 'todo' ? PERSON : claimedBy,
+          workspaceId: WS,
+        }),
+      );
+    }
+    return task.id;
+  }
+
+  /**
+   * `author` files a review item on `taskId`, a person asks back on it, and
+   * the filing time is returned.
+   *
+   * Asked-back rather than open on purpose: an item still on the queue makes
+   * `filingStateFor` answer "filed" through `openItem`, whatever window it
+   * was given, and would hide the boundary this test is about.
+   */
+  async function fileAndAnswer(taskId: string, author: typeof LEAD): Promise<number> {
+    const { item } = await jj<{ item: { id: string } }>(
+      await post(`/workspaces/${WS}/tasks/${taskId}/review-items`, { review: DECISION, author }),
+    );
+    const filedAt = Date.now();
+    await jj(
+      await post(`/workspaces/${WS}/tasks/${taskId}/review-items/${item.id}/answer`, {
+        text: 'Why does the cache size matter tonight?',
+        author: PERSON,
+      }),
+    );
+    return filedAt;
+  }
+
+  /** The review items still standing on this board's queue. */
+  const onQueue = async (): Promise<string[]> => {
+    const { items } = await jj<{ items: Array<{ reviewItemId?: string }> }>(
+      await fetch(`${base}/workspaces/${WS}/review-items`),
+    );
+    return items.flatMap((r) => (r.reviewItemId ? [r.reviewItemId] : []));
+  };
+
+  it('reaches the store when the agent holds ONE row (positive control)', async () => {
+    const only = await claimRow('Wire the index');
+    const r = await turnNote(ASKING_TURN);
+    expect(r.status).toBe(202);
+    expect(await r.json()).toMatchObject({ ok: true, taskId: only });
+
+    expect(storedNotes([only])).toEqual([ASKING_TURN]);
+    expect(notedLines().filter((l) => l.includes('ship it tonight'))).toHaveLength(1);
+  });
+
+  it('counts the agent’s OWN rows, not the board’s — a peer’s row is not a second claim', async () => {
+    // What actually decides it, measured rather than assumed. The condition
+    // is NOT "the board has more than one row in progress": `resolveNoteTarget`
+    // walks the board's in-progress rows and keeps the ones that are THIS
+    // agent's, then refuses only if it kept more than one. Whose a row is:
+    // the actor of its latest in-progress transition when that actor is an
+    // agent, and the stored assignee when a person moved it.
+    //
+    // So a board where a lead and its builders each hold a row places every
+    // one of their notes. A busy board is not by itself a dropping board, and
+    // a count of a board's in-progress rows cannot tell you whether it is.
+    await jj(
+      await post(`/workspaces/${WS}/agents`, { agentId: NOMAD.id, runtime: 'claude-code-local' }),
+    );
+    const mine = await claimRow('Wire the index');
+    await claimRow('Rebuild the sidecar', NOMAD);
+
+    const r = await turnNote(ASKING_TURN);
+    expect(r.status).toBe(202);
+    expect(await r.json()).toMatchObject({ ok: true, taskId: mine });
+    expect(storedNotes([mine])).toEqual([ASKING_TURN]);
+  });
+
+  it('counts a row a PERSON moved by its assignee, so two can still be one agent’s', async () => {
+    // The other half of the same rule, and the one that makes a board look
+    // innocent. Nobody claimed this row as an agent — a person started it —
+    // so the claimant says nothing and the assignee decides. Both rows come
+    // out as the lead's, and the note is refused exactly as if it had
+    // claimed them both itself.
+    const first = await claimRow('Wire the index');
+    const second = await claimRow('Rebuild the sidecar', LEAD, PERSON);
+
+    const r = await turnNote(ASKING_TURN);
+    const body = (await r.json()) as { taskId?: string; needsFiling?: boolean };
+    expect(body.taskId).toBeUndefined();
+    expect(body.needsFiling).toBe(true);
+    expect(storedNotes([first, second])).toEqual([]);
+  });
+
+  it('lands on NO row once a second is held — the no-guess rule is unchanged', async () => {
+    // Same agent, same board, same words — the only thing that changed is
+    // that a second row is in-progress under the same claimant. The fix does
+    // not place the note; it makes the unplaced note durable, so this half of
+    // the behaviour has to stay exactly as it was.
+    const first = await claimRow('Wire the index');
+    const second = await claimRow('Rebuild the sidecar');
+
+    const r = await turnNote(ASKING_TURN);
+    expect(r.status).toBe(202);
+    const body = (await r.json()) as { taskId?: string; needsFiling?: boolean };
+    expect(body.taskId).toBeUndefined();
+    expect(body.needsFiling).toBe(true);
+
+    expect(storedNotes([first, second])).toEqual([]);
+    expect(notedLines().filter((l) => l.includes('ship it tonight'))).toHaveLength(0);
+  });
+
+  it('survives a restart at two rows, where it used to exist only in the ring', async () => {
+    // The defect this change ends. The ring is in-process, 20 deep and read by
+    // nothing; a restart was the proof that an unplaced note went nowhere at
+    // all. It now comes back off the board's unplaced-note log.
+    await claimRow('Wire the index');
+    await claimRow('Rebuild the sidecar');
+    const posted = await turnNote(ASKING_TURN);
+    expect(await posted.json()).toMatchObject({ logged: true, needsFiling: true });
+
+    await handle.stop();
+    handle = createServer({ port: 0, dataDir });
+    base = `http://127.0.0.1:${handle.port}`;
+    const { notes } = await jj<{ notes: Array<{ text: string; needsFiling?: boolean }> }>(
+      await fetch(`${base}/workspaces/${WS}/agents/Cartographer/notes`),
+    );
+    expect(notes.map((n) => [n.text, n.needsFiling])).toEqual([[ASKING_TURN, true]]);
+  });
+
+  it('a placed note is NOT logged — the row is already its durable home', async () => {
+    // The log is for what no row would take. Writing placed notes there too
+    // would double every board's record and make its line count mean nothing.
+    await claimRow('Wire the index');
+    const r = await turnNote(ASKING_TURN);
+    expect(await r.json()).not.toHaveProperty('logged');
+    expect(unplacedLines()).toHaveLength(0);
+  });
+
+  it('logs the note with no row at all, not only the ambiguous one', async () => {
+    // An agent holding nothing on this board is unplaced for a different
+    // reason and was dropped just as completely. `needsFiling` marks the
+    // ambiguous case only, so the log records which it was.
+    await claimRow('Wire the index');
+    const r = await post(`/workspaces/${WS}/agents/Nomad/notes`, {
+      agent: 'Nomad',
+      kind: 'turn',
+      text: 'Compacted the transcript.',
+      at: Date.now(),
+    });
+    expect(await r.json()).toMatchObject({ logged: true });
+    const lines = unplacedLines().map(
+      (l) => JSON.parse(l) as { agent: string; ambiguous: boolean },
+    );
+    expect(lines).toMatchObject([{ agent: 'Nomad', ambiguous: false }]);
+  });
+
+  it('still JUDGES the ask at two rows — only the durable note is lost', async () => {
+    // The half of the brief's suspicion that does not hold. `judgeAndRecord`
+    // runs before the row is resolved, so the unfiled-ask counter moves
+    // whatever the row count is; what a many-row board loses is the note in
+    // the Activity tab and the audit log, not the detector.
+    await claimRow('Wire the index');
+    await claimRow('Rebuild the sidecar');
+
+    const r = await turnNote(ASKING_TURN);
+    const body = (await r.json()) as { unfiledAsk?: string };
+    expect(body.unfiledAsk).toContain('want me to');
+    expect(counted().agents).toMatchObject([{ unfiledAsks: 1, totalAsks: 1 }]);
+  });
+
+  it('measures "filed nothing this turn" from the PREVIOUS turn note, across a restart', async () => {
+    // Two failures, one boundary, and this case has to catch both — the
+    // ordering it pins is the whole point of the change, not a detail of it.
+    //
+    // Take the log fallback out of `judgeAndRecord` and a restarted server
+    // measures over a flat two hours instead. Cartographer below filed its
+    // item BEFORE its last turn and has filed nothing since; the wide window
+    // would let that old item excuse the ask it makes now.
+    //
+    // Append to the log BEFORE judging and the note under judgement becomes
+    // its own predecessor. Nomad below filed its item DURING this turn; that
+    // boundary sits after the filing, so the one agent that complied is the
+    // one that gets nudged.
+    const first = await claimRow('Wire the index');
+    const second = await claimRow('Rebuild the sidecar');
+
+    // Cartographer: files, answers, THEN ends a turn. The item is off the
+    // owner's queue, so `openItem` cannot carry the verdict and `since` is
+    // the only thing deciding it.
+    const cartoFiledAt = await fileAndAnswer(first, LEAD);
+    expect(await onQueue()).toEqual([]);
+    const stale = await fetch(`${base}/workspaces/${WS}/agents/cartographer/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'cartographer',
+        kind: 'turn',
+        text: 'Rebased onto main and pushed.',
+        at: cartoFiledAt + 60_000,
+      }),
+    });
+    expect(await stale.json()).toMatchObject({ logged: true });
+
+    await handle.stop();
+    handle = createServer({ port: 0, dataDir });
+    base = `http://127.0.0.1:${handle.port}`;
+
+    // Nothing filed since that turn, and the ring is empty — the log is the
+    // only place the boundary survived.
+    const askedAgain = await post(`/workspaces/${WS}/agents/cartographer/notes`, {
+      agent: 'cartographer',
+      kind: 'turn',
+      text: ASKING_TURN,
+      at: cartoFiledAt + 120_000,
+    });
+    const carto = (await askedAgain.json()) as { unfiledAsk?: string };
+    expect(carto.unfiledAsk).toContain('want me to');
+
+    // Nomad: first turn this server has seen from it, and it filed inside
+    // the turn. Nothing to nudge it for.
+    const nomadFiledAt = await fileAndAnswer(second, NOMAD);
+    const nomadTurn = await post(`/workspaces/${WS}/agents/Nomad/notes`, {
+      agent: 'Nomad',
+      kind: 'turn',
+      text: ASKING_TURN,
+      at: nomadFiledAt + 60_000,
+    });
+    const nomad = (await nomadTurn.json()) as { unfiledAsk?: string };
+    expect(nomad.unfiledAsk).toBeUndefined();
+  });
+
+  it('a status note is lost at two rows too — the kind is not what decides it', async () => {
+    // `post_status` survives this whole defect because it NAMES its row and
+    // takes the explicit-address branch, never reaching `resolveNoteTarget`.
+    // That is a property of the caller, not of the kind — so a status note
+    // posted down the nameless route, as this one is, is dropped exactly as
+    // a turn note is. The kind is not what decides it.
+    const first = await claimRow('Wire the index');
+    const second = await claimRow('Rebuild the sidecar');
+    const r = await post(`/workspaces/${WS}/agents/cartographer/notes`, {
+      agent: 'cartographer',
+      kind: 'status',
+      text: 'Bundle is under budget at 41.2 KB.',
+      at: Date.now(),
+    });
+    expect(r.status).toBe(202);
+    expect(storedNotes([first, second])).toEqual([]);
+  });
+});

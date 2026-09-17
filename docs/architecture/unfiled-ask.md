@@ -184,6 +184,88 @@ is known to be lower than it is.
 its note to the Activity tab (that message is the one a reader most wants) and
 is never nudged again.
 
+## Where the note itself goes, and what a many-row board loses
+
+The judgement runs on every turn note the route accepts, BEFORE the note is
+matched to a row — so an agent holding twenty-five in-progress rows is judged
+exactly like one holding a single row, and the counter moves either way. The
+detector is not dark on a busy board. What such a board loses is the NOTE.
+`resolveNoteTarget` answers with a row only when the agent holds exactly one
+in-progress claim, because a judged sample put the old newest-claim guess
+wrong about three times in four; a note it will not place lands on no task,
+emits no `task.noted`, and appears nowhere in `events.jsonl`.
+
+### Whose rows, not how many
+
+The trigger is per AGENT, not per board, and the loose reading of it is wrong
+in a way that matters when you go looking for affected boards. The walk keeps
+the in-progress rows that are **this agent's** and refuses only when it kept
+more than one. A row is the agent's when the actor of its latest in-progress
+transition is that agent — or, when a PERSON moved it and the claimant says
+nothing, when the stored assignee folds to its name.
+
+So a lead and three builders each holding one row place every note they write,
+on a board with four rows in progress. One agent holding two places none.
+`turn-note-many-rows.test.ts` drives both sides.
+
+**Neither count you would reach for can tell those apart.** Not the board's
+in-progress rows — four is the healthy case above and two is the broken one.
+Not its recent notes either: every other agent on the board keeps posting, so
+the board stays busy and current while one agent's turns go silently missing.
+Looking for affected boards by either number finds the wrong ones in both
+directions, which is not a hypothetical — it is how this defect was first
+described, and the description was wrong. The question is always **whose**
+rows, and only the walk above answers it.
+
+`post_status` is unaffected throughout — it names its row and takes the
+explicit-address branch, never reaching this walk. That is a property of the
+caller, not of the kind: a status note posted down the nameless route is
+dropped exactly as a turn note is.
+
+The note now also goes to `agent-note-log.ts`, which appends it to
+`<dataDir>/workspaces/<ws>.agent-notes.jsonl`. It is still not placed on a row:
+the no-guess rule is unchanged, and the log is a record that the note existed
+rather than a decision about where it belongs. So a count of a board's turn
+notes is the sum of two files, and neither alone:
+
+```bash
+grep -c '"event":"task.noted"' <data>/workspaces/<ws>.events.jsonl   # placed
+grep -c '"kind":"turn"'        <data>/workspaces/<ws>.agent-notes.jsonl  # unplaced
+```
+
+`GET /workspaces/<ws>/agents/<name>/notes` merges the two, so the agent's own
+recent-activity read is one call and survives a restart. `lastTurnAt` — the
+boundary "filed nothing this turn" is measured from — falls back to the log
+when the in-process ring has nothing, which is what a restarted server used to
+have.
+
+### What every corpus on this page could not see
+
+Both measurements above were read from placed notes — the 913-note run and the
+157-note re-measurement through the boards' own task surfaces, which is where a
+note lands only once a row takes it. **Neither number is wrong. Each is a
+corpus of placed notes, which was all there were**: an unplaced note reached
+the ring and nothing else, so no read could have recovered it. The rates still
+describe the messages they were computed over. What they do not describe is the
+population, and the gap between the two has a direction — the boards excluded
+are the busy ones, where a session holds many rows.
+
+The second gap is upstream of the server entirely, and it is a gap in the
+code rather than a measured population. A Stop hook that cannot resolve a
+board id — `CW_WORKSPACE_ID` and `FEEDBACK_WORKSPACE_ID` both unset, or an
+interpreter it cannot launch — posts nothing and says nothing, so its turns
+are in no corpus, in no log, and in no error. The board reads as quiet. That
+state is indistinguishable from a session that had nothing to say, which is
+what makes it worth naming here rather than counting.
+
+Whoever re-measures next, two cautions from the run that produced this page.
+The denominator is the sum of the two files above, and neither alone. And a
+board contributing zero is a question about its hook before it is a fact about
+its agents — a fleet-wide count of "boards that went dark" was computed for
+this work and turned out to be an artefact of unconverted timestamps, on
+boards that were in fact producing notes minutes earlier. No number on this
+page rests on it.
+
 ## The count is about the person, not the board
 
 A live row records the board it was seen on. The window does not filter by it,
