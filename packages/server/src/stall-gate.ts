@@ -142,6 +142,21 @@ export const BUILDER_SILENT_MULTIPLIER_DEFAULT = 2;
  */
 export const BUILDER_SILENT_BUCKET = 'builder-silent';
 
+/**
+ * The word the `unfiled` list carries for an ask the BOARD declares — a row
+ * whose owner is a person, or whose band is the owner's, with no item on that
+ * person's queue.
+ *
+ * Named on the row here rather than taken from `Classified.bucket`, because
+ * the bucket answers a different question (is this work somebody picks up)
+ * and a rule row answers it `scheduled-rule`. Left to speak for the ask, that
+ * word told the reader "a schedule rule, whose instances are the work"
+ * (`stall-escalation.ts`'s `BUCKET_WORDS`) about a row carrying an unanswered
+ * question — the swallowing, moved one file downstream. For every row that is
+ * not a rule this is the bucket the row already had.
+ */
+export const OWNER_UNFILED_BUCKET = 'blocked-on-owner-unfiled';
+
 /** Why a row could not be evaluated. A closed vocabulary, matching
  *  `ready-gate.ts`, so the rendered line can name the condition rather than
  *  saying that something went wrong. */
@@ -457,10 +472,15 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // is unchanged, so the keep-moving verdict still counts every unfiled ask
     // however fresh — there the question is whether the protocol is being
     // followed right now, and a young violation is still a violation.
-    else if (row.bucket === 'blocked-on-owner-unfiled' && row.sinceActivityMs > quietMs)
-      unfiled.push(named);
+    //
+    // Both of the readings below are `ownerAsk`, never `bucket`: whether a
+    // person is owed an answer is not the same question as whether the row is
+    // work anyone picks up, and a rule row answers the second one in a way
+    // that used to swallow the first (`keep-moving.ts`).
+    else if (row.ownerAsk === 'unfiled' && row.sinceActivityMs > quietMs)
+      unfiled.push({ ...named, bucket: OWNER_UNFILED_BUCKET });
     // A filed wait, by address. Not gated on the clock: it is not a finding.
-    else if (row.bucket === 'blocked-on-owner' && row.waitingOn && row.waitingOn.length > 0)
+    else if (row.ownerAsk === 'filed' && row.waitingOn && row.waitingOn.length > 0)
       waiting.push({ id: row.id, title: row.title, waitingOn: row.waitingOn });
 
     // The check-in, judged on its own and AFTER the lists above — a row the
