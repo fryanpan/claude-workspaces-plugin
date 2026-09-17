@@ -340,6 +340,12 @@ export interface EvaluateStallsInput {
    * Both absent: every row is judged, exactly as before the cap existed.
    * `unfiled` and `undetermined` are untouched either way — a question filed
    * nowhere and a row nobody could read are findings whatever the capacity.
+   * That sentence used to be a claim about which rows this set CONTAINS, and
+   * it was false the day `waiting-unfiled` arrived: that finding rides the
+   * two runnable buckets, so the cap held it. It is now a claim about what
+   * the cap SUPPRESSES — the stall, builder-silence and check-in readings
+   * only — enforced at each of those three readings rather than by skipping
+   * the row (`beyondCap` in the loop below).
    */
   parallelismCap?: number;
   priorityOrder?: readonly string[];
@@ -411,9 +417,19 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
       undetermined.push({ id: row.id, reason: 'review-items-unreadable' });
       continue;
     }
-    // A row the cap keeps out of flight is not judged for stalling — nobody
-    // was supposed to be on it. Counted, never named.
-    if (beyond.has(row.id)) continue;
+    // A row the cap keeps out of flight is not judged FOR STALLING — nobody
+    // was supposed to be on it, so its silence is idleness by rule. It is
+    // still judged for an unanswered ask: capacity says why nobody picked the
+    // row up and says nothing about a question already asked and filed
+    // nowhere. Read as a whole-row skip it swallowed exactly that — a
+    // `waiting-unfiled` row rides `in-progress`, `ready-unpicked` or
+    // `scheduled-rule` (`keep-moving.ts`), and the first two are the buckets
+    // this set is built from, so on any board with more runnable rows than
+    // its cap such a row was never named, never aged and escalated to nobody
+    // (`waiting-unfiled-escalation.ts`). The sibling reading has always
+    // worked, because a board-declared `blocked-on-owner-unfiled` row is not
+    // runnable and so was never in this set at all.
+    const beyondCap = beyond.has(row.id);
     const named: StalledRow = {
       id: row.id,
       title: row.title,
@@ -447,12 +463,12 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     if (row.waitingUnfiled && row.sinceActivityMs > quietMs) {
       unfiled.push({ ...named, bucket: WAITING_UNFILED_BUCKET });
       namedStalled = true;
-    } else if (row.stalled && dispatched) {
+    } else if (!beyondCap && row.stalled && dispatched) {
       if (row.sinceActivityMs > builderQuietMs) {
         stalled.push({ ...named, bucket: BUILDER_SILENT_BUCKET });
         namedStalled = true;
       }
-    } else if (row.stalled) {
+    } else if (!beyondCap && row.stalled) {
       stalled.push(named);
       namedStalled = true;
     }
@@ -495,6 +511,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // been silent everywhere, which is the missed check-in the protocol asks
     // about.
     if (
+      !beyondCap &&
       dispatched &&
       !namedStalled &&
       row.bucket === 'in-progress' &&

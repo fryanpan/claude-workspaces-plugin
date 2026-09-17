@@ -38,13 +38,21 @@ today's code fails is flagged.
 - **Must:** produce `stalled`, `unfiled` and `undetermined` from the
   classifier, gated on the same quiet window, and name a watched builder's
   silence as `builder-silent`.
-- **Must never:** report a task the parallelism cap keeps out of flight, or
-  a task under a triage band, or a schedule rule task AS WORK. A rule row's
-  own unanswered ask is a different finding and is reported (#1077) — unless
-  its date has not arrived, which is a deferral rather than a question
-  (`owner-ask.ts`, below).
-- **Measured by:** unit tests per exclusion; the verdict's `considered`
-  denominator.
+- **Must never:** report as STALLED a task the parallelism cap keeps out of
+  flight, report at all a task under a triage band, or report a schedule rule
+  task AS WORK. The three are not one shape. A triage-band row is dropped in
+  `keep-moving.ts` before any bucket is decided, so it reaches no list here at
+  all. A capped row is classified like every other and only its stall reading
+  is withheld — it still reaches the `unfiled` list, because an unanswered
+  question is a finding whatever the capacity; the cap held one anyway until
+  2026-09-17, when it skipped the row outright and `waiting-unfiled` rides
+  runnable buckets the cap is built from. And a rule row's own unanswered ask
+  is a different finding from the rule, so it is reported (#1077) — unless the
+  rule's date has not arrived, which is a deferral rather than a question
+  (`owner-ask.ts`, above).
+- **Measured by:** unit tests per exclusion, including a `waiting-unfiled` row
+  ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the verdict's
+  `considered` denominator.
 
 ## `stall-nudge.ts` — the lead wake
 
@@ -63,8 +71,10 @@ today's code fails is flagged.
   task with a standing declared wait is taken off `stalled` before any of
   this (`withoutStandingWaits`), so it neither wakes the lead nor appears
   under "stopped moving" on a wake something else caused, until it lapses. A
-  task past the parallelism cap needs no filter: the gate never judges it, and
-  `beyondCapacity` is a count on the frame that never enters the stamp.
+  task past the parallelism cap needs no filter for its SILENCE: the gate
+  never judges that, and `beyondCapacity` is a count on the frame that never
+  enters the stamp. An unfiled ask on such a task does reach the frame, and
+  should — it is one call for the lead, and no slot is needed to make it.
 - **Measured by:** the `[stall] wake` log lines per board per day, and the
   lead's act latency from transcripts (measured 2026-09-08: median 0–4 min).
 
@@ -291,6 +301,25 @@ file is what the builder did, the word is what the task claimed to be about.
   (`dead-board-escalation.test.ts` is the drill in CI: a board with no
   session and a Team Lead on another board gets the frame there and files
   nothing; with nobody reachable it files one item as the server).
+
+## `waiting-unfiled-escalation.ts` — the aging half — *rebuild step 6*
+
+- **Must:** age EVERY task on the gate's `unfiled` list — both ways onto it,
+  `waiting-unfiled` and `blocked-on-owner-unfiled` — and past a second window
+  address Team Lead first as ONE fleet-wide frame, the owner only when Team
+  Lead is unreachable and then as ONE review item however many tasks and
+  boards it spans. Each named task says which of the two it is, in the frame's
+  bucket and in the item's own words.
+- **Must never:** file a second item on a refusal, ask the owner again about a
+  task they have already answered or withdrawn, or file at all while Team Lead
+  can be reached. A task that stops being a finding is forgotten and its item
+  withdrawn on that tick.
+- **Measured by:** `waiting-unfiled-escalation.test.ts` and
+  `owner-unfiled-escalation.test.ts`, each with the one-window control beside
+  the two-window case. The verdict's `escalated` line cannot measure this
+  half: it counts items this actor filed, and the Team Lead rung files none —
+  a fleet-wide zero there says Team Lead was reachable, not that the ladder
+  ran.
 
 ## `note-ask.ts` + `note-ask-judge.ts` — *removed in step 2*
 

@@ -31,7 +31,7 @@ check that serves none of them is weight.
 | A task is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
 | A task waits on a person and nothing is filed on that person's queue | The lead | Same frame, `unfiled` |
 | An agent's own closing note says it is waiting on a person, with nothing filed on that person's queue | The lead | Same frame, `unfiled`, bucket `waiting-unfiled` — the note also loses its movement credit, so the task's clock never stopped |
-| Such a wait still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item naming every such task across every board |
+| Either of those still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item naming every such task across every board — each line saying which of the two it is, because the evidence differs and the reader would correct a line that claimed the wrong one |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
 | A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
@@ -54,8 +54,11 @@ second question, or the wait cleared. A task with a standing `declare_wait`
 is not a finding at all (`withoutStandingWaits`): it wakes nobody, is never
 listed as stopped, and rides along on a wake that fired for something else
 only as a declared wait. The tick after the wait lapses it is a finding again,
-carrying all its silence. A task past the parallelism cap is not
-judged at all, so it never enters the clock in the first place.
+carrying all its silence. A task past the parallelism cap is not judged for
+STALLING — there was no slot for it, so its silence is idleness by rule and it
+never enters the clock. It is still judged for an unanswered ask: capacity is
+why nobody picked the row up and says nothing about a question already asked
+and filed nowhere.
 
 ## The rebuild, in order
 
@@ -139,6 +142,17 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    every such task across every board. The judgement of "this asks" is
    `detectAsk`, the filing nudge's own reader, re-measured over three days of
    real closing notes when this shipped (`unfiled-ask.md`).
+
+   **That ladder is the `unfiled` list's, not this bucket's** (corrected
+   2026-09-17). It was built reading `waiting-unfiled` alone, which left the
+   older way onto the same list — `blocked-on-owner-unfiled`, where the BOARD
+   says a person owns the task and nothing is on that person's queue — with
+   no aging path at all: the only other filer is step 3's, and that fires only
+   when no session on the board is alive, so a board-declared unfiled ask on a
+   LIVE board was told to its lead every repeat window and went past nobody.
+   One remedy, one list, one ladder. The item names each task for the evidence
+   it has, because a line telling the reader an agent wrote closing words it
+   never wrote is a line they would correct.
 
 ## How to read the verdict
 

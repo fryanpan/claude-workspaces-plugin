@@ -1,13 +1,17 @@
 /**
- * An unfiled wait that is still unfiled a second window later goes up the
+ * An unfiled ask that is still unfiled a second window later goes up the
  * ladder — and does it as ONE item for the whole fleet.
  *
- * `stall-nudge.ts` tells the board's lead about a `waiting-unfiled` task on
- * the first window. That is the right first addressee: the lead can file the
- * ask in one call. What it cannot do is notice that the lead did not. An ask
- * an agent made in its own notes, that the lead was told about and did not
- * file, is invisible to everybody who could act on it — which is the shape
- * that put a fleet's worth of waits in chat and nowhere else.
+ * `stall-nudge.ts` tells the board's lead about every task on the gate's
+ * `unfiled` list on the first window. That is the right first addressee: the
+ * lead can file the ask in one call. What it cannot do is notice that the
+ * lead did not. An ask nobody filed, that the lead was told about, is
+ * invisible to everybody who could act on it — which is the shape that put a
+ * fleet's worth of waits in chat and nowhere else.
+ *
+ * BOTH ways onto that list age here (`waitingUnfiledRows`), because the list
+ * has one remedy. Reading only `waiting-unfiled` left the older one with no
+ * aging path at all; the story is at that function.
  *
  * So this is the aging half, and it is deliberately the SAME ladder
  * `stall-check/README.md` already has: lead → Team Lead → the owner. Team
@@ -32,13 +36,14 @@
  * same way the dead-board item does — and, the same way, its own filing must
  * not exonerate that task: the wiring already skips this actor's items when
  * it reads a task's asks (`STALL_ESCALATION_ACTOR`), so the anchor keeps
- * reading as `waiting-unfiled` on every tick.
+ * reading as unfiled on every tick.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
 import { taskDeepLink } from './home-brief.ts';
 import { STALL_ESCALATION_ACTOR, type TeamLeadReach, span } from './stall-escalation.ts';
+import { OWNER_UNFILED_BUCKET } from './stall-gate.ts';
 import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';
 import { WAITING_UNFILED_BUCKET } from './waiting-unfiled.ts';
@@ -47,11 +52,17 @@ import { WAITING_UNFILED_BUCKET } from './waiting-unfiled.ts';
  *  the server actually writes rather than a copy of its name. */
 export const WAITING_UNFILED_FILENAME = 'waiting-unfiled-waits.json';
 
-/** One task that has been a `waiting-unfiled` finding, with its board. */
+/** One task that has been an `unfiled` finding, with its board. */
 export interface AgingWait {
   workspaceId: string;
   taskId: string;
   title: string;
+  /** Which of the two ways it got onto the list — `WAITING_UNFILED_BUCKET`
+   *  or `OWNER_UNFILED_BUCKET`. Carried because it is the EVIDENCE, and the
+   *  item has to say what is actually true of each task: telling the reader
+   *  an agent wrote closing words about a task the board simply has down to
+   *  a person is a sentence they would correct. */
+  bucket: string;
   /** How long the task has been quiet, from the gate's own reading. */
   quietMs: number;
   /** When this module first saw it as a finding. */
@@ -82,7 +93,7 @@ export interface WaitingUnfiledEscalationOptions {
    *  persistence wants. */
   dataDir?: string;
   /**
-   * How long a task may be a `waiting-unfiled` finding before it goes past
+   * How long a task may be an `unfiled` finding before it goes past
    * its lead. One more quiet window by default, so the ladder reads: named to
    * the lead at the first window, escalated at the second.
    */
@@ -106,21 +117,35 @@ export function buildWaitingUnfiledReview(input: {
   const boards = new Set(rows.map((r) => r.workspaceId)).size;
   const headline =
     n === 1
-      ? `An agent is waiting on you on “${clip(rows[0]?.title ?? '', 40)}” and never filed the ask`
-      : `${n} tasks have agents waiting on a person with nothing filed`;
+      ? `“${clip(rows[0]?.title ?? '', 40)}” is waiting on a person, with nothing filed`
+      : `${n} tasks are waiting on a person with nothing filed`;
   const lines = rows.map((row) => {
     const waited = span(Math.max(0, now - row.firstSeen));
-    return `- [${label(row.title)}](${taskDeepLink(row.workspaceId, row.taskId)}) — said it is waiting on a person ${waited} ago, with no question on anybody's queue.`;
+    return `- [${label(row.title)}](${taskDeepLink(row.workspaceId, row.taskId)}) — ${evidence(row.bucket, waited)}`;
   });
   const where = boards === 1 ? 'one board' : `${boards} boards`;
   const detail = [
-    `Each of these tasks has an agent that said, in its own closing words, that it is waiting on a person — and filed nothing that person can answer. Their leads were told over ${span(agingMs)} ago and the asks are still unfiled. ${n === 1 ? 'It is' : 'They are'} on ${where}.`,
+    `Each of these tasks is waiting on a person with nothing that person can answer. Their leads were told over ${span(agingMs)} ago and the asks are still unfiled. ${n === 1 ? 'It is' : 'They are'} on ${where}.`,
     '',
     ...lines,
     '',
     'Either the ask gets filed where you read it, or the agent says there was no ask. This item is written by the board itself and withdraws on its own once none is left.',
   ].join('\n');
   return { review_type: 'question', headline, detail };
+}
+
+/**
+ * The half-sentence that says WHY this task is on the list — which is
+ * different for the two buckets, and the difference is what the reader would
+ * correct. One sentence covering both would either claim an agent wrote
+ * closing words it never wrote, or drop the fact that one of them did.
+ * Neither says "you": the item is fleet-wide, and the owner a row names need
+ * not be its reader (`blocked-on-owner-unfiled` fires on any person owner).
+ */
+function evidence(bucket: string, waited: string): string {
+  return bucket === WAITING_UNFILED_BUCKET
+    ? `said it is waiting on a person ${waited} ago, with no question on anybody's queue.`
+    : `has been down to its owner for ${waited}, with no question on their queue.`;
 }
 
 function clip(text: string, max: number): string {
@@ -134,15 +159,36 @@ function label(title: string): string {
   return title.replace(/[[\]]/g, '');
 }
 
-/** Every `waiting-unfiled` finding on one snapshot. A retired board says
- *  nobody is working it, so it contributes none. */
+/**
+ * Every `unfiled` finding on one snapshot — BOTH ways onto that list.
+ *
+ * `stall-gate.ts` keeps them on one list because they have one remedy: a
+ * person is being waited on and cannot see it, and the fix is to file the ask
+ * or say there was none. `waiting-unfiled` is the task's own agent saying so
+ * in its closing words; `blocked-on-owner-unfiled` is the BOARD saying so,
+ * from who owns the task. The ladder in `stall-check/README.md` is written
+ * against the failure, not against how the board came to know of it.
+ *
+ * It read the first bucket alone until 2026-09-17, which left the second with
+ * no aging path at all: `stall-escalation.ts` — the only other filer — fires
+ * only on a board where no session is alive, so a board-declared unfiled ask
+ * on a LIVE board was told to its lead every repeat window and went past
+ * nobody, however long the lead ignored it.
+ *
+ * A retired board says nobody is working it, so it contributes none.
+ */
 export function waitingUnfiledRows(
   board: StallSnapshot,
-): Array<{ id: string; title: string; quietMs: number }> {
+): Array<{ id: string; title: string; bucket: string; quietMs: number }> {
   if (board.retired) return [];
   return board.unfiled
-    .filter((row) => row.bucket === WAITING_UNFILED_BUCKET)
-    .map((row) => ({ id: row.id, title: row.title, quietMs: row.quietMs }));
+    .filter((row) => row.bucket === WAITING_UNFILED_BUCKET || row.bucket === OWNER_UNFILED_BUCKET)
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      bucket: row.bucket,
+      quietMs: row.quietMs,
+    }));
 }
 
 export class WaitingUnfiledEscalations {
@@ -177,6 +223,7 @@ export class WaitingUnfiledEscalations {
           workspaceId: board.workspaceId,
           taskId: row.id,
           title: row.title,
+          bucket: row.bucket,
           quietMs: row.quietMs,
           firstSeen,
         });
@@ -254,10 +301,13 @@ export class WaitingUnfiledEscalations {
       ...(top ? { taskId: top.taskId, title: top.title } : {}),
       stalledCount: 0,
       consideredCount: due.length,
+      // Each task's OWN bucket: the frame is what Team Lead reads to decide
+      // whose ask this is, and the two buckets ask for different reading —
+      // one agent's closing words, one board's ownership.
       unfiled: due.map((row) => ({
         id: row.taskId,
         title: row.title,
-        bucket: WAITING_UNFILED_BUCKET,
+        bucket: row.bucket,
         quietMs: row.quietMs,
       })),
       ts: now,
