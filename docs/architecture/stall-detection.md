@@ -200,16 +200,25 @@ nothing with either. So `FLEET_TELL_CAP` counts the wakes each row has been
 carried in, beside its `firstSeen` in the same sidecar, and a row past the cap
 is dropped from the FRAME.
 
-It is dropped from the frame and from nothing else. The row stays on the
-gate's `unfiled` list, so the board's own lead is still told about it every
-window; the keep-moving verdict still counts it; `aging()` still holds it; and
-the count is forgotten the moment the row stops being a finding, so a task
-that moves and later asks again is carried again. The rung that goes quiet is
-the one with no remedy: the board's lead can end this in one call, by filing
-the ask or saying there was none, and Team Lead can do neither. Three rather
-than one because a wake can be lost — the addressee's session can die or
-compact between the send and the reading — and three at the default window is
-an hour and a half of chances.
+**It stops waking people; it does not stop existing.** A row past the cap
+moves onto the owner's standing item — the same one item the
+unreachable-Team-Lead branch files, revised in place and withdrawn when the
+last wait clears. That item is a record rather than a wake, so it costs nobody
+a turn however long it stands, and its words already offer the two answers
+that end it: file the ask, or say there was none. A cap that only subtracted
+would be a way of losing a genuine ask quietly, which is worse than the
+repetition it removes and would look exactly like success.
+
+Meanwhile the row never leaves the gate's `unfiled` list, so the board's own
+lead is still told about it every window and the keep-moving verdict still
+counts it — that list, not any bookkeeping inside the escalation, is the row's
+real survival. The count is forgotten the moment the row stops being a
+finding, so a task that moves and later asks again is carried again, and a
+frame that reached nobody spends no wake (`tellTeamLead` returns the delivery
+count, and only a delivery is counted). Three rather than one because a wake
+can be lost — the addressee's session can die or compact between the send and
+the reading — and three at the default window is an hour and a half of
+chances.
 
 Known gap, deliberately open: nothing ages review items sitting unanswered
 on the owner's queue. That is a different signal (ask-aging, not

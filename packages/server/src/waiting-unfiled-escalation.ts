@@ -38,68 +38,41 @@
  * it reads a task's asks (`STALL_ESCALATION_ACTOR`), so the anchor keeps
  * reading as unfiled on every tick.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
 import { STALL_ESCALATION_ACTOR, type TeamLeadReach } from './stall-escalation.ts';
 import { OWNER_UNFILED_BUCKET } from './stall-gate.ts';
 import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';
 import { type AgingWait, buildWaitingUnfiledReview } from './waiting-unfiled-review.ts';
+import {
+  type Seen,
+  type Sidecar,
+  emptySidecar,
+  loadSidecar,
+  saveSidecar,
+  sidecarPath,
+} from './waiting-unfiled-sidecar.ts';
+
+export { WAITING_UNFILED_FILENAME } from './waiting-unfiled-sidecar.ts';
 import { WAITING_UNFILED_BUCKET } from './waiting-unfiled.ts';
 
-/** `<dataDir>/waiting-unfiled-waits.json`. Exported so a test asserts the file
- *  the server actually writes rather than a copy of its name. */
-export const WAITING_UNFILED_FILENAME = 'waiting-unfiled-waits.json';
-
 /**
- * How many fleet wakes ONE row may cost before it goes quiet on that rung.
+ * How many fleet wakes ONE row may cost before it stops waking that rung.
  *
- * The bug this bounds: a row whose own closing prose reads as an ask with
- * nothing anyone could file against it is a PERMANENT `unfiled` finding —
- * `detectAsk` fires on the deferral phrase, the gate lists the row, and no
- * lead can file a question that was never asked. Unbounded, that row was
- * carried to Team Lead every window for the life of the board, and a wake is
- * another session's whole turn.
+ * The bug it bounds, and why three: `docs/architecture/stall-detection.md`,
+ * under "the fleet rung is bounded". In one line — a row whose closing prose
+ * reads as an ask with nothing anyone could file against it never clears, so
+ * unbounded it cost Team Lead a whole turn every window for the life of the
+ * board.
  *
- * Three rather than one because a wake can be lost — the addressee's session
- * can die, restart or compact between the send and the reading, and the
- * repeat is what survives that. Three at the default window is an hour and a
- * half of chances, after which saying it again is evidence of nothing.
- *
- * What it bounds is the WAKE and nothing else. A row past the cap is still on
- * the gate's `unfiled` list, so `stall-nudge.ts` still names it to the
- * board's own lead every window, the keep-moving verdict still counts it and
- * `aging()` still holds it — and the lead is the rung that CAN end it, in one
- * call, by filing the ask or saying there was none. Team Lead can do neither.
- * The finding does not stop being found; it stops waking the rung with no
- * remedy for it. The count sits beside `firstSeen` and is dropped with it, so
- * a row that moves and later asks again is a new wait, carried again.
+ * What it bounds is the WAKE. A row past the cap is still on the gate's
+ * `unfiled` list — the list the board's own lead is told about every window,
+ * and the row's real survival — and it is handed ONCE to the owner's standing
+ * item, which is a record rather than a wake. The count sits beside
+ * `firstSeen` and is dropped with it, so a row that moves and later asks
+ * again is a new wait, carried again.
  */
 export const FLEET_TELL_CAP = 3;
-
-/** What the sidecar holds, keyed `<workspaceId>|<taskId>`. */
-interface Seen {
-  workspaceId: string;
-  taskId: string;
-  firstSeen: number;
-  /** Fleet wakes this row has already been carried in. Absent on a sidecar
-   *  written before the cap existed, which reads as none spent — the right
-   *  answer on an upgrade: the row gets its tells from here rather than being
-   *  silenced by a field nobody wrote. */
-  tells?: number;
-}
-
-interface Sidecar {
-  seen: Record<string, Seen>;
-  /** The one fleet item, while one stands. */
-  filed?: { workspaceId: string; taskId: string; itemId: string; keys: string[] };
-  /** When Team Lead was last told, this stretch. */
-  teamLeadToldAt?: number;
-  /** Keys the owner has already been shown on an item they answered or
-   *  withdrew. Not asked about again; a task they were not shown is. */
-  seenByOwner?: string[];
-}
 
 export interface WaitingUnfiledEscalationOptions {
   store: TaskStore;
@@ -112,6 +85,11 @@ export interface WaitingUnfiledEscalationOptions {
    * the lead at the first window, escalated at the second.
    */
   agingMs?: number;
+  /** How many fleet wakes one row may cost (`FLEET_TELL_CAP`). An option so
+   *  that the control for the cap — the same windows with the cap out of
+   *  reach — is a case in the suite rather than a number somebody once ran by
+   *  hand. Production never sets it. */
+  fleetTellCap?: number;
   teamLead?: TeamLeadReach;
   report?: (message: string) => void;
   now?: () => number;
@@ -155,15 +133,17 @@ export class WaitingUnfiledEscalations {
   private readonly store: TaskStore;
   private readonly path: string | null;
   private readonly agingMs: number;
+  private readonly tellCap: number;
   private readonly teamLead: TeamLeadReach | undefined;
   private readonly report: (message: string) => void;
-  private sidecar: Sidecar = { seen: {} };
+  private sidecar: Sidecar = emptySidecar();
   private lastPersisted = '';
 
   constructor(opts: WaitingUnfiledEscalationOptions) {
     this.store = opts.store;
-    this.path = opts.dataDir === undefined ? null : join(opts.dataDir, WAITING_UNFILED_FILENAME);
+    this.path = opts.dataDir === undefined ? null : sidecarPath(opts.dataDir);
     this.agingMs = opts.agingMs ?? 30 * 60_000;
+    this.tellCap = opts.fleetTellCap ?? FLEET_TELL_CAP;
     this.teamLead = opts.teamLead;
     this.report = opts.report ?? ((message) => console.error(message));
     this.load();
@@ -218,16 +198,15 @@ export class WaitingUnfiledEscalations {
     }
     const board = this.teamLeadBoard();
     if (board !== undefined) {
-      // Only the rows that have tells left. A row past the cap is dropped from
-      // the FRAME, not from `due`: it stays in `seen`, stays on the gate's
-      // `unfiled` list, and stays something the board's own lead is told about
-      // every window. What stops is the fleet wake, which is the one addressee
-      // with no remedy for a row that has no question in it (`FLEET_TELL_CAP`).
+      // Only the rows with wakes left. A row past the cap is dropped from the
+      // FRAME and from nothing else: it stays in `seen`, stays on the gate's
+      // `unfiled` list, and is handed below to the one surface that can hold
+      // it without costing anybody a turn.
       //
-      // And when nothing has tells left, no frame is sent AND the stamp is not
-      // moved — so a row that becomes a finding later is carried on its own
-      // clock rather than waiting out a window it was never in.
-      const carry = due.filter((row) => row.tells < FLEET_TELL_CAP);
+      // When nothing has a wake left the stamp is not moved either, so a row
+      // that becomes a finding later is carried on its own clock rather than
+      // waiting out a window it was never in.
+      const carry = due.filter((row) => row.tells < this.tellCap);
       const told = this.sidecar.teamLeadToldAt;
       if (carry.length > 0 && (told === undefined || now - told >= this.agingMs)) {
         if (this.tellTeamLead(board, carry, now)) {
@@ -235,10 +214,32 @@ export class WaitingUnfiledEscalations {
           this.spendTells(carry);
         }
       }
-      // Team Lead is reachable, so the owner is not the addressee. An item
-      // already standing is left alone rather than withdrawn: it is on the
-      // owner's queue because Team Lead was unreachable when it was filed,
-      // and taking it back would drop the ask rather than answer it.
+      // A row that has stopped waking Team Lead has to land somewhere a
+      // person can still answer it, or the cap would be a way of losing a
+      // genuine ask quietly — which is worse than the repetition it removes,
+      // and would look exactly like success. So the capped rows go onto the
+      // owner's standing item, the same one the unreachable-Team-Lead branch
+      // below files: ONE item for the fleet, revised in place as the set
+      // changes, withdrawn when none is left, and never re-shown to somebody
+      // who has answered or withdrawn it (`seenByOwner`). It is a record, not
+      // a wake, so it costs no turn however long it stands — and its words
+      // already offer the two answers that end it: file the ask, or say there
+      // was none.
+      //
+      // Read off the sidecar rather than off `due`, because `due` carries the
+      // count as it was at the top of the tick: a row that spent its last
+      // wake seconds ago is capped NOW, and waiting a window to say so would
+      // leave it with no audience in between.
+      const capped = due.filter((row) => this.tellsOf(row) >= this.tellCap);
+      if (capped.length > 0) {
+        this.fileOrRevise(capped, now);
+        return;
+      }
+      // Team Lead is reachable and every row still has wakes left, so the
+      // owner is not the addressee. An item already standing is left alone
+      // rather than withdrawn: it is on the owner's queue because Team Lead
+      // was unreachable when it was filed, and taking it back would drop the
+      // ask rather than answer it.
       this.save();
       return;
     }
@@ -265,16 +266,23 @@ export class WaitingUnfiledEscalations {
   private spendTells(carried: readonly AgingWait[]): void {
     const spent: string[] = [];
     for (const row of carried) {
-      const seen = this.sidecar.seen[key(row.workspaceId, row.taskId)];
-      if (!seen) continue;
+      // `carry` ⊆ `due` ⊆ `present`, and `seen` was rebuilt from `present`
+      // earlier in this same tick, so the key is always there.
+      const seen = this.sidecar.seen[key(row.workspaceId, row.taskId)] as Seen;
       seen.tells = (seen.tells ?? 0) + 1;
-      if (seen.tells >= FLEET_TELL_CAP) spent.push(row.taskId);
+      if (seen.tells >= this.tellCap) spent.push(key(row.workspaceId, row.taskId));
     }
     if (spent.length > 0)
       this.say(
-        `[stall] waiting-unfiled fleet-quiet after=${FLEET_TELL_CAP} rows=${spent.join(',')}` +
-          ' — still named to each board’s own lead',
+        `[stall] waiting-unfiled fleet-quiet after=${this.tellCap} rows=${spent.join(' ')}` +
+          ' — now on the owner’s standing item, and still on each board’s own list',
       );
+  }
+
+  /** This row's spent wakes as the sidecar holds them NOW, which is one
+   *  ahead of the copy in `due` on the tick that spent the last one. */
+  private tellsOf(row: AgingWait): number {
+    return this.sidecar.seen[key(row.workspaceId, row.taskId)]?.tells ?? 0;
   }
 
   private teamLeadBoard(): string | undefined {
@@ -447,47 +455,14 @@ export class WaitingUnfiledEscalations {
   }
 
   private load(): void {
-    if (!this.path || !existsSync(this.path)) return;
-    try {
-      const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<Sidecar>;
-      if (parsed && typeof parsed === 'object' && typeof parsed.seen === 'object') {
-        this.sidecar = { seen: parsed.seen ?? {} };
-        if (parsed.filed) this.sidecar.filed = parsed.filed;
-        if (typeof parsed.teamLeadToldAt === 'number')
-          this.sidecar.teamLeadToldAt = parsed.teamLeadToldAt;
-        if (Array.isArray(parsed.seenByOwner)) this.sidecar.seenByOwner = parsed.seenByOwner;
-        this.lastPersisted = this.serialize();
-      }
-    } catch {
-      // A corrupt sidecar costs at most one duplicate item, never a crash.
-      this.sidecar = { seen: {} };
-    }
+    const { sidecar, persisted } = loadSidecar(this.path);
+    this.sidecar = sidecar;
+    this.lastPersisted = persisted;
   }
 
-  private serialize(): string {
-    const seen: Record<string, Seen> = {};
-    for (const k of Object.keys(this.sidecar.seen).sort()) {
-      const row = this.sidecar.seen[k];
-      if (row) seen[k] = row;
-    }
-    return `${JSON.stringify({ ...this.sidecar, seen }, null, 2)}\n`;
-  }
-
-  /** Write the sidecar back when it has actually moved. Never throws: this
-   *  runs inside a timer tick, and a full disk must not stop the loop. */
+  /** Write the sidecar back when it has actually moved. */
   private save(): void {
-    if (!this.path) return;
-    const next = this.serialize();
-    if (next === this.lastPersisted) return;
-    try {
-      mkdirSync(dirname(this.path), { recursive: true });
-      const tmp = `${this.path}.tmp`;
-      writeFileSync(tmp, next);
-      renameSync(tmp, this.path);
-      this.lastPersisted = next;
-    } catch (err) {
-      console.error('[stall] could not persist waiting-unfiled escalations:', err);
-    }
+    this.lastPersisted = saveSidecar(this.path, this.sidecar, this.lastPersisted);
   }
 }
 

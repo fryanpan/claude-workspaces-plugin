@@ -16,14 +16,20 @@ import { join } from 'node:path';
  * What is asserted, each with its control:
  *  - the CAP. Eight windows of the same unanswerable row produce
  *    `FLEET_TELL_CAP` frames, not eight. The control is the same eight windows
- *    with the cap removed from the filter, which produces eight.
+ *    with the cap put out of reach (`fleetTellCap: 99`), which produces eight.
  *  - the KEEP SIDE. A genuine unfiled ask still ages and still escalates: it
- *    reaches Team Lead at the second window exactly as before, and a row that
+ *    reaches Team Lead at the second window exactly as before; a row that
  *    becomes a finding AFTER another has gone quiet is carried on its own
- *    clock rather than inheriting the quiet one's.
- *  - the VISIBILITY. A row that has gone quiet at the fleet rung is still
- *    being aged, still carries its bucket, and is still what the board's own
- *    `unfiled` list is built from — so somebody who goes looking finds it.
+ *    clock rather than inheriting the quiet one's; and a row that stops being
+ *    a finding and asks again gets its wakes back.
+ *  - the LANDING. A row past the cap is not silenced, it is MOVED: it goes
+ *    onto the owner's standing item — a record rather than a wake — while
+ *    staying in `aging()` and staying what the board's own `unfiled` list is
+ *    built from. Its control is a row still inside the cap, which does not go
+ *    there.
+ *  - the DELIVERY. A wake nobody received spends no wake. Five windows whose
+ *    `send` delivers 0, and a sixth that delivers, still leave the row its
+ *    full three chances; a `send` that throws does the same.
  *  - the OWNER RUNG is untouched. With Team Lead unreachable the standing item
  *    still names the row however many windows pass: it is revised in place,
  *    so it costs nobody a turn and is the durable half of the record.
@@ -84,24 +90,48 @@ describe('an unanswerable unfiled finding stops waking the fleet', () => {
     quietMs: 45 * MIN,
   });
 
-  /** A Team Lead that is always reachable, recording every frame it is sent. */
+  /**
+   * A Team Lead that is always reachable, recording every frame it is sent.
+   *
+   * `delivered` is how many sessions the send reached — the server's own
+   * return value, which the escalation is supposed to read before counting a
+   * wake against a row. Settable so a test can drive the case that matters
+   * most: a frame that went nowhere.
+   */
   function recordingTeamLead(ws: string): {
     reach: TeamLeadReach;
     sent: StallNudgeFrame[];
+    delivered: { n: number; throws: boolean };
   } {
     const sent: StallNudgeFrame[] = [];
+    const delivered = { n: 1, throws: false };
     return {
       sent,
+      delivered,
       reach: {
         agentId: 'agent-team-lead',
         boards: () => [ws],
         canReach: () => true,
         send: (_ws, _agentId, frame) => {
+          if (delivered.throws) throw new Error('the stream went away mid-send');
           sent.push(frame);
-          return 1;
+          return delivered.n;
         },
       },
     };
+  }
+
+  /** Every open review item the server itself wrote, across one board. */
+  function ownerItems(store: TaskStore, ws: string) {
+    const out: Array<{ taskId: string; detail: string }> = [];
+    for (const task of store.listTasks(ws)) {
+      for (const item of store.listReviewItems(task.id)) {
+        if (item.createdBy !== STALL_ESCALATION_ACTOR.name) continue;
+        const review = item.review as { detail?: string };
+        out.push({ taskId: task.id, detail: review.detail ?? '' });
+      }
+    }
+    return out;
   }
 
   it('is carried to Team Lead a bounded number of times, not once per window forever', () => {
@@ -121,6 +151,25 @@ describe('an unanswerable unfiled finding stops waking the fleet', () => {
     }
   });
 
+  it('CONTROL: the same eight windows with the cap out of reach produce eight', () => {
+    const { store, ws, ids } = boardWith(['Rebuild the timetable']);
+    const { reach, sent } = recordingTeamLead(ws);
+    const escalations = new WaitingUnfiledEscalations({
+      store,
+      agingMs: WINDOW,
+      teamLead: reach,
+      fleetTellCap: 99,
+    });
+    const rows = [waitingRow(ids[0] as string, 'Rebuild the timetable')];
+    for (let w = 0; w <= 8; w++) escalations.onTick([snapshot(ws, rows)], START + w * WINDOW);
+    // Eight, not three: the cap is what the case above measures, and nothing
+    // else about the ladder changed underneath it.
+    expect(sent).toHaveLength(8);
+    // And with the cap unreachable the row never lands on the owner's item,
+    // which is the other half of what the cap controls.
+    expect(escalations.filedCount()).toBe(0);
+  });
+
   it('a row that has gone quiet at the fleet rung is still a finding being aged', () => {
     const { store, ws, ids } = boardWith(['Rebuild the timetable']);
     const { reach, sent } = recordingTeamLead(ws);
@@ -134,9 +183,90 @@ describe('an unanswerable unfiled finding stops waking the fleet', () => {
     const aged = escalations.aging();
     expect(aged.map((a) => a.taskId)).toEqual([ids[0] as string]);
     expect(aged[0]?.firstSeen).toBe(START);
-    // And it never reached the owner's queue: Team Lead is reachable, so the
-    // owner is not the addressee whether or not the fleet rung has gone quiet.
-    expect(escalations.filedCount()).toBe(0);
+    expect(aged[0]?.tells).toBe(FLEET_TELL_CAP);
+    // It stopped waking anybody and did not stop existing: it is on the
+    // owner's standing item, which is where it can still be answered.
+    expect(escalations.filedCount()).toBe(1);
+  });
+
+  it('a row past the cap lands on the owner’s standing item, where it can be answered', () => {
+    const { store, ws, ids } = boardWith(['Rebuild the timetable']);
+    const { reach, sent } = recordingTeamLead(ws);
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW, teamLead: reach });
+    const rows = [waitingRow(ids[0] as string, 'Rebuild the timetable')];
+
+    // Control first: inside the cap, Team Lead is the addressee and the
+    // owner's queue is untouched — the ladder's own order, unchanged.
+    for (let w = 0; w <= FLEET_TELL_CAP - 1; w++)
+      escalations.onTick([snapshot(ws, rows)], START + w * WINDOW);
+    expect(sent.length).toBeLessThan(FLEET_TELL_CAP);
+    expect(ownerItems(store, ws)).toHaveLength(0);
+
+    // The window that spends the last wake also lands the row on the item —
+    // waiting another window would leave it with no audience in between.
+    escalations.onTick([snapshot(ws, rows)], START + FLEET_TELL_CAP * WINDOW);
+    expect(sent).toHaveLength(FLEET_TELL_CAP);
+    const filed = ownerItems(store, ws);
+    expect(filed).toHaveLength(1);
+    expect(filed[0]?.detail).toContain(ids[0] as string);
+
+    // And it is a record, not a wake: four more windows add no frame and no
+    // second item.
+    for (let w = FLEET_TELL_CAP + 1; w <= FLEET_TELL_CAP + 4; w++)
+      escalations.onTick([snapshot(ws, rows)], START + w * WINDOW);
+    expect(sent).toHaveLength(FLEET_TELL_CAP);
+    expect(ownerItems(store, ws)).toHaveLength(1);
+    expect(escalations.filedCount()).toBe(1);
+  });
+
+  it('a row that stops being a finding and asks again gets its wakes back', () => {
+    const { store, ws, ids } = boardWith(['Rebuild the timetable']);
+    const { reach, sent } = recordingTeamLead(ws);
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW, teamLead: reach });
+    const rows = [waitingRow(ids[0] as string, 'Rebuild the timetable')];
+    for (let w = 0; w <= 8; w++) escalations.onTick([snapshot(ws, rows)], START + w * WINDOW);
+    expect(sent).toHaveLength(FLEET_TELL_CAP);
+
+    // The agent reported, so the row stops being a finding: the count is
+    // dropped with `firstSeen`, exactly as a filed ask would drop it.
+    escalations.onTick([snapshot(ws, [])], START + 9 * WINDOW);
+    expect(escalations.aging()).toHaveLength(0);
+
+    // THE SAME row asks again. It is a new wait, so it ages one window and is
+    // then carried — the cap is not a permanent mark on a task id.
+    escalations.onTick([snapshot(ws, rows)], START + 10 * WINDOW);
+    expect(sent).toHaveLength(FLEET_TELL_CAP);
+    escalations.onTick([snapshot(ws, rows)], START + 11 * WINDOW);
+    expect(sent).toHaveLength(FLEET_TELL_CAP + 1);
+    expect((sent[sent.length - 1]?.unfiled ?? []).map((r) => r.id)).toEqual([ids[0] as string]);
+  });
+
+  it('a wake nobody received spends no wake, and neither does one that throws', () => {
+    const { store, ws, ids } = boardWith(['Rebuild the timetable']);
+    const { reach, sent, delivered } = recordingTeamLead(ws);
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW, teamLead: reach });
+    const rows = [waitingRow(ids[0] as string, 'Rebuild the timetable')];
+
+    // Five windows where the send reaches nobody. The frames were built and
+    // handed over; none was delivered.
+    delivered.n = 0;
+    for (let w = 0; w <= 5; w++) escalations.onTick([snapshot(ws, rows)], START + w * WINDOW);
+    expect(sent.length).toBeGreaterThan(FLEET_TELL_CAP);
+    expect(escalations.aging()[0]?.tells ?? 0).toBe(0);
+
+    // And one where it throws.
+    delivered.throws = true;
+    escalations.onTick([snapshot(ws, rows)], START + 6 * WINDOW);
+    expect(escalations.aging()[0]?.tells ?? 0).toBe(0);
+    delivered.throws = false;
+
+    // Team Lead comes back. The row still has its full three chances: an
+    // undelivered wake is not a wake, so the cap cannot be spent by an
+    // addressee who was never there.
+    delivered.n = 1;
+    const before = sent.length;
+    for (let w = 7; w <= 20; w++) escalations.onTick([snapshot(ws, rows)], START + w * WINDOW);
+    expect(sent.length - before).toBe(FLEET_TELL_CAP);
   });
 
   it('a genuine unfiled ask still escalates, and a later one is carried on its own clock', () => {
