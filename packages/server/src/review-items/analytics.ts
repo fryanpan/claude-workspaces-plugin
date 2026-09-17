@@ -74,3 +74,29 @@ export const REVIEW_ITEM_MEASUREMENT_EVENTS = ['review_item.viewed', 'review_ite
 export function isReviewItemMeasurementEvent(event: unknown): boolean {
   return typeof event === 'string' && REVIEW_ITEM_MEASUREMENT_EVENTS.includes(event);
 }
+
+/**
+ * The events that only the measurement log reads, so the server keeps them
+ * off the SSE fan-out.
+ *
+ * `review_item.viewed` says a person opened a card. No task changes, no
+ * status changes, and no surface reads the frame — the board writes the
+ * beacon and never listens for it. An agent that got the frame would spend a
+ * turn to learn that somebody looked at its ask. Bryan asked for the rule on
+ * 2026-09-17: an event that exists for analytics does not go to a listening
+ * agent.
+ *
+ * `review_item.answered` is NOT on this list, although the same file builds
+ * it. An answer is the thing an agent waits for, and the wake is the point.
+ * The test for this list is "who acts on it", not "which file wrote it".
+ *
+ * The audit log is unaffected. `TaskEventBus.emit` appends the row before it
+ * calls any listener, so Weekly Review reads the same `events.jsonl` it read
+ * before.
+ */
+export const ANALYTICS_ONLY_EVENTS = ['review_item.viewed'];
+
+/** Does this event exist for measurement alone? */
+export function isAnalyticsOnlyEvent(event: unknown): boolean {
+  return typeof event === 'string' && ANALYTICS_ONLY_EVENTS.includes(event);
+}

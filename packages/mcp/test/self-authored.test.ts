@@ -123,7 +123,7 @@ describe('events this must never touch', () => {
   // matching on it would swallow exactly the outcome the agent is waiting
   // for. doc-store.ts's fireSuggestionEvent exists to deliver it.
   it('delivers every suggestion verdict, including on its own suggestion', () => {
-    for (const event of ['suggestion.created', 'suggestion.accepted', 'suggestion.rejected']) {
+    for (const event of ['suggestion.accepted', 'suggestion.rejected']) {
       expect(
         isSelfAuthoredEvent(
           event,
@@ -132,6 +132,26 @@ describe('events this must never touch', () => {
         ),
       ).toBe(false);
     }
+  });
+
+  // The PROPOSAL is the other half, and it is the one this session made:
+  // `suggestionAuthor()` in connector-session.ts is `AUTHOR.id`, so the
+  // author on the frame is this session by construction.
+  it('suppresses a suggestion this session proposed, and nobody else’s', () => {
+    expect(
+      isSelfAuthoredEvent(
+        'suggestion.created',
+        { docId: 'd', sid: 's', suggestion: { author: { id: SELF } } },
+        SELF,
+      ),
+    ).toBe(true);
+    expect(
+      isSelfAuthoredEvent(
+        'suggestion.created',
+        { docId: 'd', sid: 's', suggestion: { author: { id: OTHER } } },
+        SELF,
+      ),
+    ).toBe(false);
   });
 
   it('delivers doc.sync_error and anything else it has no rule for', () => {

@@ -64,6 +64,25 @@ entry point that calls them. `task-routes-context.ts` and
 *Enforced by:* `bun run check:imports` (CI) for the import direction; the rest
 is read by the reviewer.
 
+## An agent is only woken by news it can act on
+
+A diff that adds or fans out a board or doc event answers two questions.
+
+- **Does it tell an agent about its own action?** Give the event an actor
+  field `packages/mcp/src/self-authored.ts` reads, so the MCP child can drop
+  the frame. An event whose actor cannot be identified is delivered, because
+  an agent cannot detect silence.
+- **Does it exist only for analytics?** Put its name in
+  `ANALYTICS_ONLY_EVENTS` (`packages/server/src/review-items/analytics.ts`) so
+  it stays off the SSE fan-out. The test is who acts on the event, not which
+  file wrote it.
+
+A miss costs one turn per event per attached session.
+
+*Enforced by:* `packages/server/test/analytics-events-off-stream.test.ts` and
+`packages/server/test/self-echo-suppression.test.ts`; the reviewer's eye for a
+new event.
+
 ## The architecture map is current
 
 A PR that adds, removes or moves a **top-level module** — a file or a
