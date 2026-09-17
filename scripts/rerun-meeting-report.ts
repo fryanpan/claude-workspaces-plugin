@@ -29,6 +29,10 @@
  * that failed to look.
  */
 
+import {
+  cleanupReasonLine,
+  groupCleanupReasons,
+} from '../packages/core/src/notes-cleanup-report.ts';
 import { normalizeSpeakerName } from '../packages/core/src/speaker-name.ts';
 import {
   allBullets,
@@ -79,6 +83,30 @@ export interface TidyCounts {
   proposed: number;
   applied: number;
   refused: number;
+  /**
+   * Edits the gate KEPT that the applier could not make.
+   *
+   * Counted apart from `refused` for the reason the route counts them apart:
+   * one is an edit the pass may not make and the other one it tried to. Both
+   * are edits that did not reach the notes, so both belong in the reasons
+   * below — and a run whose only losses were failures used to print no
+   * explanation at all, reading exactly like a clean pass.
+   */
+  failed?: number;
+  /**
+   * Every edit that did not reach the document, with the rule that dropped
+   * it — `refusals` from the gate, `failures` from the applier.
+   *
+   * THE COUNTS ALONE WERE THE DEAD END. A row reading "16 proposed, 0
+   * applied, 16 refused" is the finding this harness is run to produce and
+   * says nothing about what to change; these are what the report prints
+   * under it. Optional, because a run against a server that predates the
+   * route's two arrays gets none — and an empty list there means "not
+   * reported", not "nothing was refused", which is why the report says so
+   * out loud when the count and the lines disagree.
+   */
+  refusals?: readonly string[];
+  failures?: readonly string[];
 }
 
 /** The seven, plus what the run has to say to be reproducible. */
@@ -211,6 +239,36 @@ function tidyLine(t: TidyCounts): string {
   return t.ok ? counts : `${counts} (refused: ${t.reason ?? 'unknown'})`;
 }
 
+/**
+ * Why the tidy-up did not apply what it proposed, one line per rule.
+ *
+ * NOT IN THE TABLE, because a table cell that holds six lines stops being a
+ * table. It sits under it, and only when there is something to say — a run
+ * whose tidy-up applied everything prints nothing here.
+ *
+ * AND A DISAGREEMENT IS SAID OUT LOUD. `refused` is a count the route has
+ * always sent and the lines are newer, so a run against an older server has
+ * the count with no lines. Printing nothing there would read as "nothing was
+ * refused" on the exact run where the most was.
+ */
+export function tidyReasonLines(t: TidyCounts): string[] {
+  const groups = groupCleanupReasons([...(t.refusals ?? []), ...(t.failures ?? [])]);
+  if (groups.length === 0) {
+    // EVERY EDIT THAT DID NOT LAND, not only the refused ones. A server that
+    // predates the two arrays still sends both COUNTS, and a pass whose
+    // losses were all in the applier would otherwise print nothing.
+    const lost = t.refused + (t.failed ?? 0);
+    return lost > 0
+      ? ['', `Why the tidy-up did not apply ${lost} edit(s): not reported by this server.`]
+      : [];
+  }
+  return [
+    '',
+    'Why the tidy-up did not apply what it proposed:',
+    ...groups.map((g) => `- ${cleanupReasonLine(g)}`),
+  ];
+}
+
 /** One coverage reading as a share, with the `0 of 0` case said in words. */
 function coveredCell(covered: number, voiced: number): string {
   return voiced > 0
@@ -268,6 +326,9 @@ export function renderRerunReport(r: RerunReport, before?: RerunReport): string 
     `| Bullets on an unnamed voice | ${r.unnamedVoiceBullets} of ${r.bullets} bullet(s)${
       r.unnamedVoiceLabels.length > 0 ? ` — ${r.unnamedVoiceLabels.join(', ')}` : ''
     } |`,
+    // AFTER EVERY ROW, because these are lines rather than cells — a table
+    // cell holding six of them stops being a table.
+    ...tidyReasonLines(r.tidy),
     '',
     '## Coverage, both ways of counting it',
     '',

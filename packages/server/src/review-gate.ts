@@ -22,16 +22,33 @@ import {
   isReviewItemHeld,
   isReviewPayloadHeld,
   judgeReasonClause,
-  judgeReasonSentence,
   latestThreadedQuestion,
   locateReviewItemRange,
   readTaskReviewItem,
   reviewItemState,
   reviewPayloadVersion,
 } from '@claude-workspaces/core';
+import type { DoneWhenLine } from '@claude-workspaces/core/done-when';
+import {
+  REFUSED_CHECK_PASS_REASON,
+  isGetItAnywayHold,
+  refusalProof,
+} from '@claude-workspaces/core/done-when-refusal';
+import {
+  REVIEW_HOLD_UNUSABLE_REASON,
+  boundHoldWords,
+  holdCountWord,
+  holdGapKey,
+  judgedText,
+} from '@claude-workspaces/core/review-hold';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
 import type { ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
+import {
+  admittedLessSpecificMessage,
+  admittedUnjudgedMessage,
+  holdMessage,
+} from './review-hold-message.ts';
 import { linkHoldReason } from './review-items/link-check.ts';
 import { type PriorAskRow, priorAsksFor } from './review-items/prior-asks.ts';
 import type { ReviewJudge, ReviewJudgeVerdict } from './review-judge.ts';
@@ -326,8 +343,10 @@ export function createReviewGate(ctx: ReviewGateContext) {
     // The clause form — the judge's own words with the trailing full stop
     // taken off, so the sentence built around them has exactly one.
     const first = judgeReasonClause(heldFor[0] ?? '');
-    if (first === '') return `Admitted to the queue after ${REVIEW_GATE_MAX_HOLDS} holds.`;
-    return `Admitted to the queue after ${REVIEW_GATE_MAX_HOLDS} holds; the standing concern is unchanged — ${first}.`;
+    const held = `held ${holdCountWord(heldFor.length)}`;
+    if (first === '')
+      return `Admitted to the queue unjudged after being ${held}; nobody judged these words good.`;
+    return `Admitted to the queue unjudged after being ${held}; the standing concern is unchanged — ${first}.`;
   }
 
   /** The done-when line a ticket item checks, when it is an owner check. */
@@ -337,33 +356,40 @@ export function createReviewGate(ctx: ReviewGateContext) {
       ?.doneWhenLineId;
   }
 
-  /** What a filing route says when the gate held the item. Points at the
-   *  fix rather than only at the verdict: the filer's next act is one call. */
+  /** That line as it stands, for the facts the gate reads off it — today, only
+   *  whether its proof says the check was refused. `undefined` when the item
+   *  is not an owner check, or when the line has since gone. */
+  function ownerLineFor(address: ReviewGateAddress): DoneWhenLine | undefined {
+    const lineId = ownerLineOf(address);
+    if (lineId === undefined || address.kind !== 'task') return undefined;
+    return (taskStore.getTask(address.taskId)?.doneWhen ?? []).find((l) => l.id === lineId);
+  }
+
+  /**
+   * What a filing route says when the gate held the item — composed in
+   * `review-hold-message.ts`, which is where the wording and its test live.
+   *
+   * This function's only job is to supply the four facts the wording needs
+   * that only the gate knows: where the item lives, whether it is an owner
+   * check, and the hold count. It supplies NO words of its own, which is what
+   * keeps "a hold invents nothing" a property one test can check.
+   */
   function heldMessage(
     address: ReviewGateAddress,
     reason: string,
-    add?: string,
+    quote?: string,
     /** How many holds this item now carries, THIS one included. */
     holds = 0,
   ): string {
-    // At the cap, "it reaches the queue when it passes" stops being the whole
-    // truth — the next revision reaches the reader whether it passes or not.
-    // Saying so is the difference between a filer making one more edit and a
-    // filer bracing for a fourth round and giving up instead.
-    const last = holds >= REVIEW_GATE_MAX_HOLDS;
-    return (
-      `Held off the reader's queue — ${judgeReasonSentence(reason)} ` +
-      // The draft, when the judge wrote one. A hold that names the words is
-      // one edit away from passing; a hold that names a category is a guess.
-      (add ? `Add this sentence: “${add}” ` : '') +
-      (ownerLineOf(address) !== undefined
-        ? `It is the done-when check you handed over; check the line yourself and report it met with what you read, or report it again with what the reader needs: ${reviseCallFor(address)}. `
-        : `It is on the ${address.kind === 'thread' ? 'thread' : 'ticket'}; revise it with ${reviseCallFor(address)}. `) +
-      (last
-        ? 'This is the last hold: the next revision goes to the reader either way.'
-        : 'Every revision is judged again, and the item reaches the queue when it passes.') +
-      ' Left unrevised for an hour, it goes to the reader as filed.'
-    );
+    return holdMessage({
+      reason,
+      ...(quote !== undefined ? { quote } : {}),
+      reviseCall: reviseCallFor(address),
+      ownerCheck: ownerLineOf(address) !== undefined,
+      surface: address.kind === 'thread' ? 'thread' : 'ticket',
+      holds,
+      maxHolds: REVIEW_GATE_MAX_HOLDS,
+    });
   }
 
   /** Process-wide: a judge that throws is named once, not once per filing. */
@@ -410,10 +436,17 @@ export function createReviewGate(ctx: ReviewGateContext) {
     settled: (row: T) => void;
     /** The item hands over a done-when line — see `ReviewJudgeItem.ownerCheck`. */
     ownerCheck?: boolean;
+    /** That line's proof says the agent was REFUSED permission to run the
+     *  check — see `ReviewJudgeItem.refusedCheck` and the guard in
+     *  `runReviewGate` that drops a get-it-anyway hold on one. */
+    refusedCheck?: boolean;
   }
 
   type GateOutcome<T> =
-    | { held: false; row: T }
+    // `message` on a PASS is not decoration: it is how a filer is told the
+    // item reached the reader without the judge passing it. Absent on the
+    // ordinary pass, where there is nothing to say.
+    | { held: false; row: T; message?: string }
     | { held: true; row: T; reason: string; message: string };
 
   /** Whether the ids a relative link names actually exist here. */
@@ -443,6 +476,24 @@ export function createReviewGate(ctx: ReviewGateContext) {
   }
 
   /**
+   * What a REVISE may say to the gate beyond the words themselves.
+   *
+   * One field, and it exists because of what the gate was measured teaching:
+   * every hold asked for a concrete specific, so a fabricated specific read
+   * as more responsive than a vague truth and the revision loop selected for
+   * invention. The filer needs a way to say "the source does not support
+   * that", and it has to be an answer the gate ACCEPTS, or it is not an
+   * answer at all.
+   */
+  interface GateRunOpts {
+    /** The filer's own words for why the honest answer is less specific than
+     *  the hold asked for. Only acted on when the item is currently held —
+     *  on an unheld item there is no hold to answer, and honouring it there
+     *  would be a one-field bypass of a gate nobody had raised. */
+    lessSpecific?: string;
+  }
+
+  /**
    * Put a filed or revised review item through the quality gate — the ONE
    * implementation, whichever surface the item was filed on.
    *
@@ -463,6 +514,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
     target: ReviewGateTarget<T>,
     row: T,
     author: { id: string; name: string; kind?: string },
+    /** The filer's answer to a hold that asked for a specific their source
+     *  does not carry — see `GateRunOpts`. */
+    runOpts: GateRunOpts = {},
   ): Promise<GateOutcome<T>> {
     const judge = opts.reviewJudge;
     const criteria = taskStore.reviewItemCriteria(target.workspaceId);
@@ -488,7 +542,72 @@ export function createReviewGate(ctx: ReviewGateContext) {
     // it survives the revision that produced this call: the gate is a check
     // and not a wall precisely because this number stops growing.
     const priorJudgement = target.judgement(row);
-    const heldFor = priorJudgement?.heldFor ?? [];
+    /**
+     * A REFUSED check drops the get-it-anyway holds out of its own history.
+     *
+     * They are instructions this gate has disavowed, and a history is not
+     * inert: it goes back to the judge as `priorHolds`, it is quoted to the
+     * READER in the admitted-after-two-holds sentence, and it counts toward
+     * the cap. The lead's real item had two of them before the refusal was
+     * reported — so without this the laundering sentence comes back on the
+     * report that says the check was refused, by the one path the guard below
+     * does not sit on.
+     */
+    const priorHeldFor = priorJudgement?.heldFor ?? [];
+    const heldFor = target.refusedCheck
+      ? priorHeldFor.filter(
+          // The disavowed hold, whichever of the two shapes it is stored in.
+          //
+          // `isGetItAnywayHold` reads the judge's sentence, but a hold whose
+          // sentence named a figure the item never stated was replaced whole
+          // by `REVIEW_HOLD_UNUSABLE_REASON` before it was recorded — and the
+          // lead's real holds were exactly that, because both named
+          // `/v1/models`. So on this path the laundering words are already
+          // gone and the text filter finds nothing to drop. What is left is a
+          // hold the gate itself could not put into words, carried onto a
+          // check the gate has now disavowed: it goes too, for the same
+          // reason its sibling does.
+          (r) => !isGetItAnywayHold(r) && r !== REVIEW_HOLD_UNUSABLE_REASON,
+        )
+      : priorHeldFor;
+    // How the item got to the reader, when it did not get there by passing.
+    // Carried forward on every later verdict for the same reason `heldFor`
+    // is: an item that reached the reader unjudged is still one that reached
+    // the reader unjudged, whatever a later revision says.
+    const carriedAdmission: Pick<
+      ReviewItemJudgement,
+      'admitted' | 'lessSpecific' | 'lessSpecificFor'
+    > = {
+      ...(priorJudgement?.admitted !== undefined ? { admitted: priorJudgement.admitted } : {}),
+      ...(priorJudgement?.lessSpecific !== undefined
+        ? { lessSpecific: priorJudgement.lessSpecific }
+        : {}),
+      ...(priorJudgement?.lessSpecificFor !== undefined
+        ? { lessSpecificFor: priorJudgement.lessSpecificFor }
+        : {}),
+    };
+    // The filer answered the hold by saying the source does not support what
+    // it asked for.
+    //
+    // It does NOT skip the judge, and that is the whole shape of this. A
+    // `revise` carrying the note also carries new words — the route refuses a
+    // revision that changes nothing — so admitting here would let any content
+    // at all reach the reader unjudged behind a sentence about a source
+    // (codex review). Instead the note is recorded as the gap it answers, the
+    // new words are judged like any others, and the ONE thing the note buys
+    // is that this gap will not be held again: when the judge comes back
+    // making the same demand, `answeredAgain` below admits it. Anything else
+    // the judge finds in the new words is a hold, exactly as before.
+    const lessSpecific = runOpts.lessSpecific?.trim();
+    if (lessSpecific !== undefined && lessSpecific !== '' && target.held(row)) {
+      carriedAdmission.lessSpecific = lessSpecific;
+      // The standing hold is the gap it answers. Absent — a held row with no
+      // stored reason — leaves the note on the record with nothing exempted,
+      // which is the safe direction.
+      if (priorJudgement?.gapKey !== undefined) {
+        carriedAdmission.lessSpecificFor = priorJudgement.gapKey;
+      }
+    }
     // Off the queue from THIS moment, not from the verdict: the item is
     // already in the store, and the seconds the judge takes were seconds the
     // reader could see — and answer — an item about to be held (codex
@@ -501,6 +620,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
         verdict: 'pending',
         reason: 'being judged',
         ...(heldFor.length > 0 ? { heldFor } : {}),
+        ...carriedAdmission,
       },
       { forVersion },
     );
@@ -549,6 +669,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
             ...(heldFor.length > 0 ? { priorHolds: heldFor } : {}),
             ...(priorAsks.length > 0 ? { priorAsks } : {}),
             ...(target.ownerCheck ? { ownerCheck: true } : {}),
+            ...(target.refusedCheck ? { refusedCheck: true } : {}),
           },
         });
       } catch (err) {
@@ -562,8 +683,49 @@ export function createReviewGate(ctx: ReviewGateContext) {
         verdict = null;
       }
     }
+    /**
+     * A REFUSED check is terminal, so a hold that tells the filer to go and
+     * get the fact anyway never leaves this function.
+     *
+     * The judge is told (`refusedCheck` in the prompt), and this runs whether
+     * or not it took the instruction — because what it wrote when it did not
+     * was *"the agent blocked by the classifier can work around it by having
+     * a separate agent call …"*, and that sentence reaching a compliant agent
+     * IS the defect (2026-09-16). The general rule is untouched: a line with
+     * no refusal on it is held exactly as before, and a refused line held for
+     * anything else — nothing to open, nothing said about what the reader
+     * should see — is still held, because those are gaps its filer can close.
+     */
+    if (
+      target.refusedCheck &&
+      verdict !== null &&
+      !verdict.ok &&
+      isGetItAnywayHold(verdict.reason)
+    ) {
+      verdict = { ok: true, reason: REFUSED_CHECK_PASS_REASON };
+    }
     const at = Date.now();
-    const carried = heldFor.length > 0 ? { heldFor } : {};
+    const carried = { ...(heldFor.length > 0 ? { heldFor } : {}), ...carriedAdmission };
+    // The hold's words, with everything the judge could not have known taken
+    // out: a quote the item does not contain is dropped, and a diagnosis
+    // carrying a figure the item never states is replaced whole. The judge is
+    // never shown the SOURCE an item was written from, so any specific it
+    // supplies is one it invented — which is what four live cards were
+    // carrying on 2026-09-14.
+    const bounded =
+      verdict !== null && !verdict.ok
+        ? boundHoldWords(
+            {
+              reason: verdict.reason,
+              ...(verdict.quote !== undefined ? { quote: verdict.quote } : {}),
+            },
+            judgedText({
+              headline: words.headline,
+              ...(words.detail !== undefined ? { detail: words.detail } : {}),
+              ...(words.options !== undefined ? { options: words.options } : {}),
+            }),
+          )
+        : undefined;
     /**
      * A judge that could not answer must not ADMIT a held item.
      *
@@ -582,8 +744,29 @@ export function createReviewGate(ctx: ReviewGateContext) {
     // whether it is answerable. Two rounds is a check; a third is the wall
     // the peer walked into, and a gate that can refuse forever is a gate
     // agents route around.
+    //
+    // The gap the filer already answered with "the source is less specific
+    // than that" is admitted here too, and for a stronger reason: they have
+    // said in their own words that the specific the gate wants does not exist
+    // to be written, so asking again is the gate repeating a demand it has
+    // been told cannot be met. THAT GAP ONLY: a wider rule would let one note
+    // admit every later verdict for the life of the item, so a revision that
+    // introduced an unrelated defect would reach the reader with nobody
+    // having looked (codex review).
+    //
+    // Matched on `holdGapKey` of the judge's RAW sentence, which is what was
+    // keyed when the note was given. Neither end of this comparison can be
+    // the stored reason: that one is replaced by a single constant whenever
+    // the diagnosis carried an invented figure, so every such hold would
+    // share one identity and one answered gap would exempt every later
+    // numeric concern (codex review).
+    const gapKey = verdict !== null && !verdict.ok ? holdGapKey(verdict.reason) : undefined;
+    const answeredAgain =
+      gapKey !== undefined &&
+      carriedAdmission.lessSpecificFor !== undefined &&
+      gapKey === carriedAdmission.lessSpecificFor;
     const admitAfterHolds =
-      verdict !== null && !verdict.ok && heldFor.length >= REVIEW_GATE_MAX_HOLDS;
+      verdict !== null && !verdict.ok && (heldFor.length >= REVIEW_GATE_MAX_HOLDS || answeredAgain);
     const judgement: ReviewItemJudgement =
       restoredHold !== undefined
         ? { ...restoredHold }
@@ -595,15 +778,33 @@ export function createReviewGate(ctx: ReviewGateContext) {
               ...carried,
             }
           : admitAfterHolds
-            ? { at, verdict: 'ok' as const, reason: admittedReason(heldFor), ...carried }
+            ? {
+                at,
+                verdict: 'ok' as const,
+                reason: admittedReason(heldFor),
+                ...carried,
+                // Not "passed": nobody judged these words good, the gate
+                // simply stopped asking. The message the filer gets back says
+                // which; the reader's card deliberately does not (Bryan,
+                // 2026-09-16). An item already admitted
+                // keeps HOW it got through: running out of holds afterwards
+                // does not rewrite the filer's note into a wall they hit.
+                admitted: answeredAgain
+                  ? ('less-specific' as const)
+                  : (carriedAdmission.admitted ?? ('holds' as const)),
+              }
             : verdict.ok
               ? { at, verdict: 'ok' as const, reason: verdict.reason, ...carried }
               : {
                   at,
                   verdict: 'held' as const,
-                  reason: verdict.reason,
-                  heldFor: [...heldFor, verdict.reason],
-                  ...(verdict.add !== undefined ? { add: verdict.add } : {}),
+                  reason: bounded?.reason ?? verdict.reason,
+                  heldFor: [...heldFor, bounded?.reason ?? verdict.reason],
+                  // Which gap this is, so a `lessSpecific` answer to it can be
+                  // matched when the judge makes the same demand again.
+                  ...(gapKey !== undefined ? { gapKey } : {}),
+                  ...(bounded?.quote !== undefined ? { quote: bounded.quote } : {}),
+                  ...carriedAdmission,
                 };
     const recorded = target.record(judgement, {
       forVersion,
@@ -630,7 +831,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
           message: heldMessage(
             target.address,
             reason,
-            target.judgement(current)?.add,
+            target.judgement(current)?.quote,
             target.judgement(current)?.heldFor?.length ?? 0,
           ),
         };
@@ -639,7 +840,22 @@ export function createReviewGate(ctx: ReviewGateContext) {
     }
     // The projection carries `judge`, so the card can say "Held: …".
     target.settled(recorded.row);
-    if (judgement.verdict !== 'held') return { held: false, row: recorded.row };
+    if (judgement.verdict !== 'held') {
+      // The last-hold rule used to fire in silence: the filer read a 200 with
+      // no `held` and saw an item that had passed. It had not.
+      if (!admitAfterHolds) return { held: false, row: recorded.row };
+      return {
+        held: false,
+        row: recorded.row,
+        // Which sentence depends on WHY the gate stopped holding: the filer
+        // who answered with a note is told their note still stands, and the
+        // filer who ran out of rounds is told nobody judged these words.
+        message:
+          judgement.admitted === 'less-specific'
+            ? admittedLessSpecificMessage()
+            : admittedUnjudgedMessage(heldFor.length),
+      };
+    }
     const address = target.address;
     const frame: ReviewItemHeldFrame = {
       event: REVIEW_ITEM_HELD_EVENT,
@@ -671,7 +887,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
         (restoredHold
           ? 'The judge could not answer, so this stays held on its standing verdict. '
           : '') +
-        heldMessage(address, judgement.reason, judgement.add, judgement.heldFor?.length ?? 0),
+        heldMessage(address, judgement.reason, judgement.quote, judgement.heldFor?.length ?? 0),
     };
   }
 
@@ -683,11 +899,17 @@ export function createReviewGate(ctx: ReviewGateContext) {
     task: Task,
     item: TaskReviewItem,
     author: { id: string; name: string; kind?: string },
+    runOpts: GateRunOpts = {},
   ): Promise<ReviewGate> {
+    const address: ReviewGateAddress = { kind: 'task', taskId: task.id, reviewItemId: item.id };
+    const ownerCheck = ownerLineOf(address) !== undefined;
+    // Read off the LINE, not the item: the refusal is the reporter's word on
+    // the check, and the item is a template over it.
+    const refusedCheck = ownerCheck && refusalProof(ownerLineFor(address)) !== undefined;
     const out = await runReviewGate<TaskReviewItem>(
       {
         workspaceId: task.workspaceId,
-        address: { kind: 'task', taskId: task.id, reviewItemId: item.id },
+        address,
         title: task.title,
         current: () => {
           const raw = taskStore.getTask(task.id)?.reviews?.find((r) => r.id === item.id);
@@ -706,16 +928,16 @@ export function createReviewGate(ctx: ReviewGateContext) {
           return res.ok ? { ok: true, row: res.item } : { ok: false };
         },
         settled: () => taskProjection.refreshTask(task),
-        ...(ownerLineOf({ kind: 'task', taskId: task.id, reviewItemId: item.id }) !== undefined
-          ? { ownerCheck: true }
-          : {}),
+        ...(ownerCheck ? { ownerCheck: true } : {}),
+        ...(refusedCheck ? { refusedCheck: true } : {}),
       },
       item,
       author,
+      runOpts,
     );
     return out.held
       ? { held: true, item: out.row, reason: out.reason, message: out.message }
-      : { held: false, item: out.row };
+      : { held: false, item: out.row, ...(out.message ? { message: out.message } : {}) };
   }
 
   /**
@@ -743,6 +965,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
   async function judgeTaskDecision(
     task: Task,
     author: { id: string; name: string; kind?: string },
+    runOpts: GateRunOpts = {},
   ): Promise<ReviewGate | undefined> {
     const derived = taskStore.listReviewItems(task.id).find((r) => r.id === LEGACY_REVIEW_ITEM_ID);
     // Not a decision — no derived row, so nothing is on the queue to hold.
@@ -772,10 +995,11 @@ export function createReviewGate(ctx: ReviewGateContext) {
       },
       derived,
       author,
+      runOpts,
     );
     return out.held
       ? { held: true, item: out.row, reason: out.reason, message: out.message }
-      : { held: false, item: out.row };
+      : { held: false, item: out.row, ...(out.message ? { message: out.message } : {}) };
   }
 
   /**
@@ -799,6 +1023,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
     commentId: string,
     review: ReviewPayload,
     author: User,
+    runOpts: GateRunOpts = {},
   ): Promise<ThreadReviewGate> {
     const workspaceId = resolveWorkspaceForDoc(docId);
     // A doc no board claims has no criteria to judge against and no queue to
@@ -825,10 +1050,11 @@ export function createReviewGate(ctx: ReviewGateContext) {
       },
       review,
       author,
+      runOpts,
     );
     return out.held
       ? { held: true, review: out.row, reason: out.reason, message: out.message }
-      : { held: false, review: out.row };
+      : { held: false, review: out.row, ...(out.message ? { message: out.message } : {}) };
   }
 
   /**
@@ -878,9 +1104,29 @@ export function createReviewGate(ctx: ReviewGateContext) {
     if (wasHeld && gate && !gate.held) announceTaskReview(task, gate.item, author);
   }
 
-  /** The response fields a filing route adds when the gate held the item. */
+  /**
+   * The response fields a filing route adds for whatever the gate said.
+   *
+   * A hold reports `held`, the reason and the message. A PASS reports a
+   * message only when the item reached the reader without the judge passing
+   * it — the last-hold rule, or the filer's own less-specific answer —
+   * because until that was said the filer read a bare 200 as "it passed".
+   * `admittedUnjudged` is the machine-readable half of the same fact.
+   */
   function heldFields(gate: ReviewGate | ThreadReviewGate | undefined): Record<string, unknown> {
-    return gate?.held ? { held: true, heldReason: gate.reason, message: gate.message } : {};
+    if (gate?.held) return { held: true, heldReason: gate.reason, message: gate.message };
+    if (gate && !gate.held && gate.message !== undefined) {
+      // Which admission it was, read off the row the gate just stamped —
+      // `held`/`less-specific` rather than a second copy of the fact carried
+      // alongside the message.
+      const judged = 'item' in gate ? gate.item.judge : gate.review.judge;
+      return {
+        held: false,
+        ...(judged?.admitted !== undefined ? { admitted: judged.admitted } : {}),
+        message: gate.message,
+      };
+    }
+    return {};
   }
 
   /**

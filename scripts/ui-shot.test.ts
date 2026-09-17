@@ -25,6 +25,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { chromeForSuite } from './browser-tests.ts';
 import {
   DEFAULTS,
   DEFAULT_CHROME_BIN,
@@ -253,27 +254,9 @@ describe('ui-shot stale profile report', () => {
   });
 });
 
-/**
- * `CW_CHROME_BIN ?? DEFAULT_CHROME_BIN` was the wrong question, and it made
- * every case below decorative on CI: that constant is the macOS
- * `/Applications` path, so on the `client` job (ubuntu-latest, nothing named)
- * it does not exist and `skipIf` skipped the whole describe — while Chrome
- * WAS on the runner and `resolveChromeBin` reaches it through
- * `CHROME_CANDIDATES`, which is how the gates job's `check:client-boot` step
- * already finds it with no path named. A silent skip and a pass read
- * identically in a green log.
- *
- * It THROWS when nothing resolves, and a throw here would take the file down
- * at load rather than skipping it, so the miss is caught. A `CW_CHROME_BIN`
- * pointing at nothing still skips, exactly as before.
- */
-const CHROME = ((): string | null => {
-  try {
-    return resolveChromeBin(undefined);
-  } catch {
-    return null;
-  }
-})();
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
 const SCRIPT = resolve(process.cwd(), 'scripts/ui-shot.ts');
 
 describe.skipIf(CHROME === null)('ui-shot against real headless Chrome', () => {

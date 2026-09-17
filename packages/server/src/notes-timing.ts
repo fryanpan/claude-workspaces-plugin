@@ -31,6 +31,7 @@ import { dirname } from 'node:path';
  * file repeating it in a different shape would be a second thing to protect.
  */
 import type { TokenUsage } from '@claude-workspaces/core';
+import type { ClaudeKeySlot } from './claude-key-slot.ts';
 
 /** Why the tick fired, as the ticker reported it. */
 export type NotesTimingReason = 'pause' | 'cadence' | 'end';
@@ -105,8 +106,38 @@ export interface NotesTickTiming {
   lastSpokenAt: number | null;
   /** Epoch ms at which the tick fired. */
   startedAt: number;
-  /** How long this tick sat behind the previous one before composing. */
+  /**
+   * How long this tick sat behind the previous one before `runCompose` began.
+   *
+   * It ends at the TOP of the function, so it is the queue wait and nothing
+   * else — which is what `hypothesisFor` reads it as. Everything the tick
+   * then does before the model is asked anything is `beforeComposeMs`, and
+   * the two together are the whole distance from the tick firing to the
+   * compose request going out. Widening this one to cover both would make
+   * every tick read as H5, because the capture pass is never free.
+   */
   waitedMs: number;
+  /**
+   * From the top of `runCompose` to the compose request leaving — the task
+   * capture call, the corrections it writes back, the reference scan and the
+   * outline read, all of it in front of the note the person is waiting for.
+   *
+   * It exists because the row used to hold no span covering that stretch at
+   * all: `waitedMs` ended before it and `composeMs` started after it, so a
+   * second model call in the note's critical path was charged to nothing and
+   * showed up only as the gap between the named spans and the elapsed time.
+   * Zero on a tick that never reached the compose.
+   */
+  beforeComposeMs: number;
+  /**
+   * The task capture call alone, request to parsed result — the biggest
+   * single thing inside `beforeComposeMs`, and the one that is a model call
+   * rather than local work. Measured across the failure too, since a capture
+   * that times out costs the note the same wait a slow one does.
+   *
+   * Null when this tick ran no capture pass, never zero.
+   */
+  captureMs: number | null;
   /** Characters of prompt sent, and of reply read back. Null: no LLM. */
   promptChars: number | null;
   replyChars: number | null;
@@ -122,6 +153,24 @@ export interface NotesTickTiming {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
+  /**
+   * WHY THIS TICK READ WHAT IT READ — the shape of the prefix it offered the
+   * cache, which the four token counts above cannot say.
+   *
+   * `cacheStableBlocks` is the one to read first: 0 says the first cached
+   * block's own text moved since the last tick, so there was nothing to read
+   * whatever the tokens say; a number above 0 says the head repeated and a
+   * zero read is the model's minimum cacheable prefix (or the entry's life),
+   * not the prompt. `cacheFirstBlockChars` is what that minimum is judged
+   * against — the first breakpoint has to clear it on its own.
+   *
+   * Null on a tick that reached no model, and on a composer that sends no
+   * breakpoints. `cacheStableBlocks` is ALSO null on a meeting's first tick,
+   * where there is no previous prompt to have repeated.
+   */
+  cacheBlocks: number | null;
+  cacheFirstBlockChars: number | null;
+  cacheStableBlocks: number | null;
   /**
    * EVERY MODEL CALL THIS TICK MADE, compose and capture alike, each with the
    * model that billed it.
@@ -264,6 +313,21 @@ export interface NotesCallUsage {
   call: NotesCallKind;
   model: string;
   usage: NotesTokenUsage;
+  /**
+   * WHICH CONFIGURED SLOT PAID FOR THIS CALL — the Keychain item or the
+   * environment variable, and the role it holds, as the RUN resolved them.
+   *
+   * Never the key, never a prefix of it and never a hash of it: a slot is
+   * configuration that is already written down in this repo in plain text,
+   * and anything derived from the value would let somebody look the value up
+   * again. The point of the field is that "eval spend landed on the prod
+   * bill" becomes a question a stored row answers, rather than one that has
+   * to be re-argued from config every time it is asked.
+   *
+   * Null on a call whose adapter reported no slot — a stub composer in a
+   * harness, and any recorded call made before this field existed.
+   */
+  keySlot: ClaudeKeySlot | null;
 }
 
 /** What the composer may report about one compose, if it knows. */
@@ -275,6 +339,17 @@ export interface NotesComposeMeasure {
   /** Absent on a compose that never reached the API, and on one whose reply
    *  carried no usage block. */
   usage?: NotesTokenUsage;
+  /** The slot this composer resolved. Absent on a composer that spends
+   *  nothing — the stub the replay harness uses. */
+  keySlot?: ClaudeKeySlot;
+  /**
+   * The shape of the cacheable prefix this call sent — see
+   * `notes-prompt-cache-shape.ts` for what each number separates. Absent on a
+   * composer that sends no cache breakpoints, which is every stub.
+   */
+  cacheBlocks?: number;
+  cacheFirstBlockChars?: number;
+  cacheStableBlocks?: number | null;
 }
 
 /** Where a composer reports what its call cost. Never given the words. */

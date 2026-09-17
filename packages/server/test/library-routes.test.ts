@@ -27,7 +27,11 @@ import { type LibraryPayload, createMarkdownLister } from '../src/library.ts';
 import type { ShareTarget } from '../src/middleware/host-guard.ts';
 import { MountStore } from '../src/mount-store.ts';
 import { RepoRegistry } from '../src/repo-registry.ts';
-import { type LibraryRoutesContext, handleLibraryRoutes } from '../src/routes/workspace-library.ts';
+import {
+  type LibraryRoutesContext,
+  handleLibraryRoutes,
+  libraryRunOutputSource,
+} from '../src/routes/workspace-library.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoard } from './workspace-seed.ts';
 
@@ -360,6 +364,65 @@ describe('library routes', () => {
       expect(away?.files.map((f) => f.name)).toEqual(['Volunteer handbook']);
       // And the verb refuses what the listing no longer offers.
       expect((await ask(ctxFor('100.64.0.7'), 'library/open', null))?.status).toBe(404);
+    });
+
+    /**
+     * Names are the first thing a local-only folder would leak, and one
+     * folder's are hidden without hiding the project's others.
+     */
+    it('hides a local-only mount\u2019s file names off the box and keeps the rest listed', async () => {
+      mkdirSync(join(repo, 'riverbend'));
+      writeFileSync(join(repo, 'riverbend', 'brief.md'), '# Riverbend brief\n');
+      mkdirSync(join(repo, 'harborlight'));
+      writeFileSync(join(repo, 'harborlight', 'notes.md'), '# Harborlight notes\n');
+      const mountAt = async (rel: string): Promise<string> => {
+        const r = await at('/api/mounts', {
+          method: 'POST',
+          body: JSON.stringify({ path: join(repo, rel) }),
+        });
+        expect(r.status).toBe(200);
+        return ((await r.json()) as { mountId: string }).mountId;
+      };
+      await mountAt('riverbend');
+      const shut = await mountAt('harborlight');
+
+      const namesOffBox = async (): Promise<string[]> => {
+        const lib = (await (await ask(ctxFor('100.64.0.7'), 'library/items', null))?.json()) as
+          | LibraryPayload
+          | undefined;
+        return (lib?.files ?? []).map((f) => f.name);
+      };
+      // The control: with nothing marked, both mounts' files are listed.
+      expect(await namesOffBox()).toContain('notes.md');
+      expect(await namesOffBox()).toContain('brief.md');
+
+      const priv = await at('/api/mounts/privacy', {
+        method: 'PUT',
+        body: JSON.stringify({ path: repo, mountId: shut, privacy: 'local-only' }),
+      });
+      expect(priv.status).toBe(200);
+
+      const after = await namesOffBox();
+      expect(after).not.toContain('notes.md');
+      expect(after).toContain('brief.md');
+      // On the box the marked folder is listed as it always was.
+      const onBox = (await (await ask(ctxFor('127.0.0.1'), 'library/items', null))?.json()) as
+        | LibraryPayload
+        | undefined;
+      expect((onBox?.files ?? []).map((f) => f.name)).toContain('notes.md');
+
+      /**
+       * The second reader of the same listing. A run's output item is read
+       * with a FRESH lister rather than the page's cache, and it lands on a
+       * queue a share visitor can read — so the hidden folder has to be
+       * dropped there too, and it is the reader most likely to miss it.
+       */
+      const runFiles = libraryRunOutputSource(ctxFor('127.0.0.1'), (id) =>
+        handle.tasks.getWorkspace(id),
+      ).files(WS);
+      const runPaths = (runFiles ?? []).map((f) => f.relPath);
+      expect(runPaths).toContain('riverbend/brief.md');
+      expect(runPaths).not.toContain('harborlight/notes.md');
     });
   });
 

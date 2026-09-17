@@ -17,7 +17,7 @@ import type { ReviewOption, ReviewSecretField } from './review-item.ts';
 
 /** Bumped when the frame around the criteria changes, so a stored verdict
  *  can be told from one made under an older ask. */
-export const REVIEW_JUDGE_PROMPT_VERSION = 9;
+export const REVIEW_JUDGE_PROMPT_VERSION = 11;
 
 /**
  * What a workspace judges its review items against until somebody edits it.
@@ -125,6 +125,19 @@ export interface ReviewJudgeItem {
    * part of definition of done."*).
    */
   ownerCheck?: boolean;
+  /**
+   * The owner line's proof says the agent was REFUSED permission to run this
+   * check on this machine.
+   *
+   * Set by the server off the line, never by the filer, and it turns the
+   * `ownerCheck` rule above off for this item: "an agent could read this
+   * itself" is a true sentence about a check nobody is allowed to run, and
+   * the gate answering a hard stop with a harder push produced a hold telling
+   * the agent to launder the denial through a second agent (2026-09-16). The
+   * server drops such a hold whether or not the judge takes this instruction;
+   * this is here so the judge does not write it in the first place.
+   */
+  refusedCheck?: boolean;
 }
 
 /** How the judge starts a hold on an owner check an agent could make itself,
@@ -136,15 +149,20 @@ export interface ReviewJudgeVerdict {
   /** One sentence naming the biggest gap (or, on `ok`, what carried it). */
   reason: string;
   /**
-   * On a hold: the sentence the judge wants ADDED to the item, written out.
+   * On a hold: the item's OWN words the gap is about, copied out verbatim.
    *
-   * A reason that names a category — "the detail lacks stakes", "no option
-   * states its cost" — leaves the filer to guess what the words should be,
-   * and a guess is what gets held next round. Naming the sentence turns a
-   * verdict into an edit. Absent when the judge gave none, which is a hold
-   * with a reason and no draft, not a refusal.
+   * This replaced `add`, which was the sentence the judge wanted the item to
+   * carry, written out ready to paste. Those drafts invented specifics — four
+   * of them read by the owner on 2026-09-14, each carrying a figure or a
+   * mechanism the item's source does not support — because the judge is
+   * handed the item and never the source, so every specific it supplies is
+   * one it made up. A quote cannot be: `boundHoldWords` checks it against the
+   * item and drops it when it is not there.
+   *
+   * Absent when the judge quoted nothing, which is a hold with a reason and
+   * no pointer, not a refusal.
    */
-  add?: string;
+  quote?: string;
 }
 
 /** The longest reason stored or shown. A judge that writes an essay is
@@ -225,14 +243,20 @@ export function buildReviewJudgePrompt(
     // missing, so the remedy was always another sentence, and the details
     // grew until they stopped being readable on the phone they are written
     // for (owner, 2026-09-06: descriptions "too long").
-    `The detail is written for a phone screen and should stay under ${REVIEW_ITEM_DETAIL_WORD_CEILING} words. A detail well over that is a real gap and may be the biggest one: hold it, and make "add" the SHORTER replacement for the sentences that are carrying their weight least, not another sentence on top.`,
-    `Never let "add" push an item past ${REVIEW_ITEM_DETAIL_WORD_CEILING} words. If the gap you name needs a sentence the item has no room for, say which sentence it replaces.`,
-    'Reply with JSON only, on one line: {"ok": true|false, "reason": "<one sentence>", "add": "<one sentence>"}.',
+    `The detail is written for a phone screen and should stay under ${REVIEW_ITEM_DETAIL_WORD_CEILING} words. A detail well over that is a real gap and may be the biggest one: hold it, and quote the sentences that are carrying their weight least.`,
+    'Reply with JSON only, on one line: {"ok": true|false, "reason": "<one sentence>", "quote": "<words copied from the item>"}.',
     'When ok is false, the reason names the single biggest gap so the agent can fix it in one edit.',
+    // The draft is gone, and this is why. The judge is handed the item and
+    // never the source it was written from, so every specific it supplies is
+    // one it invented — four invented specifics reached the owner across five
+    // boards on 2026-09-14. `boundHoldWords` enforces what follows; saying it
+    // here is what makes the enforcement rare.
+    'NEVER write a replacement sentence, a rewritten headline, or any words you want the item to carry. You are shown the item and never the source it was written from, so any figure, name, date, mechanism or statistic you supply would be one you invented. Introduce NOTHING that is not already in the item.',
+    'The remedy you are naming is always the same one: the filer goes back to the source the item was written from and reads it again. Never ask for a specific in a shape you have chosen — demanding a single figure where the source may only support a range is how a fabricated number gets into a card.',
     // A category is not an instruction. Held items came back round after
     // round because "the detail lacks stakes" left the filer guessing at the
     // words, and the guess was held for something else (2026-09-04).
-    'When ok is false, "add" is the sentence you want ADDED to the item, written out in full as the item would carry it — not the name of a category and not an instruction about one. Write it in the reader’s words, ready to paste. Omit "add" only when no single sentence would close the gap.',
+    'When ok is false, "quote" is the item’s own offending words, copied character for character out of the headline, the detail or an option — never a paraphrase and never words of your own. Omit "quote" when the gap is something the item does not say at all.',
     // A judge that mis-states the item loses the agent a whole revision: it
     // fixes the fault it was told about and is held again for the real one.
     // Measured on the live board — an item whose detail read “see below” was
@@ -279,6 +303,17 @@ export function buildReviewJudgePrompt(
       `First decide whether an agent could check the line itself: the answer is in a log, an error tracker such as Sentry, an API or command output, a test run, a file, a list or table a tool returns, or a web page an agent can load in a headless browser. If it could, hold it whatever else is true, start the reason with "${OWNER_CHECK_SELF_PREFIX}" and name what the agent should read, and omit "add".`,
       'Otherwise pass it when the line needs a person — how something looks or reads to them, or a device, account or place only they have, such as their own phone — and the line with its link tells the reader what they are looking for.',
       'Hold it when the detail gives the reader nothing to open, or when the line does not say what the reader should see there.',
+    );
+  }
+  if (item.refusedCheck) {
+    system.push(
+      '',
+      // The rule above, switched off for this one item. Left as an override
+      // rather than as an edit to that rule because it is a fact about THIS
+      // check — the machine said no — and not a softening of the standard.
+      'The agent reports that it was REFUSED permission to run this check on the machine it works on. That refusal is final: it is a hard stop, not laziness, and there is no wording of the report that makes the check runnable.',
+      `So the rule about a check an agent could make itself does NOT apply to this item, however plainly the fact is one an agent could otherwise read. Never start the reason with "${OWNER_CHECK_SELF_PREFIX}" here, and never tell the agent to obtain the fact another way — not through another agent, another session, another tool or account, and not by working around the refusal. Instructing that is worse than a wrong verdict.`,
+      'Judge only whether the reader can act on the card: does it say what to check and what they should see? Pass it when it does.',
     );
   }
   if (item.priorAsks && item.priorAsks.length > 0) {
@@ -341,7 +376,13 @@ export function buildReviewJudgePrompt(
     // what the agent should have read.
     lines.push(
       '<owner-check>',
-      `A done-when line handed to the reader. Answer first: could an agent check this line itself — is it a fact in a log, a tracker, an API, a file, or what a page, list or table contains? Whether something is present or absent there is a fact an agent reads, never a judgement, even when a link to it is attached. If so, hold it with a reason that starts "${OWNER_CHECK_SELF_PREFIX}". A line about how something looks, reads or feels to the reader, or about a device only they have, needs them: pass it.`,
+      item.refusedCheck
+        ? // The refusal is stated HERE as well as in the system turn for the
+          // reason the block itself exists: on replays of the 2026-09-14
+          // checks the system rule alone got the verdict right and the reason
+          // wrong. A reason is exactly what goes wrong for a refused check.
+          'A done-when line handed to the reader, and the agent was REFUSED permission to run this check — see what the proof says was refused. The refusal is final, so do not ask whether an agent could check it: it may not. Never tell the agent to get the fact another way, through another agent, session or tool. Ask only whether the card tells the reader what to check and what they should see, and pass it when it does.'
+        : `A done-when line handed to the reader. Answer first: could an agent check this line itself — is it a fact in a log, a tracker, an API, a file, or what a page, list or table contains? Whether something is present or absent there is a fact an agent reads, never a judgement, even when a link to it is attached. If so, hold it with a reason that starts "${OWNER_CHECK_SELF_PREFIX}". A line about how something looks, reads or feels to the reader, or about a device only they have, needs them: pass it.`,
       '</owner-check>',
     );
   }
@@ -444,6 +485,13 @@ export function parseReviewJudgeResponse(text: string): ReviewJudgeVerdict | nul
   if (typeof ok !== 'boolean') return null;
   const rawReason = (parsed as { reason?: unknown }).reason;
   const reason = clipSentence(rawReason);
-  const add = clipSentence((parsed as { add?: unknown }).add);
-  return { ok, reason, ...(add !== '' ? { add } : {}) };
+  // NOT `clipSentence`: a quote is the ITEM's words, and cutting it at the
+  // first full stop would make it stop matching the item it was copied out
+  // of, which is the one test it has to pass. Collapsed and length-clipped
+  // only.
+  const raw = (parsed as { quote?: unknown }).quote;
+  const flat = (typeof raw === 'string' ? raw : '').trim().replace(/\s+/g, ' ');
+  const quote =
+    flat.length > REVIEW_JUDGE_REASON_MAX ? flat.slice(0, REVIEW_JUDGE_REASON_MAX) : flat;
+  return { ok, reason, ...(quote !== '' ? { quote } : {}) };
 }

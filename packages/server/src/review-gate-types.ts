@@ -21,11 +21,14 @@ import type { ReviewPayload, TaskReviewItem } from '@claude-workspaces/core';
  * task routes report what it said.
  */
 export type ReviewGate =
-  | { held: false; item: TaskReviewItem }
+  // `message` on a PASS is how the filer is told the item reached the reader
+  // WITHOUT the judge passing it — the last-hold rule, or their own "the
+  // source is less specific than that" answer. Absent on an ordinary pass.
+  | { held: false; item: TaskReviewItem; message?: string }
   | { held: true; item: TaskReviewItem; reason: string; message: string };
 
 /** The gate's answer for a COMMENT-borne item. Same three facts as
  *  `ReviewGate`; a bare payload where that one carries the wrapper. */
 export type ThreadReviewGate =
-  | { held: false; review: ReviewPayload }
+  | { held: false; review: ReviewPayload; message?: string }
   | { held: true; review: ReviewPayload; reason: string; message: string };

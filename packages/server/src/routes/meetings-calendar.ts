@@ -388,6 +388,15 @@ export async function handleMeetingCalendarRoutes(
       ...(result.reason !== undefined ? { reason: result.reason } : {}),
       proposed: result.proposed,
       refused: result.refused,
+      // THE REASONS, NOT ONLY THE COUNT. `refused` alone reads the same
+      // whether the model proposed sixteen bad edits or whether every note
+      // this meeting wrote had landed outside its own section — which is
+      // what happened on 2026-09-15, with nothing outside the server log
+      // able to say so. The dialog that asked for this pass groups these by
+      // rule and shows them (`readCleanupReply`), and `meeting:rerun` prints
+      // them into its report.
+      refusals: result.refusals,
+      failures: result.failures,
       applied: result.applied,
       suggested: result.suggested,
       failed: result.failed,

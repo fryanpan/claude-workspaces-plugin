@@ -1,6 +1,8 @@
 import type { Comment, Thread, User } from '@claude-workspaces/core';
+import { type ReceiptState, receiptHtml } from '@claude-workspaces/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { commentRow } from '../src/board/board-discussion-render.ts';
+import { receiptMark } from '../src/comment-view.ts';
 import { ThreadPanel } from '../src/threads.ts';
 
 /**
@@ -146,5 +148,41 @@ describe('the board discussion stream', () => {
         .querySelector('.cw-receipt')
         ?.getAttribute('data-receipt'),
     ).toBe('received');
+  });
+});
+
+/**
+ * One renderer of the mark, and the test that holds the delegation.
+ *
+ * The widget builds its rows as strings and cannot import `comment-view.ts`
+ * (a guest bundle under a gzip ceiling), so core's `receiptHtml` writes the
+ * whole mark as markup and the widget interpolates it. `receiptMark` does not
+ * build a second one: it parses what `receiptHtml` wrote. So this guards a
+ * DELEGATION, not two implementations — it fails if somebody hand-builds the
+ * wrapper in the app again, and it can say nothing about a change made inside
+ * `receiptHtml`, which both surfaces get either way. `receiptHtml`'s own
+ * output is asserted in `packages/core/src/comment-receipt.test.ts`.
+ */
+describe('the element the app hands its surfaces', () => {
+  /**
+   * Both sides go through the DOM before they are compared, because a
+   * serializer writes `<path/>` back as `<path></path>` — comparing an element
+   * against raw source text fails on that alone, which says nothing about
+   * either renderer.
+   */
+  const viaDom = (html: string): string => {
+    const box = document.createElement('span');
+    box.innerHTML = html;
+    return (box.firstElementChild as HTMLElement).outerHTML;
+  };
+
+  it('is exactly what core wrote, for every state there is', () => {
+    for (const state of ['sent', 'received'] as ReceiptState[]) {
+      expect(receiptMark(state).outerHTML, state).toBe(viaDom(receiptHtml(state)));
+    }
+  });
+
+  it('CONTROL: the comparison separates the two states', () => {
+    expect(receiptMark('sent').outerHTML).not.toBe(viaDom(receiptHtml('received')));
   });
 });

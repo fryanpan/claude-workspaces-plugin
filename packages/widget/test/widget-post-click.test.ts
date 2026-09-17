@@ -34,19 +34,12 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { resolveChromeBin } from '../../../scripts/ui-shot-lib.ts';
+import { chromeForSuite } from '../../../scripts/browser-tests.ts';
 import type { Reading } from './post-click-driver.ts';
 
-/** Is there a browser to launch — asked the way `ui-shot.ts` asks, so the
- *  cases run on a CI runner that names no path rather than silently skipping
- *  everywhere but this laptop. */
-const CHROME = ((): string | null => {
-  try {
-    return resolveChromeBin(undefined);
-  } catch {
-    return null;
-  }
-})();
+/** The browser these cases may launch, or null to skip them.
+ *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
+const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'post-click-driver.ts');
 

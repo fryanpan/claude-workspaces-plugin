@@ -46,6 +46,17 @@ export const EXCLUDED_MODULES: ReadonlyArray<{ module: string; why: string }> = 
     module: 'lib0/dom.js',
     why: 'reached only through lib0/logging, which the widget swaps for a shim.',
   },
+  {
+    module: 'y-protocols/awareness.js',
+    why:
+      'presence, which the widget renders nowhere and no reader has ever seen from it. ' +
+      'The widget swaps it for a shim; putting it back costs 886 bytes gz and starts a ' +
+      '3s interval on every host page (scripts/shims/y-protocols-awareness.ts).',
+  },
+  {
+    module: 'lib0/time.js',
+    why: 'reached only through y-protocols/awareness, which the widget swaps for a shim.',
+  },
 ];
 
 /**

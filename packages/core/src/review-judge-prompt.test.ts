@@ -155,22 +155,24 @@ describe('an item the judge has already held', () => {
   });
 });
 
-describe('a hold names the sentence it wants added, not a category', () => {
-  it('asks for that sentence by name in the reply contract', () => {
+describe('a hold quotes the item’s own words, and drafts nothing', () => {
+  it('forbids a replacement sentence and asks for a verbatim quote instead', () => {
     const { system } = buildReviewJudgePrompt(DEFAULT_REVIEW_ITEM_CRITERIA, { headline: 'x' });
-    expect(system).toContain('"add"');
-    expect(system).toContain('the sentence you want ADDED');
-    expect(system).toContain('not the name of a category');
+    expect(system).toContain('"quote"');
+    // The whole of the change: the judge is never shown the source, so it is
+    // told in so many words to introduce nothing.
+    expect(system).toContain('NEVER write a replacement sentence');
+    expect(system).toContain('copied character for character');
   });
 
-  it('reads the sentence off the verdict', () => {
+  it('reads the quote off the verdict', () => {
     const out = parseReviewJudgeResponse(
-      '{"ok": false, "reason": "The detail never says what waits on this.", "add": "The rollout is blocked until this is picked."}',
+      '{"ok": false, "reason": "The detail never says what waits on this.", "quote": "see below"}',
     );
     expect(out).toEqual({
       ok: false,
       reason: 'The detail never says what waits on this.',
-      add: 'The rollout is blocked until this is picked.',
+      quote: 'see below',
     });
   });
 
@@ -179,21 +181,23 @@ describe('a hold names the sentence it wants added, not a category', () => {
       ok: false,
       reason: 'No costs.',
     });
-    expect(parseReviewJudgeResponse('{"ok": false, "reason": "No costs.", "add": 7}')).toEqual({
+    expect(parseReviewJudgeResponse('{"ok": false, "reason": "No costs.", "quote": 7}')).toEqual({
       ok: false,
       reason: 'No costs.',
     });
-    expect(parseReviewJudgeResponse('{"ok": false, "reason": "No costs.", "add": "  "}')).toEqual({
-      ok: false,
-      reason: 'No costs.',
-    });
+    expect(parseReviewJudgeResponse('{"ok": false, "reason": "No costs.", "quote": "  "}')).toEqual(
+      {
+        ok: false,
+        reason: 'No costs.',
+      },
+    );
   });
 
   it('clips a runaway sentence the way it clips a runaway reason', () => {
     const out = parseReviewJudgeResponse(
-      JSON.stringify({ ok: false, reason: 'x', add: 'b '.repeat(400) }),
+      JSON.stringify({ ok: false, reason: 'x', quote: 'b '.repeat(400) }),
     );
-    expect(out?.add?.length).toBeLessThanOrEqual(REVIEW_JUDGE_REASON_MAX);
+    expect(out?.quote?.length).toBeLessThanOrEqual(REVIEW_JUDGE_REASON_MAX);
   });
 });
 
@@ -207,9 +211,11 @@ describe('a verdict is ONE sentence, because everything downstream builds a sent
 
   it('does the same for the sentence it wants added', () => {
     const out = parseReviewJudgeResponse(
-      '{"ok": false, "reason": "No stakes.", "add": "The rollout is blocked until this is picked. Pick soon."}',
+      '{"ok": false, "reason": "No stakes.", "quote": "The rollout is blocked. Pick soon."}',
     );
-    expect(out?.add).toBe('The rollout is blocked until this is picked.');
+    // NOT clipped at the first full stop: a quote has to keep matching the
+    // item it was copied out of.
+    expect(out?.quote).toBe('The rollout is blocked. Pick soon.');
   });
 
   it('does not cut at a full stop inside an abbreviation or a number', () => {
@@ -401,13 +407,14 @@ describe('the detail has a ceiling, so the gate can ask for cuts', () => {
     expect(detailWordCount('  two  words  ')).toBe(2);
   });
 
-  it('names the ceiling and says a hold over it asks for a shorter replacement', () => {
+  it('names the ceiling, and a hold over it quotes the weakest sentences', () => {
     const { system } = buildReviewJudgePrompt(DEFAULT_REVIEW_ITEM_CRITERIA, long);
-    expect(system).toContain(`under ${REVIEW_ITEM_DETAIL_WORD_CEILING} words`);
-    expect(system).toContain('SHORTER replacement');
-    expect(system).toContain(
-      `Never let "add" push an item past ${REVIEW_ITEM_DETAIL_WORD_CEILING}`,
-    );
+    expect(system).toContain(`should stay under ${REVIEW_ITEM_DETAIL_WORD_CEILING} words`);
+    // It used to ask for a SHORTER REPLACEMENT — a draft, and the one kind of
+    // draft that has to rewrite the item's own prose to be useful. A hold
+    // points at the sentences instead and the filer does the cutting.
+    expect(system).not.toContain('SHORTER replacement');
+    expect(system).toContain('quote the sentences that are carrying their weight least');
   });
 
   it('no longer tells the judge to ignore length — the instruction that made every hold ask for more', () => {

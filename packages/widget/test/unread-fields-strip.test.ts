@@ -54,6 +54,19 @@ describe('cutting unread fields out of the widget copy of the thread reader', ()
     // Control: the same cut over the unrenamed reader does not throw.
     expect(() => stripUnreadFields(reader, cut, 'reader.ts')).not.toThrow();
   });
+
+  it('refuses a reader that says the line TWICE, rather than cutting one of them', () => {
+    // The failure this guards: a string `replace` removes the first match
+    // only, so a duplicated statement would leave the second lifting the
+    // field into a bundle nothing checks again.
+    const twice = reader.replace(
+      '  const out = {};\n',
+      "  const out = {};\n  if (typeof value.note === 'string') out.note = value.note;\n",
+    );
+    expect(() => stripUnreadFields(twice, cut, 'reader.ts')).toThrow(/2 times/);
+    // CONTROL: the same line once is cut, and the result really has lost it.
+    expect(stripUnreadFields(reader, cut, 'reader.ts')).not.toContain('value.note');
+  });
 });
 
 describe('refusing a widget bundle that reads a stripped field', () => {

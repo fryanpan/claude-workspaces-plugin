@@ -36,7 +36,7 @@ import {
   parseReviewJudgeResponse,
 } from '@claude-workspaces/core/review-judge-prompt';
 import { readKeychainPassword } from './share/keychain.ts';
-import { resolveKeyFrom } from './summarize.ts';
+import { resolveKeySlotFrom } from './summarize.ts';
 
 export type { ReviewJudgeVerdict } from '@claude-workspaces/core/review-judge-prompt';
 
@@ -104,8 +104,9 @@ export function reviewGateEnabled(env: NodeJS.ProcessEnv = process.env): boolean
  */
 export function haikuReviewJudge(opts: HaikuReviewJudgeOpts = {}): ReviewJudge | null {
   if (!reviewGateEnabled()) return null;
-  const key = resolveKeyFrom(opts.apiKey, readKeychainPassword);
-  if (!key) return null;
+  const resolved = resolveKeySlotFrom('review-gate', opts.apiKey, readKeychainPassword);
+  if (!resolved) return null;
+  const key = resolved.key;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const timeoutMs = opts.timeoutMs ?? REVIEW_JUDGE_TIMEOUT_MS;
   return async (input) => {
