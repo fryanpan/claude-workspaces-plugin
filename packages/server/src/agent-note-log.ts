@@ -83,8 +83,13 @@ export interface LoggedAgentNote {
   workspaceId: string;
   sessionId?: string;
   /** True when the note faced 2+ candidate rows. False when it faced none —
-   *  both are unplaced, and the distinction is why, not whether. */
+   *  both are unplaced, and the distinction is why, not whether. A reader
+   *  never sees this word: `agent-note-placement.ts` maps it to a state. */
   ambiguous: boolean;
+  /** The session DECLARED that it does not post its turns here, and this line
+   *  is that declaration: `text` is empty and nothing the session said is
+   *  kept. Absent on every ordinary note. See `agent-note-placement.ts`. */
+  withheld?: true;
 }
 
 /** The path a board's unplaced notes are written to. Beside `events.jsonl`,
@@ -105,7 +110,11 @@ function parseLine(line: string): LoggedAgentNote | undefined {
   if (raw === null || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   if (typeof r.agent !== 'string' || r.agent === '') return undefined;
-  if (typeof r.text !== 'string' || r.text === '') return undefined;
+  // A declaration carries no words, and only a declaration may. An older
+  // build reads the empty text as foreign and skips the line, which is the
+  // safe direction: it shows nothing rather than an empty note.
+  const withheld = r.withheld === true;
+  if (typeof r.text !== 'string' || (r.text === '' && !withheld)) return undefined;
   // The route's own list, not a re-spelling of it: a line carrying a kind
   // this build does not know is foreign, and `kind` is read by callers that
   // switch on it. A cast here would have let one through as a valid value.
@@ -120,6 +129,7 @@ function parseLine(line: string): LoggedAgentNote | undefined {
     workspaceId: r.workspaceId,
     ambiguous: r.ambiguous === true,
     ...(typeof r.sessionId === 'string' ? { sessionId: r.sessionId } : {}),
+    ...(withheld ? { withheld: true as const } : {}),
   };
 }
 
@@ -186,7 +196,23 @@ export class AgentNoteLog {
   readFor(workspaceId: string, agent: string, cap = LOG_READ_CAP): LoggedAgentNote[] {
     const who = normalizeAgent(agent);
     const want = Math.max(0, cap);
-    const found = this.tailMatching(workspaceId, (n) => normalizeAgent(n.agent) === who, want);
+    const found = this.tailMatching(
+      workspaceId,
+      (n) => n.withheld !== true && normalizeAgent(n.agent) === who,
+      want,
+    );
+    return found.sort((a, b) => b.at - a.at);
+  }
+
+  /**
+   * Every agent's lines on this board at or after `since`, declarations
+   * included, newest first, at most `cap` — the read behind the board's
+   * per-agent surface (`agent-note-placement.ts`). Same tail walk and the
+   * same two bounds as `readFor`, so a months-old board costs what a new one
+   * does.
+   */
+  readBoard(workspaceId: string, since: number, cap: number): LoggedAgentNote[] {
+    const found = this.tailMatching(workspaceId, (n) => n.at >= since, Math.max(0, cap));
     return found.sort((a, b) => b.at - a.at);
   }
 
