@@ -205,10 +205,17 @@ transition is that agent — or, when a PERSON moved it and the claimant says
 nothing, when the stored assignee folds to its name.
 
 So a lead and three builders each holding one row place every note they write,
-on a board with four rows in progress. One agent holding two places none. **A
-count of a board's in-progress rows cannot tell those apart**, and neither can
-a count of its recent notes: a board can be busy, current, and still be
-dropping one agent's turns. `turn-note-many-rows.test.ts` drives both sides.
+on a board with four rows in progress. One agent holding two places none.
+`turn-note-many-rows.test.ts` drives both sides.
+
+**Neither count you would reach for can tell those apart.** Not the board's
+in-progress rows — four is the healthy case above and two is the broken one.
+Not its recent notes either: every other agent on the board keeps posting, so
+the board stays busy and current while one agent's turns go silently missing.
+Looking for affected boards by either number finds the wrong ones in both
+directions, which is not a hypothetical — it is how this defect was first
+described, and the description was wrong. The question is always **whose**
+rows, and only the walk above answers it.
 
 `post_status` is unaffected throughout — it names its row and takes the
 explicit-address branch, never reaching this walk. That is a property of the
