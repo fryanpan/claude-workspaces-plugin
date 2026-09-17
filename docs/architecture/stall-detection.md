@@ -189,6 +189,37 @@ reached, and then as ONE review item listing every due task across every
 board, never one item per task. The item is revised in place as the list
 changes and withdraws itself once the last wait is filed.
 
+**And the fleet rung is bounded — three wakes per row, not one per window
+forever.** A row whose closing prose reads as an ask with nothing anyone could
+file against it never clears: `detectAsk` fires on a deferral phrase beside a
+person's name, the gate lists the row, and no lead can file a question that
+was never asked. Unbounded, that row cost Team Lead a whole turn every window
+for the life of the board — measured on 2026-09-17, when one tick carried two
+such rows and the receiver spent its turn establishing that it could do
+nothing with either. So `FLEET_TELL_CAP` counts the wakes each row has been
+carried in, beside its `firstSeen` in the same sidecar, and a row past the cap
+is dropped from the FRAME.
+
+**It stops waking people; it does not stop existing.** A row past the cap
+moves onto the owner's standing item — the same one item the
+unreachable-Team-Lead branch files, revised in place and withdrawn when the
+last wait clears. That item is a record rather than a wake, so it costs nobody
+a turn however long it stands, and its words already offer the two answers
+that end it: file the ask, or say there was none. A cap that only subtracted
+would be a way of losing a genuine ask quietly, which is worse than the
+repetition it removes and would look exactly like success.
+
+Meanwhile the row never leaves the gate's `unfiled` list, so the board's own
+lead is still told about it every window and the keep-moving verdict still
+counts it — that list, not any bookkeeping inside the escalation, is the row's
+real survival. The count is forgotten the moment the row stops being a
+finding, so a task that moves and later asks again is carried again, and a
+frame that reached nobody spends no wake (`tellTeamLead` returns the delivery
+count, and only a delivery is counted). Three rather than one because a wake
+can be lost — the addressee's session can die or compact between the send and
+the reading — and three at the default window is an hour and a half of
+chances.
+
 Known gap, deliberately open: nothing ages review items sitting unanswered
 on the owner's queue. That is a different signal (ask-aging, not
 task-stalling) and gets its own design if it proves needed. The one kind of

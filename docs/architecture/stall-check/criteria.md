@@ -307,19 +307,28 @@ file is what the builder did, the word is what the task claimed to be about.
 - **Must:** age EVERY task on the gate's `unfiled` list — both ways onto it,
   `waiting-unfiled` and `blocked-on-owner-unfiled` — and past a second window
   address Team Lead first as ONE fleet-wide frame, the owner only when Team
-  Lead is unreachable and then as ONE review item however many tasks and
-  boards it spans. Each named task says which of the two it is, in the frame's
-  bucket and in the item's own words.
+  Lead is unreachable or the row has spent its wakes, and then as ONE review
+  item however many tasks and boards it spans. Each named task says which of
+  the two it is, in the frame's bucket and in the item's own words.
+- **Must:** carry any one task in at most `FLEET_TELL_CAP` fleet frames, and
+  count a frame against a task only when the send actually DELIVERED. A task
+  past the cap moves to the owner's standing item — a record, not a wake —
+  and stays on the gate's `unfiled` list, which is where the board's own lead
+  keeps seeing it. Its count is dropped with its `firstSeen`, so a task that
+  moves and asks again is carried again.
 - **Must never:** file a second item on a refusal, ask the owner again about a
-  task they have already answered or withdrawn, or file at all while Team Lead
-  can be reached. A task that stops being a finding is forgotten and its item
-  withdrawn on that tick.
+  task they have already answered or withdrawn, file while Team Lead can be
+  reached AND every due task still has wakes left, or spend a task's wake on a
+  frame that reached nobody. A task that stops being a finding is forgotten
+  and its item withdrawn on that tick.
 - **Measured by:** `waiting-unfiled-escalation.test.ts` and
   `owner-unfiled-escalation.test.ts`, each with the one-window control beside
-  the two-window case. The verdict's `escalated` line cannot measure this
-  half: it counts items this actor filed, and the Team Lead rung files none —
-  a fleet-wide zero there says Team Lead was reachable, not that the ladder
-  ran.
+  the two-window case; `waiting-unfiled-fleet-quiet.test.ts` for the cap, its
+  `fleetTellCap: 99` control, the move to the owner's item and the
+  undelivered-send case; `waiting-unfiled-sidecar.test.ts` for what a restart
+  and a pre-cap file remember. The verdict's `escalated` line cannot measure
+  the Team Lead rung: it counts items this actor filed, and a fleet-wide zero
+  there says Team Lead was reachable, not that the ladder ran.
 
 ## `note-ask.ts` + `note-ask-judge.ts` — *removed in step 2*
 
