@@ -29,6 +29,12 @@ import {
   reviewItemState,
   reviewPayloadVersion,
 } from '@claude-workspaces/core';
+import type { DoneWhenLine } from '@claude-workspaces/core/done-when';
+import {
+  REFUSED_CHECK_PASS_REASON,
+  isGetItAnywayHold,
+  refusalProof,
+} from '@claude-workspaces/core/done-when-refusal';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
 import type { ReviewGate, ThreadReviewGate } from './review-gate-types.ts';
@@ -337,6 +343,15 @@ export function createReviewGate(ctx: ReviewGateContext) {
       ?.doneWhenLineId;
   }
 
+  /** That line as it stands, for the facts the gate reads off it — today, only
+   *  whether its proof says the check was refused. `undefined` when the item
+   *  is not an owner check, or when the line has since gone. */
+  function ownerLineFor(address: ReviewGateAddress): DoneWhenLine | undefined {
+    const lineId = ownerLineOf(address);
+    if (lineId === undefined || address.kind !== 'task') return undefined;
+    return (taskStore.getTask(address.taskId)?.doneWhen ?? []).find((l) => l.id === lineId);
+  }
+
   /** What a filing route says when the gate held the item. Points at the
    *  fix rather than only at the verdict: the filer's next act is one call. */
   function heldMessage(
@@ -410,6 +425,10 @@ export function createReviewGate(ctx: ReviewGateContext) {
     settled: (row: T) => void;
     /** The item hands over a done-when line — see `ReviewJudgeItem.ownerCheck`. */
     ownerCheck?: boolean;
+    /** That line's proof says the agent was REFUSED permission to run the
+     *  check — see `ReviewJudgeItem.refusedCheck` and the guard in
+     *  `runReviewGate` that drops a get-it-anyway hold on one. */
+    refusedCheck?: boolean;
   }
 
   type GateOutcome<T> =
@@ -549,6 +568,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
             ...(heldFor.length > 0 ? { priorHolds: heldFor } : {}),
             ...(priorAsks.length > 0 ? { priorAsks } : {}),
             ...(target.ownerCheck ? { ownerCheck: true } : {}),
+            ...(target.refusedCheck ? { refusedCheck: true } : {}),
           },
         });
       } catch (err) {
@@ -561,6 +581,27 @@ export function createReviewGate(ctx: ReviewGateContext) {
         }
         verdict = null;
       }
+    }
+    /**
+     * A REFUSED check is terminal, so a hold that tells the filer to go and
+     * get the fact anyway never leaves this function.
+     *
+     * The judge is told (`refusedCheck` in the prompt), and this runs whether
+     * or not it took the instruction — because what it wrote when it did not
+     * was *"the agent blocked by the classifier can work around it by having
+     * a separate agent call …"*, and that sentence reaching a compliant agent
+     * IS the defect (2026-09-16). The general rule is untouched: a line with
+     * no refusal on it is held exactly as before, and a refused line held for
+     * anything else — nothing to open, nothing said about what the reader
+     * should see — is still held, because those are gaps its filer can close.
+     */
+    if (
+      target.refusedCheck &&
+      verdict !== null &&
+      !verdict.ok &&
+      isGetItAnywayHold(verdict.reason)
+    ) {
+      verdict = { ok: true, reason: REFUSED_CHECK_PASS_REASON };
     }
     const at = Date.now();
     const carried = heldFor.length > 0 ? { heldFor } : {};
@@ -684,10 +725,15 @@ export function createReviewGate(ctx: ReviewGateContext) {
     item: TaskReviewItem,
     author: { id: string; name: string; kind?: string },
   ): Promise<ReviewGate> {
+    const address: ReviewGateAddress = { kind: 'task', taskId: task.id, reviewItemId: item.id };
+    const ownerCheck = ownerLineOf(address) !== undefined;
+    // Read off the LINE, not the item: the refusal is the reporter's word on
+    // the check, and the item is a template over it.
+    const refusedCheck = ownerCheck && refusalProof(ownerLineFor(address)) !== undefined;
     const out = await runReviewGate<TaskReviewItem>(
       {
         workspaceId: task.workspaceId,
-        address: { kind: 'task', taskId: task.id, reviewItemId: item.id },
+        address,
         title: task.title,
         current: () => {
           const raw = taskStore.getTask(task.id)?.reviews?.find((r) => r.id === item.id);
@@ -706,9 +752,8 @@ export function createReviewGate(ctx: ReviewGateContext) {
           return res.ok ? { ok: true, row: res.item } : { ok: false };
         },
         settled: () => taskProjection.refreshTask(task),
-        ...(ownerLineOf({ kind: 'task', taskId: task.id, reviewItemId: item.id }) !== undefined
-          ? { ownerCheck: true }
-          : {}),
+        ...(ownerCheck ? { ownerCheck: true } : {}),
+        ...(refusedCheck ? { refusedCheck: true } : {}),
       },
       item,
       author,

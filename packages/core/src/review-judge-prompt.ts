@@ -17,7 +17,7 @@ import type { ReviewOption, ReviewSecretField } from './review-item.ts';
 
 /** Bumped when the frame around the criteria changes, so a stored verdict
  *  can be told from one made under an older ask. */
-export const REVIEW_JUDGE_PROMPT_VERSION = 9;
+export const REVIEW_JUDGE_PROMPT_VERSION = 10;
 
 /**
  * What a workspace judges its review items against until somebody edits it.
@@ -125,6 +125,19 @@ export interface ReviewJudgeItem {
    * part of definition of done."*).
    */
   ownerCheck?: boolean;
+  /**
+   * The owner line's proof says the agent was REFUSED permission to run this
+   * check on this machine.
+   *
+   * Set by the server off the line, never by the filer, and it turns the
+   * `ownerCheck` rule above off for this item: "an agent could read this
+   * itself" is a true sentence about a check nobody is allowed to run, and
+   * the gate answering a hard stop with a harder push produced a hold telling
+   * the agent to launder the denial through a second agent (2026-09-16). The
+   * server drops such a hold whether or not the judge takes this instruction;
+   * this is here so the judge does not write it in the first place.
+   */
+  refusedCheck?: boolean;
 }
 
 /** How the judge starts a hold on an owner check an agent could make itself,
@@ -281,6 +294,17 @@ export function buildReviewJudgePrompt(
       'Hold it when the detail gives the reader nothing to open, or when the line does not say what the reader should see there.',
     );
   }
+  if (item.refusedCheck) {
+    system.push(
+      '',
+      // The rule above, switched off for this one item. Left as an override
+      // rather than as an edit to that rule because it is a fact about THIS
+      // check — the machine said no — and not a softening of the standard.
+      'The agent reports that it was REFUSED permission to run this check on the machine it works on. That refusal is final: it is a hard stop, not laziness, and there is no wording of the report that makes the check runnable.',
+      `So the rule about a check an agent could make itself does NOT apply to this item, however plainly the fact is one an agent could otherwise read. Never start the reason with "${OWNER_CHECK_SELF_PREFIX}" here, and never tell the agent to obtain the fact another way — not through another agent, another session, another tool or account, and not by working around the refusal. Instructing that is worse than a wrong verdict.`,
+      'Judge only whether the reader can act on the card: does it say what to check and what they should see? Pass it when it does.',
+    );
+  }
   if (item.priorAsks && item.priorAsks.length > 0) {
     system.push(
       '',
@@ -341,7 +365,13 @@ export function buildReviewJudgePrompt(
     // what the agent should have read.
     lines.push(
       '<owner-check>',
-      `A done-when line handed to the reader. Answer first: could an agent check this line itself — is it a fact in a log, a tracker, an API, a file, or what a page, list or table contains? Whether something is present or absent there is a fact an agent reads, never a judgement, even when a link to it is attached. If so, hold it with a reason that starts "${OWNER_CHECK_SELF_PREFIX}". A line about how something looks, reads or feels to the reader, or about a device only they have, needs them: pass it.`,
+      item.refusedCheck
+        ? // The refusal is stated HERE as well as in the system turn for the
+          // reason the block itself exists: on replays of the 2026-09-14
+          // checks the system rule alone got the verdict right and the reason
+          // wrong. A reason is exactly what goes wrong for a refused check.
+          'A done-when line handed to the reader, and the agent was REFUSED permission to run this check — see what the proof says was refused. The refusal is final, so do not ask whether an agent could check it: it may not. Never tell the agent to get the fact another way, through another agent, session or tool. Ask only whether the card tells the reader what to check and what they should see, and pass it when it does.'
+        : `A done-when line handed to the reader. Answer first: could an agent check this line itself — is it a fact in a log, a tracker, an API, a file, or what a page, list or table contains? Whether something is present or absent there is a fact an agent reads, never a judgement, even when a link to it is attached. If so, hold it with a reason that starts "${OWNER_CHECK_SELF_PREFIX}". A line about how something looks, reads or feels to the reader, or about a device only they have, needs them: pass it.`,
       '</owner-check>',
     );
   }

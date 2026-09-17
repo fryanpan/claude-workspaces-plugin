@@ -591,6 +591,14 @@ line that needs a person asks nobody until its builder reports it `owner`;
 the stall tick reminds that builder once every other line is met
 (`review-items/done-when-ready.ts`), and the reminder renders in `mcp`
 through `done-when-ready-line.ts`, beside the other line modules.
+`done-when-refusal.ts` (`core`) sits beside `done-when.ts` for the one case
+that is nobody's to check: a proof marked `refused`, or one whose words name a
+permission refusal, says the agent was DENIED permission to run the check. It
+is terminal, so the three sides read the same predicate — the report route
+takes it in place of the link an `owner` line otherwise needs, the item
+template says why the reader is holding it, and `review-gate.ts` drops a hold
+that would tell the agent to obtain the fact another way rather than handing
+that instruction back.
 
 **A rebuild changes every clientID, so a tab that was away is told to start
 over.** Sync is a state-vector exchange, and after a rebuild a reconnecting
