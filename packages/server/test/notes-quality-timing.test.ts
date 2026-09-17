@@ -21,11 +21,18 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { type Ref, type TaskReviewItem, prose } from '@claude-workspaces/core';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import * as Y from 'yjs';
 import { createNotesHeadingMemory } from '../src/meeting-notes-doc.ts';
 import type { TickScheduler } from '../src/meeting-notes.ts';
+import {
+  type NotesQualityFiledItem,
+  createNotesQualityFiledFileStore,
+} from '../src/notes-quality-filed-store.ts';
 import { type NotesQualityFiler, createNotesQualityFiler } from '../src/notes-quality-filing.ts';
 import {
   type NotesQualityBoard,
@@ -424,5 +431,68 @@ describe('THE CONTROL: the base commit’s policy, same scripts', () => {
     await leg({ say: 'The paint arrives on Friday.', resumable: false });
     expect(board.filed).toEqual(['t-season', 't-season']);
     expect(board.revised).toEqual([]);
+  });
+});
+
+describe('the server’s own wiring is what carries a filing across a restart', () => {
+  /**
+   * One recording leg through `withServerNotesSinks` with a DATA DIR and no
+   * filer of its own — what the server builds, and the only arrangement in
+   * which the durable half is wired at all. Each call makes its own filer,
+   * heading memory and map, so two calls over one data dir are two
+   * processes: nothing but the folder on disk crosses between them.
+   */
+  async function wiredLeg(opts: {
+    board: NotesQualityBoard;
+    dataDir: string;
+    say: string;
+    clean?: boolean;
+  }): Promise<void> {
+    const harness = createNotesTickHarness({
+      docId: DOC,
+      meetingId: MEETING,
+      workspaceId: 'w-harbour',
+      dataDir: opts.dataDir,
+      qualityBoard: opts.board,
+      compose: (input, tick) => (tick === 1 ? addNotes(input, NOTE) : []),
+    });
+    if (opts.clean) tidyRepeats(harness.ydoc, NOTE);
+    await harness.speak(opts.say);
+    if (!opts.clean) pasteRepeats(harness, NOTE);
+    await harness.end();
+    harness.legEnded(false);
+  }
+
+  /** What the server wrote down about where this meeting's item went. */
+  const filedRecord = (dataDir: string): NotesQualityFiledItem | undefined =>
+    createNotesQualityFiledFileStore(dataDir).read({ docId: DOC, meetingId: MEETING });
+
+  it('writes the filing beside the meeting, and takes it back after the restart', async () => {
+    // THE MUTATION THIS CATCHES: the wiring itself — a server that builds its
+    // filer without a store. Every other case here and in
+    // `notes-quality-restart.test.ts` builds its own filer, so the store can
+    // be perfect, never reach a running server, and leave the item standing.
+    const dataDir = mkdtempSync(join(tmpdir(), 'cw-quality-wired-'));
+    try {
+      const board = recordingBoard();
+
+      await wiredLeg({ board, dataDir, say: 'The winter crew stays on.' });
+      expect(board.filed).toEqual(['t-season']);
+      expect(filedRecord(dataDir)?.filed).toEqual({
+        kind: 'row',
+        taskId: 't-season',
+        itemId: 'ri-1',
+      });
+
+      // The restart: a second process over the same folder, and the meeting
+      // the browser resumed ends clean in it.
+      await wiredLeg({ board, dataDir, say: 'We tidied those out.', clean: true });
+
+      expect(board.withdrawn).toEqual(['ri-1']);
+      expect(board.filed).toEqual(['t-season']);
+      expect(filedRecord(dataDir)).toBeUndefined();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

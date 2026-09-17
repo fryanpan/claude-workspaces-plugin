@@ -64,20 +64,20 @@
  * meeting that ends clean withdraws once, and a meeting that ends badly
  * never withdraws at all.
  *
- * ALL OF WHICH HOLDS WITHIN ONE PROCESS, AND NOT ACROSS A RESTART — say it
- * here, because a reader of the paragraphs above would otherwise take the
- * failure for ended. The memory below is a Map in this process, and that is
- * deliberate: a restart is not held through (`legIsResumable('server-restart')`
- * is false) because a hold is a timer a restarting server exits before it can
+ * AND IT HOLDS ACROSS A RESTART, WHICH TOOK A FILE. The memory below is a
+ * Map in this process, and a restart is the one leg-ending this repo produces
+ * itself: it is not held through (`legIsResumable('server-restart')` is
+ * false) because a hold is a timer a restarting server exits before it can
  * fire, so the item files at once rather than risking being lost outright.
  * The browser resumes across exactly that gap — `meeting-reconnect.ts` treats
- * a deploy's restart as invisible to the recording. So a meeting whose item
- * was filed BY a restart, and which then ends clean in the new process, finds
- * no `filed` to take back and the item stands. That is the commonest way an
- * item reaches a person mid-meeting, so the hole is worth naming: closing it
- * means persisting `filed` the way the heading memory is persisted
- * (`createNotesHeadingFileStore`), which is a store of its own and is not
- * what this change did.
+ * a deploy's restart as invisible to the recording — so a meeting whose item
+ * was filed BY a restart used to end clean in the NEW process, find no
+ * `filed` to take back, and leave the item standing. That was the commonest
+ * way one of these reached a person mid-meeting. So `filed` is now mirrored
+ * to `notes-quality-filed-store.ts`, one small file in the meeting's own
+ * folder, and an entry the map does not have is hydrated from it. What the
+ * record's lifetime is, and why a store it cannot read is an empty store
+ * rather than a failed filing, are that module's own header.
  *
  * AND A REVISION THAT CHANGES NOTHING IS NOT MADE AT ALL. Revising a review
  * item re-judges it, which puts it back in front of its reader — so a flag
@@ -92,6 +92,14 @@
  */
 
 import type { TickScheduler } from './meeting-notes.ts';
+import type {
+  NotesQualityFiledStore,
+  NotesQualityFiledWhere,
+} from './notes-quality-filed-store.ts';
+import {
+  type HeldMeeting,
+  createNotesQualityMeetingMemory,
+} from './notes-quality-meeting-memory.ts';
 import {
   type NotesQualityBoard,
   type NotesQualityFileInput,
@@ -118,11 +126,6 @@ export interface MeetingIds {
  */
 export const RESUME_GRACE_MS = 120_000;
 
-/** What a filing is remembered by, so a later reading can revise it. */
-type Filed =
-  | { kind: 'row'; taskId: string; itemId: string }
-  | { kind: 'doc'; docId: string; threadId: string; commentId: string };
-
 /**
  * The words on a withdrawal, which a reader sees beside the retired ask.
  *
@@ -135,45 +138,18 @@ export const WITHDRAWN_BECAUSE_CLEAN =
   'the notes read clean by the end of this meeting — the reading this item was filed from ' +
   'was one recording leg, and a later one found nothing past a bar';
 
-interface Held {
-  /** The newest reading of this meeting, whether or not it crossed a bar. */
-  input?: NotesQualityFileInput;
-  /** Where this meeting's one item went, once it has gone anywhere. */
-  filed?: Filed;
-  /** The verdict that item currently carries, so a re-check reaching the
-   *  same one does not re-judge it in front of its reader. Kept as the
-   *  STRUCTURE rather than as the words: the rates in it are compared with a
-   *  band against what the ITEM says — see `notes-quality-verdict.ts`. */
-  verdict?: NotesQualityVerdict;
-  /**
-   * That a refusal has already been written down for this item.
-   *
-   * IT SILENCES THE LINE, NEVER THE ATTEMPT. A meeting that keeps stopping
-   * clean asks the board once per leg, and the same refusal written once per
-   * leg is noise. But a refusal is not necessarily permanent: `answered` is
-   * the one that refuses here in practice, and its own message says to undo
-   * the answer if it was a mistake — after which the item is withdrawable and
-   * still carries a claim the meeting disproved. So the board is asked every
-   * time and only the log line is held back.
-   */
-  withdrawRefusalSaid?: true;
-  /** The resume grace, while one is armed. */
-  timer?: unknown;
-}
-
-/**
- * How many meetings are remembered. A filing is remembered so a revision can
- * find it, and nothing ever tells this module that a meeting will not be
- * resumed again, so the map needs a bound. Oldest out first; a meeting that
- * fell off gets a fresh item rather than a revision, which is the safe
- * direction — an item is never lost, at worst a very old one is duplicated.
- */
-const REMEMBERED_MEETINGS = 200;
-
 export interface NotesQualityFilerDeps {
   /** The board the item goes on. Absent, nothing is filed. */
   board?: () => NotesQualityBoard;
   actor: { id: string; name: string; kind?: string };
+  /**
+   * Where `filed` is mirrored so a restart does not lose it.
+   *
+   * Absent, the memory is this process's alone — which is what a test that
+   * models two meetings in one process wants, and what a server with no data
+   * dir has.
+   */
+  filedStore?: NotesQualityFiledStore;
   /** The resume grace's clock. Injected so a test fires it by hand. */
   schedule?: TickScheduler;
   graceMs?: number;
@@ -206,11 +182,6 @@ export interface NotesQualityFiler {
   heldCount(): number;
 }
 
-// JSON rather than a joined string: a docId is caller-supplied, so any
-// separator a key picked could appear inside one and merge two meetings'
-// memory into one.
-const keyOf = (ids: MeetingIds): string => JSON.stringify([ids.docId, ids.meetingId]);
-
 const defaultSchedule: TickScheduler = {
   set: (fn, ms) => {
     const handle = setTimeout(fn, ms);
@@ -221,49 +192,12 @@ const defaultSchedule: TickScheduler = {
 };
 
 export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQualityFiler {
-  const state = new Map<string, Held>();
+  const memory = createNotesQualityMeetingMemory(deps.filedStore);
   const schedule = deps.schedule ?? defaultSchedule;
   const graceMs = deps.graceMs ?? RESUME_GRACE_MS;
   const say = deps.say ?? ((message: string) => console.error(message));
 
-  const held = (key: string): Held => {
-    let h = state.get(key);
-    if (!h) {
-      h = {};
-      state.set(key, h);
-      // Oldest first: a Map iterates in insertion order, so the first key is
-      // the meeting nothing has touched for longest.
-      //
-      // NEVER AN ENTRY STILL WAITING TO FILE. The bound exists to cap the
-      // memory of where FINISHED meetings' items went; an entry holding a
-      // FLAGGED reading, or holding a grace that has not fired, is the only
-      // copy of an item nothing can recreate. Dropping one would lose it
-      // silently, which is the failure this whole module exists to avoid, so
-      // the map is allowed over its bound rather than evicting one.
-      //
-      // A CLEAN held reading is not that, and the distinction is what keeps
-      // this bound honest now that every reading arrives here rather than
-      // only the flagged ones. Losing one costs a withdrawal that does not
-      // happen — the behaviour this module had before it could withdraw at
-      // all — while pinning one costs memory for the life of the process.
-      // That matters because a `file()` is not guaranteed a `legEnded`: the
-      // stop path runs `notes.end()` before it knows whether there is a
-      // meeting record to report a leg for (`meeting-protocol.ts`), so an
-      // entry can be left holding a reading nothing will ever commit.
-      let evicted = 0;
-      for (const [oldestKey, oldest] of state) {
-        if (state.size - evicted <= REMEMBERED_MEETINGS) break;
-        if (oldestKey === key) continue;
-        if (oldest.timer !== undefined) continue;
-        if (oldest.input !== undefined && oldest.input.report.flags.length > 0) continue;
-        state.delete(oldestKey);
-        evicted += 1;
-      }
-    }
-    return h;
-  };
-
-  const disarm = (h: Held): void => {
+  const disarm = (h: HeldMeeting): void => {
     if (h.timer === undefined) return;
     schedule.clear(h.timer);
     h.timer = undefined;
@@ -307,9 +241,9 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
    */
   const revise = (
     ids: MeetingIds,
-    filed: Filed,
+    filed: NotesQualityFiledWhere,
     input: NotesQualityFileInput,
-    mem: Held,
+    mem: HeldMeeting,
   ): 'revised' | 'unchanged' | 'failed' => {
     if (mem.verdict !== undefined && !saysSomethingNew(mem.verdict, input)) return 'unchanged';
     const board = deps.board?.();
@@ -341,6 +275,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     // the item where it was, and banding against the suppressed one is how a
     // slow ramp never crosses.
     mem.verdict = verdictOf(input.report);
+    memory.remember(ids, mem);
     return 'revised';
   };
 
@@ -352,7 +287,11 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
    * the ask that is still standing rather than raising a second one beside
    * it, which is the outcome this whole module exists to prevent.
    */
-  const withdraw = (ids: MeetingIds, filed: Filed, mem: Held): 'withdrawn' | 'failed' => {
+  const withdraw = (
+    ids: MeetingIds,
+    filed: NotesQualityFiledWhere,
+    mem: HeldMeeting,
+  ): 'withdrawn' | 'failed' => {
     const board = deps.board?.();
     const res = !board
       ? undefined
@@ -389,9 +328,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       }
       return 'failed';
     }
-    mem.filed = undefined;
-    mem.verdict = undefined;
-    mem.withdrawRefusalSaid = undefined;
+    memory.forget(ids, mem);
     return 'withdrawn';
   };
 
@@ -403,8 +340,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
    * that never had one.
    */
   const commit = (ids: MeetingIds): void => {
-    const key = keyOf(ids);
-    const h = state.get(key);
+    const h = memory.peek(ids);
     if (!h) return;
     disarm(h);
     const input = h.input;
@@ -458,16 +394,17 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
             commentId: filing.commentId,
           };
     h.verdict = verdictOf(input.report);
+    memory.remember(ids, h);
   };
 
   return {
     file(ids, input) {
-      const h = held(keyOf(ids));
+      const h = memory.get(ids);
       h.input = input;
       return { filed: false, reason: 'held' };
     },
     legEnded(ids, opts) {
-      const h = state.get(keyOf(ids));
+      const h = memory.peek(ids);
       if (!h) return;
       disarm(h);
       if (!opts.resumable) {
@@ -479,13 +416,13 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       h.timer = schedule.set(() => commit(ids), graceMs);
     },
     legBegan(ids) {
-      const h = state.get(keyOf(ids));
+      const h = memory.peek(ids);
       if (!h) return;
       disarm(h);
       // The meeting is running again, so the reading taken at the drop is
       // about half a meeting. The next stop reads the whole of it.
       h.input = undefined;
     },
-    heldCount: () => [...state.values()].filter((h) => h.input !== undefined).length,
+    heldCount: () => memory.heldCount(),
   };
 }

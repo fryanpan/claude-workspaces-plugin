@@ -114,6 +114,7 @@ import {
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
 import { readNotesMethod } from './notes-method-store.ts';
+import { createNotesQualityFiledFileStore } from './notes-quality-filed-store.ts';
 import { type NotesQualityFiler, createNotesQualityFiler } from './notes-quality-filing.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
@@ -1264,11 +1265,16 @@ export function withServerNotesSinks(
   // ONE FILER PER WIRING, i.e. per server, for the reason the heading memory
   // above is: it is keyed by doc and meeting and it has to outlive a socket,
   // because the leg that drops and the leg that ends the meeting are two
-  // sessions of one recording.
+  // sessions of one recording. Backed by the data dir when there is one, so
+  // where the item WENT outlives the process too — a restart mid-meeting used
+  // to leave the item it filed standing after the meeting read clean.
   const qualityFiler =
     deps.qualityFiler ??
     createNotesQualityFiler({
       ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
+      ...(deps.dataDir !== undefined
+        ? { filedStore: createNotesQualityFiledFileStore(deps.dataDir) }
+        : {}),
       actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
       ...(deps.qualityGraceMs !== undefined ? { graceMs: deps.qualityGraceMs } : {}),
       ...(deps.qualityGraceSchedule ? { schedule: deps.qualityGraceSchedule } : {}),
