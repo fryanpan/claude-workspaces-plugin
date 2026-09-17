@@ -157,31 +157,25 @@ describe('the comment receipt follows the frame it acknowledges', () => {
   });
 });
 
-describe('a replay gap is its own line, not a garbled comment', () => {
-  it('names the channel and tells the agent to refetch', async () => {
+describe('a replay gap reaches the handler and stops there', () => {
+  // The notice used to be rendered as its own channel line. It no longer
+  // wakes anybody — `quiet-bookkeeping.test.ts` holds the rule and what still
+  // recovers the missed frames; these two keep the handler's OTHER outputs
+  // pinned, because a gap must also never become a comment or a receipt.
+  it('renders no comment and acks nothing for a gap naming a doc', async () => {
     const { notified, emitted, sent, handle } = harness();
     await handle(frame('replay.gap', { docId: 'plan' }));
+    expect(notified).toEqual([]);
     expect(emitted).toEqual([]);
     expect(sent).toEqual([]);
-    expect(notified).toHaveLength(1);
-    const params = notified[0] as {
-      content: string;
-      meta: Record<string, unknown>;
-      sent_at: string;
-    };
-    expect(params.content).toContain('[replay.gap] events on plan');
-    expect(params.content).toContain('refetch state');
-    expect(params.meta).toEqual({ event: 'replay.gap', doc_id: 'plan' });
-    expect(params.sent_at).toBe(new Date(FIXED_MS).toISOString());
   });
 
-  it('says "a watched channel" when the gap names no doc', async () => {
-    const { notified, handle } = harness();
+  it('is equally quiet when the gap names no doc', async () => {
+    const { notified, emitted, sent, handle } = harness();
     await handle(frame('replay.gap', {}));
-    expect((notified[0] as { content: string }).content).toContain('a watched channel');
-    expect((notified[0] as { meta: Record<string, unknown> }).meta).toEqual({
-      event: 'replay.gap',
-    });
+    expect(notified).toEqual([]);
+    expect(emitted).toEqual([]);
+    expect(sent).toEqual([]);
   });
 });
 
@@ -199,15 +193,6 @@ describe('a frame that lands during a tool call waits for it', () => {
     expect(queued).toHaveLength(2);
     for (const fn of queued) await fn();
     expect(emitted.map((e) => e.event)).toEqual(['workspace.stalled', 'thread.replied']);
-  });
-
-  it('defers the replay-gap notice the same way', async () => {
-    const queued: Array<() => Promise<unknown>> = [];
-    const { notified, handle } = harness({ defer: (fn) => queued.push(fn) });
-    await handle(frame('replay.gap', { docId: 'plan' }));
-    expect(notified).toEqual([]);
-    for (const fn of queued) await fn();
-    expect(notified).toHaveLength(1);
   });
 
   it('still acknowledges a durable comment row before the deferred write runs', async () => {
