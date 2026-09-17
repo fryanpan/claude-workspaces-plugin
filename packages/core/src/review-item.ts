@@ -635,7 +635,20 @@ export function storedJudgement(judgement: ReviewItemJudgement): ReviewItemJudge
     ...(judgement.heldFor && judgement.heldFor.length > 0
       ? { heldFor: [...judgement.heldFor] }
       : {}),
-    ...(judgement.add !== undefined && judgement.add !== '' ? { add: judgement.add } : {}),
+    ...(judgement.quote !== undefined && judgement.quote !== '' ? { quote: judgement.quote } : {}),
+    // How it reached the reader without passing, and the filer's reason when
+    // that is why — facts about the item's history, so they are stored and
+    // not re-derived.
+    ...(judgement.admitted !== undefined ? { admitted: judgement.admitted } : {}),
+    ...(judgement.lessSpecific !== undefined && judgement.lessSpecific !== ''
+      ? { lessSpecific: judgement.lessSpecific }
+      : {}),
+    ...(judgement.lessSpecificFor !== undefined && judgement.lessSpecificFor !== ''
+      ? { lessSpecificFor: judgement.lessSpecificFor }
+      : {}),
+    ...(judgement.gapKey !== undefined && judgement.gapKey !== ''
+      ? { gapKey: judgement.gapKey }
+      : {}),
   };
 }
 

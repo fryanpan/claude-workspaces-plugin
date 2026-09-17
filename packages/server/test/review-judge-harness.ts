@@ -62,6 +62,22 @@ export const CONTRADICTORY_REASONS = [
   'The links are not inline on the words they explain.',
 ];
 
+/**
+ * A judge that holds with a figure NOTHING in the item states, and quotes a
+ * phrase the item does not contain.
+ *
+ * The live defect in one stub: four cards read on 2026-09-14 carried a
+ * specific the item's source does not support, because the judge is never
+ * shown that source and supplied one anyway. Every hold this returns is
+ * unusable as written, so what reaches the filer is whatever the gate's own
+ * bound leaves — which is what the tests here measure.
+ */
+export const inventingJudge: ReviewJudge = async () => ({
+  ok: false,
+  reason: 'The rebuild takes 45 minutes, so the detail understates what waits.',
+  quote: 'the release train departs at dawn',
+});
+
 /** A judge that never passes anything and never repeats itself — the
  *  behaviour the peer met eight times over. */
 export function contradictoryJudge(): ReviewJudge {
@@ -75,7 +91,15 @@ export interface Held {
   message?: string;
   item?: {
     id: string;
-    judge?: { verdict: string; reason: string; heldFor?: string[]; add?: string; at?: number };
+    judge?: {
+      verdict: string;
+      reason: string;
+      heldFor?: string[];
+      quote?: string;
+      admitted?: 'holds' | 'less-specific';
+      lessSpecific?: string;
+      at?: number;
+    };
   };
 }
 

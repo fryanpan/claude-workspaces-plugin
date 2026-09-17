@@ -1524,6 +1524,8 @@ export function beginNotesSession(
       let measured: NotesComposeMeasure = {};
       let composeMs = 0;
       let applyMs = 0;
+      let beforeComposeMs = 0;
+      let captureMs: number | null = null;
       /**
        * Every model call THIS tick made, in the order they were made —
        * capture first, compose after it.
@@ -1560,6 +1562,8 @@ export function beginNotesSession(
           lastSpokenAt,
           startedAt,
           waitedMs: composeStart - startedAt,
+          beforeComposeMs,
+          captureMs,
           promptChars: measured.promptChars ?? null,
           replyChars: measured.replyChars ?? null,
           firstTokenMs: measured.firstTokenMs ?? null,
@@ -1567,6 +1571,9 @@ export function beginNotesSession(
           outputTokens: measured.usage?.outputTokens ?? null,
           cacheReadTokens: measured.usage?.cacheReadTokens ?? null,
           cacheWriteTokens: measured.usage?.cacheWriteTokens ?? null,
+          cacheBlocks: measured.cacheBlocks ?? null,
+          cacheFirstBlockChars: measured.cacheFirstBlockChars ?? null,
+          cacheStableBlocks: measured.cacheStableBlocks ?? null,
           calls: [...tickCalls],
           composeMs,
           model: measured.model ?? null,
@@ -1609,6 +1616,7 @@ export function beginNotesSession(
       const priorTurns = multi ? priorRaw.map(withNames) : priorRaw.map(bare);
       priorRaw = raw;
       if (deps.captureIntents) {
+        const captureStart = clock();
         try {
           const captured = await deps.captureIntents({
             docId: ids.docId,
@@ -1650,6 +1658,11 @@ export function beginNotesSession(
           // compose below, and the transcript remains the durable record a
           // later capture could be rebuilt from.
           deps.onError?.(err instanceof Error ? err.message : 'task capture failed');
+        } finally {
+          // In the `finally`, because a capture that fails costs the note the
+          // same wait a slow one does — a timeout is the expensive case, and
+          // booking it only on success would hide exactly that.
+          captureMs = clock() - captureStart;
         }
       }
       // What this tick's words named on the board. A local scan of a list
@@ -1778,6 +1791,7 @@ export function beginNotesSession(
       };
       try {
         const composeCallStart = clock();
+        beforeComposeMs = composeCallStart - composeStart;
         const composed = await deps.composer.compose({
           ...input,
           measure: (m) => {

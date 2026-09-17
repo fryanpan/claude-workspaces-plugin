@@ -43,6 +43,22 @@ describe('an owner check is judged on whether a person should be asked', () => {
     expect(user).not.toContain('<owner-check>');
   });
 
+  it('drops the self-check rule when the check was refused, in both turns', () => {
+    const { system, user } = buildReviewJudgePrompt(DEFAULT_REVIEW_ITEM_CRITERIA, {
+      ...check,
+      refusedCheck: true,
+    });
+    expect(system).toContain('REFUSED permission');
+    expect(system).toContain('does NOT apply');
+    expect(system).toContain('never tell the agent to obtain the fact another way');
+    const block = user.slice(user.indexOf('<owner-check>'));
+    // The user turn must not still be asking the question whose answer is
+    // "yes, and it may not" — that is the question that produced the hold.
+    expect(block).not.toContain('could an agent check this line itself');
+    expect(block).not.toContain(OWNER_CHECK_SELF_PREFIX);
+    expect(block).toContain('REFUSED permission');
+  });
+
   it('cannot be forged from inside the item', () => {
     const { user } = buildReviewJudgePrompt(DEFAULT_REVIEW_ITEM_CRITERIA, {
       headline: check.headline,

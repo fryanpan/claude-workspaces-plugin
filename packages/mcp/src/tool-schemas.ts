@@ -203,7 +203,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_threads',
       description:
-        'List the comment threads on a doc. Pass status to return only the threads in that state.',
+        'List the comment threads on a doc. Pass status to return only the threads in that state. Safe to call freely on any doc, including a file-bound one: threads live in the CRDT, so this binds no file — it never reads, polls or writes back the doc on disk, and auditing comments cannot clobber anything. Bounded, not free: a doc not already in memory is loaded and stays resident, so read the docs you have a reason to read rather than enumerating every doc on the server.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -220,7 +220,8 @@ export const TOOL_LIST: ListToolsResult = {
     },
     {
       name: 'get_thread',
-      description: 'Read one thread by id, with all of its comments.',
+      description:
+        'Read one thread by id, with all of its comments. Binds no file, exactly like list_threads.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -397,7 +398,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'get_doc',
       description:
-        "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape.",
+        "Read a doc's plain text and block structure. The plain text is the surface find_and_replace matches against. The result can run to hundreds of kilobytes, so call doc_status when you only need health or shape. Unlike list_threads this reaches for CONTENT, so it binds the doc's file and puts it in the file poll's fast lane — right for a doc you are about to work on, and the reason to use list_threads when comments are all you want.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1988,7 +1989,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'report_done_when',
       description:
-        "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. `owner` is also how you say a line written with `needs: 'owner'` is READY for its person — until you report it, they are not asked. If they already answered it elsewhere, report it `met` with that answer as proof instead. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool.",
+        "Say what you found against a task's done-when lines. Report the lines you have something to say about; the ones you leave out keep the verdict they had. `met` needs at least one proof and is refused without it, naming the line. When the last open line goes to `met` the board moves the task to done itself and records which line closed it — so there is no separate transition to make. `owner` is also how you say a line written with `needs: 'owner'` is READY for its person — until you report it, they are not asked. If they already answered it elsewhere, report it `met` with that answer as proof instead. Use `owner` for a line only a person can judge — how something looks or reads to them, or a device only they have. It needs a proof with a `url`, and is refused without one naming the line: the url is what the reader opens to check. The board files a review item for that line, which passes the same quality gate as any item before it reaches their queue, and their answer sets its verdict. A line you could check yourself (a log, an error tracker, an API, a page you can load) is held and comes back in `held` with the reason and what to read instead — check it and report it `met`. Do not file your own item for the same line, and do not wait on a tool. If the check was REFUSED — your permission classifier or sandbox denied the command, so there is no way for you to run it — send the proof with `refused: true` and say what was denied. That is terminal: the board hands the line straight to the reader, needs no `url` for it, and will never answer it by telling you to get the fact another way. Never route a refused check through another agent or session.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2001,7 +2002,7 @@ export const TOOL_LIST: ListToolsResult = {
           lines: {
             type: 'array',
             description:
-              "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?}]: what you ran or read, and where a reader sees it for themselves. A `url` is an absolute http(s) url, or a board path starting with one `/` (like `/workspaces/<id>?task=<id>`), which the board makes absolute on its own address; any other url is dropped. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
+              "One entry per line you are reporting: {id, verdict, proof?}. `id` is the line id the task carries. `verdict` is 'met' (you checked it and it holds), 'not-met' (you checked it and it does not), 'unchecked' (you could not check it — say why in a proof) or 'owner' (only a person can judge it). `proof` is [{text, url?, refused?}]: what you ran or read, and where a reader sees it for themselves. `refused: true` says this machine denied you permission to run that check, with `text` naming what was denied — use it only for a real refusal, because it is what tells the board the check is the reader's and stops the gate asking you to run it. A `url` is an absolute http(s) url, or a board path starting with one `/` (like `/workspaces/<id>?task=<id>`), which the board makes absolute on its own address; any other url is dropped. An `owner` line needs a `url`. Every entry is validated before anything is written, so a bad entry writes nothing.",
             items: { type: 'object' },
           },
         },
@@ -2176,7 +2177,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'revise_review_item',
       description:
-        "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again.",
+        "Rewrite one of your review items in place, to answer a question asked on it or to fix an item the quality gate held (`held: true`). Pass only the fields that change, and the previous words are kept as history. Address the item on a task, on a task's own decision, or on a doc thread. Half a doc address is refused. Every revision is judged again. When the source cannot support what a hold asked for, answer with lessSpecific rather than inventing a specific.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2223,6 +2224,11 @@ export const TOOL_LIST: ListToolsResult = {
               'Which span of the NEW detail changed, as character offsets, for when the diff would not show it well. Omitted, the changed span is derived.',
             properties: { start: { type: 'number' }, end: { type: 'number' } },
             required: ['start', 'end'],
+          },
+          lessSpecific: {
+            type: 'string',
+            description:
+              'Your answer to a hold when the source does not support what it asked for: why the honest answer is less specific, in your own words. Pass it alongside the revision you can honestly make. The revision is judged as usual, but the gap you answered is not raised against you again, and your note is shown to the reader on the item card. Never invent a figure, a name or a mechanism to satisfy a hold - say this instead. Ignored when the item is not currently held.',
           },
         },
         // No unconditional required list: which ids are required depends on
@@ -2339,7 +2345,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_task_schedule',
       description:
-        "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish.",
+        "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish. Read `output` in the reply: a rule can declare the folder its runs write into, and then each run files one Home item linking the files it wrote.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2449,7 +2455,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_agent',
       description:
-        'Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here.',
+        'Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here. READ `mounts`: it says which folders of the project behind this board are served, or what mount_folder would do when none is.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -2591,7 +2597,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'mount_folder',
       description:
-        "Mount a subfolder of a project as the project's attachment storage. Every file under it gets ONE address that keeps working. A new version overwrites the old under the same link and keeps its comments. A move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served.",
+        'Mount a subfolder of a project so the board can serve the files in it. The server WALKS THE FOLDER ON DISK and serves everything under it, ignored and uncommitted files included — .gitignore is not a privacy control here. Every file gets ONE address that keeps working: a new version overwrites the old under the same link and keeps its comments, and a move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served. Mount a folder you would show the whole board; set_project_privacy keeps a project whose bytes must not leave the machine local-only.',
       inputSchema: {
         type: 'object',
         properties: {

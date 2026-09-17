@@ -1,4 +1,4 @@
-import type { ReviewPayload, ReviewShape } from '@claude-workspaces/core';
+import type { ReviewGateNote, ReviewPayload, ReviewShape } from '@claude-workspaces/core';
 /**
  * The review queue and the walkthrough that walks it: everything waiting on a
  * person, in one list, plus the wording each row and card wears (plan §3.9).
@@ -249,6 +249,17 @@ export interface ReviewThreadItem {
   revisedAt?: number;
   question?: string;
   revisedRange?: { start: number; end: number };
+  /**
+   * What the quality gate did to these words before the reader saw them: how
+   * many times it held them, and — when it never passed them — how they got
+   * here anyway.
+   *
+   * Absent on an item the gate simply passed, which is most of them, and on a
+   * payload from a server older than the field. Absent means the card carries
+   * no gate furniture at all, which is the point: a note on every card is a
+   * note nobody reads.
+   */
+  gate?: ReviewGateNote;
 }
 
 /**
@@ -337,6 +348,9 @@ export interface ReviewItem {
   decision?: DecisionRow;
   /** Set on either thread kind — where the reply gets written. */
   thread?: ReviewThreadItem;
+  /** The gate's history with these words, when it has one. See
+   *  `ReviewThreadItem.gate`; the card reads it, the ranking never does. */
+  gate?: ReviewGateNote;
   /** Set when an agent DECLARED this as a review item. Presence decides how
    *  the row RENDERS (the authored card vs the derived line) — never whether
    *  it is in the queue, which is the server's membership call. */
@@ -586,6 +600,7 @@ export function reviewQueue(
         why: row.blocks.length === 0 ? 'Nothing is waiting on this yet' : blockingLine(row),
         since: row.task.createdAt,
         decision: row,
+        ...(row.task.decisionGate ? { gate: row.task.decisionGate } : {}),
         // Marked Revised exactly as a ticket-borne item is, off the same
         // server derivation — so a decision the reader asked on comes back
         // saying so, quoting their question, rather than as a fresh ask.
@@ -646,6 +661,7 @@ export function reviewQueue(
           why: '',
           since: t.since,
           thread: t,
+          ...(t.gate ? { gate: t.gate } : {}),
           ...(t.state === 'revised'
             ? {
                 revision: {
@@ -704,6 +720,7 @@ export function reviewQueue(
           : `${t.askedBy} posted ${timeAgo(t.since, now)} · ${where}`,
         since: t.since,
         thread: t,
+        ...(t.gate ? { gate: t.gate } : {}),
         // Marked Revised, exactly as a ticket-borne item is. Without this the
         // corrected row is indistinguishable from a fresh ask, which is the
         // confusion the correction verb exists to remove — a reader who

@@ -353,6 +353,18 @@ export async function handleTaskReviewItems(
     const parsedRange = parseRevisedRange(body?.revisedRange);
     if (!parsedRange.ok) return j(400, { error: parsedRange.error });
     const revisedRange = parsedRange.range;
+    // The filer's answer to a hold that asked for a specific their source
+    // does not carry. A string or nothing: anything else is a caller getting
+    // the shape wrong, and silently ignoring it would leave them thinking
+    // they had answered the hold.
+    const lessSpecific = body?.lessSpecific;
+    if (
+      lessSpecific !== undefined &&
+      (typeof lessSpecific !== 'string' || lessSpecific.trim() === '')
+    ) {
+      return j(400, { error: 'lessSpecific must be a non-empty string' });
+    }
+    const gateOpts = lessSpecific !== undefined ? { lessSpecific } : {};
     // The TICKET'S OWN decision. `reviseReviewItem` refuses the derived
     // id — rightly: its words are the task's title, body and options,
     // and there is no stored row to patch. So this door delegates into
@@ -392,7 +404,7 @@ export async function handleTaskReviewItems(
       taskProjection.refreshTask(revised.task);
       // Judged again, on the new words — the promise the hold's message
       // makes. A revision that still misses comes back held.
-      const gate = await judgeTaskDecision(revised.task, author);
+      const gate = await judgeTaskDecision(revised.task, author, gateOpts);
       if (wasHeldDecision && gate && !gate.held) {
         announceTaskReview(revised.task, gate.item, author);
       }
@@ -426,7 +438,7 @@ export async function handleTaskReviewItems(
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 400, res);
     taskProjection.refreshTask(res.task);
     // Re-judged on every revision: the verdict was about the old words.
-    const gate = await judgeReviewItem(res.task, res.item, author);
+    const gate = await judgeReviewItem(res.task, res.item, author, gateOpts);
     if (wasHeld && !gate.held) announceTaskReview(res.task, gate.item, author);
     let thread: Thread | null = null;
     if (reply !== undefined && res.threadId) {

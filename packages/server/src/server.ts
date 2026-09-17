@@ -18,6 +18,7 @@ import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
 import { AllowRuleProposals } from './allow-rules.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
+import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import {
   createLegacyAgentWarner,
@@ -51,6 +52,7 @@ import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
 import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { MeetingStore } from './meetings.ts';
 import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
+import { isLoopbackAddress } from './middleware/host-guard.ts';
 import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
 import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
 import { MountStore } from './mount-store.ts';
@@ -2054,6 +2056,33 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return home ? { repoKey, ...home } : null;
   };
 
+  /**
+   * What a board's project has mounted, for the attach answer.
+   *
+   * The project is resolved exactly as `meetingHomeFor` above resolves it —
+   * the repo most of the board's own docs sit in — so the two answers cannot
+   * name different projects for the same board.
+   */
+  const mountsBriefFor = (workspaceId: string, req: Request): AttachMountsBrief => {
+    const board = taskStore.getWorkspace(workspaceId);
+    const ids = new Set(board?.docIds ?? []);
+    const repoKey = board
+      ? projectRepoKey(
+          docStore.list().filter((m) => ids.has(m.docId)),
+          (docId) => docStore.repos.primaryKeyFor(docId),
+        )
+      : null;
+    if (!repoKey) return attachMountsBrief({ repoKey: null, folders: [], mayNameFolders: true });
+    // A local-only project's file NAMES stop at the edge with its bytes.
+    const onBox =
+      !req.headers.has('cf-ray') && isLoopbackAddress(server.requestIP(req)?.address ?? undefined);
+    return attachMountsBrief({
+      repoKey,
+      folders: mountStore.registry.liveMounts(repoKey).map((m) => m.relPath),
+      mayNameFolders: onBox || mountStore.privacyOf(repoKey) !== 'local-only',
+    });
+  };
+
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
   const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
 
@@ -2305,6 +2334,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     watchKeyExists,
     keepMovingVerdicts: stallWiring.keepMoving,
     meetingHomeFor,
+    mountsBriefFor,
   };
 
   /**
