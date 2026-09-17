@@ -49,4 +49,37 @@ The full rule ships fleet-wide in the `claude-workspaces:working-in-a-workspace`
 
 **Apply Bryan's comments via the claude-workspaces edit tools** — once a doc is bound, NEVER edit the .md file directly with Write/Edit. Use `find_and_replace`, `rewrite_thread_region`, `insert_blocks_after_thread`, etc. The plugin serializes the live doc back to disk ~1s after every change; direct filesystem edits get silently clobbered by the next flush. See the `claude-workspaces:editing-review-docs` skill for the full pattern.
 
+## Reading a doc's threads is not the dangerous read
+
+Auditing comments is cheap, and the caution about bound docs does not cover it.
+Two different reads, and only one of them goes anywhere near the file on disk.
+
+- **`list_threads` and `get_thread` bind nothing.** Threads live in the
+  `.ydoc`, so the server answers out of it: `DocStore.listThreads` resolves
+  through `resolveDocForRead`, which hydrates with `bind: false` — no bound
+  file is read, no mtime poll joins the sweep, no write-back observer is
+  installed, and no `touchDoc`, so nothing enters the file poll's fast lane. A
+  dormant binding stays dormant. **You cannot clobber a file by reading its
+  comments**, and a doc whose first visitor was a threads read is bound
+  properly the moment anything asks for its content.
+- **`get_doc` and every edit tool DO bind.** They reach for CONTENT, so they
+  take the full hydrate — the file is read, the binding is armed, the doc is
+  touched. Right for a doc you are about to work on, and the read the fear was
+  ever about.
+
+**Bounded, not free — so read with a reason, never by enumeration.** A threads
+read on a doc that is not already in memory still loads its whole `.ydoc`
+synchronously and leaves it resident for two days — `IDLE_EVICT_MS` is what
+releases it, and nothing shorter does. Walking one board's docs or one task's
+threads costs that and nothing else: do it without asking.
+Sweeping every doc on the server is a different animal and stays banned. On
+2026-09-16 ~7,000 threads GETs took prod from 2,246 resident docs to 7,114 and
+281MB RSS, with ~95s spent not answering, and woke 586→3,134 bindings that then
+flushed weeks-old content over files on disk. The binding half of that is fixed;
+the residency half is still exactly what a corpus-wide read would cost.
+
+Gated by `packages/server/test/scan-does-not-activate.test.ts`, which fails if a
+threads read ever arms a binding again. Story: grep `docs/process/learnings.md`
+for "Reading a doc's threads".
+
 **Watch for comments** via `watch_doc(docId)` — comment events arrive as `<channel source="claude-workspaces" doc_id="..." thread_id="..." event="...">` blocks. (Sessions still running a pre-rename bundle emit `source="live-feedback"`; the attribute changes when that session restarts, not when this rule does.) Resolve threads when you've addressed the feedback (`resolve_thread`).
