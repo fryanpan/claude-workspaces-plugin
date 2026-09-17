@@ -36,6 +36,7 @@ import type { NotesComposeInput, NotesComposer } from './meeting-notes.ts';
 import { refusalMessage } from './model-quota.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { buildNotesPrompt } from './notes-prompt-build.ts';
+import { createPromptCacheWatcher } from './notes-prompt-cache-shape.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { authHeader, resolveCredentialSlotFrom } from './summarize.ts';
 
@@ -163,6 +164,12 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const model = opts.model ?? NOTES_MODEL;
   const maxTokens = opts.maxTokens ?? MAX_TOKENS;
+  // WHY A MISS WAS A MISS. The usage block says how much was read from the
+  // cache and never why nothing was; this holds the previous tick's block
+  // digests so the measure below can say whether the prefix moved or was
+  // simply too short. It changes no prompt and no breakpoint — see
+  // `notes-prompt-cache-shape.ts`.
+  const cacheShape = createPromptCacheWatcher();
 
   return {
     name: 'haiku',
@@ -180,7 +187,15 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
       // times out is exactly the one whose prompt size matters, and a report
       // after the await would never reach the log. There is no first-token
       // number to give — this is a single non-streaming request.
-      input.measure?.({ promptChars: system.length + user.length, model, keySlot });
+      const shape = cacheShape.shapeOf(`${input.docId}|${input.meetingId}`, blocks);
+      input.measure?.({
+        promptChars: system.length + user.length,
+        model,
+        keySlot,
+        cacheBlocks: shape.blocks,
+        cacheFirstBlockChars: shape.firstBlockChars,
+        cacheStableBlocks: shape.stableBlocks,
+      });
       const ctl = new AbortController();
       const timeout = setTimeout(() => ctl.abort(), TIMEOUT_MS);
       try {
