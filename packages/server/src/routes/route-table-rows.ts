@@ -320,6 +320,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/dispatch-and-notes.ts', [
     ['trusted-local', '/workspaces/:ws/dispatches', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/dispatches/:taskId', 'DELETE'],
+    ['trusted-local', '/workspaces/:ws/dispatches/:taskId/report', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/notes', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/agents/:agent/notes', 'GET POST'],
   ]),

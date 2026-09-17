@@ -5,6 +5,7 @@ import type { AgentNoteRing } from '../agent-notes.ts';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
+import type { DispatchReportStore } from '../dispatch-reports.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
@@ -51,6 +52,10 @@ export interface TaskRoutesContext {
   docStore: DocStore;
   /** Open builder dispatches and their worktree watchers. */
   dispatches: DispatchRegistry;
+  /** The closing reports builders file on the builds they finished. Separate
+   *  from `dispatches` because it outlives one: a report is read after the
+   *  lane it describes has been released. */
+  dispatchReports: DispatchReportStore;
   /** The per-agent ring of turn / denial / status notes. */
   agentNotes: AgentNoteRing;
   /** The durable, per-board record of notes no row would take. The ring is

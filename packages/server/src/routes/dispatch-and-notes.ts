@@ -1,3 +1,4 @@
+import { classifyActor } from '../actor-identity.ts';
 import {
   AGENT_NOTE_RING_CAP,
   type AgentNoteInput,
@@ -83,6 +84,7 @@ export async function handleDispatchAndNoteRoutes(
   const {
     taskStore,
     dispatches,
+    dispatchReports,
     agentNotes,
     agentNoteLog,
     j,
@@ -180,6 +182,59 @@ export async function handleDispatchAndNoteRoutes(
       return j(200, dispatches.close(taskId));
     }
     return j(405, { error: 'method not allowed' });
+  }
+  // --- REST: the builder's ONE closing report on a build ---
+  //
+  // POST files it; GET reads back every report on the row, newest first, which
+  // is what the lead reads instead of parsing a closing message. The store
+  // validates and refuses naming the missing part, and emits the wake for a
+  // FIRST report only — see dispatch-reports.ts.
+  //
+  // Under `dispatches/<taskId>/…` on purpose rather than under `tasks/`: the
+  // `dispatches` collection is in `SCOPED_COLLECTIONS`, so the middleware has
+  // already refused a task id this board does not hold before anything here
+  // runs. It does NOT require an open dispatch — a builder whose row the board
+  // moved to done had its dispatch closed by that very move, and it still has
+  // to be able to report.
+  //
+  // Off `rq.scope` rather than the destructured `scope`, for the reason the
+  // agent-notes block below gives: `restIs` above is a type predicate, and its
+  // false branch has narrowed `scope` to `undefined`.
+  const reportScope = rq.scope;
+  const dispatchReportMatch = matchRest(reportScope, /^dispatches\/([^/]+)\/report$/);
+  if (dispatchReportMatch && reportScope) {
+    // The same defense-in-depth posture the dispatch routes above take: a
+    // report names a PR, a commit and a builder, none of which belongs to an
+    // external reviewer.
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    const taskId = decodeURIComponent(dispatchReportMatch[1] ?? '');
+    if (req.method === 'GET') {
+      return j(200, { taskId, reports: dispatchReports.forTask(taskId) });
+    }
+    if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+    const body = await safeJson(req);
+    const author = authorFor(body?.author);
+    const res = dispatchReports.submit({
+      workspaceId: reportScope.workspaceId,
+      // The URL names the row. A body `taskId` is ignored rather than
+      // compared: the path is the argument, and it is the spelling the
+      // middleware checked.
+      taskId,
+      prNumber: body?.prNumber,
+      headCommit: body?.headCommit,
+      checks: body?.checks,
+      doneWhen: body?.doneWhen,
+      agentName: body?.agentName,
+      // `classifyActor` rather than the author's own `kind`: a `User`'s kind
+      // says how the identity was PROVEN (`known` / `anon`), not whether a
+      // person typed it. Same resolver `markPersonRelease` reads, so the two
+      // cannot disagree about who is an agent.
+      ...(author
+        ? { actor: { id: author.id, name: author.name, kind: classifyActor(author) } }
+        : {}),
+    });
+    if (!res.ok) return j(400, { error: res.error, message: res.message });
+    return j(200, { ok: true, repeat: res.repeat, report: res.report });
   }
   // --- REST: a status note on a NAMED row ---
   // The MCP verb's route: the agent knows which row it is reporting on
