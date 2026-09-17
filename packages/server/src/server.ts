@@ -3428,6 +3428,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // server that is going away.
       readyNudger.stop();
       stallNudger.stop();
+      // `unref` keeps the monitor from holding the process open; it does NOT
+      // stop the interval firing. The server suite builds many servers in one
+      // process, so a closed server that kept ticking would hold a closure
+      // onto its dead registry and write `[loop]` lines into unrelated tests'
+      // output for the rest of the run.
+      loopLag.stop();
       taskScheduler.stop();
       leadPresence.stop();
       // The boot re-scoring pass runs for as long as there are stale rows, so
