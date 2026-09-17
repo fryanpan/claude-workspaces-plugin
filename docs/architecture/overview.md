@@ -567,8 +567,8 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
-**An agent gets no wake for an event it cannot act on.** Two rules give that,
-and neither one hides state. The next read shows the same board.
+**An agent gets no wake for an event it cannot act on.** Three rules give that,
+and none of them hides state. The next read shows the same board.
 
 *Its own action.* Every board event and doc event names the actor who caused
 it. The MCP child drops a frame whose actor is this session, before the frame
@@ -585,6 +585,25 @@ server keeps it off the fan-out, next to `task.noted` and
 measurement reads. `review_item.answered` stays on the stream, because an
 answer is the wake an agent waits for. The list is in
 `packages/server/src/review-items/analytics.ts`.
+
+*An act with no words.* A person resolves a thread. A resolve is a status
+flip, and it carries no text. An agent that wakes for one reads an empty line.
+The MCP child drops the frame before it becomes a wake. The child drops it for
+every reader, not only for the session that resolved the thread. That is how a
+reader separates this rule from the self-echo rule. The rule is in
+`packages/mcp/src/bookkeeping-events.ts`.
+
+One resolve still wakes. A resolve retires each review item on its thread, and
+the queue stops offering them. So a resolve that closed a question nobody
+answered is the only report that reaches the agent who asked. The child reads
+the thread on the frame and delivers that resolve.
+
+The place a rule runs depends on what it reads. The analytics rule reads only
+the event name. The server runs it, so the drop reaches each attached session
+at the next prod restart, and the frame never enters the replay buffer. The
+other two rules read more than the name. The self-echo rule must know which
+session is reading. The empty-act rule must read the thread on the frame. The
+child holds both, so the child runs them.
 
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
