@@ -1,4 +1,5 @@
 import {
+  type Comment,
   type ElementAnchor,
   type Thread,
   cssColor,
@@ -14,6 +15,13 @@ import {
 // (`scripts/bundle-guard.ts`).
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
+// The receipt decision and the glyph, from the leaf module that holds them
+// rather than from the app's renderer: the widget is a guest bundle with a
+// gzip ceiling and cannot import `comment-view.ts`, but a second copy of
+// "what does a tick mean" is how two surfaces come to disagree. Deep path,
+// not the barrel — `comment-receipt.ts` imports nothing, so this drags in
+// nothing behind it.
+import { receiptHtml, receiptState } from '@claude-workspaces/core/comment-receipt';
 import { composerNote, httpBase } from './widget-auth.ts';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
@@ -46,6 +54,18 @@ function threadSnippet(anchor: Thread['anchor']): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * The delivery mark for a comment the reader wrote, as markup, or nothing.
+ *
+ * Both places the widget draws a comment call this, so neither can be given a
+ * mark the other lacks — the failure the shared decision exists to stop. The
+ * DECISION is core's; all that is here is where the markup goes.
+ */
+function receipt(c: Comment | undefined, t: Thread, el: FeedbackWidgetEl): string {
+  const state = c ? receiptState(c, t.comments, el.user) : null;
+  return state ? receiptHtml(state) : '';
 }
 
 export function renderThreadsInto(el: FeedbackWidgetEl): void {
@@ -293,6 +313,7 @@ function renderThreadRow(
     '<span class="dot"></span>' +
     `<span class="author-name">${escape(t.createdBy.name)}</span>` +
     `<span class="time">${formatTime(last?.ts ?? 0)}</span>` +
+    receipt(last, t, el) +
     '</div>' +
     `<div class="snippet">${escape(snippet)}</div>` +
     `<div class="last">${escape(last?.text ?? '')}</div>`;
@@ -350,7 +371,7 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
     const row = document.createElement('div');
     row.className = 'comment';
     row.innerHTML =
-      `<div class="author"><span class="swatch" style="background:${cssColor(c.author.color)}"></span>${escape(c.author.name)} <span class="time">${formatTime(c.ts)}</span></div>` +
+      `<div class="author"><span class="swatch" style="background:${cssColor(c.author.color)}"></span>${escape(c.author.name)} <span class="time">${formatTime(c.ts)}</span>${receipt(c, t, el)}</div>` +
       `<div class="body">${escape(c.text)}</div>` +
       // A spoken comment keeps its clip and the words as heard.
       (c.voice
