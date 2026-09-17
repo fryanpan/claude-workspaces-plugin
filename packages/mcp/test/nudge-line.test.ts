@@ -672,6 +672,70 @@ describe('stalledLine', () => {
     expect(line.toLowerCase()).toContain('file');
   });
 
+  /**
+   * The fleet escalation reports every board's unfiled asks in ONE wake, so a
+   * reader is handed rows it does not own. Before the rows carried their own
+   * board, the line read them all under the frame's single tag and the reader
+   * could only tell by recognising the ids.
+   *
+   * The control is in the same case: the row on the frame's own board must
+   * NOT pick up a board suffix, or an ordinary per-board wake would grow one
+   * on every row for nothing.
+   */
+  it('names the board of a row that is not on the frame’s own, and only that row', () => {
+    const line = stalledLine(
+      {
+        stalledCount: 0,
+        consideredCount: 2,
+        unfiled: [
+          {
+            id: 't-mine',
+            title: 'Pick a retention window',
+            bucket: 'blocked-on-owner-unfiled',
+            quietMs: 70 * 60_000,
+            workspaceId: 'w-ferry',
+          },
+          {
+            id: 't-theirs',
+            title: 'Publish the winter timetable',
+            bucket: 'blocked-on-owner-unfiled',
+            quietMs: 70 * 60_000,
+            workspaceId: 'w-yard',
+          },
+        ],
+      },
+      'w-ferry',
+    );
+    expect(line).toContain('t-theirs');
+    expect(line).toContain('on board w-yard');
+    // The reader is told, once and up front, that not every row is theirs.
+    expect(line).toContain('FLEET report');
+    expect(line.toLowerCase()).toContain('route');
+    // The control: the frame's own board is never restated beside a row.
+    expect(line).not.toContain('on board w-ferry');
+  });
+
+  it('control: a single-board frame names no board beside any row', () => {
+    const line = stalledLine(
+      {
+        stalledCount: 0,
+        consideredCount: 1,
+        unfiled: [
+          {
+            id: 't-mine',
+            title: 'Pick a retention window',
+            bucket: 'blocked-on-owner-unfiled',
+            quietMs: 70 * 60_000,
+          },
+        ],
+      },
+      'w-ferry',
+    );
+    expect(line).toContain('t-mine');
+    expect(line).not.toContain('on board');
+    expect(line).not.toContain('FLEET report');
+  });
+
   it('says plainly when the pass could not read some rows', () => {
     const line = stalledLine({
       stalledCount: 0,
