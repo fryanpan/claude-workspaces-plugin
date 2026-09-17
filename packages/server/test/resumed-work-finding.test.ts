@@ -75,7 +75,12 @@ describe('a row whose blockage lifted with nothing done since is the lead’s fi
     dataDir = mkdtempSync(join(tmpdir(), 'unresumed-'));
     // No judge: every item this suite files is admitted, so a hold can never
     // stand in for the finding under test.
-    handle = createServer({ port: 0, dataDir, keepMovingCadenceMs: 0, stallNudgeQuietMs: QUIET_MS });
+    handle = createServer({
+      port: 0,
+      dataDir,
+      keepMovingCadenceMs: 0,
+      stallNudgeQuietMs: QUIET_MS,
+    });
     base = `http://127.0.0.1:${handle.port}`;
   });
 
@@ -232,9 +237,7 @@ describe('a row whose blockage lifted with nothing done since is the lead’s fi
     waitFor(
       () => {
         handle.nudgeStalls();
-        return stallFrames(lead.frames).find((f) =>
-          unresumedOf(f).some((r) => r.id === taskId),
-        );
+        return stallFrames(lead.frames).find((f) => unresumedOf(f).some((r) => r.id === taskId));
       },
       { timeout: 10_000, interval: 25, describe: 'a stall frame naming the unresumed row' },
     );

@@ -914,7 +914,9 @@ describe('stalledLine names rows whose blockage lifted as their own finding', ()
 
   it('one newly unblocked since the last wake is called out first', () => {
     const line = stalledLine({ ...STALL, changed: { unresumed: [UNRESUMED_ROW] } });
-    expect(line).toContain('NEW since the last wake: 1 task(s) newly unblocked with nothing done since');
+    expect(line).toContain(
+      'NEW since the last wake: 1 task(s) newly unblocked with nothing done since',
+    );
   });
 
   it('the control: a frame with no unresumed list says nothing about it', () => {

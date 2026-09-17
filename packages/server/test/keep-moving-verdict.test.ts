@@ -103,6 +103,29 @@ describe('what a verdict says', () => {
         quiet,
       ),
     ).toMatchObject({ verdict: 'FAIL', ungatedUi: ['t-ui'] });
+    // A row whose blockage LIFTED and which nothing has touched since: the
+    // answer it was waiting on is already in, so the promise "every open row
+    // is moving or names its blocker" is broken here too.
+    expect(
+      keepMovingVerdictFor(
+        board('w-1', {
+          unresumed: [
+            {
+              id: 't-lift',
+              title: 'rebuild the index nightly',
+              bucket: 'in-progress',
+              quietMs: 21 * HOUR,
+              lift: 'review-item-answered' as const,
+              liftedAt: T0 - 21 * HOUR,
+              liftedMs: 21 * HOUR,
+              what: 'Which key should the rebuild sort on?',
+            },
+          ],
+        }),
+        T0,
+        quiet,
+      ),
+    ).toMatchObject({ verdict: 'FAIL', unresumed: ['t-lift'] });
   });
 
   it('stays PASS and names no ungated row on a board with none', () => {
@@ -200,7 +223,7 @@ describe('once per board per cadence, and no more', () => {
     });
     r.observe([board('w-1', { stalled: [row('t-a')], unfiled: [row('t-b')] })], T0);
     expect(lines).toEqual([
-      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 waiting=0 unreadable=0 held=0 escalated=0 ungated-ui=0',
+      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 waiting=0 unreadable=0 held=0 escalated=0 ungated-ui=0 unresumed=0',
     ]);
   });
 });

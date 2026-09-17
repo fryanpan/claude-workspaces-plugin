@@ -19,7 +19,12 @@ const NOW = 1_700_000_000_000;
 
 /** A line with the verdict and stamp the reading turns on, and nothing else
  *  it reads. */
-function line(id: string, text: string, verdict?: DoneWhenLine['verdict'], at?: number): DoneWhenLine {
+function line(
+  id: string,
+  text: string,
+  verdict?: DoneWhenLine['verdict'],
+  at?: number,
+): DoneWhenLine {
   return {
     id,
     text,
@@ -144,9 +149,7 @@ describe('unresumedSince — has the lift stood with nothing done about it', () 
   it('names the 21-hour shape: past the window, nothing since', () => {
     expect(answered).toBeDefined();
     if (!answered) return;
-    expect(
-      unresumedSince(answered, { now: NOW, sinceActivityMs: 21 * HOUR, quietMs }),
-    ).toBe(true);
+    expect(unresumedSince(answered, { now: NOW, sinceActivityMs: 21 * HOUR, quietMs })).toBe(true);
   });
 
   it('stays silent on the connector timeline — work landed 61 seconds later', () => {
@@ -163,9 +166,9 @@ describe('unresumedSince — has the lift stood with nothing done about it', () 
     });
     expect(lift).toBeDefined();
     if (!lift) return;
-    expect(
-      unresumedSince(lift, { now: NOW, sinceActivityMs: 24 * HOUR - 62_000, quietMs }),
-    ).toBe(false);
+    expect(unresumedSince(lift, { now: NOW, sinceActivityMs: 24 * HOUR - 62_000, quietMs })).toBe(
+      false,
+    );
   });
 
   it('stays silent inside the window — an answer a minute old is one somebody may be reading', () => {
