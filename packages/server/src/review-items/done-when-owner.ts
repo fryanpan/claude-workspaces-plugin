@@ -374,6 +374,9 @@ export interface OwnerGateDeps {
     task: Task,
     item: TaskReviewItem,
     author: Actor,
+    /** `heldInReply` when the caller is about to hand this hold back in its
+     *  own response — see `GateRunOpts` in `review-gate.ts`. */
+    opts?: { heldInReply?: boolean },
   ): Promise<{ held: boolean; item: TaskReviewItem; reason?: string; message?: string }>;
   announceTaskReview(task: Task, item: TaskReviewItem, author: Actor & { color: string }): void;
 }
@@ -419,7 +422,12 @@ export async function gateOwnerItems(
     const unjudged = raw.judge === undefined;
     const wasHeld = isReviewItemHeld(item);
     const author = ownerItemFiler(raw, writer);
-    const gate = await deps.judgeReviewItem(task, item, author);
+    // The hold goes back in the done-when reply, so the author reads it there
+    // — but ONLY when the author is the session making the call. An item
+    // whose filer is some other session, and the boot sweep with no writer at
+    // all, have no reply to read and still get the pushed frame.
+    const inReply = writer !== undefined && author.id === writer.id;
+    const gate = await deps.judgeReviewItem(task, item, author, { heldInReply: inReply });
     if (gate.held) {
       holds.push({
         lineId: raw.doneWhenLineId,
