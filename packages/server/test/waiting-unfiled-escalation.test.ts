@@ -197,6 +197,71 @@ describe('an unfiled wait that ages goes past its lead', () => {
     expect(sent).toHaveLength(2);
   });
 
+  /**
+   * The frame fans boards in on purpose — one wake for one fact — so the only
+   * thing that can make it readable is each row saying which board it is on.
+   *
+   * Measured 2026-09-17: a frame tagged with one board named three rows from
+   * three boards, and the peer that got it could tell only by recognising an
+   * id. This drives two boards through ONE tick and asserts every row is
+   * attributable: `row.workspaceId ?? frame.workspaceId` has to be the board
+   * that actually holds it.
+   *
+   * The control rides along: the frame still carries BOTH rows in ONE send,
+   * so a fix that split the wake per board — spending a second turn — would
+   * fail here rather than pass quietly.
+   */
+  it('names each row’s own board when one frame spans two', () => {
+    dir = dir || mkdtempSync(join(tmpdir(), 'wu-escalation-'));
+    const store = new TaskStore({ dataDir: dir });
+    const boards = ['harborlight-ferry', 'saltmarsh-yard'].map(
+      (name) => store.createWorkspace(name, { leadAgentId: LEAD.id }).id,
+    );
+    const titles = ['Cut the release branch', 'Publish the winter timetable'];
+    const ids = boards.map((ws, i) => {
+      const res = store.createTask(ws, {
+        title: titles[i] as string,
+        body: `Agent can ${(titles[i] as string).toLowerCase()} so that the work lands.`,
+        assignee: LEAD.name,
+        assigneeKind: 'agent',
+      });
+      if (!res.ok) throw new Error('create failed');
+      return res.task.id;
+    });
+    const snapshots = boards.map((ws, i) =>
+      snapshot(ws, [waitingRow(ids[i] as string, titles[i] as string)]),
+    );
+    const sent: Array<{ agentId: string; frame: StallNudgeFrame }> = [];
+    const teamLead: TeamLeadReach = {
+      agentId: 'agent-team-lead',
+      // Team Lead holds a stream on the SECOND board only, so the wake is
+      // delivered somewhere that does not hold the anchor row either.
+      boards: () => boards,
+      canReach: (ws) => ws === boards[1],
+      send: (_ws, agentId, frame) => {
+        sent.push({ agentId, frame });
+        return 1;
+      },
+    };
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW, teamLead });
+    escalations.onTick(snapshots, START);
+    escalations.onTick(snapshots, START + WINDOW);
+
+    expect(sent).toHaveLength(1);
+    const frame = sent[0]?.frame as StallNudgeFrame;
+    const rows = frame.unfiled ?? [];
+    // One wake, both boards: the fan-in is the design and must survive.
+    expect(rows.map((r) => r.id).sort()).toEqual([...ids].sort());
+    // Every row attributable, by the reading an agent has to do.
+    const boardOf = (id: string) => store.getTask(id)?.workspaceId;
+    for (const row of rows) {
+      expect(row.workspaceId ?? frame.workspaceId).toBe(boardOf(row.id) as string);
+    }
+    // And the two rows really are on different boards, or the assertion above
+    // would hold for a frame that never spanned anything.
+    expect(new Set(rows.map((r) => r.workspaceId ?? frame.workspaceId)).size).toBe(2);
+  });
+
   it('the item is withdrawn once every wait is filed', () => {
     const { store, ws, ids } = boardWith(['Cut the release branch']);
     const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW });
