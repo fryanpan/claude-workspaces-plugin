@@ -30,6 +30,8 @@ const row = (over: Partial<NotesTickTiming> = {}): NotesTickTiming => ({
   lastSpokenAt: null,
   startedAt: 1200,
   waitedMs: 0,
+  beforeComposeMs: 0,
+  captureMs: null,
   promptChars: null,
   replyChars: null,
   firstTokenMs: null,

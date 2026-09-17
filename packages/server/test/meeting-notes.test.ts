@@ -2839,6 +2839,124 @@ describe('what the timing log records about a meeting', () => {
     expect(rows[0]?.waitedMs).toBe(0);
   });
 
+  it('charges the capture pass to the tick, so the spans add up to the wait', async () => {
+    // The blind spot this closes: the capture call sat after the clock that
+    // ends `waitedMs` and before the one that starts `composeMs`, so a second
+    // model call in front of the note was in no span at all and showed up
+    // only as the difference between the named spans and the elapsed time.
+    let now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    const composer: NotesComposer = {
+      name: 'slow',
+      compose: () => {
+        now += 900; // the compose call
+        return Promise.resolve(editsSaying('- a note'));
+      },
+    };
+    const session = beginNotesSession(
+      {
+        composer,
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        captureIntents: () => {
+          now += 1_600; // the capture call, in front of the compose
+          return Promise.resolve({ tasks: [], docs: [] });
+        },
+        onNotes: () => {
+          now += 20; // the doc write
+        },
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'Measure the capture pass.', final: true });
+    now += 4_000; // the pause the ticker waited out
+    schedule.fire();
+    await session.end();
+
+    const row = timing.rows()[0];
+    expect(row?.captureMs).toBe(1_600);
+    // Nothing else stands between the top of the compose chain and the model,
+    // so on this harness the two are equal; in a meeting `beforeComposeMs` is
+    // the larger, and the difference is the outline read.
+    expect(row?.beforeComposeMs).toBe(1_600);
+    // The queue wait keeps its old meaning: this tick was behind nothing.
+    expect(row?.waitedMs).toBe(0);
+    // And the spans now ACCOUNT for the wait rather than merely sampling it:
+    // the pause, then every named span, is the whole of it.
+    expect(row?.settledToWrittenMs).toBe(
+      4_000 +
+        (row?.waitedMs ?? 0) +
+        (row?.beforeComposeMs ?? 0) +
+        (row?.composeMs ?? 0) +
+        (row?.applyMs ?? 0),
+    );
+  });
+
+  it('says a tick ran no capture pass rather than saying it was free', async () => {
+    // Control for the case above: same shape with the pass removed. Null, not
+    // zero — a reader summing `captureMs` over a meeting has to be able to
+    // tell a tick that skipped the call from one that made a fast one.
+    let now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    const session = beginNotesSession(
+      {
+        composer: createStubNotesComposer(),
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        onNotes: () => {},
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'No capture pass here.', final: true });
+    now += 4_000;
+    schedule.fire();
+    await session.end();
+
+    const row = timing.rows()[0];
+    expect(row?.captureMs).toBeNull();
+    expect(row?.beforeComposeMs).toBe(0);
+  });
+
+  it('charges a capture pass that FAILED, because the note waited for it anyway', async () => {
+    // The expensive capture is the one that times out, and booking the span
+    // only on success would hide exactly that tick.
+    let now = 1_000;
+    const schedule = new ManualScheduler();
+    const timing = createNotesTimingLog();
+    const session = beginNotesSession(
+      {
+        composer: createStubNotesComposer(),
+        quietMs: 1000,
+        schedule,
+        now: () => now,
+        openTiming: () => timing,
+        captureIntents: () => {
+          now += 2_400; // the wait before it gave up
+          return Promise.reject(new Error('capture timed out'));
+        },
+        onError: () => {},
+        onNotes: () => {},
+      },
+      ids,
+    );
+    session.onTurn({ turn: 0, text: 'The capture pass will fail.', final: true });
+    now += 4_000;
+    schedule.fire();
+    await session.end();
+
+    const row = timing.rows()[0];
+    expect(row?.captureMs).toBe(2_400);
+    // And the tick still wrote its note: a failed capture costs time, not the
+    // meeting's notes.
+    expect(row?.outcome).toBe('written');
+  });
+
   it('records a refused write as a failed tick with no latency to report', async () => {
     let now = 1_000;
     const schedule = new ManualScheduler();
