@@ -35,6 +35,7 @@ import {
   refusalProof,
 } from '@claude-workspaces/core/done-when-refusal';
 import {
+  REVIEW_HOLD_UNUSABLE_REASON,
   boundHoldWords,
   holdCountWord,
   holdGapKey,
@@ -554,7 +555,20 @@ export function createReviewGate(ctx: ReviewGateContext) {
      */
     const priorHeldFor = priorJudgement?.heldFor ?? [];
     const heldFor = target.refusedCheck
-      ? priorHeldFor.filter((r) => !isGetItAnywayHold(r))
+      ? priorHeldFor.filter(
+          // The disavowed hold, whichever of the two shapes it is stored in.
+          //
+          // `isGetItAnywayHold` reads the judge's sentence, but a hold whose
+          // sentence named a figure the item never stated was replaced whole
+          // by `REVIEW_HOLD_UNUSABLE_REASON` before it was recorded — and the
+          // lead's real holds were exactly that, because both named
+          // `/v1/models`. So on this path the laundering words are already
+          // gone and the text filter finds nothing to drop. What is left is a
+          // hold the gate itself could not put into words, carried onto a
+          // check the gate has now disavowed: it goes too, for the same
+          // reason its sibling does.
+          (r) => !isGetItAnywayHold(r) && r !== REVIEW_HOLD_UNUSABLE_REASON,
+        )
       : priorHeldFor;
     // How the item got to the reader, when it did not get there by passing.
     // Carried forward on every later verdict for the same reason `heldFor`

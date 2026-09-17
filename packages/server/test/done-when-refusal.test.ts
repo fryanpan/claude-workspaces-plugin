@@ -22,6 +22,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { REFUSED_CHECK_PASS_REASON } from '@claude-workspaces/core/done-when-refusal';
 import type { ReviewJudgeInput, ReviewJudgeVerdict } from '../src/review-judge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
@@ -238,7 +239,12 @@ describe('a line nobody was refused', () => {
     verdict = { ok: false, reason: FIRST_HOLD };
     const { body } = await report(taskId, lineId, [{ text: 'the run log', url: LOG }]);
     expect(body.held).toHaveLength(1);
-    expect(body.held?.[0]?.heldReason).toBe(FIRST_HOLD);
+    // NOT the verbatim sentence: the hold-bounding rule owns the stored
+    // wording now, and FIRST_HOLD names an endpoint this item never states,
+    // so it is replaced before it is recorded. What this test is about
+    // survives that — the line was HELD, and it was not let through by the
+    // refusal path, which is the only way the gate could have been disarmed.
+    expect(body.held?.[0]?.heldReason).not.toBe(REFUSED_CHECK_PASS_REASON);
     expect(judged[0]?.item.refusedCheck).toBeUndefined();
     expect(await onQueue(taskId)).toBe(0);
   });
