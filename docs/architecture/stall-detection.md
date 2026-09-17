@@ -365,8 +365,9 @@ wakes correctly:
   apart on one 12h `ready-unpicked` task, measured 2026-09-04. What made
   a task flicker without moving: an escalation item used to mask its anchor
   task from the gate until it was withdrawn (gone since rebuild step 3), and a
-  task on the parallelism cap's boundary still leaves the judged set whenever
-  another task starts or stops being runnable. The bucket is held UP with the
+  task on the parallelism cap's boundary still leaves the STALL reading
+  whenever another task starts or stops being runnable (its unfiled ask, if it
+  has one, stays named either way since 2026-09-17). The bucket is held UP with the
   task that earned it, and
   the hold expires with that task: `told` forgets a task that has been off the
   list for a whole repeat window, and the next task then escalates on its own

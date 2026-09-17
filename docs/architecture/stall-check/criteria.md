@@ -23,10 +23,16 @@ today's code fails is flagged.
 - **Must:** produce `stalled`, `unfiled` and `undetermined` from the
   classifier, gated on the same quiet window, and name a watched builder's
   silence as `builder-silent`.
-- **Must never:** report a task the parallelism cap keeps out of flight, or
-  a task under a triage band, or a schedule rule task.
-- **Measured by:** unit tests per exclusion; the verdict's `considered`
-  denominator.
+- **Must never:** report as STALLED a task the parallelism cap keeps out of
+  flight, or report at all a task under a triage band. Both exclusions are
+  about work nobody was supposed to be doing. Neither reaches the `unfiled`
+  list, and nor does the schedule-rule exclusion: an unanswered question is a
+  finding whatever the capacity, the band or the row's kind. The cap held one
+  anyway until 2026-09-17 — it skipped the row outright, and
+  `waiting-unfiled` rides the two runnable buckets the cap is built from.
+- **Measured by:** unit tests per exclusion, including a `waiting-unfiled`
+  row ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the
+  verdict's `considered` denominator.
 
 ## `stall-nudge.ts` — the lead wake
 
@@ -45,8 +51,10 @@ today's code fails is flagged.
   task with a standing declared wait is taken off `stalled` before any of
   this (`withoutStandingWaits`), so it neither wakes the lead nor appears
   under "stopped moving" on a wake something else caused, until it lapses. A
-  task past the parallelism cap needs no filter: the gate never judges it, and
-  `beyondCapacity` is a count on the frame that never enters the stamp.
+  task past the parallelism cap needs no filter for its SILENCE: the gate
+  never judges that, and `beyondCapacity` is a count on the frame that never
+  enters the stamp. An unfiled ask on such a task does reach the frame, and
+  should — it is one call for the lead, and no slot is needed to make it.
 - **Measured by:** the `[stall] wake` log lines per board per day, and the
   lead's act latency from transcripts (measured 2026-09-08: median 0–4 min).
 

@@ -54,8 +54,11 @@ second question, or the wait cleared. A task with a standing `declare_wait`
 is not a finding at all (`withoutStandingWaits`): it wakes nobody, is never
 listed as stopped, and rides along on a wake that fired for something else
 only as a declared wait. The tick after the wait lapses it is a finding again,
-carrying all its silence. A task past the parallelism cap is not
-judged at all, so it never enters the clock in the first place.
+carrying all its silence. A task past the parallelism cap is not judged for
+STALLING — there was no slot for it, so its silence is idleness by rule and it
+never enters the clock. It is still judged for an unanswered ask: capacity is
+why nobody picked the row up and says nothing about a question already asked
+and filed nowhere.
 
 ## The rebuild, in order
 
