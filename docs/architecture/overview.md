@@ -567,8 +567,8 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
-**An agent gets no wake for an event it cannot act on.** Two rules give that,
-and neither hides state.
+**An agent gets no wake for an event it cannot act on.** Three rules give that,
+and none of them hides state.
 
 *Its own action.* The MCP child drops a frame whose actor is this session, so
 an agent's own comment, review item or task move costs it no turn. Every other
@@ -581,6 +581,18 @@ and changes nothing, so the server keeps it off the fan-out while the audit log
 still gets the row. `review_item.answered` stays on the stream, because an
 answer is the wake an agent waits for. The list is in
 `packages/server/src/review-items/analytics.ts`.
+
+*An act with no words.* A resolve is a status flip and carries no text, so the
+MCP child drops the frame before it becomes a wake. It drops it for every
+reader, not only the session that resolved the thread, which is what separates
+this rule from the self-echo one. A resolve retires each review item on its
+thread, so a resolve that closed an unanswered ask still wakes: it is the only
+report that reaches the agent who asked. Rule in
+`packages/mcp/src/bookkeeping-events.ts`.
+
+Which rule runs where depends on what it reads. The server drops by event name,
+which reaches every attached session at the next prod restart. The child drops
+by what the frame carries, because that is where the frame is.
 
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`

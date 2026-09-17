@@ -14086,6 +14086,29 @@ function createCallToolHandler(deps) {
   };
 }
 
+// packages/mcp/src/bookkeeping-events.ts
+function mayCarryAnOpenAsk(thread) {
+  if (!thread || typeof thread !== "object")
+    return;
+  const comments = thread.comments;
+  if (!Array.isArray(comments))
+    return;
+  return comments.some((c) => {
+    const review = c?.review;
+    if (!review || typeof review !== "object")
+      return false;
+    return review.answeredAt === undefined && review.answeredWith === undefined && review.withdrawnAt === undefined;
+  });
+}
+function isBookkeepingEvent(event, payload) {
+  if (event === "thread.resolved") {
+    if (!payload || typeof payload !== "object")
+      return false;
+    return mayCarryAnOpenAsk(payload.thread) === false;
+  }
+  return false;
+}
+
 // packages/mcp/src/decision-line.ts
 function openPartsClause(openParts) {
   if (!Array.isArray(openParts))
@@ -14699,6 +14722,8 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   }
 }
 async function emitChannelMessage(deps, event, rawPayload) {
+  if (isBookkeepingEvent(event, rawPayload))
+    return;
   if (BOARD_EVENT_RE.test(event)) {
     await emitBoardChannelMessage(deps, event, rawPayload);
     return;
@@ -20394,7 +20419,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.253";
+var PLUGIN_VERSION = "0.1.254";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

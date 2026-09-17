@@ -189,7 +189,28 @@ const FRAMES: Array<{ event: string; frame: (who: string) => Record<string, unkn
   },
   {
     event: 'thread.resolved',
-    frame: (who) => ({ docId: 'd1', threadId: 'th1', actor: actor(who) }),
+    // The thread carries an ask nobody answered, which is the one resolve
+    // that still reaches anybody at all (`bookkeeping-events.ts`). Without it
+    // this row would prove the self-echo rule against a frame the renderer
+    // drops one gate earlier, which is a green that measures nothing.
+    frame: (who) => ({
+      docId: 'd1',
+      threadId: 'th1',
+      actor: actor(who),
+      thread: {
+        id: 'th1',
+        status: 'resolved',
+        comments: [
+          {
+            id: 'c1',
+            author: actor(who),
+            text: 'Which way?',
+            ts: 1,
+            review: { shape: 'decision', headline: 'Which way?' },
+          },
+        ],
+      },
+    }),
   },
   {
     event: 'thread.reopened',
