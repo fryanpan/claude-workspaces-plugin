@@ -225,4 +225,39 @@ describe('the stylesheet the widget installs', () => {
     expect(sent.back).toBe('0');
     expect(received.back).toBe('1');
   });
+
+  /**
+   * The mark is the surface's own muted foreground at 0.85 — a little lighter
+   * than the time it sits beside, the same relationship the app's rule has.
+   * Held against the TIME rather than against a hex, because a hex copied
+   * from the app agrees on a number while inverting this: the app's muted
+   * grey is darker than the widget's, so the app's painted value would make
+   * the mark the darkest thing in a widget row. That is the mistake this case
+   * exists to catch, and it was made once.
+   */
+  it('is the same grey as the time beside it, one step lighter', () => {
+    const style = document.createElement('style');
+    style.textContent = widgetStyles;
+    document.head.append(style);
+    const el = popoverWidget();
+    showThreadPopover(el, plainThread([{}]), 5, 5);
+    // The WHOLE popover moves, not the two nodes: the time's rule is
+    // `.thread-popover .author .time`, so a detached node matches nothing and
+    // reads an empty colour — which would pass against a mark that also read
+    // empty, and fail here against one that does not.
+    const pop = el.shadow.querySelector('.thread-popover') as HTMLElement;
+    document.body.append(pop);
+    const mark = pop.querySelector('.cw-receipt') as HTMLElement;
+    const time = pop.querySelector('.author .time') as HTMLElement;
+    expect(getComputedStyle(time).color, 'CONTROL: the time has a colour to compare').not.toBe('');
+    expect(getComputedStyle(mark).color).toBe(getComputedStyle(time).color);
+    expect(getComputedStyle(mark).opacity).toBe('0.85');
+    // CONTROL: the time declares no opacity of its own, so the 0.85 above is
+    // the mark's and this is not two readings of one declaration. happy-dom
+    // returns '' for a property nothing declared rather than the initial
+    // value, so both spellings of "untouched" pass and a real `opacity: 0.85`
+    // on the time would read '0.85' and fail.
+    expect(['', '1']).toContain(getComputedStyle(time).opacity);
+    style.remove();
+  });
 });
