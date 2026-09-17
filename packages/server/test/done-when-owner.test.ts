@@ -5,7 +5,7 @@
  * done-when-owner-items.test.ts. All fixtures are synthetic.
  */
 import { describe, expect, it } from 'bun:test';
-import type { TaskReviewItem } from '@claude-workspaces/core';
+import { REVIEW_LIMITS, type TaskReviewItem } from '@claude-workspaces/core';
 import type { DoneWhenLine } from '@claude-workspaces/core/done-when';
 import type { StoredReviewItem, Task } from '@claude-workspaces/core/task-wire';
 import {
@@ -205,6 +205,14 @@ describe('the answer', () => {
 describe('ownerCheckReview', () => {
   const task = { title: 'A task' } as Task;
 
+  /** A real acceptance criterion's length — the shape that shipped a
+   *  209-character headline to the reader's queue (2026-09-15). */
+  const LONG_LINE =
+    'Before build, Bryan picks an interactive mock built on the real Home panel, showing waiting items as full-width, fixed-size blocks coloured by project in queue priority order.';
+  /** A real proof note: several sentences of context, not a label. */
+  const LONG_PROOF =
+    "Interactive mock built from staging's real Home markup: per-project blocks in queue order, with states for 0/1/12/40 items. It loads through the prod mockup route at 1180.";
+
   it('is a decision whose options are the two the answer reads', () => {
     const review = ownerCheckReview(task, {
       id: 'd-1',
@@ -215,7 +223,56 @@ describe('ownerCheckReview', () => {
     expect(review.options.map((o) => o.id)).toEqual([OWNER_CHECK_MET, 'not-met']);
   });
 
-  it('leads with a link to the proof, then says what to check and what each answer does', () => {
+  it('gives a headline that fits a phone row, however long the line is', () => {
+    const { headline, detail } = ownerCheckReview(task, {
+      id: 'd-1',
+      text: LONG_LINE,
+      proof: [{ text: LONG_PROOF, url: 'https://example.com/workspaces/w-x/mockups/d-y' }],
+    });
+    expect(headline.length).toBeLessThanOrEqual(REVIEW_LIMITS.headline);
+    expect(headline).not.toContain('\n');
+    // Clipped at a word boundary, not mid-word.
+    expect(headline.endsWith('…')).toBe(true);
+    const kept = headline.replace(/^Check: /, '').replace(/…$/, '');
+    expect(LONG_LINE.startsWith(kept)).toBe(true);
+    expect(LONG_LINE[kept.length]).toBe(' ');
+    // Nothing the clip dropped is lost: the whole line is in the detail.
+    expect(detail).toContain(LONG_LINE.replace(/\.$/, ''));
+  });
+
+  it('keeps a short line whole in the headline', () => {
+    const { headline } = ownerCheckReview(task, {
+      id: 'd-1',
+      text: 'On the phone the app page shows the comment button.',
+    });
+    expect(headline).toBe('Check: On the phone the app page shows the comment button');
+  });
+
+  it('does not end the headline at an abbreviation', () => {
+    const { headline } = ownerCheckReview(task, {
+      id: 'd-1',
+      text: 'Works on your phones, e.g. Mobile Safari, at 430 wide.',
+    });
+    expect(headline).toBe('Check: Works on your phones, e.g. Mobile Safari, at 430 wide');
+  });
+
+  it('opens with the link on its own line, and never puts a paragraph in the label', () => {
+    const { detail } = ownerCheckReview(task, {
+      id: 'd-1',
+      text: LONG_LINE,
+      by: 'Kiln Bot',
+      proof: [{ text: LONG_PROOF, url: 'https://example.com/workspaces/w-x/mockups/d-y' }],
+    });
+    const [first, blank] = detail.split('\n');
+    expect(first).toBe('Open [the mock](https://example.com/workspaces/w-x/mockups/d-y).');
+    expect(blank).toBe('');
+    // The proof's own words are carried as context, not as something to tap.
+    expect(detail).toContain(`The note attached with it: “${LONG_PROOF}”`);
+    expect(detail).toContain('Looks right marks this line of “A task” met');
+    expect(detail).toContain('Not met sends it back to Kiln Bot');
+  });
+
+  it('uses a short proof note as the link words, and links the rest below', () => {
     // A proof with no link first, so a template that took proof in order
     // would lead with words the reader cannot open.
     const { detail } = ownerCheckReview(task, {
@@ -227,14 +284,25 @@ describe('ownerCheckReview', () => {
         { text: 'phone screenshot', url: 'https://example.com/phone.png' },
       ],
     });
-    expect(
-      detail.startsWith(
-        'Open [phone screenshot](https://example.com/phone.png) and check: On the phone the app page shows the comment button.',
-      ),
-    ).toBe(true);
-    expect(detail).toContain('Looks right marks this line of “A task” met');
-    expect(detail).toContain('Not met sends it back to Kiln Bot');
+    expect(detail.startsWith('Open [phone screenshot](https://example.com/phone.png).')).toBe(true);
+    // Said once: a label that already carries the words gets no note.
+    expect(detail).not.toContain('The note attached with it');
     expect(detail).toContain('Also attached: ran the page suite.');
+  });
+
+  it('names what a long-noted link is from its address', () => {
+    const doc = ownerCheckReview(task, {
+      id: 'd-1',
+      text: 'reads well',
+      proof: [{ text: LONG_PROOF, url: 'https://example.com/workspaces/w-x/docs/d-y' }],
+    });
+    expect(doc.detail.startsWith('Open [the doc]')).toBe(true);
+    const pr = ownerCheckReview(task, {
+      id: 'd-1',
+      text: 'reads well',
+      proof: [{ text: LONG_PROOF, url: 'https://github.com/acme/widget/pull/42' }],
+    });
+    expect(pr.detail.startsWith('Open [PR 42]')).toBe(true);
   });
 
   it('says plainly when there is nothing to open', () => {

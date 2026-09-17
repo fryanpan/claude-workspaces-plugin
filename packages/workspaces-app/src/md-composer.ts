@@ -230,6 +230,45 @@ export function attachMarkdownComposer(ta: HTMLTextAreaElement): () => void {
   return field.refresh;
 }
 
+/**
+ * How long a caller that gates its first paint on the editor will wait for the
+ * chunk. Past it the caller paints anyway — a slow network must not leave a
+ * page blank, and the plain textarea underneath is still a working box.
+ */
+export const COMPOSER_PRELOAD_TIMEOUT_MS = 3000;
+
+/**
+ * Start loading the editor chunk and resolve when it is ready to mount.
+ *
+ * For the one caller whose box is SEEDED with markdown rather than empty: the
+ * prompts page. A composer that starts empty has nothing to flash, but a box
+ * that opens holding `### Notes` paints those characters as characters until
+ * the chunk lands and the editor takes over — raw source, on screen, measured
+ * at two frames of a local staging load. Awaiting this before painting closes
+ * that window, because a resolved chunk mounts in the microtask after the
+ * markup goes in, and the browser paints no frame in between.
+ *
+ * Never rejects and never waits forever. A chunk that fails or is slow leaves
+ * the caller exactly where it was without this: painting the plain box.
+ */
+export function preloadComposerEditor(timeoutMs = COMPOSER_PRELOAD_TIMEOUT_MS): Promise<void> {
+  let mod: ComposerEditorModule | Promise<ComposerEditorModule>;
+  try {
+    mod = cached ?? (cached = loader());
+  } catch {
+    return Promise.resolve();
+  }
+  if (!isThenable(mod)) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    void mod.then(done, done);
+  });
+}
+
 function isThenable(v: unknown): v is Promise<ComposerEditorModule> {
   return typeof (v as { then?: unknown } | null)?.then === 'function';
 }

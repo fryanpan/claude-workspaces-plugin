@@ -99,6 +99,18 @@
         "  });"
       ],
       "why": "conventional placeholders and a historical figure used as sample data. No address: an address is a leak by a different rule, and a case that carries one cannot say whether the NAME was what blocked it."
+    },
+    "house-names": {
+      "path": "packages/workspaces-app/test/roster-strip.test.ts",
+      "lines": [
+        "  it(\"names the speaker whose audio dropped\", () => {",
+        "    const h = mountStrip({ speakers: [\"Alice Saltmarsh\", \"Bob Harborlight\"] });",
+        "    h.dropStream(\"Alice Saltmarsh\");",
+        "    expect(h.alarm()).toContain(\"Alice Saltmarsh's audio stopped\");",
+        "    expect(ownerOf(\"riverbend-sync\")).toBe(\"Riverbend\");",
+        "  });"
+      ],
+      "why": "the three house fixture names, in the position that blocked a real push on 2026-09-15 \u2014 a surname in a test constant. Every OTHER word in it is a conventional placeholder, so a block here can only be the house name: a given name of its own would be judged on its own merits and would inflate the rate this case exists to read. Every builder here is told to write these INSTEAD of a real name, so a scanner that blocks them sets the two halves of the convention against each other, and a push-range block is not clearable by a forward commit."
     }
   },
   "positives": [
@@ -254,6 +266,13 @@
       "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
       "fragment": "placeholders",
       "why": "the fixture names a scanner must keep letting through, or every test file in the repo becomes a leak"
+    },
+    {
+      "id": "house-fixture-names",
+      "kind": "planted",
+      "shas": ["34388f9af5260b474ffed4b6c2898dc0b940ec54"],
+      "fragment": "house-names",
+      "why": "the words scrub_names.HOUSE_FIXTURE_NAMES names. Blocking here is the convention refusing its own placeholder, and the FP it produces is not paid once: the gate reads the whole unpushed range, so it blocks again on every later push of that branch."
     },
     {
       "id": "ordinary-large",

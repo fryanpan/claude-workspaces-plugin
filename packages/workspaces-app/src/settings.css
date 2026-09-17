@@ -363,9 +363,15 @@ body.settings-body {
 .prompt-default-view .md-composer {
   margin-top: 8px;
 }
+/* Opened, the default is READ — top to bottom, in the page's own scroll. The
+   190px window this used to be showed a tenth of a 1,800px prompt and asked
+   the reader to scroll a box inside a scrolling page, which is the one gesture
+   a trackpad and a thumb both get wrong. `max-height: none` also undoes the
+   composer's own `min(45vh, 360px)` clamp, which is there to stop a box being
+   TYPED IN from pushing the caret off screen — nobody types here. */
 .prompt-default-view .md-composer-surface {
   min-height: 0;
-  max-height: 190px;
+  max-height: none;
   color: var(--fg-muted);
 }
 

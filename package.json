@@ -37,6 +37,7 @@
     "check:meeting-smoke": "bun run scripts/meeting-smoke-check.ts",
     "test:audit": "bun run scripts/test-audit.ts",
     "coverage": "bun run scripts/coverage.ts",
+    "keys:trace": "bun run scripts/claude-key-slots.ts",
     "loc:audit": "bun run scripts/loc-audit.ts",
     "ui:shot": "bun run scripts/ui-shot.ts",
     "ui:nightly": "bun run scripts/ui-nightly.ts",

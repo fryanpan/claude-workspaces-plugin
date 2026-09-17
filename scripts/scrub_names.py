@@ -41,6 +41,28 @@ CONTEXT_LINES = 2
 # already seen twice tells it nothing new.
 REPEATS_SENT = 2
 
+# --- The house fixture names -------------------------------------------------
+#
+# Every builder in this repository is told to write these three words wherever
+# a real person's or client's name would otherwise go: a test fixture, a mock
+# payload, a doc example, a sample transcript. They are invented place-words
+# and they name nobody.
+#
+# A convention that names them is only half a convention while the gate in
+# front of the push refuses them. On 2026-09-15 a push was blocked with
+# `Personal surname "saltmarsh" used as sample data in test constant`, and
+# because the push gate reads every added line of the unpushed range, a
+# forward commit does not clear it — the only escape is rebuilding the branch
+# as one commit, which cost that branch its ordered history. This list is the
+# other half, so both halves say the same thing.
+#
+# It is deliberately three words long. The exemption is these exact words and
+# nothing wider: it is NOT "a surname in a fixture is fine", which would be a
+# hole in a leak gate on a public repository. `scrub-haiku.py` renders them
+# into the scanner's closed placeholder list, beside Alice and Bob; the half a
+# person reads is CLAUDE.md's "Leak gates" section.
+HOUSE_FIXTURE_NAMES = ("Harborlight", "Riverbend", "Saltmarsh")
+
 _RUN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*")
 _HEXISH = re.compile(r"^[0-9a-fA-F]{7,}$")
 _LETTERS = re.compile(r"[^\W\d_]+")

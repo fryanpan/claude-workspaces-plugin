@@ -943,6 +943,17 @@ the eval item everywhere else. `summarize.ts`'s `resolveKeyFrom`, which every
 Claude adapter already calls, asks it; `scripts/eval-credential.ts` asks it with
 the marker stripped. The environment and the Keychain reader are parameters.
 
+`claude-key-slot.ts` joins the SERVICES row and moves no boundary, because
+it holds one piece of process state the domain row's purity bar would not
+take. It names the slot a credential came out of — the Keychain service or
+the environment variable, plus the role `prod` or `eval` — and keeps the
+latest answer each call path resolved, so `bun run keys:trace` can ask a
+RUNNING process which name every adapter consulted rather than inferring it
+from `claude-key-source.ts`. The slot rides `NotesCallUsage` into the
+meeting timing ledger, which is how a stored row says which key paid. It
+imports the service names from `claude-key-source.ts` and nothing else; a
+value never reaches it, and nothing derived from one is ever produced.
+
 `model-quota.ts` and `notes-notice.ts` join the DOMAIN row and move no
 boundary. The first answers one question about a refused model call — is the
 account out of quota, or is this request's own problem — from a status and a

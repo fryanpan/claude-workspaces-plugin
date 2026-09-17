@@ -27,7 +27,7 @@ import { NOTES_AUTHOR_ID } from '../packages/server/src/notes-doc-access.ts';
 import { buildNotesPrompt } from '../packages/server/src/notes-prompt-build.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS } from '../packages/server/src/notes-prompt-store.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
-import { resolveKeyFrom } from '../packages/server/src/summarize.ts';
+import { resolveKeySlotFrom } from '../packages/server/src/summarize.ts';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -171,7 +171,12 @@ async function main(): Promise<void> {
   const at = args.indexOf('--baseline');
   const baselineFile = at >= 0 ? args[at + 1] : undefined;
   const keyAt = args.indexOf('--api-key');
-  const key = resolveKeyFrom(keyAt >= 0 ? args[keyAt + 1] : undefined, readKeychainPassword);
+  const key =
+    resolveKeySlotFrom(
+      'cost-script',
+      keyAt >= 0 ? args[keyAt + 1] : undefined,
+      readKeychainPassword,
+    )?.key ?? null;
 
   const now = buildNotesPrompt(INPUT, DEFAULT_NOTES_INSTRUCTIONS);
   const baseline = baselineFile
