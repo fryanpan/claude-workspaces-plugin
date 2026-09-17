@@ -131,7 +131,8 @@ So: **do not tighten this constant against this table.** It would take a
 record gathered while the grace was in force, where boots above 75s are
 allowed to finish and say how long they took. A grace derived from the p99
 would have killed the 109.9s boot, which survived only because the restart
-limiter had already spent its three for that hour.
+limiter had already spent its three for that hour — the watchdog did ask, and
+the minute-by-minute of that ask is in episode one below.
 
 One more reading of the same record, and it is the strongest argument that the
 grace can afford to be generous: **in 171 boots the watchdog has never been
@@ -208,18 +209,22 @@ and restarted a server that was perfectly alive. That repeated three times,
 the limiter then refused a fourth until **15:41Z**, and every board on the
 machine was unreachable for seven minutes.
 
-The 109.9s boot in the table above is from this storm, at 14:47:27Z. It
-survived **only because the limiter had already spent its three restarts for
-the hour.**
+The 109.9s boot in the table above is from this storm: `startedAt`
+14:47:27.781Z, `servingAt` 14:49:17.721Z.
 
 **Episode one hit the unbound pattern too**, which no reconstruction of the day
-noticed until the error log was read again: the same log carries `not listening
-(ECONNREFUSED)` at 14:42:30 (1/2), and then at 14:48:14 (1/2) and 14:48:43
-(2/2) — a pair that reached the restart threshold, while one of this storm's
-boots was still hydrating. So the blocked loop and the killed boot are not one
-episode each. The first-bind grace is a fix for both halves of the day, which
-is a stronger case for it than a page that told the story as one fault per
-outage would make.
+noticed until the error log was read beside that record. The log carries `not
+listening (ECONNREFUSED)` at 14:42:30 (1/2), and then at 14:48:14 (1/2) and
+14:48:43 (2/2) — and those last two sit **inside the 109.9s boot**, between its
+start and its bind. It reached 2/2 at 14:48:43, the watchdog asked for a
+restart, the limiter refused because three had already been spent that hour,
+and the boot bound 34 seconds later.
+
+That is the whole argument for the grace, in one incident. The longest boot in
+the entire record was condemned by the watchdog, saved by a rate limit that
+exists for an unrelated reason, and was half a minute from working. It also
+means the blocked loop and the killed boot are not one episode each: the
+first-bind grace is a fix for both halves of the day.
 
 ### Episode two, from 23:12:50Z — the watchdog killing boots
 
