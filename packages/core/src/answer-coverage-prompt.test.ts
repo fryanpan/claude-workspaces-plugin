@@ -220,14 +220,44 @@ describe('blanketAnswer — one reply that settles the whole ask', () => {
   });
 
   it('leaves a refusal a later sentence walks back to the model', () => {
-    // A carve-out anywhere in the reply means some part survives the refusal,
-    // so the item stays on the queue however plainly sentence one refused.
+    // A sentence that keeps one of the things back means the refusal was not
+    // blanket, so the item stays on the queue however plainly it refused.
+    //
+    // What decides this is what the later sentence is ABOUT, never the word
+    // that introduces it. The first version of this widening leaned on the
+    // carve-out word list and closed four of these silently — so the list
+    // below deliberately runs past that vocabulary, and the last four use no
+    // contrast word at all.
     for (const reply of [
       "Don't give these tips to beginners. But keep the persona one.",
-      "No, don't give these tips. Except the Harborlight one.",
-      "No, don't give these tips. Only the first one is worth it.",
+      "Don't give these tips to beginners. However, keep the persona one.",
+      "Don't give these tips to beginners. Actually, keep the persona one.",
+      "Don't give these tips to beginners. Though keep the persona one.",
+      "Don't give these tips. Scratch that, the Harborlight one is fine.",
+      "Don't give these tips. Mind you, keep the persona one.",
+      "Don't give these tips. That said, the Harborlight one stays.",
+      "Don't give these tips. Having said that, keep the Saltmarsh alerts.",
+      // No contrast word anywhere — the part is simply named and kept.
+      "Don't give these tips. Keep the persona one.",
+      "Don't give these tips. The Saltmarsh alerts are worth it.",
+      "Don't give these tips. Pin the Harborlight view anyway.",
+      'No, drop these tips. Leave the board rename in.',
     ]) {
       expect([reply, blanketAnswer(reply, THREE_TIPS)]).toEqual([reply, false]);
+    }
+  });
+
+  it('still clears when the later sentences say nothing about the asks', () => {
+    // The other half of the same rule: a reason, a deferral or an aside is
+    // not a carve-out, so these must not be held back by the guard above.
+    for (const reply of [
+      "No don't give these tips. I think this is a different story.",
+      "No, don't give these tips. They add nothing.",
+      "No, don't give these tips. We can revisit later.",
+      "Drop these tips. I'd rather ship what we have.",
+      "No, don't give these tips. Sorry for the slow reply.",
+    ]) {
+      expect([reply, blanketAnswer(reply, THREE_TIPS)]).toEqual([reply, true]);
     }
   });
 

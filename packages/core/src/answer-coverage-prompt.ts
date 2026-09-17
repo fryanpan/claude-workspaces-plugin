@@ -136,19 +136,70 @@ function nounForms(noun: string): string[] {
  * refusing it a refusal of all of them. Anything less goes to the model.
  *
  * Asked of ONE sentence; the caller asks it of each. A refusal of the whole
- * subject is a refusal wherever in the reply it was written.
+ * subject is a refusal wherever in the reply it was written. Answers WHICH
+ * noun it refused, because the caller then has to ask whether another
+ * sentence kept one of them back.
  */
-function refusesTheAsksSubject(sentence: string, item: AnswerCoverageItem | undefined): boolean {
-  if (!item || !ACCEPT_REFUSE.test(sentence)) return false;
+function refusedSubject(sentence: string, item: AnswerCoverageItem | undefined): string | null {
+  if (!item || !ACCEPT_REFUSE.test(sentence)) return null;
   const m = sentence.match(
     /\b(?:these|those)\s+(?:\d+\s+|two\s+|three\s+|four\s+)?([a-z][a-z-]{2,})\b/,
   );
   const noun = m?.[1];
-  if (noun === undefined) return false;
+  if (noun === undefined) return null;
   const questions = questionSegments(item);
-  if (questions.length < 2) return false;
+  if (questions.length < 2) return null;
   const forms = nounForms(noun);
-  return questions.every((q) => forms.some((w) => new RegExp(`\\b${w}e?s?\\b`).test(q)));
+  const everyQuestion = questions.every((q) =>
+    forms.some((w) => new RegExp(`\\b${w}e?s?\\b`).test(q)),
+  );
+  return everyQuestion ? noun : null;
+}
+
+/** Matches the word as the item might spell it, singular or plural. */
+function wordRe(w: string): RegExp {
+  return new RegExp(`\\b${w}e?s?\\b`);
+}
+
+/**
+ * The words that name a PART of the ask rather than its subject: those a
+ * question asks about which do NOT run through every question. "tip" is in
+ * all three, so it is the subject; "harborlight" and "saltmarsh" are in one
+ * each, so naming one names a part.
+ *
+ * Short words are skipped because at three letters and under the field is
+ * almost all grammar ("it", "to", "on"), and a grammatical word names
+ * nothing.
+ */
+function partWords(item: AnswerCoverageItem): string[] {
+  const per = questionSegments(item).map((q) => new Set(q.match(/[a-z][a-z-]{3,}/g) ?? []));
+  const everywhere = (w: string) => per.every((s) => s.has(w));
+  return [...new Set(per.flatMap((s) => [...s]))].filter((w) => !everywhere(w));
+}
+
+/**
+ * English's pro-form for "another of the things we were discussing" — "keep
+ * the persona ONE". Naming it is not the start of a vocabulary the way the
+ * contrast words are: the language has this one word for the job, so there is
+ * no next one to add when somebody phrases a carve-out differently.
+ */
+const ANOTHER_OF_THEM = /\bones?\b/;
+
+/**
+ * Does this sentence hold a PART of the ask back from a refusal — the shape
+ * of a walk-back, whatever word introduces it?
+ *
+ * Three ways a sentence can be about one of the things: the pro-form above,
+ * the ask's own subject noun (a sentence that is not itself the refusal but
+ * still says "tip" is talking about a tip), and a word that names one part.
+ * None of them is a list of ways to say "but", which is the point — "however",
+ * "actually", "though", "scratch that" and a walk-back with no contrast word
+ * at all are all caught by what the sentence is ABOUT.
+ */
+function keepsAPart(sentence: string, item: AnswerCoverageItem, subject: string): boolean {
+  if (ANOTHER_OF_THEM.test(sentence)) return true;
+  if (nounForms(subject).some((w) => wordRe(w).test(sentence))) return true;
+  return partWords(item).some((w) => new RegExp(`\\b${w}\\b`).test(sentence));
 }
 
 /**
@@ -174,11 +225,19 @@ function refusesTheAsksSubject(sentence: string, item: AnswerCoverageItem | unde
  * provisional by what follows it (2026-09-16): "no don't give these tips. i
  * think this is a different story" refuses in sentence one and then says why,
  * and reading only the last sentence put the same ask back on the reader's
- * queue. What stops a later sentence from walking a refusal back is the
- * carve-out test above, which reads the WHOLE reply — "don't give these tips
- * to beginners, but keep the persona one" still goes to the model, because
- * "but" is there. The other two shapes stay pinned to the last sentence: a
- * hand-back settles the ask only when it is where the reply lands.
+ * queue. The other two shapes stay pinned to the last sentence: a hand-back
+ * settles the ask only when it is where the reply lands.
+ *
+ * What stops a later sentence from walking that refusal back is NOT the
+ * carve-out test above. That test is a fixed list of contrast words, and the
+ * first version of this widening leaned on it: "…but keep the persona one"
+ * was held, while "however", "actually", "though" and "scratch that" all
+ * closed items their reader had not refused — silently, which is the worst
+ * way for this to be wrong. A word list cannot be finished, so the guard is
+ * `keepsAPart` instead: a refusal is blanket only while no OTHER sentence is
+ * ABOUT one of the things. That is a property of the reply, so it holds for
+ * phrasings nobody listed, including a walk-back with no contrast word at
+ * all ("don't give these tips. keep the persona one.").
  *
  * Everything else goes to the model, which is what keeps a genuinely partial
  * answer on the queue: "no, don't send the alert" names one thing, and so
@@ -212,7 +271,13 @@ export function blanketAnswer(text: string, item?: AnswerCoverageItem): boolean 
   const said = sentences(one);
   const last = said.at(-1) ?? one;
   if (TOTAL_QUANTIFIER.test(last) || HAND_BACK.test(last)) return true;
-  return said.some((s) => refusesTheAsksSubject(s, item));
+  if (!item) return false;
+  const refused = said.map((s) => refusedSubject(s, item));
+  const subject = refused.find((n) => n !== null);
+  if (subject === undefined || subject === null) return false;
+  // Refused somewhere — but only blanket while no OTHER sentence keeps one of
+  // them back. A sentence that refuses again is not a walk-back.
+  return !said.some((s, i) => refused[i] === null && keepsAPart(s, item, subject));
 }
 
 /** Collapse whitespace and fence-breaking angle brackets, as the judge does. */
