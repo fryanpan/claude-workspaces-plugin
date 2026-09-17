@@ -139,6 +139,49 @@ export interface StalledRowPayload {
   quietMs?: number;
 }
 
+/**
+ * The bucket the server sends for the row whose OWN CLOSING NOTE was read as
+ * an ask — the one door into `unfiled` that is not a board fact.
+ *
+ * Two things put a row on that list, and until this constant existed the line
+ * said the same words about both. `blocked-on-owner-unfiled` is the BOARD
+ * saying a person owns the row (its `ownerKind`, or its goal band) with
+ * nothing filed. This one is `detectAsk` — a regex over the agent's prose —
+ * reading a status note as an ask. Measured case: a note ending "Merge waits
+ * on the classifier block on <person>'s queue" put an agent-assigned row
+ * under an ordinary dispatched goal into the flat sentence, and its reader
+ * was told to go and file an ask that nobody had asked for.
+ *
+ * **The rendered sentence quotes no error RATE, on purpose.** There are two
+ * measured ones — 86% precision over 631 closing messages, and 94% after the
+ * tuning, both in `docs/architecture/unfiled-ask.md` — and both were measured
+ * over end-of-turn NOTES, while the rows reaching this sentence also had to
+ * survive the quiet clock. So any figure here is an extrapolation onto a
+ * different population, and a precise-sounding wrong number on a calibration
+ * line is the very failure this split exists to end. The qualitative claim —
+ * this came from a regex over the agent's words, not from the board — is the
+ * part that is true and the part the reader acts on.
+ *
+ * **A row with NO `bucket` renders as the board-declared sentence, and that
+ * is right rather than merely tolerable.** `bucket` has been on `StalledRow`
+ * since #404, the frame's inception; a row could only reach `unfiled` through
+ * this door from #1050. So a server old enough to omit the field can only
+ * ever have carried board-declared rows, and the default reproduces the old
+ * wording byte for byte for exactly those frames.
+ *
+ * A reader who learns the notice overclaims stops acting on the true rows
+ * too, which is why the fix is the wording rather than the finding: both rows
+ * are still named, and both still age and escalate exactly as before.
+ *
+ * `stall-escalation.ts` has carried two wordings for these two buckets since
+ * it was written (`BUCKET_WORDS`); this line had one, so the renderer had
+ * fallen behind a distinction the model already makes. The spelling is the
+ * server's `WAITING_UNFILED_BUCKET` — restated rather than imported, because
+ * this package may not reach into the server's, and pinned against it by
+ * `agent-owned-unfiled-wording.test.ts` so the two cannot drift apart.
+ */
+const NOTE_INFERRED_UNFILED = 'waiting-unfiled';
+
 /** One review item the quality gate is holding past its window, as
  *  `stall-nudge.ts` puts it on the wire. `id` is the ticket's. */
 export interface HeldRowPayload {
@@ -553,7 +596,9 @@ function changedClause(changed: StallPayload['changed']): string {
  *  - `unfiled` is a row waiting on a person nobody actually asked. Nothing is
  *    stalled there; the remedy is to file the question where they read it, and
  *    telling the lead to "drive" it would send them to chase somebody who was
- *    never asked.
+ *    never asked. It renders as TWO sentences, split on the row's bucket: what
+ *    the board declares, and what the row's own note was read to say. See
+ *    `NOTE_INFERRED_UNFILED` for why one sentence was not enough.
  *  - `undetermined` is rows the pass could not read. Spelled loudly and with
  *    which way the uncertainty falls, for the reason the ready line spells it:
  *    a row nobody could read that arrives as "already handled" is the exact
@@ -590,12 +635,32 @@ export function stalledLine(p: StallPayload): string {
         'then unblock it, hand it to somebody, or park it with a reason.',
     );
   }
+  // TWO SENTENCES, because two different things put a row on this list and
+  // the reader's next act differs. See `NOTE_INFERRED_UNFILED` for the story.
   const unfiled = p.unfiled ?? [];
-  if (unfiled.length > 0) {
-    const noun = unfiled.length === 1 ? 'task is' : 'tasks are';
+  const declaredUnfiled = unfiled.filter((r) => r.bucket !== NOTE_INFERRED_UNFILED);
+  const saidUnfiled = unfiled.filter((r) => r.bucket === NOTE_INFERRED_UNFILED);
+  if (declaredUnfiled.length > 0) {
+    const noun = declaredUnfiled.length === 1 ? 'task is' : 'tasks are';
     parts.push(
-      `${unfiled.length} ${noun} waiting on a person with NO question filed — ` +
-        `${stalledRowsClause(unfiled)}. File the ask where they will see it, or the wait is invisible.`,
+      `${declaredUnfiled.length} ${noun} waiting on a person with NO question filed — ` +
+        `${stalledRowsClause(declaredUnfiled)}. File the ask where they will see it, or the wait is invisible.`,
+    );
+  }
+  if (saidUnfiled.length > 0) {
+    const one = saidUnfiled.length === 1;
+    // Every clause agrees in number with its subject. Written out rather than
+    // pluralised by a helper: "an ask", "the row" and "the note" each had to
+    // move, and a reader who meets "3 tasks' own closing notes read as an ask
+    // to a person" is being told the sentence was not proof-read.
+    const subject = one
+      ? 'task’s own closing note reads as an ask to a person, with nothing filed on the row'
+      : 'tasks’ own closing notes read as asks to a person, with nothing filed on those rows';
+    parts.push(
+      `${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled)}. This is NOT the board ` +
+        `saying a person owns ${one ? 'the row' : 'those rows'} — it is a regex over the agent’s ` +
+        `own words. Read ${one ? 'the note' : 'each note'}, then file the ask where they will see ` +
+        'it, or say in one line that there was none.',
     );
   }
   // The declared waits, in two sentences rather than one, because the reader's
