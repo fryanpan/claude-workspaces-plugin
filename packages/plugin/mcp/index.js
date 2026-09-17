@@ -14275,6 +14275,56 @@ function changedClause(changed) {
     return "";
   return `NEW since the last wake: ${bits.join("; ")}.`;
 }
+var STALL_PAYLOAD_KEYS = {
+  taskId: true,
+  docId: true,
+  title: true,
+  stalledCount: true,
+  consideredCount: true,
+  beyondCapacity: true,
+  parallelismCap: true,
+  rows: true,
+  unfiled: true,
+  undetermined: true,
+  heldItems: true,
+  askedBack: true,
+  unanswered: true,
+  ungatedUi: true,
+  checkIn: true,
+  declaredWaits: true,
+  changed: true,
+  escalatedFrom: true,
+  ts: true
+};
+var STALL_ENVELOPE_KEYS = [
+  "event",
+  "workspaceId",
+  "eid",
+  "actor",
+  "watchKey"
+];
+var KNOWN_STALL_KEYS = new Set([
+  ...Object.keys(STALL_PAYLOAD_KEYS),
+  ...STALL_ENVELOPE_KEYS
+]);
+function carriesContent(v) {
+  if (v === null || v === undefined || v === false || v === "" || v === 0)
+    return false;
+  if (Array.isArray(v))
+    return v.length > 0;
+  if (typeof v === "object")
+    return Object.keys(v).length > 0;
+  return true;
+}
+function unknownStallKeys(p) {
+  return Object.entries(p).filter(([key, value]) => !KNOWN_STALL_KEYS.has(key) && carriesContent(value)).map(([key]) => key);
+}
+function unrenderableBody(unknown3) {
+  if (unknown3.length === 0) {
+    return "the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.";
+  }
+  return `the board reported findings this plugin cannot read — the frame carries ${unknown3.join(", ")}, ` + "which this bundle does not know. Your plugin is OLDER than this server, which is the likely " + "cause rather than a broken wake. The board is NOT clear: update the plugin " + "(command claude plugin update claude-workspaces@claude-workspaces), restart this session, and " + "read the board with next_tasks / list_tasks meanwhile.";
+}
 function stalledLine(p) {
   const parts = [];
   const rows = p.rows ?? [];
@@ -14340,10 +14390,17 @@ function stalledLine(p) {
     const noun = checkIn.length === 1 ? "task has" : "tasks have";
     parts.push(`${checkIn.length} ${noun} somebody on ${checkIn.length === 1 ? "it" : "them"} who has gone ` + `quiet past the check-in window — ${stalledRowsClause(checkIn)}. Ask each holder for a ` + "line now: the protocol is an activity update every 30 minutes, even if it is " + '"still on X, next Y".');
   }
+  const unknown3 = unknownStallKeys(p);
+  const renderedFindings = parts.length > 0;
+  if (renderedFindings && unknown3.length > 0) {
+    parts.push(`This frame ALSO carried ${unknown3.join(", ")}, which this plugin cannot read, so there is ` + "more on this board than the sentences above. Update the plugin " + "(command claude plugin update claude-workspaces@claude-workspaces) and restart this session.");
+  }
   const changed = changedClause(p.changed);
   if (changed)
     parts.unshift(changed);
-  const body = parts.join(" ") || "the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.";
+  if (!renderedFindings)
+    parts.push(unrenderableBody(unknown3));
+  const body = parts.join(" ");
   if (p.escalatedFrom !== undefined && p.escalatedFrom !== "") {
     return `[workspace.stalled] You are not this board's lead — ${p.escalatedFrom} holds the seat and ` + "is not reachable, so this came to you instead. Nothing addressed to that seat is arriving: " + "take it (attach_agent) or hand it to a session that is here. Then, on the board itself: " + body;
   }
@@ -14588,6 +14645,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       meta: {
         workspace_id: p.workspaceId ?? "unknown",
         ...p.taskId ? { task_id: p.taskId } : {},
+        ...p.docId ? { doc_id: p.docId } : {},
         event,
         ...p.actor?.name ? { author: p.actor.name } : {}
       }
@@ -20124,7 +20182,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.245";
+var PLUGIN_VERSION = "0.1.246";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

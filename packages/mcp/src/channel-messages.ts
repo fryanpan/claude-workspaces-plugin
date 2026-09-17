@@ -122,6 +122,18 @@ export interface BoardEventPayload {
    *  there is nothing to acknowledge. */
   queueId?: string;
   taskId?: string;
+  /**
+   * The event's subject when it names a DOC rather than a task. On
+   * `workspace.stalled` that is the wake's anchor — a question on a doc
+   * thread, or a review item filed on one; on `workspace.review_item_held` it
+   * is the surface a doc-filed hold lives on. Carried into the channel meta
+   * as `doc_id` for BOTH, deliberately: a doc id delivered as `task_id`
+   * resolves to nothing and reads as a broken wake, and a doc id delivered as
+   * nothing leaves the reader with a finding they cannot open. No other board
+   * event carries a top-level `docId` — `voice.request` nests its under
+   * `context`. See nudge-line.ts and stall-nudge.ts.
+   */
+  docId?: string;
   taskIds?: string[];
   task?: { title?: string };
   actor?: { id?: string; name?: string };
@@ -340,6 +352,13 @@ async function emitBoardChannelMessage(
       meta: {
         workspace_id: p.workspaceId ?? 'unknown',
         ...(p.taskId ? { task_id: p.taskId } : {}),
+        // Under its own name, never `task_id`: the two id spaces are not
+        // interchangeable and a reader that fed one to the other got a miss.
+        // Not gated on the event — every board event with a top-level `docId`
+        // means the same thing by it, and the one other that has one
+        // (`workspace.review_item_held`, for a hold filed on a doc thread)
+        // wants it delivered for the same reason.
+        ...(p.docId ? { doc_id: p.docId } : {}),
         event,
         ...(p.actor?.name ? { author: p.actor.name } : {}),
       },

@@ -277,7 +277,15 @@ export interface DeclaredWaitPayload {
 /** What `workspace.stalled` carries. Eight lists, because the lead's next act
  *  differs for each — see `stalledLine`. */
 export interface StallPayload {
+  /** The anchor row, when it is a TASK. Never a doc id: a doc-anchored wake
+   *  carries `docId` instead, because a reader that fed this field to a task
+   *  lookup got a miss and read it as a broken wake. */
   taskId?: string;
+  /** The anchor row when it is a DOC — a question on a doc thread, or a
+   *  review item filed on one, neither of which hangs on a task. Absent from
+   *  a server older than the split, whose doc-anchored wakes put the doc's id
+   *  in `taskId`. */
+  docId?: string;
   title?: string;
   stalledCount?: number;
   consideredCount?: number;
@@ -610,6 +618,147 @@ function changedClause(changed: StallPayload['changed']): string {
 }
 
 /**
+ * Every key a `workspace.stalled` frame carries that THIS bundle can read —
+ * the eight finding lists, the fields that qualify them, and the envelope the
+ * frame rides in.
+ *
+ * It exists so the renderer can tell "the server sent findings I do not know"
+ * from "the server sent nothing", which it could not before: a key nobody
+ * reads is simply not read, so a frame carrying only `unanswered` looked
+ * exactly like a frame carrying nothing at all, and the body fell through to
+ * a sentence blaming the wake. Two peers read that sentence on three boards
+ * on 2026-09-16, one of them 85 rows deep.
+ *
+ * The blame it corrects is not a guess. `stall-nudge.ts` RETURNS before
+ * emitting when every one of its lists is empty, so a frame that arrives
+ * carries at least one finding by construction — which means an empty render
+ * is this bundle's inability to read the frame, not the board's emptiness,
+ * whenever the frame holds a key this set does not.
+ *
+ * The payload half is BOUND to `StallPayload` by its type rather than typed
+ * out beside it: `Record<keyof StallPayload, true>` fails the build when a
+ * field is added to the payload and not to this table, and when a name here
+ * matches no field. Before that binding the two agreed only by coincidence,
+ * and a missing name is the worst failure this file has — it makes the notice
+ * below fire on every ordinary wake. The envelope half cannot be bound that
+ * way, because those fields belong to the transport rather than to the
+ * payload type; `watchKey` is the one that was missed, and a test takes a
+ * frame off a real mux stream rather than trusting this list.
+ *
+ * Kept as a set of names rather than a version number on the wire because the
+ * reader is the half that is OLD: a version the server states only helps
+ * against servers that already state it, while this comparison works against
+ * every server, including ones deployed before the renderer that reads it.
+ * See the PR that added it.
+ */
+const STALL_PAYLOAD_KEYS: Record<keyof StallPayload, true> = {
+  // The anchor.
+  taskId: true,
+  docId: true,
+  title: true,
+  // The counts and their denominator.
+  stalledCount: true,
+  consideredCount: true,
+  beyondCapacity: true,
+  parallelismCap: true,
+  // The eight finding lists, and the things that qualify them.
+  rows: true,
+  unfiled: true,
+  undetermined: true,
+  heldItems: true,
+  askedBack: true,
+  unanswered: true,
+  ungatedUi: true,
+  checkIn: true,
+  declaredWaits: true,
+  changed: true,
+  escalatedFrom: true,
+  ts: true,
+};
+
+/** The wire fields that are NOT part of the payload type — the envelope the
+ *  frame rides in, and the transport's own tag. */
+const STALL_ENVELOPE_KEYS = [
+  'event',
+  'workspaceId',
+  'eid',
+  'actor',
+  // TRANSPORT, not a finding: `sse-mux.ts` spreads the frame and stamps the
+  // watch key it arrived on into EVERY multiplexed frame, which is what makes
+  // one socket equivalent to N. It is on the wire of the path this plugin
+  // actually uses, so omitting it made the notice below fire on every
+  // ordinary stall wake — caught by review before it shipped, and pinned by
+  // the mux case in `stall-wake-blame.test.ts` rather than by this comment.
+  'watchKey',
+] as const;
+
+const KNOWN_STALL_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(STALL_PAYLOAD_KEYS),
+  ...STALL_ENVELOPE_KEYS,
+]);
+
+/**
+ * Does this value SAY anything? An absent key, an empty list and a zero are
+ * all "the server had none of these", and a renderer that cried version skew
+ * over them would fire on every ordinary frame — which is how a notice
+ * becomes the thing people skim.
+ */
+function carriesContent(v: unknown): boolean {
+  if (v === null || v === undefined || v === false || v === '' || v === 0) return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === 'object') return Object.keys(v as object).length > 0;
+  return true;
+}
+
+/**
+ * The frame's own keys that this bundle does not know AND that carry
+ * something — in wire order, so the names read as the server spelled them.
+ *
+ * Deliberately not claiming they are findings. A future server may add a key
+ * that is neither a list nor a row, and this line would then name it; the
+ * advice it carries is right either way, because the reader is a plugin older
+ * than the server it is talking to in both cases.
+ *
+ * It sees TOP-LEVEL keys only. A new sub-key inside `changed` is invisible to
+ * it, and that is the accepted hole: `changed` repeats findings the lists
+ * below it already carry, so a skew there costs the "what moved" sentence and
+ * never the findings themselves.
+ */
+function unknownStallKeys(p: StallPayload): string[] {
+  return Object.entries(p as Record<string, unknown>)
+    .filter(([key, value]) => !KNOWN_STALL_KEYS.has(key) && carriesContent(value))
+    .map(([key]) => key);
+}
+
+/**
+ * The body for a frame that rendered to nothing — and WHOSE FAULT that is.
+ *
+ * Both versions stay loud, on purpose. A peer that met the old sentence spent
+ * one call confirming the board rather than reading it as finished, which is
+ * the three-state behaviour the fleet's own rules ask for; the defect was
+ * never the volume, it was that the sentence accused the server of a bug in
+ * the wake when the reader's own bundle was the thing that could not read it.
+ * So the loudness is unchanged and only the blame moves.
+ *
+ * Which of the two the reader gets is decided by evidence rather than by a
+ * guess: keys on the frame that this bundle does not know are the version
+ * skew, and none of them means the frame really did arrive with nothing
+ * renderable on it, which remains a bug worth reporting.
+ */
+function unrenderableBody(unknown: readonly string[]): string {
+  if (unknown.length === 0) {
+    return 'the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.';
+  }
+  return (
+    `the board reported findings this plugin cannot read — the frame carries ${unknown.join(', ')}, ` +
+    'which this bundle does not know. Your plugin is OLDER than this server, which is the likely ' +
+    'cause rather than a broken wake. The board is NOT clear: update the plugin ' +
+    '(command claude plugin update claude-workspaces@claude-workspaces), restart this session, and ' +
+    'read the board with next_tasks / list_tasks meanwhile.'
+  );
+}
+
+/**
  * Render `workspace.stalled` — work that was supposed to be moving and is not.
  *
  * This wake differs from `readyIdleLine` in what it asks for. Ready work needs
@@ -795,16 +944,37 @@ export function stalledLine(p: StallPayload): string {
         '"still on X, next Y".',
     );
   }
-  // Never empty: the server does not send this frame with all seven lists
-  // empty, and a line that could render to a bare slug would be the
-  // no-subject wake the whole file exists to prevent.
+  // What this bundle could not read. Said LAST among the lists when there is
+  // something else to say — the sentences above are work the reader can do
+  // now, and this one is a caveat on how complete they are — and it becomes
+  // the whole body when there is nothing else, where it replaces a sentence
+  // that blamed the wake for the reader's own version.
+  const unknown = unknownStallKeys(p);
+  // Whether a FINDING rendered, read before the `changed` clause joins the
+  // list. `changed` is news ABOUT findings rather than a finding, so letting
+  // it stand in for one hid the whole notice: a frame with an unreadable list
+  // and a renderable `changed` clause used to render as an ordinary wake that
+  // mentioned neither the unreadable findings nor the plugin. Not reachable
+  // against today's server — every `changed` sub-key mirrors a top-level list
+  // that would have rendered — but that sentence was equally true of
+  // `askedBack` before `unanswered` shipped, and it stayed true right up to
+  // the day it was not.
+  const renderedFindings = parts.length > 0;
+  if (renderedFindings && unknown.length > 0) {
+    parts.push(
+      `This frame ALSO carried ${unknown.join(', ')}, which this plugin cannot read, so there is ` +
+        'more on this board than the sentences above. Update the plugin ' +
+        '(command claude plugin update claude-workspaces@claude-workspaces) and restart this session.',
+    );
+  }
   // Ahead of the lists, so a repeat says what moved before it says what to
   // drive. Empty on a first wake, where the whole frame is the news.
   const changed = changedClause(p.changed);
   if (changed) parts.unshift(changed);
-  const body =
-    parts.join(' ') ||
-    'the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.';
+  // After the unshift, so the news keeps the front of the body and the
+  // no-subject sentence reads as the verdict on the rest of it.
+  if (!renderedFindings) parts.push(unrenderableBody(unknown));
+  const body = parts.join(' ');
   // FIRST, when it is there. The reader of an escalated wake is not the lead:
   // before it can weigh the rows it has to know that it is standing in, and
   // that the board's own addressee is unreachable — which is a finding of its

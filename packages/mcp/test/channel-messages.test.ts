@@ -239,6 +239,55 @@ describe('board events route to the board renderer', () => {
     expect(f.meta).toMatchObject({ workspace_id: 'w1', task_id: 'k1', event: 'task.created' });
   });
 
+  /**
+   * A stall wake whose anchor is a DOC. Four boards reported this frame
+   * arriving with the doc's id in `task_id`; one lead followed it anyway and
+   * found a three-week-old unanswered question from a person on a doc with no
+   * task row behind it, which the task-walking path structurally cannot see.
+   * So the anchor is right and the FIELD NAME was wrong: the id has to reach
+   * the reader under a name that says which id space it is in.
+   */
+  it('a doc-anchored stall wake delivers doc_id, and no task_id', async () => {
+    const { frames, messages } = harness();
+    await messages.emitChannelMessage('workspace.stalled', {
+      workspaceId: 'w1',
+      docId: 'd-notes',
+      title: 'Riverbend rollout notes',
+      stalledCount: 0,
+      consideredCount: 4,
+      unanswered: [
+        {
+          id: 'd-notes',
+          docId: 'd-notes',
+          threadId: 'th-1',
+          title: 'Riverbend rollout notes',
+          askedBy: 'Riverbend',
+          askedMs: 21 * 24 * 60 * 60 * 1000,
+          excerpt: 'Does the second pass still read the whole index?',
+        },
+      ],
+    });
+    const f = only(frames);
+    expect(f.meta.doc_id).toBe('d-notes');
+    expect(f.meta.task_id).toBeUndefined();
+    expect(f.content).toContain('had NO agent reply');
+  });
+
+  it('CONTROL: a task-anchored stall wake still delivers task_id, and no doc_id', async () => {
+    const { frames, messages } = harness();
+    await messages.emitChannelMessage('workspace.stalled', {
+      workspaceId: 'w1',
+      taskId: 'k1',
+      title: 'Rank the digest by recency',
+      stalledCount: 1,
+      consideredCount: 4,
+      rows: [{ id: 'k1', title: 'Rank the digest by recency', bucket: 'in-progress' }],
+    });
+    const f = only(frames);
+    expect(f.meta.task_id).toBe('k1');
+    expect(f.meta.doc_id).toBeUndefined();
+  });
+
   it.each([
     [
       'task.transitioned',
