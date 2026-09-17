@@ -75,17 +75,60 @@ export function unplacedNoteLabel(note: UnplacedNote): string {
 }
 
 /**
+ * Everything after the first prose line, verbatim, or undefined when there is
+ * nothing after it.
+ *
+ * Walks the raw lines the way `firstLine` does — blanks and fenced code
+ * skipped — so the line it cuts at is the line the row shows. A note that is
+ * ONLY fenced code has no prose line and answers undefined; the caller falls
+ * back to the whole text, which is the honest thing to show for it.
+ */
+function afterFirstProseLine(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  let inFence = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i] ?? '';
+    if (/^\s*(```|~~~)/.test(raw)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || raw.trim() === '') continue;
+    const rest = lines
+      .slice(i + 1)
+      .join('\n')
+      .trim();
+    return rest === '' ? undefined : rest;
+  }
+  return undefined;
+}
+
+/**
  * The note split into what the row shows and what an expander holds.
  *
  * `rest` is undefined when the first line IS the whole note — the common
  * short message — so the render puts no expander on a row that has nothing
  * behind it. This tab is the only surface that carries an unplaced note, so
  * the full text has to be reachable here or it is not reachable at all.
+ *
+ * `rest` is the REMAINDER, not the whole note, whenever the shown line
+ * survived intact. `<details>` keeps its summary on screen while it is open,
+ * so handing it the whole text printed the first line twice, one directly
+ * under the other — which reads as a rendering fault rather than as an
+ * expansion. Measured at 1180x820 on a two-paragraph note.
+ *
+ * The one case that still hands back the whole note is a first line so long
+ * it was CLIPPED. The row is then showing a prefix with an ellipsis, and the
+ * characters the clip dropped exist nowhere else — so the expander has to
+ * carry them, and what looks like a repeat is the truncated line being
+ * completed.
  */
 export function unplacedNoteBody(text: string): { line: string; rest?: string } {
-  const line = firstLine(text, UNPLACED_LINE_CAP);
   const full = text.trim();
-  return full === line ? { line } : { line, rest: full };
+  const line = firstLine(full, UNPLACED_LINE_CAP);
+  if (full === line) return { line };
+  const unclipped = firstLine(full, Number.MAX_SAFE_INTEGER);
+  const after = unclipped === line ? afterFirstProseLine(full) : undefined;
+  return { line, rest: after ?? full };
 }
 
 /**

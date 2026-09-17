@@ -95,10 +95,21 @@ describe('unplacedNoteBody', () => {
     expect(unplacedNoteBody('Pushed the branch.')).toEqual({ line: 'Pushed the branch.' });
   });
 
-  it('puts the rest of a multi-line note behind the expander', () => {
+  it('puts the REST of a multi-line note behind the expander, never the line again', () => {
+    // `<details>` keeps its summary on screen while it is open, so handing it
+    // the whole note printed the first line twice, one under the other.
     const body = unplacedNoteBody('Shipped the index.\n\nStill waiting on the cache rebuild.');
     expect(body.line).toBe('Shipped the index.');
-    expect(body.rest).toBe('Shipped the index.\n\nStill waiting on the cache rebuild.');
+    expect(body.rest).toBe('Still waiting on the cache rebuild.');
+  });
+
+  it('keeps the whole note when the shown line was CLIPPED', () => {
+    // The clip dropped characters that exist nowhere else, so the expander
+    // has to carry the line it completes.
+    const long = `${'x'.repeat(400)}\nand a second line`;
+    const body = unplacedNoteBody(long);
+    expect(body.line.endsWith('…')).toBe(true);
+    expect(body.rest).toBe(long);
   });
 
   it('clips a very long first line and keeps the whole text reachable', () => {
@@ -106,6 +117,12 @@ describe('unplacedNoteBody', () => {
     const body = unplacedNoteBody(long);
     expect(body.line.length).toBeLessThanOrEqual(200);
     expect(body.rest).toBe(long);
+  });
+
+  it('shows a fenced-code-only note rather than a blank row', () => {
+    const body = unplacedNoteBody('```\nbun run verify\n```');
+    expect(body.line).toBe('bun run verify');
+    expect(body.rest).toBe('```\nbun run verify\n```');
   });
 });
 
@@ -158,7 +175,11 @@ describe('the Activity tab renders an unplaced note', () => {
     const details = root.querySelector('details.board-activity-unplaced-more');
     expect(details).not.toBeNull();
     expect(details?.querySelector('summary')?.textContent).toBe('Shipped the index.');
-    expect(details?.querySelector('.board-activity-unplaced-full')?.textContent).toBe(text);
+    const full = details?.querySelector('.board-activity-unplaced-full')?.textContent ?? '';
+    expect(full).toBe('Still waiting on the cache rebuild.');
+    // Open, the row says each line once — the summary stays on screen, so a
+    // full-text body printed the first line directly under itself.
+    expect(full).not.toContain('Shipped the index.');
   });
 
   it('draws nothing extra when the board has placed everything (control)', () => {
