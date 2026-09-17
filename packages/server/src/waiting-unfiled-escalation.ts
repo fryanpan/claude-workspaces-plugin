@@ -300,6 +300,26 @@ export class WaitingUnfiledEscalations {
    * whole turn (`stall-nudge.ts`'s wake economics), and the fact being
    * reported is the same fact however many boards it spans — so the frame
    * carries every due task and is addressed once.
+   *
+   * ── Every row says which board it is on ────────────────────────────────
+   *
+   * The fan-in above is deliberate; what was not is that the frame's SHAPE
+   * could not express it. `unfiled` used to be mapped without `workspaceId`,
+   * so every row it carried was read under the frame's single top-level tag —
+   * `due[0]`'s board. Measured 2026-09-17: one frame tagged with one board
+   * named three rows belonging to three different boards, one of which does
+   * not appear in the tagged board's events file at all. The receiving lead
+   * could only tell which row was its own by recognising the id, and its
+   * "read my own board, route anything else to its lead" rule had nothing in
+   * the event to stand on.
+   *
+   * It also explained the frame's oddest symptom: the same row quoted in two
+   * frames with the IDENTICAL quiet time. Not two computations that agreed —
+   * `waitingUnfiledRows` copies each board's already-rendered row, so the
+   * board's own wake and this one carry the same number.
+   *
+   * So each row keeps its board here, and the frame's own `workspaceId`
+   * stays the ANCHOR's board, which is what `taskId` and `title` below name.
    */
   private tellTeamLead(onBoard: string, due: readonly AgingWait[], now: number): boolean {
     const reach = this.teamLead;
@@ -319,6 +339,7 @@ export class WaitingUnfiledEscalations {
         title: row.title,
         bucket: row.bucket,
         quietMs: row.quietMs,
+        workspaceId: row.workspaceId,
       })),
       ts: now,
     };

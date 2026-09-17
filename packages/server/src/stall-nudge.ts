@@ -272,8 +272,34 @@ export interface ReviewItemHeldFrame {
 
 /** What goes on the wire. Flat, because the plugin's renderer reads these
  *  fields off the top level — see `nudge-line.ts` in packages/mcp. */
+/**
+ * A stalled row as a frame names it, plus the board that holds it when that is
+ * not the frame's own.
+ *
+ * Deliberately a widening of `StalledRow` rather than a new shape: the field
+ * is additive inside an array entry, which an older plugin bundle ignores
+ * without complaint. The frame's unknown-key guard reads the frame's OWN
+ * top-level keys (`nudge-line.ts`), so a new key here reaches a seated agent
+ * running last week's bundle as silence rather than as a notice it cannot act
+ * on.
+ */
+export type AttributedRow = StalledRow & {
+  /** The board that holds this row, set only when the frame carries rows from
+   *  more than one. Absent means the frame's own `workspaceId`. */
+  workspaceId?: string;
+};
+
 export interface StallNudgeFrame {
   event: typeof STALL_EVENT;
+  /**
+   * The board this frame is ABOUT — and, for every list on it but `unfiled`,
+   * the board each row it names is on. `taskId`/`docId` below anchor here too.
+   *
+   * It is not necessarily the board the frame was delivered over: an
+   * escalation forwards a board's frame to Team Lead on whichever board Team
+   * Lead holds a stream (`stall-escalation.ts`, `waiting-unfiled-escalation.ts`),
+   * and `escalatedFrom` is what says the receiver is a stand-in.
+   */
   workspaceId: string;
   /**
    * The row to start with, when that row is a TASK — the quietest stalled
@@ -309,11 +335,36 @@ export interface StallNudgeFrame {
    * the lookup the frame exists to save. A stalled set large enough to be a
    * wall of text is itself the finding. The RENDERED line is what shortens;
    * see `nudge-line.ts`.
+   *
+   * **This list never spans boards.** Every row on it comes from the wake for
+   * one board, so each belongs to the frame's own `workspaceId` and carries no
+   * per-row board of its own — which is why the renderer is handed no frame
+   * board for it and names no board on these rows. `unfiled` is the list that
+   * can span boards (the fleet escalation), and it is typed `AttributedRow`
+   * for exactly that reason. Widen this one and the renderer has to be given
+   * the frame board here too, or it will stay silent about a row that moved
+   * house.
    */
   rows?: readonly StalledRow[];
-  /** Rows waiting on a person with nothing filed. Absent rather than empty,
-   *  so a frame that carries none says so by omission. */
-  unfiled?: readonly StalledRow[];
+  /**
+   * Rows waiting on a person with nothing filed. Absent rather than empty,
+   * so a frame that carries none says so by omission.
+   *
+   * The ONE list on this frame that can span boards, so the one whose rows
+   * carry their own `workspaceId`. The fleet escalation
+   * (`waiting-unfiled-escalation.ts`) reports every board's unfiled asks in a
+   * single wake on purpose — a wake is a session's whole turn — and until it
+   * set this field, those rows were read under the frame's own tag. One frame
+   * tagged with one board named three rows belonging to three different
+   * boards, and the peer that got it could only tell which was its own
+   * because it recognised the id.
+   *
+   * So the reading is `row.workspaceId ?? frame.workspaceId`, and a row is
+   * ALWAYS attributable. Absent means "this frame's board", which is what
+   * every per-board wake means and why it stays optional: a per-board frame
+   * spends no bytes restating its own tag.
+   */
+  unfiled?: readonly AttributedRow[];
   /**
    * Rows the pass could not evaluate. Absent when there were none, which is
    * the ordinary case — its PRESENCE is the whole signal. A frame carrying

@@ -137,6 +137,21 @@ export interface StalledRowPayload {
   title?: string;
   bucket?: string;
   quietMs?: number;
+  /**
+   * The board that holds this row, when it is not the frame's own.
+   *
+   * Set only on the `unfiled` list, and only by the fleet escalation
+   * (`waiting-unfiled-escalation.ts`), which reports every board's unfiled
+   * asks in ONE wake. Before it existed those rows were read under the
+   * frame's single tag, so a lead was handed rows from boards it is not on
+   * with nothing in the frame to say so, and could only tell by recognising
+   * the ids.
+   *
+   * Absent means the frame's own `workspaceId` — which is what every
+   * per-board wake means, so a single-board frame spends nothing restating
+   * its own tag.
+   */
+  workspaceId?: string;
 }
 
 /**
@@ -552,13 +567,25 @@ export function reviewAnsweredLine(p: NudgePayload): string {
  *  — see `stall-nudge.ts`. */
 const STALL_ROWS_SHOWN = 5;
 
-/** One stuck row as the line names it: what it is, and how long it has been
- *  silent. The bucket is left out — the reader's action is the same for both
- *  stalled kinds, and the word "in-progress" beside a title reads as status
- *  rather than as diagnosis. */
-function stalledRowClause(row: StalledRowPayload): string {
+/**
+ * One stuck row as the line names it: what it is, how long it has been
+ * silent, and — only when the frame spans boards — which board it is on.
+ *
+ * The bucket is left out: the reader's action is the same for both stalled
+ * kinds, and the word "in-progress" beside a title reads as status rather
+ * than as diagnosis.
+ *
+ * The board is named only when it DIFFERS from the frame's own, so an
+ * ordinary per-board wake reads exactly as it always did and the words are
+ * spent only where the reader needs them — telling a row it owns from one it
+ * must route to another board's lead.
+ */
+function stalledRowClause(row: StalledRowPayload, frameBoard?: string): string {
   const named = row.title ? `"${truncate(row.title, 50)}" (${row.id})` : (row.id ?? 'a task');
-  return row.quietMs === undefined ? named : `${named} quiet ${humanDuration(row.quietMs)}`;
+  const quiet = row.quietMs === undefined ? named : `${named} quiet ${humanDuration(row.quietMs)}`;
+  return row.workspaceId === undefined || row.workspaceId === frameBoard
+    ? quiet
+    : `${quiet} on board ${row.workspaceId}`;
 }
 
 /** One declared wait as the line names it: the row, the words the declarer
@@ -574,9 +601,10 @@ function declaredWaitClause(wait: DeclaredWaitPayload, now: number | undefined):
   return `${named}${what}${held}`;
 }
 
-/** The named rows, then a count of whatever did not fit. */
-function stalledRowsClause(rows: readonly StalledRowPayload[]): string {
-  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(stalledRowClause);
+/** The named rows, then a count of whatever did not fit. `frameBoard` is what
+ *  lets a row say it belongs to a DIFFERENT board — see `stalledRowClause`. */
+function stalledRowsClause(rows: readonly StalledRowPayload[], frameBoard?: string): string {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map((row) => stalledRowClause(row, frameBoard));
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join('; ')}; and ${rest} more` : shown.join('; ');
 }
@@ -781,7 +809,7 @@ function unrenderableBody(unknown: readonly string[]): string {
  *    a row nobody could read that arrives as "already handled" is the exact
  *    swap this clause exists to prevent.
  */
-export function stalledLine(p: StallPayload): string {
+export function stalledLine(p: StallPayload, frameBoard?: string): string {
   const parts: string[] = [];
   const rows = p.rows ?? [];
   const count = p.stalledCount ?? rows.length;
@@ -817,11 +845,25 @@ export function stalledLine(p: StallPayload): string {
   const unfiled = p.unfiled ?? [];
   const declaredUnfiled = unfiled.filter((r) => r.bucket !== NOTE_INFERRED_UNFILED);
   const saidUnfiled = unfiled.filter((r) => r.bucket === NOTE_INFERRED_UNFILED);
+  // Said ONCE, ahead of both sentences, when the unfiled list reaches past the
+  // frame's own board — the fleet escalation reports every board's unfiled
+  // asks in a single wake. Without it the reader has to notice the per-row
+  // board suffix to realise some of these are not theirs to file.
+  const foreign = unfiled.filter(
+    (r) => r.workspaceId !== undefined && r.workspaceId !== frameBoard,
+  );
+  if (foreign.length > 0) {
+    parts.push(
+      `This is a FLEET report, not just this board: ${foreign.length} of the ${unfiled.length} ` +
+        'unfiled rows below sit on other boards, each named with the board it is on. Act on the ' +
+        'ones on your own board and route the rest to their board’s lead.',
+    );
+  }
   if (declaredUnfiled.length > 0) {
     const noun = declaredUnfiled.length === 1 ? 'task is' : 'tasks are';
     parts.push(
       `${declaredUnfiled.length} ${noun} waiting on a person with NO question filed — ` +
-        `${stalledRowsClause(declaredUnfiled)}. File the ask where they will see it, or the wait is invisible.`,
+        `${stalledRowsClause(declaredUnfiled, frameBoard)}. File the ask where they will see it, or the wait is invisible.`,
     );
   }
   if (saidUnfiled.length > 0) {
@@ -834,7 +876,7 @@ export function stalledLine(p: StallPayload): string {
       ? 'task’s own closing note reads as an ask to a person, with nothing filed on the row'
       : 'tasks’ own closing notes read as asks to a person, with nothing filed on those rows';
     parts.push(
-      `${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled)}. This is NOT the board ` +
+      `${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled, frameBoard)}. This is NOT the board ` +
         `saying a person owns ${one ? 'the row' : 'those rows'} — it is a regex over the agent’s ` +
         `own words. Read ${one ? 'the note' : 'each note'}, then file the ask where they will see ` +
         'it, or say in one line that there was none.',

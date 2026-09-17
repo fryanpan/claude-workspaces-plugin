@@ -313,7 +313,7 @@ async function emitBoardChannelMessage(
     // reader's next act is to drive a named list of rows, not to take the top
     // of the queue.
     case 'workspace.stalled':
-      body = stalledLine(p);
+      body = stalledLine(p, p.workspaceId);
       break;
     // The quality gate holding one of THIS agent's items — addressed to the
     // filer, so it is always about the reader's own filing. Rendered with the

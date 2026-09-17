@@ -14229,9 +14229,10 @@ function reviewAnsweredLine(p) {
   return `[workspace.review_answered] ${subject} has an answer${fromMockNote(p.via)}${openPartsClause(p.openParts)} — read it and act on it now${walk}.`;
 }
 var STALL_ROWS_SHOWN = 5;
-function stalledRowClause(row) {
+function stalledRowClause(row, frameBoard) {
   const named = row.title ? `"${truncate4(row.title, 50)}" (${row.id})` : row.id ?? "a task";
-  return row.quietMs === undefined ? named : `${named} quiet ${humanDuration2(row.quietMs)}`;
+  const quiet = row.quietMs === undefined ? named : `${named} quiet ${humanDuration2(row.quietMs)}`;
+  return row.workspaceId === undefined || row.workspaceId === frameBoard ? quiet : `${quiet} on board ${row.workspaceId}`;
 }
 function declaredWaitClause(wait, now2) {
   const named = wait.title ? `"${truncate4(wait.title, 50)}" (${wait.id})` : wait.id ?? "a task";
@@ -14239,8 +14240,8 @@ function declaredWaitClause(wait, now2) {
   const held = now2 !== undefined && wait.since !== undefined ? `, ${humanDuration2(now2 - wait.since)} so far` : "";
   return `${named}${what}${held}`;
 }
-function stalledRowsClause(rows) {
-  const shown = rows.slice(0, STALL_ROWS_SHOWN).map(stalledRowClause);
+function stalledRowsClause(rows, frameBoard) {
+  const shown = rows.slice(0, STALL_ROWS_SHOWN).map((row) => stalledRowClause(row, frameBoard));
   const rest = rows.length - shown.length;
   return rest > 0 ? `${shown.join("; ")}; and ${rest} more` : shown.join("; ");
 }
@@ -14325,7 +14326,7 @@ function unrenderableBody(unknown3) {
   }
   return `the board reported findings this plugin cannot read — the frame carries ${unknown3.join(", ")}, ` + "which this bundle does not know. Your plugin is OLDER than this server, which is the likely " + "cause rather than a broken wake. The board is NOT clear: update the plugin " + "(command claude plugin update claude-workspaces@claude-workspaces), restart this session, and " + "read the board with next_tasks / list_tasks meanwhile.";
 }
-function stalledLine(p) {
+function stalledLine(p, frameBoard) {
   const parts = [];
   const rows = p.rows ?? [];
   const count = p.stalledCount ?? rows.length;
@@ -14339,14 +14340,18 @@ function stalledLine(p) {
   const unfiled = p.unfiled ?? [];
   const declaredUnfiled = unfiled.filter((r) => r.bucket !== NOTE_INFERRED_UNFILED);
   const saidUnfiled = unfiled.filter((r) => r.bucket === NOTE_INFERRED_UNFILED);
+  const foreign = unfiled.filter((r) => r.workspaceId !== undefined && r.workspaceId !== frameBoard);
+  if (foreign.length > 0) {
+    parts.push(`This is a FLEET report, not just this board: ${foreign.length} of the ${unfiled.length} ` + "unfiled rows below sit on other boards, each named with the board it is on. Act on the " + "ones on your own board and route the rest to their board’s lead.");
+  }
   if (declaredUnfiled.length > 0) {
     const noun = declaredUnfiled.length === 1 ? "task is" : "tasks are";
-    parts.push(`${declaredUnfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(declaredUnfiled)}. File the ask where they will see it, or the wait is invisible.`);
+    parts.push(`${declaredUnfiled.length} ${noun} waiting on a person with NO question filed — ` + `${stalledRowsClause(declaredUnfiled, frameBoard)}. File the ask where they will see it, or the wait is invisible.`);
   }
   if (saidUnfiled.length > 0) {
     const one = saidUnfiled.length === 1;
     const subject = one ? "task’s own closing note reads as an ask to a person, with nothing filed on the row" : "tasks’ own closing notes read as asks to a person, with nothing filed on those rows";
-    parts.push(`${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled)}. This is NOT the board ` + `saying a person owns ${one ? "the row" : "those rows"} — it is a regex over the agent’s ` + `own words. Read ${one ? "the note" : "each note"}, then file the ask where they will see ` + "it, or say in one line that there was none.");
+    parts.push(`${saidUnfiled.length} ${subject} — ${stalledRowsClause(saidUnfiled, frameBoard)}. This is NOT the board ` + `saying a person owns ${one ? "the row" : "those rows"} — it is a regex over the agent’s ` + `own words. Read ${one ? "the note" : "each note"}, then file the ask where they will see ` + "it, or say in one line that there was none.");
   }
   const waits = p.declaredWaits ?? [];
   const standing = waits.filter((w) => w.lapsed !== true);
@@ -14614,7 +14619,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = reviewAnsweredLine(p);
       break;
     case "workspace.stalled":
-      body = stalledLine(p);
+      body = stalledLine(p, p.workspaceId);
       break;
     case "workspace.review_item_held":
       body = reviewItemHeldLine(p);
@@ -20182,7 +20187,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.247";
+var PLUGIN_VERSION = "0.1.248";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
