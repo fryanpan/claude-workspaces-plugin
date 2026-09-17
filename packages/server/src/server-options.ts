@@ -235,6 +235,18 @@ export interface ServerOptions {
    */
   deployer?: Deployer;
   /**
+   * Reads the machine-wide discovery slot — the file every local MCP client
+   * resolves this server through — for the `liveness` field on
+   * `GET /api/deploy`. See liveness.ts.
+   *
+   * Defaults to the real file under `$HOME`, cached. A seam because the slot
+   * is machine-wide state: a test that wanted to prove the route
+   * distinguishes "we own it" from "another server does" would otherwise
+   * have to write into the developer's own `~/.claude`, and reading it
+   * unmocked makes the assertion depend on whether prod happens to be up.
+   */
+  discoveryEntry?: () => { port: number; pid: number } | null;
+  /**
    * Stores a value the board's owner typed into a secret review item, under
    * the name the item declared. See secret-store.ts.
    *

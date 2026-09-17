@@ -80,7 +80,18 @@ describe('bin.ts --deploy', () => {
     await withServer(['--deploy'], async (port, headers) => {
       const res = await fetch(`http://127.0.0.1:${port}/api/deploy`, { headers });
       expect(res.status).toBe(200);
-      expect((await res.json()) as { deploy: unknown }).toEqual({ deploy: null });
+      const body = (await res.json()) as { deploy: unknown; liveness?: { port: number | null } };
+      expect(body.deploy).toBeNull();
+      // And the liveness field beside it, wired through a REAL boot: `bin.ts`
+      // is the one place the discovery reader is constructed, so this is the
+      // only case that proves the reader reaches the route at all.
+      //
+      // Only the port is asserted. `ok` depends on who owns this machine's
+      // discovery slot — prod usually does — and a case that read it would
+      // pass or fail on whether a server happened to be up. The states `ok`
+      // takes are `liveness.test.ts` and `deploy-routes.test.ts`, on an
+      // injected reader.
+      expect(body.liveness?.port).toBe(port);
     });
   }, 25_000);
 });

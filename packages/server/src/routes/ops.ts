@@ -30,6 +30,7 @@ import type { User } from '@claude-workspaces/core';
  */
 import type { Deployer } from '../deploy.ts';
 import type { DocStore } from '../doc-store.ts';
+import type { ServerLiveness } from '../liveness.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
@@ -67,6 +68,15 @@ export interface OpsRoutesContext {
    * meetings — the two are different claims.
    */
   notesQualityRollup: () => NotesQualityRollup | null;
+
+  /**
+   * Whether THIS server is bound and discoverable, right now — the second,
+   * separate claim `GET /api/deploy` answers. A thunk because both halves
+   * are live: the port is only known once `Bun.serve` has returned, and the
+   * discovery slot can change hands under a running process. See
+   * `liveness.ts` for why the route carries it at all.
+   */
+  liveness: () => ServerLiveness;
 
   /** JSON response helper — status plus body, no CORS (the per-request
    *  wrapper in createServer adds that, because it knows the Origin). */
@@ -168,6 +178,7 @@ export async function handleOpsRoutes(
   rq: OpsRouteRequest,
 ): Promise<Response | undefined> {
   const { pluginRefresher, deployer, pushStore, pushNotifier, j, safeJson, requestAddress } = ctx;
+  const { liveness } = ctx;
   const { req, pathname, visitor, authorFor } = rq;
 
   // --- REST: plugin refresh ---
@@ -286,16 +297,28 @@ export async function handleOpsRoutes(
     // allowlisting rather than the gate that stops a visitor today.
     if (visitor) return j(403, { error: 'not available to share visitors' });
     if (!deployer) {
+      // `liveness` rides along on the 501 for the same reason it exists at
+      // all: a server that cannot deploy is still a server that is up or
+      // down, and staging — the main thing this branch answers — is where
+      // "which server am I actually reaching" gets asked. The status code
+      // and the deploy semantics are untouched.
       return j(501, {
         error:
           'deploy not enabled on this server (dev and staging deliberately cannot pull or restart the deploy source)',
+        liveness: liveness(),
       });
     }
     // Reading is not deploying: a board surface that shows deploy state
     // is served over the tailnet, and reporting what already happened
     // cannot restart anything. So the read stays at trusted-local, the
     // same level as every other operator read on this server.
-    if (req.method === 'GET') return j(200, { deploy: deployer.last() });
+    //
+    // TWO CLAIMS, never one. `deploy` is the last deploy's verdict and its
+    // `verification` describes THAT boot; `liveness` is this process, now.
+    // The second field exists because the first read `healthy` right
+    // through the seven minutes prod was unreachable on 16 September, and
+    // peers took it for liveness twice. See `liveness.ts`.
+    if (req.method === 'GET') return j(200, { deploy: deployer.last(), liveness: liveness() });
     if (req.method === 'POST') {
       // Triggering one is different, and this is the narrow default.
       //
