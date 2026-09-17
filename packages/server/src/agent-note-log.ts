@@ -73,6 +73,11 @@ export const READ_BYTES_CAP = 4 * 1024 * 1024;
 /** How many notes one `readFor` hands back, newest first. Matches the ring's
  *  own per-agent cap so the two reads agree on length. */
 export const LOG_READ_CAP = 20;
+/** How many notes one `readBoard` hands back, across every agent. Larger than
+ *  the per-agent cap because the board feed it answers is one list for the
+ *  whole board rather than one agent's tail, and smaller than either bound on
+ *  the walk so the cap a reader sees is this number and not a byte count. */
+export const BOARD_READ_CAP = 50;
 
 /** One line of the log. The wire shape of a note plus where it was headed. */
 export interface LoggedAgentNote {
@@ -187,6 +192,26 @@ export class AgentNoteLog {
     const who = normalizeAgent(agent);
     const want = Math.max(0, cap);
     const found = this.tailMatching(workspaceId, (n) => normalizeAgent(n.agent) === who, want);
+    return found.sort((a, b) => b.at - a.at);
+  }
+
+  /**
+   * This board's unplaced notes, every agent, newest first, at most `cap`.
+   *
+   * The read behind the Activity tab: the tab is one list for the whole
+   * board, so the question is "what did this board fail to place lately",
+   * not "what did one agent say". Same walk and therefore the same two
+   * bounds as `readFor` — a board that has run for months costs a fixed read
+   * here too.
+   *
+   * No agent filter means the walk keeps the last `cap` PARSEABLE lines and
+   * stops, so a chatty agent can crowd a quiet one out of this list in a way
+   * it cannot out of `readFor`. That is the right trade for a feed: the tab
+   * shows what happened most recently on the board, and a per-agent view of
+   * the same log is what `readFor` is for.
+   */
+  readBoard(workspaceId: string, cap = BOARD_READ_CAP): LoggedAgentNote[] {
+    const found = this.tailMatching(workspaceId, () => true, Math.max(0, cap));
     return found.sort((a, b) => b.at - a.at);
   }
 

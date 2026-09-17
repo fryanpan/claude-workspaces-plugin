@@ -127,6 +127,54 @@ describe('AgentNoteLog', () => {
     expect(log.lastTurnAt(OTHER_WS, 'Cartographer')).toBeUndefined();
   });
 
+  describe('readBoard — every agent, for the board feed', () => {
+    it('answers one board’s notes across agents, newest first', () => {
+      log.append(note({ agent: 'Cartographer', at: 100, text: 'held two rows' }));
+      log.append(note({ agent: 'Nomad', at: 300, text: 'held none' }));
+      log.append(note({ agent: 'Cartographer', at: 200, text: 'still two' }));
+      // Another board's line must not leak into this board's feed.
+      log.append(note({ agent: 'Nomad', at: 400, workspaceId: OTHER_WS, text: 'other board' }));
+      expect(log.readBoard(WS).map((n) => [n.agent, n.text])).toEqual([
+        ['Nomad', 'held none'],
+        ['Cartographer', 'still two'],
+        ['Cartographer', 'held two rows'],
+      ]);
+      expect(log.readBoard(OTHER_WS).map((n) => n.text)).toEqual(['other board']);
+    });
+
+    it('is empty for a board that has never logged one', () => {
+      expect(log.readBoard('ws-never')).toEqual([]);
+    });
+
+    it('caps what it hands back, keeping the newest', () => {
+      for (let i = 0; i < 10; i++) log.append(note({ at: 1000 + i, text: `note ${i}` }));
+      expect(log.readBoard(WS, 3).map((n) => n.text)).toEqual(['note 9', 'note 8', 'note 7']);
+      expect(log.readBoard(WS, 0)).toEqual([]);
+    });
+
+    it('reads from the TAIL rather than parsing a long file', () => {
+      // The board feed is the read that runs on a board that has been alive
+      // for months, so it takes the same two bounds as `readFor`. Driven
+      // through the parse cap seam, which is the one a fixture can reach.
+      const impatient = new AgentNoteLog(dataDir, READ_BYTES_CAP, 4);
+      for (let i = 0; i < 40; i++) impatient.append(note({ at: 1000 + i, text: `note ${i}` }));
+      expect(impatient.readBoard(WS, 20).map((n) => n.text)).toEqual([
+        'note 39',
+        'note 38',
+        'note 37',
+        'note 36',
+      ]);
+    });
+
+    it('drops a torn line rather than the whole read', () => {
+      log.append(note({ at: 100, text: 'good one' }));
+      appendFileSync(agentNoteLogPath(dataDir, WS), '{"agent":"Cartographer","te');
+      appendFileSync(agentNoteLogPath(dataDir, WS), '\n');
+      log.append(note({ at: 200, text: 'good two' }));
+      expect(log.readBoard(WS).map((n) => n.text)).toEqual(['good two', 'good one']);
+    });
+  });
+
   describe('when one agent’s notes sit behind hundreds of another’s', () => {
     // The board this file was written for is a BUSY board — that is what
     // holding many rows means. Reading the file's last N lines and filtering

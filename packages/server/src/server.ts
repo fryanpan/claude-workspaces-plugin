@@ -2322,6 +2322,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse,
     homeBriefs,
     agentWatches,
+    agentNoteLog,
     voiceRouter,
     dataDir,
     clientReleaseRootDir,

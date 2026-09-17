@@ -98,7 +98,16 @@ export async function handleWorkspaceNext(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { taskStore, taskProjection, dataDir, opts, j, safeJson, parallelismCapView } = ctx;
+  const {
+    taskStore,
+    taskProjection,
+    dataDir,
+    agentNoteLog,
+    opts,
+    j,
+    safeJson,
+    parallelismCapView,
+  } = ctx;
   const { req, pathname, scope, url, visitor } = rq;
   // The work queue: priority order, dependency-aware, grouped into
   // waves that can run at once (§3.9 agent side).
@@ -361,7 +370,43 @@ export async function handleWorkspaceNext(
           : row,
       );
     }
-    return j(200, { workspaceId, events, uptime });
+    /**
+     * The notes NO ROW TOOK, merged into the same answer.
+     *
+     * `resolveNoteTarget` refuses to place an end-of-turn message when the
+     * agent holds more than one in-progress row it owns, and refusing is
+     * right — the old guess measured wrong about three times in four. The
+     * refused note is appended to the board's own sidecar
+     * (`agent-note-log.ts`) and, until this, was read by nothing: the record
+     * survived and no surface showed it.
+     *
+     * A SIDECAR READ, NOT A STORE EVENT, and that is the design rather than
+     * an implementation detail. An unplaced note is a record about an agent,
+     * not a change to the board, and every consumer of `events.jsonl` —
+     * this trail, the presence strip, the stall wiring, the workspace
+     * stream — carries its own exclusion list that a new event type would
+     * have to be added to in four places. So it rides beside `events` on the
+     * wire and is merged into the feed by the client, which is the only
+     * consumer that wants it.
+     *
+     * Not sent to a share visitor. The notes route these lines come from
+     * refuses a visitor outright, and an end-of-turn message is a session's
+     * own words about work in flight; the redaction that covers board events
+     * has no case for them, and inventing one here is exactly the second
+     * rule that drifts open later.
+     */
+    const unplacedNotes = visitor
+      ? []
+      : agentNoteLog.readBoard(workspaceId).map((n) => ({
+          // Display fields only, like the per-agent notes read: `sessionId`
+          // stays in the log.
+          agent: n.agent,
+          kind: n.kind,
+          text: n.text,
+          at: n.at,
+          ambiguous: n.ambiguous,
+        }));
+    return j(200, { workspaceId, events, uptime, unplacedNotes });
   }
   return undefined;
 }

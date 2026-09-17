@@ -1,4 +1,5 @@
 import type { DocType, User } from '@claude-workspaces/core';
+import type { AgentNoteLog } from '../agent-note-log.ts';
 import type { AgentWatches } from '../agent-watches.ts';
 import type { AttachMountsBrief } from '../attach-mounts.ts';
 import type { ChatAudit } from '../chat-audit.ts';
@@ -41,6 +42,12 @@ export interface WorkspaceRoutesContext {
   homeBriefs: HomeBriefStore;
   /** What each agent has asked to be told about. */
   agentWatches: AgentWatches;
+  /** The notes no row would take (`agent-note-log.ts`), read — never
+   *  written — here: the board's event feed merges them in so an end-of-turn
+   *  message from a session holding several rows reaches a reader. The same
+   *  instance the notes route appends to, so the feed cannot read a second
+   *  copy of the log with different caps. */
+  agentNoteLog: AgentNoteLog;
   /** Share links and the board memberships redeeming one creates — who has
    *  access to a board, and at what level. */
   shareLinks: ShareLinks;
