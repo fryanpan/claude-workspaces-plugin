@@ -184,10 +184,11 @@ export class WaitingUnfiledEscalations {
     }
     this.sidecar.seen = seen;
 
-    // Due: named to a lead a full window ago and STILL unfiled — or blocked on
-    // a person, which is due at once because no lead was ever named to
-    // (`waiting-unfiled-routing.ts`). Worst first, so the anchor is the task
-    // that has waited longest.
+    // Due: named a full window ago and STILL unfiled. ONE window, whatever the
+    // bucket (`isDue`, `waiting-unfiled-routing.ts`) — a finding that clears
+    // inside it should file nothing, and that is as true of the person-blocked
+    // half as of the other. What the bucket changes is the ADDRESSEE, decided
+    // below. Worst first, so the anchor is the task that has waited longest.
     const due = [...present.values()]
       .filter((row) => isDue(row, now, this.agingMs))
       .sort((a, b) => a.firstSeen - b.firstSeen);

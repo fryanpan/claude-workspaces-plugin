@@ -46,9 +46,29 @@ export function rowBucketTokens(rows: ReadonlyArray<{ id: string; bucket: string
   return rows.map((row) => `bucket:${row.id}:${row.bucket}`);
 }
 
-/** A check-in the board is carrying, due or not. */
-export function checkInTokens(rows: ReadonlyArray<{ id: string }>): string[] {
-  return rows.map((row) => `checkin:${row.id}`);
+/**
+ * A check-in the board is carrying, due or not — identified by the WINDOW it
+ * is due in, not by the row alone.
+ *
+ * The row is the obvious token and it is the wrong one. A check-in asks its
+ * holder for a word, and the row goes on owing one until they give it: a bare
+ * `checkin:<id>` is contributed on every tick for as long as the row sits
+ * there, so the reader is asked once and every later window is dropped as a
+ * repeat of the first. Measured over 400 simulated minutes on a board whose
+ * only finding is one due check-in: 14 frames became 1. That is not a repeat
+ * being removed, it is thirteen distinct asks being deleted.
+ *
+ * So the token carries when the reader was last told about this row —
+ * `undefined` before the first telling, which is its own window. A tick
+ * INSIDE a window contributes nothing at all (`dueCheckIns` has already
+ * filtered the row out of the frame), and the tick the next window opens
+ * contributes a token the reader has not been handed, so it wakes once.
+ */
+export function checkInTokens(
+  rows: ReadonlyArray<{ id: string }>,
+  toldAt: (id: string) => number | undefined,
+): string[] {
+  return rows.map((row) => `checkin:${row.id}@${toldAt(row.id) ?? 'first'}`);
 }
 
 /** A row this pass could not read. Its REASON is part of the token: the same
@@ -71,6 +91,15 @@ export function undeterminedTokens(rows: ReadonlyArray<{ id: string; reason: str
  * silent builder. Reading it as movement would not delay the check-in, it
  * would delete it, because by the time the frame could go the row has become
  * the louder finding. So the deferral covers stalls and leaves the ask alone.
+ *
+ * That exemption earns its place on ONE shape of board and it is worth naming,
+ * because a reviewer read it as dead code: a board whose stall rows are all
+ * moving and whose check-in is due. There `quiet` is non-empty and every
+ * entry in it moved, so without the exemption the frame is deferred and the
+ * ask is never made. Driven both ways over 400 minutes of one-minute ticks —
+ * with the exemption the lead is woken once, with it removed, never. On a
+ * board carrying NOTHING but the check-in the exemption changes nothing,
+ * because `quiet` is empty and an empty reading is never movement.
  */
 export function everyNamedTaskMoved(frame: StallNudgeFrame, withinMs: number): boolean {
   if (withinMs <= 0) return false;

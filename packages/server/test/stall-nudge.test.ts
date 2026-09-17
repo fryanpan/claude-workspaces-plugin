@@ -1498,7 +1498,7 @@ describe('a dispatched row whose holder stopped reporting is the lead’s remind
     expect(frame.stalledCount).toBe(0);
   });
 
-  it('says it once per task, whatever the tick rate and whatever the window', () => {
+  it('says it once per repeat window per task, whatever the tick rate', () => {
     const { world, sent, nudger } = harness();
     world.boards = [board({ stalled: [], checkIn: [DUE] })];
 
@@ -1510,13 +1510,43 @@ describe('a dispatched row whose holder stopped reporting is the lead’s remind
       nudger.tick();
     }
     expect(sent).toHaveLength(1);
+  });
 
-    // Past the check-in window, which used to send a second reminder naming
-    // the same row. The lead has been handed that row; a second copy of it
-    // tells them nothing, so the sent set holds it back.
-    world.now += CHECK_IN_REPEAT_DEFAULT_MS - 20 * MIN + 1_000;
+  it('MUTATION CONTROL: the NEXT window is a new ask, not a repeat of the last', () => {
+    // The control the silence above needs, and the one the sent set nearly
+    // took away: each window in which the row is still owing a word is its
+    // own event, so the token carries the window (`checkInTokens`) and not
+    // just the row. With the row alone the lead is asked once, ever.
+    //
+    // IT HAS TO TICK EVERY MINUTE, as the server does, and a first version of
+    // this case did not — it jumped the clock a whole window at a time and
+    // passed against the broken token. Nothing observed the board in between,
+    // so the bare `checkin:t-11` aged out of the sent set on its own and the
+    // second window read as new for the wrong reason. A row that sits there
+    // being looked at every minute never ages out, which is the case the
+    // fleet actually runs.
+    const { world, sent, nudger } = harness();
+    world.boards = [board({ stalled: [], checkIn: [DUE] })];
+    const runMinutes = (n: number): void => {
+      for (let i = 0; i < n; i += 1) {
+        world.now += MIN;
+        nudger.tick();
+      }
+    };
+
     nudger.tick();
     expect(sent).toHaveLength(1);
+
+    // Every tick up to the next window is inside the first, so it is silent.
+    runMinutes(CHECK_IN_REPEAT_DEFAULT_MS / MIN - 1);
+    expect(sent).toHaveLength(1);
+
+    runMinutes(2);
+    expect(sent).toHaveLength(2);
+
+    runMinutes(CHECK_IN_REPEAT_DEFAULT_MS / MIN);
+    expect(sent).toHaveLength(3);
+    expect((sent[2]?.frame as StallNudgeFrame).checkIn?.map((r) => r.id)).toEqual(['t-11']);
   });
 
   it('a DIFFERENT row coming due is still a reminder', () => {

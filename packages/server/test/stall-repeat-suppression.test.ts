@@ -29,7 +29,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { STALL_MOVED_WITHIN_DEFAULT_MS } from '../src/stall-frame-news.ts';
-import type { StalledRow } from '../src/stall-gate.ts';
+import { CHECK_IN_BUCKET, type StalledRow } from '../src/stall-gate.ts';
 import {
   STALL_NUDGE_STAMP_FILENAME,
   STALL_REPEAT_DEFAULT_MS,
@@ -280,6 +280,32 @@ describe('work that moved inside the window', () => {
 
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]?.rows?.map((r) => r.id)).toContain('t-old');
+  });
+
+  it('still makes a DUE CHECK-IN, though every stall beside it moved', () => {
+    // The shape the check-in's exemption from this gate exists for, and the
+    // one a reviewer read as dead code. A board whose stall rows are all
+    // moving would defer the whole frame — and by the time it could go, the
+    // row has stopped being a check-in and become a silent builder, so the
+    // ask is not delayed, it is deleted. The control below is the same board
+    // with the check-in taken off: nothing goes.
+    const due = { id: 't-ask', title: 'Land t-ask', bucket: CHECK_IN_BUCKET, quietMs: 35 * MIN };
+    const h = harness();
+    h.set({ ...h.current(), stalled: [row('t-1', 10 * MIN)], checkIn: [due] });
+
+    h.nudger.tick();
+
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.checkIn?.map((r) => r.id)).toEqual(['t-ask']);
+  });
+
+  it('MUTATION CONTROL: the same board with no check-in on it stays quiet', () => {
+    const h = harness();
+    h.set({ ...h.current(), stalled: [row('t-1', 10 * MIN)], checkIn: [] });
+
+    h.nudger.tick();
+
+    expect(h.sent).toHaveLength(0);
   });
 
   it('is an hour by default, and off when the window is zero', () => {

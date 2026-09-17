@@ -1044,18 +1044,26 @@ export class StallNudger {
     // Filtered HERE rather than in `changeOn`, because this finding's repeat
     // is its own clock and the stamp must never see a row it is holding back.
     const checkIn = this.dueCheckIns(key, board.checkIn ?? [], now);
+    // Which due window a check-in row is in, as the last telling dates it —
+    // the same reading `dueCheckIns` just made, so the token a tick observes
+    // and the token it names can only ever agree. Read BEFORE the frame goes,
+    // because delivering it moves the row to the next window.
+    const checkInWindow = (id: string): number | undefined => this.checkInTold.get(`${key}|${id}`);
     // Every token the board could name this pass, whether or not a frame goes
     // out and whether or not a check-in is due yet, so a token stays
     // remembered in the sent sets for as long as it is still a finding. A
     // check-in that has merely not come round again must not be forgotten and
-    // then re-sent as if it were a new one.
+    // then re-sent as if it were a new one — which is why the check-in tokens
+    // here read the FULL list and not `checkIn`, and why they carry the window
+    // (`checkInTokens`): this pass's window must stay remembered, and the next
+    // one must not be mistaken for it.
     const boardIds = this.newsIds(board, held, askedBack, unanswered, ungatedUi, unresumed);
     this.sentSets.observe(
       key,
       [
         ...boardIds,
         ...rowBucketTokens([...board.stalled, ...board.unfiled]),
-        ...checkInTokens(board.checkIn ?? []),
+        ...checkInTokens(board.checkIn ?? [], checkInWindow),
         ...undeterminedTokens(board.undetermined),
       ],
       now,
@@ -1177,7 +1185,7 @@ export class StallNudger {
     const named = [
       ...boardIds,
       ...rowBucketTokens([...board.stalled, ...board.unfiled]),
-      ...checkInTokens(checkIn),
+      ...checkInTokens(checkIn, checkInWindow),
       ...undeterminedTokens(board.undetermined),
     ];
     // The same findings this session was last handed: silent, but RECORDED the
@@ -1746,6 +1754,10 @@ export class StallNudger {
     // — so every row still here is news by its own clock, and it does not ride
     // the stamp. That is the one departure from the stamp rule in this method,
     // and it is deliberate: a missed check-in repeats per task per window.
+    // Since 2026-09-17 the sent sets have a say as well, and this is the one
+    // finding whose token had to carry a WINDOW rather than a row to survive
+    // them (`checkInTokens`) — a bare row id sits on the board between windows
+    // and would make the second ask a repeat of the first.
     if (
       !escalated &&
       rows.length === 0 &&

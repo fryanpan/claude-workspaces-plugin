@@ -416,6 +416,17 @@ wakes correctly:
   stamps, so a deploy does not re-send what the previous process sent. It
   forgets a token that has been off the board for a whole repeat window, which
   is what makes a recurrence news.
+  **A DUE CHECK-IN survives too, and its token had to carry the WINDOW to do
+  it.** It is the one finding whose repeat is its own event: a holder who has
+  still not said a word an hour later is a new fact, not the old one twice. A
+  bare `checkin:<id>` is contributed on every tick for as long as the row sits
+  there, so the first window's ask would swallow every later one — measured
+  over 400 simulated minutes on a board whose only finding is one due
+  check-in, the row alone gives 1 frame where the row-and-window gives 14. The
+  token is therefore `checkin:<id>@<when the reader was last told>`, which
+  makes a tick inside a window a subset (it names no check-in at all, since
+  `dueCheckIns` has filtered the row out) and the next window a new telling.
+  `stall-check/README.md` carries the same measurement.
 - **A frame about work that moved inside the hour waits.** The quiet window
   makes a ROW a finding; this makes a FRAME worth a turn. While every task a
   frame would name has moved inside `movedWithinMs` — the wiring derives it as
@@ -429,6 +440,12 @@ wakes correctly:
   held item, a question asked back, an unanswered thread, a row past the UI
   gate, a row the pass could not read, and a DUE CHECK-IN — whose whole window
   lives inside this one, so deferring it would delete it rather than delay it.
+  The check-in's exemption earns its place on one shape of board, and it is
+  worth naming because it reads as dead code: a board whose stall rows are all
+  moving and whose check-in is due. Driven both ways, the lead is woken once
+  with the exemption and never without it. On a board carrying nothing but the
+  check-in the exemption changes nothing, because there is no silence reading
+  to be movement.
 - **The repeat bucket is HELD, never lowered by a flicker**: a
   remembered task that drops off the findings for one pass used to take the
   armed bucket down with it, so its return read as another window crossed and

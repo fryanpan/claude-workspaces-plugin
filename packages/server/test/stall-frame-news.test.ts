@@ -18,7 +18,7 @@ import {
   undeterminedTokens,
   withoutPersonBlocked,
 } from '../src/stall-frame-news.ts';
-import type { StalledRow } from '../src/stall-gate.ts';
+import type { StalledRow, UnresumedRow } from '../src/stall-gate.ts';
 import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from '../src/stall-nudge.ts';
 
 const MIN = 60_000;
@@ -31,6 +31,17 @@ function row(over: Partial<StalledRow> = {}): StalledRow {
     bucket: 'in-progress',
     quietMs: 40 * MIN,
     ...over,
+  };
+}
+
+/** The same silence reading, wearing the shape the unresumed list carries. */
+function lifted(from: StalledRow): UnresumedRow {
+  return {
+    ...from,
+    lift: 'done-when-met',
+    liftedAt: 1_000_000,
+    liftedMs: 5 * MIN,
+    what: 'The rollout window is agreed',
   };
 }
 
@@ -77,9 +88,16 @@ describe('a frame whose every named task moved inside the window', () => {
   });
 
   it('reads the unfiled and unresumed lists too, not only `rows`', () => {
+    // Each list is driven BOTH ways. An empty list reads false through the
+    // `quiet.length === 0` branch, which is the answer to a different
+    // question — so a case that passes an empty array proves nothing about
+    // whether the list is read at all.
     const quiet = { ...row({ id: 't-9', quietMs: 90 * MIN }) };
+    const moving = { ...row({ id: 't-8', quietMs: 10 * MIN }) };
     expect(everyNamedTaskMoved(frame({ rows: [], unfiled: [quiet] }), HOUR)).toBe(false);
-    expect(everyNamedTaskMoved(frame({ rows: [], unresumed: [] }), HOUR)).toBe(false);
+    expect(everyNamedTaskMoved(frame({ rows: [], unfiled: [moving] }), HOUR)).toBe(true);
+    expect(everyNamedTaskMoved(frame({ rows: [], unresumed: [lifted(quiet)] }), HOUR)).toBe(false);
+    expect(everyNamedTaskMoved(frame({ rows: [], unresumed: [lifted(moving)] }), HOUR)).toBe(true);
   });
 
   it('never defers a DUE CHECK-IN, whose whole window sits inside this one', () => {
@@ -141,8 +159,15 @@ describe('a row only a person can unblock', () => {
 });
 
 describe('the tokens the sent set is compared over', () => {
-  it('name a check-in by its row', () => {
-    expect(checkInTokens([{ id: 't-7' }])).toEqual(['checkin:t-7']);
+  it('name a check-in by its row AND the window it is due in', () => {
+    // Never told: its own window, and the one every check-in starts in.
+    expect(checkInTokens([{ id: 't-7' }], () => undefined)).toEqual(['checkin:t-7@first']);
+    // Told once: a different token, so the next window is not read as a
+    // repeat of the first. Without this the row is asked about once ever.
+    expect(checkInTokens([{ id: 't-7' }], () => 1_000)).toEqual(['checkin:t-7@1000']);
+    expect(checkInTokens([{ id: 't-7' }], () => 2_000)).not.toEqual(
+      checkInTokens([{ id: 't-7' }], () => 1_000),
+    );
   });
 
   it('name an unreadable row by its REASON as well, so a new one is news', () => {

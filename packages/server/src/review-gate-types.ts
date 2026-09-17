@@ -71,6 +71,14 @@ export interface GateRunOpts {
    * other. The paths that judge an item on somebody ELSE's behalf — the boot
    * sweep, and a sync whose filer is a different session — leave it off,
    * because there is no reply for their author to read.
+   *
+   * THE CONDITION IS `author === the caller`, not "this is a route". The
+   * routes pass a flat `true` because every one of them takes its author from
+   * the requesting session's own body, so the two are the same actor by
+   * construction; `review-items/done-when-owner.ts` files on a WRITER's behalf
+   * and compares the two ids before passing it. A route that ever files for
+   * another actor must do the same, or the hold reaches nobody: the author
+   * gets no event and the caller's reply is about somebody else's item.
    */
   heldInReply?: boolean;
 }

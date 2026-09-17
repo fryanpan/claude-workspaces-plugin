@@ -51,8 +51,26 @@ not last handed is dropped at the door, and a frame whose every named task
 moved inside the hour waits until one of them crosses. Both are
 `stall-detection.md`'s "The repeat window escalates a board that stays bad";
 what survives them is a set that gained a task, a row that changed bucket, a
-new hold, a question asked back, a person's new comment, a newly unreadable
-row and a due check-in. The board's repeat
+new hold, a question asked back, a person's new comment and a newly unreadable
+row.
+
+**A due check-in survives too, once per WINDOW in which it is due.** It is the
+one finding whose repeat is its own event rather than a re-telling: a check-in
+asks its holder for a word, and a holder who has still not given one an hour
+later is a new fact, not the old one said twice. So its token carries the
+window — when the reader was last told about that row — and not the row alone.
+Both readings were built and measured over 400 simulated minutes of
+one-minute ticks on a board whose only finding is one due check-in: the row
+alone gives 1 frame, the row-and-window gives 14, and 14 is what the window is
+for. A tick inside a window still costs nothing, because the row is not due on
+it at all.
+
+What protects the ask from the OTHER gate is the check-in's exemption from the
+moved-within deferral (`everyNamedTaskMoved`, `stall-frame-news.ts`).
+On a board whose stall rows are all moving and whose check-in is due, the
+frame would otherwise be deferred past the point where the row stops being a
+check-in at all. Driven both ways: with the exemption the lead is woken once,
+with it removed, never. The board's repeat
 window is what makes a board nobody is driving get louder. It gets louder only
 about work the lead can move. A ticket whose review item is held, or whose
 reader asked a question back, is quiet for a reason that belongs to its filer,

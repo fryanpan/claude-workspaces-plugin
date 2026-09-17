@@ -797,6 +797,16 @@ export class ReadyWorkNudger {
     // not evaluate one of them has not established that the board is quiet,
     // and returning here on `ready.length === 0` alone is precisely how "I
     // could not look" came to be delivered as "I looked and saw nothing".
+    //
+    // No `sentSets.observe` here, where `stall-nudge.ts` has one on the same
+    // branch, and the difference is deliberate rather than an oversight. That
+    // call is a SWEEP with an empty list: it ages tokens out. A board with no
+    // lead has no reader whose memory could be wrong, and the first observe
+    // after the seat is refilled sweeps on the same stale timestamps, so the
+    // forgetting happens either way. What it would buy is a board that sat
+    // leaderless being swept on a clock nobody is reading — which costs a
+    // little and proves nothing. The stall side has the call because that
+    // branch does not return empty-handed: it still reports unreadable rows.
     if (board.retired || lead === undefined) {
       this.armed.delete(key);
       this.counted.delete(key);
