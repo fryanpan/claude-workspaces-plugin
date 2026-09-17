@@ -469,14 +469,21 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
     // wedge this watchdog was built for), or a first bind that never arrived
     // inside the whole grace. Only the second is a boot, and it is the one
     // worth measuring against `server-starts.json` afterwards.
+    //
+    // Both keep the words `alive-but-unbound`, because that phrase is what
+    // the 24h restart criterion counts (see the note in `scripts/serve.ts`).
+    // Splitting the message into two strings without a shared stem would have
+    // made the more serious of the two faults invisible to the grep that
+    // measures it.
     log(
       result.verdict === 'no-answer'
         ? '[supervisor] server alive but not answering — restarting via launchd'
         : everBound
           ? '[supervisor] server alive-but-unbound — it was listening earlier and is not now — ' +
             'restarting via launchd'
-          : `[supervisor] server never bound ${label} in ${Math.round(sinceArmed / 1000)}s — ` +
-            'the first-bind grace ran out — restarting via launchd',
+          : '[supervisor] server alive-but-unbound — it never bound ' +
+            `${label} in ${Math.round(sinceArmed / 1000)}s, past the first-bind grace — ` +
+            'restarting via launchd',
     );
     opts.restart();
     return 'restart';
