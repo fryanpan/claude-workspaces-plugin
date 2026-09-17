@@ -4,6 +4,16 @@ agent that created each one whether to keep it. Most review docs are used for
 ~30 minutes and then are obsolete; occasionally one waits several days on
 Bryan's feedback — so you NEVER delete docs yourself. Owners decide.
 
+**An open comment thread means somebody is still waiting for an answer, and it
+takes a doc out of this job entirely.** Idle is not the same as finished: a
+question asked on a document and never answered looks exactly like abandonment
+from here, and it is the opposite. So an open thread is a STOP CONDITION, never
+a footnote about how to delete anyway. You never suggest `force`, and you never
+ask an owner to delete a surface that holds one. The server refuses such a
+delete on purpose (`deleteDoc` returns `has-open-threads`); that refusal is the
+guard working, and talking an owner past it destroys the record of a question
+nobody answered.
+
 ## Steps
 
 1. Get the current time in epoch ms: run `date +%s` and multiply by 1000.
@@ -13,6 +23,19 @@ Bryan's feedback — so you NEVER delete docs yourself. Owners decide.
    may be absent on legacy docs), `createdAt`, `lastActivityAt` (epoch ms),
    `reviewUrl`, `sourceUrl`, and — for docs that belong to a bound folder —
    `workspaceId`.
+
+   **This listing carries no thread counts**, so it cannot on its own tell you
+   which docs hold an unanswered question. Fetch the open-thread counts too, in
+   a second pass: `curl -s 'http://localhost:8787/api/docs?limit=500'` returns
+   COMPACT rows that each carry `threads: { open, total }`, plus a `nextCursor`
+   to continue with `&cursor=<value>` until it is null. Build a
+   `docId -> threads.open` map from those pages and join it to the list above by
+   `docId`. The counts come off each doc's listing index — a map lookup, not a
+   document read — so paging the whole server this way is cheap and loads
+   nothing.
+
+   The two shapes are deliberate and you need both: the unpaginated listing has
+   `owner` but no counts, and the compact page has counts but no `owner`.
 
 3. Fetch the **workspace list**: `curl -s http://localhost:8787/workspaces`.
    Each workspace rolls up its member files: `workspaceId`, `owner`,
@@ -28,6 +51,17 @@ Bryan's feedback — so you NEVER delete docs yourself. Owners decide.
    `now_ms - lastActivityAt > 86400000` (24h). Ignore every non-idle workspace
    and non-idle standalone doc — they're active, do not nag about them.
 
+4b. **Then drop everything that holds an open thread**, before any message is
+   composed. A workspace whose `openThreads` (step 3) is greater than 0 is not a
+   cleanup candidate; neither is a standalone doc whose joined `threads.open`
+   (step 2) is greater than 0. Drop them from the run: they are waiting on an
+   answer, not on a decision about deletion, and this job has nothing useful to
+   say about them.
+
+   **A doc whose open-thread count you could not determine is dropped too.** An
+   absent or unreadable count is unknown, and unknown is not permission to ask
+   for a delete — the only safe default is to leave the doc alone.
+
 5. **If there are no idle workspaces and no idle standalone docs, do nothing and
    exit. Send no messages.**
 
@@ -39,17 +73,23 @@ Bryan's feedback — so you NEVER delete docs yourself. Owners decide.
 8. For each owner that **matches a live peer's `cwd`**: send ONE message to that
    peer via `mcp__claude-hive__send_message` (use `to_stable_id` = that peer's
    `stable_id`). List its idle items and say:
-   > "These claude-workspaces review surfaces you created have been idle >24h:
-   > [for each idle WORKSPACE: its workspaceId, fileCount, openThreads, days
-   > idle — ask to clean up with `delete_workspace(workspaceId)` (use
-   > `force: true` if member files still have open threads)] [for each idle
-   > standalone DOC: title, reviewUrl, days idle — clean up with
-   > `delete_doc(docId)`, `force: true` if it has open threads]. Keep the ones
-   > you're still waiting on Bryan for. No action needed if they're all still
-   > in use."
+   > "These claude-workspaces review surfaces you created have been idle >24h
+   > and hold no open comment threads:
+   > [for each idle WORKSPACE: its workspaceId, fileCount, days idle — ask to
+   > clean up with `delete_workspace(workspaceId)`] [for each idle standalone
+   > DOC: title, reviewUrl, days idle — clean up with `delete_doc(docId)`].
+   > Keep the ones you're still waiting on Bryan for. No action needed if
+   > they're all still in use."
    Ask the owner to delete an idle WORKSPACE as a unit via `delete_workspace` —
    do NOT ask them to delete its member files one at a time. Do NOT delete
    anything yourself.
+
+   **Never mention `force`, in any form.** Every surface named in this message
+   passed step 4b, so none of them has an open thread and none of them needs it.
+   If a delete is nevertheless refused with `has-open-threads`, a question
+   arrived after your listing: that is the guard doing its job. Tell the owner
+   the refusal stands and the doc keeps its thread — do not offer a way around
+   it.
 
 9. Collect idle workspaces/docs whose `owner` is **absent** OR whose owner
    matches **no live peer** (that agent isn't running). Send ONE digest message
@@ -62,6 +102,12 @@ Bryan's feedback — so you NEVER delete docs yourself. Owners decide.
 ## Hard constraints
 
 - NEVER call `delete_doc` or `delete_workspace` yourself. You only ASK owners.
+- **NEVER suggest `force: true`, and never ask anyone to delete a surface that
+  holds an open comment thread.** An open thread is an unanswered question; the
+  server's `has-open-threads` refusal is the guard this project relies on, and
+  this job must never coach anybody past it.
+- **An unknown open-thread count is treated as "has open threads."** Silence
+  from the listing is not a clearance.
 - Treat a bound folder as ONE unit: a workspace is idle only if every member is,
   and owners delete it with `delete_workspace`, not per-file `delete_doc`.
 - Send nothing if there are no idle workspaces and no idle standalone docs.
