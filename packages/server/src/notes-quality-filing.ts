@@ -83,9 +83,9 @@ interface Held {
   input?: NotesQualityFileInput;
   /** Where this meeting's one item went, once it has gone anywhere. */
   filed?: Filed;
-  /** The words that item currently carries, so a reading that says exactly
-   *  the same thing does not re-judge it in front of its reader. */
-  words?: string;
+  /** The verdict that item currently carries, so a re-check reaching the
+   *  same one does not re-judge it in front of its reader. */
+  verdict?: string;
   /** The resume grace, while one is armed. */
   timer?: unknown;
 }
@@ -196,10 +196,24 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
           report: input.report,
         });
 
-  /** What a filed item's words are compared on. Headline and detail together,
-   *  because a verdict can change in either half alone. */
-  const sameAs = (review: Record<string, unknown>): string =>
-    JSON.stringify([review.headline, review.detail]);
+  /**
+   * What a re-check is compared on: THE FLAGS, which are the verdict.
+   *
+   * Not the rendered words, which was the first version and was wrong. Every
+   * leg of a meeting sees a longer transcript, so any count the detail
+   * interpolates differs at every stop — and a reading that could not read
+   * the notes at all renders a different sentence each leg while saying the
+   * identical thing. Comparing words made the suppression unreachable for
+   * exactly the state it was written for.
+   *
+   * A flag already carries its own number in its text, so a duplicate count
+   * going 3 to 40, or an uncovered share going 30% to 60%, changes this key
+   * and does revise. What it deliberately does not catch is the detail's
+   * SUPPORTING numbers moving while no bar is crossed: that leaves the item
+   * carrying the figures it was filed with until the verdict itself changes,
+   * which is the price of not re-asking a person a question they answered.
+   */
+  const verdictOf = (input: NotesQualityFileInput): string => JSON.stringify(input.report.flags);
 
   /**
    * Rewrite the words of the item this meeting already has.
@@ -212,12 +226,13 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     ids: MeetingIds,
     filed: Filed,
     input: NotesQualityFileInput,
-    held: Held,
+    mem: Held,
   ): 'revised' | 'unchanged' | 'failed' => {
+    const verdict = verdictOf(input);
+    if (mem.verdict !== undefined && mem.verdict === verdict) return 'unchanged';
     const board = deps.board?.();
     const review = wordsOf(input);
     if (!board || review === null) return 'failed';
-    if (held.words !== undefined && held.words === sameAs(review)) return 'unchanged';
     const patch = { headline: review.headline, detail: review.detail };
     const res =
       filed.kind === 'row'
@@ -239,7 +254,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       );
       return 'failed';
     }
-    held.words = sameAs(review);
+    mem.verdict = verdict;
     return 'revised';
   };
 
@@ -290,8 +305,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
             threadId: filing.threadId,
             commentId: filing.commentId,
           };
-    const filedWords = wordsOf(input);
-    if (filedWords !== null) h.words = sameAs(filedWords);
+    h.verdict = verdictOf(input);
   };
 
   return {

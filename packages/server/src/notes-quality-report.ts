@@ -41,6 +41,7 @@ import {
   MAX_LONG_FLAT_RUNS,
   MAX_UNCOVERED_IDEA_SHARE,
   MAX_UNKNOWN_SPEAKERS,
+  MIN_IDEAS_FOR_COVERAGE,
 } from './notes-quality-thresholds.ts';
 import {
   type FlatRun,
@@ -349,10 +350,16 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
     // NEVER A COVERAGE FLAG HERE. The one thing this state must not do is
     // wear the verdict it replaced: "100% of what was said reached no note"
     // is what a broken divisor says, and it is what a person answered "not
-    // true" to. A reading that failed raises a flag about ITSELF, and only
-    // when the meeting had something to cover — a meeting nobody spoke in
-    // whose notes could not be read has lost nothing worth waking anyone for.
-    if (coverage.ideas > 0) {
+    // true" to. A reading that failed raises a flag about ITSELF.
+    //
+    // THE SAME FLOOR THE COVERAGE VERDICT NEEDS, and not a lower one. This
+    // flag says a coverage verdict could not be reached; below
+    // MIN_IDEAS_FOR_COVERAGE there would have been no verdict to reach even
+    // from a perfect reading, so firing there would wake a reader about the
+    // absence of something they were never going to be told. The first
+    // version of this bar was `ideas > 0`, which made a failed reading
+    // LOUDER than a successful one on the same short meeting.
+    if (coverage.ideas >= MIN_IDEAS_FOR_COVERAGE) {
       flags.push({
         kind: 'notes-unread',
         text: `this meeting's notes could not be read, so what reached a note is not known`,

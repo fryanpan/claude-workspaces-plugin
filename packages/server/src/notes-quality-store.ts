@@ -302,12 +302,20 @@ export function rollupNotesQuality(
     if (record.lateShare === null) latenessUnknown++;
     if (record.coverageSource === 'unreadable') coverageUnknown++;
     for (const flag of record.flags) byFlag[flag] = (byFlag[flag] ?? 0) + 1;
+    // A READING THAT FAILED CONTRIBUTES NO NOTES-DERIVED TOTAL AT ALL, and
+    // the first version of this loop excluded only the coverage pair. The
+    // other three are counted off the notes text, which for an unreadable
+    // meeting is the empty string — so each of them is a zero that means
+    // "not measured" and was being summed as "measured, and none". A window
+    // holding one unreadable meeting then read as a window whose duplicate
+    // rate had improved. `coverageUnknown` and `meetings` still count it,
+    // which is how a reader sees the denominator these totals are over.
+    if (record.coverageSource === 'unreadable') continue;
     totals.duplicateBulletLines += record.duplicateBulletLines;
     totals.duplicateHeadings += record.duplicateHeadings;
     totals.unknownVoices += record.unknownVoices;
-    // A reading that failed contributes NEITHER half. Adding its ideas while
-    // its uncovered count is unknown would move the window's ratio by a
-    // meeting nothing is known about.
+    // Adding a meeting's ideas while its uncovered count is unknown would
+    // move the window's ratio by a meeting nothing is known about.
     if (record.uncoveredIdeas !== null) {
       totals.ideas += record.ideas;
       totals.uncoveredIdeas += record.uncoveredIdeas;

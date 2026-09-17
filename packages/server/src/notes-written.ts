@@ -224,15 +224,25 @@ export interface MeetingNotesReading {
   missing?: string;
 }
 
-/** The words an unreadable reading carries, by what went wrong. */
-const NO_DOCUMENT =
-  'the document could not be read at the stop — it is not in the store, or its ' +
-  'prose would not parse, so nothing can be said about what this meeting wrote';
+/**
+ * The words an unreadable reading carries, by what went wrong.
+ *
+ * WRITTEN FOR THE PERSON READING THE REVIEW ITEM, not for whoever maintains
+ * this file. These strings are interpolated straight into the item's detail,
+ * so they say what was not found in terms of the document the reader knows.
+ * Why each one happens is the module header above, and the header is where a
+ * maintainer's version of this belongs.
+ *
+ * `NO_DOCUMENT`: the doc is not in the store, or its prose would not parse.
+ * `NO_ADDRESS`: neither half of the address landed — no section of this
+ * meeting's own, and no block still carrying the note-taker's mark, which a
+ * person's edit, a markdown round trip, and the release every recording leg
+ * does on its own start all remove.
+ */
+const NO_DOCUMENT = 'the document could not be opened when the recording stopped';
 const NO_ADDRESS =
-  'the document holds blocks and this reading claimed none of them — the meeting ' +
-  'opened no section this reading could find, and no block still carries the ' +
-  "note-taker's authorship mark, which a person's edit, a markdown round trip " +
-  'and the release every recording leg does on its own start all remove';
+  'this meeting opened no section of its own, and nothing in the document is ' +
+  'still marked as its notes';
 
 /**
  * Everything this meeting wrote in this doc: the blocks it still holds the
@@ -265,10 +275,18 @@ export function readMeetingNotes(
   const scope = sectionScope(all, headingId, skip);
   for (const el of authoredScope(all, author, skip)) scope.add(el);
   const markdown = markdownOfScope(all, scope);
-  if (markdown !== '') return { markdown, source: 'notes' };
-  // A document with nothing in it is the one empty reading that is a fact
-  // about the meeting: there were no blocks for this address to have missed.
-  return all.length === 0
+  if (markdown.trim() !== '') return { markdown, source: 'notes' };
+  // A document with no TEXT in it is the one empty reading that is a fact
+  // about the meeting: there was nothing for this address to have missed.
+  //
+  // NOT `all.length === 0`, which was the first version and was almost never
+  // true. A doc the editor has touched at all holds an empty paragraph, so
+  // counting blocks put every genuinely-empty meeting into `unreadable` and
+  // left the honest-zero branch reachable only for a doc with no prose node
+  // whatsoever. The test is the same serializer that produced the scope's
+  // own empty answer, run over every block, so the two answers cannot
+  // disagree about what counts as content.
+  return markdownOfScope(all, new Set(all)).trim() === ''
     ? { markdown: '', source: 'notes' }
     : { markdown: '', source: 'unreadable', missing: NO_ADDRESS };
 }

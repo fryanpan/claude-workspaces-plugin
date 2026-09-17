@@ -42,8 +42,16 @@
  * clean is very likely clean.
  */
 
+// ONE VOCABULARY, and `notes-idea-coverage.ts` is the server's door to it.
+// This module shipped with its own `STOPWORDS`, `stem` and `contentWords`,
+// one directory from the maintained versions and several fixes behind them —
+// core's stemmer had already been taught that "estimates" and "estimated"
+// are one word, and this copy had not. Two lexicons mean the board and this
+// check can disagree about what a meeting said.
+import { contentWords, sentencesOf } from './notes-idea-coverage.ts';
 import { MIN_IDEAS_FOR_COVERAGE } from './notes-quality-thresholds.ts';
-import { plainWords } from './notes-quality.ts';
+
+export { contentWords };
 
 /** One settled turn, as much of it as this module reads. Structural on
  *  purpose: `TranscriptTurn` from `meetings.ts` satisfies it, and so does a
@@ -82,38 +90,6 @@ export interface NotesCoverage {
   missing?: string;
 }
 
-/** Words too common to say anything about whether two texts are about the
- *  same thing. Small on purpose: a long list starts throwing away the nouns
- *  that carry a short sentence. */
-const STOPWORDS = new Set(
-  (
-    'a about all also an and any are as at be been but by can could did do does for from get go' +
-    ' had has have he her here him his how i if in into is it its just like me more most my no' +
-    ' not of on one or our out over said say see she should so some than that the their them' +
-    ' then there these they this those to too up us very was we well were what when where which' +
-    ' who will with would yeah yes you your'
-  ).split(' '),
-);
-
-/** A word reduced to the part two forms of it share. Not a stemmer: it drops
- *  the three endings that change a word without changing its subject, which
- *  is what keeps "shipping" and "shipped" from reading as different ideas. */
-function stem(word: string): string {
-  const w = word.toLowerCase();
-  if (w.length > 4 && w.endsWith('ing')) return w.slice(0, -3);
-  if (w.length > 4 && w.endsWith('ed')) return w.slice(0, -2);
-  if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
-  return w;
-}
-
-/** The words of a text that say what it is about. */
-export function contentWords(text: string): string[] {
-  return plainWords(text)
-    .map((w) => w.toLowerCase().replace(/[^a-z0-9]/g, ''))
-    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
-    .map(stem);
-}
-
 /**
  * The share of an idea's content words that has to appear in the notes before
  * it counts as written down. Two fifths, for the reason
@@ -122,18 +98,30 @@ export function contentWords(text: string): string[] {
  */
 export const IDEA_OVERLAP_SHARE = 0.4;
 
-/** The fewest content words a settled sentence needs before it is an idea at
- *  all. "Right." and "Yeah, exactly" are not ideas; "we ship Tuesday" is, and
- *  it is two content words, so the floor cannot be higher than two. */
-export const MIN_IDEA_CONTENT_WORDS = 4;
+/**
+ * The fewest DISTINCT content words a settled sentence needs before this
+ * check treats it as an idea the notes owed. "Right." and "Yeah, exactly"
+ * are not ideas.
+ *
+ * NOT `MIN_IDEA_CONTENT_WORDS` from `notes-idea-coverage.ts`, which is 2 and
+ * is deliberately a different number: that check feeds the note-taker's own
+ * decisions and wants every idea it can find, while this one feeds a review
+ * item that wakes a person, and a four-word floor keeps a short aside from
+ * counting against a meeting. The two checks otherwise ask the same question
+ * of the same lexicon, and collapsing them into one is worth doing — as its
+ * own change, with the operating point re-measured, not as a side effect of
+ * this one. The name differs from the other so a reader cannot import the
+ * wrong bar believing they are the same constant.
+ */
+export const MIN_QUALITY_IDEA_WORDS = 4;
 
 /** The sentences of a meeting that carried enough to be worth a note. */
 export function spokenIdeas(transcript: readonly SpokenTurn[]): string[][] {
   const out: string[][] = [];
   for (const turn of transcript) {
-    for (const sentence of turn.text.split(/(?<=[.?!])\s+/)) {
+    for (const sentence of sentencesOf(turn.text)) {
       const words = contentWords(sentence);
-      if (words.length >= MIN_IDEA_CONTENT_WORDS) out.push(words);
+      if (words.length >= MIN_QUALITY_IDEA_WORDS) out.push(words);
     }
   }
   return out;

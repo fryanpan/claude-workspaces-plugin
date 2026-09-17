@@ -89,7 +89,7 @@ export const MAX_UNKNOWN_SPEAKERS = 0;
  *
  * The check behind it is lexical and its errors run one way — it calls a
  * paraphrase a miss more often than it calls a miss covered (see the module
- * header of `notes-quality-report.ts`) — so the bar HAS to sit well above the
+ * header of `notes-quality-coverage.ts`) — so the bar HAS to sit well above the
  * miss rate a healthy meeting scores rather than near the rate a perfect one
  * would.
  */

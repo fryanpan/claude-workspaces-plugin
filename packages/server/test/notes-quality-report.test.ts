@@ -21,6 +21,7 @@ import {
   repeatedBullets,
   unknownVoices,
 } from '../src/notes-quality-report.ts';
+import { MIN_IDEAS_FOR_COVERAGE } from '../src/notes-quality-thresholds.ts';
 import {
   LATE_NOTE_MS,
   MAX_DUPLICATE_BULLET_LINES,
@@ -322,6 +323,49 @@ describe('a report built from a reading that could not read the notes', () => {
   it('wakes nobody about a meeting nobody spoke in', () => {
     const quiet = buildNotesQualityReport({ notes: '', transcript: [], notesRead: false });
     expect(quiet.flags).toEqual([]);
+  });
+
+  /** A transcript of exactly `n` settled ideas, none of them noted. */
+  const heard = (n: number): SpokenTurn[] =>
+    Array.from({ length: n }, (_, i) => ({
+      text: `Berth ${i} needs its mooring chain replaced before the season opens.`,
+    }));
+
+  it('stays quiet below the floor a coverage verdict needs, and speaks at it', () => {
+    // THE BOUNDARY, both sides. This flag says a coverage verdict could not
+    // be reached; one idea below MIN_IDEAS_FOR_COVERAGE there was no verdict
+    // to reach from any reading, so there is nothing to tell anyone about.
+    // The first version fired at one idea, which made a failed reading noisier
+    // than a successful one on the same short meeting.
+    const below = buildNotesQualityReport({
+      notes: '',
+      transcript: heard(MIN_IDEAS_FOR_COVERAGE - 1),
+      notesRead: false,
+    });
+    expect(below.coverage.ideas).toBe(MIN_IDEAS_FOR_COVERAGE - 1);
+    expect(below.flags).toEqual([]);
+
+    const at = buildNotesQualityReport({
+      notes: '',
+      transcript: heard(MIN_IDEAS_FOR_COVERAGE),
+      notesRead: false,
+    });
+    expect(at.coverage.ideas).toBe(MIN_IDEAS_FOR_COVERAGE);
+    expect(at.flags.map((f) => f.kind)).toEqual(['notes-unread']);
+  });
+
+  it('THE CONTROL: a readable reading is silent on the same short meeting', () => {
+    // The symmetry the floor exists for. Nine ideas and not one of them
+    // noted raises nothing, because a share over nine ideas says nothing —
+    // so a reading that FAILED on those same nine must raise nothing either.
+    const short = buildNotesQualityReport({
+      notes: '',
+      transcript: heard(MIN_IDEAS_FOR_COVERAGE - 1),
+      notesRead: true,
+    });
+    expect(short.coverage.uncoveredIdeas).toBe(MIN_IDEAS_FOR_COVERAGE - 1);
+    expect(short.coverage.uncoveredShare).toBeNull();
+    expect(short.flags.map((f) => f.kind)).not.toContain('coverage');
   });
 
   it('says the notes were unreadable in the log line rather than printing a ratio', () => {

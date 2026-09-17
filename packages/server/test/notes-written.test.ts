@@ -213,4 +213,61 @@ describe('the shape that read zero from a document holding notes', () => {
     const { store } = docStoreFrom(WHOLE_DOC_NOTES);
     expect(readMeetingNotes(store, 'd-nowhere', undefined).source).toBe('unreadable');
   });
+
+  /**
+   * A store over a document built BLOCK BY BLOCK rather than from markdown,
+   * because blank lines in markdown parse to no blocks at all and this pair
+   * of cases is about a document that holds blocks holding nothing. Each
+   * string is one paragraph; an empty string is an empty paragraph, which is
+   * what the editor leaves behind when somebody opens a doc and types
+   * nothing. No block is marked as the note-taker's, so neither half of the
+   * address lands and the reading comes back empty either way.
+   */
+  const paragraphStore = (texts: readonly string[]): NotesDocStore => {
+    const ydoc = new Y.Doc();
+    const fragment = prose.getProseFragment(ydoc);
+    fragment.insert(
+      0,
+      texts.map((text) => {
+        const el = new Y.XmlElement('paragraph');
+        if (text !== '') el.insert(0, [new Y.XmlText(text)]);
+        return el;
+      }),
+    );
+    prose.readOutline(ydoc);
+    return {
+      get: (docId) => (docId === DOC ? { ydoc, meta: { type: 'markdown' as const } } : undefined),
+      readOutline: (docId) => (docId === DOC ? { blocks: prose.readOutline(ydoc) } : null),
+      applyBlockEdits: () => {
+        throw new Error('reading the notes must not write');
+      },
+    };
+  };
+
+  it('reads a document of empty paragraphs as a real zero, not an unreadable one', () => {
+    // The state a doc is in when somebody opened it and typed nothing: it
+    // holds blocks, and none of them holds a word. Counting BLOCKS put this
+    // in `unreadable` and left the honest-zero branch reachable only for a
+    // doc with no prose node at all — so a meeting that genuinely wrote
+    // nothing would have been reported as a reading that failed, which is
+    // the same collapse in the other direction.
+    const reading = readMeetingNotes(paragraphStore(['', '', '']), DOC, undefined);
+    expect(reading.markdown.trim()).toBe('');
+    expect(reading.source).toBe('notes');
+    expect(reading.missing).toBeUndefined();
+  });
+
+  it('THE CONTROL: one word in one of those paragraphs makes it unreadable again', () => {
+    // The same three blocks, the same absent address, one of them carrying
+    // text. The pair is what proves the test is on the TEXT and not on the
+    // block count: both documents hold three blocks, and only this one holds
+    // something a reading could have found and did not.
+    const reading = readMeetingNotes(
+      paragraphStore(['', 'A prep note nobody marked', '']),
+      DOC,
+      undefined,
+    );
+    expect(reading.markdown.trim()).toBe('');
+    expect(reading.source).toBe('unreadable');
+  });
 });

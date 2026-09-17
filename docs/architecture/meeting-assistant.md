@@ -1371,16 +1371,28 @@ was filed seven times on one doc with one headline, the denominator climbing
 15, 33, 75, 160, 199, 262, each one saying 100% of what was said had reached
 no note. 172 notes had been written; the arithmetic was right every time and
 the divisor was broken. So `readMeetingNotes` answers `notes` or `unreadable`
-rather than a string: a reading that claimed no blocks in a document that
-HOLDS blocks is `unreadable`, a document holding no blocks at all is the
-genuine zero, and `notes-quality-coverage.ts` turns `unreadable` into a null
-count and a null share instead of a percentage. A meeting in that state
-raises `notes-unread` — "this meeting's notes could not be read" — and never
-`coverage`, the record on disk carries `coverageSource` so it cannot be read
-back as a real zero, and the week's rollup counts it under `coverageUnknown`
-rather than in the totals. The filer compares the words it already filed
-before revising, so a verdict that cannot clear stops re-judging its item at
-every leg stop.
+rather than a string: a reading that claimed nothing in a document that HOLDS
+TEXT is `unreadable`, a document with no text in it at all is the genuine
+zero, and `notes-quality-coverage.ts` turns `unreadable` into a null count
+and a null share instead of a percentage. A meeting in that state raises
+`notes-unread` — "this meeting's notes could not be read" — and never
+`coverage`; it raises it only at `MIN_IDEAS_FOR_COVERAGE`, the floor a real
+coverage verdict needs, because below that there was no verdict to reach from
+any reading. The record on disk carries `coverageSource` so it cannot be read
+back as a real zero, and the week's rollup leaves it out of every
+notes-derived total, counting it under `coverageUnknown` instead.
+
+**What stops the re-filing is comparing the VERDICT, not the words.** The
+filer holds the flags its standing item was filed with and revises only when
+a later leg's flags differ. Comparing the rendered words was the first
+version and could not work: every leg hears a longer transcript, so any count
+the item's detail interpolates differs at every stop while the reading says
+the identical thing — which is the 2026-09-15 shape exactly. A flag carries
+its own number in its own text, so a duplicate count going 3 to 40 or an
+uncovered share going 30% to 60% does revise. The cost, taken deliberately:
+the detail's supporting numbers keep the values they were filed with until
+the verdict itself moves, which is cheaper than re-asking a person a question
+they have already answered.
 
 **Coverage is counted twice, because there are two ways to lose a meeting.**
 `turnsLost` counts turns the composer never SAW. `ideas` counts what it saw

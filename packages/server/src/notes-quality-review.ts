@@ -241,14 +241,17 @@ export function buildNotesQualityReview(input: {
     );
   }
   if (report.coverage.source === 'unreadable') {
-    // The sentence that replaces a verdict nobody could have answered. It
-    // names the ideas heard, because that half WAS measured, and then says
-    // plainly that what became of them is not known — rather than reporting
-    // every one of them as lost, which is what an empty reading used to do.
+    // The sentence that replaces a verdict nobody could have answered — and
+    // it carries NO COUNT, deliberately. Every leg of a meeting hears more
+    // than the last, so a number here would differ at every stop while the
+    // reading said the identical thing, and the filer would re-judge this
+    // item in front of its reader once per leg. See `verdictOf` in
+    // notes-quality-filing.ts.
     lines.push(
-      '- **Whether what was said reached a note is not known.** ' +
-        `${report.coverage.ideas} things were said and this reading could account for ` +
-        `none of them, because ${report.coverage.missing ?? 'the notes could not be read'}.`,
+      '- **Whether what was said reached a note is not known.** This check could not find ' +
+        `this meeting's notes, because ${report.coverage.missing ?? 'they could not be read'}. ` +
+        'That is a statement about the check, not about the notes: it is not a claim that ' +
+        'nothing was written down.',
     );
   } else if (report.coverage.uncoveredShare !== null) {
     lines.push(

@@ -117,6 +117,19 @@ describe('one meeting’s record', () => {
     expect(readNotesQuality(dir, old.docId, old.meetingId)).toEqual(old);
   });
 
+  it('still lands the new reading when every existing line is unreadable', () => {
+    // A record file that has been truncated, half-written or hand-edited must
+    // not cost a meeting its reading. The write is read-modify-write, so the
+    // read is the step that could throw, and the new line is the one thing
+    // this call exists to keep.
+    const dir = freshDir();
+    const r = record({ meetingId: 'm-after-corruption', at: 5_000 });
+    putFile(notesQualityPath(dir, r.docId, r.meetingId), '{ truncated\nnot json either\n');
+    writeNotesQuality(dir, r);
+    expect(readNotesQuality(dir, r.docId, r.meetingId)).toEqual(r);
+    expect(readNotesQualitySeries(dir, r.docId, r.meetingId)).toEqual([r]);
+  });
+
   it('keeps the readings it can parse when one line is corrupt', () => {
     const dir = freshDir();
     const good = record({ at: 8_000 });
@@ -222,6 +235,74 @@ describe('the week the health check reads', () => {
     const rollup = rollupNotesQuality(dir, { now: 10_000, windowMs: 5_000 });
     expect(rollup.totals.ideas).toBe(12);
     expect(rollup.totals.uncoveredIdeas).toBe(2);
+  });
+
+  it('leaves it out of every notes-derived total, not only the coverage pair', () => {
+    // The three counts below are read off the NOTES text, which for an
+    // unreadable meeting is the empty string — so each of its zeros means
+    // "not measured" and summing them as "measured, and none" makes a week
+    // holding one unreadable meeting read as a week whose duplicate rate
+    // improved. The judged meeting's own numbers are what the totals must
+    // come to.
+    const dir = freshDir();
+    writeNotesQuality(
+      dir,
+      record({
+        meetingId: 'm-judged',
+        at: 9_000,
+        duplicateBulletLines: 3,
+        duplicateHeadings: 2,
+        unknownVoices: 1,
+      }),
+    );
+    writeNotesQuality(
+      dir,
+      record({
+        meetingId: 'm-unread',
+        at: 9_100,
+        bullets: 0,
+        duplicateBulletLines: 0,
+        duplicateHeadings: 0,
+        unknownVoices: 0,
+        ideas: 262,
+        coverageSource: 'unreadable',
+        uncoveredIdeas: null,
+        uncoveredShare: null,
+      }),
+    );
+    const rollup = rollupNotesQuality(dir, { now: 10_000, windowMs: 5_000 });
+    expect(rollup.totals.duplicateBulletLines).toBe(3);
+    expect(rollup.totals.duplicateHeadings).toBe(2);
+    expect(rollup.totals.unknownVoices).toBe(1);
+    // Still counted as a meeting, and still counted as unknown coverage —
+    // which is how a reader sees the denominator those totals are over.
+    expect(rollup.meetings).toBe(2);
+    expect(rollup.coverageUnknown).toBe(1);
+  });
+
+  it('THE CONTROL: a readable meeting with the same zeros IS counted', () => {
+    // The same two records, with the second one readable. Without this the
+    // case above would pass on a rollup that had stopped adding the second
+    // record for any reason at all.
+    const dir = freshDir();
+    writeNotesQuality(
+      dir,
+      record({
+        meetingId: 'm-judged',
+        at: 9_000,
+        duplicateBulletLines: 3,
+        duplicateHeadings: 2,
+        unknownVoices: 1,
+      }),
+    );
+    writeNotesQuality(
+      dir,
+      record({ meetingId: 'm-clean', at: 9_100, duplicateBulletLines: 4, unknownVoices: 5 }),
+    );
+    const rollup = rollupNotesQuality(dir, { now: 10_000, windowMs: 5_000 });
+    expect(rollup.totals.duplicateBulletLines).toBe(7);
+    expect(rollup.totals.unknownVoices).toBe(6);
+    expect(rollup.coverageUnknown).toBe(0);
   });
 
   it('is an empty week rather than an error when nothing has met', () => {
