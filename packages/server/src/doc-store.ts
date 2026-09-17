@@ -109,6 +109,7 @@ import { docKeyForPath } from './doc-key.ts';
 import { type LiveCopyResult, type ResolveOpts, resolveLiveCopy } from './doc-live-copy.ts';
 import { resolveOriginRepoCheckout } from './doc-origin-repo.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
+import { type TimeSlice, timeSlice } from './event-loop.ts';
 import {
   CONTENT_REVISION_ORIGIN,
   LiveDocFanout,
@@ -3903,11 +3904,22 @@ export class DocStore {
     return this.docEdits.rejectSuggestion(docId, sid);
   }
 
+  /**
+   * Async because it YIELDS between proposals — see `DocEditOps` for the
+   * 114,650 ms outage that made an unyielded pass unacceptable.
+   *
+   * `slice` is a seam, not a knob: production passes nothing and gets the
+   * default budget. A test passes `timeSlice(0)` to make the pass yield after
+   * EVERY proposal, so "the loop was handed back mid-pass" is an ordering
+   * assertion rather than a bet on how long a doc takes to resolve on the
+   * machine the suite happens to be running on.
+   */
   resolveAllSuggestions(
     docId: string,
     opts: { action: 'accept' | 'reject'; authorId?: string },
-  ): { ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' } {
-    return this.docEdits.resolveAllSuggestions(docId, opts);
+    slice?: TimeSlice,
+  ): Promise<{ ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' }> {
+    return this.docEdits.resolveAllSuggestions(docId, opts, slice ?? timeSlice());
   }
 
   /** The doc's addressable blocks and their ids. `null` for an unknown doc. */

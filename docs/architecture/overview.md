@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>unanswered-thread<br/>keep-moving · owner-ask · waiting-unfiled<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts · event-loop.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -973,6 +973,18 @@ check `scripts/serve.ts` runs against the server it supervises — one HTTP
 request to a route that already exists, a verdict, and a restart ledger that
 outlives the supervisor — so the server imports only its probe-marker
 constant, and only so `sentry.ts` can leave the probe out of tracing.
+
+`event-loop.ts` joins Ops and moves no boundary. It is an observer plus a
+helper, importing nothing from the subsystems it watches: a lag monitor that
+reports a turn which held the single JS thread past a threshold and names the
+requests in flight at the time, and `timeSlice`, the budget a long pass uses to
+hand the loop back. `server.ts` registers each request at the front door and
+arms the monitor beside the other running-board timers; `doc-edit-ops.ts` is
+its first `timeSlice` caller. The reason it exists is that the 2026-09-16
+outages were legible only as a 404 that took 56 seconds — the block itself was
+recorded nowhere, and whether a stall was a synchronous pass or the OS
+descheduling the process could not be told apart. A stall with nothing in
+flight is that second thing, and the line says so.
 
 `server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
 start of the process in `server-starts.json` beside the deploy log: once at

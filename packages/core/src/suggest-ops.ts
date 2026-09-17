@@ -510,17 +510,42 @@ export function rejectSuggestion(
   return resolveOne(doc, sid, 'reject', opts?.transactionOrigin ?? 'agent');
 }
 
-/** Accept or reject every pending proposal (optionally one author's). */
-export function resolveAllSuggestions(
-  doc: Y.Doc,
-  opts: { action: 'accept' | 'reject'; authorId?: string; transactionOrigin?: unknown },
-): { ok: true; resolved: number; sids: string[] } {
+/**
+ * The sids a resolve-all would act on, in the order it would act on them.
+ *
+ * Split out so a caller that must YIELD between resolutions — the server's
+ * `DocEditOps.resolveAllSuggestions`, which cannot hold the event loop for the
+ * length of a whole doc — selects exactly what this function's own loop below
+ * selects, in exactly the same order. Two copies of this filter would be two
+ * chances for a resolve-all to mean different things depending on which entry
+ * point asked, and ordering is load-bearing: `handOverBlockIds` reads the
+ * sibling that follows an emptied block, so the sequence decides which block
+ * keeps which id.
+ */
+export function suggestionsToResolve(doc: Y.Doc, opts: { authorId?: string }): string[] {
   const scan = scanSuggestions(getProseFragment(doc));
   const sids: string[] = [];
   for (const [sid, entry] of scan) {
     if (opts.authorId != null && entry.attrs.authorId !== opts.authorId) continue;
     sids.push(sid);
   }
+  return sids;
+}
+
+/**
+ * Accept or reject every pending proposal (optionally one author's).
+ *
+ * Synchronous, and stays that way: the client runs this against a local doc
+ * where there is no event loop to protect. The SERVER goes through
+ * `suggestionsToResolve` plus one `resolveOne` per sid instead, so it can hand
+ * the loop back between them — see `packages/server/src/event-loop.ts` for why
+ * an unyielded pass here took prod down for ten minutes.
+ */
+export function resolveAllSuggestions(
+  doc: Y.Doc,
+  opts: { action: 'accept' | 'reject'; authorId?: string; transactionOrigin?: unknown },
+): { ok: true; resolved: number; sids: string[] } {
+  const sids = suggestionsToResolve(doc, opts);
   const resolvedSids: string[] = [];
   for (const sid of sids) {
     // Each resolution rescans, so earlier mutations can't stale-out later

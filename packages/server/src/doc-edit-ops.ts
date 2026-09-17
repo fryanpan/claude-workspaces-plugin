@@ -26,6 +26,7 @@ import {
   readDocOutline,
 } from './doc-outline-ops.ts';
 import type { LiveDoc } from './doc-store.ts';
+import { type TimeSlice, timeSlice } from './event-loop.ts';
 
 /** Backups kept per doc by `backupReplacedContent` before rotation. */
 const REPLACE_BACKUP_CAP = 20;
@@ -335,20 +336,49 @@ export class DocEditOps {
     return res;
   }
 
-  /** Accept or reject every pending proposal (optionally one author's). */
-  resolveAllSuggestions(
+  /**
+   * Accept or reject every pending proposal (optionally one author's).
+   *
+   * **Yields between proposals, and that is the point.** One unbroken pass
+   * here held the event loop for 114,650 ms on 2026-09-16 and took every board
+   * on the machine down with it; `event-loop.ts` carries that story. The cost
+   * is quadratic — `resolveOne` re-scans the whole prose fragment per sid — so
+   * yielding does not make it cheaper, it makes it interruptible, which is
+   * what decides whether a slow request is slow or an outage.
+   *
+   * Interleaving is safe rather than merely tolerated: core re-scans per sid
+   * precisely so earlier mutations cannot stale out later ones, and treats a
+   * sid another actor resolved first as a skip. Handing the loop back
+   * exercises paths two concurrent agents already reached. A reader can now
+   * observe a PARTIALLY resolved doc mid-pass; that is the honest state, and
+   * the alternative was a server that answered nobody.
+   */
+  async resolveAllSuggestions(
     docId: string,
     opts: { action: 'accept' | 'reject'; authorId?: string },
-  ): { ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' } {
+    slice: TimeSlice = timeSlice(),
+  ): Promise<{ ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' }> {
     const doc = this.p.doc(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     const before = new Map(suggestOps.listSuggestions(doc.ydoc).map((s) => [s.sid, s]));
-    const res = suggestOps.resolveAllSuggestions(doc.ydoc, opts);
+    // The same selection, in the same order, that core's synchronous
+    // `resolveAllSuggestions` would have made — shared rather than restated,
+    // because the order decides which block keeps which id.
+    const sids = suggestOps.suggestionsToResolve(doc.ydoc, opts);
     const event = opts.action === 'accept' ? 'suggestion.accepted' : 'suggestion.rejected';
-    for (const sid of res.sids) {
-      this.p.announceSuggestion(doc, event, sid, before.get(sid));
+    const resolved: string[] = [];
+    for (const sid of sids) {
+      const one =
+        opts.action === 'accept'
+          ? suggestOps.acceptSuggestion(doc.ydoc, sid)
+          : suggestOps.rejectSuggestion(doc.ydoc, sid);
+      if (one.ok) {
+        resolved.push(sid);
+        this.p.announceSuggestion(doc, event, sid, before.get(sid));
+      }
+      await slice.yieldIfDue();
     }
-    return res;
+    return { ok: true, resolved: resolved.length, sids: resolved };
   }
 
   /**
