@@ -210,6 +210,39 @@ describe('blanketAnswer — one reply that settles the whole ask', () => {
     expect(blanketAnswer("No, don't give these tips.")).toBe(false);
   });
 
+  it('reads that refusal wherever in the reply it was written', () => {
+    // The measured reply (2026-09-16): the refusal is sentence one and the
+    // rest says why. Reading only the last sentence put it back on the queue.
+    expect(
+      blanketAnswer("No don't give these tips. I think this is a different story.", THREE_TIPS),
+    ).toBe(true);
+    expect(blanketAnswer("Let's hold off. Don't give these tips.", THREE_TIPS)).toBe(true);
+  });
+
+  it('leaves a refusal a later sentence walks back to the model', () => {
+    // A carve-out anywhere in the reply means some part survives the refusal,
+    // so the item stays on the queue however plainly sentence one refused.
+    for (const reply of [
+      "Don't give these tips to beginners. But keep the persona one.",
+      "No, don't give these tips. Except the Harborlight one.",
+      "No, don't give these tips. Only the first one is worth it.",
+    ]) {
+      expect([reply, blanketAnswer(reply, THREE_TIPS)]).toEqual([reply, false]);
+    }
+  });
+
+  it('still reads a quantifier or a hand-back only as the LAST sentence', () => {
+    // Widening the refusal shape must not widen these two: a hand-back
+    // settles the ask only when it is where the reply lands.
+    for (const reply of [
+      'Do whatever you think for the rest. Use the Harborlight window.',
+      'All fine. Use the Harborlight window.',
+      'None of them. Use the Harborlight window.',
+    ]) {
+      expect([reply, blanketAnswer(reply, THREE_THINGS)]).toEqual([reply, false]);
+    }
+  });
+
   it('leaves a reply that speaks to one part to the model', () => {
     for (const reply of [
       'No, email them.',

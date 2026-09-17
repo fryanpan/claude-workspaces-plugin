@@ -107,14 +107,16 @@ const TOTAL_QUANTIFIER =
 const HAND_BACK =
   /^(?:(?:yes|no|sure|ok|okay)[,\s-]+)?(?:(?:i\s+)?don'?t\s+mind|no\s+preference|your\s+call|up\s+to\s+you|(?:do\s+)?whatever\s+you\s+(?:think|want|like|prefer|decide|see\s+fit))(?:\s+(?:on|for|about|with)\s+(?:the\s+)?(?:rest|others|lot|questions?|asks?|them|these|those|all|both|everything))?$/;
 
-/** The reply's last sentence, which is where a whole-ask settlement sits: an
- *  earlier sentence may answer one part and the last one hand back the rest. */
-function lastSentence(one: string): string {
-  const parts = one
+/** The reply's sentences, in order. Which of them a shape may read is that
+ *  shape's own business: a quantifier or a hand-back counts only as the LAST
+ *  one, because "do whatever you think for the rest" settles the ask only
+ *  when it is where the reply lands; a refusal of the ask's subject counts
+ *  wherever it sits. */
+function sentences(one: string): string[] {
+  return one
     .split(/[.!;]+/)
     .map((p) => p.trim())
     .filter((p) => p !== '');
-  return parts.at(-1) ?? one;
 }
 
 /** The word as the item might also spell it: with or without a plural `s`. */
@@ -132,10 +134,13 @@ function nounForms(noun: string): string[] {
  * noun can name one part as easily as all of them. So the noun the reply
  * refuses has to be a word every question asks about — which is what makes
  * refusing it a refusal of all of them. Anything less goes to the model.
+ *
+ * Asked of ONE sentence; the caller asks it of each. A refusal of the whole
+ * subject is a refusal wherever in the reply it was written.
  */
-function refusesTheAsksSubject(last: string, item: AnswerCoverageItem | undefined): boolean {
-  if (!item || !ACCEPT_REFUSE.test(last)) return false;
-  const m = last.match(
+function refusesTheAsksSubject(sentence: string, item: AnswerCoverageItem | undefined): boolean {
+  if (!item || !ACCEPT_REFUSE.test(sentence)) return false;
+  const m = sentence.match(
     /\b(?:these|those)\s+(?:\d+\s+|two\s+|three\s+|four\s+)?([a-z][a-z-]{2,})\b/,
   );
   const noun = m?.[1];
@@ -162,7 +167,18 @@ function refusesTheAsksSubject(last: string, item: AnswerCoverageItem | undefine
  * decided before the call. Four shapes, each of which can only be speaking to
  * the ask as a body: a reply made only of accepting and refusing words, a
  * total quantifier as the whole last sentence, a hand-back as the whole last
- * sentence, and a refusal of the very subject every question asks about.
+ * sentence, and a refusal of the very subject every question asks about, in
+ * ANY sentence of the reply.
+ *
+ * That last shape reads any sentence because a refusal is not made
+ * provisional by what follows it (2026-09-16): "no don't give these tips. i
+ * think this is a different story" refuses in sentence one and then says why,
+ * and reading only the last sentence put the same ask back on the reader's
+ * queue. What stops a later sentence from walking a refusal back is the
+ * carve-out test above, which reads the WHOLE reply — "don't give these tips
+ * to beginners, but keep the persona one" still goes to the model, because
+ * "but" is there. The other two shapes stay pinned to the last sentence: a
+ * hand-back settles the ask only when it is where the reply lands.
  *
  * Everything else goes to the model, which is what keeps a genuinely partial
  * answer on the queue: "no, don't send the alert" names one thing, and so
@@ -193,9 +209,10 @@ export function blanketAnswer(text: string, item?: AnswerCoverageItem): boolean 
   if (bare !== '' && BARE_LEAD.test(one) && bare.split(' ').every((w) => BARE_WORDS.has(w))) {
     return true;
   }
-  const last = lastSentence(one);
+  const said = sentences(one);
+  const last = said.at(-1) ?? one;
   if (TOTAL_QUANTIFIER.test(last) || HAND_BACK.test(last)) return true;
-  return refusesTheAsksSubject(last, item);
+  return said.some((s) => refusesTheAsksSubject(s, item));
 }
 
 /** Collapse whitespace and fence-breaking angle brackets, as the judge does. */
