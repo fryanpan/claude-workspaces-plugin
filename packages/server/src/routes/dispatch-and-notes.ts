@@ -262,8 +262,14 @@ export async function handleDispatchAndNoteRoutes(
       // lost. Keyed on `at` + kind + text because that triple is what a
       // logged line and its ring entry share — the log deliberately does
       // not store a taskId, having none.
+      // `\u0000` as an ESCAPE, never the character. A literal NUL in the
+      // source makes the whole file binary: `grep` skips it silently without
+      // `-a`, `file` calls it data, and a scanner that sorts text from binary
+      // by content stops reading it as code. It was a raw byte here for two
+      // commits and no search for anything in this file matched.
       const seen = new Set<string>();
-      const key = (n: { at: number; kind: string; text: string }) => `${n.at} ${n.kind} ${n.text}`;
+      const key = (n: { at: number; kind: string; text: string }) =>
+        `${n.at}\u0000${n.kind}\u0000${n.text}`;
       const notes = agentNotes
         .list(agent)
         .filter((n) => n.workspaceId === boardId)
