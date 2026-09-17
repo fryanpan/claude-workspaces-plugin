@@ -541,6 +541,16 @@ export async function handleDocThreadRoutes(
       }
       const parsed = parseRevisedRange(body?.revisedRange);
       if (!parsed.ok) return j(400, { error: parsed.error });
+      // The filer's answer to a hold that asked for a specific their source
+      // does not carry — the same field the ticket form takes, refused the
+      // same way, so one surface cannot quietly ignore it.
+      const lessSpecific = body?.lessSpecific;
+      if (
+        lessSpecific !== undefined &&
+        (typeof lessSpecific !== 'string' || lessSpecific.trim() === '')
+      ) {
+        return j(400, { error: 'lessSpecific must be a non-empty string' });
+      }
       const res = docStore.reviseCommentReview(
         docId,
         threadId,
@@ -565,7 +575,14 @@ export async function handleDocThreadRoutes(
       // the verdict was about the old words. Without this a hold on
       // this surface would be a dead end — the filer's one remedy
       // would leave the item held for words the judge never read.
-      const gate = await judgeThreadReview(docId, threadId, commentId, res.review, user);
+      const gate = await judgeThreadReview(
+        docId,
+        threadId,
+        commentId,
+        res.review,
+        user,
+        lessSpecific !== undefined ? { lessSpecific } : {},
+      );
       // Watchers hear a revision the same way they hear the original
       // ask: the item changed, and anyone holding the old words is
       // holding words the reader can no longer see. Not while it is

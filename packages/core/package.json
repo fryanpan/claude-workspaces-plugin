@@ -25,6 +25,7 @@
     "./types": "./src/types.ts",
     "./summary-prompt": "./src/summary-prompt.ts",
     "./review-judge-prompt": "./src/review-judge-prompt.ts",
+    "./review-hold": "./src/review-hold.ts",
     "./answer-coverage-prompt": "./src/answer-coverage-prompt.ts",
     "./effort-estimate-prompt": "./src/effort-estimate-prompt.ts",
     "./goal-summary": "./src/goal-summary.ts",

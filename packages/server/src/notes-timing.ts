@@ -106,8 +106,38 @@ export interface NotesTickTiming {
   lastSpokenAt: number | null;
   /** Epoch ms at which the tick fired. */
   startedAt: number;
-  /** How long this tick sat behind the previous one before composing. */
+  /**
+   * How long this tick sat behind the previous one before `runCompose` began.
+   *
+   * It ends at the TOP of the function, so it is the queue wait and nothing
+   * else — which is what `hypothesisFor` reads it as. Everything the tick
+   * then does before the model is asked anything is `beforeComposeMs`, and
+   * the two together are the whole distance from the tick firing to the
+   * compose request going out. Widening this one to cover both would make
+   * every tick read as H5, because the capture pass is never free.
+   */
   waitedMs: number;
+  /**
+   * From the top of `runCompose` to the compose request leaving — the task
+   * capture call, the corrections it writes back, the reference scan and the
+   * outline read, all of it in front of the note the person is waiting for.
+   *
+   * It exists because the row used to hold no span covering that stretch at
+   * all: `waitedMs` ended before it and `composeMs` started after it, so a
+   * second model call in the note's critical path was charged to nothing and
+   * showed up only as the gap between the named spans and the elapsed time.
+   * Zero on a tick that never reached the compose.
+   */
+  beforeComposeMs: number;
+  /**
+   * The task capture call alone, request to parsed result — the biggest
+   * single thing inside `beforeComposeMs`, and the one that is a model call
+   * rather than local work. Measured across the failure too, since a capture
+   * that times out costs the note the same wait a slow one does.
+   *
+   * Null when this tick ran no capture pass, never zero.
+   */
+  captureMs: number | null;
   /** Characters of prompt sent, and of reply read back. Null: no LLM. */
   promptChars: number | null;
   replyChars: number | null;
@@ -123,6 +153,24 @@ export interface NotesTickTiming {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheWriteTokens: number | null;
+  /**
+   * WHY THIS TICK READ WHAT IT READ — the shape of the prefix it offered the
+   * cache, which the four token counts above cannot say.
+   *
+   * `cacheStableBlocks` is the one to read first: 0 says the first cached
+   * block's own text moved since the last tick, so there was nothing to read
+   * whatever the tokens say; a number above 0 says the head repeated and a
+   * zero read is the model's minimum cacheable prefix (or the entry's life),
+   * not the prompt. `cacheFirstBlockChars` is what that minimum is judged
+   * against — the first breakpoint has to clear it on its own.
+   *
+   * Null on a tick that reached no model, and on a composer that sends no
+   * breakpoints. `cacheStableBlocks` is ALSO null on a meeting's first tick,
+   * where there is no previous prompt to have repeated.
+   */
+  cacheBlocks: number | null;
+  cacheFirstBlockChars: number | null;
+  cacheStableBlocks: number | null;
   /**
    * EVERY MODEL CALL THIS TICK MADE, compose and capture alike, each with the
    * model that billed it.
@@ -294,6 +342,14 @@ export interface NotesComposeMeasure {
   /** The slot this composer resolved. Absent on a composer that spends
    *  nothing — the stub the replay harness uses. */
   keySlot?: ClaudeKeySlot;
+  /**
+   * The shape of the cacheable prefix this call sent — see
+   * `notes-prompt-cache-shape.ts` for what each number separates. Absent on a
+   * composer that sends no cache breakpoints, which is every stub.
+   */
+  cacheBlocks?: number;
+  cacheFirstBlockChars?: number;
+  cacheStableBlocks?: number | null;
 }
 
 /** Where a composer reports what its call cost. Never given the words. */
