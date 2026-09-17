@@ -194,3 +194,159 @@ describe('reading a tidy-up reply', () => {
     }
   });
 });
+
+/**
+ * THE APPLIER'S HALF OF THE SAME LIST.
+ *
+ * The gate writes a sentence per dropped edit; the applier writes its error
+ * CODE. Both arrays reach one list, so the 15 September shape put "3 edits —
+ * unknown-block" directly under "1 edit — somebody has commented on the
+ * block" — a code identifier in a report addressed to a person, beside the
+ * English that made it look deliberate.
+ */
+describe('what the applier says, said in English', () => {
+  it('reads every applier code as a sentence, never as the code', () => {
+    const codes = [
+      'unknown-block',
+      'not-a-heading',
+      'parse-failed',
+      'empty',
+      'no-range',
+      'suggest-failed',
+      'not-a-list-item',
+      'not-yours',
+      'not-a-sibling',
+      'nothing-to-nest',
+    ];
+    const rules = groupCleanupReasons(codes.map((c) => `replace_block: ${c}`)).map((g) => g.rule);
+    // Ten codes, and not one of them survives as itself.
+    for (const code of codes) expect(rules, code).not.toContain(code);
+    // …and nothing is empty or a hyphenated identifier wearing a space.
+    for (const rule of rules) {
+      expect(rule.length).toBeGreaterThan(12);
+      expect(rule).toMatch(/ /);
+    }
+  });
+
+  it('gives the gate and the applier ONE row when they name one fact', () => {
+    // A missing block is a missing block, whether the gate saw it first or
+    // the applier did. Two rows saying it in two ways is how a reader
+    // concludes there were two problems.
+    const groups = groupCleanupReasons([
+      refusal('replace_block', 'b1', 'the block is not in the document'),
+      'delete_block: unknown-block',
+      'nest_blocks: unknown-block',
+    ]);
+    expect(groups).toEqual([{ rule: 'the block is not in the document', count: 3 }]);
+    expect(cleanupReasonLine(groups[0] as { rule: string; count: number })).toBe(
+      '3 edits — the block is not in the document',
+    );
+  });
+
+  it('leaves a code it has never heard of exactly as it arrived', () => {
+    // A wrong guess reads as fact; an unfamiliar code at least reads as
+    // something to look up.
+    expect(groupCleanupReasons(['replace_block: some-new-verdict'])).toEqual([
+      { rule: 'some-new-verdict', count: 1 },
+    ]);
+  });
+});
+
+/**
+ * THE RECOVERY LINE IS THE ONE A PERSON CAN ACT ON.
+ *
+ * It used to be the biggest group's line and nothing else, and on the real 15
+ * September run the biggest group was `unknown-block`, which matched no
+ * recovery at all because it was still a code. Two comment-blocked edits sat
+ * under it carrying the only actionable step in the report, and reading the
+ * top group alone printed the fallback — the sentence that says there is
+ * nothing to do.
+ */
+describe('which recovery a report of several rules offers', () => {
+  const dropped = (reply: Parameters<typeof readCleanupReply>[0]) =>
+    readCleanupReply(reply).recovery;
+
+  const HEADING = "the block is the meeting's own section heading";
+  const FALLBACK = 'The notes are unchanged, and nothing changes them on its own.';
+
+  it('takes the actionable rule over the bigger pile that is not', () => {
+    // Three edits dropped for a rule nobody can act on — the model addressed
+    // the section heading — and two for one they can.
+    expect(
+      dropped({
+        ok: true,
+        changed: false,
+        proposed: 5,
+        refused: 5,
+        refusals: [
+          refusal('replace_block', 'b1', HEADING),
+          refusal('replace_block', 'b2', HEADING),
+          refusal('delete_block', 'b3', HEADING),
+          refusal('delete_block', 'b8', COMMENTED),
+          refusal('replace_block', 'b9', COMMENTED),
+        ],
+      }),
+    ).toContain('Resolve the threads');
+    // The control on the same shape: take the comment-blocked pair out and
+    // there genuinely is nothing to act on, so the fallback is right. A
+    // reading in which every reply returns the actionable line fails here.
+    expect(
+      dropped({
+        ok: true,
+        changed: false,
+        proposed: 3,
+        refused: 3,
+        refusals: [
+          refusal('replace_block', 'b1', HEADING),
+          refusal('replace_block', 'b2', HEADING),
+          refusal('delete_block', 'b3', HEADING),
+        ],
+      }),
+    ).toBe(FALLBACK);
+  });
+
+  it('still prefers the commonest among the rules that ARE actionable', () => {
+    // Choosing "actionable" must not mean choosing the smallest: the groups
+    // arrive commonest-first and the first actionable match wins.
+    expect(
+      dropped({
+        ok: true,
+        changed: false,
+        proposed: 4,
+        refused: 4,
+        refusals: [
+          refusal('replace_block', 'b1', NOT_OURS),
+          refusal('replace_block', 'b2', NOT_OURS),
+          refusal('replace_block', 'b3', NOT_OURS),
+          refusal('delete_block', 'b4', COMMENTED),
+        ],
+      }),
+    ).toContain('Editing them yourself');
+  });
+
+  it('gives the 15 September run a step instead of the fallback', () => {
+    // Its shape exactly: three applier failures on blocks that had moved,
+    // two gate refusals on blocks under discussion. While `unknown-block`
+    // was still a code it matched no recovery, so the biggest group handed
+    // back the fallback. Read as the sentence it means, it carries its own
+    // step — and either way the report no longer says there is nothing to do.
+    const recovery = dropped({
+      ok: true,
+      changed: false,
+      proposed: 5,
+      refused: 2,
+      refusals: [
+        refusal('delete_block', 'b8', COMMENTED),
+        refusal('replace_block', 'b9', COMMENTED),
+      ],
+      failed: 3,
+      failures: [
+        'replace_block: unknown-block',
+        'replace_block: unknown-block',
+        'nest_blocks: unknown-block',
+      ],
+    });
+    expect(recovery).not.toBe(FALLBACK);
+    expect(recovery).toContain('Running it again');
+  });
+});

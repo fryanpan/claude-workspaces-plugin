@@ -138,3 +138,85 @@ describe('the offer at the end of a finished meeting', () => {
     expect(styleOf(actions).justifyContent).toBe('flex-end');
   });
 });
+
+/**
+ * TELLING "REFUSED" APART FROM "ON THE WIRE".
+ *
+ * Both used to be the primary's filled blue at `opacity: 0.6` with
+ * `cursor: default` — one appearance for a request still in flight and for an
+ * answer that will never be pressable. On an iPad there is no hover to
+ * correct that guess, so a finished-success dialog and a five-second wait
+ * looked the same and neither looked inert.
+ *
+ * The geometry of the card is measured in a real browser
+ * (`cleanup-offer-layout-browser.test.ts`); what is read here is the cascade
+ * that dresses each state, which happy-dom resolves in full.
+ */
+describe("the answers, in each of the dialog's three states", () => {
+  /** A scrim in one phase, with the primary in the state that phase puts it
+   *  in, and the spinner that sits inside it. */
+  const inPhase = (
+    phaseName: string,
+    goAttrs: Record<string, string> = {},
+  ): { go: HTMLElement; spinner: HTMLElement; dismiss: HTMLElement } => {
+    const root = attach('cleanup-offer', { attrs: { 'data-phase': phaseName } });
+    const actions = attach('cleanup-offer-actions', { parent: root });
+    const dismiss = attach('cleanup-offer-dismiss', { tag: 'button', parent: actions });
+    const go = attach('cleanup-offer-go', { tag: 'button', parent: actions, attrs: goAttrs });
+    const spinner = attach('voice-spinner cleanup-offer-spinner', { parent: go });
+    return { go, spinner, dismiss };
+  };
+
+  it("keeps the primary's fill for the one state it can be pressed in", () => {
+    const { go, spinner } = inPhase('asking');
+    const asking = styleOf(go);
+    // The accent, whatever the token resolves to — read from the sheet rather
+    // than pinned, so a palette change is not a failure here.
+    expect(asking.backgroundColor).toBe(
+      styleOf(document.documentElement).getPropertyValue('--accent').trim(),
+    );
+    expect(asking.backgroundColor.length).toBeGreaterThan(0);
+    expect(asking.cursor).toBe('pointer');
+    // Nothing fades it: happy-dom reads an unset property as '' (css-harness
+    // says so), which is exactly what "no opacity rule reaches this" means.
+    expect(asking.opacity).toBe('');
+    // Nothing is moving: the pass has not been asked for.
+    expect(styleOf(spinner).display).toBe('none');
+  });
+
+  it('drops the fill for an answer that is refused, rather than dimming it', () => {
+    const { go } = inPhase('reported', { disabled: '' });
+    const refused = styleOf(go);
+    // Filled blue at 0.6 is still filled blue. This reads as the flat, inert
+    // thing it is — and not by being faded, which is the shade that was doing
+    // two jobs.
+    expect(refused.backgroundColor).not.toBe(styleOf(inPhase('asking').go).backgroundColor);
+    expect(refused.opacity).toBe('1');
+    expect(refused.cursor).toBe('default');
+  });
+
+  it('tells a pass on the wire apart from one refused for ever', () => {
+    const working = inPhase('working', { disabled: '' });
+    const refused = inPhase('reported', { disabled: '' });
+    // The mark, not the shade: a spinner that paints only while the request
+    // is out, and a cursor that says the wait is temporary.
+    expect(styleOf(working.spinner).display).toBe('block');
+    expect(styleOf(refused.spinner).display).toBe('none');
+    expect(styleOf(working.go).cursor).toBe('progress');
+    expect(styleOf(refused.go).cursor).toBe('default');
+    // The dismiss is refused for the same window, and says the same thing.
+    expect(styleOf(working.dismiss).cursor).toBe('progress');
+    // Positive control: the two states DO reach the same element through the
+    // same harness, so a difference above is the rule and not a missing sheet.
+    expect(styleOf(working.go).paddingTop).toBe(styleOf(refused.go).paddingTop);
+  });
+
+  it('paints no primary at all once it can never be pressed again', () => {
+    // `display: flex` on the button outranks the UA\'s `[hidden]` rule, which
+    // is the trap the scrim itself fell into.
+    const { go } = inPhase('reported', { hidden: '', disabled: '' });
+    expect(styleOf(go).display).toBe('none');
+    // Positive control: without the attribute the same button paints.
+    expect(styleOf(inPhase('reported', { disabled: '' }).go).display).not.toBe('none');
+  });
+});

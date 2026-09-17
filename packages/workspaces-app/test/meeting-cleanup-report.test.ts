@@ -20,9 +20,11 @@ import {
   deferredFetch,
   dismissEl,
   goEl,
+  goLabel,
+  headlineEl,
   mount,
-  noteEl,
   offerEl,
+  phase,
   reasonRows,
   reasonsEl,
   recoveryEl,
@@ -76,7 +78,9 @@ describe('what a tidy-up that changed nothing says', () => {
     offer.offer('m-1');
     goEl().click();
     await vi.waitFor(() =>
-      expect(noteEl().textContent).toBe('The tidy-up could not run — the model did not answer.'),
+      expect(headlineEl().textContent).toBe(
+        'The tidy-up could not run — the model did not answer.',
+      ),
     );
     expect(recoveryEl().textContent).toContain('nothing runs it again on its own');
     expect(goEl().textContent).toBe('Try again');
@@ -89,7 +93,7 @@ describe('what a tidy-up that changed nothing says', () => {
     const offer = mount(f);
     offer.offer('m-1');
     goEl().click();
-    await vi.waitFor(() => expect(noteEl().textContent).toContain('no model key configured'));
+    await vi.waitFor(() => expect(headlineEl().textContent).toContain('no model key configured'));
     // Dead for this server — but the person may still leave, and the dialog
     // is still the thing they leave from.
     expect(goEl().disabled).toBe(true);
@@ -113,10 +117,138 @@ describe('what a tidy-up that changed nothing says', () => {
     goEl().click();
     // While the second pass is on the wire nothing on screen may still be
     // explaining the first — it would read as this run's answer.
-    await vi.waitFor(() => expect(noteEl().textContent).toBe('Tidying up these notes…'));
+    await vi.waitFor(() => expect(headlineEl().textContent).toBe('Tidying up these notes…'));
     expect(reasonRows()).toEqual([]);
     expect(recoveryEl().hidden).toBe(true);
     f.settle(1, { ok: true, changed: true, touched: 3 });
     await vi.waitFor(() => expect(offerEl().hidden).toBe(true));
+  });
+});
+
+/**
+ * WHAT THE DIALOG LEADS WITH, AND WHAT IT LEAVES PRESSABLE.
+ *
+ * Four outcomes shipped with "Tidy up these notes?" at 17px full strength and
+ * the sentence naming what had happened at 13px muted underneath — the
+ * loudest text on screen was the one thing the reader had already answered.
+ * These cases are the behaviour half of that fix: that the outcome IS the
+ * loud line, that the dialog says which of its three states it is in so the
+ * stylesheet can dress the answers, and that the controls left on screen are
+ * the ones a person can still use.
+ */
+describe('what leads, and what is left to press', () => {
+  it('asks the question, then says it is working, then names what happened', async () => {
+    const f = deferredFetch();
+    const offer = mount(f.impl);
+    offer.offer('m-1');
+    expect(headlineEl().textContent).toBe('Tidy up these notes?');
+    expect(phase()).toBe('asking');
+    // One loud line and no second one under it: the question does not stay on
+    // screen competing with the news that answers it.
+    expect(offerEl().querySelectorAll('.cleanup-offer-title')).toHaveLength(1);
+
+    goEl().click();
+    await vi.waitFor(() => expect(phase()).toBe('working'));
+    expect(headlineEl().textContent).toBe('Tidying up these notes…');
+
+    f.settle(0, {
+      ok: true,
+      changed: false,
+      proposed: 2,
+      refused: 2,
+      refusals: [
+        'delete_block b1: somebody has commented on the block',
+        'replace_block b2: somebody has commented on the block',
+      ],
+    });
+    await vi.waitFor(() => expect(phase()).toBe('reported'));
+    // The outcome, in the line that was the question — and it is the dialog's
+    // accessible name, so what it is called and what it says are one thing.
+    expect(headlineEl().textContent).toBe(
+      'Nothing changed — none of these edits could be made to the notes.',
+    );
+    const card = offerEl().querySelector('.cleanup-offer-card');
+    expect(card?.getAttribute('aria-labelledby')).toBe(headlineEl().id);
+    // Announced without the focus moving, since nothing else would say it.
+    expect(headlineEl().getAttribute('aria-live')).toBe('polite');
+  });
+
+  it('stops saying "Not now" once the pass has run', async () => {
+    const f = stubFetch({
+      body: {
+        ok: true,
+        changed: false,
+        proposed: 1,
+        refused: 1,
+        refusals: ['delete_block b1: somebody has commented on the block'],
+      },
+    });
+    const offer = mount(f);
+    offer.offer('m-1');
+    expect(dismissEl().textContent).toBe('Not now');
+    goEl().click();
+    await vi.waitFor(() => expect(phase()).toBe('reported'));
+    // "Not now" defers a question. By now it has been answered.
+    expect(dismissEl().textContent).toBe('Close');
+    expect(goLabel()).toBe('Try again');
+  });
+
+  it('leaves one live control, saying what it does, when nothing can be retried', async () => {
+    // The pass read the meeting and found the notes finished. There is
+    // nothing to press but the way out, so the way out is what is on screen —
+    // a permanently dead "Tidy up" beside it is one more thing to weigh.
+    const f = stubFetch({ body: { ok: true, changed: false, proposed: 0, refused: 0 } });
+    const offer = mount(f);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(phase()).toBe('reported'));
+    expect(goEl().hidden).toBe(true);
+    expect(dismissEl().hidden).toBe(false);
+    expect(dismissEl().disabled).toBe(false);
+    expect(dismissEl().textContent).toBe('Close');
+  });
+
+  it('keeps the primary on a report that CAN be pressed again', async () => {
+    // The control for the case above: removal belongs to `retry: false`, not
+    // to every report. A reading in which the primary always goes fails here.
+    const f = stubFetch({ status: 409, body: { ok: false, reason: 'compose-failed' } });
+    const offer = mount(f);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(phase()).toBe('reported'));
+    expect(goEl().hidden).toBe(false);
+    expect(goEl().disabled).toBe(false);
+    expect(goLabel()).toBe('Try again');
+  });
+
+  it('keeps Tab inside the dialog when the primary has been taken away', async () => {
+    // The trap walks the answers that are actually stops. `report` hides and
+    // disables the primary on one line, so the one live control is the only
+    // stop, and Tab has to turn back onto it rather than leaving the card.
+    const f = stubFetch({ body: { ok: true, changed: false, proposed: 0, refused: 0 } });
+    const offer = mount(f);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(goEl().hidden).toBe(true));
+    dismissEl().focus();
+    const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    document.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(dismissEl());
+  });
+
+  it('brings the primary back for the next meeting', async () => {
+    // The removal belongs to one reply, not to the mount.
+    const f = stubFetch({ body: { ok: true, changed: false, proposed: 0, refused: 0 } });
+    const offer = mount(f);
+    offer.offer('m-1');
+    goEl().click();
+    await vi.waitFor(() => expect(goEl().hidden).toBe(true));
+    offer.offer('m-2');
+    expect(goEl().hidden).toBe(false);
+    expect(goEl().disabled).toBe(false);
+    expect(goLabel()).toBe('Tidy up');
+    expect(dismissEl().textContent).toBe('Not now');
+    expect(phase()).toBe('asking');
   });
 });

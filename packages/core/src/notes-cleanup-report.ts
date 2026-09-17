@@ -159,14 +159,53 @@ const RECOVERY_BY_RULE: ReadonlyArray<{ match: string; recovery: string }> = [
 const NOTHING_LANDED_FALLBACK = 'The notes are unchanged, and nothing changes them on its own.';
 
 /**
+ * The applier's verdicts, in the words the gate already uses.
+ *
+ * WHY THIS EXISTS. The gate writes a sentence per dropped edit; the applier
+ * writes its error CODE — `"replace_block: unknown-block"`. Both arrays reach
+ * the same list, so a real pass put "3 edits — unknown-block" directly under
+ * "1 edit — somebody has commented on the block". A code identifier in a
+ * sentence addressed to a person is the thing this dialog exists to stop
+ * printing.
+ *
+ * AND THE WORDING IS THE GATE'S, NOT A SECOND PARAPHRASE. `unknown-block` and
+ * the gate's "the block is not in the document" are one fact, so they get one
+ * sentence and therefore ONE ROW: an edit the gate dropped for a missing block
+ * and one the applier dropped for the same missing block are the same news,
+ * and two rows saying it differently is how a reader concludes there were two
+ * problems.
+ *
+ * A code this build has never heard of is left exactly as it arrived — a
+ * wrong guess reads as fact, whereas an unfamiliar code at least reads as
+ * something to look up.
+ */
+const APPLIER_WORDS: Record<string, string> = {
+  'unknown-block': 'the block is not in the document',
+  'not-a-heading': 'the block the tidy-up addressed is not a heading',
+  'parse-failed': 'the tidy-up’s replacement text was not readable as notes',
+  empty: 'the tidy-up offered nothing to put in the block’s place',
+  'no-range': 'the tidy-up named no text to change',
+  'suggest-failed': 'the suggestion could not be recorded on the block',
+  'not-a-list-item': 'the block is not a bullet, so nothing can be grouped under it',
+  'not-yours': 'the document does not record the block as the note-taker’s own',
+  'not-a-sibling': 'those bullets sit in different lists, so they cannot be grouped together',
+  'nothing-to-nest': 'those bullets are already grouped where the tidy-up wanted them',
+};
+
+/**
  * Split `"<op> <id>: <rule>"` — and `"<op>: <reason>"`, which the failures
  * carry — into the rule alone, on the FIRST colon-space only. The rules
  * themselves hold no colon, and splitting on the last one would cut a reason
  * that does.
+ *
+ * An applier code becomes its sentence here, at the one point both arrays
+ * pass through, so the dialog and `meeting:rerun`'s report get the English
+ * without either of them knowing there were two kinds of line.
  */
 function ruleOf(line: string): string {
   const at = line.indexOf(': ');
-  return at === -1 ? line.trim() : line.slice(at + 2).trim();
+  const rule = at === -1 ? line.trim() : line.slice(at + 2).trim();
+  return APPLIER_WORDS[rule] ?? rule;
 }
 
 /**
@@ -190,14 +229,27 @@ export function groupCleanupReasons(
     .sort((a, b) => b.count - a.count || a.rule.localeCompare(b.rule));
 }
 
-/** The recovery line for a set of dropped edits: the biggest group's, when
- *  that group names something a person can do; the generic one otherwise. */
+/**
+ * The recovery line for a set of dropped edits: the commonest group that
+ * names something a person can DO, and the generic line only when none of
+ * them does.
+ *
+ * NOT THE BIGGEST GROUP'S LINE, which is what this used to be. On the real
+ * 15 September run the biggest group was `unknown-block` — nothing the
+ * reader did and nothing they can fix — and two comment-blocked edits sat
+ * under it with the one actionable step in the whole report. Reading only
+ * the top group threw that step away and printed the fallback, which is the
+ * sentence that says there is nothing to do.
+ *
+ * `groups` arrives commonest-first, so the FIRST actionable match is still
+ * the one that covers the most edits among those worth acting on.
+ */
 function recoveryFor(groups: readonly NotesCleanupReasonGroup[]): string {
-  const top = groups[0];
-  if (top === undefined) return NOTHING_LANDED_FALLBACK;
-  return (
-    RECOVERY_BY_RULE.find((r) => top.rule.includes(r.match))?.recovery ?? NOTHING_LANDED_FALLBACK
-  );
+  for (const group of groups) {
+    const hit = RECOVERY_BY_RULE.find((r) => group.rule.includes(r.match));
+    if (hit !== undefined) return hit.recovery;
+  }
+  return NOTHING_LANDED_FALLBACK;
 }
 
 /**

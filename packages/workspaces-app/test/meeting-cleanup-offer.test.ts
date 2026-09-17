@@ -24,8 +24,8 @@ import {
   dismissEl,
   escape,
   goEl,
+  headlineEl,
   mount,
-  noteEl,
   offerEl,
   reasonsEl,
   recoveryEl,
@@ -50,7 +50,8 @@ describe('the tidy-up offer', () => {
     // A question with two answers, and nothing said until one is pressed.
     expect(goEl().textContent).toBe('Tidy up');
     expect(dismissEl().textContent).toBe('Not now');
-    expect(noteEl().hidden).toBe(true);
+    // The loud line is the question, because nothing has happened yet.
+    expect(headlineEl().textContent).toBe('Tidy up these notes?');
     // The whole point: an offer on screen has asked the server for nothing.
     expect(f.calls).toEqual([]);
   });
@@ -73,8 +74,7 @@ describe('the tidy-up offer', () => {
     await vi.waitFor(() => expect(f.calls).toHaveLength(1));
     // The dialog stays up and reports, rather than vanishing on the press.
     expect(offerEl().hidden).toBe(false);
-    expect(noteEl().hidden).toBe(false);
-    expect(noteEl().textContent).toBe('Tidying up these notes…');
+    expect(headlineEl().textContent).toBe('Tidying up these notes…');
     expect(goEl().disabled).toBe(true);
     expect(dismissEl().disabled).toBe(true);
     // …and nothing closes over writes that are already coming: not the
@@ -203,7 +203,7 @@ describe('the tidy-up offer', () => {
     const offer = mount(f);
     offer.offer('m-1');
     goEl().click();
-    await vi.waitFor(() => expect(noteEl().textContent).toBe('no transcript'));
+    await vi.waitFor(() => expect(headlineEl().textContent).toBe('no transcript'));
     // Still pressable, and still refusable: a refusal is not a dead end.
     expect(offerEl().hidden).toBe(false);
     expect(goEl().disabled).toBe(false);
@@ -229,7 +229,7 @@ describe('the tidy-up offer', () => {
     offer.offer('m-1');
     goEl().click();
     await vi.waitFor(() =>
-      expect(noteEl().textContent).toBe(
+      expect(headlineEl().textContent).toBe(
         'Nothing changed — none of these edits could be made to the notes.',
       ),
     );
@@ -251,7 +251,7 @@ describe('the tidy-up offer', () => {
     offer.offer('m-1');
     goEl().click();
     await vi.waitFor(() =>
-      expect(noteEl().textContent).toBe(
+      expect(headlineEl().textContent).toBe(
         'Nothing changed — the tidy-up read the whole meeting and found nothing to improve.',
       ),
     );
@@ -328,7 +328,7 @@ describe('the tidy-up offer', () => {
     f.reject(0);
     await vi.waitFor(() => expect(f.read(0)).toBe(true));
     expect(offerEl().hidden).toBe(false);
-    expect(noteEl().hidden).toBe(true);
+    expect(headlineEl().textContent).toBe('Tidy up these notes?');
   });
 
   it('does not run twice on a double press', async () => {

@@ -55,11 +55,18 @@ export const dismissEl = (): HTMLButtonElement => {
   if (!el) throw new Error('no dismiss button');
   return el;
 };
-export const noteEl = (): HTMLElement => {
-  const el = offerEl().querySelector<HTMLElement>('.cleanup-offer-note');
-  if (!el) throw new Error('no note');
+/** The one loud line: the question, then the working line, then the outcome.
+ *  It is also the dialog's accessible name, which is why there is one of it. */
+export const headlineEl = (): HTMLElement => {
+  const el = offerEl().querySelector<HTMLElement>('.cleanup-offer-title');
+  if (!el) throw new Error('no headline');
   return el;
 };
+/** Which of the three states the dialog is in, as the stylesheet reads it. */
+export const phase = (): string => offerEl().dataset.phase ?? '';
+/** The primary answer's label, without the spinner that sits beside it. */
+export const goLabel = (): string =>
+  offerEl().querySelector('.cleanup-offer-go-label')?.textContent ?? '';
 /** The grouped reasons, as the rows a reader sees. */
 export const reasonRows = (): string[] =>
   [...offerEl().querySelectorAll('.cleanup-offer-reasons li')].map((li) => li.textContent ?? '');
