@@ -74,6 +74,11 @@ that way and add new subsystem docs to the list here.
 - **Calm by default** (Bryan, 2026-09-13): spend the reader's limited
   attention only where it pays. No pulsing, no blinking, no badges; a steady
   indicator (the red Recording dot) is clear enough.
+- **A UI element keeps its size and position as its state changes** (Bryan,
+  2026-09-17), unless the change is the thing the reader has to notice. Size a
+  control for its widest option and keep the part of its label that does not
+  change in the same place, so nothing beside it moves and the reader's target
+  stays where they aimed.
 - **Verify UI at 1180x820 (iPad landscape — Bryan's main device) AND 430px**
   per [docs/product/design-mobile.md](docs/product/design-mobile.md). Tiers:
   mobile ≤1100, tablet/laptop 1101–1920 (iPad and MacBook alike — the scarce
