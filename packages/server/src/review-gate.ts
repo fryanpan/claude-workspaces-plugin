@@ -507,7 +507,21 @@ export function createReviewGate(ctx: ReviewGateContext) {
     // it survives the revision that produced this call: the gate is a check
     // and not a wall precisely because this number stops growing.
     const priorJudgement = target.judgement(row);
-    const heldFor = priorJudgement?.heldFor ?? [];
+    /**
+     * A REFUSED check drops the get-it-anyway holds out of its own history.
+     *
+     * They are instructions this gate has disavowed, and a history is not
+     * inert: it goes back to the judge as `priorHolds`, it is quoted to the
+     * READER in the admitted-after-two-holds sentence, and it counts toward
+     * the cap. The lead's real item had two of them before the refusal was
+     * reported — so without this the laundering sentence comes back on the
+     * report that says the check was refused, by the one path the guard below
+     * does not sit on.
+     */
+    const priorHeldFor = priorJudgement?.heldFor ?? [];
+    const heldFor = target.refusedCheck
+      ? priorHeldFor.filter((r) => !isGetItAnywayHold(r))
+      : priorHeldFor;
     // Off the queue from THIS moment, not from the verdict: the item is
     // already in the store, and the seconds the judge takes were seconds the
     // reader could see — and answer — an item about to be held (codex

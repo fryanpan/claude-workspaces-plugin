@@ -158,6 +158,36 @@ describe('a check the agent was refused permission to run', () => {
     expect(await onQueue(taskId)).toBe(0);
   });
 
+  it('the lead’s own sequence: held twice, then reported as refused', async () => {
+    await fresh();
+    const { taskId, lineId } = await lineTask();
+    // Two rounds with no refusal on the line, exactly as it happened — each
+    // reworded, because a report that repeats itself word for word is not a
+    // revision and is not judged again.
+    for (const [hold, words] of [
+      [FIRST_HOLD, 'the run log'],
+      [SECOND_HOLD, 'the run log, and what I was unable to read'],
+    ] as const) {
+      verdict = { ok: false, reason: hold };
+      const round = await report(taskId, lineId, [{ text: words, url: LOG }]);
+      expect(round.body.held).toHaveLength(1);
+    }
+    // Then the report that says why there is no check to make. The judge
+    // holds again — it cannot see what it was not told — and the line still
+    // reaches the reader, carrying none of the disavowed words: not in the
+    // verdict, not in the history the card quotes, not back to the judge.
+    verdict = { ok: false, reason: SECOND_HOLD };
+    const { body, raw } = await report(taskId, lineId, [{ text: DENIED, refused: true }]);
+    expect(body.held).toBeUndefined();
+    expect(raw).not.toContain('separate agent');
+    expect(await onQueue(taskId)).toBe(1);
+    const judge = (await detail(taskId)).reviews?.[0]?.judge;
+    expect(judge?.verdict).toBe('ok');
+    expect(judge?.reason).toContain('refused permission');
+    expect(judge?.heldFor ?? []).toEqual([]);
+    expect(judged.at(-1)?.item.priorHolds).toBeUndefined();
+  });
+
   it('tells the judge the refusal is terminal, and the reader why it is theirs', async () => {
     await fresh();
     const { taskId, lineId } = await lineTask();
