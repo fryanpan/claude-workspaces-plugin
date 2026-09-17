@@ -205,6 +205,39 @@ describe('an item whose meeting went on to read clean is withdrawn', () => {
     expect(board.revised).toEqual(['ri-1']);
   });
 
+  it('asks again at the next clean leg, because an answer can be undone', () => {
+    // THE MUTATION THIS CATCHES: remembering a refusal and never asking the
+    // board again. `answered` is the refusal that happens in practice, and it
+    // is reversible — its own message tells the reader to undo the answer if
+    // it was a mistake. Suppress the retry and the item that answer was
+    // undone on keeps a claim the meeting disproved for the life of the
+    // process. Under the mutation `board.withdrawn` stays empty below.
+    const board = recordingBoard();
+    let refuse = true;
+    const sometimesRefusing: Recorder = {
+      ...board,
+      withdrawReviewItem: (taskId, itemId, opts) =>
+        refuse
+          ? { ok: false as const, error: 'answered' }
+          : (board.withdrawReviewItem?.(taskId, itemId, opts) ?? { ok: true as const }),
+    };
+    const { filer, ids } = scene(sometimesRefusing);
+
+    filer.file(ids, badReading(ids.docId));
+    filer.legEnded(ids, { resumable: false });
+    filer.file(ids, cleanReading(ids.docId));
+    filer.legEnded(ids, { resumable: false });
+    expect(board.withdrawn).toEqual([]);
+
+    // The person undoes their answer; the meeting stops clean once more.
+    refuse = false;
+    filer.file(ids, cleanReading(ids.docId));
+    filer.legEnded(ids, { resumable: false });
+
+    expect(board.withdrawn).toEqual(['ri-1']);
+    expect(board.filed).toEqual(['t-season']);
+  });
+
   it('leaves the item standing on a board with no way to withdraw at all', () => {
     // The board shape this change found. It must not throw, and it must not
     // file a second item to compensate.

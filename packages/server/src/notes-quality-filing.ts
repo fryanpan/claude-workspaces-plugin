@@ -146,15 +146,17 @@ interface Held {
    *  band against what the ITEM says — see `notes-quality-verdict.ts`. */
   verdict?: NotesQualityVerdict;
   /**
-   * That a withdrawal was already tried on this item and refused.
+   * That a refusal has already been written down for this item.
    *
-   * Every refusal `withdrawReviewItem` and `withdrawCommentReview` answer is
-   * a standing fact about the item — answered, already withdrawn, not
-   * withdrawable, gone — never a transient one, so a second attempt refuses
-   * identically. Without this a meeting that keeps stopping clean asks the
-   * board once per leg and writes the same refusal line each time.
+   * IT SILENCES THE LINE, NEVER THE ATTEMPT. A meeting that keeps stopping
+   * clean asks the board once per leg, and the same refusal written once per
+   * leg is noise. But a refusal is not necessarily permanent: `answered` is
+   * the one that refuses here in practice, and its own message says to undo
+   * the answer if it was a mistake — after which the item is withdrawable and
+   * still carries a claim the meeting disproved. So the board is asked every
+   * time and only the log line is held back.
    */
-  withdrawRefused?: true;
+  withdrawRefusalSaid?: true;
   /** The resume grace, while one is armed. */
   timer?: unknown;
 }
@@ -351,7 +353,6 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
    * it, which is the outcome this whole module exists to prevent.
    */
   const withdraw = (ids: MeetingIds, filed: Filed, mem: Held): 'withdrawn' | 'failed' => {
-    if (mem.withdrawRefused) return 'failed';
     const board = deps.board?.();
     const res = !board
       ? undefined
@@ -376,16 +377,21 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     }
     if (!res.ok) {
       // An item somebody already answered refuses, and must: withdrawing it
-      // would retract their answer. Said once — see `withdrawRefused`.
-      mem.withdrawRefused = true;
-      say(
-        `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item withdraw refused ` +
-          `(${res.error}${res.message !== undefined ? `: ${res.message}` : ''})`,
-      );
+      // would retract their answer. The ASK is repeated at every later clean
+      // leg, because an undone answer makes the same item withdrawable again;
+      // only the line is said once — see `withdrawRefusalSaid`.
+      if (!mem.withdrawRefusalSaid) {
+        mem.withdrawRefusalSaid = true;
+        say(
+          `[meeting-notes] ${ids.docId} meeting ${ids.meetingId}: quality item withdraw refused ` +
+            `(${res.error}${res.message !== undefined ? `: ${res.message}` : ''})`,
+        );
+      }
       return 'failed';
     }
     mem.filed = undefined;
     mem.verdict = undefined;
+    mem.withdrawRefusalSaid = undefined;
     return 'withdrawn';
   };
 
