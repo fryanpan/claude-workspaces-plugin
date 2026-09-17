@@ -105,9 +105,13 @@ const { readDeploySource } = await import('../packages/server/src/deploy-source.
 const { acquirePort, probeLocalPort, shouldWalkPorts } = await import(
   '../packages/server/src/port-bind.ts'
 );
-const { createHealthWatchdog, fileRestartLedger, probeHealth, restartLedgerPath } = await import(
-  '../packages/server/src/supervisor-health.ts'
-);
+const {
+  FIRST_BIND_GRACE_MS,
+  createHealthWatchdog,
+  fileRestartLedger,
+  probeHealth,
+  restartLedgerPath,
+} = await import('../packages/server/src/supervisor-health.ts');
 
 /**
  * DEV only. Walk to the next port when this one is occupied, so two agents on
@@ -471,6 +475,16 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () =
 // at most WATCHDOG_RESTART_POLICY often, a limit kept in a file because each
 // restart ends this process.
 //
+// The third failure, and the one this watchdog CAUSED: a child that has not
+// bound yet. The builds above finish before the spawn, but the child still
+// hydrates every persisted document before its own bind, and an unbound port
+// read as a dead server is a restart that kills a boot which was going to
+// succeed — twice on 2026-09-16, each costing another pair of builds and
+// another hydration. So the first bind of this supervisor's life gets
+// `firstBindGraceMs` below, and only the first: once anything has answered on
+// this port, an unbound port is the reload wedge again and acts on the old
+// budget.
+//
 // This polls the port we ASKED for, which is only the same as the port the
 // child BOUND because prod forbids walking on both sides (`shouldWalkPorts`
 // above, `--no-port-walk` in serverArgs). When that invariant did not hold,
@@ -479,9 +493,13 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () =
 // leaking a fully-hydrated server on each pass. Do not re-enable walking in
 // prod without giving the child a way to report the port it actually got.
 if (noWatch) {
+  // `setInterval` fires its first callback one CHECK_MS after it is armed, so
+  // these three numbers mean: first probe at GRACE_MS + CHECK_MS (45s), first
+  // restart at GRACE_MS + MAX_FAILS * CHECK_MS (75s). Written out because the
+  // 75s was being read as 45s, and it is the budget a boot actually gets.
   const GRACE_MS = 15_000; // let the server bind before the first check
   const CHECK_MS = 30_000;
-  const MAX_FAILS = 2; // ~60s unanswered before we act (avoids blips)
+  const MAX_FAILS = 2; // so 75s unanswered from here before we act
   const watchdog = createHealthWatchdog({
     probe: () => probeHealth(port),
     maxFails: MAX_FAILS,
@@ -489,6 +507,11 @@ if (noWatch) {
     log: note,
     label: `:${port}`,
     restart: () => cleanup(1),
+    // Those 75s are a budget for a server that HAS bound. The child hydrates
+    // every persisted document before its bind, so the first bind gets its own,
+    // much longer window — see FIRST_BIND_GRACE_MS for what it is derived from.
+    // Passed rather than defaulted so this block names every timing it runs on.
+    firstBindGraceMs: FIRST_BIND_GRACE_MS,
   });
   setTimeout(() => {
     const timer = setInterval(() => {

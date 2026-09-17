@@ -63,11 +63,17 @@ describe('the supervisor log', () => {
       log: (line) => lines.push(line),
       restart: () => {},
       label: ':8873',
+      // Off, because this case is about the line and its stamp, not about the
+      // first-bind grace — which would otherwise hold this probe as a boot.
+      firstBindGraceMs: 0,
     });
     expect(await dog.tick()).toBe('restart');
-    expect(lines.filter((l) => l.includes('— restarting via launchd'))).toEqual([
-      '[supervisor] server alive-but-unbound — restarting via launchd',
-    ]);
+    const restartLines = lines.filter((l) => l.includes('— restarting via launchd'));
+    expect(restartLines).toHaveLength(1);
+    // `alive-but-unbound` is the phrase the 24h count greps for, and both
+    // unbound variants carry it; the rest of the line names which fault it was.
+    expect(restartLines[0]).toContain('[supervisor] server alive-but-unbound');
+    expect(restartLines[0]).toContain('it never bound :8873');
 
     // Every `log:` the supervisor hands a helper is `note`; the watchdog's
     // is the bare reference.
