@@ -1707,6 +1707,27 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   text-align: left;
   cursor: pointer;
 }
+/* And the same line when it is a READOUT rather than a script. A recording
+   that timed itself out is read once, by the one person who comes back to a
+   meeting nobody attended — at a desk, not across a room — so it takes the
+   strip's own 13px muted chrome instead of the body size above. Sized for a
+   room, it was the loudest text in the strip and the only line claiming an
+   audience that by definition was not there. */
+.meeting-note-ended {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+/* And what a tidy-up press had to say, on the same line AFTER that sentence
+   rather than over it — both are news, about different things. Same 13px
+   readout, but full-strength colour: it is the more recent of the two and the
+   one the reader just asked for, so it is the one their eye should land on. */
+.meeting-note-report {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  margin-left: 8px;
+}
 /* The same line when the tap DOES something — an auto-started huddle whose
    mic is still waiting on a gesture. It has to read as a control at rest:
    hover is not an answer on the iPad, and the words alone read as one more
@@ -1764,6 +1785,23 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
      min-height, so a label that wraps grows the target rather than centring a
      fixed box inside it. */
   padding-block: 7px;
+}
+/* The offer beside it: the notes that recording wrote are real, so a tidy-up
+   is still worth making — as a control on the line the person comes back to,
+   never a dialog raised over a doc nobody is looking at. Takes
+   `.meeting-note-action`'s treatment (it is the same kind of thing: a control
+   that has to read as one at rest on a touch device); this adds only the gap
+   from the sentence and keeps the label off a line of its own. */
+.meeting-note-tidy {
+  margin-left: 10px;
+  white-space: nowrap;
+}
+/* While the pass is on the wire the label says so, and a disabled control has
+   to stop looking like one that can be pressed again. */
+.meeting-note-tidy:disabled {
+  color: var(--fg-muted);
+  text-decoration: none;
+  cursor: default;
 }
 /* And the row gives a held sentence the room, rather than clipping it at
    36px. The shell's strip track is `auto` — the strip RESERVES its height —

@@ -99,10 +99,17 @@ const WORKING = 'Tidying up these notes…';
  *  pass that found nothing to improve it is the ONLY control, so it has to
  *  say what it does rather than defer something already done. */
 const DISMISS_WORDS = { asking: 'Not now', reported: 'Close' };
-/** What a request that never arrived says. A reply that ARRIVED says its own
- *  words through `readCleanupReply`; this is the one case with no reply at
- *  all, so the recovery has to be written here. */
-const UNREACHABLE = {
+/**
+ * What a request that never arrived says. A reply that ARRIVED says its own
+ * words through `readCleanupReply`; this is the one case with no reply at
+ * all, so the recovery has to be written here.
+ *
+ * Exported because the strip's idle-line offer is the second surface that can
+ * fail to reach the server, and two surfaces writing this sentence twice is
+ * the drift `readCleanupReply` exists to stop — the only difference being
+ * that this one reply never came, so core has nothing to read.
+ */
+export const CLEANUP_UNREACHABLE = {
   headline: 'The tidy-up could not run — the request did not reach the server.',
   recovery: 'The notes are unchanged, and nothing runs it again on its own.',
 };
@@ -321,7 +328,7 @@ export function mountMeetingCleanupOffer(opts: {
       // No reply at all, so nothing said anything about the notes. They are
       // untouched: the writes happen inside the request this never completed.
       if (!superseded()) {
-        report({ ...UNREACHABLE, reasons: [], retry: true });
+        report({ ...CLEANUP_UNREACHABLE, reasons: [], retry: true });
       }
     } finally {
       inFlight.delete(id);
