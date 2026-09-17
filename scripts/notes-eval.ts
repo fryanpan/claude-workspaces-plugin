@@ -89,6 +89,7 @@ import {
   allBullets,
   decisionsWithoutSpeaker,
   duplicateTopics,
+  flatBulletRuns,
   longFlatRuns,
   openedEmptyHeadings,
   overlongBullets,
@@ -1312,6 +1313,14 @@ async function runMeeting(
       // counts the walls still standing when the meeting ended, and a zero
       // is worth printing because it is the number that should be there.
       `${longFlatRuns(harness.notes()).length} topics over ${MAX_FLAT_RUN_BULLETS} flat bullets` +
+      // THE TWO SIZES BEHIND THAT COUNT. "Two topics over the bar" is the
+      // same line whether they ran to five bullets or to sixty-five, and the
+      // meeting that made this worth printing ran to sixty-five. The largest
+      // topic is the other half: a heading nested into tidy groups has no
+      // long run at all and can still have swallowed half an hour
+      // (`MAX_TOPIC_NOTES`, `notes-regroup.ts`).
+      `, longest run ${longestFlatRun(harness.notes())}, ` +
+      `largest topic ${largestTopic(harness.notes())}` +
       (opts.judgePerMeeting > 0
         ? `, ${judgeWindow.waited} of ${judgeWindow.judged} judged windows waited for a ` +
           "heading's bullets"
@@ -1324,6 +1333,16 @@ async function runMeeting(
     console.log(`    ${fixture.meeting}: ${reason}`);
   }
   return { rate, expanded };
+}
+
+/** The longest stretch of flat bullets anywhere in the notes. */
+function longestFlatRun(notes: string): number {
+  return flatBulletRuns(notes).reduce((most, r) => Math.max(most, r.bullets.length), 0);
+}
+
+/** How many notes sit under the fullest single heading. */
+function largestTopic(notes: string): number {
+  return parseNotesTopics(notes).reduce((most, t) => Math.max(most, t.bullets.length), 0);
 }
 
 function report(
