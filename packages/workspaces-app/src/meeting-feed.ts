@@ -103,6 +103,15 @@ export interface MeetingFeedDeps {
    */
   endedNote(): string;
   /**
+   * What the last tidy-up press had to report, or empty.
+   *
+   * A SECOND SENTENCE, not a replacement for the one above. This used to
+   * overwrite `endedNote`, which spent the one piece of news a returning
+   * reader came back for — that the recording stopped itself — on how a pass
+   * they had just pressed went. Both survive; the strip's row grows for them.
+   */
+  endedReport(): string;
+  /**
    * The control that sits BESIDE that sentence, or null when there is none.
    *
    * Today it is the tidy-up a timed-out recording leaves behind: the notes
@@ -231,6 +240,17 @@ export function createMeetingFeed(deps: MeetingFeedDeps): MeetingFeed {
         note.title = 'Tap to dismiss';
         note.addEventListener('click', () => deps.dismissEndedNote());
         line.append(note);
+        // What the last press said, AFTER the ending's own sentence rather
+        // than over it. Plain text, not a second dismiss target: the sentence
+        // beside it already dismisses the whole line, and two tap targets
+        // saying different things about one line is a guess to make.
+        const reported = deps.endedReport();
+        if (reported) {
+          const said = document.createElement('span');
+          said.className = 'meeting-note meeting-note-report';
+          said.textContent = reported;
+          line.append(said);
+        }
         // A SIBLING, not a child: the sentence is itself a button, and a
         // control nested inside one is neither valid nor reachable.
         const action = deps.endedAction();

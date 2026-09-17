@@ -1718,6 +1718,16 @@ body.doc-heading-in-view:not(.doc-renaming) #doc-title {
   line-height: 1.4;
   color: var(--fg-muted);
 }
+/* And what a tidy-up press had to say, on the same line AFTER that sentence
+   rather than over it — both are news, about different things. Same 13px
+   readout, but full-strength colour: it is the more recent of the two and the
+   one the reader just asked for, so it is the one their eye should land on. */
+.meeting-note-report {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+  margin-left: 8px;
+}
 /* The same line when the tap DOES something — an auto-started huddle whose
    mic is still waiting on a gesture. It has to read as a control at rest:
    hover is not an answer on the iPad, and the words alone read as one more

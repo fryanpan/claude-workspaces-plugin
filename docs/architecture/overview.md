@@ -1105,8 +1105,12 @@ either: it is the SAME offer for the ending nobody was present for. A
 recording that timed itself out for silence raises no dialog — there is
 nobody there to answer one — so the tidy-up becomes a control on the strip's
 idle line, beside the sentence saying the recording is over. It holds the
-request, the three answers a pass can give, and the small state machine that
-turns them into a label; the strip draws it and owns every side effect.
+request and the small state machine that turns a reply into a label; the
+strip draws it and owns every side effect. What the reply MEANS it does not
+decide — `readCleanupReply` in `packages/core` does, for this line and for
+the dialog both, so the two surfaces cannot name one reply differently. The
+line takes that report's headline and its `retry`, and leaves the grouped
+per-edit reasons to the dialog, which has a card where this has one row.
 `notes-link-affordance.ts` joins the editor tier beside
 `task-link-chips.ts`, and is the one plugin there that WRITES: the chips are
 render-time and change nothing, while accepting a note's suggestion or undoing

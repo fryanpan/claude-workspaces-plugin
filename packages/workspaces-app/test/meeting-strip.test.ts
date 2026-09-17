@@ -281,6 +281,8 @@ interface Harness {
   note(): string;
   /** The control beside a timed-out recording's sentence, when there is one. */
   tidy(): HTMLButtonElement | null;
+  /** What the last tidy-up press reported, beside that sentence. */
+  tidyReport(): string;
   /** The speaker tags on the caption, in turn order. */
   tags(): string[];
   /** The rename rows in whichever popover is open. */
@@ -417,6 +419,7 @@ function mount(
     caption: () => q('.meeting-caption-line'),
     note: () => q('.meeting-note'),
     tidy: () => root.querySelector<HTMLButtonElement>('.meeting-note-tidy'),
+    tidyReport: () => root.querySelector('.meeting-note-report')?.textContent ?? '',
     tags: () => [...root.querySelectorAll('.meeting-speaker')].map((el) => el.textContent ?? ''),
     popNames: () =>
       [...pop().querySelectorAll('.meeting-pop-speaker-name')].map((el) => el.textContent ?? ''),
@@ -1187,9 +1190,19 @@ describe('the strip when no words are coming', () => {
     expect(h.root.hidden).toBe(true);
   });
 
-  it('says on the line when the pass could not run, and leaves the offer standing', async () => {
+  /**
+   * BOTH FACTS SURVIVE A PRESS. The report used to be handed to the strip AS
+   * the ending's sentence, so asking for a tidy-up erased the one piece of
+   * news the returning reader came back for.
+   */
+  it('reports the pass beside the ending sentence, not over it', async () => {
     const tidyUpNotes = vi.fn(
-      async () => ({ kind: 'failed', note: 'The tidy-up could not run.' }) as const,
+      async () =>
+        ({
+          kind: 'reported',
+          note: 'The tidy-up could not run — a recording is going on this doc.',
+          retry: true,
+        }) as const,
     );
     const h = mount(undefined, { tidyUpNotes });
     h.pressStart({ pick: 'Just me' });
@@ -1200,10 +1213,46 @@ describe('the strip when no words are coming', () => {
     h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 9_000, reason: 'silence' });
     h.tidy()?.click();
     await settle();
-    expect(h.note()).toBe('The tidy-up could not run.');
-    // Pressing again is a reasonable thing to want, so the control stays.
-    expect(h.tidy()?.textContent).toBe('Tidy up the notes');
+    // The ending still says what ended the recording…
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+    // …and the pass says what it did, on the same line.
+    expect(h.tidyReport()).toBe('The tidy-up could not run — a recording is going on this doc.');
+    // A person can stop the recording and press again, so the control stays —
+    // saying what it now is.
+    expect(h.tidy()?.textContent).toBe('Try again');
     expect(h.tidy()?.disabled).toBe(false);
+  });
+
+  /**
+   * And an answer that cannot change takes the control with it. A server with
+   * no model key would otherwise hand the reader an underlined offer that
+   * fails identically on every press, for ever.
+   */
+  it('retires the offer when another press could not answer differently', async () => {
+    const tidyUpNotes = vi.fn(
+      async () =>
+        ({
+          kind: 'reported',
+          note: 'The tidy-up could not run — this server has no model key configured.',
+          retry: false,
+        }) as const,
+    );
+    const h = mount(undefined, { tidyUpNotes });
+    h.pressStart({ pick: 'Just me' });
+    await settle();
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({ type: 'ready', meetingId: 'm1', startedAt: 1_000, engine: 'test' });
+    h.sockets[0]?.serve({ type: 'transcript', turn: 0, text: 'the levee holds', final: true });
+    h.sockets[0]?.serve({ type: 'stopped', meetingId: 'm1', endedAt: 9_000, reason: 'silence' });
+    h.tidy()?.click();
+    await settle();
+    expect(h.note()).toBe(MEETING_SILENCE_NOTE);
+    expect(h.tidyReport()).toBe(
+      'The tidy-up could not run — this server has no model key configured.',
+    );
+    // Nothing left to press, and the sentence saying why is still there.
+    expect(h.tidy()).toBe(null);
+    expect(tidyUpNotes).toHaveBeenCalledTimes(1);
   });
 
   it('offers nothing to tidy when the room was silent the whole time', async () => {

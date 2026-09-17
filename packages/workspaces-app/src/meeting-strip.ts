@@ -1136,10 +1136,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     names: () => names,
     liveBot,
     botFarewell,
-    // What the last press had to report OUTRANKS the ending's own sentence:
-    // once somebody has asked for a tidy-up, how that went is the news, and
-    // the strip has one line.
-    endedNote: () => tidy?.report() ?? endedNote,
+    // BOTH FACTS SURVIVE. The ending's own sentence is what a returning
+    // reader came back for; how a tidy-up they pressed went is news about
+    // something else, and the row grows for the second line rather than the
+    // second overwriting the first.
+    endedNote: () => endedNote,
+    endedReport: () => tidy?.report() ?? '',
     endedAction: () => tidy?.view() ?? null,
     nameSpeaker: (label) => nameSpeaker(label),
     dismissBotNote: () => {

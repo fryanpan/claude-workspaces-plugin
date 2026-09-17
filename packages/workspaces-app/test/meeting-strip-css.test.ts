@@ -304,6 +304,31 @@ describe('the strip itself: one flex row, blinker · clock · flowing feed', () 
     expect(readout.color).toBe(token('--fg-muted'));
   });
 
+  /**
+   * And the pass's own sentence beside it. Both are on one row, so they have
+   * to be told apart by eye: same readout size, but the report is the more
+   * recent of the two and the one the reader just asked for.
+   */
+  it('sets the tidy-up report apart from the ending sentence it sits beside', () => {
+    const bar = strip();
+    const ending = styleOf(
+      attach('meeting-note meeting-note-dismiss meeting-note-ended', {
+        tag: 'button',
+        parent: bar.el,
+      }),
+    );
+    const report = styleOf(
+      attach('meeting-note meeting-note-report', { tag: 'span', parent: bar.el }),
+    );
+    expect(px(report.fontSize)).toBe(px(ending.fontSize));
+    expect(report.color).toBe(token('--fg'));
+    // Control: the sentence it sits beside is the muted one.
+    expect(ending.color).toBe(token('--fg-muted'));
+    expect(report.color).not.toBe(ending.color);
+    // And it is held off the sentence rather than running into it.
+    expect(px(report.marginLeft)).toBeGreaterThan(0);
+  });
+
   it('draws the tidy-up beside it as a control, greyed while the pass runs', () => {
     const bar = strip();
     const act = attach('meeting-note-action meeting-note-tidy', { tag: 'button', parent: bar.el });

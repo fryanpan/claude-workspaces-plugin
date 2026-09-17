@@ -35,6 +35,7 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     liveBot: null as MeetingBotStatus | null,
     farewell: null as string | null,
     endedNote: '' as string,
+    endedReport: '' as string,
     endedAction: null as MeetingFeedAction | null,
     named: [] as string[],
     dismissed: 0,
@@ -58,6 +59,7 @@ function makeFeed(over: Partial<Harness> = {}): Harness {
     liveBot: () => h.liveBot,
     botFarewell: () => h.farewell,
     endedNote: () => h.endedNote,
+    endedReport: () => h.endedReport,
     endedAction: () => h.endedAction,
     nameSpeaker: (label) => h.named.push(label),
     dismissBotNote: () => {
@@ -84,6 +86,7 @@ interface Harness {
   liveBot: MeetingBotStatus | null;
   farewell: string | null;
   endedNote: string;
+  endedReport: string;
   endedAction: MeetingFeedAction | null;
   named: string[];
   dismissed: number;
@@ -283,6 +286,38 @@ describe('createMeetingFeed — the notes that stand in for words', () => {
     const act = h.line.querySelector<HTMLButtonElement>('button.meeting-note-tidy');
     expect(act?.textContent).toBe('Tidying up these notes…');
     expect(act?.disabled).toBe(true);
+  });
+
+  /**
+   * BOTH FACTS, NOT ONE. The report used to arrive as `endedNote` and so
+   * overwrote it — spending the one piece of news a returning reader came
+   * back for on how a pass they had just pressed went.
+   */
+  it('keeps the ending sentence when a tidy-up reports beside it', () => {
+    const h = makeFeed();
+    h.endedNote = 'Recording stopped after 15 minutes without speech.';
+    h.endedReport = 'The tidy-up could not run — this server has no model key configured.';
+    h.feed.renderFeed();
+    const note = h.line.querySelector<HTMLButtonElement>('button.meeting-note-dismiss');
+    const said = h.line.querySelector<HTMLElement>('.meeting-note-report');
+    expect(note?.textContent).toBe('Recording stopped after 15 minutes without speech.');
+    expect(said?.textContent).toBe(
+      'The tidy-up could not run — this server has no model key configured.',
+    );
+    // The report is a readout, not a second tap target: the sentence beside
+    // it already dismisses the whole line.
+    expect(said?.tagName).toBe('SPAN');
+    // And it comes after the sentence, not before it.
+    const kids = [...h.line.children];
+    expect(kids.indexOf(said as Element)).toBeGreaterThan(kids.indexOf(note as Element));
+  });
+
+  it('draws nothing extra before a press has reported', () => {
+    const h = makeFeed();
+    h.endedNote = 'Recording stopped after 15 minutes without speech.';
+    h.endedAction = { label: 'Tidy up the notes', busy: false, press: () => {} };
+    h.feed.renderFeed();
+    expect(h.line.querySelector('.meeting-note-report')).toBe(null);
   });
 
   it('draws no control when there is nothing to offer', () => {

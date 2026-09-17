@@ -25,8 +25,9 @@
  * makes it a default.
  */
 
+import { type NotesCleanupReply, readCleanupReply } from '@claude-workspaces/core';
 import { api } from './doc-path.ts';
-import { CLEANUP_WASH_HOLD_MS } from './meeting-cleanup-offer.ts';
+import { CLEANUP_UNREACHABLE, CLEANUP_WASH_HOLD_MS } from './meeting-cleanup-offer.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 
 /** The control's label at rest. */
@@ -34,48 +35,50 @@ export const TIDY_LABEL = 'Tidy up the notes';
 /** And while the pass is on the wire. */
 export const TIDY_WORKING_LABEL = 'Tidying up these notes…';
 /**
- * What a pass that could not run says.
+ * And once a pass has run and left the offer standing.
  *
- * Shorter than the dialog's sentence, and that is the surface talking rather
- * than drift: this one shares a 36px strip row with the ending's own
- * sentence, where the dialog has a card to itself.
+ * The dialog's primary says the same word for the same reason: by then the
+ * question has been answered, so the control is a repeat rather than a first
+ * ask, and the recovery line beside it therefore never names a button.
  */
-export const TIDY_FAILED_NOTE = 'The tidy-up could not run — the notes are unchanged.';
-/** A pass whose every edit was refused: it TRIED, and pressing again after
- *  moving the notes is a reasonable thing to do. */
-export const TIDY_NOTHING_LANDED_NOTE = 'Nothing changed — none of the edits could be made.';
-/** And a pass that read the notes and found them finished, which is a
- *  documented success of the feature rather than a fault to chase. */
-export const TIDY_NOTHING_TO_CHANGE_NOTE = 'Nothing changed — the notes needed nothing.';
+export const TIDY_RETRY_LABEL = 'Try again';
 
 /**
- * What one pass did, in the three shapes the line has to say differently.
+ * What one pass did, in the two shapes the line has to act on differently.
  *
  * `changed` is the only one that ends the offer: the notes themselves are the
- * receipt, so there is nothing left for the line to report. The other two
- * leave the offer standing, because in both of them pressing again is a thing
- * a person might reasonably want.
+ * receipt, so there is nothing left for the line to report. Everything else is
+ * a sentence plus the one bit that decides whether a control survives it.
+ *
+ * THE WORDS ARE NOT CHOSEN HERE. They come from `readCleanupReply`, which is
+ * the same reader the dialog uses, so the two surfaces cannot name the same
+ * reply differently — see `runMeetingTidyUp`.
  */
 export type MeetingTidyOutcome =
   | { kind: 'changed' }
-  | { kind: 'unchanged'; note: string }
-  | { kind: 'failed'; note: string };
-
-/** What the route answers with; every field optional to a hostile reader. */
-interface CleanupReply {
-  ok?: boolean;
-  error?: string;
-  /** The server's own sum over every kind of change a pass can make. A server
-   *  that predates the field sends nothing, and nothing is not a claim. */
-  changed?: boolean;
-  proposed?: number;
-}
+  /** What happened, and whether another press could plausibly answer
+   *  differently. `retry: false` takes the control down for good. */
+  | { kind: 'reported'; note: string; retry: boolean };
 
 /**
  * Ask the server to re-read one meeting's notes.
  *
- * Never throws: a request that never arrived is a `failed` outcome like any
- * other, because the line has to say something either way.
+ * ONE READER FOR BOTH SURFACES. The reply is handed to `readCleanupReply` in
+ * core — the same call the dialog makes, including for a non-2xx, which
+ * carries the same shape and the same `reason`. This line used to read
+ * `body.error`, a field the route does not send for a refusal: `no-composer`,
+ * `recording`, `no-transcript` and `no-section` all collapsed into one
+ * sentence that named no cause, and the control came back live after every
+ * one of them. A server with no model key offered a press that failed
+ * identically for ever with nothing on screen saying why.
+ *
+ * THE STRIP IS ONE LINE, so it takes the report's headline and its `retry`
+ * and leaves the grouped per-edit reasons to the dialog, which has a card.
+ * The headline is the cause in the dialog's own words; `retry` is what stops
+ * an offer standing in front of an answer that cannot change.
+ *
+ * Never throws: a request that never arrived is a report like any other,
+ * because the line has to say something either way.
  */
 export async function runMeetingTidyUp(opts: {
   docId: string;
@@ -97,19 +100,17 @@ export async function runMeetingTidyUp(opts: {
       ),
       { method: 'POST' },
     );
-    const body = (await res.json().catch(() => ({}))) as CleanupReply;
-    if (!res.ok || body.ok !== true)
-      return { kind: 'failed', note: body.error ?? TIDY_FAILED_NOTE };
-    // RAN IS NOT THE SAME AS CHANGED, and the two nothings are different news.
-    if (body.changed === false) {
-      return {
-        kind: 'unchanged',
-        note: (body.proposed ?? 0) > 0 ? TIDY_NOTHING_LANDED_NOTE : TIDY_NOTHING_TO_CHANGE_NOTE,
-      };
-    }
-    return { kind: 'changed' };
+    const body = (await res.json().catch(() => ({}))) as NotesCleanupReply;
+    const outcome = readCleanupReply(res.ok ? body : { ...body, ok: false });
+    // RAN IS NOT THE SAME AS CHANGED, and only a pass that moved the document
+    // has a receipt of its own.
+    if (outcome.kind === 'changed') return { kind: 'changed' };
+    return { kind: 'reported', note: outcome.headline, retry: outcome.retry };
   } catch {
-    return { kind: 'failed', note: TIDY_FAILED_NOTE };
+    // No reply at all, so core has nothing to read and nothing said anything
+    // about the notes: they are untouched, and the writes happen inside the
+    // request this never completed. The dialog's own words for the same case.
+    return { kind: 'reported', note: CLEANUP_UNREACHABLE.headline, retry: true };
   }
 }
 
@@ -128,8 +129,15 @@ export interface MeetingTidyLine {
   withdraw(): void;
   /** The control to draw, or null when there is nothing to offer. */
   view(): MeetingTidyView | null;
-  /** What the last press had to report, or null. It REPLACES the ending's
-   *  sentence: the news is now the pass, not the timeout. */
+  /**
+   * What the last press had to report, or null.
+   *
+   * It sits BESIDE the ending's own sentence, never over it. It used to
+   * replace it, which spent the one thing a returning reader came back for —
+   * that the recording stopped itself after fifteen minutes of silence — to
+   * say how a tidy-up they had just pressed went. Both are news, and they are
+   * news about different things.
+   */
   report(): string | null;
 }
 
@@ -143,10 +151,22 @@ export function createMeetingTidyLine(opts: {
   let meetingId: string | null = null;
   let busy = false;
   let report: string | null = null;
+  /**
+   * The last pass said another press could not answer differently, so the
+   * control is gone while its sentence stays.
+   *
+   * A SEPARATE FLAG FROM `meetingId` BECAUSE THE TWO HALVES PART COMPANY
+   * HERE: the report has to keep saying why there is no longer anything to
+   * press, and clearing the meeting would take the sentence with it. This is
+   * the same call the dialog makes when it REMOVES its primary rather than
+   * greying it — a control that can never be pressed is one more thing to
+   * weigh on the way to the only one that can.
+   */
+  let retired = false;
 
   async function press(): Promise<void> {
     const id = meetingId;
-    if (id === null || busy) return;
+    if (id === null || busy || retired) return;
     busy = true;
     // The pass is the news now; whatever the last one reported is stale.
     report = null;
@@ -157,8 +177,9 @@ export function createMeetingTidyLine(opts: {
     } catch {
       // `runMeetingTidyUp` answers rather than throws, but the runner is an
       // injected function and a rejected promise here would otherwise leave
-      // the control saying "Tidying up…" for the rest of the session.
-      outcome = { kind: 'failed', note: TIDY_FAILED_NOTE };
+      // the control saying "Tidying up…" for the rest of the session. A
+      // runner that threw ran nothing, so another press is worth allowing.
+      outcome = { kind: 'reported', note: CLEANUP_UNREACHABLE.headline, retry: true };
     }
     busy = false;
     // SUPERSEDED WHILE THE REQUEST WAS ON THE WIRE. A new recording withdraws
@@ -172,6 +193,8 @@ export function createMeetingTidyLine(opts: {
       return;
     }
     report = outcome.note;
+    // THE ANSWER GOES IN THE CONTROL, not in a sentence about the control.
+    retired = !outcome.retry;
     opts.onChange();
   }
 
@@ -180,16 +203,20 @@ export function createMeetingTidyLine(opts: {
       meetingId = id;
       report = null;
       busy = false;
+      retired = false;
     },
     withdraw() {
       meetingId = null;
       report = null;
       busy = false;
+      retired = false;
     },
     view() {
-      if (meetingId === null) return null;
+      if (meetingId === null || retired) return null;
       return {
-        label: busy ? TIDY_WORKING_LABEL : TIDY_LABEL,
+        // "Try again" once a pass has run, exactly as the dialog's primary
+        // does: by then the question has been answered.
+        label: busy ? TIDY_WORKING_LABEL : report === null ? TIDY_LABEL : TIDY_RETRY_LABEL,
         busy,
         press: () => void press(),
       };
