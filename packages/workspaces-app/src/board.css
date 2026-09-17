@@ -1266,14 +1266,6 @@ body.board-body {
   color: #1f7a3a;
   background: rgba(45, 164, 78, 0.12);
 }
-/* The quality gate stopped holding these words rather than passing them: the
-   reader is about to answer something nobody judged good. A decision's
-   weight, because it is a warning about the words and not a label for a kind
-   of ask. */
-.board-walk-k-unjudged {
-  color: var(--warn-fg, #b25e09);
-  background: var(--warn-wash, #fff4e5);
-}
 /* One quiet line: how many times the gate held these words before the reader
    got them, and how they got through. Drawn only when there was at least one
    hold - the ordinary item says nothing, because nothing happened to it. */
@@ -5875,12 +5867,6 @@ label.board-sched-chip:hover {
 .board-decide-k-revised {
   color: #1f7a3a;
   background: rgba(45, 164, 78, 0.12);
-}
-/* Admitted without a passing verdict - the same warning, and the same
-   tokens, as `.board-walk-k-unjudged` on the walkthrough's card. */
-.board-decide-k-unjudged {
-  color: var(--warn-fg, #b25e09);
-  background: var(--warn-wash, #fff4e5);
 }
 /* The hold count, and the filer's note when that is how the item got
    through. The walkthrough's two rules, on the panel's card. */

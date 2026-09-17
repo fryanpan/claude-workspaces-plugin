@@ -264,10 +264,10 @@ export function gateNoteOf(
     ...(judge?.admitted !== undefined ? { admitted: judge.admitted } : {}),
     // The note is shown ONLY when it is why the item got through. A filer may
     // send it with a revision the judge then passes on its merits, and the
-    // stored verdict keeps it either way — but a card that says "the filer
-    // revised it and it passed" while quoting an explanation of what the
-    // source cannot support is telling the reader two different stories about
-    // the same item (codex review).
+    // stored verdict keeps it either way — but a card quoting an explanation
+    // of what the source cannot support, on an item that got through on its
+    // merits instead, is telling the reader two different stories about the
+    // same item (codex review).
     ...(judge?.admitted === 'less-specific' &&
     judge?.lessSpecific !== undefined &&
     judge.lessSpecific !== ''

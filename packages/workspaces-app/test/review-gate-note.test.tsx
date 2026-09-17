@@ -3,9 +3,12 @@
  * quality gate — driven through the two real surfaces that draw it.
  *
  * The reader could not previously tell a question that passed first time from
- * one that took three rounds, and an item the gate ADMITTED because it ran out
- * of holds was drawn exactly like one it passed. Both are facts about whether
- * anybody judged the words, which is what the person answering is trusting.
+ * one that took three rounds, so the hold count is drawn. Whether the gate
+ * reached a verdict or ran out of holds and gave up is NOT (Bryan,
+ * 2026-09-16) — the reader judges the words in front of them, and the cases
+ * below hold that boundary from both sides: the count renders, and an item
+ * admitted on the last-hold rule is word-for-word indistinguishable from one
+ * the gate held the same number of times and then passed.
  *
  * Driven rather than asserted about: the gate note reaches the card through
  * the queue model, and "the walkthrough renders the field the server sends"
@@ -94,23 +97,30 @@ describe('the walkthrough card says what the gate did', () => {
   it('says nothing at all about an item the gate simply passed', () => {
     const el = card(item());
     expect(el.querySelector('.board-walk-gate')).toBeNull();
-    expect(el.querySelector('.board-walk-k-unjudged')).toBeNull();
     expect(el.querySelector('.board-walk-gate-note')).toBeNull();
   });
 
   it('counts the holds an item went through, in words', () => {
     const el = card(item({ gate: { holds: 3 } }));
     expect(el.querySelector('.board-walk-gate')?.textContent).toContain('Held three times');
-    // It PASSED in the end, so nothing warns about the words.
-    expect(el.querySelector('.board-walk-k-unjudged')).toBeNull();
   });
 
-  it('marks an item admitted on the last-hold rule, rather than drawing it as passed', () => {
-    const el = card(item({ gate: { holds: 2, admitted: 'holds' } }));
-    expect(el.querySelector('.board-walk-k-unjudged')?.textContent).toBe('Admitted unjudged');
-    const line = el.querySelector('.board-walk-gate')?.textContent ?? '';
-    expect(line).toContain('Held twice');
-    expect(line).toContain('without a passing verdict');
+  it('tells the reader nothing about the gate having given up on an item', () => {
+    const gaveUp = card(item({ gate: { holds: 2, admitted: 'holds' } }));
+    // The count is the whole point of the line and still renders.
+    expect(gaveUp.querySelector('.board-walk-gate')?.textContent).toContain('Held twice');
+    // No badge, and no clause anywhere on the card, about who judged what.
+    expect(gaveUp.querySelector('.board-walk-k-unjudged')).toBeNull();
+    const spoken = (gaveUp.textContent ?? '').toLowerCase();
+    expect(spoken).not.toContain('unjudged');
+    expect(spoken).not.toContain('verdict');
+    // And not merely quieter: read WORD FOR WORD against a card the gate held
+    // twice and then passed, so the absence of a claim is not itself the
+    // signal the badge used to be. Captured before the next mount, which
+    // tears this one down.
+    const gaveUpText = gaveUp.textContent;
+    const passedText = card(item({ gate: { holds: 2 } })).textContent;
+    expect(gaveUpText).toBe(passedText);
   });
 
   it("shows the filer's own note, quoted and attributed, when that is how it got through", () => {
@@ -121,8 +131,9 @@ describe('the walkthrough card says what the gate did', () => {
     expect(block?.querySelector('.board-walk-gate-note-who')?.textContent).toBe(
       'Ledger Keeper says',
     );
-    // Not a warning: somebody read the source and said what it supports.
-    expect(el.querySelector('.board-walk-k-unjudged')).toBeNull();
+    // Somebody read the source and said what it supports, so the line points
+    // at the note rather than leaving the reader to find it.
+    expect(el.querySelector('.board-walk-gate')?.textContent).toContain('note below');
   });
 });
 
@@ -144,7 +155,7 @@ describe('the task panel’s own decide card says the same thing', () => {
       onOpenTask: vi.fn(),
     }) as unknown as DetailHandlers;
 
-  it('marks the ticket’s own decision when the gate stopped holding it', async () => {
+  it('shows the hold count, and no verdict badge, when the gate stopped holding it', async () => {
     const decision: BoardTask = {
       id: 't-rebuild',
       title: 'Rebuild now?',
@@ -168,10 +179,13 @@ describe('the task panel’s own decide card says the same thing', () => {
     await settle();
     // Positive control: the panel really drew the decide card.
     expect(container.querySelector('.board-decide-card')).not.toBeNull();
-    expect(container.querySelector('.board-decide-k-unjudged')?.textContent).toBe(
-      'Admitted unjudged',
-    );
     expect(container.querySelector('.board-decide-gate')?.textContent).toContain('Held twice');
+    // The panel drew the walkthrough's treatment, which is now no badge at
+    // all — checked here too because these two cards have drifted before.
+    expect(container.querySelector('.board-decide-k-unjudged')).toBeNull();
+    expect(
+      (container.querySelector('.board-decide-card')?.textContent ?? '').toLowerCase(),
+    ).not.toContain('unjudged');
   });
 });
 
@@ -203,16 +217,18 @@ describe('the gate note reads as a quiet line, at both sizes', () => {
     });
   }
 
-  it('gives the unjudged badge a decision’s weight, not a plain chip’s', () => {
+  it('has no warning treatment left for an unjudged chip to reach for', () => {
     setViewport({ width: 1180, height: 820 });
     const head = attach('board-walk-card-head');
+    // The badge is gone from the markup; this is the other half — the amber
+    // rule it used to reach for is gone from the stylesheet too, so a chip
+    // that named the old class again would draw as a plain one rather than
+    // silently coming back looking like a warning.
     const unjudged = attach('board-walk-k board-walk-k-unjudged', { tag: 'span', parent: head });
     const plain = attach('board-walk-k', { tag: 'span', parent: head });
-    // Deliberately the SAME amber as a decision and a secret — both are asks
-    // only the reader can settle, and a third warning colour would drift —
-    // so what is asserted is that it is not the quiet default chip.
+    // The control: the cascade IS live here — a decision chip still differs.
     const decision = attach('board-walk-k board-walk-k-decision', { tag: 'span', parent: head });
-    expect(styleOf(unjudged).backgroundColor).not.toBe(styleOf(plain).backgroundColor);
-    expect(styleOf(unjudged).backgroundColor).toBe(styleOf(decision).backgroundColor);
+    expect(styleOf(decision).backgroundColor).not.toBe(styleOf(plain).backgroundColor);
+    expect(styleOf(unjudged).backgroundColor).toBe(styleOf(plain).backgroundColor);
   });
 });

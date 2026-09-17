@@ -98,7 +98,7 @@ import {
 import { panelReviewQueue } from './board-review-render.ts';
 import { ComposerForm, Discussion, useFill } from './detail-parts.tsx';
 import { DoneWhenList } from './done-when-list.tsx';
-import { GateHoldLine, GateLessSpecificNote, GateUnjudgedBadge } from './review-gate-note.tsx';
+import { GateHoldLine, GateLessSpecificNote } from './review-gate-note.tsx';
 import { markPhrase } from './review-item-phrase.ts';
 import { useReviewItemSeen } from './review-item-seen-hook.ts';
 import { ReviewSecretBlock } from './review-secret-form.tsx';
@@ -369,9 +369,6 @@ function ReviewCard(props: {
             item is back in the queue and says so, beside its kind rather than
             instead of it — the walkthrough's own treatment. */}
         {item.revision && <span class="board-decide-k board-decide-k-revised">Revised</span>}
-        {/* Nobody judged these words good — the gate ran out of holds and
-            stopped holding. The walkthrough's own treatment. */}
-        <GateUnjudgedBadge gate={item.gate} prefix="board-decide" />
         {!(echoesTitle && bodyMarkdown !== '') && (
           <p class="board-decide-headline">{item.headline}</p>
         )}

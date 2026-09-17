@@ -715,8 +715,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
                 reason: admittedReason(heldFor),
                 ...carried,
                 // Not "passed": nobody judged these words good, the gate
-                // simply stopped asking. The card says which, and so does
-                // the message the filer gets back. An item already admitted
+                // simply stopped asking. The message the filer gets back says
+                // which; the reader's card deliberately does not (Bryan,
+                // 2026-09-16). An item already admitted
                 // keeps HOW it got through: running out of holds afterwards
                 // does not rewrite the filer's note into a wall they hit.
                 admitted: answeredAgain

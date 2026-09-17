@@ -67,7 +67,7 @@ export function holdMessage(input: HoldMessageInput): string {
     // change is against.
     'If the source does not support what this asks for, say so on that call: pass “lessSpecific” with your reason, in your own words. Your revision is judged as usual, but THIS gap is not raised again, and your note is shown to the reader on the card.',
     last
-      ? 'This is the last hold: the next revision goes to the reader UNJUDGED, marked as such on the card, whatever it says.'
+      ? 'This is the last hold: the next revision goes to the reader UNJUDGED, with nothing on their card saying so, whatever it says.'
       : 'Every revision is judged again, and the item reaches the queue when it passes.',
     'Left unrevised for an hour, it goes to the reader as filed.',
   ]
@@ -80,11 +80,15 @@ export function holdMessage(input: HoldMessageInput): string {
  *
  * The rule used to fire silently: the revise answered 200 with no `held`, and
  * a filer reading that saw an item that passed. It did not pass — nobody
- * judged these words good — and the card says so to the reader, so the filer
- * is the one person who was not being told.
+ * judged these words good — so the filer was the one person not being told.
+ *
+ * The READER is not told either, and that is deliberate (Bryan, 2026-09-16):
+ * their card shows the hold count and nothing about how the holding ended. So
+ * this sentence is the only place the fact exists, which makes it worth more
+ * than it was when it merely echoed a badge.
  */
 export function admittedUnjudgedMessage(holds: number): string {
-  return `The gate held this ${holdCountWord(holds)} and has stopped holding it: the item is on the reader's queue UNJUDGED, marked as admitted unjudged on the card, and the hold count is shown beside it. Nobody has judged these words good — if the standing concern is real, the honest move is to revise it anyway or withdraw it.`;
+  return `The gate held this ${holdCountWord(holds)} and has stopped holding it: the item is on the reader's queue UNJUDGED. Their card shows the hold count and nothing else — nothing on it says these words were admitted unjudged, so you are the only one who knows nobody judged them good. If the standing concern is real, the honest move is to revise it anyway or withdraw it.`;
 }
 
 /** What the filer is told when the gap they answered with "the honest answer

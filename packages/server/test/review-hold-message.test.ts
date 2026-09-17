@@ -66,7 +66,12 @@ describe('the two admissions', () => {
     const msg = admittedUnjudgedMessage(3);
     expect(msg).toContain('UNJUDGED');
     expect(msg).toContain('three times');
-    expect(msg).toContain('admitted unjudged');
+    // The filer keeps this notice even though the reader's card no longer
+    // carries a badge — this sentence is now the only place the fact exists,
+    // so it says the reader is NOT being told rather than pointing at a chip
+    // that is gone (Bryan, 2026-09-16).
+    expect(msg).toContain('you are the only one who knows');
+    expect(msg).not.toContain('marked as admitted unjudged on the card');
   });
 
   it('says where the filer’s own note will be read, rather than restating it', () => {
