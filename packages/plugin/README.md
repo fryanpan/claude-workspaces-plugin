@@ -23,13 +23,23 @@ doc editor + injectable widget) as a single install.
 - **Slash commands** — `/feedback-serve`, `/feedback-threads`.
 - **PreToolUse hook** — auto-approves `mcp__claude-in-chrome__navigate`
   for hostnames you explicitly trust. Zero defaults ship.
+- **SessionStart hook** — says, in the session's own context, when the
+  note hooks are installed but have nothing to post to: no
+  `CW_WORKSPACE_ID`, no `CW_AGENT_NAME`, or no resolvable `bun`. It says
+  nothing at all when the session is configured. Four fleet agents ran
+  inert for weeks because a hook that exits 0 with nothing to post reads
+  exactly like a session that had quiet turns.
 
 ## Requirements
 
 - [Claude Code](https://code.claude.com/docs) ≥ 2.0.70 (plugin v2 format).
 - Node ≥ 18 (for `npx`, which runs the MCP server on demand).
 - [Bun](https://bun.sh) on the host that runs the feedback HTTP/WS
-  server. Reviewers' devices (phone, teammate's laptop) don't need Bun.
+  server, and on any machine running an agent — the hooks are Bun
+  scripts. `bin/claude-workspaces-hook.sh` finds it on `PATH`, at
+  `$BUN_INSTALL/bin`, `~/.bun/bin`, or the usual package-manager
+  locations, and says where it looked when it cannot. Reviewers' devices
+  (phone, teammate's laptop) don't need Bun.
 
 ## Install
 
