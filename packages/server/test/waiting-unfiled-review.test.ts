@@ -23,6 +23,7 @@ const row = (over: Partial<AgingWait> = {}): AgingWait => ({
   bucket: WAITING_UNFILED_BUCKET,
   quietMs: 45 * MIN,
   firstSeen: NOW - 90 * MIN,
+  tells: 0,
   ...over,
 });
 

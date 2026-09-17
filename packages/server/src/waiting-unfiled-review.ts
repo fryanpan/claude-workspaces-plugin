@@ -32,6 +32,10 @@ export interface AgingWait {
   quietMs: number;
   /** When the escalation first saw it as a finding. */
   firstSeen: number;
+  /** How many fleet wakes have already carried it. Read by the escalation,
+   *  not by these words: the reader of the item is being shown the finding,
+   *  not the history of who was woken about it. */
+  tells: number;
 }
 
 /** The due tasks' words. Exported so a test reads what a person would see

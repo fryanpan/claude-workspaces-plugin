@@ -189,6 +189,28 @@ reached, and then as ONE review item listing every due task across every
 board, never one item per task. The item is revised in place as the list
 changes and withdraws itself once the last wait is filed.
 
+**And the fleet rung is bounded — three wakes per row, not one per window
+forever.** A row whose closing prose reads as an ask with nothing anyone could
+file against it never clears: `detectAsk` fires on a deferral phrase beside a
+person's name, the gate lists the row, and no lead can file a question that
+was never asked. Unbounded, that row cost Team Lead a whole turn every window
+for the life of the board — measured on 2026-09-17, when one tick carried two
+such rows and the receiver spent its turn establishing that it could do
+nothing with either. So `FLEET_TELL_CAP` counts the wakes each row has been
+carried in, beside its `firstSeen` in the same sidecar, and a row past the cap
+is dropped from the FRAME.
+
+It is dropped from the frame and from nothing else. The row stays on the
+gate's `unfiled` list, so the board's own lead is still told about it every
+window; the keep-moving verdict still counts it; `aging()` still holds it; and
+the count is forgotten the moment the row stops being a finding, so a task
+that moves and later asks again is carried again. The rung that goes quiet is
+the one with no remedy: the board's lead can end this in one call, by filing
+the ask or saying there was none, and Team Lead can do neither. Three rather
+than one because a wake can be lost — the addressee's session can die or
+compact between the send and the reading — and three at the default window is
+an hour and a half of chances.
+
 Known gap, deliberately open: nothing ages review items sitting unanswered
 on the owner's queue. That is a different signal (ask-aging, not
 task-stalling) and gets its own design if it proves needed. The one kind of
