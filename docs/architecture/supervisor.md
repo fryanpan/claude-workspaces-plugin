@@ -302,7 +302,7 @@ Under the current grace both of those boots would have been left alone: 76.0s
 and 75.5s are well inside 240s.
 
 **The whole episode now reads as one restart rather than three**, and that is
-measured rather than asserted. `supervisor-health.test.ts` replays this shape
+measured rather than asserted. `supervisor-boot-replay.test.ts` replays this shape
 across supervisor generations on an injected clock — one wedge (`no-answer`,
 a fair restart) followed by a port held unbound — and counts restarts inside
 the 253 seconds the log above covers, 23:13:21 to 23:17:34. With the grace

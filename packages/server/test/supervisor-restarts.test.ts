@@ -9,9 +9,9 @@
  * Fixtures are synthetic timestamps; nothing here reads a wall clock.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   FIRST_BIND_GRACE_MAX_MS,
   FIRST_BIND_GRACE_MS,
@@ -25,10 +25,32 @@ afterEach(() => {
   for (const fn of cleanups.splice(0)) fn();
 });
 
+/**
+ * A ledger path one level BELOW a directory that exists — the `nested`
+ * segment is the coverage, not tidiness. `restartLedgerPath` puts the ledger
+ * directly in the data dir, and the case where that parent is missing is a
+ * first boot against a fresh `CW_DATA_DIR`: `bun run staging`, and a new prod
+ * install. If `fileRestartLedger`'s `mkdirSync` were ever dropped, that boot's
+ * first restart would fail to record itself, the catch would log "restarting
+ * anyway", and the 3-per-hour limiter would never accumulate — on the box
+ * where it matters most. Writing into the mkdtemp dir directly makes that
+ * `mkdirSync` a no-op in every case and the regression invisible.
+ */
 function tempLedgerPath(): string {
   const dir = mkdtempSync(join(tmpdir(), 'restart-ledger-'));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-  return join(dir, 'supervisor-restarts.json');
+  return join(dir, 'nested', 'supervisor-restarts.json');
+}
+
+/**
+ * Plant a ledger file by hand, for the cases whose subject is what the LOADER
+ * makes of a given file's bytes. They are the cases that cannot go through
+ * `save`, so they create the parent themselves rather than borrowing the
+ * `mkdirSync` the save path is here to exercise.
+ */
+function plantLedger(path: string, contents: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, contents);
 }
 
 const MIN = 60_000;
@@ -70,7 +92,7 @@ describe('the ledger file', () => {
   it('reads a missing or corrupt file as empty, so the watchdog can still act', () => {
     const path = tempLedgerPath();
     expect(fileRestartLedger(path).load()).toEqual({ restarts: [], unbound: [] });
-    writeFileSync(path, '{ not json');
+    plantLedger(path, '{ not json');
     expect(fileRestartLedger(path).load()).toEqual({ restarts: [], unbound: [] });
   });
 
@@ -79,7 +101,7 @@ describe('the ledger file', () => {
     // the new code reads one. It must count every restart for the limit and
     // start the backoff at its base, rather than refusing to read the file.
     const path = tempLedgerPath();
-    writeFileSync(path, JSON.stringify({ restarts: [10, 20] }));
+    plantLedger(path, JSON.stringify({ restarts: [10, 20] }));
     expect(fileRestartLedger(path).load()).toEqual({ restarts: [10, 20], unbound: [] });
     expect(firstBindGraceFor([], 30, { windowMs: 1_000 }).graceMs).toBe(FIRST_BIND_GRACE_MS);
   });
@@ -89,7 +111,7 @@ describe('the ledger file', () => {
     // hand-edited into naming restarts that never happened would otherwise
     // buy a boot an arbitrarily long grace.
     const path = tempLedgerPath();
-    writeFileSync(path, JSON.stringify({ restarts: [10], unbound: [10, 20, 30] }));
+    plantLedger(path, JSON.stringify({ restarts: [10], unbound: [10, 20, 30] }));
     expect(fileRestartLedger(path).load()).toEqual({ restarts: [10], unbound: [10] });
   });
 

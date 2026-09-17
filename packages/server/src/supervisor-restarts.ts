@@ -199,6 +199,16 @@ export interface FirstBindGrace {
  * `supervisor-health.ts` is what classifies a restart, and it writes only the
  * never-bound ones into `unbound`.
  *
+ * **The classification is what the watchdog SAW, and its first probe is at
+ * 45s** (15s to arm, then the 30s tick). So one window is misread: a child
+ * that binds at 3s and drops the port again before 45s, while its process
+ * stays alive, shows the watchdog nothing but `not-listening`, and the restart
+ * that follows is recorded as never-bound. Known and left alone. The harm is
+ * one doubling of the next generation's grace, still under the 3-per-hour
+ * limiter, and the alternative — a second source of truth for "did it ever
+ * bind" that the supervisor could consult — costs more than the error. A dead
+ * child does not reach here at all; it goes to the fast-crash damper.
+ *
  * `base` of 0 stays 0 — turning the grace off must not be undone by history.
  */
 export function firstBindGraceFor(

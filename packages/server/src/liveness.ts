@@ -117,7 +117,20 @@ export function describeLiveness(input: LivenessInput): ServerLiveness {
  */
 export const DISCOVERY_READ_TTL_MS = 15_000;
 
-/** Wrap a discovery read so at most one happens per `DISCOVERY_READ_TTL_MS`. */
+/**
+ * Wrap a discovery read so at most one happens per `DISCOVERY_READ_TTL_MS`.
+ *
+ * A throwing reader answers with the previous value rather than propagating.
+ * `readDiscovery` cannot throw today — it catches its own read and parse — but
+ * this is the generic seam, and without the catch one fault would produce two
+ * different behaviours: the first call after the window opens throws out of
+ * the route, and every call for the next 15s serves the stale value silently,
+ * indistinguishable from a healthy cached read. A liveness field that lies
+ * about being cached is the exact class of reading failure this module exists
+ * to close. The stamp is taken BEFORE the read for the same reason: a reader
+ * that throws every time must still be attempted only once per window, not on
+ * every request.
+ */
 export function cacheDiscoveryReads(
   read: () => DiscoveryClaim | null,
   opts: { now?: () => number; ttlMs?: number } = {},
@@ -130,7 +143,13 @@ export function cacheDiscoveryReads(
     const at = now();
     if (at - readAt < ttlMs) return last;
     readAt = at;
-    last = read();
+    try {
+      last = read();
+    } catch {
+      // Keep whatever the last successful read said — `null` before there has
+      // been one, which reads as "nothing owns the slot" rather than as a
+      // claim this server does.
+    }
     return last;
   };
 }

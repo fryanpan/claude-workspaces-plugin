@@ -134,4 +134,47 @@ describe('cacheDiscoveryReads', () => {
     clock = 1_000;
     expect(read()).toEqual(OURS);
   });
+
+  it('keeps answering the last good reading when the reader throws', () => {
+    // Driven against a reader MADE to throw: the real `readDiscovery` catches
+    // its own read and parse, so pointing this at it would assert nothing.
+    // Without the catch a single fault gives the route two behaviours — one
+    // throw out of `GET /api/deploy`, then 15s of a stale value served as if
+    // it had just been read — and the second is the dangerous one, because it
+    // is indistinguishable from a healthy cached answer.
+    let mode: 'ok' | 'throw' = 'ok';
+    let reads = 0;
+    let clock = 0;
+    const read = cacheDiscoveryReads(
+      () => {
+        reads += 1;
+        if (mode === 'throw') throw new Error('discovery slot unreadable');
+        return OURS;
+      },
+      { now: () => clock, ttlMs: 1_000 },
+    );
+    expect(read()).toEqual(OURS);
+
+    mode = 'throw';
+    clock = 1_000;
+    expect(read()).toEqual(OURS);
+    // And the failed attempt still spent the window, so a reader that throws
+    // every time is attempted once per window rather than once per request.
+    expect(reads).toBe(2);
+    clock = 1_500;
+    expect(read()).toEqual(OURS);
+    expect(reads).toBe(2);
+  });
+
+  it('answers null when the very first read throws, claiming no slot', () => {
+    // The safe direction: no reading is "nothing owns the slot", never "this
+    // server does".
+    const read = cacheDiscoveryReads(
+      () => {
+        throw new Error('discovery slot unreadable');
+      },
+      { now: () => 0, ttlMs: 1_000 },
+    );
+    expect(read()).toBeNull();
+  });
 });

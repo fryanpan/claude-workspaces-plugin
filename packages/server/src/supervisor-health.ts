@@ -353,7 +353,8 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
     if (step.action === 'booting') {
       // Logged every tick, not once: the elapsed seconds are the diagnostic,
       // and they are what says afterwards whether the grace was generous or
-      // barely enough. Bounded by the grace itself — eight lines at most.
+      // barely enough. Bounded by the grace itself — eight lines at the base
+      // grace, thirty-two at the backoff's ceiling (960s over a 30s tick).
       log(
         `[supervisor] health: ${label} not listening ${Math.round(sinceArmed / 1000)}s into ` +
           `boot — nothing has bound in this supervisor's life yet, so this is a boot in ` +
