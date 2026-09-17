@@ -218,6 +218,29 @@ boundary "filed nothing this turn" is measured from — falls back to the log
 when the in-process ring has nothing, which is what a restarted server used to
 have.
 
+### What every corpus on this page could not see
+
+Both measurements above were read from placed notes — the 913-note run and the
+157-note re-measurement through the boards' own task surfaces, which is where a
+note lands only once a row takes it. **Neither number is wrong. Each is a
+corpus of placed notes, which was all there were**: an unplaced note reached
+the ring and nothing else, so no read could have recovered it. The rates still
+describe the messages they were computed over. What they do not describe is the
+population, and the gap between the two has a direction — the boards excluded
+are the busy ones, where a session holds many rows.
+
+The second gap is upstream of the server entirely. A Stop hook that cannot
+resolve a board id posts nothing, so its turns are in no corpus and no log,
+and the board looks quiet rather than broken. Two boards on this fleet were
+in that state with neither `CW_WORKSPACE_ID` nor `FEEDBACK_WORKSPACE_ID` set
+in their session environment; a third had both set to a real board, ended
+turns, and still produced no turn row ever, which the server-side cause above
+does not explain and which is still open.
+
+Whoever re-measures next: the denominator is the sum of the two files, and a
+board contributing zero is a question about its hook before it is a fact about
+its agents.
+
 ## The count is about the person, not the board
 
 A live row records the board it was seen on. The window does not filter by it,

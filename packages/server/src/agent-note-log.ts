@@ -44,13 +44,15 @@ import {
   statSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentNoteKind } from './agent-notes.ts';
+import { type AgentNoteKind, isAgentNoteKind } from './agent-notes.ts';
 import { normalizeAgent } from './chat-audit.ts';
 
-/** How many of a board's trailing lines a read parses. A note is at most
- *  `NOTE_TEXT_MAX` (4000) chars, so this is a few hundred KB in the worst
- *  case and a single-digit KB in the normal one. */
-const READ_LINES_CAP = 500;
+/** How many lines one read will `JSON.parse` before it stops looking. It
+ *  bounds the WORK, not the reach: the walk filters as it goes, so this is
+ *  reached only by an agent whose notes are all older than this many lines of
+ *  other agents'. The byte cap alone would not bound it — four megabytes of
+ *  short lines is twenty thousand parses on a route that answers a hook. */
+const PARSE_LINES_CAP = 5000;
 /** How many bytes are read off the tail to find those lines. Sized for the
  *  worst case above with headroom; a file under it is read whole. Overridable
  *  per instance so a test can drive the seek branch without writing four
@@ -93,12 +95,15 @@ function parseLine(line: string): LoggedAgentNote | undefined {
   const r = raw as Record<string, unknown>;
   if (typeof r.agent !== 'string' || r.agent === '') return undefined;
   if (typeof r.text !== 'string' || r.text === '') return undefined;
-  if (typeof r.kind !== 'string') return undefined;
+  // The route's own list, not a re-spelling of it: a line carrying a kind
+  // this build does not know is foreign, and `kind` is read by callers that
+  // switch on it. A cast here would have let one through as a valid value.
+  if (!isAgentNoteKind(r.kind)) return undefined;
   if (typeof r.at !== 'number' || !Number.isFinite(r.at)) return undefined;
   if (typeof r.workspaceId !== 'string' || r.workspaceId === '') return undefined;
   return {
     agent: r.agent,
-    kind: r.kind as AgentNoteKind,
+    kind: r.kind,
     text: r.text,
     at: r.at,
     workspaceId: r.workspaceId,
@@ -118,11 +123,18 @@ function parseLine(line: string): LoggedAgentNote | undefined {
 export class AgentNoteLog {
   private readonly bytesCap: number;
 
+  private readonly parseLinesCap: number;
+
+  /** Both caps are overridable per instance so a test can reach the bound it
+   *  is checking without writing four megabytes or five thousand lines. They
+   *  are the two bounds on a read, and neither is reachable from the other. */
   constructor(
     private readonly dataDir: string,
     bytesCap: number = READ_BYTES_CAP,
+    parseLinesCap: number = PARSE_LINES_CAP,
   ) {
     this.bytesCap = Math.max(1, bytesCap);
+    this.parseLinesCap = Math.max(1, parseLinesCap);
   }
 
   /**
@@ -154,15 +166,17 @@ export class AgentNoteLog {
    * file parse to answer "what did this agent say lately". A missing file is
    * an empty list, not an error — a board with nothing unplaced is the state
    * this whole change is trying to reach.
+   *
+   * Newest by `at`, not by position in the file. The two agree whenever one
+   * server appended the whole file and diverge whenever a restart, a clock
+   * adjustment or a hook's own timestamp got in between — and `at` is what
+   * every caller and every reader means by "latest".
    */
   readFor(workspaceId: string, agent: string, cap = LOG_READ_CAP): LoggedAgentNote[] {
     const who = normalizeAgent(agent);
-    const out: LoggedAgentNote[] = [];
-    for (const note of this.tail(workspaceId)) {
-      if (normalizeAgent(note.agent) !== who) continue;
-      out.push(note);
-    }
-    return out.reverse().slice(0, Math.max(0, cap));
+    const want = Math.max(0, cap);
+    const found = this.tailMatching(workspaceId, (n) => normalizeAgent(n.agent) === who, want);
+    return found.sort((a, b) => b.at - a.at);
   }
 
   /**
@@ -172,65 +186,103 @@ export class AgentNoteLog {
    * previous turn note's time, and read that off the in-process ring alone —
    * so a restarted server fell back to a two-hour window and could nudge for
    * an ask filed inside it. The log answers across a restart.
+   *
+   * The greatest `at` among the last `LOG_READ_CAP` matches, not the first
+   * match the backwards walk meets. File order is append order, and the two
+   * differ exactly when a clock moved — which is one of the cases this read
+   * exists to survive.
    */
   lastTurnAt(workspaceId: string, agent: string): number | undefined {
     const who = normalizeAgent(agent);
+    const found = this.tailMatching(
+      workspaceId,
+      (n) => n.kind === 'turn' && normalizeAgent(n.agent) === who,
+      LOG_READ_CAP,
+    );
     let latest: number | undefined;
-    for (const note of this.tail(workspaceId)) {
-      if (note.kind !== 'turn') continue;
-      if (normalizeAgent(note.agent) !== who) continue;
+    for (const note of found) {
       if (latest === undefined || note.at > latest) latest = note.at;
     }
     return latest;
   }
 
-  /** The board's trailing lines, oldest first, parsed and bounded. A torn
-   *  first line (the tail read cut it mid-JSON) drops out of `parseLine` the
-   *  same way a torn last line does, so no caller has to know. */
-  private tail(workspaceId: string): LoggedAgentNote[] {
-    const path = agentNoteLogPath(this.dataDir, workspaceId);
-    let text: string;
-    try {
-      if (!existsSync(path)) return [];
-      const size = statSync(path).size;
-      if (size <= this.bytesCap) {
-        text = readFileSync(path, 'utf8');
-      } else {
-        // Seek, do not read the whole file and slice it — the point of the
-        // cap is that a months-old log costs a fixed read.
-        //
-        // Decoded only as far as `readSync` actually filled, because decoding
-        // the whole buffer would append the allocation's zero bytes to the
-        // LAST line — turning the newest note into invalid JSON and dropping
-        // exactly the one a caller came for. DEFENSIVE AND UNTESTED: a local
-        // append-only file never shrinks, so a full-length read off a
-        // known-good offset does not come back short here, and a mutation
-        // control that ignored `read` passed every case in
-        // `agent-note-log.test.ts`. Kept because the failure it guards is
-        // silent and the guard is one argument.
-        const buf = Buffer.alloc(this.bytesCap);
-        const fd = openSync(path, 'r');
-        let read = 0;
-        try {
-          read = readSync(fd, buf, 0, this.bytesCap, size - this.bytesCap);
-        } finally {
-          closeSync(fd);
-        }
-        // The seek lands mid-character as readily as mid-line; the partial
-        // first line is dropped by `parseLine` either way.
-        text = buf.toString('utf8', 0, read);
-      }
-    } catch (err) {
-      console.error(`[agent-notes] failed to read the unplaced-note log: ${String(err)}`);
-      return [];
-    }
-    const lines = text.split('\n');
-    const from = Math.max(0, lines.length - READ_LINES_CAP);
+  /**
+   * Walk the board's trailing lines backwards, keep what `keep` wants, stop
+   * at `want` matches.
+   *
+   * FILTER INSIDE THE WALK; never cut a prefix and filter after. The earlier
+   * version parsed the file's last 500 lines and then filtered, which reads
+   * fine and is wrong on exactly the board this file was written for: a
+   * many-row board is a busy one, so a quiet agent's notes sit behind
+   * hundreds of a chatty agent's and fall out of the window before the filter
+   * sees them. The cut has to be per agent or it is not a cut at all.
+   *
+   * Two bounds, because they fail differently. `bytesCap` bounds the READ, so
+   * a months-old file costs a fixed number of bytes. `PARSE_LINES_CAP` bounds
+   * the WORK. Hitting either returns fewer matches than asked for rather than
+   * an error: this is a best-effort read of a best-effort record, and a hook
+   * waiting on it must not wait longer to be told less.
+   *
+   * A torn first line (the byte read cut it mid-JSON) drops out of
+   * `parseLine` the same way a torn last one does, so no caller has to know.
+   */
+  private tailMatching(
+    workspaceId: string,
+    keep: (note: LoggedAgentNote) => boolean,
+    want: number,
+  ): LoggedAgentNote[] {
     const out: LoggedAgentNote[] = [];
-    for (let i = from; i < lines.length; i++) {
-      const parsed = parseLine(lines[i] ?? '');
-      if (parsed) out.push(parsed);
+    if (want <= 0) return out;
+    const lines = this.tailText(workspaceId).split('\n');
+    let parsed = 0;
+    for (let i = lines.length - 1; i >= 0 && out.length < want; i--) {
+      const line = lines[i] ?? '';
+      if (line === '') continue;
+      if (parsed >= this.parseLinesCap) break;
+      parsed++;
+      const note = parseLine(line);
+      if (note && keep(note)) out.push(note);
     }
     return out;
+  }
+
+  /** The tail bytes of the board's log, decoded. Empty when the file is
+   *  missing or the read failed — both are "nothing to say", and neither is
+   *  worth an exception on a hook's path. */
+  private tailText(workspaceId: string): string {
+    const path = agentNoteLogPath(this.dataDir, workspaceId);
+    try {
+      if (!existsSync(path)) return '';
+      const size = statSync(path).size;
+      if (size <= this.bytesCap) {
+        return readFileSync(path, 'utf8');
+      }
+      // Seek, do not read the whole file and slice it — the point of the
+      // cap is that a months-old log costs a fixed read.
+      //
+      // Decoded only as far as `readSync` actually filled, because decoding
+      // the whole buffer would append the allocation's zero bytes to the
+      // LAST line — turning the newest note into invalid JSON and dropping
+      // exactly the one a caller came for. DEFENSIVE AND UNTESTED: a local
+      // append-only file never shrinks, so a full-length read off a
+      // known-good offset does not come back short here, and a mutation
+      // control that ignored `read` passed every case in
+      // `agent-note-log.test.ts`. Kept because the failure it guards is
+      // silent and the guard is one argument.
+      const buf = Buffer.alloc(this.bytesCap);
+      const fd = openSync(path, 'r');
+      let read = 0;
+      try {
+        read = readSync(fd, buf, 0, this.bytesCap, size - this.bytesCap);
+      } finally {
+        closeSync(fd);
+      }
+      // The seek lands mid-character as readily as mid-line; the partial
+      // first line is dropped by `parseLine` either way.
+      return buf.toString('utf8', 0, read);
+    } catch (err) {
+      console.error(`[agent-notes] failed to read the unplaced-note log: ${String(err)}`);
+      return '';
+    }
   }
 }

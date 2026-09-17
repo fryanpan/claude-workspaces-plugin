@@ -23,6 +23,19 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 
 const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
+const NOMAD = { id: 'agent-nomad', name: 'Nomad', kind: 'agent' };
+
+/** A decision an agent files and a person then asks back on — the shape
+ *  that leaves a filed item OFF the owner's queue. */
+const DECISION = {
+  shape: 'decision' as const,
+  headline: 'Cache size for the nightly rebuild',
+  detail: 'A full pass reads the index once. A smaller cache makes it read twice.',
+  options: [
+    { id: 'o-keep', label: 'Keep it' },
+    { id: 'o-halve', label: 'Halve it' },
+  ],
+};
 
 /** A closing message that asks the owner something, so the same post
  *  exercises both halves: the durable note and the unfiled-ask judgement. */
@@ -122,6 +135,36 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
     return task.id;
   }
 
+  /**
+   * `author` files a review item on `taskId`, a person asks back on it, and
+   * the filing time is returned.
+   *
+   * Asked-back rather than open on purpose: an item still on the queue makes
+   * `filingStateFor` answer "filed" through `openItem`, whatever window it
+   * was given, and would hide the boundary this test is about.
+   */
+  async function fileAndAnswer(taskId: string, author: typeof LEAD): Promise<number> {
+    const { item } = await jj<{ item: { id: string } }>(
+      await post(`/workspaces/${WS}/tasks/${taskId}/review-items`, { review: DECISION, author }),
+    );
+    const filedAt = Date.now();
+    await jj(
+      await post(`/workspaces/${WS}/tasks/${taskId}/review-items/${item.id}/answer`, {
+        text: 'Why does the cache size matter tonight?',
+        author: PERSON,
+      }),
+    );
+    return filedAt;
+  }
+
+  /** The review items still standing on this board's queue. */
+  const onQueue = async (): Promise<string[]> => {
+    const { items } = await jj<{ items: Array<{ reviewItemId?: string }> }>(
+      await fetch(`${base}/workspaces/${WS}/review-items`),
+    );
+    return items.flatMap((r) => (r.reviewItemId ? [r.reviewItemId] : []));
+  };
+
   it('reaches the store when the agent holds ONE row (positive control)', async () => {
     const only = await claimRow('Wire the index');
     const r = await turnNote(ASKING_TURN);
@@ -207,6 +250,67 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
     const body = (await r.json()) as { unfiledAsk?: string };
     expect(body.unfiledAsk).toContain('want me to');
     expect(counted().agents).toMatchObject([{ unfiledAsks: 1, totalAsks: 1 }]);
+  });
+
+  it('measures "filed nothing this turn" from the PREVIOUS turn note, across a restart', async () => {
+    // Two failures, one boundary, and this case has to catch both — the
+    // ordering it pins is the whole point of the change, not a detail of it.
+    //
+    // Take the log fallback out of `judgeAndRecord` and a restarted server
+    // measures over a flat two hours instead. Cartographer below filed its
+    // item BEFORE its last turn and has filed nothing since; the wide window
+    // would let that old item excuse the ask it makes now.
+    //
+    // Append to the log BEFORE judging and the note under judgement becomes
+    // its own predecessor. Nomad below filed its item DURING this turn; that
+    // boundary sits after the filing, so the one agent that complied is the
+    // one that gets nudged.
+    const first = await claimRow('Wire the index');
+    const second = await claimRow('Rebuild the sidecar');
+
+    // Cartographer: files, answers, THEN ends a turn. The item is off the
+    // owner's queue, so `openItem` cannot carry the verdict and `since` is
+    // the only thing deciding it.
+    const cartoFiledAt = await fileAndAnswer(first, LEAD);
+    expect(await onQueue()).toEqual([]);
+    const stale = await fetch(`${base}/workspaces/${WS}/agents/cartographer/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: 'cartographer',
+        kind: 'turn',
+        text: 'Rebased onto main and pushed.',
+        at: cartoFiledAt + 60_000,
+      }),
+    });
+    expect(await stale.json()).toMatchObject({ logged: true });
+
+    await handle.stop();
+    handle = createServer({ port: 0, dataDir });
+    base = `http://127.0.0.1:${handle.port}`;
+
+    // Nothing filed since that turn, and the ring is empty — the log is the
+    // only place the boundary survived.
+    const askedAgain = await post(`/workspaces/${WS}/agents/cartographer/notes`, {
+      agent: 'cartographer',
+      kind: 'turn',
+      text: ASKING_TURN,
+      at: cartoFiledAt + 120_000,
+    });
+    const carto = (await askedAgain.json()) as { unfiledAsk?: string };
+    expect(carto.unfiledAsk).toContain('want me to');
+
+    // Nomad: first turn this server has seen from it, and it filed inside
+    // the turn. Nothing to nudge it for.
+    const nomadFiledAt = await fileAndAnswer(second, NOMAD);
+    const nomadTurn = await post(`/workspaces/${WS}/agents/Nomad/notes`, {
+      agent: 'Nomad',
+      kind: 'turn',
+      text: ASKING_TURN,
+      at: nomadFiledAt + 60_000,
+    });
+    const nomad = (await nomadTurn.json()) as { unfiledAsk?: string };
+    expect(nomad.unfiledAsk).toBeUndefined();
   });
 
   it('a status note is lost at two rows too — the kind is not what decides it', async () => {

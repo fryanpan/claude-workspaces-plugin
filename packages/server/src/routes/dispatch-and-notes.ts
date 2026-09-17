@@ -349,6 +349,14 @@ export async function handleDispatchAndNoteRoutes(
     // rides back on the 202 so a hook — or a person reading the response —
     // can tell "kept" from "kept nowhere": a full disk is the one case where
     // this note still vanishes, and it now says so.
+    //
+    // ORDER IS LOAD-BEARING, and it is the reason this sits AFTER
+    // `judgeAndRecord` rather than beside the `appendNote` above. The judge
+    // reads the log for the PREVIOUS turn note; appending first would make
+    // this note its own predecessor, and an ask filed during this very turn
+    // would be measured from a boundary it cannot be on the right side of.
+    // Pinned by "measures 'filed nothing this turn' from the PREVIOUS turn
+    // note" in `turn-note-many-rows.test.ts`, which fails on either half.
     let logged: boolean | undefined;
     if (!task) {
       logged = agentNoteLog.append({

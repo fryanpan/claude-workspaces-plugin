@@ -12,7 +12,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentNoteLog, type LoggedAgentNote, agentNoteLogPath } from '../src/agent-note-log.ts';
+import {
+  AgentNoteLog,
+  type LoggedAgentNote,
+  READ_BYTES_CAP,
+  agentNoteLogPath,
+} from '../src/agent-note-log.ts';
 
 const WS = 'ws-alpha';
 const OTHER_WS = 'ws-beta';
@@ -53,11 +58,15 @@ describe('AgentNoteLog', () => {
   });
 
   it('appends: a second note never rewrites the first', () => {
-    log.append(note({ at: 1, text: 'First' }));
+    // Written newest-`at` FIRST, so append order and `at` order DISAGREE.
+    // With them agreeing this case passed on a read that merely reversed the
+    // file, which is not what "newest" means to any of its callers: a
+    // restart, a clock adjustment or a hook's own timestamp separates the
+    // two, and those are the conditions this log exists for.
     log.append(note({ at: 2, text: 'Second' }));
+    log.append(note({ at: 1, text: 'First' }));
     const raw = readFileSync(agentNoteLogPath(dataDir, WS), 'utf8');
     expect(raw.trimEnd().split('\n')).toHaveLength(2);
-    // Newest first on the way out, whatever order they went in.
     expect(log.readFor(WS, 'Cartographer').map((n) => n.text)).toEqual(['Second', 'First']);
   });
 
@@ -107,13 +116,61 @@ describe('AgentNoteLog', () => {
   });
 
   it('answers lastTurnAt with the latest TURN, ignoring other kinds and agents', () => {
-    log.append(note({ at: 100, kind: 'turn' }));
+    // The 150 goes in BEFORE the 100, so "latest" cannot be read off the end
+    // of the file — the greatest `at` and the last line are different notes.
+    log.append(note({ at: 150, kind: 'turn' }));
     log.append(note({ at: 200, kind: 'status' }));
     log.append(note({ at: 300, kind: 'turn', agent: 'Nomad' }));
-    log.append(note({ at: 150, kind: 'turn' }));
+    log.append(note({ at: 100, kind: 'turn' }));
     expect(log.lastTurnAt(WS, 'Cartographer')).toBe(150);
     expect(log.lastTurnAt(WS, 'Nomad')).toBe(300);
     expect(log.lastTurnAt(OTHER_WS, 'Cartographer')).toBeUndefined();
+  });
+
+  describe('when one agent’s notes sit behind hundreds of another’s', () => {
+    // The board this file was written for is a BUSY board — that is what
+    // holding many rows means. Reading the file's last N lines and filtering
+    // after would answer nothing for the quiet agent, because the cut happens
+    // before anyone asks whose notes these are. The cut has to be per agent.
+    const BUSY = 600;
+
+    const twoAgents = (instance: AgentNoteLog) => {
+      for (let i = 0; i < 5; i++) {
+        instance.append(note({ agent: 'Nomad', at: 100 + i, text: `quiet ${i}` }));
+      }
+      for (let i = 0; i < BUSY; i++) {
+        instance.append(note({ agent: 'Cartographer', at: 1000 + i, text: `busy ${i}` }));
+      }
+    };
+
+    it('still finds the quiet agent, and still answers the busy one from the tail', () => {
+      twoAgents(log);
+      expect(log.readFor(WS, 'Nomad').map((n) => n.text)).toEqual([
+        'quiet 4',
+        'quiet 3',
+        'quiet 2',
+        'quiet 1',
+        'quiet 0',
+      ]);
+      expect(log.lastTurnAt(WS, 'Nomad')).toBe(104);
+      expect(log.readFor(WS, 'Cartographer', 1).map((n) => n.text)).toEqual([`busy ${BUSY - 1}`]);
+    });
+
+    it('gives up rather than parsing the whole file when the walk runs long', () => {
+      // The reach is per agent; the WORK is still bounded, or a four-megabyte
+      // file would be twenty thousand parses on a route that answers a hook.
+      // Driven with a small parse cap rather than a five-thousand-line
+      // fixture — the same seam the byte cap uses.
+      const impatient = new AgentNoteLog(dataDir, READ_BYTES_CAP, 10);
+      twoAgents(impatient);
+      expect(impatient.readFor(WS, 'Nomad')).toEqual([]);
+      expect(impatient.lastTurnAt(WS, 'Nomad')).toBeUndefined();
+      // And it gave up looking rather than returning nothing at all: the
+      // agent whose notes are inside the budget is answered normally.
+      expect(impatient.readFor(WS, 'Cartographer', 1).map((n) => n.text)).toEqual([
+        `busy ${BUSY - 1}`,
+      ]);
+    });
   });
 
   it('answers false rather than throwing when the write cannot land', () => {
