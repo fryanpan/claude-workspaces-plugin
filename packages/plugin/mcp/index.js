@@ -17312,7 +17312,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_task_schedule",
-      description: "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish.",
+      description: "Set, replace or clear the rule that says WHEN a task's work starts. The task files one occurrence per firing, and the scheduler wakes its owner. Check `nextAt` in the reply, because a changed rule restarts from the arm time. This is not a due date, which is when work should finish. Read `output` in the reply: a rule can declare the folder its runs write into, and then each run files one Home item linking the files it wrote.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17409,7 +17409,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_agent",
-      description: "Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here.",
+      description: "Register this session on a board without taking the lead seat. The response briefs you: open gating decisions, the untriaged tasks to shape, and queued voice notes. It subscribes you to board events. Call heartbeat every few minutes, because after about five minutes of silence you show as away. ACT ON `sentry`: call sentry_watch_project on each slug it names and check with sentry_list_my_watches, or a raised alarm reaches nobody here. READ `mounts`: it says which folders of the project behind this board are served, or what mount_folder would do when none is.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17538,7 +17538,7 @@ var TOOL_LIST = {
     },
     {
       name: "mount_folder",
-      description: "Mount a subfolder of a project as the project's attachment storage. Every file under it gets ONE address that keeps working. A new version overwrites the old under the same link and keeps its comments. A move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served.",
+      description: "Mount a subfolder of a project so the board can serve the files in it. The server WALKS THE FOLDER ON DISK and serves everything under it, ignored and uncommitted files included — .gitignore is not a privacy control here. Every file gets ONE address that keeps working: a new version overwrites the old under the same link and keeps its comments, and a move to another mounted folder of the same project follows the file. Nothing is copied. Credential-shaped names, such as dotfiles, .env*, *.pem, *.key and id_*, are never listed and never served. Mount a folder you would show the whole board; set_project_privacy keeps a project whose bytes must not leave the machine local-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -18562,6 +18562,20 @@ function nextOccurrence(schedule, cursor = {}) {
   return next;
 }
 
+// packages/mcp/src/schedule-output-line.ts
+var NONE = 'This rule declares no output folder. Pass output: {folder: "digests"} and every ' + "run that writes files there files ONE review item on Home linking them, which the " + "next run replaces. Without it a run that writes files tells nobody it did.";
+function scheduleOutputLine(schedule) {
+  if (schedule === null || schedule === undefined)
+    return null;
+  const folder = schedule.output?.folder;
+  if (typeof folder !== "string" || folder.trim() === "")
+    return { folder: null, note: NONE };
+  return {
+    folder,
+    note: `Runs of this rule write into ${folder}. Every run that changes a file there files ` + "ONE review item on Home linking those files, and the next run replaces it. The " + "folder is read relative to the board’s project root."
+  };
+}
+
 // packages/mcp/src/task-projection.ts
 function projectTaskRows(tasks, fields) {
   const rows = tasks;
@@ -19167,7 +19181,8 @@ async function handleTaskTool(name, a, ctx) {
       return ok2({
         taskId,
         schedule,
-        ...nextAt !== undefined ? { nextAt, nextAtIso: new Date(nextAt).toISOString() } : { nextAt: null }
+        ...nextAt !== undefined ? { nextAt, nextAtIso: new Date(nextAt).toISOString() } : { nextAt: null },
+        ...scheduleOutputLine(schedule) !== null ? { output: scheduleOutputLine(schedule) } : {}
       });
     }
     case "import_tasks_markdown": {
@@ -19473,7 +19488,8 @@ async function handleWorkspaceTool(name, a, ctx) {
         ...res.watching !== undefined ? { watching: res.watching } : {},
         ...res.seat !== undefined ? { seat: res.seat } : {},
         ...res.seatTakenFrom !== undefined ? { seatTakenFrom: res.seatTakenFrom } : {},
-        ...res.sentry !== undefined ? { sentry: res.sentry } : {}
+        ...res.sentry !== undefined ? { sentry: res.sentry } : {},
+        ...res.mounts !== undefined ? { mounts: res.mounts } : {}
       });
     }
     case "heartbeat": {
@@ -20079,7 +20095,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.239";
+var PLUGIN_VERSION = "0.1.240";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

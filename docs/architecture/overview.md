@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>keep-moving · waiting-unfiled<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · supervisor-health.ts · server-starts.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · server-starts.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -237,6 +237,19 @@ read and write the same tasks through the same store, and only the clock is
 new. The two
 wake frames render in `mcp` through `scheduled-line.ts`, beside the other
 line modules.
+
+**A verb says what it can do, in its own answer.** Two small modules exist
+because a capability announced only in a skill goes unused: a skill is read
+once, at session start. `attach-mounts.ts` in `server` words what an attaching
+session is told about its project's mounted folders — the count and the names,
+or, when there are none, what `mount_folder` does and that `.gitignore` is not
+a privacy control. It sits beside `sentry-projects.ts` in the Ops group and
+for the same reason: the attach answer is where a session learns what this
+deployment can do for it. `schedule-output-line.ts` in `mcp` is the same shape
+one layer out — it words `set_task_schedule`'s answer about the folder a
+rule's runs write into — and joins the line modules beside
+`scheduled-line.ts`. Neither moves a boundary: both are pure wording, read by
+one caller each.
 
 `task-wait.ts` joins the Board group under the same `task-*.ts` glob and
 moves no boundary either. It writes one field on a task — what an agent

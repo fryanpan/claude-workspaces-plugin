@@ -1,5 +1,6 @@
 import type { DocType, User } from '@claude-workspaces/core';
 import type { AgentWatches } from '../agent-watches.ts';
+import type { AttachMountsBrief } from '../attach-mounts.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
@@ -138,6 +139,15 @@ export interface WorkspaceRoutesContext {
    * filesystem map inside a route whose other business is a doc.
    */
   meetingHomeFor: (workspaceId: string) => MeetingHomeResolution | null;
+  /**
+   * What this board's project has mounted, as the attaching session is told
+   * it (`attach-mounts.ts`).
+   *
+   * Takes the request because a `local-only` project's folder NAMES stop at
+   * the edge the same way its bytes do, and only the request says whether
+   * this caller is on the box.
+   */
+  mountsBriefFor: (workspaceId: string, req: Request) => AttachMountsBrief;
   /** Whether a watch key still names something on this server. */
   watchKeyExists: (key: string) => boolean;
   /** The board's keep-moving verdicts (`keep-moving-verdict.ts`), read-only. */
