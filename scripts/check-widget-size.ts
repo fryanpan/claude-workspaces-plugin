@@ -73,6 +73,25 @@ import { gzipSync } from 'node:zlib';
  * and refuses a bundle that reads any of the nine, so a widget change that
  * starts showing one fails the build instead of reading `undefined`.
  *
+ * And again on 2026-09-16, from the part of the bundle that was not about
+ * reading anything:
+ *
+ *   before        40,733 gz   (130,819 raw)      227 under
+ *   after         39,853 gz   (127,488 raw)    1,107 under
+ *
+ * 880 of it was `y-protocols/awareness`, plus the `lib0/time` behind it. The
+ * widget renders presence nowhere — it reads `client.awareness` in no module —
+ * and the two surfaces that DO render presence skip an entry carrying no
+ * `user.name`, which is the only kind a widget has ever had. So no reader has
+ * ever seen a widget in a presence strip, while every host page paid for the
+ * protocol, announced an empty entry on each connect, and ran a 3-second
+ * interval for the life of the page — measured on a real embed, not read
+ * off the diff: the same host page in the same browser arms one 3s interval
+ * with the real module and none with the shim, the widget mounting either
+ * way. The build stands a shim in for it
+ * (`packages/widget/scripts/shims/y-protocols-awareness.ts`) and
+ * `bundle-guard.ts` refuses a bundle that takes the real one back.
+ *
  * Raising the ceiling is a decision about what the widget costs the pages it is
  * a guest on, so it takes a paragraph here, not a round-up.
  */
