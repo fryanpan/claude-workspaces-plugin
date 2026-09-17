@@ -282,6 +282,25 @@ file is what the builder did, the word is what the task claimed to be about.
   session and a Team Lead on another board gets the frame there and files
   nothing; with nobody reachable it files one item as the server).
 
+## `waiting-unfiled-escalation.ts` — the aging half — *rebuild step 6*
+
+- **Must:** age EVERY task on the gate's `unfiled` list — both ways onto it,
+  `waiting-unfiled` and `blocked-on-owner-unfiled` — and past a second window
+  address Team Lead first as ONE fleet-wide frame, the owner only when Team
+  Lead is unreachable and then as ONE review item however many tasks and
+  boards it spans. Each named task says which of the two it is, in the frame's
+  bucket and in the item's own words.
+- **Must never:** file a second item on a refusal, ask the owner again about a
+  task they have already answered or withdrawn, or file at all while Team Lead
+  can be reached. A task that stops being a finding is forgotten and its item
+  withdrawn on that tick.
+- **Measured by:** `waiting-unfiled-escalation.test.ts` and
+  `owner-unfiled-escalation.test.ts`, each with the one-window control beside
+  the two-window case. The verdict's `escalated` line cannot measure this
+  half: it counts items this actor filed, and the Team Lead rung files none —
+  a fleet-wide zero there says Team Lead was reachable, not that the ladder
+  ran.
+
 ## `note-ask.ts` + `note-ask-judge.ts` — *removed in step 2*
 
 - Gone, with the `waiting-on-you` prompt. A task's waiting state is
