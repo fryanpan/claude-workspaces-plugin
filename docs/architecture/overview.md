@@ -55,7 +55,7 @@ flowchart TB
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
-    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>unanswered-thread<br/>keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>ready-nudge · ready-gate · ready-release · board-activity"]
+    keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · unanswered-thread<br/>keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · server-starts.ts<br/>liveness.ts · event-loop.ts"]
@@ -568,42 +568,31 @@ could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
 **An agent gets no wake for an event it cannot act on.** Three rules give that,
-and none of them hides state. The next read shows the same board.
+and none of them hides state.
 
-*Its own action.* Every board event and doc event names the actor who caused
-it. The MCP child drops a frame whose actor is this session, before the frame
-becomes a wake. The agent's own comment, review item, task move or attach then
-costs it no turn. The child drops the frame and the server does not, so every
-other reader still gets it. A frame with an actor the child cannot identify is
-always delivered, because an agent cannot detect silence. The rule and each
-family's attribution field are in `packages/mcp/src/self-authored.ts`.
+*Its own action.* The MCP child drops a frame whose actor is this session, so
+an agent's own comment, review item or task move costs it no turn. Every other
+reader still gets the frame, and one whose actor the child cannot identify is
+always delivered, because an agent cannot detect silence. Rules in
+`packages/mcp/src/self-authored.ts`.
 
-*An analytics event.* `review_item.viewed` records that a person opened a
-card. It changes no task and no status, and no page reads the frame. The
-server keeps it off the fan-out, next to `task.noted` and
-`dispatch.requested`. The audit log still gets the row, which is what the
-measurement reads. `review_item.answered` stays on the stream, because an
+*An analytics event.* `review_item.viewed` records that a person opened a card
+and changes nothing, so the server keeps it off the fan-out while the audit log
+still gets the row. `review_item.answered` stays on the stream, because an
 answer is the wake an agent waits for. The list is in
 `packages/server/src/review-items/analytics.ts`.
 
-*An act with no words.* A person resolves a thread. A resolve is a status
-flip, and it carries no text. An agent that wakes for one reads an empty line.
-The MCP child drops the frame before it becomes a wake. The child drops it for
-every reader, not only for the session that resolved the thread. That is how a
-reader separates this rule from the self-echo rule. The rule is in
+*An act with no words.* A resolve is a status flip and carries no text, so the
+MCP child drops the frame before it becomes a wake. It drops it for every
+reader, not only the session that resolved the thread, which is what separates
+this rule from the self-echo one. A resolve retires each review item on its
+thread, so a resolve that closed an unanswered ask still wakes: it is the only
+report that reaches the agent who asked. Rule in
 `packages/mcp/src/bookkeeping-events.ts`.
 
-One resolve still wakes. A resolve retires each review item on its thread, and
-the queue stops offering them. So a resolve that closed a question nobody
-answered is the only report that reaches the agent who asked. The child reads
-the thread on the frame and delivers that resolve.
-
-The place a rule runs depends on what it reads. The analytics rule reads only
-the event name. The server runs it, so the drop reaches each attached session
-at the next prod restart, and the frame never enters the replay buffer. The
-other two rules read more than the name. The self-echo rule must know which
-session is reading. The empty-act rule must read the thread on the frame. The
-child holds both, so the child runs them.
+Which rule runs where depends on what it reads. The server drops by event name,
+which reaches every attached session at the next prod restart. The child drops
+by what the frame carries, because that is where the frame is.
 
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
@@ -942,7 +931,17 @@ policy: it reads the outline a tick is about to be composed against, finds the
 topics whose flat run has reached the bar `notes-quality.ts` scores, and writes
 the block ids into the prompt so the note-taker groups that topic instead of
 extending it. It counts runs the way `flatBulletRuns` does, deliberately, so
-the directive can never fire on a topic the eval calls fine.
+the directive can never fire on a topic the eval calls fine. It counts a
+SECOND thing beside the run — how many notes one heading stands over at all —
+because a heading may swallow half an hour without ever holding five bullets
+flat, and nesting cannot repair that: the reader meets the same stretch, in
+groups. `notes-regroup-ask.ts` is the other half, split off it: the scan
+decides what is wrong, the ask decides how to say it to a model, and only the
+second is paid for on every tick at full rate. It offers the three remedies
+Bryan asked for rather than one — a subtopic bullet with `nest_blocks`, a
+subheading or a topic heading placed in front of the note a new part starts at
+with `insert_before_block`, and the two composed in a single update, which is
+what takes a stretch already on the page apart.
 `notes-unconfirmed.ts` joins the same DOMAIN tier as the half that settles the
 guesses a meeting marked "(unconfirmed)" — it finds them and names their ids to
 the cleanup pass, which counts what is left afterwards.
@@ -1327,7 +1326,19 @@ insert, and a block with no words, which applies directly whoever owns it.
 `prose-nest.ts` is one of those edits given a
 module of its own: `nest_blocks` MOVES existing list items under a lead bullet
 rather than restating them, which is what lets a note-taker regroup a topic
-without retyping a point or orphaning the comment threads anchored to it. Server-side they are reached through
+without retyping a point or orphaning the comment threads anchored to it.
+`prose-split.ts` is the second, and it is the only insert in the product that
+lands anywhere but an END. Every other one appends — to the document, or to
+the end of the section it names — so a heading could be written and never
+PLACED, and a topic that had swallowed half an hour could not be broken up at
+all. `insert_before_block` opens a slot in front of a named block, splitting
+its list when the block is in the middle of one, and a heading written there
+re-parents every note below it by ARRIVING: an outline reads a block's topic
+as the nearest heading above it, so nothing is moved, nothing is retyped, and
+every note keeps its words, its id and its comment threads. What it does
+disturb is the list it splits, whose tail is carried by the same clone
+`prose-nest.ts` uses — so it asks the same ownership question before it does,
+and refuses rather than carry a line a person owns. Server-side they are reached through
 `doc-outline-ops.ts`, which sits beside `doc-edit-ops.ts` in the services tier
 for the reason that module already gives: `doc-edit-ops.ts` was at the
 500-line bar, and the outline verbs are a family of their own.
@@ -1415,6 +1426,7 @@ the client module is chrome-free measurement with no UI of its own.
 - [stall-detection.md](stall-detection.md) — gains one more top-level module, `unanswered-thread.ts`, and no new edge. It is the other DIRECTION of the same question. `review-queue.ts` walks every open thread for an agent's unanswered comment and for a declaration awaiting a person, and both of those runs end at a person — `unansweredRun` breaks at the first author who is not an agent — so a thread whose last speaker is Bryan produces no row anywhere, on a doc that may hang on no task at all. This module is the predicate for that case and the row the wake names: pure, so it joins the domain tier beside `stall-gate.ts`, reading only `classifyActor` from `actor-identity.ts`. `stall-wiring.ts` calls it once per board tick over `workspace.docIds` — the same walk `heldThreadReviewItems` already pays for — and the row rides the existing stall frame to the board's LEAD. It never reaches the board's owner: the escalation that goes past a lead anchors on `stalled`/`unfiled` rows, and a waiting thread is neither, so a question Bryan asked can never be filed back onto Bryan's own queue.
 - [unfiled-ask.md](unfiled-ask.md) — the two top-level modules `unfiled-ask.ts` and `unfiled-ask-filing.ts`, which judge whether a closing message asked the board's owner something with nothing filed. They join the services tier beside `chat-audit.ts` and move nothing in the picture: one is pure text, the other one walk of the task store, and only `routes/dispatch-and-notes.ts` calls either. The doc carries the measured false-positive and false-negative rates, because the count they feed is unreadable without them.
 - [unfiled-ask.md](unfiled-ask.md) — also gains `agent-note-log.ts`, one more top-level module in the services tier and no new edge. It is the durable half of `agent-notes.ts`'s per-agent ring: a board where one session holds several in-progress rows can place none of its end-of-turn notes, and the ring they fell back to is in-process, twenty deep and read by nothing, so every one of them was dropped. The log appends each unplaced note to `<dataDir>/workspaces/<ws>.agent-notes.jsonl` — its own file rather than a new `TaskStoreEvent`, because a store event is a change to the board and an unplaced note is a record about an agent, and because every consumer of `events.jsonl` keeps an exclusion list that a new type would have to be added to. `routes/dispatch-and-notes.ts` is its only caller, writing on the POST and merging it into the GET.
+- [stall-detection.md](stall-detection.md) — gains three top-level modules and no new edge, all three answering ONE question: does this frame tell its reader anything it does not already have? A week of the fleet's transcripts put repeat or empty reminders at 11% of all model spend, and a wake is the reader's whole turn. `wake-sent-sets.ts` is the memory — per board, per session, the tokens of the last frame actually delivered, persisted beside the armed stamps so a deploy does not re-send what the previous process sent; both nudgers own one. `stall-frame-news.ts` is the three readings the stall wake takes of a built frame: the tokens the stamp does not already carry, whether every task the frame would name moved inside the moved-within window, and the person-blocked rows that come off the board before the lead is woken at all. `waiting-unfiled-routing.ts` is which rung of the unfiled-ask ladder a row belongs on, split out of `waiting-unfiled-escalation.ts` when the two buckets stopped sharing an addressee. All three are pure — no clock, no store, no socket — so they join the domain tier beside `stall-gate.ts`, and their callers are the two nudgers and the escalation that already sat in the keep-moving box.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
 - [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.

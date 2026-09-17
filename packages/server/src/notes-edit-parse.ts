@@ -102,6 +102,14 @@ function readEdit(entry: unknown, at: number): { edit: prose.BlockEdit } | { why
       }
       return { edit: { op, headingId, markdown } };
     }
+    case 'insert_before_block': {
+      const blockId = str(raw.blockId);
+      if (blockId === undefined) return { why: `edit ${at}: insert_before_block without id` };
+      if (markdown === undefined) {
+        return { why: `edit ${at}: insert_before_block without markdown` };
+      }
+      return { edit: { op, blockId, markdown } };
+    }
     case 'replace_block': {
       const blockId = str(raw.blockId);
       if (blockId === undefined) return { why: `edit ${at}: replace_block without id` };

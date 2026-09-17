@@ -307,7 +307,7 @@ export async function handleTaskBatch(
     // this route reports still line up with the rows that sent them.
     if (toJudge.length > 0) {
       const gates = await mapBounded(toJudge, JUDGE_BATCH_CONCURRENCY, (row) =>
-        judgeReviewItem(row.task, row.item, row.actor),
+        judgeReviewItem(row.task, row.item, row.actor, { heldInReply: true }),
       );
       for (let i = 0; i < toJudge.length; i++) {
         const row = toJudge[i];
@@ -330,7 +330,7 @@ export async function handleTaskBatch(
     // ticket announces itself through `task.created`.
     if (decisionsToJudge.length > 0) {
       const gates = await mapBounded(decisionsToJudge, JUDGE_BATCH_CONCURRENCY, (row) =>
-        judgeTaskDecision(row.task, row.actor),
+        judgeTaskDecision(row.task, row.actor, { heldInReply: true }),
       );
       for (let i = 0; i < decisionsToJudge.length; i++) {
         const row = decisionsToJudge[i];

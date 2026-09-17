@@ -117,15 +117,21 @@ describe('a note that says the agent is waiting on a person, with nothing filed'
    * duration. Creating a task kicks off background writes (the goal
    * assignment among them) that land after the create returns and bump
    * `updatedAt`; a fixed sleep raced them and the wake read the row as fresh.
+   *
+   * TWO windows, not one. The gate makes a row a finding after one; the wake
+   * spends no turn while every task it would name moved inside the
+   * moved-within window, which the wiring derives as twice the quiet window
+   * (`stall-frame-news.ts`). A row named at one window is work somebody was
+   * on minutes ago.
    */
   const quietPastWindow = (ids: readonly string[]): Promise<unknown> =>
     waitFor(
       () =>
         ids.every((id) => {
           const task = handle.tasks.getTask(id);
-          return task !== undefined && Date.now() - task.updatedAt > QUIET_MS;
+          return task !== undefined && Date.now() - task.updatedAt > 2 * QUIET_MS;
         }),
-      { describe: 'every task quiet past the stall window' },
+      { describe: 'every task quiet past the moved-within window' },
     );
 
   const noteOn = (taskId: string, text: string): Promise<Response> =>

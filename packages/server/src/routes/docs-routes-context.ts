@@ -28,7 +28,7 @@ import type { createLeadPresenceMonitor } from '../lead-presence.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
-import type { ThreadReviewGate } from '../review-gate-types.ts';
+import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -174,7 +174,7 @@ export interface DocRoutesContext {
     /** `lessSpecific`: the filer's own reason why the honest answer is less
      *  specific than a standing hold asked for. Acted on only when the item
      *  is held. */
-    runOpts?: { lessSpecific?: string },
+    runOpts?: GateRunOpts,
   ) => Promise<ThreadReviewGate>;
   /** Tell the addressee a comment-borne review item is waiting on them. */
   announceThreadReview: (

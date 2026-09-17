@@ -903,19 +903,66 @@ describe('the review-item quality gate', () => {
 
   describe('agent wake', () => {
     it(
-      'the filer is told which item was held, why, and to revise it',
+      'the filer is told which item was held, why, and to revise it — in its own reply',
       async () => {
         verdict = { ok: false, reason: 'The headline is a ticket id.' };
         const { workspaceId, taskId } = await board();
         const filer = await agentStream(workspaceId, FILER);
         const lead = await agentStream(workspaceId, LEAD);
         try {
-          const res = await jj<{ item: { id: string } }>(
+          const res = await jj<{
+            item: { id: string };
+            held?: boolean;
+            heldReason?: string;
+            message?: string;
+          }>(
             await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
               review: BAD,
               author: FILER,
             }),
           );
+          // Everything the pushed frame used to carry is on the call the
+          // filer is already waiting on: that it was held, why, and the
+          // paste-ready call that ends the hold.
+          expect(res.held).toBe(true);
+          expect(res.heldReason).toBe('The headline is a ticket id.');
+          expect(res.message).toContain(`revise_review_item(taskId="${taskId}"`);
+          // So no second copy is pushed at it. Since 2026-09-17 a hold handed
+          // back in its own reply sends no frame — a wake is the reader's
+          // whole turn, and a turn spent re-reading the reply it just got is
+          // part of the 11% of fleet spend repeat reminders were measured at.
+          // The overdue nudge below is the control: this stream does carry
+          // held frames, for the telling nobody asked for.
+          await settle();
+          expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
+          // And the lead was never in it: the item is not theirs to fix.
+          expect(lead.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
+        } finally {
+          await filer.stop();
+          await lead.stop();
+        }
+      },
+      SSE_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'MUTATION CONTROL: the overdue nudge, which no reply carries, still wakes it',
+      async () => {
+        verdict = { ok: false, reason: 'The headline is a ticket id.' };
+        const { workspaceId, taskId } = await board();
+        const filer = await agentStream(workspaceId, FILER);
+        try {
+          const res = await jj<{ item: { id: string; judge?: { at: number } } }>(
+            await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+              review: BAD,
+              author: FILER,
+            }),
+          );
+          const stampedAt = res.item.judge?.at;
+          expect(stampedAt).toBeGreaterThan(0);
+          while (Date.now() <= (stampedAt as number)) await settle(1);
+
+          handle.nudgeStalls();
           const [frame] = await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
           expect(frame?.data).toMatchObject({
             workspaceId,
@@ -923,14 +970,10 @@ describe('the review-item quality gate', () => {
             reviewItemId: res.item.id,
             reason: 'The headline is a ticket id.',
             title: 'Rebuild the index nightly',
+            overdue: true,
           });
-          // Addressed to the filer alone: the lead is not woken over an item
-          // that is not theirs to fix.
-          await settle(150);
-          expect(lead.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
         } finally {
           await filer.stop();
-          await lead.stop();
         }
       },
       SSE_TEST_TIMEOUT_MS,
@@ -952,8 +995,9 @@ describe('the review-item quality gate', () => {
               author: FILER,
             }),
           );
-          // The create-time wake, so the counts below start from a known place.
-          await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
+          // No create-time wake any more — the reply carried the hold — so the
+          // counts below start from nothing.
+          expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
 
           // The window here is zero, and `overdueHeldItems` wants age > window
           // — so the hold is a finding only once the clock has actually moved
@@ -972,9 +1016,9 @@ describe('the review-item quality gate', () => {
           while (Date.now() <= (stampedAt as number)) await settle(1);
 
           handle.nudgeStalls();
-          const nudges = await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 2);
-          expect(nudges).toHaveLength(2);
-          expect(nudges[1]?.data).toMatchObject({ reviewItemId: res.item.id, overdue: true });
+          const nudges = await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
+          expect(nudges).toHaveLength(1);
+          expect(nudges[0]?.data).toMatchObject({ reviewItemId: res.item.id, overdue: true });
           // The lead hears nothing: the hold is seconds old and this suite's
           // quiet window is an hour. A hold that outlives the window IS the
           // lead's finding — held-item-finding.test.ts, where the window is
@@ -988,7 +1032,7 @@ describe('the review-item quality gate', () => {
           handle.nudgeStalls();
           await settle(200);
           expect(lead.frames.filter((f) => f.event === STALL_EVENT)).toEqual([]);
-          expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toHaveLength(2);
+          expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toHaveLength(1);
 
           // Revising it away clears the finding; the board falls silent.
           verdict = { ok: true, reason: 'Clear.' };
@@ -1226,7 +1270,7 @@ describe('the review-item quality gate', () => {
     });
 
     it(
-      'the filer is woken with the doc-form address',
+      'the filer reads the doc-form address in its own reply',
       async () => {
         const { workspaceId, taskId } = await board();
         const filer = await agentStream(workspaceId, FILER);
@@ -1241,18 +1285,17 @@ describe('the review-item quality gate', () => {
               review: BAD,
             }),
           );
-          const [frame] = await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
+          // The address rides the reply, whole: the doc, the thread and the
+          // comment the hold hangs on, spelled as the call that ends it.
           const revise = `revise_review_item(docId="task:${taskId}", threadId="${weak.thread.id}", commentId="${bearing(weak)}")`;
-          expect(frame?.data).toMatchObject({
-            docId: `task:${taskId}`,
-            threadId: weak.thread.id,
-            commentId: bearing(weak),
-            revise,
-            reason: 'No stakes.',
-          });
-          // The wake is the FILER's. The lead's copy — the stall report past
-          // the quiet window, carrying this same address — is
-          // held-item-finding.test.ts.
+          expect(weak.held).toBe(true);
+          expect(weak.heldReason).toBe('No stakes.');
+          expect(weak.message).toContain(revise);
+          // And nothing is pushed at anybody: not at the filer, which read it
+          // in the reply, and not at the lead, whose copy — the stall report
+          // past the quiet window — is held-item-finding.test.ts.
+          await settle();
+          expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
           expect(lead.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
         } finally {
           await filer.stop();
@@ -1421,7 +1464,7 @@ describe('the review-item quality gate', () => {
     });
 
     it(
-      'the filer is woken with the ticket address',
+      'the filer reads the ticket address in its own reply',
       async () => {
         const { workspaceId } = await board();
         const filer = await agentStream(workspaceId, FILER);
@@ -1437,15 +1480,22 @@ describe('the review-item quality gate', () => {
           });
           const taskId = weak.tasks[0]?.id ?? '';
           const revise = `revise_review_item(taskId="${taskId}")`;
-          const [frame] = await waitForFrames(filer.frames, REVIEW_ITEM_HELD_EVENT, 1);
-          expect(frame?.data).toMatchObject({
+          const held = weak.held?.[0];
+          expect(held).toMatchObject({
             taskId,
             reviewItemId: 'r-legacy',
-            revise,
-            reason: 'The headline is a ticket id, not a decision.',
+            heldReason: 'The headline is a ticket id, not a decision.',
           });
-          // Addressed at the ticket, with no doc half of the address on it.
-          expect(frame?.data?.docId).toBeUndefined();
+          // Addressed at the ticket: the call names the ticket and nothing
+          // else, with no doc half of the address in it.
+          expect(held?.message).toContain(revise);
+          expect(held?.message).not.toContain('docId=');
+          // Read in the reply, so nothing was pushed at anybody. The send is
+          // synchronous with the gate and the reply above has landed, so a
+          // frame would already be here; the two cases in `agent wake` own
+          // that rule and carry its control.
+          expect(filer.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
+          expect(lead.frames.filter((f) => f.event === REVIEW_ITEM_HELD_EVENT)).toEqual([]);
           // The lead's copy of this address is held-item-finding.test.ts.
         } finally {
           await filer.stop();

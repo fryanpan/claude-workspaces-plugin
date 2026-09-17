@@ -66,44 +66,30 @@ is read by the reviewer.
 
 ## An agent is only woken by news it can act on
 
-Three questions on any diff that adds or fans out a board or doc event.
+A diff that adds or fans out a board or doc event answers three questions.
 
-- **Does it tell an agent about its own action?** The MCP child drops a frame
-  whose actor is this session. A new event carries its actor in a field
-  `packages/mcp/src/self-authored.ts` already reads, or that file gains a rule
-  for it in the same PR. A frame with no identified actor is delivered, and
-  that is the safe direction.
-- **Does it exist for analytics?** An event that only the measurement log
-  reads does not ride the SSE fan-out. Put its name in
-  `ANALYTICS_ONLY_EVENTS` (`packages/server/src/review-items/analytics.ts`).
-  The test is who acts on the event, not which file wrote it:
-  `review_item.viewed` is on the list and `review_item.answered` is not,
-  although one function builds both. The audit log is written before any
-  listener runs, so the measurement keeps the row either way.
+- **Does it tell an agent about its own action?** Give the event an actor
+  field `packages/mcp/src/self-authored.ts` reads, so the MCP child can drop
+  the frame. An event whose actor cannot be identified is delivered, because
+  an agent cannot detect silence.
+- **Does it exist only for analytics?** Put its name in
+  `ANALYTICS_ONLY_EVENTS` (`packages/server/src/review-items/analytics.ts`) so
+  it stays off the SSE fan-out. The test is who acts on the event, not which
+  file wrote it.
+- **Does it carry any words?** An event that renders empty tells its reader
+  only that somebody clicked, so name it in
+  `packages/mcp/src/bookkeeping-events.ts`. Ask what the event retires first: a
+  resolve retires each review item on its thread, so a resolve that closed an
+  unanswered ask still wakes.
 
-- **Does it carry any words?** An event whose render is empty tells the reader
-  only that somebody clicked. If the drop needs the frame's own state, the MCP
-  child makes it — `packages/mcp/src/bookkeeping-events.ts`, which today holds
-  `thread.resolved`. Name the event and its reason; a family prefix would
-  swallow the next event added under it. Before you add one, ask what the
-  event retires: a resolve retires each review item on its thread, so a resolve
-  that closed an unanswered ask still wakes. Where you are unsure, keep the
-  wake and write down why.
-
-**Which rule runs where follows from what it reads.** A drop decidable from
-the event's name alone goes in the server, so it reaches each attached session
-at the next prod restart and the frame never enters the replay buffer. A drop
-that needs the frame's own state goes in the child, which holds that state.
-
-All three rules cost an agent a turn when they are missed, and one turn per
-event per attached session. Bryan asked for the second on 2026-09-17: "there's
-also no point sending [review_item.viewed] events to the agent … events just
-for analytics do not need to be sent to listening agents."
+A miss costs one turn per event per attached session. A drop decidable from the
+event name belongs in the server; one that needs the frame's own state belongs
+in the child.
 
 *Enforced by:* `packages/server/test/analytics-events-off-stream.test.ts`,
 `packages/server/test/self-echo-suppression.test.ts` and
-`packages/server/test/quiet-resolve.test.ts` for the events that exist today,
-and the reviewer's eye for a new one.
+`packages/server/test/quiet-resolve.test.ts`; the reviewer's eye for a new
+event.
 
 ## The architecture map is current
 

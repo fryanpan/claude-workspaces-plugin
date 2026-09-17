@@ -88,6 +88,39 @@ describe('what the gate refuses', () => {
     headingId: 'h1',
   };
 
+  /**
+   * THE SWITCH USED TO HAVE NO `default`, so an op nobody had written a case
+   * for was neither kept nor refused-with-a-reason: it fell out of the loop,
+   * was counted in `refused` by subtraction, and left nothing in `reasons`.
+   * A pass reporting a refusal it cannot name is the same shape as the bug
+   * this branch exists to fix.
+   *
+   * The compile-time half of the guard cannot be asserted from in here — a
+   * `never` assignment either builds or does not. It was checked by adding a
+   * seventh member to `prose.BlockEdit` and running `bun run typecheck`,
+   * which failed on exactly that line and nowhere else. This is the runtime
+   * half: the arm behind the `never`, reached by an edit that arrives without
+   * having gone through the type.
+   */
+  it('names an op it has no rule for, rather than dropping it silently', () => {
+    const rogue = { op: 'teleport_block', blockId: 'b1' } as unknown as prose.BlockEdit;
+    const { kept, refused, reasons } = boundByAuthorship([rogue], scope);
+
+    expect(kept).toEqual([]);
+    expect(refused).toBe(1);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('teleport_block');
+    // CONTROL, and it is the whole point of the case: an op the gate DOES
+    // have a rule for is refused with its own reason, so the assertions above
+    // are about the missing rule and not about refusal in general.
+    const known = boundByAuthorship(
+      [{ op: 'insert_at_end', markdown: '- a second section' }],
+      scope,
+    );
+    expect(known.refused).toBe(1);
+    expect(known.reasons[0]).toContain('second notes section');
+  });
+
   it("keeps a rewrite of a person's block, rather than dropping it", () => {
     const edit: prose.BlockEdit = { op: 'replace_block', blockId: 'b2', markdown: '- rewritten' };
     const { kept, refused } = boundByAuthorship([edit], scope);

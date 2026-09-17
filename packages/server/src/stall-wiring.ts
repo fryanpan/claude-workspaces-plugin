@@ -1282,10 +1282,17 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // The lead hears of a hold at the quiet window — the window the verdict
     // above counts it under — not at the filer's shorter one.
     ...(ctx.stallNudgeQuietMs !== undefined ? { leadHeldMs: ctx.stallNudgeQuietMs } : {}),
+    // A frame whose every named task moved inside two quiet windows waits
+    // (`everyNamedTaskMoved`) — an hour at the default half hour, and the
+    // same ratio on a server run with a shorter window.
+    ...(ctx.stallNudgeQuietMs !== undefined ? { movedWithinMs: 2 * ctx.stallNudgeQuietMs } : {}),
     ...(ctx.stallNudgeRepeatMs !== undefined ? { repeatMs: ctx.stallNudgeRepeatMs } : {}),
     // One task costs the lead a check-in reminder at most once per window —
     // the same window that makes the row due, so the reminder is one per
-    // missed check-in.
+    // missed check-in. This survived the sent sets added on 2026-09-17 only
+    // because the check-in's token names the window as well as the row
+    // (`checkInTokens`); with the row alone, this knob would set how often the
+    // row falls due and nothing at all about how often the lead hears.
     ...(ctx.checkInMs !== undefined ? { checkInRepeatMs: ctx.checkInMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
     escalateFleet: (boards, now) => waitingUnfiled.onTick(boards, now),

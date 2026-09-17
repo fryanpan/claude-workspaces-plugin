@@ -102,6 +102,9 @@ function harness(initial: StallSnapshot = board()) {
   const world = { now: START, boards: [initial] };
   const sent: StallNudgeFrame[] = [];
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => world.now,
     snapshot: () => world.boards,
     canReach: () => true,
@@ -179,19 +182,21 @@ describe('a ticket waiting on a question its reader asked back', () => {
     expect(h.sent[1]?.changed?.askedBack?.[0]?.askedAt).toBe(START + 10 * MIN);
   });
 
-  it('escalates again once the question is gone and the row is a plain stall', () => {
+  it('says nothing more once the question is gone and the row is a plain stall', () => {
     const h = harness(board({ askedBack: [askedBackOn()] }));
     h.tick();
     h.windows(2);
     expect(h.sent).toHaveLength(1);
 
     // The filer revised: the question is off the board, and the ticket's
-    // silence is nobody else's any more. The ordinary clock resumes.
+    // silence is nobody else's any more. The lead was handed this ticket in
+    // the first frame, so there is nothing left to hand it — the row losing
+    // one of its two readings names LESS than last time, and less is never
+    // news (`wake-sent-sets.ts`).
     h.set({ ...h.current(), askedBack: [] });
     h.windows(2);
 
-    expect(h.sent.length).toBeGreaterThan(1);
-    expect(h.sent[h.sent.length - 1]?.changed?.escalated).toBe(true);
+    expect(h.sent).toHaveLength(1);
   });
 });
 
@@ -231,7 +236,7 @@ describe('a long wait beside a short stall', () => {
   // read as an escalation. Let a waiting ticket set that mark and it holds the
   // board at ITS number — five hours of somebody else's wait — and the plain
   // stall beside it can never climb high enough to be re-said at all.
-  it("does not let the wait swallow the plain stall's own escalation", () => {
+  it('still speaks for the plain stall the moment its own list changes', () => {
     const h = harness(
       board({
         stalled: [
@@ -245,11 +250,24 @@ describe('a long wait beside a short stall', () => {
     h.tick();
     expect(h.sent).toHaveLength(1);
 
+    // Two windows of pure ageing. Nothing joined the list, so nothing is said
+    // — the escalation clock no longer sends by itself.
     h.windows(2);
+    expect(h.sent).toHaveLength(1);
 
-    const last = h.sent[h.sent.length - 1];
-    expect(h.sent.length).toBeGreaterThan(1);
-    expect(last?.changed?.escalated).toBe(true);
+    // A row the lead has not been handed, though, is through at once: the
+    // five-hour wait beside it holds nothing down.
+    h.set({
+      ...h.current(),
+      stalled: [
+        ...h.current().stalled,
+        quietRow({ id: 't-new', title: 'Rebuild the shard index', quietMs: 40 * MIN }),
+      ],
+    });
+    h.tick();
+
+    expect(h.sent).toHaveLength(2);
+    expect(h.sent[1]?.rows?.map((row) => row.id)).toContain('t-new');
   });
 });
 
@@ -331,7 +349,7 @@ describe('a row carrying a DECLARED wait on something off the board', () => {
     );
   });
 
-  it('escalates again once the wait is cleared', () => {
+  it('speaks once the wait is cleared, and then only once', () => {
     const h = harness(board({ declaredWaits: [declared()] }));
     h.tick();
     h.windows(2);
@@ -340,8 +358,10 @@ describe('a row carrying a DECLARED wait on something off the board', () => {
     h.set({ ...h.current(), declaredWaits: [] });
     h.windows(2);
 
-    expect(h.sent.length).toBeGreaterThan(1);
-    expect(h.sent[h.sent.length - 1]?.changed?.escalated).toBe(true);
+    // The row is a finding again, so the lead hears about it — and hears
+    // about it ONCE, however many windows the clock then crosses.
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.rows?.map((row) => row.id)).toEqual(['t-rollout']);
   });
 
   it('does NOT quieten a row waiting on a person with nothing filed', () => {
@@ -358,14 +378,16 @@ describe('a row carrying a DECLARED wait on something off the board', () => {
 
     h.tick();
     expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.unfiled?.map((row) => row.id)).toEqual(['t-palette']);
 
+    // Named despite the sentence — and then not re-named, because the list
+    // does not change. The annotation never becomes a mute button; the
+    // repeat it used to prove is now the sent-set rule's business.
     h.windows(3);
-
-    expect(h.sent.length).toBeGreaterThan(3);
-    for (const frame of h.sent.slice(1)) expect(frame.changed?.escalated).toBe(true);
+    expect(h.sent).toHaveLength(1);
   });
 
-  it("does not let one row's declared wait swallow another row's escalation", () => {
+  it("does not let one row's declared wait swallow another row's arrival", () => {
     // The high-water mark is filtered with the stamp, so a five-hour declared
     // wait must not hold the board's bucket up where a short plain stall
     // beside it can never climb high enough to be re-said. Same failure the
@@ -384,9 +406,19 @@ describe('a row carrying a DECLARED wait on something off the board', () => {
     expect(h.sent).toHaveLength(1);
 
     h.windows(2);
+    expect(h.sent).toHaveLength(1);
 
-    expect(h.sent.length).toBeGreaterThan(1);
-    expect(h.sent[h.sent.length - 1]?.changed?.escalated).toBe(true);
+    h.set({
+      ...h.current(),
+      stalled: [
+        ...h.current().stalled,
+        quietRow({ id: 't-new', title: 'Rebuild the shard index', quietMs: 40 * MIN }),
+      ],
+    });
+    h.tick();
+
+    expect(h.sent).toHaveLength(2);
+    expect(h.sent[1]?.rows?.map((row) => row.id)).toContain('t-new');
   });
 });
 
@@ -407,25 +439,39 @@ describe('a row queued behind the parallelism cap', () => {
     expect(h.sent).toHaveLength(0);
   });
 
-  it('does not stop the board escalating over a row the lead CAN act on', () => {
+  it('does not stop the board speaking over a row the lead CAN act on', () => {
     const h = harness(board({ beyondCapacity: 17, parallelismCap: { value: 2 } }));
 
     h.tick();
-    h.windows(2);
 
-    // The stalled row still gets louder; the 17 beyond the cap ride along in
-    // the frame without ever being the reason for one.
-    expect(h.sent.length).toBeGreaterThan(1);
-    expect(h.sent[1]?.changed?.escalated).toBe(true);
-    expect(h.sent[1]?.beyondCapacity).toBe(17);
+    // The stalled row is named; the 17 beyond the cap ride along in the frame
+    // without ever being the reason for one.
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.rows?.map((row) => row.id)).toEqual(['t-rollout']);
+    expect(h.sent[0]?.beyondCapacity).toBe(17);
+
+    h.windows(2);
+    expect(h.sent).toHaveLength(1);
   });
 });
 
-describe('the control: a plain stall still gets louder', () => {
-  // The half this change must not break. A row with no wait on it is the
-  // lead's to move, and the owner asked to hear about it again every half
-  // hour it stays put (2026-09-11).
-  it('is re-said every repeat window', () => {
+/**
+ * The control, and the owner decision it used to carry.
+ *
+ * This describe asserted the other half of the wait rules: a row with no wait
+ * on it is the lead's to move, and the owner asked to hear about it again
+ * every half hour it stayed put (2026-09-11). That repeat is RETIRED. A week
+ * of the fleet's transcripts put `workspace.stalled` frames naming exactly the
+ * previous frame's task set at 5.4% of all model spend, and the half-hourly
+ * re-say was where almost all of it came from: the same sentence with a bigger
+ * number on it. The wake now fires on the list changing and on nothing else.
+ *
+ * So the control below is inverted on purpose — it pins the silence, and the
+ * survival half (a list that GAINS a row still speaks at once) is pinned in
+ * `stall-repeat-suppression.test.ts`.
+ */
+describe('the control: a plain stall is said once', () => {
+  it('is not re-said while its list does not change', () => {
     const h = harness();
 
     h.tick();
@@ -433,7 +479,6 @@ describe('the control: a plain stall still gets louder', () => {
 
     h.windows(3);
 
-    expect(h.sent.length).toBeGreaterThan(3);
-    for (const frame of h.sent.slice(1)) expect(frame.changed?.escalated).toBe(true);
+    expect(h.sent).toHaveLength(1);
   });
 });

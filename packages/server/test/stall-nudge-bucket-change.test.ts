@@ -8,6 +8,12 @@
  * the actual failure on 2026-09-04: three rows already remembered under
  * `in-progress` never came back.
  *
+ * The bucket used here is `waiting-unfiled` — the agent's own closing words
+ * saying it waits on a person. The board-declared reading,
+ * `blocked-on-owner-unfiled`, no longer wakes an agent at all: it goes to the
+ * owner's standing review item instead (`stall-frame-news.ts`), so it cannot
+ * carry a case about what the lead is told.
+ *
  * Fixtures are synthetic; the repo is public.
  */
 import { describe, expect, it } from 'bun:test';
@@ -21,6 +27,9 @@ function nudgerHarness(boards: () => StallSnapshot[]) {
   const sent: Array<{ agentId: string; frame: { unfiled?: ReadonlyArray<{ id: string }> } }> = [];
   let clock = now;
   const nudger = new StallNudger({
+    // Off: this file's subject is not the moved-within-the-hour rule
+    // (`stall-frame-news.test.ts`), and its fixtures are younger than an hour.
+    movedWithinMs: 0,
     now: () => clock,
     snapshot: boards,
     canReach: () => true,
@@ -61,7 +70,7 @@ describe('StallNudger — the same row coming back as an unfiled ask', () => {
     const { sent, nudger, advance } = nudgerHarness(() =>
       phase === 'stalled'
         ? [snapshot({ stalled: [{ ...row, bucket: 'in-progress' }] })]
-        : [snapshot({ unfiled: [{ ...row, bucket: 'blocked-on-owner-unfiled' }] })],
+        : [snapshot({ unfiled: [{ ...row, bucket: 'waiting-unfiled' }] })],
     );
 
     // Told once, as a quiet row.
@@ -90,7 +99,7 @@ describe('the stall event name is unchanged', () => {
           {
             id: 't-arm',
             title: 'Land the R12 standard arm',
-            bucket: 'blocked-on-owner-unfiled',
+            bucket: 'waiting-unfiled',
             quietMs: 40 * MIN,
           },
         ],

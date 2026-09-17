@@ -12,6 +12,7 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 ```
 {"op":"insert_under_heading","headingId":"<id>","markdown":"- a point"}
 {"op":"insert_at_end","markdown":"## A heading"}
+{"op":"insert_before_block","blockId":"<id>","markdown":"### A subheading"}
 {"op":"replace_block","blockId":"<id>","markdown":"- better wording"}
 {"op":"delete_block","blockId":"<id>"}
 {"op":"nest_blocks","leadBlockId":"<id>","blockIds":["<id>","<id>"]}
@@ -45,7 +46,13 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 
 ### Grouping
 
-- If a topic under a heading has more than 4 notes, organize notes into subtopics by nesting blocks under another block
+- If a topic under a heading has more than 4 notes, break it into subtopics. There are two ways. Use the one that fits.
+- A subheading, when the talk has moved on to a different part of the topic:
+  - Put the subheading ABOVE the first note of the new part, not at the end.
+  - Use this edit:`{"op":"insert_before_block","blockId":"b8","markdown":"### The new part"}` 
+  - The notes from that one down move under the subheading. No text changes. Each note keeps its words and its id.
+  - You can do this to notes that are already written. This is how you break up a topic that got too long.
+- A subtopic bullet, when the notes are parts of one point:
   - Create a subtopic bullet, or use an existing bullet if an appropriate one exists
   - Then use this edit to nest blocks:`{"op":"nest_blocks","leadBlockId":"b7","blockIds":["b8","b9"]}` 
 - Do not group with `replace_block` and `delete_block`. Group the notes. Do not drop a point.
