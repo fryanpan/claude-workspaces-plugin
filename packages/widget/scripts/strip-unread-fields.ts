@@ -110,6 +110,12 @@ export function readerCutFor(path: string): ReaderCut | undefined {
 /**
  * `source` with the cut's statements and blocks removed. THROWS naming the
  * first one it cannot find, with `where` naming the file.
+ *
+ * A line that appears TWICE throws as well, because `String.replace` with a
+ * string pattern removes only the first — a duplicated statement would strip
+ * less than the cut says it does, ship a reader that still lifts the field,
+ * and say nothing. Throwing turns that into a build failure on the change
+ * that causes it, which is the guarantee the rest of this file rests on.
  */
 export function stripUnreadFields(source: string, cut: ReaderCut, where: string): string {
   const missing = (what: string) =>
@@ -117,9 +123,16 @@ export function stripUnreadFields(source: string, cut: ReaderCut, where: string)
       `widget-unread-fields: ${where} no longer contains ${JSON.stringify(what)}. ` +
         'Fix the cut in packages/widget/scripts/strip-unread-fields.ts to match the reader.',
     );
+  const duplicated = (what: string, count: number) =>
+    new Error(
+      `widget-unread-fields: ${where} contains ${JSON.stringify(what)} ${count} times; ` +
+        'a cut removes one occurrence only. Give the cut a longer, unique line.',
+    );
   let out = source;
   for (const line of cut.lines) {
-    if (!out.includes(line)) throw missing(line);
+    const count = out.split(line).length - 1;
+    if (count === 0) throw missing(line);
+    if (count > 1) throw duplicated(line, count);
     out = out.replace(line, '');
   }
   for (const opening of cut.blocks) {

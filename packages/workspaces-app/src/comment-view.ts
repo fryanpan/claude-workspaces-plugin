@@ -28,7 +28,7 @@
  * in `@claude-workspaces/core`.
  */
 
-import { RECEIPT_SVG, type ReceiptState, receiptTitle } from '@claude-workspaces/core';
+import { type ReceiptState, receiptHtml } from '@claude-workspaces/core';
 
 /** Which stylesheet is going to dress this. */
 export type CommentHeadVariant = 'doc' | 'board';
@@ -53,19 +53,23 @@ const CLASSES: Record<CommentHeadVariant, { row: string; name: string; time: str
 /**
  * The mark itself — one grey tick for sent, two for received.
  *
+ * One renderer, not two. Core's `receiptHtml` writes the whole mark, wrapper
+ * included, because the widget builds its rows as strings and cannot import
+ * this module; this parses what it wrote rather than hand-building the same
+ * span beside it. A wrapper written twice is a class or a data attribute that
+ * drifts on one surface, and the stylesheet keys on both.
+ *
  * `innerHTML` with a module constant, never with anything a person or an
- * agent wrote: `RECEIPT_SVG` is a literal in `@claude-workspaces/core` and no
- * part of it is interpolated.
+ * agent wrote: the only values `receiptHtml` interpolates are the state — a
+ * closed `'sent' | 'received'` union — and the two fixed strings
+ * `receiptTitle` returns for it.
  */
 export function receiptMark(state: ReceiptState): HTMLElement {
   const box = document.createElement('span');
-  box.className = 'cw-receipt';
-  box.dataset.receipt = state;
-  // A title rather than visible words: the ticks are a glance, and a caption
-  // beside every comment you wrote is four words of furniture per row.
-  box.title = receiptTitle(state);
-  box.innerHTML = RECEIPT_SVG;
-  return box;
+  box.innerHTML = receiptHtml(state);
+  // Non-null: `receiptHtml` always returns one element, and its own unit test
+  // in `packages/core` is what holds that.
+  return box.firstElementChild as HTMLElement;
 }
 
 /**

@@ -116,8 +116,13 @@ describe('minifyCss', () => {
       const bare = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '');
       const decls = (s: string) => (bare(s).match(/[a-z-]+\s*:\s*[^;{}]+/g) ?? []).length;
       expect(decls(minifyCss(rawCss))).toBe(decls(rawCss as string));
-      // CONTROL: the counter still sees a declaration go missing.
-      expect(decls(rawCss.replace('display:', 'xx'))).toBeLessThan(decls(rawCss as string));
+      // CONTROL: the counter still sees a declaration go missing. The mutation
+      // lands on the comment-STRIPPED text, so it cannot fall inside a comment
+      // and be stripped away — which would leave the count unchanged and fail
+      // this control on a prose edit, the failure this case exists to remove.
+      expect(decls(bare(rawCss as string).replace('display:', 'xx'))).toBeLessThan(
+        decls(rawCss as string),
+      );
     });
 
     it('gets meaningfully smaller', () => {

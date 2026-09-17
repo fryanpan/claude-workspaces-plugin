@@ -375,10 +375,15 @@ export const widgetStyles = `
    markup for all three), so a reader who learns the mark on the board reads
    it unchanged on a page the widget is a guest on.
 
+   #848b94 is what the app's rule PAINTS, not what it declares: --fg-muted
+   (#6e7781) at opacity 0.85, over the widget's own white chrome. A guest
+   bundle cannot read that token, so hardcoding the painted value is the only
+   way the sentence above stays true.
+
    Both ticks are always in the box and the second is revealed by opacity
    rather than inserted, so the second tick arriving never nudges the clock
    beside it. Grey in both states: a delivery is not an event worth colour. */
-.cw-receipt { display: inline-flex; align-items: center; flex: 0 0 auto; width: 15px; height: 11px; margin-left: 4px; color: #afb8c1; }
+.cw-receipt { display: inline-flex; align-items: center; flex: 0 0 auto; width: 15px; height: 11px; margin-left: 4px; color: #848b94; }
 .cw-receipt svg { display: block; }
 .cw-receipt .cw-tick-back { opacity: 0; transition: opacity 0.22s ease; }
 .cw-receipt[data-receipt="received"] .cw-tick-back { opacity: 1; }

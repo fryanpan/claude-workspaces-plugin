@@ -152,45 +152,37 @@ describe('the board discussion stream', () => {
 });
 
 /**
- * The one duplication the repo actually has, and the test that holds it.
+ * One renderer of the mark, and the test that holds the delegation.
  *
- * The mark is built twice: `receiptMark` puts an element together for the
- * app's surfaces, and core's `receiptHtml` writes the same thing as markup
- * for a surface that builds its rows as strings — which is the widget, a
- * guest bundle under a gzip ceiling that cannot import the app's renderer.
- * Two builders of one mark are free to drift, and a reader who learned the
- * ticks on the board would then meet a different thing on a mock.
- *
- * So this compares what each produces, element for element, rather than
- * either against a literal: a change to one that the other does not get
- * fails here.
+ * The widget builds its rows as strings and cannot import `comment-view.ts`
+ * (a guest bundle under a gzip ceiling), so core's `receiptHtml` writes the
+ * whole mark as markup and the widget interpolates it. `receiptMark` does not
+ * build a second one: it parses what `receiptHtml` wrote. So this guards a
+ * DELEGATION, not two implementations — it fails if somebody hand-builds the
+ * wrapper in the app again, and it can say nothing about a change made inside
+ * `receiptHtml`, which both surfaces get either way. `receiptHtml`'s own
+ * output is asserted in `packages/core/src/comment-receipt.test.ts`.
  */
-describe('the element the app builds and the markup the widget builds', () => {
-  const parsed = (html: string): HTMLElement => {
-    const box = document.createElement('div');
+describe('the element the app hands its surfaces', () => {
+  /**
+   * Both sides go through the DOM before they are compared, because a
+   * serializer writes `<path/>` back as `<path></path>` — comparing an element
+   * against raw source text fails on that alone, which says nothing about
+   * either renderer.
+   */
+  const viaDom = (html: string): string => {
+    const box = document.createElement('span');
     box.innerHTML = html;
-    return box.firstElementChild as HTMLElement;
+    return (box.firstElementChild as HTMLElement).outerHTML;
   };
-  const shape = (el: HTMLElement) => ({
-    tag: el.tagName,
-    className: el.className,
-    receipt: el.dataset.receipt,
-    title: el.title,
-    // The glyph itself: the tag, the class each path carries, and the line it
-    // draws. A tick moved or a class renamed on one side shows up here.
-    paths: Array.from(el.querySelectorAll('path')).map((p) => [
-      p.getAttribute('class'),
-      p.getAttribute('d'),
-    ]),
-  });
 
-  it('agree for every state there is', () => {
+  it('is exactly what core wrote, for every state there is', () => {
     for (const state of ['sent', 'received'] as ReceiptState[]) {
-      expect(shape(receiptMark(state)), state).toEqual(shape(parsed(receiptHtml(state))));
+      expect(receiptMark(state).outerHTML, state).toBe(viaDom(receiptHtml(state)));
     }
   });
 
   it('CONTROL: the comparison separates the two states', () => {
-    expect(shape(receiptMark('sent'))).not.toEqual(shape(parsed(receiptHtml('received'))));
+    expect(receiptMark('sent').outerHTML).not.toBe(viaDom(receiptHtml('received')));
   });
 });
