@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { type ChannelNotification, createChannelMessages } from '../src/channel-messages.ts';
-import { FIXED_ISO, FIXED_MS, SELF, harness, only } from './channel-harness.ts';
+import { FIXED_ISO, FIXED_MS, SELF, type Sent, harness, only } from './channel-harness.ts';
 
 describe('a doc-shaped frame becomes one readable line', () => {
   it('renders a comment with its author, its text and its anchor', async () => {
