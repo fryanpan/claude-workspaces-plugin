@@ -67,8 +67,9 @@ const CLASSES: Record<CommentHeadVariant, { row: string; name: string; time: str
 export function receiptMark(state: ReceiptState): HTMLElement {
   const box = document.createElement('span');
   box.innerHTML = receiptHtml(state);
-  // Non-null: `receiptHtml` always returns one element, and its own unit test
-  // in `packages/core` is what holds that.
+  // Non-null: `receiptHtml` returns exactly one root element, asserted by
+  // parsing its output in `packages/core/src/comment-receipt.test.ts` — which
+  // takes a DOM for that one case, because the cast below is what needs it.
   return box.firstElementChild as HTMLElement;
 }
 
