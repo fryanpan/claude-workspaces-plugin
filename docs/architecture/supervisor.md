@@ -181,10 +181,10 @@ Two neighbouring mechanisms are often confused with this one and are not it:
 
 ## Worked example: 16 September 2026
 
-Two outages the same day, about ten minutes each. The first is one request
-holding the event loop. The second opens the same way and then diverges into
-the watchdog killing boots — and that second half is the one this page exists
-for.
+Two outages the same day, about ten minutes each. They are split here by which
+fault DOMINATED, not by which faults were present: the first is mostly one
+request holding the event loop, the second mostly the watchdog killing boots.
+Both appear in both, and the second is the one this page exists for.
 
 ### Episode one, from 14:40:52Z — a restart of a server that was alive
 
@@ -211,6 +211,15 @@ machine was unreachable for seven minutes.
 The 109.9s boot in the table above is from this storm, at 14:47:27Z. It
 survived **only because the limiter had already spent its three restarts for
 the hour.**
+
+**Episode one hit the unbound pattern too**, which no reconstruction of the day
+noticed until the error log was read again: the same log carries `not listening
+(ECONNREFUSED)` at 14:42:30 (1/2), and then at 14:48:14 (1/2) and 14:48:43
+(2/2) — a pair that reached the restart threshold, while one of this storm's
+boots was still hydrating. So the blocked loop and the killed boot are not one
+episode each. The first-bind grace is a fix for both halves of the day, which
+is a stronger case for it than a page that told the story as one fault per
+outage would make.
 
 ### Episode two, from 23:12:50Z — the watchdog killing boots
 
