@@ -110,15 +110,17 @@ function nestedListOf(lead: Y.XmlElement, author: string): Y.XmlElement {
  * paragraph into our list, a sibling list was gathered from before it was
  * judged, and the judgement itself read only a list's DIRECT children so a
  * person's bullet nested one level down was carried along. Each was found on
- * its own. This exists so a fourth route has nothing new to get wrong: both
- * places that decide what may move ask this, and it descends.
+ * its own. This exists so a fourth route has nothing new to get wrong: every
+ * place that decides what may move asks this, and it descends. `prose-split.ts`
+ * is the third — splitting a list in front of a heading carries its tail by
+ * the same clone, so it answers the same question before it does.
  *
  * Only list ITEMS are judged. A list container carries `cwAuthor` just when
  * this agent's own insert built it — one that came back off disk carries
  * nothing, because markdown has nowhere to put the attribute — so a container
  * is never the evidence.
  */
-function everyListItemIsOurs(el: Y.XmlElement, author: string): boolean {
+export function everyListItemIsOurs(el: Y.XmlElement, author: string): boolean {
   for (const kid of el.toArray() as unknown[]) {
     if (!(kid instanceof Y.XmlElement)) continue;
     if (kid.nodeName === 'listItem' && readBlockAuthor(kid) !== author) return false;

@@ -1113,6 +1113,82 @@ with headings"*):
   underneath is narrower and matters more — their line is never rewritten or
   deleted, because an edit naming a block that is not the note-taker's own
   arrives as a suggestion instead.
+- **Open the next heading once a topic has swallowed the meeting** — the
+  remedy nesting cannot be (2026-09-16). Grouping answers "this STRETCH of
+  notes has no structure"; it cannot answer "this HEADING now stands over half
+  an hour", because a topic gathered into four tidy groups is still one entry
+  in the outline for thirty minutes of talk. So there are two bars, and the
+  server counts both: `MAX_FLAT_RUN_BULLETS` on the run, `MAX_TOPIC_NOTES`
+  (twelve — three groups of four) on everything under one heading whatever its
+  depth. Past the second, the per-tick directive stops asking for a group and
+  asks for a heading instead, spelling both shapes at the levels this document
+  writes at: a sub-topic where the room is still on the subject and has
+  reached a new part of it, a new topic where it has moved on. The ask goes
+  only to the heading the room is writing under RIGHT NOW — one aimed at a
+  heading already moved on from can never be carried out, repeats every
+  remaining tick, and produced 51 headings over 70 ticks the first time it was
+  tried. And it carries the speech with it: one `insert_at_end` writes the
+  heading and this tick's points together, so no idea waits a tick for
+  somewhere to go.
+- **And the heading can now be PLACED, which is what repairs a stretch that
+  is already on the page** (2026-09-16). The bullet above stops a wall
+  forming. It does nothing for one that has formed, and that was the state
+  the 16 September meeting was actually in: sixty-five bullets written, and
+  no edit in the vocabulary that could break them up. Every insert landed at
+  an END — `insert_at_end` at the end of the document, `insert_under_heading`
+  at the end of the section it names — so a new heading always arrived
+  BELOW the stretch it was meant to head. That is a gap in the edits, not in
+  the prompt: no wording reaches a position the ops cannot express.
+  `insert_before_block` (`packages/core/src/prose-split.ts`) opens a slot in
+  front of a named note, and because an outline reads a block's topic as the
+  nearest heading ABOVE it, the heading re-parents everything below it by
+  arriving. Nothing moves and nothing is retyped, so every note keeps its
+  words, its id and its comment threads. Measured on a meeting driven to
+  sixty flat bullets under one heading and then given twenty-four quiet
+  ticks: the longest run falls from 60 to 3 and the fullest heading from 60
+  to 10, with all 84 notes still present and no heading written twice. The
+  control is the same wall, the same directive and the same obedient
+  note-taker with only the old ops: the run comes down to 9, because nesting
+  can fold a wall — and all sixty notes are still under the one heading,
+  which is the defect in Bryan's words. A test that watched only the run
+  would have called that fixed, which is why the topic size is a bar of its
+  own.
+- **The three remedies compose; they used to exclude each other.** A topic
+  past `MAX_TOPIC_NOTES` was asked for the heading and explicitly told NOT to
+  nest, on the reasoning that grouping is what a note-taker does instead of
+  moving on. That held only while a heading could only be appended — the ask
+  was then "stop adding here", and grouping what was already written was its
+  opposite. With placement it is a repair rather than a redirection, so the
+  directive now asks for both: break the stretch where the meeting turned,
+  and group what is still flat inside the part left behind. Asked for the
+  split alone, a repaired meeting ended with twelve flat bullets under its
+  live heading and no ask ever firing on them. The shipped instructions
+  (`DEFAULT_NOTES_INSTRUCTIONS`) name the subheading remedy too, and say in
+  as many words that it may be used on notes already written — which is the
+  half a note-taker has no way to infer from an op list.
+- **What an hour of real meeting shows, and what it does not.** Two AMI
+  meetings replayed end to end (ES2002 and ES2003, four fifteen-minute
+  windows each, 149 and 124 ticks) with an obedient note-taker come out at a
+  longest run of 3 and 4 and a fullest heading of 10, against 12 for the old
+  ops. The margin is small BECAUSE the scan fix above stops the wall forming
+  when every ask is carried out, and a live replay never builds one. Missing
+  asks is what a real model does, so the same replay was run catching one ask
+  in four (fullest heading 12 new, 15 old) and one in eight (18 new, 19 old).
+  The placement op's value is concentrated where the notes have already gone
+  wrong, which is exactly the case the eval's fifteen-minute windows cannot
+  reach.
+- **Two bugs kept all of this from firing at all**, and they are why a real
+  meeting on 16 September left sixty-five flat bullets under one heading with
+  the bar at four. The scan was scoped to the meeting's section by slicing the
+  outline AFTER the section heading — so a meeting's first topic arrived with
+  no heading in hand and was reported as a run under no heading, and the
+  note-taker was told to open the heading it was already writing under. And
+  the slice ended at the next heading of the section's own level, which is the
+  meeting's own second topic, so everything said after the room first moved on
+  was outside the scan entirely. The scope now starts AT the section heading
+  and walks past every heading the note-taker itself wrote, stopping at one it
+  did not — which keeps what the slice was for: a long list in the document's
+  own section is still not this meeting's wall.
 - **Write the smaller sure point, not a hedged bigger one.** Where the speech
   will not support the claim, the note says the part it does support. This
   REPLACED "write the note and end it `(unconfirmed)`" (2026-09-15). That

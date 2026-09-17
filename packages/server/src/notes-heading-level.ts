@@ -73,6 +73,12 @@ export function notesTopicHashes(outline: readonly prose.OutlineEntry[]): string
   return '#'.repeat(notesTopicLevel(outline));
 }
 
+/** `notesSubTopicLevel` as that same prefix — what a heading for one PART of
+ *  a topic is written with, one level below the topic's own. */
+export function notesSubTopicHashes(outline: readonly prose.OutlineEntry[]): string {
+  return '#'.repeat(notesSubTopicLevel(outline));
+}
+
 /**
  * How a meeting is told to start a topic, at the level THIS doc writes its
  * sections at.

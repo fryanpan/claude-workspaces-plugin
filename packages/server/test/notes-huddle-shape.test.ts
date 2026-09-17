@@ -78,12 +78,19 @@ function huddleComposer(): (input: NotesComposeInput) => prose.BlockEdit[] {
     }
     if (lines.length === 0) return [];
     const topicHeadings = input.outline.filter((e) => e.kind === 'heading' && (e.level ?? 2) > 2);
-    const asked = homelessRun(input.outline, {
-      author: NOTES_AUTHOR_ID,
-      notesHeadingId: input.notesHeadingId,
-    });
+    // THE CUE IS THE SERVER ASKING FOR STRUCTURE, whichever shape it asks
+    // for. It used to be `homelessRun` alone, which was a reading of a bug:
+    // `sectionOf` sliced the meeting's own section heading out of its own
+    // scope, so a run under it came back as a run under NO heading. With that
+    // fixed the same wall arrives as a regroup target, and this model answers
+    // a full topic with a heading — one of the three remedies — exactly as it
+    // did before.
+    const regroupOpts = { author: NOTES_AUTHOR_ID, notesHeadingId: input.notesHeadingId };
+    const asked =
+      homelessRun(input.outline, regroupOpts) !== null ||
+      regroupTargets(input.outline, regroupOpts).length > 0;
     const next = spoke ?? subject;
-    if (next !== undefined && (asked !== null || topicHeadings.length > 0) && next !== subject) {
+    if (next !== undefined && (asked || topicHeadings.length > 0) && next !== subject) {
       subject = next;
       return addNotes(input, `### ${next}\n\n${lines.join('\n\n')}`);
     }

@@ -81,6 +81,12 @@ const ADDRESS_ERRORS: ReadonlySet<string> = new Set(['unknown-block', 'not-a-hea
 const CARRIES_WORDS: ReadonlySet<prose.BlockEditOp> = new Set([
   'insert_under_heading',
   'insert_at_end',
+  // A placement whose anchor has gone still carries the words it was going to
+  // write. Only the ADDRESS errors route here, so a placement REFUSED
+  // (`not-yours`, `nested-item`) is left alone deliberately: re-addressing it
+  // would write the subheading at the section end, which is the placement the
+  // op exists to escape.
+  'insert_before_block',
   'replace_block',
 ]);
 
