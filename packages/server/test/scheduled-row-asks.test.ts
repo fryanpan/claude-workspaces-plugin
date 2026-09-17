@@ -8,9 +8,11 @@
  * Raised from another board, where a comment on a scheduled row went unread
  * while the rule kept closing green.
  *
- * The two questions are now answered separately: `bucket` still says whether
- * the row is work anyone picks up, and `ownerAsk` says whether a person is
- * owed an answer and can see the question. So every case below comes in a
+ * The two questions are now answered separately, in two modules: `bucket`
+ * still says whether the row is work anyone picks up, and `owner-ask.ts` says
+ * whether a person is owed an answer and can see the question. The first two
+ * blocks below drive that module on its own; the rest drive the classifier
+ * and the gate over it. So every case below comes in a
  * pair — the rule row, and the same row without the rule — because the claim
  * being tested is that a rule row's ask reads EXACTLY like any other row's.
  *
@@ -24,6 +26,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { type ReviewItemRow, type TaskRow, classifyOpenTasks } from '../src/keep-moving.ts';
+import { indexFiledAsks, ownerAskOf } from '../src/owner-ask.ts';
 import { OWNER_UNFILED_BUCKET, evaluateStalls } from '../src/stall-gate.ts';
 import { WAITING_UNFILED_BUCKET, noteClockOf, noteClocks } from '../src/waiting-unfiled.ts';
 
@@ -57,6 +60,63 @@ function classify(tasks: TaskRow[], reviewItems: ReviewItemRow[] = []) {
   const out = classifyOpenTasks(tasks, [], reviewItems, now, STALL, bands);
   return new Map(out.map((r) => [r.id, r]));
 }
+
+describe('ownerAskOf — the reading, driven on its own', () => {
+  it('a pending item is a filed ask whatever else is true of the task', () => {
+    expect(ownerAskOf({ hasPendingAsk: true, boardSaysOwnerWaits: false, inBacklog: true })).toBe(
+      'filed',
+    );
+  });
+
+  it('the board saying a person waits, with nothing filed, is an unfiled ask', () => {
+    expect(ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: false })).toBe(
+      'unfiled',
+    );
+  });
+
+  it('the backlog carries no ask, because there is none anyone could file', () => {
+    expect(
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: true, inBacklog: true }),
+    ).toBeUndefined();
+  });
+
+  it('a task nobody is waiting on reads as no ask at all, not as a filed one', () => {
+    expect(
+      ownerAskOf({ hasPendingAsk: false, boardSaysOwnerWaits: false, inBacklog: false }),
+    ).toBeUndefined();
+  });
+});
+
+describe('indexFiledAsks — which task an item was filed for', () => {
+  it('reads a thread-borne item addressed as task:<id> under that id', () => {
+    const asks = indexFiledAsks([{ docId: 'task:t-1', askedAt: 5 }]);
+    expect(asks.has('t-1')).toBe(true);
+    expect(asks.newestAt('t-1')).toBe(5);
+    // Control: the raw docId is not itself a task id.
+    expect(asks.has('task:t-1')).toBe(false);
+  });
+
+  it('gives the addresses newest first, and none for a task with no items', () => {
+    const asks = indexFiledAsks([
+      { taskId: 't-1', askedAt: 10, address: { kind: 'task', taskId: 't-1', reviewItemId: 'old' } },
+      { taskId: 't-1', askedAt: 30, address: { kind: 'task', taskId: 't-1', reviewItemId: 'new' } },
+      { taskId: 't-2', askedAt: 20 },
+    ]);
+    expect(asks.newestAt('t-1')).toBe(30);
+    expect(asks.addressesFor('t-1')?.map((a) => (a.kind === 'task' ? a.reviewItemId : ''))).toEqual(
+      ['new', 'old'],
+    );
+    // Filed, but with no address to name — not the same as not filed.
+    expect(asks.has('t-2')).toBe(true);
+    expect(asks.addressesFor('t-2')).toBeUndefined();
+    expect(asks.has('t-3')).toBe(false);
+  });
+
+  it('drops an item that names no task at all', () => {
+    const asks = indexFiledAsks([{ docId: 'doc-7', askedAt: 5 }]);
+    expect(asks.has('doc-7')).toBe(false);
+  });
+});
 
 describe('a rule row is still never dispatched and never stalls as work', () => {
   it('buckets an agent-owned rule row as scheduled-rule however long it has sat', () => {
