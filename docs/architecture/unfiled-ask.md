@@ -230,8 +230,34 @@ notes is the sum of two files, and neither alone:
 
 ```bash
 grep -c '"event":"task.noted"' <data>/workspaces/<ws>.events.jsonl   # placed
-grep -c '"kind":"turn"'        <data>/workspaces/<ws>.agent-notes.jsonl  # unplaced
+grep '"kind":"turn"' <data>/workspaces/<ws>.agent-notes.jsonl | grep -vc '"withheld":true'  # unplaced
 ```
+
+The second count leaves out a declaration. A session launched with
+`CW_TURN_NOTES=withheld` still runs the Stop hook, but the hook posts only
+`{agent, withheld: true, at}` — no words, never the closing message — and the
+log keeps it as a `kind: "turn"` line with empty text and `"withheld": true`.
+The server refuses a declaration that carries text. The per-agent read below
+never returns one.
+
+A person reads the unplaced notes on the board's Home, under Recent activity →
+**Not on a task**, one group per agent. `GET /workspaces/<ws>/agent-notes`
+(trusted-local; a share visitor gets 403) answers from this log for the last
+three hours. `agent-note-placement.ts` names the state of each group from its
+newest line, and that line never says "ambiguous" to a reader:
+
+| State | Why | What the group shows |
+| --- | --- | --- |
+| `undecidable` | the agent holds several in-progress tasks (`ambiguous: true`) | its notes |
+| `unattachable` | the agent holds none (`ambiguous: false`) | its notes |
+| `withheld` | the session declared it does not post | a header, no notes |
+| `attached` | a NEWER note landed on a task (read from the in-process ring) | older unplaced notes, and a header that opens the task |
+
+After a restart the ring is empty, so a group reverts to the state of its
+newest log line until the agent's next placed note. A new unplaced line
+pushes a wordless `agent.noted` frame to open board pages only
+(`skipAgentStreams`), and the page reads the route again. The frame is not a
+store event, so `events.jsonl` and its consumers do not change.
 
 `GET /workspaces/<ws>/agents/<name>/notes` merges the two, so the agent's own
 recent-activity read is one call and survives a restart. `lastTurnAt` — the

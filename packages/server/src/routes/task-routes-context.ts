@@ -56,6 +56,10 @@ export interface TaskRoutesContext {
   /** The durable, per-board record of notes no row would take. The ring is
    *  in-process and bounded; this is what survives a restart. */
   agentNoteLog: AgentNoteLog;
+  /** Tells the board's open pages that a note no task took has just been
+   *  logged, so Home re-reads it. Pages only, never an agent's stream, and
+   *  the frame carries no words. Absent in a harness that wires no bus. */
+  announceAgentNote?: (workspaceId: string) => void;
   /** The unfiled-ask counters. The hook route is the only writer of the live
    *  rows; the chat-audit routes read them and take the daily audit's. */
   chatAudit: ChatAudit;

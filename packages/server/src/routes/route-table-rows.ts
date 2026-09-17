@@ -322,6 +322,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/dispatches/:taskId', 'DELETE'],
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/notes', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/agents/:agent/notes', 'GET POST'],
+    ['trusted-local', '/workspaces/:ws/agent-notes', 'GET'],
   ]),
   ...family('routes/chat-audit-routes.ts', [
     ['trusted-local', '/workspaces/:ws/chat-audit', 'GET POST'],

@@ -1,4 +1,12 @@
 import {
+  AGENT_NOTES_PER_AGENT,
+  AGENT_NOTES_WINDOW_MS,
+  WithheldDeclarations,
+  agentNotesByAgent,
+  parseWithheld,
+  placementOfTarget,
+} from '../agent-note-placement.ts';
+import {
   AGENT_NOTE_RING_CAP,
   type AgentNoteInput,
   parseAgentNote,
@@ -26,6 +34,11 @@ import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.
  * yesterday's filing does not excuse today's ask.
  */
 const FIRST_TURN_WINDOW_MS = 2 * 60 * 60_000;
+
+/** Which withheld declarations were written lately, so a session declaring
+ *  every turn writes one line an hour. Keyed by board, so one process
+ *  serving several test servers cannot cross them. */
+const declarations = new WithheldDeclarations();
 
 /**
  * Judge a turn note as it arrives, and record the verdict.
@@ -92,6 +105,32 @@ export async function handleDispatchAndNoteRoutes(
     proposeAllowRule,
   } = ctx;
   const { req, scope, visitor, authorFor } = rq;
+  // --- REST: every agent's notes that no task took, on this board ---
+  // The board's one read of the unplaced-note log, grouped per agent and
+  // named by state (agent-note-placement.ts) — the Home pane's "Not on a
+  // task" list. Per agent because two of its three states have no task to
+  // hang on. Refused to share visitors like the per-agent read below: a
+  // session's own words, not the board's rows.
+  // Not `restIs`: its false branch would narrow `scope` for every block below.
+  if (scope !== undefined && scope.rest === 'agent-notes') {
+    if (visitor) return j(403, { error: 'not available to share visitors' });
+    if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
+    const board = scope.workspaceId;
+    const since = Date.now() - AGENT_NOTES_WINDOW_MS;
+    const read = agentNoteLog.readBoard(board, since, AGENT_NOTES_PER_AGENT);
+    const agents = agentNotesByAgent(
+      read.lines,
+      (agent) => {
+        const placed = agentNotes
+          .list(agent)
+          .find((n) => n.workspaceId === board && n.taskId !== undefined);
+        return placed?.taskId !== undefined ? { at: placed.at, taskId: placed.taskId } : undefined;
+      },
+      AGENT_NOTES_PER_AGENT,
+      read.skipped,
+    );
+    return j(200, { workspaceId: board, since, agents });
+  }
   // --- REST: builder dispatches ---
   // The lead's statement that a builder is working a task in a private
   // worktree, so the stall loop can read worktree churn as the row
@@ -300,6 +339,35 @@ export async function handleDispatchAndNoteRoutes(
     }
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
     const raw = await safeJson(req);
+    // A session that DECLARED it does not post its turns (CW_TURN_NOTES=
+    // withheld) sends this instead of its words: one line in the board's log
+    // with no text, so a blank Activity tab reads as a choice the board was
+    // told about rather than as a fault. No task, no ring, no judgement —
+    // there is nothing to judge.
+    if (
+      raw !== null &&
+      typeof raw === 'object' &&
+      (raw as { withheld?: unknown }).withheld === true
+    ) {
+      const decl = parseWithheld(raw as Record<string, unknown>, Date.now());
+      if (!decl.ok) return j(400, { error: decl.error, message: decl.message });
+      // A repeat inside the hour is already on record: no line, no push.
+      if (!declarations.shouldWrite(boardId, agent, Date.now())) {
+        return j(202, { ok: true, workspaceId: boardId, placement: 'withheld', repeat: true });
+      }
+      const logged = agentNoteLog.append({
+        agent,
+        kind: 'turn',
+        text: '',
+        at: decl.at,
+        workspaceId: boardId,
+        ambiguous: false,
+        withheld: true,
+        ...(decl.sessionId !== undefined ? { sessionId: decl.sessionId } : {}),
+      });
+      if (logged) ctx.announceAgentNote?.(boardId);
+      return j(202, { ok: true, workspaceId: boardId, placement: 'withheld', logged });
+    }
     // The URL names the agent; a body `agent` is overwritten rather than
     // compared — the hook route accepted the name in the body before the
     // address carried it, and a stale hook must not be refused for
@@ -374,6 +442,7 @@ export async function handleDispatchAndNoteRoutes(
         ambiguous: target.ambiguous,
         ...(note.sessionId !== undefined ? { sessionId: note.sessionId } : {}),
       });
+      if (logged) ctx.announceAgentNote?.(boardId);
     }
     agentNotes.record({
       ...note,
@@ -386,6 +455,7 @@ export async function handleDispatchAndNoteRoutes(
       workspaceId: boardId,
       ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
+      placement: placementOfTarget(target),
       ...(logged !== undefined ? { logged } : {}),
       ...(nudge ? { unfiledAsk: nudge } : {}),
     });

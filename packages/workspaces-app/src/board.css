@@ -2686,6 +2686,34 @@ html:has(.board-walk-cred-form) {
   opacity: 0.75;
   margin-top: 1px;
 }
+/* ── Not on a task (2026-09-17) ──
+   End-of-turn notes no task took, one group per agent, under the task
+   groups. Same row anatomy, so it reads as more of the same pane; the one
+   difference a reader needs is WHY these sit here, which is the muted state
+   line after the agent's name. No colour for the state: it is an explanation,
+   not an alarm. A header with no task to open does not pretend to be a
+   control — no pointer, no hover wash. */
+.acti-agents {
+  margin-top: 6px;
+}
+.acti-subhead {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fg-muted);
+}
+.acti-state {
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+.acti-agent-head-static {
+  cursor: default;
+}
+.acti-agent-head-static:hover {
+  background: none;
+}
 /* ── Commenting on a note like a doc (2026-08-29) ──
    Select (or tap) words of a note line or the title → the walkthrough's
    `.comment-pill` appears beside them → the REAL thread card (threads.ts
