@@ -14275,7 +14275,7 @@ function stalledLine(p) {
   const parts = [];
   const rows = p.rows ?? [];
   const count = p.stalledCount ?? rows.length;
-  const beyond = p.beyondCapacity !== undefined && p.beyondCapacity > 0 ? `; ${p.beyondCapacity} beyond the parallelism cap${capClause(p.parallelismCap, p.ts, "stall")} and not judged` : "";
+  const beyond = p.beyondCapacity !== undefined && p.beyondCapacity > 0 ? `; ${p.beyondCapacity} beyond the parallelism cap${capClause(p.parallelismCap, p.ts, "stall")} and not judged for stalling — still checked for an unfiled ask` : "";
   const denominator = p.consideredCount === undefined ? "" : ` (of ${p.consideredCount} open task(s) checked${beyond})`;
   if (count > 0) {
     const subject = count === 1 ? "1 task has" : `${count} tasks have`;
@@ -20095,7 +20095,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.242";
+var PLUGIN_VERSION = "0.1.243";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
