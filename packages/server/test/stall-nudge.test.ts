@@ -103,9 +103,13 @@ function harness(
   return { world, sent, toFilers, reported, nudger };
 }
 
-/** One review item the quality gate has held past the window. */
+/** One review item the quality gate has held past the window, filed on a
+ *  TICKET — so it carries `taskId` beside `id`, exactly as `overdueHeldItems`
+ *  builds it. The field is what tells the frame's anchor which id space this
+ *  row is in; a hold filed on a doc thread carries `docId` there instead. */
 const HELD = {
   id: 't-7',
+  taskId: 't-7',
   title: 'Rebuild the index nightly',
   reviewItemId: 'ri-1',
   headline: 'ok?',

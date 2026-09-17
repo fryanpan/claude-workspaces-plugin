@@ -275,10 +275,24 @@ export interface ReviewItemHeldFrame {
 export interface StallNudgeFrame {
   event: typeof STALL_EVENT;
   workspaceId: string;
-  /** The row to start with — the quietest stalled one, or the top unfiled row
-   *  when nothing is stalled. A wake with no subject costs a turn and says
-   *  nothing. */
+  /**
+   * The row to start with, when that row is a TASK — the quietest stalled
+   * one, or the top unfiled row when nothing is stalled. A wake with no
+   * subject costs a turn and says nothing.
+   *
+   * Only ever a task id. Two of the lists this anchor is picked from name a
+   * DOC instead: `unanswered` always does (`UnansweredThreadRow.id` is the
+   * doc's), and a held review item filed on a doc thread does too
+   * (`HeldItemRow.id` falls back to `docId` when no ticket holds the item).
+   * Those go in `docId` below, because a field named `taskId` that no task
+   * lookup resolves is read as a broken wake — which is what two peers
+   * reported it as.
+   */
   taskId?: string;
+  /** The anchor when it names a DOC rather than a task — see `taskId`. The
+   *  two are mutually exclusive; the frame carries whichever the top finding
+   *  actually is. */
+  docId?: string;
   /** That row's name. Sent because the id alone makes the reader call
    *  `get_task` before they can tell whether the wake was worth the turn. */
   title?: string;
@@ -551,6 +565,60 @@ interface ToldRow {
    *  list, wake or no wake, because the question this answers is how long the
    *  row has been off the list, not how long since anyone was told. */
   seenAt: number;
+}
+
+/**
+ * The row the wake opens with, and WHICH KIND OF ID that is.
+ *
+ * The order is the reader's: work that stopped, then a wait nobody filed,
+ * then the asks sitting off somebody's queue, then a question on a doc, then
+ * the gate and the check-in. That order is unchanged — what is new is that
+ * each branch says what its id addresses, because two of these lists name a
+ * surface that is not a task and the frame used to put all of them in a field
+ * called `taskId`.
+ *
+ * A held item is the only list that can be either: one filed on a ticket
+ * carries `taskId`, one filed on a doc thread carries `docId`, and
+ * `HeldItemRow.id` is whichever of those exists. So the kind is read off the
+ * row rather than off the list it came from.
+ *
+ * A row carrying NEITHER yields no anchor and the next list is asked instead.
+ * `overdueHeldItems` drops such a row before it can get here — `id` is
+ * `taskId ?? docId` and an item with neither is unaddressable — so this is
+ * not a state the server produces. It is written as a fall-through rather
+ * than as a default to a kind, because defaulting to a kind is the whole
+ * defect this function exists to end: an id whose space nobody checked went
+ * out in a field named `taskId` and was read as a broken wake.
+ */
+type StallAnchor = { kind: 'task' | 'doc'; id: string; title: string };
+
+function stallAnchor(
+  board: StallSnapshot,
+  held: readonly HeldItemRow[],
+  askedBack: readonly AskedBackRow[],
+  unanswered: readonly UnansweredThreadRow[],
+  ungatedUi: readonly UngatedUiRow[],
+  checkIn: readonly StalledRow[],
+): StallAnchor | undefined {
+  const task = (row?: { id: string; title: string }): StallAnchor | undefined =>
+    row ? { kind: 'task', id: row.id, title: row.title } : undefined;
+  const heldAnchor = (row?: HeldItemRow): StallAnchor | undefined => {
+    if (!row) return undefined;
+    if (row.taskId !== undefined) return { kind: 'task', id: row.taskId, title: row.title };
+    if (row.docId !== undefined) return { kind: 'doc', id: row.docId, title: row.title };
+    return undefined;
+  };
+  const docAnchor = (row?: UnansweredThreadRow): StallAnchor | undefined =>
+    row ? { kind: 'doc', id: row.docId, title: row.title } : undefined;
+  return (
+    task(board.stalled[0]) ??
+    task(board.unfiled[0]) ??
+    heldAnchor(held[0]) ??
+    task(askedBack[0]) ??
+    docAnchor(unanswered[0]) ??
+    task(ungatedUi[0]) ??
+    task(checkIn[0])
+  );
 }
 
 /** The distinct reasons a pass could not evaluate rows, sorted so the same
@@ -915,18 +983,16 @@ export class StallNudger {
     // has ANYBODY on it is the escalation's question, and it answers it from
     // the store's liveness reads rather than from a failed delivery here.
     if (to === undefined) return;
-    const top =
-      board.stalled[0] ??
-      board.unfiled[0] ??
-      held[0] ??
-      askedBack[0] ??
-      unanswered[0] ??
-      ungatedUi[0] ??
-      checkIn[0];
+    const anchor = stallAnchor(board, held, askedBack, unanswered, ungatedUi, checkIn);
     const delivered = this.emit(key, to.agentId, {
       event: STALL_EVENT,
       workspaceId: key,
-      ...(top ? { taskId: top.id, title: top.title } : {}),
+      ...(anchor
+        ? {
+            ...(anchor.kind === 'task' ? { taskId: anchor.id } : { docId: anchor.id }),
+            title: anchor.title,
+          }
+        : {}),
       stalledCount: board.stalled.length,
       consideredCount: board.considered,
       ...(board.stalled.length > 0 ? { rows: board.stalled } : {}),

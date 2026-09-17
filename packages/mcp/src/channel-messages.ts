@@ -122,6 +122,11 @@ export interface BoardEventPayload {
    *  there is nothing to acknowledge. */
   queueId?: string;
   taskId?: string;
+  /** `workspace.stalled`: the anchor when it names a DOC rather than a task —
+   *  a question on a doc thread, or a review item filed on one. Carried into
+   *  the channel meta as `doc_id`, because a doc id delivered as `task_id`
+   *  resolves to nothing and reads as a broken wake. See nudge-line.ts. */
+  docId?: string;
   taskIds?: string[];
   task?: { title?: string };
   actor?: { id?: string; name?: string };
@@ -340,6 +345,9 @@ async function emitBoardChannelMessage(
       meta: {
         workspace_id: p.workspaceId ?? 'unknown',
         ...(p.taskId ? { task_id: p.taskId } : {}),
+        // Under its own name, never `task_id`: the two id spaces are not
+        // interchangeable and a reader that fed one to the other got a miss.
+        ...(p.docId ? { doc_id: p.docId } : {}),
         event,
         ...(p.actor?.name ? { author: p.actor.name } : {}),
       },
