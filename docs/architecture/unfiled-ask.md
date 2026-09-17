@@ -184,6 +184,40 @@ is known to be lower than it is.
 its note to the Activity tab (that message is the one a reader most wants) and
 is never nudged again.
 
+## Where the note itself goes, and what a many-row board loses
+
+The judgement runs on every turn note the route accepts, before the note is
+matched to a row — so an agent holding twenty-five in-progress rows is judged
+exactly like one holding a single row, and the counter moves either way. What
+a many-row board loses is the NOTE. `resolveNoteTarget` answers with a row
+only when the agent holds exactly one in-progress claim on the board, because
+a judged sample put the old newest-claim guess wrong about three times in
+four; a note it will not place lands on no task, emits no `task.noted`, and
+appears nowhere in `events.jsonl`.
+
+That was measured on this fleet over 14-17 September 2026: 335 turn notes, all
+from boards where one agent held one or two rows. One board logged 494 turn
+notes up to 2026-09-02 and none in the fifteen days after, while 1,793 status
+notes kept arriving — `post_status` names its row and takes the explicit
+address, which the Stop hook has no way to do.
+
+The note now also goes to `agent-note-log.ts`, which appends it to
+`<dataDir>/workspaces/<ws>.agent-notes.jsonl`. It is still not placed on a row:
+the no-guess rule is unchanged, and the log is a record that the note existed
+rather than a decision about where it belongs. So a count of a board's turn
+notes is the sum of two files, and neither alone:
+
+```bash
+grep -c '"event":"task.noted"' <data>/workspaces/<ws>.events.jsonl   # placed
+grep -c '"kind":"turn"'        <data>/workspaces/<ws>.agent-notes.jsonl  # unplaced
+```
+
+`GET /workspaces/<ws>/agents/<name>/notes` merges the two, so the agent's own
+recent-activity read is one call and survives a restart. `lastTurnAt` — the
+boundary "filed nothing this turn" is measured from — falls back to the log
+when the in-process ring has nothing, which is what a restarted server used to
+have.
+
 ## The count is about the person, not the board
 
 A live row records the board it was seen on. The window does not filter by it,
