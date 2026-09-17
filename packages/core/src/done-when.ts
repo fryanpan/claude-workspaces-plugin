@@ -61,6 +61,19 @@ export const DONE_WHEN_VERDICTS: readonly DoneWhenVerdict[] = [
 export interface DoneWhenProof {
   text: string;
   url?: string;
+  /**
+   * This proof reports a check the agent was REFUSED permission to run — the
+   * command was denied on this machine, and no rewording of the report makes
+   * it runnable. `text` says what was refused.
+   *
+   * It exists so a refusal is a thing the board can read rather than a
+   * sentence the judge has to infer: an owner line carrying one is never
+   * answered with an instruction to obtain the fact another way
+   * (`done-when-refusal.ts`), and it stands in for the link an `owner` report
+   * otherwise needs, because a refused check has nothing to open by
+   * construction. Never set by the server — only the reporter knows.
+   */
+  refused?: boolean;
 }
 
 /** One line of the list. `id` is server-minted (`d-…`) and stable across
