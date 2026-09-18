@@ -13,8 +13,15 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
  * text of every block on every state change and hands back two decorations
  * per note: one over the `^[…]` run itself (the stylesheet folds it down to
  * a superscript, or hides it where the margin carries the note) and one over
- * the fact the note supports (the underline, dotted when the author said
- * "Unconfirmed").
+ * the fact the note supports.
+ *
+ * The fact decoration SAYS WHERE THE WORDS ARE; it does not say to draw a
+ * line under them. At rest only an "Unconfirmed" note's fact carries one, and
+ * lighting the rest is `footnote-notes.ts`, which adds `cw-fn-fact-on` to the
+ * one note the reader is pointing at — a doc with a note on every sentence
+ * came out with every line underlined when this decoration was the underline.
+ * That is why `data-cw-fn-for` is on the span: it is how the other module
+ * finds this one's fact again after any rebuild.
  *
  * The raw run is REVEALED, not hidden, while the caret sits inside it: a
  * note you cannot see is a note you cannot fix, and the editor is the only

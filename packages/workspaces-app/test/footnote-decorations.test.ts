@@ -68,6 +68,19 @@ describe('a footnote in the editor', () => {
     expect(facts().map((el) => el.classList.contains('cw-fn-fact-unsure'))).toEqual([false, true]);
   });
 
+  /**
+   * The decoration says WHERE the words are; it does not say to draw a line
+   * under them. Lighting one is `footnote-notes.ts`, on the note the reader
+   * is pointing at — the whole reason a doc with a note on every sentence no
+   * longer comes back with every line underlined. So no fact arrives lit, and
+   * `data-cw-fn-for` is how the other module finds this span again.
+   */
+  it('hands over an unlit fact, whichever note it belongs to', () => {
+    mount(DOC);
+    expect(facts().some((el) => el.classList.contains('cw-fn-fact-on'))).toBe(false);
+    expect(notes().some((el) => el.classList.contains('cw-fn-on'))).toBe(false);
+  });
+
   it('leaves the document itself untouched', () => {
     const { ydoc } = mount(DOC);
     expect(prose.serializeFragmentToMarkdown(prose.getProseFragment(ydoc))).toBe(`${DOC}\n`);

@@ -35,6 +35,10 @@ export interface DocMarginOptions {
   /** The `#editor` element — the scroll container the hints measure against. */
   editorMount: HTMLElement;
   chrome: ReviewChrome;
+  /** Passed straight to the footnote notes, whose captions may hold a
+   *  relative link: the same context `createEditor` resolves the doc body's
+   *  relative links against, so both land in the same place. */
+  docLink?: { workspaceId: string; relPath: string; navigate: (url: string) => void };
 }
 
 export interface DocMarginHandle {
@@ -102,6 +106,7 @@ export function mountDocMargin(opts: DocMarginOptions): DocMarginHandle {
     container: editorMount,
     marginVisible: balloonMarginVisible,
     onChange: () => margin.scheduleRelayout(),
+    docLink: opts.docLink,
     scope,
   });
   // Doc-level "N pending suggestions" topbar badge (Accept all / Reject all

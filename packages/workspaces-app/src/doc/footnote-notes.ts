@@ -1,6 +1,9 @@
 import { onPlacementChange } from '../card-placement.ts';
+import { workspaceIdFromPath } from '../doc-path.ts';
+import { resolveDocLink } from '../link-open.ts';
 import type { MountScope } from '../mount-scope.ts';
 import type { NoteCard } from '../recent-note-cards.ts';
+import { noteParts } from './note-links.ts';
 
 /**
  * What a `^[…]` note LOOKS like, once the decoration plugin has said where
@@ -25,6 +28,20 @@ import type { NoteCard } from '../recent-note-cards.ts';
  *
  * All three read the same DOM the plugin decorated (`.cw-fn[data-cw-fn]`),
  * so they cannot disagree about what the notes are or how they are numbered.
+ * All three draw a note through `drawNote`, so a source written as a markdown
+ * link is a short clickable label in every one of them rather than a run of
+ * `[label](path)` syntax — `note-links.ts` decides which hrefs may be drawn
+ * that way, and the elements are built with `createElement` and `textContent`
+ * so a note's characters are never parsed as HTML.
+ *
+ * WHICH WORDS A NOTE IS ABOUT is asked, not announced (Bryan, 2026-09-18:
+ * "the quotes are cool, and also unreadable"). A doc with a note on nearly
+ * every sentence used to come back with nearly every line underlined, which
+ * left the reader nothing to read and nothing to notice. Nothing is lit at
+ * rest now except an UNCONFIRMED note's dotted line, which is the certainty
+ * signal and is rare; pointing at a caption or a superscript — or tabbing
+ * into a caption's link — lights that one note's fact and no other. That is
+ * `relight` below, and the classes it writes are the ones `doc.css` draws.
  */
 
 export interface FootnoteNotesOptions {
@@ -38,6 +55,12 @@ export interface FootnoteNotesOptions {
   marginVisible: () => boolean;
   /** The card set changed; the column has to lay out again. */
   onChange: () => void;
+  /** The workspace context a RELATIVE href inside a note resolves against —
+   *  the same one `createEditor` is given for the doc body, so `[the
+   *  plan](plan.md)` in a note lands where the identical link in the prose
+   *  lands. Absent on a surface with no workspace, where such an href is left
+   *  to the browser to resolve against the page. */
+  docLink?: { workspaceId: string; relPath: string; navigate: (url: string) => void };
   scope: MountScope;
 }
 
@@ -77,7 +100,50 @@ function found(prose: HTMLElement): FoundNote[] {
 }
 
 export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHandle {
-  const { prose, container, marginVisible, onChange, scope } = opts;
+  const { prose, container, marginVisible, onChange, scope, docLink } = opts;
+
+  /** The in-app review URL a relative href names, or null when there is no
+   *  workspace context or the path does not resolve to a sibling doc. */
+  function inAppHref(href: string): string | null {
+    if (!docLink) return null;
+    return resolveDocLink({
+      href,
+      reviewId: docLink.workspaceId,
+      relPath: docLink.relPath,
+      workspaceId: workspaceIdFromPath(location.pathname),
+    });
+  }
+
+  /**
+   * Draw one note's words into `el`, its markdown links drawn as links.
+   *
+   * Every node is built with `createElement` / `textContent`, never from a
+   * string of HTML: a note is the author's characters, and the one thing they
+   * may not become is markup.
+   */
+  function drawNote(el: HTMLElement, note: string): void {
+    el.textContent = '';
+    for (const part of noteParts(note)) {
+      if (part.href === undefined) {
+        el.appendChild(document.createTextNode(part.text));
+        continue;
+      }
+      const a = document.createElement('a');
+      a.className = 'cw-fn-link';
+      a.textContent = part.text;
+      const inApp = part.external ? null : inAppHref(part.href);
+      // The resolved URL goes in the attribute, not only into the click
+      // handler, so the status bar, a copy-link and a middle-click all name
+      // the same destination a plain click reaches.
+      a.href = inApp ?? part.href;
+      if (inApp !== null) a.dataset.cwFnInApp = '';
+      if (part.external) {
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      }
+      el.appendChild(a);
+    }
+  }
 
   // Marks THIS editor as one whose notes have a margin to go to. Every
   // `createEditor` draws the same `.cw-fn` decorations — a task body, a live
@@ -112,15 +178,28 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     pop.remove();
   });
 
+  /** A margin caption, wired once to light the words it is about while the
+   *  reader points at it or tabs into one of its links. Wired at CREATION,
+   *  because `cardFor` reuses the element it already made for this number and
+   *  re-wiring on every redraw would stack duplicate listeners. */
+  function noteEl(n: string): HTMLElement {
+    const el = document.createElement('div');
+    scope.listen(el, 'mouseenter', () => hover(n));
+    scope.listen(el, 'mouseleave', () => hover(null));
+    scope.listen(el, 'focusin', () => hover(n));
+    scope.listen(el, 'focusout', () => hover(null));
+    return el;
+  }
+
   function cardFor(f: FoundNote): NoteCard {
     const held = cards.get(f.n);
     if (held && held.note === f.note && held.unsure === f.unsure) {
       held.card.anchor = f.anchor;
       return held.card;
     }
-    const el = held?.card.el ?? document.createElement('div');
+    const el = held?.card.el ?? noteEl(f.n);
     el.className = f.unsure ? 'cw-fn-note cw-fn-note-unsure' : 'cw-fn-note';
-    el.textContent = f.note;
+    drawNote(el, f.note);
     const card: NoteCard = {
       key: `fn:${f.n}`,
       el,
@@ -139,7 +218,7 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     const ol = document.createElement('ol');
     for (const f of notes) {
       const li = document.createElement('li');
-      li.textContent = f.note;
+      drawNote(li, f.note);
       if (f.unsure) li.className = 'cw-fn-note-unsure';
       ol.appendChild(li);
     }
@@ -151,15 +230,41 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     openN = null;
     openNote = '';
     pop.hidden = true;
-    for (const el of prose.querySelectorAll('.cw-fn-on')) el.classList.remove('cw-fn-on');
+    relight();
   }
 
-  /** Light the one note the card belongs to, and nothing else. The decoration
-   *  plugin replaces these spans on every rebuild, so the class has to be put
-   *  back on the NEW element rather than assumed to have survived. */
-  function lightOnly(anchor: HTMLElement): void {
-    for (const el of prose.querySelectorAll('.cw-fn-on')) el.classList.remove('cw-fn-on');
-    anchor.classList.add('cw-fn-on');
+  /** The note the reader is pointing at or focused inside, if any. */
+  let hoverN: string | null = null;
+
+  function hover(n: string | null): void {
+    if (hoverN === n) return;
+    hoverN = n;
+    relight();
+  }
+
+  /**
+   * Light exactly one note — the one being pointed at, or the one whose card
+   * is open — and nothing else.
+   *
+   * Nothing is lit at rest, so the prose reads as prose; this is the whole of
+   * "which words is that note about". The decoration plugin replaces both
+   * spans on every rebuild, so the classes are put back by QUERY rather than
+   * through a remembered element: a run split by another mark renders as two
+   * spans carrying the same number, and both halves are the same note.
+   */
+  function relight(): void {
+    for (const el of prose.querySelectorAll('.cw-fn-on, .cw-fn-fact-on')) {
+      el.classList.remove('cw-fn-on', 'cw-fn-fact-on');
+    }
+    const n = hoverN ?? openN;
+    if (n === null) return;
+    const id = CSS.escape(n);
+    for (const el of prose.querySelectorAll(`.cw-fn[data-cw-fn="${id}"]`)) {
+      el.classList.add('cw-fn-on');
+    }
+    for (const el of prose.querySelectorAll(`.cw-fn-fact[data-cw-fn-for="${id}"]`)) {
+      el.classList.add('cw-fn-fact-on');
+    }
   }
 
   /**
@@ -208,10 +313,12 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
       if (!still || still.note !== openNote || marginVisible()) closePop();
       else {
         pop.classList.toggle('cw-fn-pop-unsure', still.unsure);
-        lightOnly(still.anchor);
         placePop(still.anchor);
       }
     }
+    // Whatever the card did, the spans under the lit note are new elements
+    // and carry none of the classes the old ones did.
+    relight();
     onChange();
   }
 
@@ -231,10 +338,10 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     if (!f) return;
     openN = n;
     openNote = f.note;
-    pop.textContent = f.note;
+    drawNote(pop, f.note);
     pop.classList.toggle('cw-fn-pop-unsure', f.unsure);
     pop.hidden = false;
-    lightOnly(target);
+    relight();
     placePop(target);
   });
   // A tap anywhere else — including on the prose, handled above — closes it.
@@ -243,6 +350,30 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     if (el && (prose.contains(el) || pop.contains(el))) return;
     closePop();
   });
+
+  // A relative link in a note goes where the same link in the prose goes: the
+  // sibling doc's review URL, in THIS tab, because it is the same review
+  // session. Only a link whose href this module resolved is taken over —
+  // anything else (an external URL, a bare anchor, a path that named no
+  // sibling) is the browser's to follow, exactly as the attribute says.
+  scope.listen(container, 'click', (ev) => {
+    const a = (ev.target as HTMLElement | null)?.closest?.(
+      'a.cw-fn-link[data-cw-fn-in-app]',
+    ) as HTMLAnchorElement | null;
+    const url = a?.getAttribute('href');
+    if (!url || !docLink) return;
+    ev.preventDefault();
+    docLink.navigate(url);
+  });
+
+  // The superscript's own half of "which words is this about". A note whose
+  // number is hidden (the margin carries it) has its caption instead, and the
+  // caption's listeners are wired in `noteEl`.
+  scope.listen(prose, 'mouseover', (ev) => {
+    const el = (ev.target as HTMLElement | null)?.closest?.('.cw-fn') as HTMLElement | null;
+    hover(el?.dataset.cwFn ?? null);
+  });
+  scope.listen(prose, 'mouseout', () => hover(null));
 
   // Placement is the reader's, changed from the chrome and from a width
   // boundary, and neither goes through an editor transaction — so without
