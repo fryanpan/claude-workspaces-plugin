@@ -37,10 +37,15 @@ import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
  * — "may an edit name this block?" and "is this a heading a bullet may be
  * inserted under?" — and answering the second by re-walking would let a
  * heading BELOW the section pass as one inside it.
+ *
+ * `carryOver` CARRIES THE WALK PAST THE SECOND TOPIC: since PR 1048 a
+ * meeting's topics are its section's SIBLINGS, so a heading named there is
+ * the minutes' own. What it cost: `NotesDedupeContext.meetingTopics`.
  */
 export function sectionIds(
   outline: readonly prose.OutlineEntry[],
   headingId: string,
+  carryOver: ReadonlySet<string> = new Set(),
 ): { blocks: Set<string>; headings: Set<string> } {
   const blocks = new Set<string>();
   const headings = new Set<string>();
@@ -50,7 +55,8 @@ export function sectionIds(
   for (let i = start; i < outline.length; i++) {
     const entry = outline[i];
     if (entry === undefined) continue;
-    if (i > start && entry.kind === 'heading' && (entry.level ?? 1) <= openLevel) break;
+    const ends = i > start && entry.kind === 'heading' && (entry.level ?? 1) <= openLevel;
+    if (ends && !carryOver.has(entry.id)) break;
     blocks.add(entry.id);
     if (entry.kind === 'heading') headings.add(entry.id);
   }

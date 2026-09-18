@@ -286,6 +286,23 @@ export interface NotesHeadingMemory {
    */
   claimsIn(docId: string): ReadonlyMap<string, NotesSectionClaim>;
   /**
+   * Every heading on this doc the note-taker has OPENED — each meeting's
+   * section and every topic it wrote beside it.
+   *
+   * WIDER THAN {@link claimsIn}, AND FOR A DIFFERENT QUESTION. A claim says
+   * whose a SECTION is, so it holds one heading per meeting and feeds the
+   * continuation window. This says which headings are the minutes rather than
+   * the document's own material, so a walk that would stop at the meeting's
+   * second topic can carry on over it — topics are siblings at the section's
+   * level since PR 1048 removed the container.
+   *
+   * IN MEMORY ONLY, deliberately. The durable record beside a meeting holds
+   * its section, which is what a restart needs to avoid opening a second one;
+   * a forgotten topic costs a repeat check its reach, which is the failure
+   * this doc had before any of it existed rather than a new one.
+   */
+  topicsIn(docId: string): ReadonlySet<string>;
+  /**
    * This meeting has STOPPED.
    *
    * What turns its section from "that meeting's, do not write here" into
@@ -375,6 +392,9 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
   // that outlives the recording, and it is what says whether the next one is
   // continuing a finished meeting's notes or writing beside a live one's.
   const claimedByDoc = new Map<string, Map<string, NotesSectionClaim>>();
+  // Every heading the note-taker has OPENED on a doc, sections and their
+  // sibling topics alike. See `topicsIn` for why this is not the claim map.
+  const topicsByDoc = new Map<string, Set<string>>();
   // A CLAIM IS ALWAYS RECORDED LIVE, INCLUDING OVER A FINISHED ONE. The
   // meeting claiming the heading is recording right now, and the heading it
   // takes over is its section until IT stops — otherwise a third recording
@@ -426,25 +446,45 @@ export function createNotesHeadingMemory(store?: NotesHeadingStore): NotesHeadin
       return priorByMeeting.get(keyOf(ids)) ?? new Set<string>();
     },
     learn(ids, before, after) {
-      const held = remembered(ids);
-      if (held !== undefined && present(held, after)) return;
       const known = new Set(before.map((e) => e.id));
       // READ OFF THE DOC AS IT WAS BEFORE THE BATCH — the headings the batch
       // just added are the ones being judged, so letting them vote on the
       // level would let a sub-topic redefine what a section is.
       const topic = notesTopicLevel(before.length > 0 ? before : after);
-      const opened = after.find(
+      const opened = after.filter(
         (e) =>
           e.kind === 'heading' &&
           !known.has(e.id) &&
           e.author === NOTES_AUTHOR_ID &&
           (e.level ?? topic) <= topic,
       );
-      if (opened) {
-        byMeeting.set(keyOf(ids), opened.id);
-        claim(ids.docId, opened.id);
-        store?.write(ids, opened.id);
+      // EVERY TOPIC IS RECORDED, NOT ONLY THE FIRST. The first is this
+      // meeting's SECTION and the rest are its siblings, and until they were
+      // written down nothing could tell them from the document's own headings
+      // once `releaseNotesAuthorship` had run — which is how a paused meeting
+      // came back and re-opened eight topics the doc already had. Recorded
+      // here rather than as claims, because a claim answers whose a section is
+      // and a second claimed heading would move the continuation window onto
+      // the meeting's last topic (`topicsIn`).
+      const topics = topicsByDoc.get(ids.docId) ?? new Set<string>();
+      for (const e of opened) topics.add(e.id);
+      if (topics.size > 0) topicsByDoc.set(ids.docId, topics);
+      const held = remembered(ids);
+      if (held !== undefined && present(held, after)) return;
+      const first = opened[0];
+      if (first) {
+        byMeeting.set(keyOf(ids), first.id);
+        claim(ids.docId, first.id);
+        store?.write(ids, first.id);
       } else if (held !== undefined) forget(ids);
+    },
+    topicsIn(docId) {
+      const out = new Set(topicsByDoc.get(docId) ?? []);
+      // A SECTION IS A TOPIC TOO. One adopted rather than opened is claimed
+      // and never passes through `learn`, so without this the walk would stop
+      // at the heading the previous meeting continued under.
+      for (const id of claimedByDoc.get(docId)?.keys() ?? []) out.add(id);
+      return out;
     },
     claimsIn(docId) {
       const out = new Map<string, NotesSectionClaim>();
@@ -703,6 +743,13 @@ export function applyNotesUpdate(
     // section it does not have catches nothing. Authorship answers it with or
     // without a claim.
     ownedElsewhere: new Set(full.filter((e) => e.author === NOTES_AUTHOR_ID).map((e) => e.id)),
+    // EVERY TOPIC SOME MEETING HAS OPENED HERE. The section walk stops at
+    // the next heading of the section's own level, and a meeting's topics are
+    // its section's siblings — so without this the repeat check sees the
+    // first topic and nothing after it. Authorship covers that inside one
+    // leg; across a pause it cannot, because starting a recording releases
+    // every mark (`NotesDedupeContext.meetingTopics`).
+    meetingTopics: heading.topicsIn(update.docId),
     outline: full,
     speech: update.tick.turns.map((t) => t.text),
     authorId: NOTES_AUTHOR_ID,
