@@ -132,6 +132,11 @@ export interface OvergrownTopic {
   heading: string;
   /** Every note directly under it, nested ones and paragraph notes included. */
   notes: number;
+  /** The heading the room is writing under right now — the last one in the
+   *  meeting's section. Only a live topic can be asked where the NEXT note
+   *  goes; every topic can be asked to break up the stretch already written.
+   *  See {@link closeTopic}. */
+  live: boolean;
 }
 
 /** A run of top-level bullets sitting above every heading — a wall the room
@@ -281,19 +286,30 @@ export function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOp
    * ask ever fired on it: twelve flat bullets at the end of every repaired
    * meeting, measured by `notes-long-topic.test.ts`.
    *
-   * AND ONLY THE HEADING THE ROOM IS UNDER RIGHT NOW CAN BE ASKED TO SPLIT,
-   * which is what `live` says. "Open the next heading" is an instruction
-   * about where the NEXT note goes, so a heading the meeting has already
-   * moved on from has nothing to carry it out with — its count cannot fall,
-   * because nothing is being added to it any more. Asked anyway, the
-   * directive repeated on every remaining tick of the meeting and the
-   * note-taker opened a heading a tick: 51 headings over 70 ticks, measured
-   * by `notes-long-topic.test.ts` before this clause existed. Nesting is a
-   * repair of what is already written, so it carries no such restriction.
+   * EVERY OVERGROWN TOPIC IS NAMED; `live` DECIDES WHICH HALF OF THE REMEDY
+   * IT IS ASKED FOR. "Open the next heading" is an instruction about where
+   * the NEXT note goes, so a heading the meeting has already moved on from
+   * has nothing to carry it out with. Asked for that, the directive repeated
+   * on every remaining tick and the note-taker opened a heading a tick: 51
+   * headings over 70 ticks, measured by `notes-long-topic.test.ts`. That is
+   * why `notes-regroup-ask.ts` withholds that half from a topic that is not
+   * live — and it is the whole of what the flag is for.
+   *
+   * IT USED TO WITHHOLD THE TOPIC ITSELF, and a topic's count does keep
+   * rising after the room has left it: `insert_under_heading` lands at the
+   * end of whatever heading it names, so a note-taker still writing under an
+   * earlier topic grows it with nothing able to ask about it again. Three
+   * thirty-minute real-transcript replays on 2026-09-18 ended with 26, 36 and
+   * 79 notes under one heading against a bar of twelve, and in the
+   * fifteen-minute instrumented run 107 of the 111 ticks that had a topic
+   * over the bar raised no ask at all, because the topic over the bar was
+   * never the live one. Placing a heading in front of a note already written
+   * repairs a topic wherever the room has got to, so the repair half is
+   * asked of every topic past the bar.
    */
   const closeTopic = (live: boolean): void => {
-    if (live && headingId !== undefined && topicNotes >= topicBar) {
-      const topic = { headingId, heading, notes: topicNotes };
+    if (headingId !== undefined && topicNotes >= topicBar) {
+      const topic = { headingId, heading, notes: topicNotes, live };
       overgrown.push(topic);
       asks.push({ kind: 'split', topic });
     }

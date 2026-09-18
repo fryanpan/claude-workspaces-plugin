@@ -248,20 +248,47 @@ describe('overgrownTopics', () => {
     );
   });
 
-  test('says nothing about a heading the room has already moved on from', () => {
-    // The ask is "open the NEXT heading", which only the heading this speech
-    // is landing under can carry out. Asked of an earlier one it repeats every
-    // remaining tick and the note-taker opens a heading a tick.
+  test('names a heading the room has already moved on from, as not live', () => {
+    // IT USED TO NAME NOTHING AT ALL HERE, and that is what a thirty-minute
+    // replay measured as the defect: on 107 of the 111 ticks that had a topic
+    // over the bar, the topic was an earlier one and no ask fired. A topic
+    // stops being live the moment a heading opens below it, and every note
+    // `insert_under_heading` lands on it after that is one nothing can ever
+    // ask about again.
+    //
+    // WHAT THE `live` FLAG STILL CARRIES is the half of the remedy an earlier
+    // heading cannot do: "open the next heading" is about where the NEXT note
+    // goes, and asked of an earlier one it repeated every remaining tick and
+    // the note-taker opened a heading a tick. The repair half — putting a
+    // heading in front of a note already written — is about the page, not
+    // about where the room is, so it applies to both.
     const swallowed = ownHeading('Slipway crane booking');
     const now = ownHeading('Budget line');
     const outline = [swallowed, ...bullets(MAX_TOPIC_NOTES, 'crane'), now, ...bullets(1, 'budget')];
     const opts = { author: NOTES_AUTHOR_ID, notesHeadingId: swallowed.id };
-    expect(overgrownTopics(outline, opts)).toEqual([]);
-    // CONTROL: the same heading, still the live one, is named.
+    expect(overgrownTopics(outline, opts).map((t) => [t.heading, t.notes, t.live])).toEqual([
+      ['Slipway crane booking', MAX_TOPIC_NOTES, false],
+    ]);
+    // CONTROL: the same heading, still the live one, is named AND live.
     expect(
-      overgrownTopics([swallowed, ...bullets(MAX_TOPIC_NOTES, 'crane')], opts).map(
-        (t) => t.heading,
-      ),
-    ).toEqual(['Slipway crane booking']);
+      overgrownTopics([swallowed, ...bullets(MAX_TOPIC_NOTES, 'crane')], opts).map((t) => [
+        t.heading,
+        t.live,
+      ]),
+    ).toEqual([['Slipway crane booking', true]]);
+  });
+
+  test('is silent about an earlier heading one note below the bar — the control', () => {
+    const swallowed = ownHeading('Slipway crane booking');
+    const now = ownHeading('Budget line');
+    const outline = [
+      swallowed,
+      ...bullets(MAX_TOPIC_NOTES - 1, 'crane'),
+      now,
+      ...bullets(1, 'budget'),
+    ];
+    expect(
+      overgrownTopics(outline, { author: NOTES_AUTHOR_ID, notesHeadingId: swallowed.id }),
+    ).toEqual([]);
   });
 });

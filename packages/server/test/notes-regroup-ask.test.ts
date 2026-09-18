@@ -175,6 +175,39 @@ describe('the three remedies', () => {
     expect(text).not.toContain('do NOT nest these');
   });
 
+  test('asks an earlier swallowed topic for the repair, and not for the next heading', () => {
+    // The topic the room has left. It can still be repaired — a heading put
+    // in front of a note already written re-parents everything below it — but
+    // it cannot be asked where the NEXT note goes, because nothing is being
+    // added to it any more.
+    const swallowed = ownHeading('Slipway crane booking');
+    const now = ownHeading('Budget line');
+    const text =
+      regroupDirective(
+        [swallowed, ...bullets(MAX_TOPIC_NOTES, 'crane'), now, ...bullets(1, 'budget')],
+        { author: NOTES_AUTHOR_ID, notesHeadingId: swallowed.id },
+      ) ?? '';
+    expect(text).toContain('HAS RUN PAST ONE HEADING');
+    expect(text).toContain(swallowed.id);
+    expect(text).toContain('insert_before_block');
+    expect(text).not.toContain('insert_at_end');
+  });
+
+  test('says not to put the heading in front of the first note', () => {
+    // A heading placed in front of the FIRST note goes in front of the whole
+    // list, so the stretch arrives under it entire and the emptied heading is
+    // removed by the cleanup: the topic is renamed and its count does not
+    // move. Measured twice in a fifteen-minute replay, each time as
+    // "1 topic heading with nothing under it removed".
+    const own = ownHeading('Slipway crane booking');
+    const text =
+      regroupDirective([own, ...bullets(MAX_TOPIC_NOTES, 'crane')], {
+        author: NOTES_AUTHOR_ID,
+        notesHeadingId: own.id,
+      }) ?? '';
+    expect(text).toContain('never in front of the first note');
+  });
+
   test('asks a topic that is merely full for a group — the control', () => {
     const own = ownHeading('Harborlight survey');
     const text =

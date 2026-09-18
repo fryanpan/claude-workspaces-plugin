@@ -1123,13 +1123,32 @@ with headings"*):
   depth. Past the second, the per-tick directive stops asking for a group and
   asks for a heading instead, spelling both shapes at the levels this document
   writes at: a sub-topic where the room is still on the subject and has
-  reached a new part of it, a new topic where it has moved on. The ask goes
-  only to the heading the room is writing under RIGHT NOW — one aimed at a
-  heading already moved on from can never be carried out, repeats every
-  remaining tick, and produced 51 headings over 70 ticks the first time it was
-  tried. And it carries the speech with it: one `insert_at_end` writes the
-  heading and this tick's points together, so no idea waits a tick for
-  somewhere to go.
+  reached a new part of it, a new topic where it has moved on. Every topic
+  past the bar is named; which HALF of the remedy it is asked for depends on
+  whether the room is still under it. "Open the next heading" is about where
+  the NEXT note goes, so it is withheld from a heading already moved on from —
+  one aimed there can never be carried out, repeats every remaining tick, and
+  produced 51 headings over 70 ticks the first time it was tried. For the live
+  topic it carries the speech with it: one `insert_at_end` writes the heading
+  and this tick's points together, so no idea waits a tick for somewhere to
+  go.
+- **Naming ONLY the live topic is what made the bar miss on real meetings**
+  (2026-09-18). `insert_under_heading` lands at the END of whatever heading it
+  names, so a note-taker writing under an earlier topic keeps growing it while
+  nothing can ask about it again — the count of a topic the room has left is
+  not frozen, and treating it as frozen was the reasoning the old scan rested
+  on. Instrumented over a fifteen-minute replay: 111 of 147 ticks had a topic
+  past the bar and 107 of those raised no ask at all, because the topic past
+  the bar was never the live one. Three thirty-minute replays of real AMI
+  transcripts through the real note-taker ended with 26, 36 and 79 notes under
+  one heading. Placing a heading in front of a note already written repairs a
+  topic wherever the room has got to, so the repair half now goes to every
+  topic past the bar, and the same three meetings come out at 11, 14 and 13.
+  The directive also says where the heading may NOT go: in front of the FIRST
+  note under a topic it lands in front of the whole list, empties the original
+  heading — the section tidy then removes it — and leaves the count exactly
+  where it was. That is a rename, and it was observed twice before the clause
+  existed.
 - **And the heading can now be PLACED, which is what repairs a stretch that
   is already on the page** (2026-09-16). The bullet above stops a wall
   forming. It does nothing for one that has formed, and that was the state
@@ -2896,6 +2915,25 @@ somebody presses the button. So the offer calls `liveZone.holdWash()` before
 the request; without it the one pass whose notes are the freshest thing on
 the page would be the only one that never tinted and never reached recent
 edits.
+
+**THE PASS IS NOT BOUND BY THE TOPIC BAR, and that is where the bar still
+misses** (2026-09-18, open). It gets the same regroup directive a tick gets,
+but computed from the outline it was HANDED — so a heading it grows from six
+notes to fourteen is never named in its own prompt, because at the moment the
+prompt was built that heading was fine. On a thirty-minute replay of EN2002d
+the last live tick left "Next steps" at 6 and the pass's 28 edits finished it
+at 14, two past the bar, with no ask anywhere having mentioned it.
+
+Adding a clause to `CLEANUP_DIRECTIVE` that names `MAX_TOPIC_NOTES` and asks
+the pass to count what will be under a heading AFTER its own edits was tried
+and NOT shipped, because it breaks the pass instead: two thirty-minute replays
+in a row came back `stop_reason: max_tokens`, and the whole pass is refused
+rather than truncated, so the reader got nothing tidied at all. Raising the
+reply ceiling to four times a tick's moved the refusal to the request
+timeout — one more replay, one more pass that did nothing. **Both budgets the
+pass runs under are a TICK'S**, sized for an edit list that grows with what
+was just said, and this one grows with the meeting; fixing the bar here means
+fixing those first, and measuring the pass rather than only the notes.
 
 ### Does it actually leave good notes alone?
 
