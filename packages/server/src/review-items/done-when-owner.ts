@@ -280,6 +280,16 @@ export function linkedLineOf(task: Task, reviewItemId: string): DoneWhenLine | u
   return (task.doneWhen ?? []).find((l) => l.id === item.doneWhenLineId);
 }
 
+/** Has the agent that owns this line already taken its item back? A
+ *  withdrawn linked item is the agent saying "not this, not yet" — the work
+ *  moved on. Re-filing puts the check back on the reader's queue, where the
+ *  gate's hour-long hold releases it unrevised: twice on one task
+ *  (2026-09-17), two cards opened, neither answered. Only the owning agent
+ *  reporting the line `owner` again clears it — no timer, no boot pass. */
+function withdrawnByItsAgent(linked: readonly StoredReviewItem[], lineId: string): boolean {
+  return linked.some((r) => r.doneWhenLineId === lineId && reviewWithdrawn(r.review));
+}
+
 /** What one sync did. `toJudge` names the items the quality gate has not
  *  seen: filed or revised by this sync, or open with no verdict at all — an
  *  item filed before owner checks were gated, or one a crash left between its
@@ -300,11 +310,13 @@ export interface OwnerSyncResult {
  * `actor` is whoever wrote the done-when change. An item it FILES is filed as
  * that actor when it is not a person — the agent that marked the line, which
  * is who a hold must reach.
- */
+ * `reportedOwnerLines` names the lines this call reported `owner` — the only
+ * way back for a line whose item was withdrawn (`withdrawnByItsAgent`). */
 export function syncOwnerItems(
   taskId: string,
   deps: OwnerItemDeps,
   actor?: Actor,
+  reportedOwnerLines: readonly string[] = [],
 ): OwnerSyncResult {
   const task = deps.getTask(taskId);
   if (!task) return { filed: 0, withdrawn: 0, revised: 0, toJudge: [] };
@@ -354,6 +366,7 @@ export function syncOwnerItems(
   for (const line of lines) {
     if (line.verdict !== 'owner') continue;
     if (linked.some((r) => r.doneWhenLineId === line.id && isOpen(r))) continue;
+    if (!reportedOwnerLines.includes(line.id) && withdrawnByItsAgent(linked, line.id)) continue;
     const res = deps.addReviewItem(task.id, ownerCheckReview(task, line), {
       actor: { id: filerId, name: line.by || OWNER_CHECK_FILER, kind: 'agent' },
       doneWhenLineId: line.id,

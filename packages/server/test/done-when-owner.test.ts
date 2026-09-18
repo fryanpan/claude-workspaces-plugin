@@ -133,8 +133,14 @@ describe('syncOwnerItems', () => {
     const line = task.doneWhen?.[0] as DoneWhenLine;
     line.verdict = 'not-met';
     expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 0, withdrawn: 1, revised: 0 });
+    // Marked owner again by a report, which is the only door back to the
+    // reader once a line has had an item withdrawn.
     line.verdict = 'owner';
-    expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 1, withdrawn: 0, revised: 0 });
+    expect(syncOwnerItems('t-1', deps, AGENT, ['d-1'])).toMatchObject({
+      filed: 1,
+      withdrawn: 0,
+      revised: 0,
+    });
     task.doneWhen = [];
     expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 0, withdrawn: 1, revised: 0 });
     expect(calls.withdraw).toEqual(['r-1', 'r-2']);
@@ -157,6 +163,27 @@ describe('syncOwnerItems', () => {
     expect(task.reviews?.[0]?.review.headline).toContain('reads well at 430 wide');
     expect(task.reviews?.[0]?.review.detail).toContain('new shot');
     expect(syncOwnerItems('t-1', deps).revised).toBe(0);
+  });
+
+  it('leaves a line alone once its agent withdrew the item, until the line is reported owner again', () => {
+    const { task, deps, calls } = fixture([{ id: 'd-1', text: 'reads well', verdict: 'owner' }]);
+    syncOwnerItems('t-1', deps);
+    // The agent takes its own item back: the work moved on mid-rework.
+    const item = task.reviews?.[0] as StoredReviewItem;
+    item.review = { ...item.review, withdrawnAt: 5, withdrawnBy: 'Kiln Bot' };
+
+    // Every later sync that is not a report — the boot pass, an edit of the
+    // line's words, the hour the gate holds — leaves it withdrawn.
+    expect(syncOwnerItems('t-1', deps)).toMatchObject({ filed: 0, withdrawn: 0 });
+    const line = task.doneWhen?.[0] as DoneWhenLine;
+    line.text = 'reads well at 430 wide';
+    expect(syncOwnerItems('t-1', deps, AGENT)).toMatchObject({ filed: 0, withdrawn: 0 });
+    expect(calls.add).toBe(1);
+
+    // The agent reporting the line owner again is what asks the reader.
+    expect(syncOwnerItems('t-1', deps, AGENT, ['d-1'])).toMatchObject({ filed: 1 });
+    expect(calls.add).toBe(2);
+    expect(task.reviews?.[1]?.doneWhenLineId).toBe('d-1');
   });
 
   it('files nothing on a done task', () => {
