@@ -1,5 +1,6 @@
 /**
- * The markdown links inside a `^[…]` note, split from the words around them.
+ * The markdown links and code spans inside a `^[…]` note, split from the words
+ * around them.
  *
  * A note's body is opaque to the prose parser on purpose — the characters in
  * the file ARE the note (packages/core/src/footnotes.ts) — so a source written
@@ -8,6 +9,15 @@
  * half of the bargain: the file still holds exactly what the author typed, and
  * the three draws in `footnote-notes.ts` build `<a>` elements from what comes
  * back here, so the reader sees the label and clicks it.
+ *
+ * A backtick span outside a link is the same bargain again. Fleet notes end
+ * with a provenance tag the author writes in backticks — `` `[primary — read
+ * 2026-09-18]` `` — and the tag stays inline in the markdown (owner's call,
+ * 2026-09-05); what the renderer owes is a way to draw it that does not make
+ * the reader read two backticks first. Those runs come back marked `code`, and
+ * the syntax is the one thing dropped: the words between the backticks are
+ * handed back whole. A backtick with no closer is not a span, so its
+ * characters come back as the plain text they are.
  *
  * Pure, and the only place a note's href is judged. Two kinds may be followed:
  * an `http(s)` URL, and a link relative to the doc. Every other scheme —
@@ -18,16 +28,23 @@
  * link can still see it well enough to fix it.
  */
 
-/** One run of a note: plain words, or a link the renderer may draw as one. */
+/**
+ * One run of a note: plain words, a link the renderer may draw as one, or a
+ * backtick span the renderer draws quietly. Never both — a link's label is
+ * already stripped of its backticks, so `href` and `code` do not meet.
+ */
 export interface NotePart {
-  /** What the reader sees. */
+  /** What the reader sees. Never the syntax around it. */
   text: string;
-  /** Where it goes. Absent on a plain run, and only then. */
+  /** Where it goes. Absent on a plain or code run, and only then. */
   href?: string;
   /** An `http(s)` destination, which opens in a new tab. False for a relative
    *  href: that one names another doc in the same workspace, and following it
    *  keeps the reader in the review they are already in. */
   external?: boolean;
+  /** The author wrote these words between backticks. Present only when true,
+   *  so a plain run stays the one-property object it has always been. */
+  code?: true;
 }
 
 /**
@@ -51,10 +68,36 @@ export function noteLinkHref(href: string): { href: string; external: boolean } 
 }
 
 /**
+ * Push `text` as plain runs, with each closed backtick span split out as a
+ * code run.
+ *
+ * A span needs a closer and at least one character between the pair: a lone
+ * backtick, and an empty `` `` ``, are characters the author typed and come
+ * back as themselves rather than as an element with nothing in it. The regex
+ * is built per call, because a `g` regex carries its `lastIndex` between
+ * calls and a shared one would start the second note where the first stopped.
+ */
+function pushPlain(out: NotePart[], text: string): void {
+  if (text === '') return;
+  const code = /`([^`]+)`/g;
+  let at = 0;
+  for (let m = code.exec(text); m !== null; m = code.exec(text)) {
+    const before = text.slice(at, m.index);
+    if (before !== '') out.push({ text: before });
+    out.push({ text: m[1] ?? '', code: true });
+    at = m.index + m[0].length;
+  }
+  const rest = text.slice(at);
+  if (rest !== '') out.push({ text: rest });
+}
+
+/**
  * Split `note` into the runs a renderer draws.
  *
  * Adjacent plain runs are merged, so a rejected link comes back joined to the
- * words around it rather than as a seam in the middle of a sentence.
+ * words around it rather than as a seam in the middle of a sentence — and a
+ * backtick span is looked for in the merged text, so a pair that opened before
+ * a rejected link and closed after it is still one span.
  */
 export function noteParts(note: string): NotePart[] {
   const out: NotePart[] = [];
@@ -66,7 +109,7 @@ export function noteParts(note: string): NotePart[] {
   let plain = '';
   let at = 0;
   const flush = (): void => {
-    if (plain !== '') out.push({ text: plain });
+    pushPlain(out, plain);
     plain = '';
   };
   for (let m = link.exec(note); m !== null; m = link.exec(note)) {
