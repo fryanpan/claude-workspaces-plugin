@@ -92,7 +92,7 @@ export function regroupDirective(
   if (splits.length > 0) {
     if (lines.length > 0) lines.push('');
     lines.push(
-      'THIS SPEECH HAS RUN PAST ONE HEADING — BREAK IT UP IN THIS UPDATE.',
+      'A TOPIC HAS RUN PAST ONE HEADING — BREAK IT UP IN THIS UPDATE.',
       `A heading holding ${topicBar} notes has stopped naming a subject and has`,
       'started standing over a stretch of the meeting. Nesting alone cannot',
       'repair that: the reader still meets one heading with the whole stretch',
@@ -107,17 +107,30 @@ export function regroupDirective(
       'part, put a heading IN FRONT OF the note that turn begins at, and every',
       'note from there down comes under it.',
       `  {"op":"insert_before_block","blockId":"<the note the new part starts at>","markdown":"${notesSubTopicHashes(outline)} <what that part is about>"}`,
-      'Name a note under this heading, at the top level of its list. Nothing is',
-      'retyped and nothing is lost: every note keeps its words and its id, and',
-      'only the heading above them changes. Do this even when this speech adds',
-      'nothing — the stretch already written is what the reader is stuck in.',
-      '',
-      "AND THIS SPEECH'S OWN POINTS GO UNDER A HEADING OF THEIR OWN, in the same",
-      'update, so nothing said now waits a tick for somewhere to go:',
-      `  {"op":"insert_at_end","markdown":"${notesSubTopicHashes(outline)} <what this part is about>\\n\\n- the point"}`,
+      'Name a note under this heading, at the top level of its list, and',
+      'never in front of the first note under it — a heading in front of the',
+      'whole stretch renames the topic and leaves the count exactly where it',
+      'was. Pick a note well inside the stretch. Nothing is retyped and',
+      'nothing is lost: every note keeps its words and its id, and only the',
+      'heading above them changes. Do this even when this speech adds nothing',
+      '— the stretch already written is what the reader is stuck in.',
     );
+    // ONLY THE TOPIC THE ROOM IS UNDER can be told where the NEXT note goes;
+    // see `closeTopic` in `notes-regroup.ts` for the 51-headings incident
+    // this clause is what is left of.
+    if (splits.some((t) => t.live)) {
+      lines.push(
+        '',
+        "AND THIS SPEECH'S OWN POINTS GO UNDER A HEADING OF THEIR OWN, in the same",
+        'update, so nothing said now waits a tick for somewhere to go:',
+        `  {"op":"insert_at_end","markdown":"${notesSubTopicHashes(outline)} <what this part is about>\\n\\n- the point"}`,
+      );
+    }
     for (const topic of splits) {
-      lines.push(`- "${topic.heading}" (${topic.headingId}) — ${topic.notes} notes under it.`);
+      lines.push(
+        `- "${topic.heading}" (${topic.headingId}) — ${topic.notes} notes under it` +
+          `${topic.live ? '' : ', a topic the room has left'}.`,
+      );
     }
   }
   if (nests.length > 0) {

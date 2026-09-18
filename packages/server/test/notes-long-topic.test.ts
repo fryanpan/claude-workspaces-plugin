@@ -98,9 +98,26 @@ function currentHeading(outline: readonly prose.OutlineEntry[]): string | undefi
  */
 function readAsk(
   prompt: string,
-): { kind: 'nest'; edit: prose.BlockEdit } | { kind: 'heading' } | { kind: 'split' } | null {
+):
+  | { kind: 'nest'; edit: prose.BlockEdit }
+  | { kind: 'heading' }
+  | { kind: 'split'; live: boolean; topicIds: string[] }
+  | null {
   if (prompt.includes('UNDER NO HEADING')) return { kind: 'heading' };
-  if (prompt.includes('HAS RUN PAST ONE HEADING')) return { kind: 'split' };
+  if (prompt.includes('HAS RUN PAST ONE HEADING')) {
+    // THE TWO HALVES ARE TOLD APART BY THE CALL THE ASK HANDS OVER. Only a
+    // topic the room is still under is offered `insert_at_end` — "and this
+    // speech's own points go under a heading of their own". A topic the room
+    // has left is offered the repair alone, and obeying it means placing a
+    // heading inside the stretch, not opening another one at the end.
+    return {
+      kind: 'split',
+      live: prompt.includes('"op":"insert_at_end"'),
+      topicIds: [...prompt.matchAll(/^- ".*" \((\S+)\) — \d+ notes under it/gm)].map(
+        (m) => m[1] as string,
+      ),
+    };
+  }
   const call = prompt.match(/\{"op":"nest_blocks"[^}]*\}/);
   if (call) return { kind: 'nest', edit: JSON.parse(call[0]) as prose.BlockEdit };
   return null;
@@ -139,7 +156,7 @@ function obedient(turns: readonly Turn[]) {
         },
       ];
     }
-    if (ask?.kind === 'split') {
+    if (ask?.kind === 'split' && ask.live) {
       // Still the same subject, so the remedy that fits is a subheading for
       // the part of it the room has reached — carrying this speech's point
       // with it, which is what the ask hands over a call for.
@@ -149,6 +166,34 @@ function obedient(turns: readonly Turn[]) {
           markdown: `${notesSubTopicHashes(input.outline)} Booking detail ${tick}\n\n- ${turn.text}`,
         },
       ];
+    }
+    if (ask?.kind === 'split') {
+      // A TOPIC THE ROOM HAS LEFT, which is the case that used to be asked
+      // nothing at all. The only remedy offered is the repair, so the
+      // mechanical reading of "put a heading in front of the note the new
+      // part begins at, never the first" is the note `MAX_FLAT_RUN_BULLETS`
+      // in. This speech's point still goes where it was going.
+      const edits: prose.BlockEdit[] = [];
+      for (const topicId of ask.topicIds) {
+        const under = input.outline.filter(
+          (e) => e.kind === 'listItem' && e.depth === 0 && e.underHeadingId === topicId,
+        );
+        const at = under[MAX_FLAT_RUN_BULLETS]?.id;
+        if (at !== undefined) {
+          edits.push({
+            op: 'insert_before_block',
+            blockId: at,
+            markdown: `${notesSubTopicHashes(input.outline)} Booking detail from note ${tick}`,
+          });
+        }
+      }
+      const live = currentHeading(input.outline);
+      edits.push(
+        live === undefined
+          ? { op: 'insert_at_end', markdown: `- ${turn.text}` }
+          : { op: 'insert_under_heading', headingId: live, markdown: `- ${turn.text}` },
+      );
+      return edits;
     }
     if (turn.opens !== undefined) {
       return [
@@ -201,11 +246,21 @@ describe('a meeting that stays on one subject', () => {
     // full topic with a new heading passes both lines above and leaves the
     // reader a table of contents — which is exactly what the first version
     // of the split ask produced, 51 headings over these 70 ticks, because
-    // it went on asking a heading the room had already moved on from. So
-    // the count of headings is a bar of its own: a meeting whose notes are
-    // capped at twelve per heading needs about one heading per twelve
-    // ticks, plus the two subjects the room actually has.
-    expect(topics).toBeLessThanOrEqual(Math.ceil(turns.length / MAX_TOPIC_NOTES) + 2);
+    // it went on asking a heading the room had already moved on from.
+    //
+    // THE BAR IS NOTES PER HEADING, NOT THE COUNT, and it used to be the
+    // count — `ceil(ticks / MAX_TOPIC_NOTES) + 2`, which is the steady state
+    // of a remedy that only ever fired on the topic the room was under. The
+    // repair now fires on a topic the room has left as well, and a repair
+    // leaves BOTH halves under the bar, so headings arrive at about one per
+    // `MAX_FLAT_RUN_BULLETS` notes rather than one per `MAX_TOPIC_NOTES`:
+    // twelve headings over these seventy ticks, each carrying 5.8 notes.
+    // What the old ceiling was for is that a heading should still be worth
+    // opening, and 51 headings over 70 notes is 1.4 notes each. So the mean
+    // is the bar, and it fails the inflation it was written for by a
+    // distance rather than by a hair.
+    expect(topics).toBeLessThanOrEqual(Math.ceil(turns.length / MAX_FLAT_RUN_BULLETS) + 2);
+    expect(allBullets(notes).length / topics).toBeGreaterThanOrEqual(MAX_FLAT_RUN_BULLETS);
     expect(duplicateTopics(notes)).toEqual([]);
   }, 30_000);
 });
