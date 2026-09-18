@@ -30,9 +30,12 @@ import { noteParts } from './note-links.ts';
  * so they cannot disagree about what the notes are or how they are numbered.
  * All three draw a note through `drawNote`, so a source written as a markdown
  * link is a short clickable label in every one of them rather than a run of
- * `[label](path)` syntax — `note-links.ts` decides which hrefs may be drawn
- * that way, and the elements are built with `createElement` and `textContent`
- * so a note's characters are never parsed as HTML.
+ * `[label](path)` syntax, and a provenance tag written in backticks — `` `[primary
+ * — read 2026-09-18]` `` — is quiet text rather than two backticks the reader
+ * has to read past. `note-links.ts` decides which hrefs may be drawn as links
+ * and which characters are a backtick span; the elements are built with
+ * `createElement` and `textContent` so a note's characters are never parsed as
+ * HTML.
  *
  * WHICH WORDS A NOTE IS ABOUT is asked, not announced (Bryan, 2026-09-18:
  * "the quotes are cool, and also unreadable"). A doc with a note on nearly
@@ -115,7 +118,8 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
   }
 
   /**
-   * Draw one note's words into `el`, its markdown links drawn as links.
+   * Draw one note's words into `el`, its markdown links drawn as links and its
+   * backtick spans drawn quietly.
    *
    * Every node is built with `createElement` / `textContent`, never from a
    * string of HTML: a note is the author's characters, and the one thing they
@@ -125,6 +129,16 @@ export function mountFootnoteNotes(opts: FootnoteNotesOptions): FootnoteNotesHan
     el.textContent = '';
     for (const part of noteParts(note)) {
       if (part.href === undefined) {
+        // A provenance tag the author wrote in backticks. The backticks are
+        // syntax and stop here; the words are the note's own sans face, a
+        // shade smaller and lighter, so the link stays what the eye lands on.
+        if (part.code === true) {
+          const span = document.createElement('span');
+          span.className = 'cw-fn-code';
+          span.textContent = part.text;
+          el.appendChild(span);
+          continue;
+        }
         el.appendChild(document.createTextNode(part.text));
         continue;
       }

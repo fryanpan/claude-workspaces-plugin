@@ -246,7 +246,7 @@ plumbing at 241.
 
 ## Test files
 
-96 test files exceed 500 lines. Two hold two unrelated harnesses; the other 94
+97 test files exceed 500 lines. Two hold two unrelated harnesses; the other 95
 are exceptions, listed after them. The recurring shape across the exceptions is
 one feature tested at two or three *layers* — pure predicate, then store, then
 real HTTP route — sharing the same fixture builders. That is one harness.
@@ -255,7 +255,7 @@ real HTTP route — sharing the same fixture builders. That is one harness.
 |---|---|---|---|
 | `packages/workspaces-app/test/board-render.test.ts` | 3882 | Exception | Twelve describes over one harness: the module-scope `task()` factory and the `root` beforeEach, asserting rendered DOM. The six that `readFileSync` `styles.css` and board source and assert on text moved to `board-source-contract.test.ts` in B1 — they were the second harness this row named. |
 
-The remaining 94 are exceptions. Each row names the one harness its cases share.
+The remaining 95 are exceptions. Each row names the one harness its cases share.
 
 | File | Lines | Reason |
 |---|---|---|
@@ -331,6 +331,7 @@ The remaining 94 are exceptions. Each row names the one harness its cases share.
 | `packages/server/test/collab-host.test.ts` | 582 | All three describes depend on the module-scope `jwks` / `signJwt` `beforeAll` and boot the same server shape. |
 | `packages/server/test/task-review-queue.test.ts` | 581 | Module-scope `handle` / `base` plus `seedWorkspace` / `seedDecision` feed every describe. |
 | `packages/server/test/task-review-item-routes.test.ts` | 579 | A single describe and one `beforeAll` server; every case is a write route read back over HTTP. |
+| `packages/workspaces-app/test/footnote-notes.test.ts` | 578 | Eight describes over one `mount()` — a Y.Doc of note-bearing markdown, a real editor and the notes module — reading the same three draws back off it. The subject is one module's rendering: the margin caption, the tap popover and the printed list, plus what a note's links, backtick spans and fact underline do in each. Splitting by draw would give each half a copy of `mount` and of the `supFor` / `factFor` / `tap` readers, and would file a case about a link in the margin away from the same case about the same link in the popover. |
 | `packages/core/test/summary-generated.test.ts` | 578 | All describes are pure summary-module functions over the shared `thread()` builder. |
 | `packages/server/test/agent-coverage.test.ts` | 573 | One top-level describe around the watch-coverage route; the nested block reuses the same server fixture. |
 | `packages/server/test/meetings.test.ts` | 571 | Four describes, each constructing the same `MeetingStore`-on-disk fixture in an identical `beforeAll`. |

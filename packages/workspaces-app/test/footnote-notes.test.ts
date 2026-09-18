@@ -449,6 +449,96 @@ describe('a link inside a note', () => {
   });
 });
 
+/**
+ * The provenance tag a fleet note ends with, written in backticks and left
+ * that way in the markdown (owner's call, 2026-09-05). The renderer's whole
+ * job is to make it unobtrusive: the backticks never reach the reader, and
+ * what is left steps back from the link beside it.
+ */
+describe('a backtick span inside a note', () => {
+  const TAG = '[primary — read 2026-09-18]';
+  const TAGGED = `Two reviewers serve the city^[[Staffing page, Sep 2026](${PAGE}) \`${TAG}\`.].`;
+  const ticks = (s: string | null | undefined) => (s ?? '').split('`').length - 1;
+
+  it('draws the tag in the margin caption with no backtick in sight', () => {
+    const { notes, container } = mount({ marginVisible: true, md: TAGGED });
+    const card = notes.cards()[0]?.el;
+    expect(card?.querySelector('.cw-fn-code')?.textContent).toBe(TAG);
+    expect(ticks(card?.textContent)).toBe(0);
+    expect(card?.textContent).toBe(`Staffing page, Sep 2026 ${TAG}.`);
+    // The control, and the point of the whole design: the characters the
+    // author typed are still the note, backticks included. Only the DRAW
+    // dropped them.
+    expect(ticks(supFor(container, '1').dataset.cwFnNote)).toBe(2);
+  });
+
+  it('draws it in the popover a tap opens', () => {
+    const { container } = mount({ marginVisible: false, md: TAGGED });
+    tap(supFor(container, '1'));
+    const pop = popover(container);
+    expect(pop?.querySelector('.cw-fn-code')?.textContent).toBe(TAG);
+    expect(ticks(pop?.textContent)).toBe(0);
+  });
+
+  it('draws it in the printed sources list', () => {
+    const { container } = mount({ marginVisible: true, md: TAGGED });
+    const li = container.querySelector('.cw-fn-sources ol li');
+    expect(li?.querySelector('.cw-fn-code')?.textContent).toBe(TAG);
+    expect(ticks(li?.textContent)).toBe(0);
+  });
+
+  /**
+   * Smaller and lighter than the link, in the caption's own sans face: the
+   * link is the thing the reader is meant to land on, and a monospace chip
+   * beside it would be the loudest thing in the margin. Read as computed
+   * values, with the caption itself as the control for what "the link's size"
+   * and "nothing dims this" mean here — happy-dom answers `''` for a property
+   * no author rule set.
+   */
+  it('steps back from the link rather than becoming a code chip', () => {
+    const { notes, container } = mount({ marginVisible: true, md: TAGGED });
+    const card = notes.cards()[0]?.el;
+    if (!card) throw new Error('no margin card');
+    container.appendChild(card);
+    const tagEl = card.querySelector('.cw-fn-code');
+    const link = card.querySelector('a.cw-fn-link');
+    if (!tagEl || !link) throw new Error('caption is missing the tag or the link');
+    const tag = styleOf(tagEl);
+    const [tagSize, tagFace, tagDim] = [tag.fontSize, tag.fontFamily, tag.opacity];
+    const a = styleOf(link);
+    const [linkSize, linkDim] = [a.fontSize, a.opacity];
+    const caption = styleOf(card);
+    const [capSize, capFace] = [caption.fontSize, caption.fontFamily];
+
+    expect(Number.parseFloat(tagSize)).toBeLessThan(Number.parseFloat(linkSize));
+    expect(Number.parseFloat(linkSize)).toBe(Number.parseFloat(capSize));
+    expect(tagFace).toBe(capFace);
+    expect(tagFace).not.toContain('monospace');
+    expect(Number.parseFloat(tagDim)).toBeLessThan(1);
+    expect(linkDim).toBe('');
+  });
+
+  it('builds the tag as text, never as markup', () => {
+    const { notes } = mount({
+      marginVisible: true,
+      md: 'Two reviewers^[Filed `<img src=x onerror=1>` in March.].',
+    });
+    const card = notes.cards()[0]?.el;
+    expect(card?.querySelectorAll('img')).toHaveLength(0);
+    expect(card?.querySelector('.cw-fn-code')?.textContent).toBe('<img src=x onerror=1>');
+  });
+
+  it('leaves a lone backtick in the words, where the author put it', () => {
+    const { notes } = mount({
+      marginVisible: true,
+      md: 'Two reviewers^[Riverbend intake log, `2025 season.].',
+    });
+    const card = notes.cards()[0]?.el;
+    expect(card?.querySelectorAll('.cw-fn-code')).toHaveLength(0);
+    expect(card?.textContent).toBe('Riverbend intake log, `2025 season.');
+  });
+});
+
 describe('a relative link inside a note', () => {
   const REL = 'Two reviewers^[[the intake log](notes/intake.md#sep).].';
 

@@ -5,10 +5,10 @@ import { noteLinkHref, noteParts } from '../src/doc/note-links.ts';
  * Splitting a `^[…]` note into the runs the margin, the popover and the
  * printed list all draw (src/doc/note-links.ts).
  *
- * Two questions, and the second is the one with teeth: which characters are a
- * link, and which hrefs may be followed. An href this function admits becomes
- * an `<a href>` in three places, so a scheme slipping through here is a
- * scheme the reader can click.
+ * Three questions, and the second is the one with teeth: which characters are
+ * a link, which hrefs may be followed, and which characters are a backtick
+ * span. An href this function admits becomes an `<a href>` in three places, so
+ * a scheme slipping through here is a scheme the reader can click.
  */
 
 const REPORT = 'https://harborlight.example.org/permits/2026.pdf';
@@ -37,6 +37,70 @@ describe('the words around a link', () => {
   it('strips backticks from a label, so a code-spanned path reads as the path', () => {
     expect(noteParts('[`plan.md`](plan.md)')).toEqual([
       { text: 'plan.md', href: 'plan.md', external: false },
+    ]);
+  });
+});
+
+/**
+ * The provenance tag a fleet note ends with is written in backticks, and stays
+ * that way in the file. What comes back is the words without the syntax,
+ * marked as the run the renderer draws quietly.
+ */
+describe('a backtick span', () => {
+  const TAG = '[primary — read 2026-09-18]';
+
+  it('comes back as a code run holding the words, not the backticks', () => {
+    expect(noteParts(`Council minutes, 12 May. \`${TAG}\``)).toEqual([
+      { text: 'Council minutes, 12 May. ' },
+      { text: TAG, code: true },
+    ]);
+  });
+
+  it('reads one that follows a link, and keeps them separate runs', () => {
+    expect(noteParts(`[table 4](${REPORT}) \`${TAG}\``)).toEqual([
+      { text: 'table 4', href: REPORT, external: true },
+      { text: ' ' },
+      { text: TAG, code: true },
+    ]);
+  });
+
+  it('reads one that comes BEFORE a link (control on the same note)', () => {
+    expect(noteParts(`\`${TAG}\` [table 4](${REPORT})`)).toEqual([
+      { text: TAG, code: true },
+      { text: ' ' },
+      { text: 'table 4', href: REPORT, external: true },
+    ]);
+  });
+
+  it('leaves a backtick with no closer as the character the author typed', () => {
+    expect(noteParts('Riverbend intake log, `2025 season')).toEqual([
+      { text: 'Riverbend intake log, `2025 season' },
+    ]);
+  });
+
+  it('leaves an empty pair alone — there would be nothing to draw', () => {
+    expect(noteParts('Saltmarsh survey `` and nothing else')).toEqual([
+      { text: 'Saltmarsh survey `` and nothing else' },
+    ]);
+  });
+
+  /**
+   * A label's backticks are stripped rather than marked, and that is the older
+   * behaviour this change had to leave standing: a link is already one run, so
+   * a code run inside it would be a second element inside the `<a>` saying
+   * nothing the label does not.
+   */
+  it('marks nothing inside a link label, which still strips its backticks', () => {
+    expect(noteParts('[`plan.md`](plan.md)')).toEqual([
+      { text: 'plan.md', href: 'plan.md', external: false },
+    ]);
+  });
+
+  it('starts each note over, so one note ending mid-span cannot eat the next', () => {
+    expect(noteParts('Riverbend log `2025')).toEqual([{ text: 'Riverbend log `2025' }]);
+    expect(noteParts(`Council minutes \`${TAG}\``)).toEqual([
+      { text: 'Council minutes ' },
+      { text: TAG, code: true },
     ]);
   });
 });
