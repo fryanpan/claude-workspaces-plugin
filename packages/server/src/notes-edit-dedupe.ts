@@ -84,6 +84,23 @@ export interface NotesDedupeContext {
    * Absent for a tick, which judges exactly as it always did.
    */
   ownedElsewhere?: ReadonlySet<string>;
+  /**
+   * Every heading on this doc SOME meeting has written as a topic of its own.
+   *
+   * WITHOUT IT THE REPEAT CHECK HOLDS ONE TOPIC OF EIGHT. A meeting's topics
+   * are siblings at its section's level (PR 1048 removed the container), so
+   * the section walk stops at the meeting's second topic. Inside one leg the
+   * check survives on `ownedElsewhere`, which is authorship; across a pause
+   * it does not, because `releaseNotesAuthorship` drops every mark when the
+   * next recording starts. On 2026-09-16 a sixteen-second pause therefore
+   * re-opened eight topics the doc already had.
+   *
+   * The note-taker's own memory of which headings it opened is the one record
+   * of that which survives the release, so it is what carries the scope across
+   * the siblings. Absent — a caller with no memory to ask — the scope is the
+   * old one.
+   */
+  meetingTopics?: ReadonlySet<string>;
 }
 
 export interface NotesDedupeResult {
@@ -229,7 +246,7 @@ export function dedupeNotesEdits(
   const section =
     headingId === undefined
       ? { blocks: new Set<string>(), headings: new Set<string>() }
-      : sectionIds(outline, headingId);
+      : sectionIds(outline, headingId, ctx.meetingTopics);
   // No speech is a caller that cannot say what the tick heard — a section
   // open, a cleanup — not a tick that heard no decision.
   const unheard = ctx.speech.length === 0;
@@ -256,7 +273,11 @@ export function dedupeNotesEdits(
     if (e.kind === 'heading') headings.add(e.id);
     if (!section.blocks.has(e.id) || e.kind !== 'heading') continue;
     lastHeading = e.id;
-    if (e.id === headingId) continue;
+    // THE SECTION HEADING IS A TOPIC LIKE THE REST. It was skipped here while
+    // the section was a `## Meeting notes` CONTAINER, which named no topic and
+    // could not be repeated; since PR 1048 it is the meeting's FIRST topic,
+    // and skipping it is what let a recording started after a pause open a
+    // second copy of exactly that one while reusing the seven after it.
     if (topicKey(e.text).length > 0) topics.push({ id: e.id, level: e.level ?? 1, text: e.text });
   }
   /** Where a note already counts as written: this meeting's section, plus
