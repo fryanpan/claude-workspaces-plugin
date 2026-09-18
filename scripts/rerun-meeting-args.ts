@@ -37,6 +37,11 @@ export const USAGE = `usage: bun run meeting:rerun <meeting folder | segment-N-<
                       has to hear it. \`mock\` is free and reads --mock-script.
   --mock-script <f>   JSON array of { words: string[], settled?, speaker? } for
                       the mock engine, which reveals one word per audio chunk.
+  --capture           Run the spoken-ask capture pass in front of every
+                      compose, as the pipeline did until 2026-09-18. Off by
+                      default, because the live server no longer wires it: a
+                      tick is one model call. Pass it to measure the older,
+                      two-call pipeline against this one.
   --engine-spend-ok   REQUIRED with any engine but \`mock\`. A paid engine bills
                       the vendor for the audio's whole length, on their price
                       list and not through any seam this harness can meter, so
@@ -96,6 +101,9 @@ export interface DocSpec {
 
 export interface RerunArgs {
   target: string;
+  /** Run the capture pass in front of every compose — the pipeline as it was
+   *  before the second model call was taken off the note's path. */
+  capture: boolean;
   /** The operator said out loud that a paid engine's bill is outside
    *  `--spend-usd`. Only ever true when they typed it. */
   engineSpendOk: boolean;
@@ -138,6 +146,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
   let port = 0;
   let keep = false;
   let engineSpendOk = false;
+  let capture = false;
   let compare: string | undefined;
   const next = (flag: string, i: number): string => {
     const v = argv[i + 1];
@@ -159,6 +168,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
       engine = e as RerunEngine;
     } else if (a === '--mock-script') mockScript = next(a, i++);
     else if (a === '--engine-spend-ok') engineSpendOk = true;
+    else if (a === '--capture') capture = true;
     else if (a === '--doc') doc = next(a, i++);
     else if (a === '--cast') cast = parseCast(next(a, i++));
     else if (a === '--out') out = next(a, i++);
@@ -223,6 +233,7 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
     port,
     keep,
     engineSpendOk,
+    capture,
     ...(cast !== undefined ? { cast } : {}),
     ...(compare !== undefined ? { compare } : {}),
     ...(mockScript !== undefined ? { mockScript } : {}),
@@ -234,12 +245,13 @@ export function parseRerunArgs(argv: readonly string[]): RerunArgs {
 /**
  * How much more than the compose alone a meeting bills.
  *
- * `estimatedPerHourUsd` is the compose call and nothing else, and a live
- * meeting also pays for task capture on every tick — the half that was
+ * `estimatedPerHourUsd` is the compose call and nothing else, and a run given
+ * `--capture` also pays for task capture on every tick — the half that was
  * invisible until it was measured at roughly as much again as the compose
- * (`notes-spend.ts`). An estimate used to REFUSE a run has to be the high
- * one: a guard that under-reads lets exactly the run it exists to stop
- * through.
+ * (`notes-spend.ts`). Held at 2 even though the live path no longer captures,
+ * because an estimate used to REFUSE a run has to be the high one: a guard
+ * that under-reads lets exactly the run it exists to stop through, and the
+ * flag that doubles the bill is one word on the command line.
  */
 export const CAPTURE_OVERHEAD = 2;
 

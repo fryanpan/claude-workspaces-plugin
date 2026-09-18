@@ -95,6 +95,7 @@ import {
   type NotesTick,
   type TickScheduler,
   createPauseTicker,
+  wordsOf,
 } from './pause-ticker.ts';
 import type { EngineTurn } from './transcribe.ts';
 
@@ -240,6 +241,25 @@ export interface NotesTurn {
    * future prompt — treating the fragment as the start of a new thought.
    */
   continued?: boolean;
+  /**
+   * Where these words start INSIDE their turn, counted in words: 0 for the
+   * opening of a turn, and the number of words earlier ticks already carried
+   * for the rest of a long one.
+   *
+   * IT EXISTS TO DATE THE WORDS. A turn is one person talking until they
+   * stop, so a turn can run for a minute and reach the notes as four
+   * fragments. Every clock the timing row kept was stamped on the turn's
+   * FIRST FRAME, which meant the fourth fragment was charged with the whole
+   * minute — a tick reading thirteen seconds late for words spoken seven
+   * seconds ago, whose opening was already in the doc. With this the session
+   * can ask when the words THIS tick carries were said, which is the wait the
+   * ten-second goal is about.
+   *
+   * Absent on a turn built by a caller that does not count words — every
+   * direct-to-session test — and then the turn's own first frame is the best
+   * the row can do, exactly as before.
+   */
+  fromWord?: number;
 }
 
 /**
@@ -1364,6 +1384,40 @@ export function beginNotesSession(
    */
   const spokenAtOf = new Map<number, number>();
   const spokenEndOf = new Map<number, number>();
+  /**
+   * WHEN EACH WORD OF A TURN WAS SAID, as far as the frames can say: one
+   * entry per frame that grew the turn, holding how many words the turn had
+   * reached and the instant that frame's LAST word was spoken.
+   *
+   * It is what turns `NotesTurn.fromWord` into a clock. A frame's `spokenAt`
+   * dates its own last word, so the first frame whose word count exceeds
+   * `fromWord` is the frame in which that word was first heard — and its
+   * `spokenAt` is the closest thing the pipeline has to when that word was
+   * said. Without this the only date a tick's words had was the turn's first
+   * frame, which is why a ceiling tick carrying the tail of a long turn read
+   * as a note that was thirteen seconds late.
+   *
+   * Empty on any caller that passes no `spokenAt` — see `onTurn` — and only
+   * frames that added words are kept, so a turn's list is bounded by its own
+   * length in words rather than by how often the engine spoke.
+   */
+  const spokenFramesOf = new Map<number, Array<{ words: number; at: number }>>();
+  /**
+   * When the words a tick carries out of `turn` starting at word `fromWord`
+   * were first heard. Falls back to the turn's own first frame, which is what
+   * every clock here did before `fromWord` existed.
+   */
+  const firstSpokenOf = (turn: NotesTurn): number | undefined => {
+    const frames = spokenFramesOf.get(turn.turn);
+    const from = turn.fromWord;
+    if (frames === undefined || frames.length === 0 || from === undefined) {
+      return spokenAtOf.get(turn.turn);
+    }
+    for (const frame of frames) if (frame.words > from) return frame.at;
+    // Past every frame we saw: the settled turn carried more words than any
+    // partial did. Its last frame is the nearest instant we can name.
+    return frames[frames.length - 1]?.at ?? spokenAtOf.get(turn.turn);
+  };
   /** When each tick fired, and how many ticks' words it ended up carrying. */
   const firedAt = new WeakMap<NotesTick, number>();
   const mergedOf = new WeakMap<NotesTick, number>();
@@ -1521,6 +1575,13 @@ export function beginNotesSession(
         .filter((v): v is number => v !== undefined);
       const spokenAt = spokenStarts.length > 0 ? Math.min(...spokenStarts) : null;
       const lastSpokenAt = spokenEnds.length > 0 ? Math.max(...spokenEnds) : null;
+      // THE EARLIEST WORD THIS TICK IS ACTUALLY CARRYING, which is not the
+      // same as the earliest word of the turns it names — see
+      // `NotesTurn.fromWord`.
+      const firstSpokens = raw
+        .map((t) => firstSpokenOf(t))
+        .filter((v): v is number => v !== undefined);
+      const firstSpokenAt = firstSpokens.length > 0 ? Math.min(...firstSpokens) : null;
       let measured: NotesComposeMeasure = {};
       let composeMs = 0;
       let applyMs = 0;
@@ -1559,6 +1620,7 @@ export function beginNotesSession(
           turns: raw.map((t) => t.turn),
           settledAt,
           spokenAt,
+          firstSpokenAt,
           lastSpokenAt,
           startedAt,
           waitedMs: composeStart - startedAt,
@@ -1585,6 +1647,8 @@ export function beginNotesSession(
           outcome,
           settledToWrittenMs: outcome === 'written' && settledAt !== null ? end - settledAt : null,
           spokenToWrittenMs: outcome === 'written' && spokenAt !== null ? end - spokenAt : null,
+          firstSpokenToWrittenMs:
+            outcome === 'written' && firstSpokenAt !== null ? end - firstSpokenAt : null,
           lastSpokenToWrittenMs:
             outcome === 'written' && lastSpokenAt !== null ? end - lastSpokenAt : null,
         });
@@ -1606,6 +1670,10 @@ export function beginNotesSession(
         // does: whether these words finish a sentence already in the notes
         // is a fact about the WORDS, not about who said them.
         ...(t.continued ? { continued: true } : {}),
+        // And `fromWord` for a third time: where the words sit in their turn
+        // is what dates them, and dropping it here would leave every solo
+        // meeting's timing row reading off the turn's first frame again.
+        ...(t.fromWord !== undefined ? { fromWord: t.fromWord } : {}),
       });
       const turns = multi ? raw.map(withNames) : raw.map(bare);
       let taskLinks: readonly NoteTaskLink[] = [];
@@ -2228,6 +2296,16 @@ export function beginNotesSession(
         // turn must not move it BACK, or a re-emitted earlier frame would
         // report the speaker as still talking.
         spokenEndOf.set(turn.turn, Math.max(spokenEndOf.get(turn.turn) ?? spokenAt, spokenAt));
+        // One entry per frame that GREW the turn: the pair (words so far,
+        // when the last of them was said) is what dates a word inside a long
+        // turn. A frame that added nothing — a re-emitted final, a revision —
+        // dates no new word, so it is not an entry.
+        const frames = spokenFramesOf.get(turn.turn) ?? [];
+        const words = wordsOf(turn.text).length;
+        if (words > (frames[frames.length - 1]?.words ?? 0)) {
+          frames.push({ words, at: spokenAt });
+          spokenFramesOf.set(turn.turn, frames);
+        }
       }
       ticker.onTurn(turn);
     },

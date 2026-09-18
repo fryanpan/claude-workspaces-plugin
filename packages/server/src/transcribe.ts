@@ -191,8 +191,31 @@ export const DEFAULT_MOCK_SCRIPT: readonly MockScriptTurn[] = [
  * touches a meeting either slow or flaky, and the thing under test here — a
  * partial being replaced in place — is precisely the thing a race hides.
  */
+export interface MockEngineOptions {
+  /**
+   * Report `audioEndMs` and an in-turn `settledText`, the way both shipped
+   * engines do.
+   *
+   * OFF BY DEFAULT, because a suite's mock reporting neither is what makes a
+   * scripted meeting's turns arrive as whole settled sentences — the shape
+   * almost every test here is written against. ON is for a run that MEASURES
+   * the note-taker rather than asserting on it: without word offsets the
+   * relay has nothing to date a word by (`spokenAtOf` in
+   * `meeting-protocol.ts` returns undefined), so every latency in a mock
+   * replay's timing rows reads null and the run answers "lateness unknown".
+   *
+   * The offsets are exact rather than estimated: the engine is driven one
+   * chunk at a time and knows the sample rate, so the audio position when a
+   * word was revealed is a byte count. The settled prefix is every revealed
+   * word but the last, which is the streaming finalizer both engines run —
+   * one word behind the live tail.
+   */
+  wordTimings?: boolean;
+}
+
 export function createMockTranscriptionEngine(
   script: readonly MockScriptTurn[] = DEFAULT_MOCK_SCRIPT,
+  options: MockEngineOptions = {},
 ): TranscriptionEngine {
   return {
     name: 'mock',
@@ -200,6 +223,12 @@ export function createMockTranscriptionEngine(
       let index = 0;
       let revealed = 0;
       let closed = false;
+      /** Milliseconds of audio this session has been handed. */
+      let audioMs = 0;
+      const bytesPerMs = (opts.sampleRate * 2) / 1000;
+      const timings = options.wordTimings === true;
+      const at = (): { audioEndMs?: number } =>
+        timings ? { audioEndMs: Math.round(audioMs) } : {};
       /**
        * The mock diarizes only when it was asked to, exactly as the real
        * engine does — so a test can prove the flag REACHED an engine by
@@ -215,7 +244,7 @@ export function createMockTranscriptionEngine(
         const text = whole
           ? (turn.settled ?? turn.words.join(' '))
           : turn.words.slice(0, revealed).join(' ');
-        opts.onTurn({ turn: index, text, final: true, ...speakerOf(turn) });
+        opts.onTurn({ turn: index, text, final: true, ...speakerOf(turn), ...at() });
         index++;
         revealed = 0;
       };
@@ -223,8 +252,12 @@ export function createMockTranscriptionEngine(
         labelling && turn.speaker !== undefined ? { speaker: turn.speaker } : {};
 
       return Promise.resolve({
-        send(): void {
+        send(audio: Uint8Array): void {
           if (closed) return;
+          // Counted even once the script has run out: the audio is what the
+          // offsets are measured in, and a replay's later segments are still
+          // real seconds of a meeting.
+          if (bytesPerMs > 0) audioMs += audio.byteLength / bytesPerMs;
           const turn = script[index];
           if (!turn) return;
           if (revealed < turn.words.length) {
@@ -234,6 +267,12 @@ export function createMockTranscriptionEngine(
               text: turn.words.slice(0, revealed).join(' '),
               final: false,
               ...speakerOf(turn),
+              ...at(),
+              // One word behind the tail, and only once there is a word to be
+              // behind: the prefix a ceiling tick is allowed to carry.
+              ...(timings && revealed > 1
+                ? { settledText: turn.words.slice(0, revealed - 1).join(' ') }
+                : {}),
             });
             return;
           }

@@ -81,7 +81,12 @@ export function engineFor(args: RerunArgs, target: ReplayTarget): TranscriptionE
       if (script && (!Array.isArray(script) || script.length === 0)) {
         throw new UsageError(`--mock-script ${args.mockScript} must be a non-empty JSON array`);
       }
-      engine = script ? createMockTranscriptionEngine(script) : createMockTranscriptionEngine();
+      // Word offsets ON: a rerun exists to measure, and without them the
+      // relay cannot date a word, so every latency in the report reads null.
+      const timings = { wordTimings: true };
+      engine = script
+        ? createMockTranscriptionEngine(script, timings)
+        : createMockTranscriptionEngine(undefined, timings);
       break;
     }
     case 'soniox':
@@ -181,11 +186,17 @@ async function main(argv: string[]): Promise<number> {
   const outcome = await runRerun(args, target, doc, {
     composer: composerFor(log),
     transcription,
-    taskExtractor: requireCapture(
-      createHaikuTaskCaptureExtractor({
-        instructions: () => promptStore.read('meeting-capture'),
-      }),
-    ),
+    // OFF UNLESS THE OPERATOR ASKED FOR IT, because the live server no longer
+    // wires it (Bryan, 2026-09-18): the capture pass was a second model call
+    // in front of every note. `--capture` is how the older two-call pipeline
+    // is measured against this one; without it a run measures what ships.
+    taskExtractor: args.capture
+      ? requireCapture(
+          createHaikuTaskCaptureExtractor({
+            instructions: () => promptStore.read('meeting-capture'),
+          }),
+        )
+      : null,
     // NO TITLE NAMER, DELIBERATELY. It bills Haiku through a seam that
     // reports no usage, so the meter cannot see it and `--spend-usd` would be
     // a ceiling with a hole in it. None of the seven measures is about the

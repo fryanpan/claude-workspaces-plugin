@@ -27,7 +27,6 @@ import {
 } from './google-oauth.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
-import { createHaikuTaskCaptureExtractor } from './meeting-task-capture.ts';
 import { createNotesMethodComposer } from './notes-method-composer.ts';
 import { readNotesMethod } from './notes-method-store.ts';
 import { createPluginRefresher } from './plugin-refresh.ts';
@@ -318,19 +317,14 @@ export function createServerDeps(
   });
   // No "no key" line here: the `[claude]` line at the top already said it.
 
-  // The ONLY place the real task-capture extractor is constructed — the same
-  // dedicated-key consent as the notes composer, because the same transcript
-  // text leaves the machine. Absent key or CW_MEETING_TASKS=0 → null → the
-  // notes still compose, they just never link or file board tasks.
-  const taskExtractor = createHaikuTaskCaptureExtractor({
-    instructions: () => promptStore.read('meeting-capture'),
-  });
-  if (notesComposer && !taskExtractor) {
-    console.log(
-      '[meeting-tasks] task capture off (CW_MEETING_TASKS=0); meetings compose notes ' +
-        'without finding or filing board tasks.',
-    );
-  }
+  // NO TASK-CAPTURE EXTRACTOR IS BUILT HERE ANY MORE (Bryan, 2026-09-18).
+  // The capture pass was a SECOND Haiku call in front of every note — 1.6s of
+  // median wait and 9.3s at its worst, on a note the board asks to arrive
+  // within ten seconds — and it was a third of what a meeting-hour cost. The
+  // extractor and the pass behind it are unchanged in
+  // `meeting-task-capture.ts`; nothing in the live server wires them, so a
+  // tick is one model call. `createHaikuTaskCaptureExtractor` is what a
+  // caller that wants the pass back constructs.
 
   // The ONLY place the real meeting namer is constructed — the same key and
   // the same consent as the notes composer, because what it sends is the
@@ -394,7 +388,6 @@ export function createServerDeps(
     meetingBot,
     calendarBot,
     notesComposer,
-    taskExtractor,
     titleNamer,
     pluginRefresher,
     deployer,
