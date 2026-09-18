@@ -66,6 +66,7 @@
 import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts';
 import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
+import { missedBlock } from './notes-missed-words.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
 import { regroupDirective } from './notes-regroup-ask.ts';
 
@@ -282,15 +283,7 @@ export function buildNotesPrompt(
 
   if (input.missed?.length) {
     parts.push(
-      [
-        'SAID EARLIER AND STILL IN NO NOTE. Each of these went past without',
-        'producing anything. Read them again with the notes above in front of',
-        'you: write the note each one should have produced, under the heading',
-        'it belongs to. Leave one out only if it is genuinely packaging — a',
-        'greeting, a false start, or a point the notes already carry in other',
-        'words. This is their last offer; nothing asks again.',
-        ...input.missed.map((t) => `- ${speakerPrefix(t)}${t.text}`),
-      ].join('\n'),
+      missedBlock(input.missed, input.outline.map((e) => e.text).join('\n'), speakerPrefix),
     );
   }
 

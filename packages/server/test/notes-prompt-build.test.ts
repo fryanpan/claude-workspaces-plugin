@@ -425,3 +425,76 @@ describe('material pulled in, in the prompt', () => {
     expect(user).not.toContain('asked to have pulled in');
   });
 });
+
+/**
+ * The retry block, and the one judgement it stopped asking the note-taker to
+ * make. The block used to let a line be left out as "a point the notes
+ * already carry in other words", which is true of the point of an "X because
+ * Y" line and false of its reason — the shape twenty-six of thirty-one
+ * measured misses had. The server knows which words are still absent, so it
+ * names them (`notes-missed-words.ts`).
+ */
+describe('the retried lines, in the prompt', () => {
+  const outline = [
+    {
+      id: 'h1',
+      kind: 'heading' as const,
+      nodeName: 'heading',
+      level: 2,
+      text: 'Meeting notes',
+      author: 'meeting-notes',
+    },
+    {
+      id: 'b1',
+      kind: 'listItem' as const,
+      nodeName: 'listItem',
+      text: 'Reminder: follow up on the contract signature by the twentieth',
+      author: 'meeting-notes',
+    },
+  ];
+
+  it('names the words of a part-carried line that reached no note', () => {
+    const { user } = buildNotesPrompt({
+      ...input,
+      outline,
+      missed: [
+        {
+          turn: 1,
+          text:
+            'Put a reminder on it for the twentieth, because a contract sitting ' +
+            'unsigned in an inbox is the same as no contract.',
+        },
+      ],
+    });
+    // The reason, called out as the part no note has — not the sentence
+    // again, which is what the block already carried.
+    expect(user).toContain('[no note has: Put, sitting, unsigned, inbox]');
+  });
+
+  it('adds no word list to a line the notes touch nowhere', () => {
+    const { user } = buildNotesPrompt({
+      ...input,
+      outline,
+      missed: [{ turn: 1, text: 'The crane deposit is refundable up to a month out.' }],
+    });
+    expect(user).toContain('The crane deposit is refundable up to a month out.');
+    expect(user).not.toContain('[no note has:');
+  });
+
+  it('does not offer "the notes already carry it" as a reason to skip a line', () => {
+    const { user } = buildNotesPrompt({
+      ...input,
+      outline,
+      missed: [{ turn: 1, text: 'The crane deposit is refundable up to a month out.' }],
+    });
+    // Read with the line wrapping collapsed: the sentence is built from an
+    // array of lines, so a phrase test that did not collapse it would pass
+    // whatever the block said.
+    expect(user.replace(/\s+/g, ' ')).not.toContain('already carry in other words');
+  });
+
+  it('says nothing about retries when the tick had none', () => {
+    const { user } = buildNotesPrompt({ ...input, outline });
+    expect(user).not.toContain('STILL IN NO NOTE');
+  });
+});

@@ -37,6 +37,7 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 - Each note is one markdown list item. Do not write paragraphs.
 - Write one point in each note. Use a maximum of 20 words. The speaker tag is not part of the 20.
 - If a note needs "and", a dash or a semicolon to hold two ideas, write two notes.
+- When the speaker gives a reason, a cause or a trade-off for a point, write it as a second note under that point. The reason is an idea. Do not drop it.
 - Paraphrase. Do not copy the words of the speaker.
   - Remove greetings, false starts and repeats. 
 - Keep every idea, also a small idea. If you must choose, write the idea in five words. Do not drop it.

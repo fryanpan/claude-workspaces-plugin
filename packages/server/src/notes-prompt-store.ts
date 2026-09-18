@@ -58,6 +58,12 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  * - "Keep every idea" replaced "fewer, better notes beat complete ones". A
  *   note-taker told that leaving an idea out is a success did exactly that,
  *   and `notes-idea-coverage.ts` is the half that measures whether it stopped.
+ * - "A reason is a note of its own" was added on 2026-09-18 because the note
+ *   that "keep every idea" produces for "X because Y" is a note about X.
+ *   Across four reruns of two synthetic meetings, twenty-six of thirty-one
+ *   uncovered ideas had that shape: the point reached a bullet and the reason
+ *   the speaker gave for it reached nothing. The retry block's half of the
+ *   same fix is `notes-missed-words.ts`.
  * - The strength rule ("an aside is not a proposal") is in Accuracy because
  *   all three shipped methods wrote a joke about the cables on AMI ES2002b as
  *   a design proposal. That is not fabrication — the idea was there, one step
@@ -125,6 +131,7 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '- Each note is one markdown list item. Do not write paragraphs.',
   `- Write one point in each note. Use a maximum of ${MAX_BULLET_WORDS} words. The speaker tag is not part of the ${MAX_BULLET_WORDS}.`,
   '- If a note needs "and", a dash or a semicolon to hold two ideas, write two notes.',
+  '- When the speaker gives a reason, a cause or a trade-off for a point, write it as a second note under that point. The reason is an idea. Do not drop it.',
   '- Paraphrase. Do not copy the words of the speaker.',
   '  - Remove greetings, false starts and repeats. ',
   '- Keep every idea, also a small idea. If you must choose, write the idea in five words. Do not drop it.',
