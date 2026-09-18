@@ -144,7 +144,6 @@ const {
   meetingBot,
   calendarBot,
   notesComposer,
-  taskExtractor,
   titleNamer,
   pluginRefresher,
   deployer,
@@ -278,9 +277,7 @@ while (!handle) {
       ...(transcription ? { transcription } : {}),
       ...(meetingBot ? { meetingBot } : {}),
       ...(meetingBotWebhookSecret ? { meetingBotWebhookSecret } : {}),
-      ...(notesComposer
-        ? { meetingNotes: { composer: notesComposer, taskExtractor, titleNamer } }
-        : {}),
+      ...(notesComposer ? { meetingNotes: { composer: notesComposer, titleNamer } } : {}),
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
       // The one construction of the real discovery reader — the seam rule

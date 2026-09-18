@@ -514,6 +514,7 @@ describe('a --compare that names nothing readable', () => {
           port: 0,
           keep: false,
           engineSpendOk: false,
+          capture: false,
           compare: join(tmpdir(), 'cw-no-such-rerun-folder'),
         } satisfies RerunArgs,
         recording(),

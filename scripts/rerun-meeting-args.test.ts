@@ -64,7 +64,14 @@ describe('the spend flag', () => {
       port: 0,
       keep: false,
       engineSpendOk: false,
+      // The capture pass is opt-in: the live path stopped making that call on
+      // 2026-09-18, so a rerun replays one model call per tick unless asked.
+      capture: false,
     });
+  });
+
+  it('--capture asks for the two-call pipeline the live path no longer runs', () => {
+    expect(parseRerunArgs(['/m', '--spend-usd', '5', '--capture']).capture).toBe(true);
   });
 
   it('takes a method, an engine and a document, and rejects names it has no builder for', () => {

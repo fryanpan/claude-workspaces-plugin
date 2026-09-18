@@ -4,7 +4,7 @@
  * A pause, the cadence ceiling, or the meeting ending. Read
  * [meeting-assistant.md](../../../docs/architecture/meeting-assistant.md)
  * before changing any of the numbers: they were set against measured runs of
- * `scripts/notes-latency-check.ts`, and a tick is two model calls.
+ * `scripts/notes-latency-check.ts`, and a tick is one model call.
  *
  * It knows nothing about notes, docs or models — turns in, ticks out, and
  * every timer through an injectable seam so a test asserts a sequence rather
@@ -318,7 +318,7 @@ export function createPauseTicker(opts: PauseTickerOpts): PauseTicker {
         text: rest,
         ...(held.speaker !== undefined ? { speaker: held.speaker } : {}),
         partial: true,
-        ...(already > 0 ? { continued: true } : {}),
+        ...(already > 0 ? { fromWord: already, continued: true } : {}),
       });
     }
     return out;
@@ -378,6 +378,7 @@ export function createPauseTicker(opts: PauseTickerOpts): PauseTicker {
               turn: waiting.turn,
               text: waiting.text,
               ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
+              ...(waiting.fromWord !== undefined ? { fromWord: waiting.fromWord } : {}),
               ...(waiting.continued ? { continued: true } : {}),
             };
           } else {
@@ -399,7 +400,7 @@ export function createPauseTicker(opts: PauseTickerOpts): PauseTicker {
               turn: turn.turn,
               text: rest,
               ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}),
-              ...(already > 0 ? { continued: true } : {}),
+              ...(already > 0 ? { fromWord: already, continued: true } : {}),
             });
           }
         }
