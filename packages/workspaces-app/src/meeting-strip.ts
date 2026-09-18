@@ -20,16 +20,24 @@
  * layout.
  *
  * ONE TAP WHEN ALONE. A Record press on a doc with nobody else on it starts
- * a solo recording at once — no chooser, the server's default engine — because
- * every question the chooser asks (who will the microphone hear, should a bot
- * go instead) has no answer when there is nobody else there, and a form that
- * recurs unchanged is friction rather than a decision (Urgent-fixes ticket,
- * 2026-09-02: "start recording in one tap when he is alone"). Whether anyone
- * else is here is the doc's presence, asked at press time through
+ * recording at once — no chooser, the server's default engine — because a form
+ * that recurs unchanged is friction rather than a decision (Urgent-fixes
+ * ticket, 2026-09-02: "start recording in one tap when he is alone"). Whether
+ * anyone else is here is the doc's presence, asked at press time through
  * `opts.alone` (`meeting-solo.ts`); with a collaborator on the doc the press
  * opens the chooser as before. The chooser itself stays one tap away either
- * way, behind the small options button beside Record — a conversation in a
- * room nobody else has the doc open in still has to be asked for somewhere.
+ * way, behind the small options button beside Record.
+ *
+ * WHAT THAT TAP STARTS IS WHAT THE BUTTON SAYS. It used to assign `solo`
+ * outright, on the reasoning that nobody else is here to label — but nobody
+ * on the DOC is not one voice in the ROOM, and the press overwrote a mode
+ * already chosen. On 16 September a sixteen-second pause came back solo and
+ * speaker attribution ended for three quarters of the meeting, with nothing
+ * on screen saying so. So the button now carries both billed facts — what it
+ * will listen to and how many voices it will listen for — the chooser form is
+ * what both doors read (`startWhatTheButtonSays`), and a stop leaves that form
+ * where the last answer left it, which is what makes a restart keep it.
+ * `meeting-record-face.ts` is the vocabulary and holds that story.
  *
  * EVERY BILLED CHOICE HAPPENS AT START TIME. The chooser collects the source
  * (microphone, or a bot sent to a Zoom / Google Meet call) and whether the
@@ -132,6 +140,15 @@ import {
   createAudioHold,
   createReconnectPlan,
 } from './meeting-reconnect.ts';
+import {
+  RECORD_LABEL,
+  type RecordSource,
+  SOURCE_GLYPH,
+  VOICES_GLYPH,
+  everyRecordLabel,
+  everyRecordSetting,
+  recordFace,
+} from './meeting-record-face.ts';
 import { COMBINED_ECHO_NOTE, systemAudioOffered } from './meeting-source.ts';
 import {
   type LostStream,
@@ -560,8 +577,47 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   recordDot.hidden = true;
   const recordLabel = document.createElement('span');
   recordLabel.className = 'meeting-record-label';
-  recordLabel.textContent = 'Record Audio';
-  record.append(recordGlyph, recordDot, recordLabel);
+  recordLabel.textContent = RECORD_LABEL.idle;
+  /**
+   * The line under the headline: what this press will capture, and for how
+   * many voices. It is the whole point of the control — a press whose two
+   * billed facts are invisible is how a paused meeting came back solo on 16
+   * September (`meeting-record-face.ts` tells that story).
+   */
+  const recordSettingEl = document.createElement('span');
+  recordSettingEl.className = 'meeting-record-setting';
+  /**
+   * Every face the button can wear, at zero height and hidden from everyone.
+   *
+   * It is what holds the pill to ONE width (Bryan, on the approved mock:
+   * "keep the button the same size across every state"). Without it the pill
+   * resizes on every chooser answer and again when Record Audio becomes
+   * Recording, dragging the chevron and the toolbar beside it.
+   */
+  const recordSizer = document.createElement('span');
+  recordSizer.className = 'meeting-record-sizer';
+  recordSizer.setAttribute('aria-hidden', 'true');
+  for (const text of everyRecordLabel()) {
+    const span = document.createElement('span');
+    span.className = 'meeting-record-label';
+    span.textContent = text;
+    recordSizer.append(span);
+  }
+  for (const text of everyRecordSetting()) {
+    const span = document.createElement('span');
+    span.className = 'meeting-record-setting';
+    span.textContent = text;
+    recordSizer.append(span);
+  }
+  const recordText = document.createElement('span');
+  recordText.className = 'meeting-record-text';
+  recordText.append(recordLabel, recordSettingEl, recordSizer);
+  /** The voice-count mark, which is the only place that fact survives below
+   *  640px — the width Bryan's phone ruling takes the words away at. */
+  const recordMarks = document.createElement('span');
+  recordMarks.className = 'meeting-record-marks';
+  recordMarks.setAttribute('aria-hidden', 'true');
+  record.append(recordGlyph, recordDot, recordText, recordMarks);
   /**
    * The chooser's own door, beside Record: the source and speaker questions a
    * one-tap start does not ask. Idle only — while recording, Record itself
@@ -583,6 +639,10 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   blinker.setAttribute('aria-hidden', 'true');
   const elapsed = document.createElement('span');
   elapsed.className = 'meeting-elapsed';
+  /** What this recording is capturing, beside its clock — the same two facts
+   *  the button carried before the press. Shown only while it runs. */
+  const stripSetting = document.createElement('span');
+  stripSetting.className = 'meeting-setting';
   const feed = document.createElement('div');
   feed.className = 'meeting-feed';
   const line = document.createElement('div');
@@ -609,7 +669,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   root.classList.add('meeting-strip');
   root.classList.toggle('has-timing', timing !== null);
   root.replaceChildren(
-    ...(timing ? [blinker, elapsed, feed, timing.element] : [blinker, elapsed, feed]),
+    ...(timing
+      ? [blinker, elapsed, stripSetting, feed, timing.element]
+      : [blinker, elapsed, stripSetting, feed]),
   );
   // Record and its chevron travel as ONE box. They are one control drawn in
   // two, and the bar they dock into sizes its children independently — a
@@ -1044,6 +1106,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     ...(opts.loadTranscript ? { loadTranscript: opts.loadTranscript } : {}),
     speakerRow: (label) => menu.speakerRow(label),
     renderPop,
+    onChoiceChanged: () => {
+      if (!disposed) render();
+    },
     onStartPressed,
     systemAudioOffered: opts.systemAudioOffered ?? (() => systemAudioOffered()),
     isChooserView: () => view === 'chooser',
@@ -1301,9 +1366,29 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         });
       return;
     }
+    closePop();
+    startWhatTheButtonSays();
+  }
+
+  /**
+   * Open a capture with the settings the button is showing.
+   *
+   * ONE PATH FOR BOTH DOORS — the chooser's Start and a one-tap press while
+   * alone. They used to differ, and the difference was a bug: the one-tap
+   * path assigned `solo` outright, so a stop and a second press overwrote a
+   * `conversation` already chosen. On 16 September a sixteen-second pause
+   * came back solo and speaker attribution ended for three quarters of the
+   * meeting, with nothing on screen saying so before the press or after it.
+   *
+   * The chooser form is what BOTH read, which is what makes a restart keep
+   * the settings: `choose` lives for the mount, so a stop leaves it exactly
+   * as the last answer left it. (Still not persisted beyond the mount — a
+   * mode remembered from yesterday spends money on a session nobody chose it
+   * for.)
+   */
+  function startWhatTheButtonSays(): void {
     mode = choose.chooseMode;
     source = choose.chooseSource === 'mic+system' ? 'mic+system' : 'mic';
-    closePop();
     void start(false);
   }
 
@@ -1335,6 +1420,29 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     return busy ? 'menu' : 'chooser';
   }
 
+  /**
+   * What the NEXT press will listen to, as the button names it.
+   *
+   * The chooser form is the intent, and it is the only thing that is: `mode`
+   * and `source` below are overwritten by what actually opened (and `mode`
+   * again by the server's `ready`), so a button reading those would announce
+   * a session that has ended rather than the one a press would start.
+   */
+  function intentSource(): RecordSource {
+    return choose.chooseSource === 'bot'
+      ? 'bot'
+      : choose.chooseSource === 'mic+system'
+        ? 'mic+system'
+        : 'mic';
+  }
+
+  /** What the LIVE capture is listening to — the bot outranks a microphone
+   *  that is not open, and a refused second stream is not claimed. */
+  function liveFaceSource(): RecordSource {
+    if (liveBot() !== null && state.kind === 'idle') return 'bot';
+    return liveSource === 'mic+system' ? 'mic+system' : 'mic';
+  }
+
   /** Whether the strip row earns its height right now. */
   function stripVisible(): boolean {
     if (state.kind !== 'idle') return true;
@@ -1355,17 +1463,28 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     root.classList.toggle('is-live', isRecording);
     root.classList.toggle('is-bot', botLive !== null && state.kind === 'idle');
     root.hidden = !stripVisible();
-    // The button: Record Audio with the speaker glyph when idle, a solid red
-    // dot and Recording while live — the strip and its owner read as one unit.
-    recordLabel.textContent = isRecording ? 'Recording' : 'Record Audio';
-    recordGlyph.hidden = isRecording;
+    // The button: what it is about to capture while idle, what it IS
+    // capturing while live, plus a solid red dot — the strip and its owner
+    // read as one unit. Idle reads the chooser (the intent the next press
+    // will honour); live reads what actually opened, which differ whenever a
+    // stream was refused or the server answered with a different mode.
+    const face = recordFace({
+      recording: isRecording,
+      source: isRecording ? liveFaceSource() : intentSource(),
+      mode: isRecording ? mode : choose.chooseMode,
+    });
+    recordLabel.textContent = face.label;
+    recordSettingEl.textContent = face.setting;
+    recordGlyph.innerHTML = SOURCE_GLYPH[isRecording ? liveFaceSource() : intentSource()];
+    recordMarks.innerHTML = VOICES_GLYPH[isRecording ? mode : choose.chooseMode];
+    // The dot keeps its box when it is not lit: a control that grows when a
+    // recording starts moves the chevron and the toolbar beside it.
     recordDot.hidden = !isRecording;
     record.classList.toggle('is-live', isRecording);
-    record.title = isRecording ? 'Recording — open controls' : 'Record audio';
-    record.setAttribute(
-      'aria-label',
-      isRecording ? 'Recording — open recording controls' : 'Record audio',
-    );
+    record.title = face.title;
+    record.setAttribute('aria-label', face.ariaLabel);
+    stripSetting.textContent = face.setting;
+    stripSetting.hidden = !isRecording;
     switch (state.kind) {
       case 'requesting':
         transcript.showNote('Asking for the microphone…');
@@ -2264,13 +2383,18 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       return;
     }
     const want = popForNow();
-    // Alone on the doc and nothing running: the tap IS the start. Solo,
-    // because nobody else is here to label; the engine the server defaults
-    // to, because that is not this person's question. Everything the chooser
+    // Alone on the doc and nothing running: the tap IS the start, with the
+    // settings the button is showing and the engine the server defaults to,
+    // because that is not this person's question. Everything the chooser
     // would have asked stays one tap away behind the options button.
-    if (want === 'chooser' && opts.alone?.() === true) {
-      mode = 'solo';
-      void start(false);
+    //
+    // IT NO LONGER ASSIGNS SOLO. Nobody else on the DOC never meant one voice
+    // in the ROOM — that conflation is the 16 September failure, and a press
+    // that silently overrode the mode on screen is exactly what this button
+    // now exists to rule out. A bot is the one pick a press cannot honour: it
+    // needs a call to be sent to, so it goes to the chooser for the link.
+    if (want === 'chooser' && opts.alone?.() === true && choose.chooseSource !== 'bot') {
+      startWhatTheButtonSays();
       return;
     }
     openPop(want);
