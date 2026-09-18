@@ -145,6 +145,7 @@ async function rerun(cast?: SeededCast): Promise<RerunOutcome> {
     target: dir,
     method: 'original',
     engine: 'mock',
+    capture: false,
     doc: 'empty',
     out,
     spendUsd: 1,

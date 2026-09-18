@@ -103,6 +103,23 @@ export interface NotesTickTiming {
    * machine they are tens of milliseconds against a wait measured in seconds.
    */
   spokenAt: number | null;
+  /**
+   * Epoch ms at which the EARLIEST WORD THIS TICK CARRIES was spoken.
+   *
+   * WHY IT IS NOT `spokenAt`. `spokenAt` is the opening of the oldest TURN a
+   * tick names, and a turn is one person talking until they stop — so a
+   * ceiling tick carrying the tail of a minute-long argument is dated to the
+   * start of that argument, whose opening words are already in the doc. On a
+   * synthetic twenty-minute meeting with fourteen-second turns the two read
+   * 13.0s and 7.3s for the same ticks; the 13.0s is the age of words nobody
+   * was still waiting for.
+   *
+   * It is read off `NotesTurn.fromWord` and the per-frame word counts the
+   * session keeps: the frame in which the tick's first word appeared dates
+   * that word. Null on the same terms as `spokenAt` — no audio clock, no
+   * relay, or a caller that counts no words — never zero.
+   */
+  firstSpokenAt: number | null;
   lastSpokenAt: number | null;
   /** Epoch ms at which the tick fired. */
   startedAt: number;
@@ -239,6 +256,12 @@ export interface NotesTickTiming {
    * speech costs the person who spoke first.
    */
   spokenToWrittenMs: number | null;
+  /**
+   * THE NUMBER THE TEN-SECOND GOAL IS MEASURED ON: from the earliest word
+   * this tick carries being spoken to its note being in the doc. See
+   * {@link firstSpokenAt} for why it is not `spokenToWrittenMs`.
+   */
+  firstSpokenToWrittenMs: number | null;
   lastSpokenToWrittenMs: number | null;
 }
 
@@ -424,6 +447,13 @@ export function createNotesTimingLog(opts: NotesTimingLogOpts = {}): NotesTiming
         .filter((v): v is number => v !== null);
       const spokenMid = spoken.length > 0 ? (median(spoken) ?? 0) : null;
       const spokenWorst = spoken.length > 0 ? Math.max(...spoken) : null;
+      // And the wait of the FIRST words on the tick, which is the larger of
+      // the two and the one the ten-second goal is written against.
+      const first = rows
+        .map((r) => r.firstSpokenToWrittenMs)
+        .filter((v): v is number => v !== null);
+      const firstMid = first.length > 0 ? (median(first) ?? 0) : null;
+      const firstWorst = first.length > 0 ? Math.max(...first) : null;
       const failed = rows.filter((r) => r.outcome === 'failed').length;
       // THE EDITS THAT NEVER LANDED WHERE THEY WERE AIMED, over the whole
       // meeting. Counted apart from `failed`, which is ticks: the case this
@@ -437,6 +467,10 @@ export function createNotesTimingLog(opts: NotesTimingLogOpts = {}): NotesTiming
         (spokenMid !== null
           ? `; spoken-to-written median ${Math.round(spokenMid)}ms, worst ` +
             `${Math.round(spokenWorst ?? 0)}ms over ${spoken.length} tick(s)`
+          : '') +
+        (firstMid !== null
+          ? `; first-word-to-written median ${Math.round(firstMid)}ms, worst ` +
+            `${Math.round(firstWorst ?? 0)}ms`
           : '') +
         (failed > 0 ? `, ${failed} write(s) skipped` : '') +
         (dropped > 0
@@ -452,6 +486,8 @@ export function createNotesTimingLog(opts: NotesTimingLogOpts = {}): NotesTiming
           spokenMedianMs: spokenMid,
           spokenWorstMs: spokenWorst,
           spokenTicks: spoken.length,
+          firstSpokenMedianMs: firstMid,
+          firstSpokenWorstMs: firstWorst,
           failed,
           droppedEdits: dropped,
           lostEdits: lost,

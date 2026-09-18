@@ -509,8 +509,8 @@ assumed. The notes composer and task capture are separate Haiku
 calls and are not in these numbers.
 
 **And the model half, which the transcription table above does not cover.**
-Every Claude call a tick makes — the compose, and the task-capture pass that
-runs on the same tick — now records the `usage` block the API answered with,
+Every Claude call a tick makes — the compose, and the task-capture pass when
+a caller wires one — records the `usage` block the API answered with,
 beside that tick's timing row. The stop sums them through `notes-spend.ts`,
 states the meeting's own dollars and dollars-per-hour in its `[meeting-notes]`
 line split compose-versus-capture, and files the meeting's cost into
@@ -1374,9 +1374,12 @@ rather than characters, because the settled text is the same words re-cased
 and punctuated; the remainder goes out when the turn settles, marked
 `continued`, and is never written twice.
 
-**A tick is two Haiku calls** (compose + task capture), so the ceiling raises
-the per-meeting LLM cost roughly in proportion to the extra ticks.
-Transcription is billed on socket-seconds and is unchanged.
+**A tick is one Haiku call** (the compose), so the ceiling raises the
+per-meeting LLM cost roughly in proportion to the extra ticks. It was two
+until 2026-09-18, when the task-capture pass came off the live path — it ran
+in front of every compose at a median of 1.6s and a worst of 9.3s, which the
+note waited for (see "Task capture" below). Transcription is billed on
+socket-seconds and is unchanged.
 
 **Ticks that fire during a compose merge into one.** A tick used to queue
 behind a slow reply one per tick, so a single slow compose put the notes into
@@ -1448,6 +1451,21 @@ the one-line meeting summary. `CW_NOTES_TIMING=0` turns the file off; it is
 on by default because the at-stop quality report reads it, and a measurement
 that exists only when somebody set a flag is one nothing downstream can rely
 on.
+
+**Three spoken clocks, because a turn is not a sentence.** A row dates its
+words three ways. `spokenAt` is the oldest turn a tick names, taken from that
+turn's FIRST frame; `lastSpokenAt` is the last word the tick carries; and
+`firstSpokenAt` — added 2026-09-18 — is the earliest word THIS tick carries,
+which is the one the ten-second goal is about. The three differ because a
+turn is one person talking until they stop: a ceiling tick reached four
+minutes into a monologue carries a tail, while `spokenAt` still points at an
+opening whose words were written three ticks ago. Measured on a 20-minute
+synthetic meeting with no pauses in it, the same ticks read 13.0s on
+`spokenAt` and 7.3s on `firstSpokenAt` — the 12s median wait reported from the
+15 September meeting was that gap, not a queue. `firstSpokenAt` is dated from
+`NotesTurn.fromWord`, which the ticker sets on a carried chunk, against the
+per-frame word counts the session keeps; it is null on an engine that reports
+no word offsets, exactly as the other two are.
 
 **Stopping is the third thing that fires a tick, and the only one that carries
 unfinished words.** Both clocks need the meeting to keep going: the sentence
@@ -2060,6 +2078,17 @@ time (a `PENDING` placeholder resolving) composed as untagged prose, and there
 is no mention to move — the notes gain no attribution they did not have.
 
 ## Task capture ("file a ticket for that")
+
+**Off the live path since 2026-09-18** (Bryan's call). The pass below cost the
+note 1.6s at the median and 9.3s at the worst, in front of every compose, on
+the way to a ten-second goal. `server-deps.ts` builds no extractor and
+`bin.ts` passes none, so a live meeting makes one model call per tick and
+files no spoken tasks, review asks, research placeholders or corrections.
+Nothing is deleted: `meeting-task-capture.ts`, the `taskExtractor` seam on
+`withServerNotesSinks` and every guard described here are intact, a caller
+that passes an extractor still gets the pass, and `bun run meeting:rerun
+--capture` replays the two-call pipeline for comparison. What follows
+describes that pass, and is what restoring it would restore.
 
 Each pause tick ALSO runs a task-capture pass (`meeting-task-capture.ts`)
 before the compose: a second Haiku call — same dedicated-key consent, off

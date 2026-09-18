@@ -562,7 +562,12 @@ describe('pause ticker', () => {
       final: true,
     });
     schedule.fireAt(CONFIRM_MS);
-    expect(ticks[1]?.turns).toEqual([{ turn: 0, text: 'the write path first.', continued: true }]);
+    // `fromWord` is the same bookkeeping said out loud: six words of this turn
+    // went out on the ceiling tick, so what the timing row dates is the
+    // seventh, not the first.
+    expect(ticks[1]?.turns).toEqual([
+      { turn: 0, text: 'the write path first.', fromWord: 6, continued: true },
+    ]);
   });
 
   it('a turn whose settled words are all already carried adds no empty note', () => {

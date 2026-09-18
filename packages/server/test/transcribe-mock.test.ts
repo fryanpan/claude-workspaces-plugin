@@ -10,6 +10,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   DEFAULT_MOCK_SCRIPT,
   type EngineTurn,
+  type MockScriptTurn,
   createMockTranscriptionEngine,
   orderedEngines,
 } from '../src/transcribe.ts';
@@ -97,6 +98,55 @@ describe('mock transcription engine', () => {
     expect(partials[partials.length - 1]).not.toBe(settled?.text);
     expect(settled?.text).toContain('sync');
     expect(partials[partials.length - 1]).toContain('sink');
+  });
+});
+
+/**
+ * A mock replay is the only free way to measure the note-taker, and it can
+ * only measure what the relay can date. `spokenAtOf` needs `audioEndMs`, and
+ * a ceiling tick mid-turn needs `settledText`; without them a twenty-minute
+ * rerun reports "lateness unknown". So the mock reports both when asked —
+ * and, because every other test in this suite compares whole frames, only
+ * when asked.
+ */
+describe('the mock reports word offsets when a measurement asks for them', () => {
+  /** 320 bytes at 16 kHz mono 16-bit is 10ms of audio. */
+  const CHUNK_MS = 10;
+  async function driveTimed(chunks: number, script: MockScriptTurn[]) {
+    const turns: EngineTurn[] = [];
+    const engine = createMockTranscriptionEngine(script, { wordTimings: true });
+    const session = await engine.open({
+      sampleRate: 16_000,
+      detectSpeakers: false,
+      onTurn: (t) => turns.push({ ...t }),
+      onError: () => {},
+    });
+    for (let i = 0; i < chunks; i++) session.send(CHUNK);
+    return turns;
+  }
+
+  it('dates every word by the audio that carried it', async () => {
+    const turns = await driveTimed(3, [{ words: ['pull', 'the', 'schema'] }]);
+    // One chunk per word, so the nth word ends n chunks into the audio.
+    expect(turns.map((t) => t.audioEndMs)).toEqual([CHUNK_MS, CHUNK_MS * 2, CHUNK_MS * 3]);
+  });
+
+  it('finalizes one word behind the live tail, which is what a ceiling tick may carry', async () => {
+    const turns = await driveTimed(3, [{ words: ['pull', 'the', 'schema'] }]);
+    expect(turns.map((t) => t.settledText)).toEqual([undefined, 'pull', 'pull the']);
+  });
+
+  it('says nothing about timing unless asked — the shape every other test reads', async () => {
+    const { turns } = await drive(3, [{ words: ['pull', 'the', 'schema'] }]);
+    expect(turns.map((t) => t.audioEndMs)).toEqual([undefined, undefined, undefined]);
+    expect(turns.map((t) => t.settledText)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('dates the settled turn too, so a whole turn has an end', async () => {
+    // Two words, then the chunk that settles the turn: three chunks in.
+    const turns = await driveTimed(4, [{ words: ['pull', 'the'], settled: 'Pull the.' }]);
+    const final = turns.find((t) => t.final);
+    expect(final?.audioEndMs).toBe(CHUNK_MS * 3);
   });
 });
 
