@@ -60,6 +60,7 @@ import {
 import { SILENCE_TIMEOUT_MS } from './meeting-silence.ts';
 import { type MeetingStreamSet, openMeetingStreamSet } from './meeting-stream-set.ts';
 import type { ActiveMeeting, MeetingStore } from './meetings.ts';
+import { raceDeadline } from './race-deadline.ts';
 import type { TranscriptionEngine } from './transcribe.ts';
 
 /** The slice of a Bun `ServerWebSocket` this module needs. */
@@ -123,6 +124,19 @@ export interface MeetingRelayDeps {
    */
   now?: () => number;
   /**
+   * How long `dispose()` waits for meetings to flush before going anyway.
+   *
+   * A seam for the same reason `schedule` is one: the production window is
+   * five seconds, and the case that proves the drain is BOUNDED has to
+   * outlast it. Waited out for real, that single test was the slowest thing
+   * in the server suite — over five seconds in every CI run of September, and
+   * a fixed wall-clock wait at that, so a loaded runner could only make it
+   * worse. Shortening the window shortens BOTH timers it schedules, so the
+   * ordering the test asserts is preserved exactly. Absent — every production
+   * build — is `DISPOSE_DRAIN_MS`.
+   */
+  disposeDrainMs?: number;
+  /**
    * Record which note-taker this DOC is now using, changed mid-recording.
    *
    * A seam rather than a store because the socket has no business knowing
@@ -166,7 +180,7 @@ export interface MeetingRelayDeps {
 type ConnState = 'idle' | 'opening' | 'live' | 'ending';
 
 /** How long a shutdown waits for meetings to flush before going anyway. */
-const DISPOSE_DRAIN_MS = 5_000;
+export const DISPOSE_DRAIN_MS = 5_000;
 
 interface Conn {
   state: ConnState;
@@ -798,12 +812,9 @@ export class MeetingRelay {
     // keep neither the others' notes nor the process itself out of the flush
     // that follows. A shutdown that cannot finish is worse than a lost
     // sentence — SIGTERM comes through here.
-    const deadline = Date.now() + DISPOSE_DRAIN_MS;
+    const deadline = Date.now() + (this.deps.disposeDrainMs ?? DISPOSE_DRAIN_MS);
     while (this.inFlight.size > 0 && Date.now() < deadline) {
-      await Promise.race([
-        Promise.allSettled([...this.inFlight]),
-        new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now()))),
-      ]);
+      await raceDeadline(Promise.allSettled([...this.inFlight]), deadline - Date.now());
     }
     this.deps.store.stopAll();
   }
