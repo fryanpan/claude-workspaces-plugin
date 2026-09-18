@@ -152,12 +152,31 @@ function listDepthOf(el: Y.XmlElement): number {
 /**
  * Every addressable element in the fragment, in document order.
  *
- * The walk stops at two places on purpose. A list ITEM's paragraph is the
+ * The walk stops at three places on purpose. A list ITEM's paragraph is the
  * item's own words, not a block beside it — addressing both would offer an
  * agent two names for one bullet and print every bullet twice in an outline
  * — so an item is descended into only for the lists nested under it. A
  * table is one block: nothing addresses a cell, and minting inside one is
  * churn on every read.
+ *
+ * A BLOCK QUOTE'S PARAGRAPHS ARE THE QUOTE'S OWN WORDS, for the same reason
+ * and with a worse failure when it was not so. `> some quote` parses to
+ * `blockquote > paragraph`, so one inserted quote printed TWO outline entries
+ * carrying the same text, with nothing saying one held the other. An agent
+ * that read that as a duplicate and deleted "the paragraph" emptied the quote
+ * — the words gone from the doc and from the file, a `>` left behind, and the
+ * lead-in sentence ending in a colon left with nothing after it. Reported
+ * twice in one day. So a quote is one address: its direct paragraph children
+ * are skipped, and the entry an outline hands out is the blockquote's.
+ *
+ * A quote is descended into for everything ELSE it holds — a list, a nested
+ * quote, a code block — because those are structures an agent addresses in
+ * their own right, exactly as a list item is descended into for its lists. The
+ * consequence, stated where the choice is made: a multi-paragraph quote (the
+ * shape the browser editor builds when a person presses Enter inside one) is
+ * editable AS A WHOLE and not paragraph by paragraph. `replace_block` on the
+ * quote's id, with `> a\n>\n> b` for markdown, is how a paragraph inside one
+ * gets rewritten.
  */
 export function addressableBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
   const out: Y.XmlElement[] = [];
@@ -167,6 +186,13 @@ export function addressableBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
     if (node.nodeName === 'table') return;
     for (const child of node.toArray()) {
       if (node.nodeName === 'listItem' && !(child instanceof Y.XmlElement && isListEl(child))) {
+        continue;
+      }
+      if (
+        node.nodeName === 'blockquote' &&
+        child instanceof Y.XmlElement &&
+        child.nodeName === 'paragraph'
+      ) {
         continue;
       }
       visit(child as Y.XmlElement | Y.XmlText);
@@ -250,7 +276,14 @@ export function findBlockById(fragment: Y.XmlFragment, id: string): Y.XmlElement
 
 /** The text an outline shows for a block: its own words, not its children's
  *  whole subtree. A list item reads as its first paragraph, so a group's lead
- *  bullet is not printed with every point nested under it. */
+ *  bullet is not printed with every point nested under it. A block quote reads
+ *  as its own PARAGRAPHS, separated: it is one entry now, so every paragraph
+ *  in it has to appear here, and `textContent` alone joins children with
+ *  nothing, which ran the last word of one paragraph into the first of the
+ *  next. A list or code block inside a quote is left out for the reason the
+ *  walk leaves a list container's words out — those blocks carry entries of
+ *  their own, and printing them here is the doubling this whole file exists
+ *  to avoid. */
 export function outlineTextOf(el: Y.XmlElement): string {
   let text: string;
   if (el.nodeName === 'listItem') {
@@ -258,6 +291,15 @@ export function outlineTextOf(el: Y.XmlElement): string {
     text = first instanceof Y.XmlElement ? textContent(first) : '';
   } else if (el.nodeName === 'bulletList' || el.nodeName === 'orderedList') {
     text = '';
+  } else if (el.nodeName === 'blockquote') {
+    text = el
+      .toArray()
+      .filter(
+        (child): child is Y.XmlElement =>
+          child instanceof Y.XmlElement && child.nodeName === 'paragraph',
+      )
+      .map((child) => textContent(child))
+      .join('\n');
   } else {
     text = textContent(el);
   }
