@@ -16,9 +16,16 @@ import { input } from './notes-compose-input.ts';
 
 /**
  * The shipped words are Bryan's "Simplified Technical English, short" draft
- * (2026-09-11), word for word. The fixture is a copy of that section; the only
- * differences allowed are the two numbers the code interpolates, and both
- * read as the draft's own today.
+ * (2026-09-11), plus the rules added since. The fixture is a copy of the
+ * shipped section; the only other differences allowed are the two numbers the
+ * code interpolates, and both read as the draft's own today.
+ *
+ * ONE RULE HAS BEEN ADDED to the draft, and the fixture carries it: a reason,
+ * a cause or a trade-off is a note of its own. Twenty-six of thirty-one misses
+ * measured over four reruns were an "X because Y" line whose X reached a note
+ * and whose Y did not — see `notes-missed-words.ts` for the other half of that
+ * fix. A further rule goes in the same way: change both copies, and say here
+ * what it was measured against.
  */
 describe('the shipped notes prompt', () => {
   it('is the Simplified Technical English draft, word for word', () => {
