@@ -1189,6 +1189,22 @@ with headings"*):
   and walks past every heading the note-taker itself wrote, stopping at one it
   did not — which keeps what the slice was for: a long list in the document's
   own section is still not this meeting's wall.
+- **And the same slice was quietly reducing the section tidy to one topic**,
+  which is why twenty-four of about forty-one headings in that 16 September
+  meeting stood over nothing. `notes-section-tidy.ts` has removed an empty
+  topic heading of the note-taker's own since 2026-09-14; its walk ended at
+  the next heading of the section's level, which after the container went away
+  is the meeting's own second topic, so only the first was ever judged. Every
+  one of those headings was WRITTEN empty — a tick opens a topic and its notes
+  land under another one, or its bullets are deduped away — and nothing
+  emptied them afterwards. Both passes now read one rule, `endsMeetingNotes`
+  in `notes-section-fit.ts`: a sibling heading carries the meeting's notes on
+  when the document records it as the note-taker's own, and ends them when it
+  does not. `notes-empty-topic-headings.test.ts` is what fails if the walk
+  goes back, and drives topics at the doc's own level — the older cases in
+  `notes-section-tidy.test.ts` write `###` topics under a `##` section, the
+  nested shape the product no longer produces, which is how they stayed green
+  through the regression.
 - **Write the smaller sure point, not a hedged bigger one.** Where the speech
   will not support the claim, the note says the part it does support. This
   REPLACED "write the note and end it `(unconfirmed)`" (2026-09-15). That

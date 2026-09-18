@@ -57,11 +57,19 @@
  *
  * Every bullet survives either way: the only element removed is the heading
  * itself, and the lines under it become the lines under the heading above.
+ *
+ * WHAT COUNTS AS THE SECTION. Everything from the heading it is given to the
+ * end of the note-taker's own run of topics — not to the next heading at that
+ * level, which is what it used to mean and what silently reduced this pass to
+ * the meeting's FIRST topic once the reserved container went away. The rule
+ * and the measurement are on the walk itself; `notes-empty-topic-headings.test.ts`
+ * is what fails if it goes back.
  */
 
 import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
 import { topicKey } from './notes-quality.ts';
+import { endsMeetingNotes } from './notes-section-fit.ts';
 
 /** What one tidy changed. Every number is zero for the ordinary section,
  *  which is what a caller logs nothing for. */
@@ -151,10 +159,29 @@ export function tidyNotesSection(
   // compared with the heading it would be folded into rather than with any
   // earlier one.
   let lastTopic: { key: string; level: number } | undefined;
+  // WHERE THE MEETING'S NOTES END IS AUTHORSHIP, NOT LEVEL (2026-09-17).
+  //
+  // This walk used to stop at the first heading at the section's own level or
+  // above, which was right while a meeting wrote `###` topics inside a
+  // reserved `## Meeting notes` container. There is no container since
+  // 2026-09-15: a meeting's topics are SIBLINGS of the heading it opened
+  // first, so the stop fired on the second topic and every heading after it
+  // was never judged — which is how twenty-four of forty-one headings in the
+  // 16 September meeting reached the reader standing over nothing. Each was
+  // written empty; nothing emptied them afterwards.
+  //
+  // `endsMeetingNotes` is the same rule `notes-regroup.ts` walks its own scan
+  // by, and it is shared rather than restated: one pass reorganising what the
+  // other calls somebody else's page is the failure that costs.
   for (let i = start + 1; i < top.length; i++) {
     const el = top[i] as Y.XmlElement;
     const level = levelOf(el);
-    if (level !== undefined && level <= openLevel) break;
+    if (
+      level !== undefined &&
+      endsMeetingNotes({ level, author: prose.readBlockAuthor(el) }, openLevel, bulletAuthor)
+    ) {
+      break;
+    }
     const id = prose.readBlockId(el);
     const commentedHere = (): boolean => id !== undefined && commentedNow().has(id);
     if (level !== undefined) {

@@ -108,6 +108,34 @@ export function notesSectionEnd(outline: readonly prose.OutlineEntry[], at: numb
 }
 
 /**
+ * Whether a heading is where this MEETING's notes stop — the rule two passes
+ * over the same blocks both need, written once.
+ *
+ * A SECTION ends at the next heading of its own level, and since 2026-09-15
+ * the prompt asks for every new topic at exactly that level, so the section
+ * rule ends a meeting's notes at its own SECOND topic. What actually ends
+ * them is a heading the meeting did not write: the document's own material,
+ * which neither pass may reorganise or remove.
+ *
+ * A heading a PERSON has since edited reads as theirs — the doc clears
+ * authorship on a person's edit — so renaming a topic mid-meeting stops both
+ * passes there. That is the conservative direction, and it is the same
+ * reading of "yours" every other part of this pipeline uses.
+ *
+ * `notes-regroup.ts` reads it over outline entries and `notes-section-tidy.ts`
+ * over the fragment's own elements; two readings that disagreed would let one
+ * pass reorganise what the other calls somebody else's page.
+ */
+export function endsMeetingNotes(
+  heading: { level: number | undefined; author: string | undefined },
+  sectionLevel: number,
+  notesAuthor: string | undefined,
+): boolean {
+  if ((heading.level ?? 0) > sectionLevel) return false;
+  return notesAuthor === undefined || heading.author !== notesAuthor;
+}
+
+/**
  * Whether the last claimed section is one new minutes may carry on under.
  *
  * `now` is only ever compared against a recorded stop, so a test says how
