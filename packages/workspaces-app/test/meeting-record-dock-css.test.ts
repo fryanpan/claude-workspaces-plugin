@@ -111,9 +111,17 @@ const PROBE = `(() => {
   // The strip hides the chevron while a meeting runs by setting the hidden
   // attribute. Whether that HIDES it is a cascade question: an author display
   // on the class out-specifies the UA's rule for it, and for a while it did.
-  out.chevronShown = getComputedStyle(options).display;
+  // It is now hidden by visibility rather than display, so its PLACE is kept
+  // and starting a recording does not shift the dock — both halves are read
+  // here: unreachable, and still the same width.
+  out.chevronShown = getComputedStyle(options).visibility;
+  out.chevronShownWidth = +options.getBoundingClientRect().width.toFixed(2);
+  out.dockShownWidth = +dock.getBoundingClientRect().width.toFixed(2);
   options.hidden = true;
-  out.chevronHidden = getComputedStyle(options).display;
+  out.chevronHidden = getComputedStyle(options).visibility;
+  out.chevronHiddenPointer = getComputedStyle(options).pointerEvents;
+  out.chevronHiddenWidth = +options.getBoundingClientRect().width.toFixed(2);
+  out.dockHiddenWidth = +dock.getBoundingClientRect().width.toFixed(2);
   options.hidden = false;
 
   // The control: the bar as it stood BEFORE this branch, same page, same
@@ -152,7 +160,12 @@ interface Reading {
 interface Measured {
   width: number;
   chevronShown: string;
+  chevronShownWidth: number;
+  dockShownWidth: number;
   chevronHidden: string;
+  chevronHiddenPointer: string;
+  chevronHiddenWidth: number;
+  dockHiddenWidth: number;
   docked: Reading;
   inToolbar: Reading;
 }
@@ -253,8 +266,16 @@ describe.skipIf(CHROME === null)('the Record button on a phone', () => {
       // meeting starts, and while the chevron went on being drawn it was a
       // live door to the START chooser sitting beside a running recording.
       // The control is the line above it: visible, the same element is drawn.
-      expect(m.chevronShown).not.toBe('none');
-      expect(m.chevronHidden).toBe('none');
+      expect(m.chevronShown).toBe('visible');
+      expect(m.chevronHidden).toBe('hidden');
+      // `visibility: hidden` is out of hit-testing and out of the
+      // accessibility tree; pointer-events says the first half twice.
+      expect(m.chevronHiddenPointer).toBe('none');
+      // And it keeps its BOX, so a recording starting does not move the pill
+      // or the toolbar beside it — the house rule that a control holds its
+      // size and position as its state changes.
+      expect(m.chevronHiddenWidth).toBe(m.chevronShownWidth);
+      expect(m.dockHiddenWidth).toBe(m.dockShownWidth);
 
       // THE CONTROL: refill the toolbar to the width it had before this
       // branch and put the pair back at the end of it, which is where it

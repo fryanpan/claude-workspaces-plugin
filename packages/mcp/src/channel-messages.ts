@@ -13,6 +13,7 @@
  * `workspace.`, `agent.`, `voice.`, `dispatch.`) go to
  * `emitBoardChannelMessage`; everything else keeps the doc-shaped path.
  */
+import { isBookkeepingEvent } from './bookkeeping-events.ts';
 import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
 import {
@@ -441,6 +442,14 @@ async function emitChannelMessage(
   event: string,
   rawPayload: unknown,
 ): Promise<void> {
+  // The first gate, and the only one that reads nothing but the event: an act
+  // that asks the reader for nothing costs no reader a turn, whoever
+  // performed it. ABOVE the board dispatch rather than inside either
+  // renderer, because it is a property of the event and not of a family — a
+  // member that moves between the two paths must not change whether it wakes
+  // anybody. See bookkeeping-events.ts, which also says how a reader tells
+  // this rule apart from the self-echo one below.
+  if (isBookkeepingEvent(event, rawPayload)) return;
   if (BOARD_EVENT_RE.test(event)) {
     await emitBoardChannelMessage(deps, event, rawPayload);
     return;

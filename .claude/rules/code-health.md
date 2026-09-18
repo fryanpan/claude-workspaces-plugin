@@ -66,7 +66,7 @@ is read by the reviewer.
 
 ## An agent is only woken by news it can act on
 
-A diff that adds or fans out a board or doc event answers two questions.
+A diff that adds or fans out a board or doc event answers three questions.
 
 - **Does it tell an agent about its own action?** Give the event an actor
   field `packages/mcp/src/self-authored.ts` reads, so the MCP child can drop
@@ -76,12 +76,29 @@ A diff that adds or fans out a board or doc event answers two questions.
   `ANALYTICS_ONLY_EVENTS` (`packages/server/src/review-items/analytics.ts`) so
   it stays off the SSE fan-out. The test is who acts on the event, not which
   file wrote it.
+- **Does it carry any words?** An event that renders empty tells its reader
+  only that somebody clicked, so name it in
+  `packages/mcp/src/bookkeeping-events.ts`. Ask what the event retires first: a
+  resolve retires each review item on its thread, so a resolve that closed an
+  unanswered ask still wakes.
+- **Is it the transport reporting on itself?** A delivery receipt, a presence
+  notice or a replay gap tells the agent the plumbing worked, not what to do
+  — name it in `packages/mcp/src/bookkeeping-events.ts` too. A gap may only
+  be dropped where the missed frames come back by themselves: an addressed
+  comment row is durable until the child acks it, and everything else a gap
+  covers is state the next read returns.
 
-A miss costs one turn per event per attached session.
+A miss costs one turn per event per attached session. A drop decidable from the
+event name belongs in the server; one that needs the frame's own state belongs
+in the child. The exception is a frame a PAGE must still receive — the server's
+`skipAgentStreams` is exact only on board channels, so a doc-channel frame can
+only be dropped in the child.
 
-*Enforced by:* `packages/server/test/analytics-events-off-stream.test.ts` and
-`packages/server/test/self-echo-suppression.test.ts`; the reviewer's eye for a
-new event.
+*Enforced by:* `packages/server/test/analytics-events-off-stream.test.ts`,
+`packages/server/test/self-echo-suppression.test.ts`,
+`packages/server/test/quiet-resolve.test.ts` and
+`packages/server/test/quiet-bookkeeping.test.ts`; the reviewer's eye for a new
+event.
 
 ## The architecture map is current
 

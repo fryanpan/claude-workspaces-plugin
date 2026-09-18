@@ -1189,6 +1189,43 @@ with headings"*):
   and walks past every heading the note-taker itself wrote, stopping at one it
   did not — which keeps what the slice was for: a long list in the document's
   own section is still not this meeting's wall.
+- **And the same slice was quietly reducing the section tidy to one topic**,
+  which is why twenty-four of about forty-one headings in that 16 September
+  meeting stood over nothing. `notes-section-tidy.ts` has removed an empty
+  topic heading of the note-taker's own since 2026-09-14; its walk ended at
+  the next heading of the section's level, which after the container went away
+  is the meeting's own second topic, so only the first was ever judged. Every
+  one of those headings was WRITTEN empty — a tick opens a topic and its notes
+  land under another one, or its bullets are deduped away — and nothing
+  emptied them afterwards. Both passes now read one rule, `endsMeetingNotes`
+  in `notes-section-fit.ts`: a sibling heading carries the meeting's notes on
+  when the document records it as the note-taker's own, and ends them when it
+  does not. `notes-empty-topic-headings.test.ts` is what fails if the walk
+  goes back, and drives topics at the doc's own level — the older cases in
+  `notes-section-tidy.test.ts` write `###` topics under a `##` section, the
+  nested shape the product no longer produces, which is how they stayed green
+  through the regression.
+- **And the third reader of that slice was the duplicate check, which is what
+  a pause exposed.** A sixteen-second stop-and-restart on 17 September made
+  the second recording re-open eight topics the doc already had; its prompt
+  carried every one of them, and `dedupeNotesEdits` — the deterministic half
+  that folds a repeat into the heading already there — could see one. The two
+  passes above were fixed with `endsMeetingNotes`, which asks AUTHORSHIP, and
+  that answer is unavailable here: `releaseNotesAuthorship` drops every mark
+  when the next recording starts, so across a pause the previous leg's topics
+  read as the document's own. What survives it is the note-taker's own memory
+  of which headings it OPENED (`NotesHeadingMemory.topicsIn`), so the walk
+  carries over those and stops at anything else — `sectionIds`' `carryOver`
+  argument. Two consequences worth knowing: the memory now records EVERY topic
+  a meeting opens rather than only the first, and the section heading itself
+  is judged as a topic, because since the container went away it is the
+  meeting's first one rather than a wrapper naming no subject.
+  `notes-topics-after-pause.test.ts` drives it, and holds the
+  eight-topics-twice reproduction, the arm that proves the second leg's words
+  still land under the topic they are about, and the control that a heading
+  nobody recorded still ends the scope. The memory is per PROCESS, so a
+  restart between the two legs loses the reach — the failure this doc had
+  before any of it existed, not a new one.
 - **Write the smaller sure point, not a hedged bigger one.** Where the speech
   will not support the claim, the note says the part it does support. This
   REPLACED "write the note and end it `(unconfirmed)`" (2026-09-15). That

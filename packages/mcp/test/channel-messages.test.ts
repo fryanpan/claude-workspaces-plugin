@@ -52,29 +52,11 @@ describe('a doc-shaped frame becomes one readable line', () => {
     expect(only(frames).meta.anchor_text).toBe('a line that moved');
   });
 
-  it('attributes a resolve to the actor, never to a comment author', async () => {
-    const { frames, messages } = harness();
-    await messages.emitChannelMessage('thread.resolved', {
-      docId: 'plan',
-      threadId: 't3',
-      actor: { name: 'Bryan' },
-      thread: { comments: [{ author: { name: 'Someone Else' }, text: 'not my words' }] },
-    });
-    const f = only(frames);
-    expect(f.content).toContain('by Bryan');
-    expect(f.content).not.toContain('Someone Else');
-    expect(f.content).not.toContain('not my words');
-  });
-
-  it('leaves the author blank when an older server sends no actor', async () => {
-    const { frames, messages } = harness();
-    await messages.emitChannelMessage('thread.resolved', {
-      docId: 'plan',
-      threadId: 't4',
-      thread: { comments: [{ author: { name: 'Someone Else' }, text: 'x' }] },
-    });
-    expect(only(frames).meta.author).toBe('');
-  });
+  // The two resolve-attribution cases that used to sit here moved to
+  // `quiet-resolve.test.ts`. A resolve now reaches a session only
+  // when it closed an ask nobody answered, so the fixture that renders one has
+  // to be built there — and building it twice is how the two files disagree
+  // about what a resolve looks like.
 
   it('names the review item a comment landed on', async () => {
     const { frames, messages } = harness();

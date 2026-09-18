@@ -23,6 +23,7 @@ import {
   rollTranscript,
 } from '../src/meeting-protocol.ts';
 import { AUDIO_HOLD_MS } from '../src/meeting-reconnect.ts';
+import { everyRecordLabel, everyRecordSetting } from '../src/meeting-record-face.ts';
 import type { MeetingAudioSource } from '../src/meeting-source.ts';
 import {
   type MeetingSocket,
@@ -445,7 +446,9 @@ describe('the chrome at rest', () => {
     // row back; an idle meeting surface has nothing to say.
     expect(h.root.hidden).toBe(true);
     expect(h.record().textContent).toContain('Record Audio');
-    expect(h.record().getAttribute('aria-label')).toBe('Record audio');
+    expect(h.record().getAttribute('aria-label')).toBe(
+      'Record Audio — microphone, multiple speakers',
+    );
     expect(h.record().getAttribute('aria-haspopup')).toBe('menu');
     expect(h.record().classList.contains('is-live')).toBe(false);
     // The glyph shows at rest; the solid red dot is the recording face.
@@ -731,7 +734,10 @@ describe('the strip while a meeting runs', () => {
     expect(h.record().classList.contains('is-live')).toBe(true);
     expect(h.record().textContent).toContain('Recording');
     expect(h.record().querySelector<HTMLElement>('.meeting-record-dot')?.hidden).toBe(false);
-    expect(h.record().querySelector<HTMLElement>('.meeting-record-glyph')?.hidden).toBe(true);
+    // The source glyph STAYS while recording — it is what says which source
+    // this is, and the button now carries that fact in every state. (The dot
+    // keeps its box while idle, in CSS, so neither one moves the control.)
+    expect(h.record().querySelector<HTMLElement>('.meeting-record-glyph')?.hidden).toBe(false);
     h.clock.at = 1_000 + 65_000;
     h.tick();
     expect(h.elapsed()).toBe('01:05');
@@ -2143,7 +2149,7 @@ describe('one tap when alone', () => {
   const twoEngines = () =>
     Promise.resolve({ engines: ['soniox', 'assemblyai'], default: 'soniox' });
 
-  it('a Record press on a doc with nobody else on it records at once — solo, no chooser', async () => {
+  it('a Record press on a doc with nobody else on it records at once — what the button says, no chooser', async () => {
     const calls: CaptureCall[] = [];
     const h = mount(
       (o) => {
@@ -2158,14 +2164,17 @@ describe('one tap when alone', () => {
     expect(h.root.dataset.state).toBe('requesting');
     await settle();
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.mode).toBe('solo');
+    // The mode the BUTTON showed, not one the press assigned behind it: a
+    // one-tap start used to write `solo` over whatever had been chosen,
+    // which is how a paused meeting lost its speakers on 16 September.
+    expect(calls[0]?.mode).toBe('conversation');
     h.sockets[0]?.onopen?.();
     const frame = JSON.parse(String(h.sockets[0]?.sent[0]));
     expect(frame.type).toBe('start');
-    expect(frame.mode).toBe('solo');
+    expect(frame.mode).toBe('conversation');
     // The server's default, with no picker in the way.
     expect(frame.engine).toBe('soniox');
-    expect(h.strip.mode()).toBe('solo');
+    expect(h.strip.mode()).toBe('conversation');
   });
 
   it('with somebody else on the doc the press opens the chooser as before', () => {
@@ -2306,6 +2315,211 @@ describe('one tap when alone', () => {
     expect(h.root.dataset.state).toBe('recording');
     expect(h.root.querySelector('.meeting-consent-note')).toBeNull();
     expect(h.root.querySelectorAll('.meeting-note')).toHaveLength(0);
+  });
+});
+
+/**
+ * WHAT THE BUTTON SAYS IT WILL CAPTURE, AND WHETHER A RESTART KEEPS IT.
+ *
+ * On 16 September a sixteen-second pause came back in solo mode. The press
+ * that restarted the recording was handled as "nobody else is on this doc",
+ * which assigned `solo` over the `conversation` already chosen, and speaker
+ * attribution ended for three quarters of the meeting. Nothing said so: the
+ * button read "Record Audio" before the press and after it.
+ *
+ * These drive the button, not its source. The face is read off the element;
+ * what was actually opened is read off the capture call and the `start` frame,
+ * which is the half a label alone could lie about.
+ */
+describe('the Record button says what it will capture, and a restart keeps it', () => {
+  const faceSetting = (h: Harness): string =>
+    h.record().querySelector('.meeting-record-setting')?.textContent ?? '';
+  const faceLabel = (h: Harness): string =>
+    h.record().querySelector('.meeting-record-label')?.textContent ?? '';
+  const stripSetting = (h: Harness): string =>
+    h.root.querySelector('.meeting-setting')?.textContent ?? '';
+
+  /** The capture calls a mount makes, newest last. */
+  function recorder(): { calls: CaptureCall[]; capture: (o: CaptureCall) => Promise<never> } {
+    const calls: CaptureCall[] = [];
+    return {
+      calls,
+      capture: ((o: CaptureCall) => {
+        calls.push(o);
+        return Promise.resolve({ ok: true, capture: fakeCapture() });
+      }) as never,
+    };
+  }
+
+  it('names both axes before a press — the microphone, and multiple voices', () => {
+    const h = mount(undefined, { alone: () => true });
+    expect(faceLabel(h)).toBe('Record Audio');
+    expect(faceSetting(h)).toBe('Microphone · Multiple');
+    // Spelled out for a screen reader: "·" is not read aloud.
+    expect(h.record().getAttribute('aria-label')).toBe(
+      'Record Audio — microphone, multiple speakers',
+    );
+  });
+
+  it('follows the chooser as it is answered, before anything is recorded', () => {
+    const h = mount(undefined, { alone: () => true, systemAudioOffered: () => true });
+    h.options().click();
+    h.pick('Just me');
+    expect(faceSetting(h)).toBe('Microphone · Just me');
+    h.pick('Mac Audio');
+    expect(faceSetting(h)).toBe('Mac audio · Just me');
+    h.pick('Multiple Speakers');
+    expect(faceSetting(h)).toBe('Mac audio · Multiple');
+  });
+
+  it('a press while alone starts what the button says, and says it is running', async () => {
+    const r = recorder();
+    const h = mount(r.capture, { alone: () => true });
+    await settle();
+    expect(faceSetting(h)).toBe('Microphone · Multiple');
+    h.record().click();
+    await settle();
+    // The face was not a claim about a different recording: the capture and
+    // the wire carry the same mode the button showed.
+    expect(r.calls[0]?.mode).toBe('conversation');
+    h.sockets[0]?.onopen?.();
+    expect(JSON.parse(String(h.sockets[0]?.sent[0])).mode).toBe('conversation');
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm1',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'conversation',
+    });
+    await settle();
+    expect(faceLabel(h)).toBe('Recording');
+    expect(faceSetting(h)).toBe('Microphone · Multiple');
+    // And the strip under it names the same thing while it runs.
+    expect(stripSetting(h)).toBe('Microphone · Multiple');
+  });
+
+  it('a stop and a second press keep the mode already chosen — the 16 September pause', async () => {
+    const r = recorder();
+    const h = mount(r.capture, { alone: () => true });
+    await settle();
+    // A room with people in it, asked for behind the chevron.
+    h.options().click();
+    h.pick('Multiple Speakers');
+    h.startCta().click();
+    await settle();
+    expect(r.calls[0]?.mode).toBe('conversation');
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm1',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'conversation',
+    });
+    await settle();
+
+    // The pause.
+    h.pressStop();
+    expect(h.strip.state().kind).toBe('idle');
+    // The button still says what the next press will do, and it is the same.
+    expect(faceLabel(h)).toBe('Record Audio');
+    expect(faceSetting(h)).toBe('Microphone · Multiple');
+
+    // And the press honours it, on a doc with nobody else on it — the exact
+    // shape of the failure: this used to open a solo session.
+    h.record().click();
+    await settle();
+    expect(r.calls).toHaveLength(2);
+    expect(r.calls[1]?.mode).toBe('conversation');
+    h.sockets[1]?.onopen?.();
+    expect(JSON.parse(String(h.sockets[1]?.sent[0])).mode).toBe('conversation');
+  });
+
+  it('keeps a cheaper pick across a restart too — the fix is memory, not a new default', async () => {
+    const r = recorder();
+    const h = mount(r.capture, { alone: () => true });
+    await settle();
+    h.options().click();
+    h.pick('Just me');
+    h.startCta().click();
+    await settle();
+    expect(r.calls[0]?.mode).toBe('solo');
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm1',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'solo',
+    });
+    await settle();
+    h.pressStop();
+    expect(faceSetting(h)).toBe('Microphone · Just me');
+    h.record().click();
+    await settle();
+    expect(r.calls[1]?.mode).toBe('solo');
+  });
+
+  it('a restart keeps the SOURCE as well, not just the voice count', async () => {
+    const r = recorder();
+    const h = mount(r.capture, { alone: () => true, systemAudioOffered: () => true });
+    await settle();
+    h.options().click();
+    h.pick('Mac Audio');
+    h.startCta().click();
+    await settle();
+    // Mac Audio opens both streams — the room and what the Mac plays.
+    expect(r.calls.map((c) => c.source)).toEqual(['mic', 'system']);
+    h.sockets[0]?.onopen?.();
+    h.sockets[0]?.serve({
+      type: 'ready',
+      meetingId: 'm1',
+      startedAt: 1_000,
+      engine: 'test',
+      mode: 'conversation',
+    });
+    await settle();
+    h.pressStop();
+    expect(faceSetting(h)).toBe('Mac audio · Multiple');
+    h.record().click();
+    await settle();
+    expect(r.calls.slice(2).map((c) => c.source)).toEqual(['mic', 'system']);
+  });
+
+  it('a bot pick sends the alone press to the chooser — a bot needs a link first', () => {
+    const bot = new FakeBot();
+    const h = mount(undefined, { alone: () => true, bot });
+    h.options().click();
+    h.pick('Join Zoom / Google Meet');
+    expect(faceSetting(h)).toBe('Meeting link · Multiple');
+    h.scrim().click();
+    expect(h.pop().hidden).toBe(true);
+    // No capture opens behind a press that has nowhere to send the bot.
+    h.record().click();
+    expect(h.pop().hidden).toBe(false);
+    expect(h.root.dataset.state).toBe('idle');
+  });
+
+  it('a Board solo huddle still presets Just me, and keeps it across a restart', async () => {
+    const r = recorder();
+    const h = mount(r.capture, { alone: () => true, mode: 'solo' });
+    await settle();
+    expect(faceSetting(h)).toBe('Microphone · Just me');
+    h.record().click();
+    await settle();
+    expect(r.calls[0]?.mode).toBe('solo');
+  });
+
+  it('the widths the sizer holds cover every face the button can wear', () => {
+    const h = mount(undefined, { alone: () => true });
+    const sizer = h.record().querySelector('.meeting-record-sizer') as HTMLElement;
+    const held = [...sizer.children].map((el) => el.textContent ?? '');
+    // Every setting line and every headline is in there, so no state can
+    // introduce a string the reserved width was not measured against.
+    for (const s of everyRecordSetting()) expect(held).toContain(s);
+    for (const l of everyRecordLabel()) expect(held).toContain(l);
+    // And it is hidden from the reader and from a screen reader alike.
+    expect(sizer.getAttribute('aria-hidden')).toBe('true');
   });
 });
 

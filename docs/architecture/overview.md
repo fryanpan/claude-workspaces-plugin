@@ -567,8 +567,8 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
-**An agent gets no wake for an event it cannot act on.** Two rules give that,
-and neither hides state.
+**An agent gets no wake for an event it cannot act on.** Three rules give that,
+and none of them hides state.
 
 *Its own action.* The MCP child drops a frame whose actor is this session, so
 an agent's own comment, review item or task move costs it no turn. Every other
@@ -581,6 +581,18 @@ and changes nothing, so the server keeps it off the fan-out while the audit log
 still gets the row. `review_item.answered` stays on the stream, because an
 answer is the wake an agent waits for. The list is in
 `packages/server/src/review-items/analytics.ts`.
+
+*An act with no words.* A resolve is a status flip and carries no text, so the
+MCP child drops the frame before it becomes a wake. It drops it for every
+reader, not only the session that resolved the thread, which is what separates
+this rule from the self-echo one. A resolve retires each review item on its
+thread, so a resolve that closed an unanswered ask still wakes: it is the only
+report that reaches the agent who asked. Rule in
+`packages/mcp/src/bookkeeping-events.ts`.
+
+Which rule runs where depends on what it reads. The server drops by event name,
+which reaches every attached session at the next prod restart. The child drops
+by what the frame carries, because that is where the frame is.
 
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`
@@ -1171,7 +1183,7 @@ for the same reason — the zone is back on the 500-line bar — and holds one
 decision that is not the zone's: a speaker pill is a rename BUTTON where
 somebody handed in a way to record a name and the plain span it always was
 where nobody did. Nothing but the zone imports it either, today; the strip's
-own pill (`meeting-feed.ts`) is the obvious second caller. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `meeting-reconnect.ts` joins the same family one tier below the strip and changes no layer either: it is the policy a dropped audio socket is retried under — how long to wait, when to stop waiting, and the two sentences the strip shows while it happens — with no DOM, no socket and no timer in it, so `meeting-strip.ts` owns the doing and this owns the deciding. Three modules join that family for the capture that dies while the meeting is still running, and they split noticing from deciding for the same reason: `meeting-track-watch.ts` is the noticing — it watches a capture's tracks on the audio graph's own block clock and reports the first loss once, with no DOM, no timer and no policy in it, because a `MediaStreamAudioSourceNode` downstream of a dead track keeps delivering silence and nothing else in the capture path was listening. `meeting-stream-health.ts` is the deciding: which streams can be reopened without a person (a microphone can, the Mac's audio cannot — the share picker is a modal no page may open by itself), what the strip says while one is gone, and what the button is called where only a press will do. Both are pure, so the strip owns every side effect. `meeting-room-audio.ts` changes none of the picture: it is the room-processing constants and constraint builders lifted out of `meeting-audio.ts`, which sits on the 500-line bar, and `meeting-audio.ts` re-exports them so no caller moved. `meeting-transcript-panel.ts` joins the same family in the view tier and
+own pill (`meeting-feed.ts`) is the obvious second caller. `meeting-source.ts` sits beside `meeting-audio.ts` in the same family and changes none of the picture: it is where the strip's chosen source — the microphone, or the Mac's own audio through Chrome's share picker — becomes a media stream, split out because the capture module sits on the 500-line bar. `meeting-capture-set.ts` joins that family for the meeting that opens BOTH: it is the tier above one capture, opening each stream in turn and deciding what a meeting runs on when only one of the two doors was answered. It changes no layer — it is a view-tier module calling the same `startMeetingCapture` a single-source meeting always did — and it is named here because the strip now talks to it rather than to the capture directly. `meeting-reconnect.ts` joins the same family one tier below the strip and changes no layer either: it is the policy a dropped audio socket is retried under — how long to wait, when to stop waiting, and the two sentences the strip shows while it happens — with no DOM, no socket and no timer in it, so `meeting-strip.ts` owns the doing and this owns the deciding. Three modules join that family for the capture that dies while the meeting is still running, and they split noticing from deciding for the same reason: `meeting-track-watch.ts` is the noticing — it watches a capture's tracks on the audio graph's own block clock and reports the first loss once, with no DOM, no timer and no policy in it, because a `MediaStreamAudioSourceNode` downstream of a dead track keeps delivering silence and nothing else in the capture path was listening. `meeting-stream-health.ts` is the deciding: which streams can be reopened without a person (a microphone can, the Mac's audio cannot — the share picker is a modal no page may open by itself), what the strip says while one is gone, and what the button is called where only a press will do. Both are pure, so the strip owns every side effect. `meeting-room-audio.ts` changes none of the picture: it is the room-processing constants and constraint builders lifted out of `meeting-audio.ts`, which sits on the 500-line bar, and `meeting-audio.ts` re-exports them so no caller moved. `meeting-record-face.ts` joins the same family one tier below the strip and changes no layer: it is the vocabulary the Record button wears — which word stands for each source and each voice count, what the control reads in each state, and the full list of faces the hidden sizer reserves the button's one width from. Pure, with no DOM and no state in it, because the two facts it names are the two that decide what is recorded and what is billed, and a button that got them wrong is how a paused meeting came back solo on 16 September. `meeting-transcript-panel.ts` joins the same family in the view tier and
 changes none of the picture either: it is the Transcript fold the start panel
 grows once a meeting has ended, split out of `meeting-chooser.ts` — which sits
 on the 500-line bar — because that panel is where every billed choice for the

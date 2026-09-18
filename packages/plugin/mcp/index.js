@@ -14086,6 +14086,32 @@ function createCallToolHandler(deps) {
   };
 }
 
+// packages/mcp/src/bookkeeping-events.ts
+function mayCarryAnOpenAsk(thread) {
+  if (!thread || typeof thread !== "object")
+    return;
+  const comments = thread.comments;
+  if (!Array.isArray(comments))
+    return;
+  return comments.some((c) => {
+    const review = c?.review;
+    if (!review || typeof review !== "object")
+      return false;
+    return review.answeredAt === undefined && review.answeredWith === undefined && review.withdrawnAt === undefined;
+  });
+}
+var BOOKKEEPING_EVENTS = new Set(["comment.delivered", "agent.listening", "replay.gap"]);
+function isBookkeepingEvent(event, payload) {
+  if (BOOKKEEPING_EVENTS.has(event))
+    return true;
+  if (event === "thread.resolved") {
+    if (!payload || typeof payload !== "object")
+      return false;
+    return mayCarryAnOpenAsk(payload.thread) === false;
+  }
+  return false;
+}
+
 // packages/mcp/src/decision-line.ts
 function openPartsClause(openParts) {
   if (!Array.isArray(openParts))
@@ -14714,6 +14740,8 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   }
 }
 async function emitChannelMessage(deps, event, rawPayload) {
+  if (isBookkeepingEvent(event, rawPayload))
+    return;
   if (BOARD_EVENT_RE.test(event)) {
     await emitBoardChannelMessage(deps, event, rawPayload);
     return;
@@ -14939,6 +14967,8 @@ async function handleFrame(deps, raw) {
     return;
   }
   if (ev === "replay.gap") {
+    if (isBookkeepingEvent(ev, payload))
+      return;
     const p = payload ?? {};
     await outsideToolCall(deps, () => deps.notify({
       method: "notifications/claude/channel",
