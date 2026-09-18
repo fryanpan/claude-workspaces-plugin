@@ -4761,8 +4761,19 @@ body.redline-mode .ProseMirror del.cw-del {
                    not move, or the reader loses their place mid-sentence.
      on paper      the notes print as a numbered "Sources" list at the end.
 
-   Certainty is carried by the STROKE, never by colour: solid for a note the
-   author confirmed, dotted for one whose text says "Unconfirmed".
+   Certainty is carried by the STROKE, never by colour: dotted for a note
+   whose text says "Unconfirmed", and nothing at all for one the author
+   confirmed.
+
+   NOTHING IS UNDERLINED AT REST (Bryan, 2026-09-18: "the quotes are cool, and
+   also unreadable"). A line under the fact behind every note is a line under
+   nearly every sentence on a well-sourced page, which spends the reader's
+   attention on the one thing they were not asking about. So the question is
+   asked instead of answered: pointing at a caption, at a superscript, or
+   tabbing into a caption's link lights THAT note's words and no others, via
+   the `cw-fn-on` / `cw-fn-fact-on` classes footnote-notes.ts writes. No
+   transition and no animation — a line appearing where the pointer is is
+   already the whole signal.
    --------------------------------------------------------------------------- */
 
 /* The raw `^[…]` run. Folded to nothing on a wide screen (the margin has the
@@ -4810,13 +4821,26 @@ body[data-cards="balloon"] .cw-fn-margined .cw-fn {
   content: none;
 }
 
-/* The fact the note supports: a hairline under the words, dotted when the
-   author has not confirmed them. */
+/* The fact the note supports. Unmarked while nobody is asking: the note in
+   the margin is the visible thing, and the words it is about are one point
+   away. An UNCONFIRMED note is the exception and keeps its dotted hairline
+   standing — doubt is the one thing a reader must not have to hunt for, and
+   there are few enough of them that the page still reads. */
 .cw-fn-fact {
-  border-bottom: 1px solid var(--border-strong);
   text-decoration: none;
 }
 .cw-fn-fact-unsure {
+  border-bottom: 1px dotted var(--border-strong);
+}
+/* Lit: the reader is pointing at this note. A hairline plus the same tint the
+   superscript takes, so the words and the number read as one thing. The
+   compound selector comes last so an unconfirmed fact stays DOTTED when it
+   lights up rather than changing stroke under the pointer. */
+.cw-fn-fact-on {
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-hover);
+}
+.cw-fn-fact-unsure.cw-fn-fact-on {
   border-bottom-style: dotted;
 }
 
@@ -4829,6 +4853,25 @@ body[data-cards="balloon"] .cw-fn-margined .cw-fn {
   padding-left: 6px;
   font: 400 12px / 1.4 var(--sans);
   color: var(--fg-muted);
+}
+
+/* A markdown link inside a note, in all three draws. What the reader sees is
+   the label the author wrote between the brackets — the path never reaches
+   the margin, which is the whole point of drawing it (note-links.ts decides
+   which hrefs may be drawn as links at all). Underlined, because here the
+   line is an affordance rather than an annotation: it says "this is the part
+   you can click", which is the opposite of what the fact underline was
+   saying. */
+.cw-fn-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+.cw-fn-link:hover,
+.cw-fn-link:focus-visible {
+  color: var(--fg);
+  text-decoration-color: currentcolor;
 }
 /* A footnote's leader is GREY, not the red every markup leader inherits: the
    red says "something was deleted here", and a note is not a change. Dashed

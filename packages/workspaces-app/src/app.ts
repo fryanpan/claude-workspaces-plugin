@@ -230,6 +230,12 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
   // Read once the document has synced (`wireDocReady`) — before that the
   // notes are not on screen and there is nothing to draw a control beside.
   const notesLinkRefs = createNotesLinkRefs(docId);
+  // Workspace members (folder binds, diff File views — ctx spreads through
+  // mountEditableFileView) get in-app navigation for relative sibling links,
+  // in the prose and in a `^[…]` note's caption alike (doc/footnote-notes.ts).
+  const docLink = ctx.workspaceId
+    ? { workspaceId: ctx.workspaceId, relPath: ctx.relPath, navigate: navigateTo }
+    : undefined;
   const editor: EditorHandle = createEditor({
     parent: editorMount,
     ydoc,
@@ -237,11 +243,7 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
     onSelectionChange: () => pill?.refreshSelection(),
     onUpdate: () => chrome?.redrawThreads(),
     user: { name: user.name, color: user.color },
-    // Workspace members (folder binds, diff File views — ctx spreads through
-    // mountEditableFileView) get in-app navigation for relative sibling links.
-    docLink: ctx.workspaceId
-      ? { workspaceId: ctx.workspaceId, relPath: ctx.relPath, navigate: navigateTo }
-      : undefined,
+    docLink,
     notesLinks: {
       docId,
       linkedTasks: () => notesLinkRefs.linked(),
@@ -306,6 +308,7 @@ async function mountMarkdown(ctx: MountContext): Promise<void> {
     editor,
     editorMount,
     chrome: reviewChrome,
+    docLink,
   });
 
   // Interaction-bounded reading-session capture (doc_open + read_session).
