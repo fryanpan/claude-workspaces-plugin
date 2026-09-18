@@ -12,8 +12,9 @@
  * field names the actor — and that varies by family, which is the whole
  * reason the old inline `actor?.id` check missed three of them:
  *
- *   - `actor: {id}`       task.* / decision.* / workspace.* / review_item.added,
- *                         .revised, .withdrawn / thread.resolved, .reopened
+ *   - `actor: {id}`       task.* / decision.* / workspace.* / dispatch.* /
+ *                         review_item.added, .revised, .withdrawn /
+ *                         thread.resolved, .reopened
  *   - `actorId: '…'`      review_item.viewed, review_item.answered
  *   - `agentId: '…'`      agent.attached, agent.detached
  *   - `comment.author.id` thread.replied (and thread.created, off the thread)
@@ -21,6 +22,10 @@
  *
  * Driven through `createChannelMessages`, so what is asserted is whether the
  * session was woken — not what any predicate returned.
+ *
+ * `dispatch.reported` belongs to the first family and is covered in
+ * `channel-messages-dispatch.test.ts` instead of here, because the list below
+ * is the measured set and that event is newer than the probe that produced it.
  *
  * All fixtures synthetic. Nothing here opens a socket.
  */

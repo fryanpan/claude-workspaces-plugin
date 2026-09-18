@@ -15,38 +15,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { type ChannelNotification, createChannelMessages } from '../src/channel-messages.ts';
-
-/** A frozen clock, so `sent_at` is an assertion rather than a race. */
-const FIXED_MS = Date.UTC(2026, 8, 3, 12, 0, 0);
-const FIXED_ISO = new Date(FIXED_MS).toISOString();
-
-const SELF = 'agent-workspaces';
-
-type Sent = { method: string; path: string; body: unknown };
-
-function harness(opts: { authorId?: string } = {}) {
-  const frames: ChannelNotification['params'][] = [];
-  const sent: Sent[] = [];
-  const messages = createChannelMessages({
-    notify: async (n) => {
-      expect(n.method).toBe('notifications/claude/channel');
-      frames.push(n.params);
-    },
-    http: async (method, path, body) => {
-      sent.push({ method, path, body });
-      return {};
-    },
-    authorId: opts.authorId ?? SELF,
-    now: () => FIXED_MS,
-  });
-  return { frames, sent, messages };
-}
-
-/** The one frame a call produced — fails loudly on zero or two. */
-function only(frames: ChannelNotification['params'][]): ChannelNotification['params'] {
-  expect(frames).toHaveLength(1);
-  return frames[0] as ChannelNotification['params'];
-}
+import { FIXED_ISO, FIXED_MS, SELF, type Sent, harness, only } from './channel-harness.ts';
 
 describe('a doc-shaped frame becomes one readable line', () => {
   it('renders a comment with its author, its text and its anchor', async () => {

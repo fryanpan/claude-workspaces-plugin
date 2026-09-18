@@ -1386,6 +1386,44 @@ export interface DispatchRequestedEvent {
   ts: number;
 }
 
+/**
+ * A builder's closing report on the build it just finished — the other end of
+ * `dispatch.requested`, and the one event of the pair that a person acts on.
+ *
+ * Broadcast, where `dispatch.requested` is not, and the difference is what
+ * each one is FOR. A request is telemetry read out of `events.jsonl` after the
+ * fact and fires once per lane started; a report is the lead's cue to read the
+ * record, fires once per build finished, and is the thing the whole feature
+ * exists to deliver. It carries counts rather than the lists themselves — a
+ * channel frame is one line in a reader's context, and `GET
+ * /workspaces/<ws>/dispatches/<taskId>/report` is where the detail is read.
+ *
+ * A SECOND report on the same build emits nothing at all: the store declines
+ * to build the event (`dispatch-reports.ts`), so a repeat cannot reach the
+ * fan-out for any subscriber on any bundle.
+ */
+export interface DispatchReportedEvent {
+  type: 'dispatch.reported';
+  workspaceId: string;
+  taskId: string;
+  /** The pull request this build is on. */
+  prNumber: number;
+  /** The commit the reported checks ran on. */
+  headCommit: string;
+  checksTotal: number;
+  checksFailed: number;
+  /** Gates the run did not execute — the browser-gated members on a
+   *  developer's machine. Neither a pass nor a failure; see
+   *  `.claude/rules/testing-standards.md`. */
+  checksHeld: number;
+  doneWhenTotal: number;
+  doneWhenMet: number;
+  /** Who reported, when the caller named itself. */
+  agentName?: string;
+  actor?: TaskActor;
+  ts: number;
+}
+
 export interface VoiceRequestEvent {
   type: 'voice.request';
   workspaceId: string;
@@ -1574,6 +1612,7 @@ export type TaskStoreEvent =
   | AgentDetachedEvent
   | AgentHeartbeatEvent
   | DispatchRequestedEvent
+  | DispatchReportedEvent
   | VoiceRequestEvent;
 
 /* `legacyTriageSidecarPaths` lives in `task-persistence.ts` now, next to

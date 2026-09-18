@@ -35,6 +35,7 @@ import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
+import { DispatchReportStore } from './dispatch-reports.ts';
 import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
@@ -285,6 +286,9 @@ export interface ServerHandle {
   /** Open builder dispatches and their worktree watchers
    *  (dispatch-registry.ts). Exposed for the same reason `agentWatches` is. */
   dispatches: DispatchRegistry;
+  /** The builders' closing reports (dispatch-reports.ts). Exposed for the same
+   *  reason `dispatches` is. */
+  dispatchReports: DispatchReportStore;
   shares: Shares | null;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
@@ -825,6 +829,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     console.log(
       `[dispatch] closed ${dispatches.prunedAtBoot.length} stale dispatch(es) at boot: ${dispatches.prunedAtBoot.join(', ')}`,
     );
+  }
+  // The other end of a dispatch: the builder's one closing report, kept
+  // against the TASK so it outlives the lane. `taskStore` is the sink, so a
+  // first report rides the ordinary store fan-out and reaches the lead's
+  // attached session; a repeat builds no event at all (dispatch-reports.ts).
+  // The done-when reader is what lets a report that skips a line be refused by
+  // that line's NAME rather than by a count.
+  const dispatchReports = new DispatchReportStore({
+    dataDir,
+    sink: taskStore,
+    doneWhenLinesOf: (taskId) =>
+      (taskStore.getTask(taskId)?.doneWhen ?? []).map((line) => ({ id: line.id, text: line.text })),
+  });
+  if (dispatchReports.loadError) {
+    console.error(`[dispatch] ${dispatchReports.loadError}`);
   }
   // The row reaching `done` or the archive IS the dispatch's terminal
   // statement — the registry hears it here, so a builder that never sent
@@ -2329,6 +2348,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     taskProjection,
     docStore,
     dispatches,
+    dispatchReports,
     agentNotes,
     agentNoteLog,
     chatAudit,
@@ -3457,6 +3477,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     chatAudit,
     identities,
     dispatches,
+    dispatchReports,
     shares,
     sweepDeadShares,
     // Exactly what the interval does, exposed for the same reason
