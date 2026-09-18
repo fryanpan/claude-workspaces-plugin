@@ -88,6 +88,7 @@
 import type { prose } from '@claude-workspaces/core';
 import { notesTopicLevel } from './notes-heading-level.ts';
 import { MAX_FLAT_RUN_BULLETS } from './notes-quality.ts';
+import { endsMeetingNotes } from './notes-section-fit.ts';
 
 /**
  * How many notes one heading may stand over before it has stopped being a
@@ -158,19 +159,10 @@ export interface RegroupOptions {
 }
 
 /**
- * Where this MEETING's notes stop — not where its first section does.
- *
- * A section ends at the next heading of its own level, and the prompt asks
- * for every new topic at exactly that level, so the section rule ended the
- * scan at the meeting's own second topic. What actually ends the meeting's
- * notes is a heading it did not write: the document's own material, which
- * this must never tell the note-taker to reorganise.
- *
- * A heading a PERSON has since edited reads as theirs (the doc clears
- * authorship on a person's edit), so renaming a topic mid-meeting stops the
- * scan there. That is the conservative direction — it goes quiet rather than
- * reaching into a block somebody has taken over — and it is the same reading
- * of "yours" every other part of this pipeline uses.
+ * Where this MEETING's notes stop — not where its first section does, which
+ * ended the scan at the meeting's own second topic. The rule and the story
+ * behind it are `endsMeetingNotes` in `notes-section-fit.ts`; this is it read
+ * over outline entries.
  */
 function meetingSectionEnd(
   outline: readonly prose.OutlineEntry[],
@@ -181,9 +173,7 @@ function meetingSectionEnd(
   for (let i = at + 1; i < outline.length; i++) {
     const entry = outline[i];
     if (entry?.kind !== 'heading') continue;
-    if ((entry.level ?? 0) > level) continue;
-    if (entry.author === author) continue;
-    return i;
+    if (endsMeetingNotes({ level: entry.level, author: entry.author }, level, author)) return i;
   }
   return outline.length;
 }

@@ -17,6 +17,7 @@ import { NOTES_AUTHOR_ID, type NotesDocStore, readNotesOutline } from '../src/no
 import type { NotesSectionClaim } from '../src/notes-heading-store.ts';
 import {
   NOTES_CONTINUATION_WINDOW_MS,
+  endsMeetingNotes,
   lastClaimedHeadingIndex,
   notesSectionEnd,
   notesSectionFits,
@@ -278,5 +279,39 @@ describe('the section a meeting adopts, end to end', () => {
     expect(notesSectionForMeeting(memory, ids, readNotesOutline(store, ids.docId), store)).toBe(
       first,
     );
+  });
+});
+
+describe('where a meeting\u2019s notes end', () => {
+  // The rule both the regroup scan and the section tidy walk by. It is one
+  // function because two readings that disagreed would let one pass
+  // reorganise blocks the other calls somebody else\u2019s page.
+  const heading = (level: number, author?: string) => ({ level, author });
+
+  test('a deeper heading is inside them, whoever wrote it', () => {
+    expect(endsMeetingNotes(heading(3), 2, AGENT)).toBe(false);
+    expect(endsMeetingNotes(heading(3, AGENT), 2, AGENT)).toBe(false);
+  });
+
+  test('a sibling topic the note-taker wrote carries them on', () => {
+    expect(endsMeetingNotes(heading(2, AGENT), 2, AGENT)).toBe(false);
+  });
+
+  test('a sibling heading the document\u2019s own author wrote ends them', () => {
+    expect(endsMeetingNotes(heading(2), 2, AGENT)).toBe(true);
+    expect(endsMeetingNotes(heading(1), 2, AGENT)).toBe(true);
+    expect(endsMeetingNotes(heading(2, 'agent:other'), 2, AGENT)).toBe(true);
+  });
+
+  test('with no note-taker named, every sibling heading ends them', () => {
+    // The caller that judges nothing by authorship gets the old section rule
+    // back, which is what keeps an unguarded tidy where it was.
+    expect(endsMeetingNotes(heading(2, AGENT), 2, undefined)).toBe(true);
+    expect(endsMeetingNotes(heading(3, AGENT), 2, undefined)).toBe(false);
+  });
+
+  test('a heading with no level of its own is judged on its author alone', () => {
+    expect(endsMeetingNotes({ level: undefined, author: AGENT }, 2, AGENT)).toBe(false);
+    expect(endsMeetingNotes({ level: undefined, author: undefined }, 2, AGENT)).toBe(true);
   });
 });
