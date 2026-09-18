@@ -825,6 +825,17 @@ decision a test reads and a reviewer checks, not a number buried in a
 `setTimeout`. No state, no `Request`, nothing to schedule: the relay owns the
 timer, this owns only how long it runs.
 
+`race-deadline.ts` is a leaf under the services tier and changes nothing in
+the picture: one function, `raceDeadline(work, ms)`, which settles when the
+work settles or when the window runs out, and clears its own timer either way.
+It sees no `Request` and holds no state. It exists because
+`Promise.race([work, new Promise((r) => setTimeout(r, ms))])` leaves the
+deadline's timer scheduled when the work wins, and a referenced timer keeps
+the process alive — every shutdown drain in `meeting-protocol.ts` and
+`recall-meeting.ts` held one, so a server with no meetings at all sat five
+seconds past its own `stop()` before it could exit. Nothing else imports it
+yet; a third drain would.
+
 `meeting-namer.ts` and `meeting-titler.ts` join the same family and change
 nothing in the picture: a meeting starts as "Meeting" and is renamed to its
 topic from its own notes, only while nobody has named it. The namer is the

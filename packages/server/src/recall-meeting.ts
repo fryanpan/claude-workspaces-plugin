@@ -41,6 +41,7 @@ import {
   beginNotesSession,
 } from './meeting-notes.ts';
 import type { ActiveMeeting, MeetingStore } from './meetings.ts';
+import { raceDeadline } from './race-deadline.ts';
 import type { BotStatusEvent } from './recall-status.ts';
 import { SpeakerNamer, TurnAllocator, parseRecallFrame } from './recall-turns.ts';
 import type { RecallClient } from './recall.ts';
@@ -420,17 +421,11 @@ export class RecallMeetingRelay {
           console.error('[recall] leave_call on shutdown failed:', err);
         }),
       );
-    await Promise.race([
-      Promise.allSettled(leaves),
-      new Promise((r) => setTimeout(r, DISPOSE_LEAVE_MS)),
-    ]);
+    await raceDeadline(Promise.allSettled(leaves), DISPOSE_LEAVE_MS);
     for (const rec of records) this.track(this.endMeeting(rec, 'left'));
     const deadline = Date.now() + DISPOSE_LEAVE_MS;
     while (this.inFlight.size > 0 && Date.now() < deadline) {
-      await Promise.race([
-        Promise.allSettled([...this.inFlight]),
-        new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now()))),
-      ]);
+      await raceDeadline(Promise.allSettled([...this.inFlight]), deadline - Date.now());
     }
   }
 

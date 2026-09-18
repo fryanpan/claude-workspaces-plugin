@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
+import { DISPOSE_DRAIN_MS, type MeetingClient, MeetingRelay } from '../src/meeting-protocol.ts';
 import { MeetingStore } from '../src/meetings.ts';
 import type { TranscriptionEngine, TranscriptionSession } from '../src/transcribe.ts';
 
@@ -25,16 +25,29 @@ import type { TranscriptionEngine, TranscriptionSession } from '../src/transcrib
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 /**
- * A marker due before the relay's own shutdown drain (`DISPOSE_DRAIN_MS`, 5s,
- * in `meeting-protocol.ts`).
+ * The drain the wedged-meeting case below runs on, INJECTED rather than
+ * waited out.
+ *
+ * Production is `DISPOSE_DRAIN_MS` (5s, in `meeting-protocol.ts`) and the
+ * case has to outlast it, so waiting it out for real made this the slowest
+ * test in the server suite: over five seconds in every CI run of September,
+ * paid on every green. What the case is about is the ORDER of two timers, and
+ * order is scale-free — so the window it runs on is a dep, exactly as the
+ * silence deadline's `schedule` already is.
+ */
+const DRAIN_MS = 200;
+
+/**
+ * A marker due before that drain.
  *
  * Both timers are scheduled from the same instant and the event loop fires
  * timers in DUE order, so this one lands first however loaded the machine is.
  * That ordering — not a measured duration — is what lets the wedged-meeting
  * test below say "dispose is still draining" without a wall clock in an
- * assertion, and it is why a slow CI box cannot turn it red.
+ * assertion, and it is why a slow CI box cannot turn it red. Derived from
+ * `DRAIN_MS` so shortening the window can never overtake it.
  */
-const DRAIN_FLOOR_MS = 4_000;
+const DRAIN_FLOOR_MS = Math.round(DRAIN_MS * 0.8);
 
 describe('meeting relay dispose', () => {
   let dataDir: string;
@@ -168,7 +181,13 @@ describe('meeting relay dispose', () => {
       open: () => new Promise<TranscriptionSession>(() => {}),
     };
     const store = new MeetingStore(dataDir);
-    const relay = new MeetingRelay({ store, engines: [engine], notes: null, broadcast: () => {} });
+    const relay = new MeetingRelay({
+      store,
+      engines: [engine],
+      notes: null,
+      broadcast: () => {},
+      disposeDrainMs: DRAIN_MS,
+    });
     const ws: MeetingClient = { data: { docId: 'wedged-doc' }, send: () => {} };
     relay.onOpen(ws);
     relay.onText(ws, JSON.stringify({ type: 'start', sampleRate: 16000, encoding: 'pcm_s16le' }));
@@ -194,6 +213,14 @@ describe('meeting relay dispose', () => {
       store.start({ docId: 'wedged-doc', engine: 'wedged', sampleRate: 16000, mode: 'solo' }),
     ).not.toBeNull();
   }, 20_000);
+
+  it('leaves production shutdowns on the five-second window', () => {
+    // The seam above is for the test, not for the product. Without this, a
+    // default quietly shortened to keep the suite fast would take real
+    // meetings' last sentences with it, and every case here would still pass.
+    expect(DISPOSE_DRAIN_MS).toBe(5_000);
+    expect(DRAIN_MS).toBeLessThan(DISPOSE_DRAIN_MS);
+  });
 
   it('still ends a meeting whose socket never produced a close', async () => {
     const engine: TranscriptionEngine = {
