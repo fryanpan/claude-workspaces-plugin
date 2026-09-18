@@ -193,6 +193,58 @@ describe('an owner line is a review item on the queue', () => {
   });
 });
 
+describe('an item the agent withdrew mid-rework', () => {
+  it('stays off the queue through later writes and a restart, and comes back only on a fresh owner report', async () => {
+    await fresh();
+    const { taskId, lineId } = await ownerLine(
+      'Reader can read the summary on a phone',
+      'the summary fits without a scroll at 430',
+    );
+    const [filed] = await ownerItemsOn(taskId);
+    expect(filed?.reviewItemId).toBeString();
+
+    // The work moved on, so the agent takes its own ask back.
+    const withdrew = await post(
+      `/workspaces/${ws}/tasks/${taskId}/review-items/${filed?.reviewItemId}/withdraw`,
+      { author: AGENT, reason: 'the summary is being rewritten' },
+    );
+    expect(withdrew.status).toBe(200);
+    expect(await ownerItemsOn(taskId)).toHaveLength(0);
+
+    // Another done-when write on the same task — the shape of every sweep
+    // that re-filed it: the line is still owner and still has no open item.
+    const edited = await post(`/workspaces/${ws}/tasks/${taskId}/done-when`, {
+      author: AGENT,
+      lines: [{ id: lineId, text: 'the summary fits without a scroll at 430 wide' }],
+    });
+    expect(edited.status).toBe(200);
+    expect(await ownerItemsOn(taskId)).toHaveLength(0);
+
+    // And a restart, whose backfill files an item for every owner line.
+    await handle?.stop();
+    boot();
+    expect(await ownerItemsOn(taskId)).toHaveLength(0);
+    expect((await detail(taskId)).doneWhen?.[0]?.verdict).toBe('owner');
+
+    // The agent reporting it owner again is the one thing that asks the
+    // reader, and it is a new item rather than the retracted one.
+    const again = await post(`/workspaces/${ws}/tasks/${taskId}/done-when/report`, {
+      author: AGENT,
+      lines: [
+        {
+          id: lineId,
+          verdict: 'owner',
+          proof: [{ text: 'rewritten summary at 430', url: 'https://example.com/430.png' }],
+        },
+      ],
+    });
+    expect(again.status).toBe(200);
+    const rows = await ownerItemsOn(taskId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.reviewItemId).not.toBe(filed?.reviewItemId);
+  });
+});
+
 describe('owner lines written before the items existed', () => {
   it('get their item at boot, and a second boot files no second item', async () => {
     await fresh();

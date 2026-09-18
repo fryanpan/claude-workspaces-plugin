@@ -2649,7 +2649,14 @@ export class TaskStore {
     opts: { actor: { id: string; name: string; kind?: string }; baseUrl?: string },
   ): DoneWhenResult {
     const res = this.doneWhen.report(taskId, entries, opts.actor, opts.baseUrl);
-    return this.withOwnerItems(res, opts.actor);
+    // The lines this report hands to the owner are the only ones that may
+    // reach the reader again after their item was withdrawn — a report is the
+    // agent saying the line is ready, which is what a withdrawal took back.
+    return this.withOwnerItems(
+      res,
+      opts.actor,
+      entries.filter((e) => e.verdict === 'owner').map((e) => e.id),
+    );
   }
 
   /** The owner's word on a line only a person can judge. */
@@ -2672,9 +2679,10 @@ export class TaskStore {
   private withOwnerItems(
     res: DoneWhenResult,
     actor: { id: string; name: string; kind?: string },
+    reportedOwnerLines: readonly string[] = [],
   ): DoneWhenResult {
     if (!res.ok) return res;
-    const { toJudge } = syncOwnerItems(res.task.id, this.ownerItemDeps, actor);
+    const { toJudge } = syncOwnerItems(res.task.id, this.ownerItemDeps, actor, reportedOwnerLines);
     return toJudge.length > 0 ? { ...res, ownerItemsToJudge: toJudge } : res;
   }
 
