@@ -184,7 +184,7 @@ interface FileShape {
 
 /** The key that decides whether two reports are about the same build. */
 function buildKey(taskId: string, headCommit: string): string {
-  return `${taskId} ${headCommit}`;
+  return `${taskId}\u0000${headCommit}`;
 }
 
 /** A git object name. Seven is the shortest abbreviation git itself prints;
