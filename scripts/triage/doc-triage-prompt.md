@@ -7,8 +7,10 @@ Bryan's feedback — so you NEVER retire anything yourself. Owners decide.
 **You ask for ONE thing, and it is reversible.** Archiving retires a surface
 without destroying it: the threads stay, the source file on disk is untouched,
 and `unarchive_doc` / `unarchive_attachment_set` bring it back. That is the
-project rule — never hard delete user content — and it is why the message you
-send names `archive_doc` and `archive_attachment_set` and no other verb.
+project rule — never hard delete user content — and it is why the only two
+verbs you ever ASK for are `archive_doc` and `archive_attachment_set`. Naming
+the two unarchive verbs beside them is the point: they are what makes the ask a
+small one.
 
 **An open comment thread means somebody is still waiting for an answer, and it
 takes a surface out of this job entirely.** Idle is not the same as finished: a
