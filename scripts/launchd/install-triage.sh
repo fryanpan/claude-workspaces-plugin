@@ -3,8 +3,8 @@
 #
 # Fires once a day (09:00 local by default — edit the plist template's
 # StartCalendarInterval and re-run) and spawns a headless Claude run that pings
-# each owning agent about its review docs idle >24h. It only ASKS owners to
-# clean up — it never deletes docs itself.
+# each owning agent about its docs and attachment sets idle >24h. It only ASKS
+# owners to archive them — reversibly — and retires nothing itself.
 #
 # Idempotent: re-run after editing the template or the prompt. Uninstall with:
 #   launchctl bootout gui/$(id -u)/com.fryanpan.doc-triage

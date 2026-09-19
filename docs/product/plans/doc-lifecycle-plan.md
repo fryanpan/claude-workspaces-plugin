@@ -4,8 +4,11 @@
 
 Stop obsolete review docs from piling up (177 had accumulated). Most docs
 live ~30 min then become obsolete; occasionally one waits multiple days on
-Bryan. So we don't auto-delete on a timer — we **ask the owning agent once a
-day** which of its idle-open docs to keep, and it `delete_doc`s the rest.
+Bryan. So nothing is retired on a timer — we **ask the owning agent once a
+day** which of its idle docs and attachment sets to keep, and it archives the
+rest with `archive_doc` / `archive_attachment_set`. Archiving is reversible and
+keeps the threads; the job names no destructive verb at all (the banned list
+and its check are `scripts/triage/prompt-audit.ts`).
 
 Decided with Bryan 2026-06-06: target = **owning agent via claude-hive**;
 idle threshold **>24h**; daily cadence.
@@ -46,9 +49,19 @@ claude-hive channel. Cloud routines can't reach `localhost:8787` or the local
 claude-hive network, so it must run on the Mac Mini. Verified headless
 `claude -p --dangerously-load-development-channels server:claude-hive` reaches
 claude-hive. Install with `scripts/launchd/install-triage.sh`. The triage logic
-lives in `scripts/triage/doc-triage-prompt.md`; it only ASKS owners, never
-deletes. Dry-run confirmed idle detection, owner grouping, peer/conductor
-lookup, and the orphan→conductor-digest fallback all work.
+lives in `scripts/triage/doc-triage-prompt.md`; it only ASKS owners, and only
+for the reversible archive verbs. Dry-run confirmed idle detection, owner
+grouping, peer/conductor lookup, and the orphan→conductor-digest fallback all
+work.
+
+Revised 2026-09-19: the prompt predated boards. It had been telling owners to
+clean a bound folder up with a board-delete verb that by then destroyed a whole
+board, and both listing addresses it named (`/api/docs`) had started answering
+410 gone, so the agent improvised the listing daily. It now walks
+`boardWorkspaces` from `GET /workspaces` and pages each board's
+`/workspaces/<board>/docs` twice — compact for `threads`, `full=1` for `owner` —
+and names `archive_doc` / `archive_attachment_set` with both arguments filled
+in. `prompt-audit.test.ts` fails if a destructive verb returns.
 
 **Future enhancement (noted, not built):** when `owner` is absent (legacy
 docs), fall back to the doc's `sourceUrl` project/git-root to find the owning
@@ -82,5 +95,7 @@ A daily scheduled agent (via the `schedule` skill / cron):
 
 - Owner is best-effort (cwd at create time); legacy docs have none → digest
   fallback. Reversible.
-- Never auto-delete in increment 2 — always ask. `delete_doc`'s open-thread
-  guardrail is the backstop.
+- Nothing is retired without asking. The open-thread exclusion is the job's own
+  rule and has no server refusal behind it: the archive verbs accept a surface
+  that holds an open thread, so the prompt applies the exclusion before it
+  composes a message.

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Daily claude-workspaces doc-triage run. Invoked by the
 # com.fryanpan.doc-triage launchd job (see scripts/launchd/). Spawns a
-# headless Claude run that reads the open review docs and pings each owning
-# agent (via claude-hive) about the ones idle >24h. It only ASKS — it never
-# deletes docs itself.
+# headless Claude run that reads each board's doc listing and pings the owning
+# agent (via claude-hive) about the docs and attachment sets idle >24h. It only
+# ASKS, and the only thing it asks for is archiving, which is reversible — it
+# retires nothing itself and names no destructive verb. The banned list and the
+# check behind it are scripts/triage/prompt-audit.ts.
 #
-# Needs local access to the LF server (localhost:8787) and the claude-hive
+# Needs local access to the claude-workspaces server (localhost:8787) and the claude-hive
 # network, which is why this runs on the Mac Mini, not as a cloud routine.
 # Verified that `claude -p --dangerously-load-development-channels
 # server:claude-hive` can reach claude-hive in headless mode.
