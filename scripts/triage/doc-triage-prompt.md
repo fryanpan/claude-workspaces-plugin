@@ -35,9 +35,13 @@ message is composed.
 2. Fetch the board list: `curl -s http://localhost:8787/workspaces`. Read the
    **`boardWorkspaces`** key: each entry is a board, with `id`, `name`,
    `docCount`, `createdAt`, and `retired: true` when it has been stood down.
-   Skip retired boards. Every doc on this server lives on some board — a doc
-   nobody filed gets one the server materialized — so walking these ids reaches
-   everything.
+   Skip retired boards. Walking these ids reaches everything this job can act
+   on: a backfill runs at every boot and files any attachment set, and any doc
+   holding content, that sits on no board onto a holding pen named **Unfiled**.
+   So expect that board to carry the legacy tail. What the backfill leaves
+   unfiled is out of scope here anyway — a board's own furniture (`ws:` and
+   `task:` docs, which `archive_doc` refuses) and a mockup with no source, which
+   has no page to open.
 
    (The same response has a `workspaces` key holding attachment-set rollups.
    Those rows carry no board id, and you need one for every verb you name, so
