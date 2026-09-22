@@ -37,14 +37,15 @@ describe('the interval a rule runs on', () => {
     ).toBe(3 * DAY);
   });
 
-  it('is the gap between the next two occurrences of a calendar rule', () => {
-    expect(scheduleIntervalMs(DAILY_9)).toBe(DAY);
+  it('is nothing for a calendar rule, which has no one gap to name', () => {
+    expect(scheduleIntervalMs(DAILY_9)).toBeUndefined();
     const weekdays: TaskSchedule = {
       rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [1, 2, 3, 4, 5] },
       armedAt: MON + 4 * DAY + 10 * HOUR, // a Friday, after 9am
     };
-    // Monday's 9am is next, then Tuesday's: one day, not the weekend.
-    expect(scheduleIntervalMs(weekdays)).toBe(DAY);
+    expect(scheduleIntervalMs(weekdays)).toBeUndefined();
+    // And the record carries none, so nothing downstream can print one.
+    expect(runRecord(DAILY_9, undefined, NINE).intervalMs).toBeUndefined();
   });
 
   it('is nothing for a one-off, which can never be stale', () => {
@@ -161,6 +162,7 @@ describe('when a rule is stale', () => {
   /** Closed on the hour it was owed, so "one day later" is unambiguous. */
   const closed = { id: 't-run', status: 'done' as const, closedAt: NINE };
   const fired = { ...DAILY_9, state: { lastFiredAt: NINE, lastInstanceId: 't-run' } };
+  const open = { id: 't-run', status: 'open' as const };
 
   it('gives a daily rule the hour after its next run was due', () => {
     expect(runRecord(fired, closed, NINE + DAY).dueAt).toBe(NINE + DAY);
@@ -176,27 +178,85 @@ describe('when a rule is stale', () => {
     expect(runRecord(DAILY_9, undefined, NINE + HOUR + 1).stale).toBe(true);
   });
 
-  it('calls an open run stale a slack after the occurrence nobody closed', () => {
-    const open = { id: 't-run', status: 'open' as const };
+  it('never counts from before the arming, so re-arming cannot make a rule stale', () => {
+    // `set_task_schedule` stamps a new `armedAt` and KEEPS the state when the
+    // rule itself is unchanged, so an envelope edit leaves a success older
+    // than the arming. Unfloored, this rule is owed 09:00 — an instant it
+    // never fires — and reads stale an hour later instead of seven.
+    const rearmed: TaskSchedule = {
+      rule: { kind: 'every', everyMs: 6 * HOUR },
+      armedAt: NINE,
+      state: { lastFiredAt: NINE - 5 * HOUR, lastSuccessAt: NINE - 5 * HOUR },
+    };
+    expect(runRecord(rearmed, undefined, NINE + HOUR).dueAt).toBe(NINE + 6 * HOUR);
+    expect(runRecord(rearmed, undefined, NINE + 7 * HOUR).stale).toBe(false);
+    expect(runRecord(rearmed, undefined, NINE + 7 * HOUR + 1).stale).toBe(true);
+  });
+
+  it('gives a run in flight the whole gap, so a long job is not stale every cycle', () => {
     // Armed an hour before the fire, so the arming is not what makes it late.
-    const rule = { ...fired, armedAt: NINE - HOUR };
-    expect(runRecord(rule, open, NINE + 30 * MINUTE).stale).toBe(false);
-    expect(runRecord(rule, open, NINE + 2 * HOUR).stale).toBe(true);
+    // The 09:00 occurrence was filed and its instance is still running; a
+    // three-hour job would otherwise read stale from 10:01 to noon daily.
+    const running = {
+      ...DAILY_9,
+      armedAt: NINE - HOUR,
+      state: { lastOccurrenceAt: NINE, lastFiredAt: NINE, lastInstanceId: 't-run' },
+    };
+    expect(runRecord(running, open, NINE + 90 * MINUTE).dueAt).toBe(NINE);
+    expect(runRecord(running, open, NINE + 90 * MINUTE).stale).toBe(false);
+    expect(runRecord(running, open, NINE + 3 * HOUR).stale).toBe(false);
+    // Stale only once tomorrow's nine o'clock is owed.
+    expect(runRecord(running, open, NINE + DAY).stale).toBe(false);
+    expect(runRecord(running, open, NINE + DAY + 1).stale).toBe(true);
+  });
+
+  it('does not let an instance from an older occurrence shield the rule', () => {
+    // Yesterday's run succeeded and its instance was reopened; today's was
+    // never filed, so nothing is in flight and the capped slack applies.
+    const reopened = {
+      ...DAILY_9,
+      state: {
+        lastOccurrenceAt: NINE,
+        lastFiredAt: NINE,
+        lastInstanceId: 't-run',
+        lastSuccessAt: NINE,
+      },
+    };
+    expect(runRecord(reopened, open, NINE + DAY).dueAt).toBe(NINE + DAY);
+    expect(runRecord(reopened, open, NINE + DAY + HOUR).stale).toBe(false);
+    expect(runRecord(reopened, open, NINE + DAY + HOUR + 1).stale).toBe(true);
   });
 
   it('gives a ten-minute rule ten minutes of slack, not an hour', () => {
+    // A preservation case: this reads the same on the commit before the fix.
     const rule: TaskSchedule = { rule: { kind: 'every', everyMs: 10 * MINUTE }, armedAt: MON };
     expect(runRecord(rule, undefined, MON + 20 * MINUTE).stale).toBe(false);
     expect(runRecord(rule, undefined, MON + 20 * MINUTE + 1).stale).toBe(true);
   });
 
   it('leaves an after-completion rule on its delay plus the same slack', () => {
+    // A preservation case: this reads the same on the commit before the fix.
     const rule: TaskSchedule = {
       rule: { kind: 'after-completion', delayMs: 3 * DAY },
       armedAt: MON,
     };
     expect(runRecord(rule, undefined, MON + 3 * DAY + HOUR).stale).toBe(false);
     expect(runRecord(rule, undefined, MON + 3 * DAY + HOUR + 1).stale).toBe(true);
+  });
+
+  it('still catches the after-completion instance nobody closes, one delay later', () => {
+    const rule: TaskSchedule = {
+      rule: { kind: 'after-completion', delayMs: 3 * DAY },
+      armedAt: MON,
+      state: {
+        lastOccurrenceAt: MON + 3 * DAY,
+        lastFiredAt: MON + 3 * DAY,
+        lastInstanceId: 't-run',
+      },
+    };
+    expect(runRecord(rule, open, MON + 5 * DAY).stale).toBe(false);
+    expect(runRecord(rule, open, MON + 6 * DAY).stale).toBe(false);
+    expect(runRecord(rule, open, MON + 6 * DAY + 1).stale).toBe(true);
   });
 
   it('is never stale past its end limit — that rule is finished, not stuck', () => {
@@ -207,14 +267,42 @@ describe('when a rule is stale', () => {
       true,
     );
   });
+
+  it('is not stale on the last run its end limit admits', () => {
+    // `until` falls between the due occurrence and the one after it, so there
+    // is no next gap to wait through — the rule is winding down.
+    const winding = { ...fired, until: NINE + DAY + 12 * HOUR };
+    expect(runRecord(winding, closed, NINE + DAY + 11 * HOUR).dueAt).toBe(NINE + DAY);
+    expect(runRecord(winding, closed, NINE + DAY + 11 * HOUR).stale).toBe(false);
+  });
+
+  it('is never stale on a rule whose cadence is not a positive number', () => {
+    const noInterval: TaskSchedule = { rule: { kind: 'every', everyMs: 0 }, armedAt: MON };
+    const noDelay: TaskSchedule = {
+      rule: { kind: 'after-completion', delayMs: -1 },
+      armedAt: MON,
+    };
+    expect(runRecord(noInterval, undefined, MON + 30 * DAY).stale).toBe(false);
+    expect(runRecord(noDelay, undefined, MON + 30 * DAY).stale).toBe(false);
+  });
+
+  it('is never stale on a calendar rule that admits no occurrence', () => {
+    const noTimes: TaskSchedule = { rule: { kind: 'calendar', times: [] }, armedAt: MON };
+    const noDays: TaskSchedule = {
+      rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }], weekdays: [] },
+      armedAt: MON,
+    };
+    expect(runRecord(noTimes, undefined, MON + 30 * DAY).stale).toBe(false);
+    expect(runRecord(noDays, undefined, MON + 30 * DAY).stale).toBe(false);
+  });
 });
 
 /**
  * The reading that sent a stale item out on 22 September: a rule running at
- * 00, 06, 09, 12, 15, 18 and 21 Pacific, read at 04:01 with its midnight run
- * long since done. The old arithmetic took the 06-to-09 gap as the rule's
- * interval, so three hours plus an hour of slack made a 00:05 success late
- * two hours before 06:00 was even due.
+ * 00, 06, 09, 12, 15, 18 and 21 Pacific with its midnight run long since
+ * done. The old arithmetic took the 06-to-09 gap as the rule's interval, so
+ * three hours plus an hour of slack made a 00:05 success late before 06:00
+ * was ever due.
  */
 describe('a calendar rule whose gaps are uneven', () => {
   const LA = 'America/Los_Angeles';
@@ -229,11 +317,14 @@ describe('a calendar rule whose gaps are uneven', () => {
     },
     timezone: LA,
     armedAt: instantForLocal(LA, 2026, 9, 1, 12, 0),
-    state: { lastFiredAt: la(0, 0), lastInstanceId: 't-run', lastSuccessAt: SUCCESS },
+    state: { lastOccurrenceAt: la(0, 0), lastFiredAt: la(0, 0), lastSuccessAt: SUCCESS },
   };
 
-  it('is not stale at 04:01, because 06:00 has not come due', () => {
-    const r = runRecord(sevenADay, ran, la(4, 1));
+  it('is not stale at 05:30, because 06:00 has not come due', () => {
+    // 05:30 is the reading that discriminates: five hours and twenty-five
+    // minutes after the success, past the four hours the old arithmetic
+    // allowed, and still before the run it is waiting for.
+    const r = runRecord(sevenADay, ran, la(5, 30));
     expect(r.dueAt).toBe(la(6, 0));
     expect(r.stale).toBe(false);
   });
@@ -243,15 +334,50 @@ describe('a calendar rule whose gaps are uneven', () => {
     expect(runRecord(sevenADay, ran, la(7, 30)).stale).toBe(true);
   });
 
-  it('still calls an even three-hourly rule stale at 04:01 — the control', () => {
+  it('still calls an even three-hourly rule stale at 05:30 — the control', () => {
     const every3h: TaskSchedule = {
       rule: { kind: 'every', everyMs: 3 * HOUR },
       timezone: LA,
       armedAt: la(0, 0),
-      state: { lastFiredAt: la(0, 0), lastInstanceId: 't-run', lastSuccessAt: SUCCESS },
+      state: { lastOccurrenceAt: la(0, 0), lastFiredAt: la(0, 0), lastSuccessAt: SUCCESS },
     };
-    const r = runRecord(every3h, ran, la(4, 1));
+    const r = runRecord(every3h, ran, la(5, 30));
     expect(r.dueAt).toBe(la(3, 0));
     expect(r.stale).toBe(true);
+  });
+});
+
+/**
+ * A daily rule across both US transitions. The gap the slack is drawn from is
+ * 23 hours in March and 25 in November, and the slack is an hour either way,
+ * so the rule is owed its run at nine local and stale at ten local on both
+ * days rather than an hour out.
+ */
+describe('a daily rule across a daylight-saving transition', () => {
+  const LA = 'America/Los_Angeles';
+  const nine = (month: number, day: number): number => instantForLocal(LA, 2026, month, day, 9, 0);
+  const dailyNine = (success: number): TaskSchedule => ({
+    rule: { kind: 'calendar', times: [{ hour: 9, minute: 0 }] },
+    timezone: LA,
+    armedAt: instantForLocal(LA, 2026, 3, 1, 0, 0),
+    state: { lastOccurrenceAt: success, lastFiredAt: success, lastSuccessAt: success },
+  });
+
+  it('spring forward: 2026-03-08 is 23 hours on, and the hour still holds', () => {
+    const rule = dailyNine(nine(3, 7));
+    const due = nine(3, 8);
+    expect(runRecord(rule, undefined, due).dueAt).toBe(due);
+    expect(due - nine(3, 7)).toBe(23 * HOUR);
+    expect(runRecord(rule, undefined, due + HOUR).stale).toBe(false);
+    expect(runRecord(rule, undefined, due + HOUR + 1).stale).toBe(true);
+  });
+
+  it('fall back: 2026-11-01 is 25 hours on, and the hour still holds', () => {
+    const rule = { ...dailyNine(nine(11, 1)), armedAt: instantForLocal(LA, 2026, 10, 1, 0, 0) };
+    const due = nine(11, 2);
+    expect(runRecord(rule, undefined, due).dueAt).toBe(due);
+    expect(nine(11, 1) - nine(10, 31)).toBe(25 * HOUR);
+    expect(runRecord(rule, undefined, due + HOUR).stale).toBe(false);
+    expect(runRecord(rule, undefined, due + HOUR + 1).stale).toBe(true);
   });
 });

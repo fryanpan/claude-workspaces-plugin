@@ -38,6 +38,7 @@ import {
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
   type TaskSchedule,
+  instantForLocal,
   zonedParts,
 } from '@claude-workspaces/core/task-schedule';
 import type { Task } from '@claude-workspaces/core/task-wire';
@@ -101,6 +102,23 @@ export function successNote(record: RunRecord, closedAt: number): string {
   return `Run finished — ${record.instanceId ?? 'its instance'} done${took}`;
 }
 
+/** The rule's OWN spelling of the time `dueAt` stands for, with the zone it
+ *  is read in. Matched by instant rather than by wall-clock parts, because a
+ *  spring-forward morning normalises a 02:30 rule to 01:30 or 03:30 and the
+ *  reader is looking for the 02:30 they typed. */
+function dueTimeLabel(schedule: TaskSchedule, dueAt: number): string | undefined {
+  const rule = schedule.rule;
+  if (rule.kind !== 'calendar') return undefined;
+  const zone = schedule.timezone ?? DEFAULT_SCHEDULE_TIMEZONE;
+  const on = zonedParts(dueAt, zone);
+  const hhmm = (hour: number, minute: number): string =>
+    `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  const own = rule.times.find(
+    (t) => instantForLocal(zone, on.year, on.month, on.day, t.hour, t.minute) === dueAt,
+  );
+  return `${own ? hhmm(own.hour, own.minute) : hhmm(on.hour, on.minute)} ${zone}`;
+}
+
 /**
  * What the rule was owed, in the words its own shape supports.
  *
@@ -108,13 +126,14 @@ export function successNote(record: RunRecord, closedAt: number): string {
  * not be even: "it runs every 3h" was what the item said about a rule firing
  * at 00, 06, 09, 12, 15, 18 and 21, and it was not true of any pair of runs
  * the reader could point at. Every other kind has one gap, so its cadence is
- * the more useful sentence.
+ * the more useful sentence. A calendar rule owed nothing more says nothing,
+ * rather than falling back to the sentence it was taken off.
  */
 function cadenceClause(schedule: TaskSchedule, record: RunRecord, now: number): string {
-  if (schedule.rule.kind === 'calendar' && record.dueAt !== undefined) {
-    const parts = zonedParts(record.dueAt, schedule.timezone ?? DEFAULT_SCHEDULE_TIMEZONE);
-    const hhmm = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
-    return `its ${hhmm} run was due ${ageWord(now - record.dueAt)} ago`;
+  if (schedule.rule.kind === 'calendar') {
+    if (record.dueAt === undefined) return '';
+    const label = dueTimeLabel(schedule, record.dueAt);
+    return `its ${label} run was due ${ageWord(now - record.dueAt)} ago`;
   }
   return record.intervalMs !== undefined ? `it runs every ${ageWord(record.intervalMs)}` : '';
 }
