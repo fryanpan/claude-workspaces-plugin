@@ -146,12 +146,19 @@ const FRAMES: Array<{ event: string; frame: (who: string) => Record<string, unkn
     }),
   },
   {
+    // The UNDO, not the plain withdrawal. A withdrawal asks its reader for
+    // nothing and is dropped for everybody by `bookkeeping-events.ts`, so the
+    // delivered-to-a-peer control below could not be asserted on it — and a
+    // row whose control cannot run tests only that something is suppressed,
+    // which is what the whole file exists not to do. `reinstated: true` is
+    // the same event name carrying an ask, so the self-echo rule is still the
+    // only thing deciding this row.
     event: 'review_item.withdrawn',
     frame: (who) => ({
       workspaceId: 'w1',
       taskId: 't1',
       reviewItemId: 'r1',
-      reason: 'answered elsewhere',
+      reinstated: true,
       links: [],
       actor: actor(who),
     }),

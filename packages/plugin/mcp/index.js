@@ -14109,6 +14109,11 @@ function isBookkeepingEvent(event, payload) {
       return false;
     return mayCarryAnOpenAsk(payload.thread) === false;
   }
+  if (event === "review_item.withdrawn") {
+    if (!payload || typeof payload !== "object")
+      return false;
+    return payload.reinstated !== true;
+  }
   return false;
 }
 
@@ -14543,6 +14548,45 @@ function reviewItemHeldLine(p) {
   return `[workspace.review_item_held] your review item ${ask}${on}${ids} was held off the queue by the quality gate${why}.${stood} ${fix}`;
 }
 
+// packages/mcp/src/review-item-line.ts
+var TASK_REVIEW_ITEM_EVENTS = new Set([
+  "review_item.added",
+  "review_item.revised",
+  "review_item.withdrawn"
+]);
+function isTaskReviewItemEvent(event, payload) {
+  if (!TASK_REVIEW_ITEM_EVENTS.has(event))
+    return false;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return false;
+  const p = payload;
+  if (typeof p.docId === "string" && p.docId.trim() !== "")
+    return false;
+  return typeof p.taskId === "string" && p.taskId.trim() !== "";
+}
+var HEADLINE_MAX = 100;
+function truncate5(s, n) {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+function reviewItemTaskLine(event, p) {
+  const item = p.reviewItemId ?? "?";
+  const where = `item ${item} on task ${p.taskId ?? "?"}`;
+  const by = p.actor?.name ? ` by ${p.actor.name}` : "";
+  if (event === "review_item.added") {
+    const ask = p.headline ? `"${truncate5(p.headline, HEADLINE_MAX)}" — ` : "";
+    return `[review item added] ${ask}${where}${by}`;
+  }
+  if (event === "review_item.revised") {
+    const answers = p.threadId ? `answers thread ${p.threadId}, ` : "";
+    return `[review item revised] ${where}${by} — ${answers}back on the queue`;
+  }
+  if (p.reinstated === true) {
+    return `[review item reinstated] ${where}${by} — back in front of the reader`;
+  }
+  const why = p.reason ? ` — ${truncate5(p.reason, 80)}` : "";
+  return `[review item withdrawn] ${where}${by}${why}`;
+}
+
 // packages/mcp/src/scheduled-line.ts
 var quoted = (title, id) => title ? `"${title}" (${id ?? "?"})` : id ?? "a scheduled run";
 function scheduledRunLine(p) {
@@ -14607,7 +14651,7 @@ function isSelfAuthoredEvent(event, payload, selfId) {
 }
 
 // packages/mcp/src/voice-line.ts
-function truncate5(s, n) {
+function truncate6(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 function where(p) {
@@ -14621,7 +14665,7 @@ function voiceRequestLine(p) {
     return null;
   const by = p.actor?.name ? ` by ${p.actor.name}` : "";
   const said = `[voice.request]${by}${where(p)}: "${p.transcript ?? ""}"`;
-  const told = truncate5(p.ack ?? "", 120);
+  const told = truncate6(p.ack ?? "", 120);
   if (p.route === "fast-path-action") {
     return `${said} — the fast path ALREADY applied this to the board on the speaker's behalf; ` + `they were told: "${told}". Do NOT redo it — reconcile your own picture of the board ` + "with what changed, and pick up only whatever the utterance asked for beyond it.";
   }
@@ -14666,10 +14710,10 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
   let body;
   switch (event) {
     case "task.created":
-      body = `[task.created] "${truncate6(p.task?.title ?? p.taskId ?? "", 60)}" → ${p.goal ?? "?"}${p.assignee ? ` (assignee ${p.assignee})` : ""}`;
+      body = `[task.created] "${truncate7(p.task?.title ?? p.taskId ?? "", 60)}" → ${p.goal ?? "?"}${p.assignee ? ` (assignee ${p.assignee})` : ""}`;
       break;
     case "task.transitioned":
-      body = `[task.transitioned] ${p.taskId}: ${p.from} → ${p.to}${by}${p.note ? ` — ${truncate6(p.note, 80)}` : ""}`;
+      body = `[task.transitioned] ${p.taskId}: ${p.from} → ${p.to}${by}${p.note ? ` — ${truncate7(p.note, 80)}` : ""}`;
       break;
     case "task.assigned":
       body = `[task.assigned] ${p.taskId}: ${p.from} → ${p.to}${by}`;
@@ -14678,10 +14722,10 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       body = `[task.regrouped] ${p.taskId}: ${p.fromGoal} → ${p.toGoal}${by}`;
       break;
     case "task.retitled":
-      body = `[task.retitled] "${truncate6(p.titleFrom ?? "", 60)}" → "${truncate6(p.titleTo ?? "", 60)}"${by}${p.reason ? ` — ${truncate6(p.reason, 80)}` : ""}`;
+      body = `[task.retitled] "${truncate7(p.titleFrom ?? "", 60)}" → "${truncate7(p.titleTo ?? "", 60)}"${by}${p.reason ? ` — ${truncate7(p.reason, 80)}` : ""}`;
       break;
     case "task.body_edited":
-      body = p.titleFrom && p.titleTo ? `[task.body_edited] reshaped "${truncate6(p.titleFrom, 60)}" → "${truncate6(p.titleTo, 60)}"${by}${p.reason ? ` — ${truncate6(p.reason, 80)}` : ""}` : `[task.body_edited] ${p.taskId}${by}${p.reason ? ` — ${truncate6(p.reason, 80)}` : ""}`;
+      body = p.titleFrom && p.titleTo ? `[task.body_edited] reshaped "${truncate7(p.titleFrom, 60)}" → "${truncate7(p.titleTo, 60)}"${by}${p.reason ? ` — ${truncate7(p.reason, 80)}` : ""}` : `[task.body_edited] ${p.taskId}${by}${p.reason ? ` — ${truncate7(p.reason, 80)}` : ""}`;
       break;
     case "task.scheduled_run":
       body = scheduledRunLine(p);
@@ -14765,6 +14809,25 @@ async function emitChannelMessage(deps, event, rawPayload) {
   }
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
     return;
+  if (isTaskReviewItemEvent(event, rawPayload)) {
+    const r = rawPayload;
+    await deps.notify({
+      method: "notifications/claude/channel",
+      params: {
+        source: "claude-workspaces",
+        sent_at: nowIso(deps),
+        content: reviewItemTaskLine(event, r),
+        meta: {
+          workspace_id: r.workspaceId ?? "unknown",
+          ...r.taskId ? { task_id: r.taskId } : {},
+          ...r.reviewItemId ? { review_item_id: r.reviewItemId } : {},
+          event,
+          ...r.actor?.name ? { author: r.actor.name } : {}
+        }
+      }
+    });
+    return;
+  }
   const p = rawPayload ?? {};
   const docId = p.docId ?? "unknown";
   if (event === "doc.sync_error") {
@@ -14792,7 +14855,7 @@ async function emitChannelMessage(deps, event, rawPayload) {
     const author2 = p.suggestion?.author?.name ?? "";
     const snippet2 = p.suggestion?.snippet ?? "";
     const kind = p.suggestion?.kind ?? "";
-    const header2 = snippet2 ? `"${truncate6(snippet2, 60)}"` : sid;
+    const header2 = snippet2 ? `"${truncate7(snippet2, 60)}"` : sid;
     const body2 = `[suggestion ${action2}] ${author2 ? `${author2}: ` : ""}${kind} ${header2}`.trim();
     await deps.notify({
       method: "notifications/claude/channel",
@@ -14820,8 +14883,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const fromMock = fromMockNote(statusChange ? p.via : (p.comment ?? p.thread?.comments?.at(-1))?.via);
   const sentAt = new Date(p.comment?.ts ?? nowMs(deps)).toISOString();
   const action = event.startsWith("thread.") ? event.slice("thread.".length) : event;
-  const header = snippet ? `on "${truncate6(snippet, 60)}"` : "";
-  const onItem = reviewItemId ? ` on review item ${reviewItemId}${snippet ? ` "${truncate6(snippet, 60)}"` : ""} —` : "";
+  const header = snippet ? `on "${truncate7(snippet, 60)}"` : "";
+  const onItem = reviewItemId ? ` on review item ${reviewItemId}${snippet ? ` "${truncate7(snippet, 60)}"` : ""} —` : "";
   const body = text ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ""}${text}${openPartsClause(p.openParts)}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
   await deps.notify({
     method: "notifications/claude/channel",
@@ -14840,7 +14903,7 @@ async function emitChannelMessage(deps, event, rawPayload) {
     }
   });
 }
-function truncate6(s, n) {
+function truncate7(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
@@ -20528,7 +20591,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.257";
+var PLUGIN_VERSION = "0.1.258";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

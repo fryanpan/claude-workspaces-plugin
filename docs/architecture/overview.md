@@ -249,7 +249,13 @@ deployment can do for it. `schedule-output-line.ts` in `mcp` is the same shape
 one layer out — it words `set_task_schedule`'s answer about the folder a
 rule's runs write into — and joins the line modules beside
 `scheduled-line.ts`. Neither moves a boundary: both are pure wording, read by
-one caller each.
+one caller each. `review-item-line.ts` is the third and joins them: it words
+the frame for a review item filed, revised or reinstated on a TASK. Those
+events carry `taskId` and no doc, so they fell through the doc-shaped tail of
+`channel-messages.ts` and reached readers naming `doc_id: "unknown"` with no
+task and no ask; the line module holds the wording and the two-part test for
+which items are ticket-borne, and the routing decision stays in
+`emitChannelMessage`.
 
 `task-wait.ts` joins the Board group under the same `task-*.ts` glob and
 moves no boundary either. It writes one field on a task — what an agent
@@ -587,8 +593,13 @@ MCP child drops the frame before it becomes a wake. It drops it for every
 reader, not only the session that resolved the thread, which is what separates
 this rule from the self-echo one. A resolve retires each review item on its
 thread, so a resolve that closed an unanswered ask still wakes: it is the only
-report that reaches the agent who asked. Rule in
-`packages/mcp/src/bookkeeping-events.ts`.
+report that reaches the agent who asked. A review item WITHDRAWN on a ticket
+is the one place that reasoning comes out the other way: it also retires an
+unanswered ask, but the ticket is left with no open question, which is the
+state `workspace.stalled` and `workspace.ready_idle` already report to the
+agent holding the row — so the withdrawal is dropped and its undo
+(`reinstated: true`), which puts the ask back in front of the reader, is not.
+Rules in `packages/mcp/src/bookkeeping-events.ts`.
 
 Which rule runs where depends on what it reads. The server drops by event name,
 which reaches every attached session at the next prod restart. The child drops

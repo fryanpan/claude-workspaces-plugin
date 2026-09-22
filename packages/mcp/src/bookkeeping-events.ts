@@ -62,6 +62,11 @@
  *
  *   - `thread.reopened` — a reopen says the work is not done. That is a
  *     request, and it is the exact inverse of a resolve.
+ *   - `review_item.withdrawn` with `reinstated: true` — the undo puts the ask
+ *     back in front of the reader, which is the exact inverse of the
+ *     withdrawal, exactly as a reopen is of a resolve. The plain withdrawal
+ *     IS on the list; see the carve-out below for what makes the pair
+ *     separable and why the filer is not left in silence by it.
  *   - `review_item.answered` — an answer is the outcome the filer is blocked
  *     on. It is ids-only like `viewed`, and its words do ride `thread.replied`
  *     and `decision.answered`, so a case could be made; the case is not
@@ -177,6 +182,26 @@ export function isBookkeepingEvent(event: string, payload: unknown): boolean {
   if (event === 'thread.resolved') {
     if (!payload || typeof payload !== 'object') return false;
     return mayCarryAnOpenAsk((payload as { thread?: unknown }).thread) === false;
+  }
+  // An ask taken back. The route refuses a withdrawal of an item somebody has
+  // already answered, so this always retires an UNANSWERED ask — which is the
+  // shape the resolve carve-out above delivers on. It is dropped anyway, and
+  // the difference is who is left waiting. A resolve closes a thread that the
+  // board records nothing else about; a withdrawal leaves the ticket with no
+  // open question, which is precisely the state `workspace.stalled` and
+  // `workspace.ready_idle` already report to the agent holding the row. So
+  // the filer is told by an existing wake and the reader is told nothing
+  // because it is owed nothing: the ask is gone.
+  //
+  // The undo is not this event's inverse by accident — `reinstated: true` is
+  // the ask arriving, and it wakes.
+  //
+  // A STATE-dependent drop, so it belongs here rather than in the server's
+  // `ANALYTICS_ONLY_EVENTS`: the name alone cannot separate a withdrawal from
+  // a reinstatement.
+  if (event === 'review_item.withdrawn') {
+    if (!payload || typeof payload !== 'object') return false;
+    return (payload as { reinstated?: unknown }).reinstated !== true;
   }
   return false;
 }
