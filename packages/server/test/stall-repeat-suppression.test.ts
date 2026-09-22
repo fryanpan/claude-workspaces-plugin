@@ -333,11 +333,17 @@ describe('work that moved inside the window', () => {
 
 describe('a row only a person can unblock', () => {
   it('is not on the frame the lead is woken with', () => {
+    // The gate hands such a row over on `awaitingPerson` rather than on
+    // `unfiled` (2026-09-22), so there is nothing on the lists the wake reads
+    // — not for one tick and not for three repeat windows. It used to arrive
+    // on `unfiled` and be filtered out here by `withoutPersonBlocked`, which
+    // is the reading this case tested and the one that is gone.
     const h = harness();
     h.set({
       ...h.current(),
       stalled: [],
-      unfiled: [row('t-owner', 90 * MIN, { bucket: 'blocked-on-owner-unfiled' })],
+      unfiled: [],
+      awaitingPerson: [row('t-owner', 90 * MIN, { bucket: 'blocked-on-owner-unfiled' })],
     });
 
     h.nudger.tick();

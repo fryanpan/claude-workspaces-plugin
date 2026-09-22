@@ -159,9 +159,8 @@ export const BUILDER_SILENT_MULTIPLIER_DEFAULT = 2;
 export const BUILDER_SILENT_BUCKET = 'builder-silent';
 
 /**
- * The word the `unfiled` list carries for an ask the BOARD declares — a row
- * whose owner is a person, or whose band is the owner's, with no item on that
- * person's queue.
+ * The word the `awaitingPerson` RECORD carries for a row the BOARD says a
+ * person owns — by assignee or by band — with no item on that person's queue.
  *
  * Named on the row here rather than taken from `Classified.bucket`, because
  * the bucket answers a different question (is this work somebody picks up)
@@ -170,6 +169,9 @@ export const BUILDER_SILENT_BUCKET = 'builder-silent';
  * (`stall-escalation.ts`'s `BUCKET_WORDS`) about a row carrying an unanswered
  * question — the swallowing, moved one file downstream. For every row that is
  * not a rule this is the bucket the row already had.
+ *
+ * It was an `unfiled` FINDING until 2026-09-22, and is now a record: see
+ * `StallVerdict.awaitingPerson`.
  */
 export const OWNER_UNFILED_BUCKET = 'blocked-on-owner-unfiled';
 
@@ -183,15 +185,15 @@ export interface StalledRow {
   id: string;
   title: string;
   /** Which keep-moving bucket put it here — `in-progress` (claimed and gone
-   *  quiet), `ready-unpicked` (nothing blocking it and nobody on it), or, on
-   *  the `unfiled` list, EITHER `blocked-on-owner-unfiled` (the board says a
-   *  person owns it) or `waiting-unfiled` (the row's own note was READ as an
-   *  ask, by a regex over prose) — or the gate's own `builder-silent` (a
-   *  watched builder that stopped reporting; probe or replace it). The lead's
-   *  next move differs per bucket, so the frame must not flatten them into
-   *  one word. Both `unfiled` buckets were rendered in one sentence until
-   *  `nudge-line.ts` learned to read this field, which told the reader a
-   *  person was waiting when only a regex over an agent's status note had
+   *  quiet), `ready-unpicked` (nothing blocking it and nobody on it),
+   *  `waiting-unfiled` on the `unfiled` list (the row's own note was READ as
+   *  an ask, by a regex over prose), `blocked-on-owner-unfiled` on the
+   *  `awaitingPerson` record — or the gate's own `builder-silent` (a watched
+   *  builder that stopped reporting; probe or replace it). The lead's next
+   *  move differs per bucket, so the frame must not flatten them into one
+   *  word. The two ways of waiting on a person were rendered in one sentence
+   *  until `nudge-line.ts` learned to read this field, which told the reader
+   *  a person was waiting when only a regex over an agent's status note had
    *  said so — the flattening this comment forbids, downstream of it. */
   bucket: string;
   /** How long since anything touched the row — a transition, an edit, or a
@@ -287,14 +289,38 @@ export interface StallVerdict {
   /** Work that should be moving and is not, quietest first. */
   stalled: StalledRow[];
   /**
-   * Rows waiting on a person with no question filed where they would see it.
-   * Two ways in, told apart by `StalledRow.bucket`:
-   * `blocked-on-owner-unfiled` — the BOARD says a person owns the row —
-   * and `waiting-unfiled` — the row's own agent said so in its closing words
-   * (`waiting-unfiled.ts`). Same remedy, so one list; different evidence, so
-   * two words.
+   * Rows whose own agent said, in its closing words, that it waits on a
+   * person, with no question filed where that person would see it
+   * (`waiting-unfiled.ts`). One bucket, `waiting-unfiled`, and one remedy the
+   * agent can perform: file the ask, or say there was none.
+   *
+   * It carried a second bucket until 2026-09-22 — `blocked-on-owner-unfiled`,
+   * the BOARD saying a person owns the row. That one is `awaitingPerson`
+   * below now, because it is not a finding: nobody has an act to perform on
+   * it.
    */
   unfiled: StalledRow[];
+  /**
+   * Rows the BOARD says a person owns, with nothing on that person's queue —
+   * `OWNER_UNFILED_BUCKET`. A RECORD, never a finding: it counts toward no
+   * FAIL, enters no frame and reaches no review item.
+   *
+   * Why it is not a finding. There is no act for anyone here. An agent cannot
+   * hand the row back — the board itself says a person holds it — so a wake
+   * spends a turn that ends where it started, and stall frames naming such
+   * rows were part of the 11% of fleet model spend measured on repeat or
+   * empty reminders. The person cannot act either: the only thing the item
+   * asked them to do was file a question to themselves about work already on
+   * their own queue. One row reached the owner on three review items in five
+   * days before this was retired (Bryan, 2026-09-21: "The first one is
+   * assigned to me already. Work with workspaces to stop alerting me.").
+   *
+   * Kept as a record rather than dropped so that a week of verdicts still
+   * answers "why is this row not moving" — the ready gate already holds the
+   * same rows as `awaiting-person` (`ready-gate.ts`), and this is the same
+   * fact where the verdict can be read.
+   */
+  awaitingPerson: StalledRow[];
   /**
    * Rows whose blockage lifted and whose work has not restarted, longest
    * since the lift first. NOT disjoint from `stalled`: a quiet row that was
@@ -483,6 +509,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
   const stalled: StalledRow[] = [];
   const checkIn: StalledRow[] = [];
   const unfiled: StalledRow[] = [];
+  const awaitingPerson: StalledRow[] = [];
   const unresumed: UnresumedRow[] = [];
   const waiting: WaitingRow[] = [];
   const undetermined: StallUndeterminedRow[] = [];
@@ -549,29 +576,27 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
       stalled.push(named);
       namedStalled = true;
     }
-    // Restricted to the row that actually needs the ask filed. `unfiledAsk` is
+    // A row the BOARD says a person owns, with nothing on their queue. A
+    // RECORD and not a finding — `StallVerdict.awaitingPerson` says why — so
+    // it leaves this function on a list nothing counts and nothing sends.
+    //
+    // Restricted to the row that actually owes the answer. `unfiledAsk` is
     // also set on rows BEHIND such a row, whose chain bottoms out in it —
-    // listing those would hand the lead the same single action several times
-    // over, attached to rows where it cannot be performed.
+    // recording those would say the same single fact several times over,
+    // attached to rows it is not true of.
     //
-    // And gated on the SAME silence the stalled list runs on. Without the
-    // clock a row counted the moment it was created: an agent files a ticket
-    // for a person, and the wake fires while the turn that filed it is still
-    // running — telling the lead about a gap it is in the middle of closing.
-    // Measured on a live board, that produced six wakes in an evening with
-    // nothing stalled in any of them, its unfiled count walking 1→2→3→2→1.
-    //
-    // This clock belongs to the WAKE and to nothing else. `classifyOpenTasks`
-    // is unchanged, so the keep-moving verdict still counts every unfiled ask
-    // however fresh — there the question is whether the protocol is being
-    // followed right now, and a young violation is still a violation.
+    // The clock is kept, so the record names what the FRAME would have named
+    // had this still been a finding: a row counted the moment it was created
+    // read as a gap while the turn that filed it was still running, which is
+    // how it produced six wakes in one evening with nothing stalled in any of
+    // them. `classifyOpenTasks` is unchanged either way.
     //
     // Both of the readings below are `ownerAsk`, never `bucket`: whether a
     // person is owed an answer is not the same question as whether the row is
     // work anyone picks up, and a rule row answers the second one in a way
     // that used to swallow the first (`keep-moving.ts`).
     else if (row.ownerAsk === 'unfiled' && row.sinceActivityMs > quietMs)
-      unfiled.push({ ...named, bucket: OWNER_UNFILED_BUCKET });
+      awaitingPerson.push({ ...named, bucket: OWNER_UNFILED_BUCKET });
     // A filed wait, by address. Not gated on the clock: it is not a finding.
     else if (row.ownerAsk === 'filed' && row.waitingOn && row.waitingOn.length > 0)
       waiting.push({ id: row.id, title: row.title, waitingOn: row.waitingOn });
@@ -654,6 +679,7 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
   return {
     stalled,
     unfiled,
+    awaitingPerson,
     unresumed,
     waiting,
     declaredWaits,

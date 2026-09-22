@@ -1,10 +1,14 @@
 /**
- * The three readings the stall wake takes of a frame before it spends a turn.
+ * The two readings the stall wake takes of a frame before it spends a turn.
  *
  * Unit-level, over built frames rather than through the nudger, because each
  * answer has edges the nudger cannot easily be driven into: a frame that
- * names a held item AND a moving row, a board whose unfiled list is entirely
- * person-blocked, a window of zero.
+ * names a held item AND a moving row, a window of zero.
+ *
+ * A third reading lived here, `withoutPersonBlocked`, which took a row the
+ * board says a person owns off the wake's copy of `unfiled`. Its cases are
+ * gone with it: the gate no longer puts such a row on that list at all, and
+ * `person-owned-quiet.test.ts` is where that is now asserted.
  *
  * Fixtures are synthetic; the repo is public.
  */
@@ -13,13 +17,11 @@ import {
   STALL_MOVED_WITHIN_DEFAULT_MS,
   checkInTokens,
   everyNamedTaskMoved,
-  isPersonBlocked,
   rowBucketTokens,
   undeterminedTokens,
-  withoutPersonBlocked,
 } from '../src/stall-frame-news.ts';
 import type { StalledRow, UnresumedRow } from '../src/stall-gate.ts';
-import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from '../src/stall-nudge.ts';
+import { STALL_EVENT, type StallNudgeFrame } from '../src/stall-nudge.ts';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -53,19 +55,6 @@ function frame(over: Partial<StallNudgeFrame> = {}): StallNudgeFrame {
     consideredCount: 6,
     rows: [row()],
     ts: 1_000_000,
-    ...over,
-  };
-}
-
-function board(over: Partial<StallSnapshot> = {}): StallSnapshot {
-  return {
-    workspaceId: 'w-harbor',
-    leadAgentId: 'agent-lead',
-    retired: false,
-    stalled: [],
-    unfiled: [],
-    considered: 6,
-    undetermined: [],
     ...over,
   };
 }
@@ -131,30 +120,6 @@ describe('a frame whose every named task moved inside the window', () => {
 
   it('holds back nothing when the frame names no task at all', () => {
     expect(everyNamedTaskMoved(frame({ rows: [] }), HOUR)).toBe(false);
-  });
-});
-
-describe('a row only a person can unblock', () => {
-  it('is the board-declared bucket, and not the agent-declared one', () => {
-    expect(isPersonBlocked(row({ bucket: 'blocked-on-owner-unfiled' }))).toBe(true);
-    expect(isPersonBlocked(row({ bucket: 'waiting-unfiled' }))).toBe(false);
-  });
-
-  it('is taken off the board the lead is woken about', () => {
-    const b = board({
-      unfiled: [
-        row({ id: 't-owner', bucket: 'blocked-on-owner-unfiled' }),
-        row({ id: 't-agent', bucket: 'waiting-unfiled' }),
-      ],
-    });
-
-    expect(withoutPersonBlocked(b).unfiled.map((r) => r.id)).toEqual(['t-agent']);
-  });
-
-  it('leaves a board with none of them untouched, object and all', () => {
-    const b = board({ unfiled: [row({ bucket: 'waiting-unfiled' })] });
-
-    expect(withoutPersonBlocked(b)).toBe(b);
   });
 });
 
