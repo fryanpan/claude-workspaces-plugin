@@ -123,6 +123,11 @@ export class WaitingUnfiledEscalations {
         const tells = prior?.tells ?? 0;
         present.set(k, {
           workspaceId: board.workspaceId,
+          // Read fresh off the snapshot every tick rather than persisted: the
+          // frame names who the filing goes back to, which is whoever holds
+          // the seat now — the sidecar remembers that a row is aging and
+          // nothing about who sat there while it did.
+          ...(board.leadAgentId !== undefined ? { leadAgentId: board.leadAgentId } : {}),
           taskId: row.id,
           title: row.title,
           bucket: row.bucket,
@@ -269,7 +274,11 @@ export class WaitingUnfiledEscalations {
     if (!reach) return false;
     let delivered = 0;
     try {
-      delivered = reach.send(onBoard, reach.agentId, buildFleetFrame({ due, onBoard, now }));
+      delivered = reach.send(
+        onBoard,
+        reach.agentId,
+        buildFleetFrame({ due, onBoard, agingMs: this.agingMs, now }),
+      );
     } catch (err) {
       console.error('[stall] waiting-unfiled escalation send failed:', err);
       return false;

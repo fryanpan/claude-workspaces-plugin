@@ -26,12 +26,20 @@ const wait = (over: Partial<AgingWait> = {}): AgingWait => ({
   quietMs: 45 * MIN,
   firstSeen: NOW - 90 * MIN,
   tells: 0,
+  leadAgentId: 'agent-cartographer',
   ...over,
 });
 
+const WINDOW = 30 * MIN;
+
 describe('the fleet frame', () => {
   it('rides the stall event every lead already reads, anchored on the first row', () => {
-    const frame = buildFleetFrame({ due: [wait()], onBoard: 'w-elsewhere', now: NOW });
+    const frame = buildFleetFrame({
+      due: [wait()],
+      onBoard: 'w-elsewhere',
+      now: NOW,
+      agingMs: WINDOW,
+    });
 
     expect(frame.event).toBe(STALL_EVENT);
     // The anchor's board, not the board the wake is delivered on.
@@ -48,6 +56,7 @@ describe('the fleet frame', () => {
       due: [wait(), wait({ workspaceId: 'w-riverbend', taskId: 't-berth' })],
       onBoard: 'w-harbor',
       now: NOW,
+      agingMs: WINDOW,
     });
 
     const rows = frame.unfiled ?? [];
@@ -59,10 +68,72 @@ describe('the fleet frame', () => {
   });
 
   it('falls back to the delivery board only when there is no row to anchor on', () => {
-    const frame = buildFleetFrame({ due: [], onBoard: 'w-elsewhere', now: NOW });
+    const frame = buildFleetFrame({ due: [], onBoard: 'w-elsewhere', now: NOW, agingMs: WINDOW });
 
     expect(frame.workspaceId).toBe('w-elsewhere');
     expect(frame.taskId).toBeUndefined();
     expect(frame.unfiled).toEqual([]);
+  });
+});
+
+/**
+ * The step of the ladder this frame IS. Team Lead reads a stall event tagged
+ * with a board it is not on; without this field the only other frame that
+ * does that — the dead-board redirect — is indistinguishable from it, and a
+ * lead spent a whole turn on 2026-09-22 deciding which one it had.
+ */
+describe('the fleet frame says which rung it is', () => {
+  it('names the window each row already stood and every board with the seat it holds', () => {
+    const frame = buildFleetFrame({
+      due: [
+        wait(),
+        wait({
+          workspaceId: 'w-riverbend',
+          taskId: 't-berth',
+          leadAgentId: 'agent-harbour-master',
+        }),
+      ],
+      onBoard: 'w-elsewhere',
+      now: NOW,
+      agingMs: WINDOW,
+    });
+
+    expect(frame.unfiledCarry?.agedAtLeastMs).toBe(WINDOW);
+    expect(frame.unfiledCarry?.boards).toEqual([
+      { workspaceId: 'w-harbor', leadAgentId: 'agent-cartographer' },
+      { workspaceId: 'w-riverbend', leadAgentId: 'agent-harbour-master' },
+    ]);
+    // The redirect's marker is the OTHER frame's; carrying both would make
+    // the child render two contradictory first lines.
+    expect(frame.escalatedFrom).toBeUndefined();
+  });
+
+  it('names a board once however many of its rows are due, and admits an empty seat', () => {
+    const frame = buildFleetFrame({
+      due: [
+        wait(),
+        wait({ taskId: 't-slip' }),
+        wait({ workspaceId: 'w-saltmarsh', taskId: 't-tide', leadAgentId: undefined }),
+      ],
+      onBoard: 'w-harbor',
+      now: NOW,
+      agingMs: WINDOW,
+    });
+
+    expect(frame.unfiledCarry?.boards).toEqual([
+      { workspaceId: 'w-harbor', leadAgentId: 'agent-cartographer' },
+      { workspaceId: 'w-saltmarsh' },
+    ]);
+  });
+
+  it('carries nothing to say when no row is due', () => {
+    const frame = buildFleetFrame({ due: [], onBoard: 'w-elsewhere', now: NOW, agingMs: WINDOW });
+    expect(frame.unfiledCarry).toBeUndefined();
+    // POSITIVE CONTROL: the same builder with one row does carry it, so the
+    // absence above is the empty list and not a field nobody ever sets.
+    expect(
+      buildFleetFrame({ due: [wait()], onBoard: 'w-elsewhere', now: NOW, agingMs: WINDOW })
+        .unfiledCarry,
+    ).toBeDefined();
   });
 });

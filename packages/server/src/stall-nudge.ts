@@ -521,7 +521,53 @@ export interface StallNudgeFrame {
    * "why am I being told this" is answerable only here.
    */
   escalatedFrom?: string;
+  /**
+   * Which rung of the unfiled-wait ladder this frame is — set ONLY by the
+   * fleet carry (`waiting-unfiled-frame.ts`), and never by the dead-board
+   * redirect above.
+   *
+   * The two are the only frames a lead reads about a board it is not on, and
+   * until this field they looked identical on arrival. The redirect's line
+   * says the board's seat is unreachable, which is true of that path alone;
+   * a lead that read it off a carry frame went looking for a delivery fault
+   * that was not there, six times between 20 and 22 September 2026.
+   *
+   * It is one field for the whole frame because the fact is one fact — every
+   * row on `unfiled` has stood on its own board's unfiled list a window with
+   * nothing filed — while `boards` keeps the per-board half the rows need,
+   * since `unfiled` can span boards and each board's seat is a different
+   * agent to tell.
+   */
+  unfiledCarry?: UnfiledCarry;
   ts: number;
+}
+
+/** The fleet carry's marker: the window every row has already stood unfiled,
+ *  and the boards it spans with the seat each holds NOW. */
+export interface UnfiledCarry {
+  /**
+   * The aging window. Every row on `unfiled` has been a finding on its own
+   * board's list at LEAST this long (`isDue`) — "at least", because the rows
+   * age on their own clocks and only their common floor is true of all of
+   * them. The board item's words state the same window
+   * (`waiting-unfiled-review.ts`), so the frame and the item cannot drift.
+   *
+   * It is the row's age, NOT a record of a delivery. Nothing here knows that
+   * a particular agent read a particular wake, so neither this field nor the
+   * line rendered from it claims one.
+   */
+  agedAtLeastMs: number;
+  /**
+   * Every board `unfiled` names, once each, in the order the rows arrive —
+   * worst first, so the board holding the oldest wait is named first.
+   *
+   * `leadAgentId` is the seat as it stands at THIS tick, read off the board's
+   * snapshot. A seat can have changed hands, or been empty, while the row
+   * aged — so it answers "who do I send this back to", never "who was told".
+   * A board with an empty seat carries no `leadAgentId` and is still named:
+   * the reader has to act on the row either way.
+   */
+  boards: readonly { workspaceId: string; leadAgentId?: string }[];
 }
 
 export interface StallNudgerOptions {

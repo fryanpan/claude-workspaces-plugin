@@ -1,6 +1,15 @@
 /**
  * The words on a board's unfiled-wait item — the half a person reads.
  *
+ * What it claims is an AGE, matching the Team Lead frame's first line
+ * (`nudge-line.ts`'s `unfiledCarryLine`): these rows have been unfiled asks on
+ * this board's list for over the window. It used to say the board's lead "was
+ * told over X ago", which nothing here knows — the escalation records that a
+ * row is aging, never that a particular agent read a particular wake, and a
+ * seat can change hands or stand empty while a row ages. The item and the
+ * frame say the same thing on purpose: a reader who meets both must not be
+ * told two different stories about the same rows.
+ *
  * Split out of `waiting-unfiled-escalation.ts` for the reason
  * `docs/architecture/exceptions.md` already names as the obvious seam on its
  * sibling `stall-escalation.ts`: rendering is a pure function of the due rows
@@ -27,6 +36,12 @@ export interface AgingWait {
    *  these words no longer branch on it, because there is nothing to branch
    *  to (`waiting-unfiled-escalation.ts`, 2026-09-22). */
   bucket: string;
+  /** The board's lead seat as it stands at the tick this row was read,
+   *  absent when the seat is empty. Who the filing goes back to — not a
+   *  record that anybody was told, which nothing here holds. Read by the Team
+   *  Lead FRAME; these words never render it, because the person reading the
+   *  item is on that board already. */
+  leadAgentId?: string;
   /** How long the task has been quiet, from the gate's own reading. */
   quietMs: number;
   /** When the escalation first saw it as a finding. */
@@ -55,7 +70,7 @@ export function buildWaitingUnfiledReview(input: {
     return `- [${label(row.title)}](${taskDeepLink(row.workspaceId, row.taskId)}) — said it is waiting on a person ${waited} ago, with no question on anybody's queue.`;
   });
   const detail = [
-    `Each of these tasks is waiting on a person with nothing that person can answer. Their lead was told over ${span(agingMs)} ago and the asks are still unfiled. ${n === 1 ? 'It is' : 'They are'} on this board.`,
+    `Each of these tasks is waiting on a person with nothing that person can answer. ${n === 1 ? 'It has' : 'Each has'} been an unfiled ask on this board's list for over ${span(agingMs)}. ${n === 1 ? 'It is' : 'They are'} on this board.`,
     '',
     ...lines,
     '',
