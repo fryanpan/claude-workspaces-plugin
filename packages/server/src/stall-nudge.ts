@@ -1206,8 +1206,10 @@ export class StallNudger {
       ...(unresumed.length > 0 ? { unresumed } : {}),
       ...(checkIn.length > 0 ? { checkIn } : {}),
       // Awareness only. Never a reason for the frame — `changeOn` above has
-      // already decided that on the findings themselves — and a standing
-      // wait's row is on none of the lists above (`withoutStandingWaits`).
+      // already decided that on the findings themselves. A standing wait's
+      // row is off `stalled` (`withoutStandingWaits`) and off nothing else,
+      // so it can still be on `unresumed`: a wait declared BEFORE the lift it
+      // sits over answers nothing, and the gate names the row (`stall-gate.ts`).
       ...(board.declaredWaits && board.declaredWaits.length > 0
         ? { declaredWaits: board.declaredWaits }
         : {}),

@@ -557,8 +557,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(t.notes !== undefined ? { notes: t.notes } : {}),
       // What the row's holder declared it is waiting on, for a thing the
       // board cannot see. Not activity and not a bucket — the gate reads it
-      // only to annotate the rows it names, and the wake only to stop
-      // escalating a stalled one (`task-wait.ts`).
+      // to annotate the rows it names and to decide whether a lifted blockage
+      // has been read (a wait declared at or after the lift says it has), and
+      // the wake reads it only to stop escalating a stalled one
+      // (`task-wait.ts`).
       ...(t.externalWait !== undefined ? { externalWait: t.externalWait } : {}),
     }));
     // Every row timestamp as an activity tick. Deliberately unfiltered by
@@ -722,8 +724,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // untouched since the lift, which is precisely the claim this finding
     // makes. Almost all of them are already here as stalled rows; the ones
     // that are not — a row the parallelism cap holds back, a row whose
-    // declared wait still stands — are exactly the ones with no other reason
-    // to be looked at, so leaving them out would aim the gap at them.
+    // declared wait was declared BEFORE its lift or has lapsed — are exactly
+    // the ones with no other reason to be looked at, so leaving them out
+    // would aim the gap at them. A row whose wait was declared at or after
+    // the lift and still stands is on neither list: the gate reads that
+    // declaration as the answer having been read (`stall-gate.ts`), so it
+    // leaves this set on the first pass and its linked docs are not walked.
     //
     // The person-owned RECORD rides along too. It wakes nobody, but the
     // second pass is where a comment-borne ask on a doc the row LINKS is

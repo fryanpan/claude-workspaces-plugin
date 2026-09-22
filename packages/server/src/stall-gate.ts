@@ -58,7 +58,12 @@
  * an owner — so it is its own list and its own sentence. What it rests on is
  * `blockage-lift.ts`; every gate it passes is applied at the reading below.
  */
-import { type Lift, type LiftKind, unresumedSince } from './blockage-lift.ts';
+import {
+  LIFT_CLOCK_EPSILON_MS,
+  type Lift,
+  type LiftKind,
+  unresumedSince,
+} from './blockage-lift.ts';
 import {
   type EventRow,
   type FiledItemAddress,
@@ -256,6 +261,12 @@ export interface DeclaredWaitRow {
  * wait is still standing (`stall-nudge.ts`'s `withoutStandingWaits` takes
  * those off `stalled` and nothing else), which is exactly the 21-hour shape:
  * a wait declared on a person who had already answered.
+ *
+ * A wait that was declared AT OR AFTER the lift AND is still standing is the
+ * exception, and the only one: it is itself the record that somebody read the
+ * answer, so such a row is not named here at all. Both halves are required —
+ * a wait declared before the lift never answered it, and a lapsed one has run
+ * out — and the reading is at the `unresumed` push below.
  */
 export interface UnresumedRow {
   id: string;
@@ -269,7 +280,12 @@ export interface UnresumedRow {
   lift: LiftKind;
   /** When it lifted, and how long ago. Carried so a reader can check the
    *  event — the way `ungatedUi` carries the file that convicted a row —
-   *  rather than take the finding's word for it. */
+   *  rather than take the finding's word for it.
+   *
+   *  On a row whose covering wait has LAPSED this is the lapse rather than
+   *  the lift: the declaration answered the lift, so the span it stood for is
+   *  not time nobody read the answer, and measuring from the lift would hand
+   *  the lead an age spanning the whole declared wait. */
   liftedAt: number;
   liftedMs: number;
   /** What is now unblocked, in the board's own words. */
@@ -638,20 +654,69 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // not applied to an unfiled ask: the cap says why nobody picked the row
     // up and says nothing about an answer already given and read by nobody.
     // It is one line for the lead and no slot is needed to read it.
+    //
+    // And a DECLARED WAIT can answer it, which is the one thing that reads
+    // the answer back. The finding's sentence is that nobody has recorded
+    // reading the answer; an agent that declares, after the lift, what the row
+    // now waits on HAS recorded exactly that, in its own words. Measured
+    // 2026-09-22: two done-when lines reported met at 13:59:38Z, a wait
+    // declared eleven seconds later standing until 21:59Z, and the 15:05Z pass
+    // still naming the row as unresumed.
+    //
+    // THE STAMP READ IS `since`, NOT `declaredAt`, and that is the whole
+    // difference between a record and a mute button. `since` is when this wait
+    // was FIRST declared and survives a same-words renewal (`task-wait.ts`);
+    // `declaredAt` moves on every renewal. Keyed on `declaredAt`, an agent
+    // that re-declares a wait it has been rolling over all day would cover a
+    // lift that landed in the middle of it — which is the 21-hour shape
+    // exactly: a wait declared on a person, the person answers, nobody reads
+    // the answer, and the next renewal hides the row for another eight hours.
+    // Renewing a wait on one thing is not evidence of having read an answer
+    // to another. Keyed on `since`, only a wait first declared — or
+    // re-declared with DIFFERENT words, which restarts `since` and is a
+    // different thing being waited for — after the answer covers it.
+    //
+    // The tolerance is `LIFT_CLOCK_EPSILON_MS`, borrowed from the reading it
+    // sits beside for the same reason: a declaration and a done-when report
+    // made in one agent turn are ONE action, and which of the two calls the
+    // server stamps first must not decide the verdict.
+    //
+    // A LAPSED wait does not cover the lift — the declaration has run out and
+    // the row is loud again by every other reading here — but it still says
+    // the answer was read once, so the age the finding reports is measured
+    // from the LAPSE rather than from the lift. Otherwise the lead is handed
+    // "unblocked with nothing done since" over a span that is mostly a wait
+    // somebody declared in good faith.
     const lift = input.lifts?.get(row.id);
+    const wait = declared.get(row.id);
+    // Did a declaration answer THIS lift, and does it still stand? `lapsedAt`
+    // is set only on a wait that answered the lift and has since run out.
+    let coveredByWait = false;
+    let lapsedAt: number | undefined;
+    if (lift !== undefined && wait !== undefined && wait.since >= lift.at - LIFT_CLOCK_EPSILON_MS) {
+      if (externalWaitActive(wait, input.now)) coveredByWait = true;
+      // A declaration whose `until` cannot be read is lapsed by
+      // `externalWaitActive` and carries no usable stamp, so the finding keeps
+      // the lift's own — an unreadable field must never move the number a
+      // reader checks.
+      else if (typeof wait.until === 'number' && Number.isFinite(wait.until)) lapsedAt = wait.until;
+    }
     if (
       lift !== undefined &&
+      !coveredByWait &&
       (row.bucket === 'in-progress' || row.bucket === 'ready-unpicked') &&
       unresumedSince(lift, { now: input.now, sinceActivityMs: row.sinceActivityMs, quietMs })
-    )
+    ) {
+      const at = lapsedAt ?? lift.at;
       unresumed.push({
         ...named,
         lift: lift.kind,
-        liftedAt: lift.at,
-        liftedMs: input.now - lift.at,
+        liftedAt: at,
+        liftedMs: input.now - at,
         what: lift.what,
         ...(lift.next !== undefined ? { next: lift.next } : {}),
       });
+    }
   }
   // Longest since the lift first: the answer nobody has acted on for longest
   // is the one to hand back first.
