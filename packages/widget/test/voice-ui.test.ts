@@ -100,7 +100,7 @@ describe('a settled comment’s card', () => {
     expect(t.card()?.textContent, 'no byline').not.toContain('voice');
   });
 
-  it('plays the clip from the server', () => {
+  it('plays the clip from the server', async () => {
     const played: string[] = [];
     class FakeAudio {
       constructor(readonly src: string) {}
@@ -114,7 +114,9 @@ describe('a settled comment’s card', () => {
     const t = setup();
     t.add(comment({ final: true }));
     (t.card()?.querySelector('.vplay') as HTMLElement).click();
-    expect(played).toEqual([`http://host${CLIP}`]);
+    // The clip's bytes may come over the network now, so the ▶ hands back
+    // before it plays (`widget-auth.ts`'s `clipAudio`).
+    await vi.waitFor(() => expect(played).toEqual([`http://host${CLIP}`]));
     vi.unstubAllGlobals();
   });
 

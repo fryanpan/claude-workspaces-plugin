@@ -22,7 +22,7 @@ import { resolve as resolveElement } from '@claude-workspaces/core/anchor/elemen
 // not the barrel — `comment-receipt.ts` imports nothing, so this drags in
 // nothing behind it.
 import { receiptHtml, receiptState } from '@claude-workspaces/core/comment-receipt';
-import { composerNote, httpBase } from './widget-auth.ts';
+import { clipAudio, composerNote } from './widget-auth.ts';
 import { IGNORE_ATTR } from './widget-picker.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -383,7 +383,11 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
   pop.querySelector('.close')?.addEventListener('click', () => pop.remove());
   cList.addEventListener('click', (ev) => {
     const clip = (ev.target as Element).closest('[data-clip]')?.getAttribute('data-clip');
-    if (clip) void new Audio(httpBase(el) + clip).play().catch(() => {});
+    if (clip) {
+      void clipAudio(el, clip)
+        .then((a) => a?.play())
+        .catch(() => {});
+    }
   });
   pop.querySelector('.submit')?.addEventListener('click', async () => {
     const ta = pop.querySelector('textarea') as HTMLTextAreaElement;

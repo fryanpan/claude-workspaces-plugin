@@ -534,7 +534,15 @@ note). The board imports it directly
 (`board/board-feedback-mic.ts`); a mock page gets the mic from
 `mockup-live.js` and fetches the rest as the lazy chunk `voice.js` on the
 first tap (`voice/voice-loader.ts`), so none of it is in `widget.iife.js`,
-which mock pages load against a hard size budget. Inside a served mock's frame the browser
+which mock pages load against a hard size budget. **A page that embeds the
+widget by hand gets no mic**: `widget.ts` imports neither module, so a
+dev-server embed loading `widget.iife.js` alone plays clips and records
+nothing. Every path below it — the door, the chunk, the socket — is open to
+such a page; the button that starts it is not yet mounted anywhere but a mock
+and the board. On the tailnet name all of it goes through the widget door
+(`middleware/widget-door.ts`), which admits the chunk without a token and the
+socket, the thread verbs `edit-comment` and `reanchor`, and the recordings
+with one. Inside a served mock's frame the browser
 refuses the microphone to an opaque origin, so there the host page holds it
 instead: `mock-host-mic.ts` (widget, a top-level module the host asset
 bundles) opens the capture when the frame asks over its voice socket, streams
@@ -551,7 +559,12 @@ ceiling for talk that never pauses; `voice-feedback-turns.ts` tracks which
 heard words a note holds yet, and `voice-feedback-session.ts` holds the
 relay's per-recording state types. `voice-feedback-store.ts` keeps each
 recording's WAV and a timestamped raw transcript beside the doc
-(`routes/doc-voice-feedback.ts` serves both). No new write path: a spoken
+(`routes/doc-voice-feedback.ts` serves both). A comment's ▶ asks
+`clipAudio` (`widget/src/widget-auth.ts`) for the audio: with no token held
+that is the `<audio>` fetching the clip itself, with its byte ranges and its
+`#t=` seek; with one it is a fetch carrying the Bearer header an `<audio>`
+cannot set, played from a blob, which costs the whole recording rather than
+the stretch the clip names. No new write path: a spoken
 comment is the thread POST the typed composer already makes, carrying a
 `voice` note (clip and raw words).
 

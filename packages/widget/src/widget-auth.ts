@@ -38,6 +38,38 @@ export function httpBase(el: FeedbackWidgetEl): string {
   return el.opts.serverUrl.replace(/^ws/, 'http');
 }
 
+/**
+ * An `<audio>` for one spoken comment's clip, or null when the server would
+ * not hand it over.
+ *
+ * Without a token, the element fetches the clip itself, with byte ranges and
+ * the `#t=` seek the media element understands — which is every surface this
+ * widget has ever played one on, and stays unchanged.
+ *
+ * With one, it cannot: on another project's page the clip sits behind the
+ * tailnet widget door, which asks every route but the two static scripts for
+ * the reviewer's board token, and an `<audio>` sets no Authorization header
+ * on the request it makes. So the bytes are fetched — where the header can be
+ * set — and played from a blob, with the fragment carried across. That costs
+ * the whole recording rather than the stretch the clip names, which is why
+ * the token is what selects it rather than it being the only path.
+ */
+export async function clipAudio(
+  el: FeedbackWidgetEl,
+  clip: string,
+): Promise<HTMLAudioElement | null> {
+  if (!el.authToken) return new Audio(httpBase(el) + clip);
+  const [path, frag] = clip.split('#');
+  const res = await fetch(httpBase(el) + path, {
+    headers: { authorization: `Bearer ${el.authToken}` },
+  });
+  if (!res.ok) return null;
+  const src = URL.createObjectURL(await res.blob());
+  const audio = new Audio(frag ? `${src}#${frag}` : src);
+  audio.onended = () => URL.revokeObjectURL(src);
+  return audio;
+}
+
 /** The one origin the message listener will take a token from. */
 function serverOrigin(el: FeedbackWidgetEl): string {
   return el.signInOrigin || new URL(httpBase(el)).origin;

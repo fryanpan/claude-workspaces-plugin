@@ -40,8 +40,9 @@ export interface VoiceViewDeps {
   element: (target: number | null) => HTMLElement | null;
   /** A short name for where a comment is ("Goal bar", "Done chip"). */
   name: (target: number | null) => string;
-  /** The clip's URL, made absolute against the server. */
-  clipUrl: (clip: string) => string;
+  /** An `<audio>` for a clip, fetched with the reviewer's token where the
+   *  server asks for one (`widget-auth.ts`'s `clipAudio`). */
+  clipAudio: (clip: string) => Promise<HTMLAudioElement | null>;
   onMove: (key: string) => void;
   now?: () => number;
 }
@@ -73,6 +74,8 @@ export class VoiceView {
   /** The comment Move is choosing a place for. */
   picking: string | null = null;
   private audio: HTMLAudioElement | null = null;
+  /** Which ▶ is the current one; see `play`. */
+  private playSeq = 0;
 
   constructor(private readonly deps: VoiceViewDeps) {
     this.live = document.createElement('div');
@@ -309,8 +312,18 @@ export class VoiceView {
 
   private play(clip: string): void {
     this.audio?.pause();
-    this.audio = new Audio(this.deps.clipUrl(clip));
-    void this.audio.play().catch(() => {});
+    // Numbered, because the bytes may now arrive over the network: a second
+    // ▶ pressed while the first is still fetching must not be played over by
+    // the one it interrupted.
+    const seq = ++this.playSeq;
+    void this.deps
+      .clipAudio(clip)
+      .then((audio) => {
+        if (!audio || seq !== this.playSeq) return undefined;
+        this.audio = audio;
+        return audio.play();
+      })
+      .catch(() => {});
   }
 
   private schedule(): void {
