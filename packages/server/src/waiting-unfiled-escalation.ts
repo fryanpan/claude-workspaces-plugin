@@ -124,8 +124,9 @@ export class WaitingUnfiledEscalations {
         present.set(k, {
           workspaceId: board.workspaceId,
           // Read fresh off the snapshot every tick rather than persisted: the
-          // sidecar remembers that a row is aging, not who held the seat when
-          // it started, and the frame has to name the lead that is there now.
+          // frame names who the filing goes back to, which is whoever holds
+          // the seat now — the sidecar remembers that a row is aging and
+          // nothing about who sat there while it did.
           ...(board.leadAgentId !== undefined ? { leadAgentId: board.leadAgentId } : {}),
           taskId: row.id,
           title: row.title,

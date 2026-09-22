@@ -49,8 +49,8 @@ export function buildFleetFrame(input: {
   /** The board Team Lead holds a stream on — the frame's tag only when no
    *  row is carrying one, which is a frame with no rows. */
   onBoard: string;
-  /** The aging window, restated on the frame so the reader is told what the
-   *  rows have already cost. The same number the board's item states. */
+  /** The aging window, restated on the frame so the reader is told how long
+   *  the rows have already stood. The same number the board's item states. */
   agingMs: number;
   now: number;
 }): StallNudgeFrame {
@@ -74,14 +74,15 @@ export function buildFleetFrame(input: {
     })),
     // Absent when there is nothing to carry: a frame with no rows is not a
     // rung of the ladder, and a marker on it would be a claim about nothing.
-    ...(due.length > 0 ? { unfiledCarry: { toldAtLeastMs: agingMs, boards: boardsOf(due) } } : {}),
+    ...(due.length > 0 ? { unfiledCarry: { agedAtLeastMs: agingMs, boards: boardsOf(due) } } : {}),
     ts: now,
   };
 }
 
-/** Each board once, in row order, with the lead that was told. A board with
- *  an empty seat is kept and simply carries no lead — the reader has to know
- *  the row exists before it can ask who owns it. */
+/** Each board once, in row order, with the seat it holds NOW — who the reader
+ *  hands the filing to, not who was told while the row aged. A board with an
+ *  empty seat is kept and simply carries no lead: the reader has to know the
+ *  row exists before it can ask who owns it. */
 function boardsOf(due: readonly AgingWait[]): Array<{ workspaceId: string; leadAgentId?: string }> {
   const out: Array<{ workspaceId: string; leadAgentId?: string }> = [];
   const seen = new Set<string>();

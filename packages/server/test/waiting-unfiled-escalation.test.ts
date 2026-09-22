@@ -328,7 +328,7 @@ describe('an unfiled wait that ages goes past its lead', () => {
    * thing that could break is the wiring: the lead is read off each board's
    * snapshot at the tick, and `AgingWait` had no field for it before.
    */
-  it('tells Team Lead the window the rows already spent, and each board’s own lead', () => {
+  it('tells Team Lead the window the rows already stood, and each board’s own seat', () => {
     dir = dir || mkdtempSync(join(tmpdir(), 'wu-escalation-'));
     const store = new TaskStore({ dataDir: dir });
     const leads = [LEAD.id, 'agent-harbour-master', undefined];
@@ -370,13 +370,13 @@ describe('an unfiled wait that ages goes past its lead', () => {
     const carry = sent[0]?.frame.unfiledCarry;
     // The window the frame states is the window the escalation actually ran,
     // which is the same number the board's own item states.
-    expect(carry?.toldAtLeastMs).toBe(WINDOW);
-    // Each board once, each with the lead that sits on IT — not the anchor's.
+    expect(carry?.agedAtLeastMs).toBe(WINDOW);
+    // Each board once, each with the seat on IT — not the anchor's.
     expect(carry?.boards).toEqual([
       { workspaceId: boards[0] as string, leadAgentId: LEAD.id },
       { workspaceId: boards[1] as string, leadAgentId: 'agent-harbour-master' },
-      // The control for the lead: a board with an empty seat is still named,
-      // and carries no lead rather than inheriting one.
+      // The control for the seat: a board with an empty one is still named,
+      // and carries no lead rather than inheriting a neighbour's.
       { workspaceId: boards[2] as string },
     ]);
     // This frame is the carry, never the dead-board redirect.

@@ -791,6 +791,11 @@ describe('stalledLine tells a stand-in why it, and not the lead, was woken', () 
  * ordinary board wakes, and the reader could not tell them from the
  * dead-board redirect above — which says the seat is unreachable, true only
  * of that path. So the rung is named in the first line, with the act.
+ *
+ * What the line may claim is pinned here too: the row's AGE and who holds
+ * each seat now, never that a named agent was told. The seat can have changed
+ * hands, or been empty, for the whole window the row aged, and the frame
+ * carries no record of a delivery either way.
  */
 describe('stalledLine says when a wake is the fleet carry of unfiled waits', () => {
   const CARRY = {
@@ -806,7 +811,7 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
       },
     ],
     unfiledCarry: {
-      toldAtLeastMs: 30 * 60_000,
+      agedAtLeastMs: 30 * 60_000,
       boards: [
         { workspaceId: 'w-riverbend', leadAgentId: 'agent-cartographer' },
         { workspaceId: 'w-saltmarsh' },
@@ -814,12 +819,16 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
     },
   };
 
-  it('leads with the rung, names each board’s lead, and asks for the filing', () => {
+  it('leads with the rung, names each board’s seat, and asks for the filing', () => {
     const line = stalledLine(CARRY, 'w-elsewhere');
     // FIRST: the reader's question is why a board it does not lead woke it,
     // so the rung is read before any row is.
-    expect(line.indexOf('still unfiled')).toBeLessThan(line.indexOf('t-theirs'));
-    expect(line).toContain('30m');
+    expect(line.indexOf('woken as Team Lead')).toBeLessThan(line.indexOf('t-theirs'));
+    // The claim is the row's AGE, stated as a floor…
+    expect(line).toContain('for over 30m with nothing filed');
+    // …and NOT that any named agent was told, which nothing here knows.
+    expect(line).not.toContain('was told');
+    expect(line).not.toContain('named to its own');
     expect(line).toContain('w-riverbend (lead agent-cartographer)');
     // A board whose seat is empty is said so rather than dropped.
     expect(line).toContain('w-saltmarsh (no lead named)');
@@ -834,7 +843,7 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
   it('POSITIVE CONTROL: an ordinary wake says none of it', () => {
     const { unfiledCarry: _dropped, ...withoutCarry } = CARRY;
     const line = stalledLine(withoutCarry, 'w-elsewhere');
-    expect(line).not.toContain('still unfiled');
+    expect(line).not.toContain('woken as Team Lead');
     expect(line).not.toContain('add_review_item');
     expect(line).toContain('t-theirs');
   });
@@ -851,10 +860,24 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
     expect(line).not.toContain('add_review_item');
   });
 
-  it('a carry that names no board still says which rung it is', () => {
-    const line = stalledLine({ ...CARRY, unfiledCarry: { toldAtLeastMs: 30 * 60_000 } }, 'w-x');
-    expect(line).toContain('still unfiled');
+  it('a carry that names no board still says which rung it is, and asks for the act', () => {
+    const line = stalledLine({ ...CARRY, unfiledCarry: { agedAtLeastMs: 30 * 60_000 } }, 'w-x');
+    expect(line).toContain('woken as Team Lead');
+    expect(line).toContain('add_review_item');
     expect(line).not.toContain('(lead ');
+  });
+
+  it('a carry that states no age claims none, and still says which rung it is', () => {
+    // A server that sends the marker without the window must not produce
+    // "for over 0s", which reads as a row that has waited no time at all.
+    const line = stalledLine(
+      { ...CARRY, unfiledCarry: { boards: CARRY.unfiledCarry.boards } },
+      'w-x',
+    );
+    expect(line).toContain('for a full window with nothing filed');
+    expect(line).not.toContain('0s');
+    // CONTROL: the same frame WITH the window states it as a number.
+    expect(stalledLine(CARRY, 'w-x')).toContain('for over 30m');
   });
 });
 

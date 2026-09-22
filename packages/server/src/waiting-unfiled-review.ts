@@ -27,11 +27,11 @@ export interface AgingWait {
    *  these words no longer branch on it, because there is nothing to branch
    *  to (`waiting-unfiled-escalation.ts`, 2026-09-22). */
   bucket: string;
-  /** The lead that was already told about this row — the board's lead seat
-   *  at the tick the row was read, absent when the seat is empty. Read by
-   *  the Team Lead FRAME, which names each board's lead so the reader knows
-   *  who to send the filing back to; these words never render it, because
-   *  the person reading the item is on that board already. */
+  /** The board's lead seat as it stands at the tick this row was read,
+   *  absent when the seat is empty. Who the filing goes back to — not a
+   *  record that anybody was told, which nothing here holds. Read by the Team
+   *  Lead FRAME; these words never render it, because the person reading the
+   *  item is on that board already. */
   leadAgentId?: string;
   /** How long the task has been quiet, from the gate's own reading. */
   quietMs: number;

@@ -14359,9 +14359,9 @@ function unrenderableBody(unknown3) {
 }
 function unfiledCarryLine(carry) {
   const boards = (carry.boards ?? []).filter((b) => Boolean(b.workspaceId)).map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : "no lead named"})`);
-  const named = boards.length > 0 ? ` — ${boards.join(", ")}` : "";
-  const window = carry.toldAtLeastMs === undefined ? "" : ` over ${humanDuration2(carry.toldAtLeastMs)}`;
-  return `You were woken as Team Lead, not as this board's lead: every row below was named to its own ` + `board's lead${window} ago and is still unfiled${named}. ` + "Tell that lead to file the ask with add_review_item, or file it yourself.";
+  const age = carry.agedAtLeastMs === undefined ? "for a full window" : `for over ${humanDuration2(carry.agedAtLeastMs)}`;
+  const seats = boards.length > 0 ? `The seats on those boards now: ${boards.join(", ")} — tell that lead` : "Tell each board’s lead";
+  return "You were woken as Team Lead, not as this board’s lead: every row below has stood on its own " + `board’s unfiled list ${age} with nothing filed. ` + `${seats} to file the ask with add_review_item, or file it yourself.`;
 }
 function stalledLine(p, frameBoard) {
   const parts = [];

@@ -83,7 +83,7 @@ describe('the fleet frame', () => {
  * lead spent a whole turn on 2026-09-22 deciding which one it had.
  */
 describe('the fleet frame says which rung it is', () => {
-  it('names the window each row already spent and every board lead that was told', () => {
+  it('names the window each row already stood and every board with the seat it holds', () => {
     const frame = buildFleetFrame({
       due: [
         wait(),
@@ -98,7 +98,7 @@ describe('the fleet frame says which rung it is', () => {
       agingMs: WINDOW,
     });
 
-    expect(frame.unfiledCarry?.toldAtLeastMs).toBe(WINDOW);
+    expect(frame.unfiledCarry?.agedAtLeastMs).toBe(WINDOW);
     expect(frame.unfiledCarry?.boards).toEqual([
       { workspaceId: 'w-harbor', leadAgentId: 'agent-cartographer' },
       { workspaceId: 'w-riverbend', leadAgentId: 'agent-harbour-master' },
@@ -108,7 +108,7 @@ describe('the fleet frame says which rung it is', () => {
     expect(frame.escalatedFrom).toBeUndefined();
   });
 
-  it('names a board once however many of its rows are due, and admits a board with no lead', () => {
+  it('names a board once however many of its rows are due, and admits an empty seat', () => {
     const frame = buildFleetFrame({
       due: [
         wait(),

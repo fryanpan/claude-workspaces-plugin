@@ -381,12 +381,12 @@ export interface StallPayload {
   unfiledCarry?: UnfiledCarryPayload;
 }
 
-/** The fleet carry's marker: the window every unfiled row has already spent
- *  past its own board's lead, and the leads that were told. Every field
- *  optional — a server may send the marker with a board list this bundle's
- *  own server would not. */
+/** The fleet carry's marker: how long every unfiled row has already stood,
+ *  and the boards it spans with the seat each holds now. Every field optional
+ *  — a server may send the marker with a board list this bundle's own server
+ *  would not. */
 export interface UnfiledCarryPayload {
-  toldAtLeastMs?: number;
+  agedAtLeastMs?: number;
   boards?: { workspaceId?: string; leadAgentId?: string }[];
 }
 
@@ -838,14 +838,20 @@ function unrenderableBody(unknown: readonly string[]): string {
  * The first line of a fleet carry — the wake that is NOT about this board.
  *
  * Two sentences, and neither of them is the redirect's. The redirect says the
- * board's lead seat is unreachable; this says the leads were reached, were
- * told a window ago, and the asks are still unfiled. A reader handed the
- * wrong one of those goes hunting a delivery fault, which is what six wakes
- * between 20 and 22 September 2026 cost.
+ * board's lead seat is unreachable; this says the rows have stood on their own
+ * boards' unfiled lists a window with nothing filed. A reader handed the wrong
+ * one of those goes hunting a delivery fault, which is what six wakes between
+ * 20 and 22 September 2026 cost.
  *
- * The window is stated as a floor. The rows are due on their own clocks and
- * only the common one is true of every row on the frame, so the line says
- * "over" rather than a number it would have to pick a row to justify.
+ * It claims an AGE, never a delivery. The obvious sentence — "their lead was
+ * told a window ago" — is not one the payload supports: the seat named here is
+ * the one the board holds at this tick, and a seat can have changed hands, or
+ * been empty, for the whole window the row aged. So the first sentence is what
+ * the row did and the second is who holds the seat now.
+ *
+ * The age is stated as a floor. The rows age on their own clocks and only the
+ * common one is true of every row on the frame, so the line says "over" rather
+ * than a number it would have to pick one row to justify.
  *
  * A board whose seat is empty is named with "(no lead named)" rather than
  * dropped: the reader still has to act on the row, and a silently missing
@@ -855,13 +861,18 @@ function unfiledCarryLine(carry: UnfiledCarryPayload): string {
   const boards = (carry.boards ?? [])
     .filter((b): b is { workspaceId: string; leadAgentId?: string } => Boolean(b.workspaceId))
     .map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : 'no lead named'})`);
-  const named = boards.length > 0 ? ` — ${boards.join(', ')}` : '';
-  const window =
-    carry.toldAtLeastMs === undefined ? '' : ` over ${humanDuration(carry.toldAtLeastMs)}`;
+  const age =
+    carry.agedAtLeastMs === undefined
+      ? 'for a full window'
+      : `for over ${humanDuration(carry.agedAtLeastMs)}`;
+  const seats =
+    boards.length > 0
+      ? `The seats on those boards now: ${boards.join(', ')} — tell that lead`
+      : 'Tell each board’s lead';
   return (
-    `You were woken as Team Lead, not as this board's lead: every row below was named to its own ` +
-    `board's lead${window} ago and is still unfiled${named}. ` +
-    'Tell that lead to file the ask with add_review_item, or file it yourself.'
+    'You were woken as Team Lead, not as this board’s lead: every row below has stood on its own ' +
+    `board’s unfiled list ${age} with nothing filed. ` +
+    `${seats} to file the ask with add_review_item, or file it yourself.`
   );
 }
 
