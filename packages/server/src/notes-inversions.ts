@@ -69,23 +69,28 @@ const BENEFIT = stems(
  * Actions, grouped so a synonym stays in its class. A note that trades a
  * word for another in the same class is paraphrasing; one that crosses
  * classes has changed what is going to be done.
+ *
+ * ONLY VERBS WITH ONE READING. "Raise", "add", "build", "open", "close",
+ * "cut", "review" and "lower" are left out: each has an everyday sense that
+ * crosses these classes in a faithful note ("Bob will raise the pricing
+ * issue" is "Bob to add pricing to the agenda").
  */
 const ACTION_CLASSES: readonly (readonly string[])[] = [
   ['repave', 'resurface', 'pave', 'tarmac'],
   ['repair', 'fix', 'patch', 'mend'],
   ['rebuild', 'reconstruct', 'replace'],
-  ['assess', 'reassess', 'review', 'study', 'evaluate', 'survey', 'inspect', 'audit', 'examine'],
-  ['close', 'shut'],
-  ['open', 'reopen'],
+  ['assess', 'reassess', 'study', 'evaluate', 'survey', 'inspect', 'audit', 'examine'],
+  ['shut'],
+  ['reopen'],
   ['remove', 'demolish', 'eliminate', 'scrap'],
-  ['add', 'install', 'build', 'expand', 'extend', 'widen'],
-  ['narrow', 'reduce', 'shrink', 'cut'],
+  ['install', 'expand', 'extend', 'widen'],
+  ['narrow', 'reduce', 'shrink'],
   ['fund', 'finance'],
   ['delay', 'postpone', 'defer'],
   ['approve', 'accept', 'adopt'],
   ['reject', 'decline', 'refuse', 'deny'],
-  ['increase', 'raise'],
-  ['decrease', 'lower'],
+  ['increase'],
+  ['decrease'],
   ['buy', 'purchase'],
   ['hire', 'rent', 'lease'],
   ['sell'],
@@ -95,6 +100,19 @@ const ACTION_OF = new Map<string, { cls: number; word: string }>();
 for (const [cls, words] of ACTION_CLASSES.entries()) {
   for (const word of words) ACTION_OF.set(stem(word), { cls, word });
 }
+
+/**
+ * A note asking for something to get better: a remedy for a problem, not a
+ * claim that it is a benefit ("the docs are a problem" is "docs need to be
+ * better").
+ */
+const REMEDY = /\b(?:needs?|should|must|has to|have to|ought to)\b/i;
+
+/**
+ * A question that only asks for agreement ("We launch Friday, right?"): the
+ * speaker stated the thing, so a note stating it is faithful.
+ */
+const TAG_QUESTION = /,\s*(?:right|yeah|yes|ok|okay|correct|no)\s*\?\s*$/i;
 
 /** Words that mark a note as still open rather than a statement. */
 const OPEN_MARK =
@@ -152,7 +170,7 @@ function judgeNote(bullet: string, matches: readonly Spoken[]): InvertedNote | n
   const words = contentWords(text);
   const base = { bullet: bullet.trim(), source: source.text };
 
-  const noteBenefit = hasAny(words, BENEFIT);
+  const noteBenefit = hasAny(words, BENEFIT) && !REMEDY.test(text);
   const noteProblem = hasAny(words, PROBLEM);
   if (noteBenefit && !noteProblem && hasAny(source.words, PROBLEM)) {
     if (!matches.some((m) => hasAny(m.words, BENEFIT))) {
@@ -204,7 +222,7 @@ export function invertedNotes(
     sentencesOf(turn.text).map((text) => ({
       text,
       words: contentWords(text),
-      question: /\?\s*$/.test(text),
+      question: /\?\s*$/.test(text) && !TAG_QUESTION.test(text),
     })),
   );
   if (spoken.length === 0) return [];

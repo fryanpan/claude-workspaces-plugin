@@ -81,9 +81,6 @@ export function verdictOf(report: NotesQualityReport): NotesQualityVerdict {
       case 'unknown-speakers':
         counts[flag.kind] = report.unknownVoices.length;
         break;
-      case 'inverted-notes':
-        counts[flag.kind] = report.inversions.length;
-        break;
       case 'coverage':
         // Non-null whenever this flag is raised: the bar it crossed is a
         // comparison against the share.

@@ -38,7 +38,6 @@ import {
   LATE_NOTE_MS,
   MAX_DUPLICATE_BULLET_LINES,
   MAX_DUPLICATE_HEADINGS,
-  MAX_INVERTED_NOTES,
   MAX_LATE_NOTE_SHARE,
   MAX_LONG_FLAT_RUNS,
   MAX_UNCOVERED_IDEA_SHARE,
@@ -151,7 +150,6 @@ export interface NotesQualityFlag {
     | 'duplicate-headings'
     | 'flat-runs'
     | 'unknown-speakers'
-    | 'inverted-notes'
     | 'coverage'
     | 'notes-unread'
     | 'late';
@@ -377,15 +375,8 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
       text: `${plural(report.unknownVoices.length, 'speaker')} the meeting never had`,
     });
   }
-  if (report.inversions.length > MAX_INVERTED_NOTES) {
-    // The count only. The quotes live on `report.inversions` and reach the
-    // review item; this text also reaches the process log, which never
-    // carries the meeting's words.
-    flags.push({
-      kind: 'inverted-notes',
-      text: `${plural(report.inversions.length, 'note')} saying the opposite of what was said`,
-    });
-  }
+  // NO FLAG FOR `report.inversions`: counted and logged, never filed, until
+  // the rules are scored against real meetings (`notes-quality-thresholds.ts`).
   const { coverage } = report;
   if (coverage.source === 'unreadable') {
     // NEVER A COVERAGE FLAG HERE. The one thing this state must not do is

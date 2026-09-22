@@ -77,14 +77,32 @@ describe('invertedNotes', () => {
   it('says nothing about a note no sentence is about', () => {
     expect(invertedNotes('- Improve the ferry signage', TRANSCRIPT)).toEqual([]);
   });
+
+  it('reads a note asking for a fix as a remedy, not a problem turned into a benefit', () => {
+    const notes = '- Onboarding docs need to be better';
+    expect(invertedNotes(notes, [{ text: 'The onboarding docs are confusing.' }])).toEqual([]);
+    expect(invertedNotes(notes, [{ text: 'The onboarding docs are a problem.' }])).toEqual([]);
+  });
+
+  it('reads an everyday verb as a paraphrase, not a swap', () => {
+    const said = [{ text: 'Bob will raise the pricing issue.' }];
+    expect(invertedNotes('- Bob to add pricing to the agenda', said)).toEqual([]);
+  });
+
+  it('reads a question that only asks for agreement as a statement', () => {
+    expect(invertedNotes('- Launch Friday', [{ text: 'We launch Friday, right?' }])).toEqual([]);
+    expect(invertedNotes('- Launch Friday', [{ text: 'Do we launch Friday?' }])).toHaveLength(1);
+  });
 });
 
 describe('the quality record', () => {
-  it('flags the planted inversions and quotes the source line in the review item', () => {
+  it('records the planted inversions without flagging them, and quotes the source line', () => {
     const report = buildNotesQualityReport({ notes: PLANTED, transcript: TRANSCRIPT });
     expect(report.inversions).toHaveLength(2);
-    expect(report.flags.map((f) => f.kind)).toContain('inverted-notes');
-    expect(verdictOf(report).counts['inverted-notes']).toBe(2);
+    // Counted, never a flag: a flag files a review item, and the rules are
+    // not yet scored against real meetings.
+    expect(report.flags).toEqual([]);
+    expect(verdictOf(report).counts).toEqual({});
     expect(notesQualityRecord('d-1', 'm-1', report, 1).invertedNotes).toBe(2);
     expect(notesQualityLogLine(report)).toContain('2 inverted notes');
     const review = JSON.stringify(
@@ -97,7 +115,7 @@ describe('the quality record', () => {
   it('flags none over the clean notes', () => {
     const report = buildNotesQualityReport({ notes: CLEAN, transcript: TRANSCRIPT });
     expect(report.inversions).toEqual([]);
-    expect(report.flags.map((f) => f.kind)).not.toContain('inverted-notes');
+    expect(report.flags).toEqual([]);
     expect(notesQualityRecord('d-1', 'm-1', report, 1).invertedNotes).toBe(0);
   });
 });
