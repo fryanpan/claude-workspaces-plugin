@@ -98,7 +98,9 @@ export interface EscalatedRow {
 /** Plain words for each bucket — the reader is a person on a phone who was
  *  not there, and `ready-unpicked` is vocabulary from a different audience. */
 const BUCKET_WORDS: Record<string, string> = {
-  'blocked-on-owner-unfiled': 'waiting on a person, with no question filed anywhere they read',
+  // `blocked-on-owner-unfiled` had a row here until 2026-09-22. It is a
+  // record now, off every list this table's one reader is fed from, so the
+  // entry could only ever have been dead words.
   'waiting-unfiled':
     'its agent said it is waiting on a person, with no question filed anywhere they read',
   'blocked-on-owner': 'waiting on a person',

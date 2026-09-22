@@ -725,6 +725,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // declared wait still stands — are exactly the ones with no other reason
     // to be looked at, so leaving them out would aim the gap at them.
     //
+    // The person-owned RECORD rides along too. It wakes nobody, but the
+    // second pass is where a comment-borne ask on a doc the row LINKS is
+    // found — and finding one moves the row off this record and onto
+    // `waiting`, with the item's address. Leaving it out would not make the
+    // tick cheaper (it was in this set as an `unfiled` row until 2026-09-22)
+    // and would make the record claim nothing is filed when something is.
+    //
     // DEDUPED, which the other three lists never needed: they are disjoint by
     // construction (`evaluateStalls`'s else-if chain) and this one is not, so
     // without it a row that is both stalled and unresumed would have its
@@ -732,9 +739,13 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // item arriving as two addresses on the `waiting` line.
     const suspect = [
       ...new Map(
-        [...first.stalled, ...first.unfiled, ...first.checkIn, ...first.unresumed].map(
-          (row) => [row.id, row] as const,
-        ),
+        [
+          ...first.stalled,
+          ...first.unfiled,
+          ...first.awaitingPerson,
+          ...first.checkIn,
+          ...first.unresumed,
+        ].map((row) => [row.id, row] as const),
       ).values(),
     ];
     if (suspect.length === 0) return first;
@@ -1164,6 +1175,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       retired: workspace.retiredAt !== undefined,
       stalled: verdict.stalled,
       unfiled: verdict.unfiled,
+      ...(verdict.awaitingPerson.length > 0 ? { awaitingPerson: verdict.awaitingPerson } : {}),
       ...(verdict.unresumed.length > 0 ? { unresumed: verdict.unresumed } : {}),
       ...(verdict.waiting.length > 0 ? { waiting: verdict.waiting } : {}),
       ...(verdict.declaredWaits.length > 0 ? { declaredWaits: verdict.declaredWaits } : {}),

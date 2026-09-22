@@ -20,7 +20,8 @@
  * What a verdict reads, all from `StallSnapshot`:
  *
  *   stalled     rows that should be moving and are not
- *   unfiled     rows waiting on a person with nothing on that person's queue
+ *   unfiled     rows whose agent said it waits on a person, with nothing on
+ *               that person's queue — an ask the agent can still file
  *   waiting     rows waiting on a person WITH the ask on that person's queue,
  *               each with the address of the item — not a finding, recorded
  *               so that a wait is always traceable to the item that excuses
@@ -42,7 +43,16 @@
  *               the work was waiting on is already in and nobody read it as
  *               an event
  *
- * Any of them non-zero is a FAIL. A FAIL is not an alarm — the wake already
+ * And one line that is NOT a finding and may never become one:
+ *
+ *   awaitingPerson  rows the BOARD says a person owns, with nothing on that
+ *               person's queue. Nobody has an act to perform: an agent cannot
+ *               hand the row back, and the person already holds it. Recorded
+ *               so a week of verdicts still says why such a row is not
+ *               moving; counted toward no FAIL, on no frame, on no item
+ *               (`StallVerdict.awaitingPerson`, 2026-09-22)
+ *
+ * Any of the FINDINGS above being non-zero is a FAIL. A FAIL is not an alarm — the wake already
  * told the lead — it is the record that the promise was not kept at that
  * moment, so a week of verdicts answers "is this working" with a number
  * rather than a feeling.
@@ -75,6 +85,9 @@ export interface KeepMovingVerdict {
   /** Row ids, quietest first. */
   stalled: string[];
   unfiled: string[];
+  /** Rows a person owns with nothing on their queue — a record, never a
+   *  finding, so it is absent from the FAIL test above. */
+  awaitingPerson: string[];
   /** Rows excused by a filed ask, and the address of every ask excusing each. */
   waiting: Array<{ id: string; waitingOn: FiledItemAddress[] }>;
   unreadable: string[];
@@ -115,6 +128,7 @@ export function keepMovingVerdictFor(
     .map((h) => h.reviewItemId);
   const stalled = snapshot.stalled.map((r) => r.id);
   const unfiled = snapshot.unfiled.map((r) => r.id);
+  const awaitingPerson = (snapshot.awaitingPerson ?? []).map((r) => r.id);
   const waiting = (snapshot.waiting ?? []).map((r) => ({ id: r.id, waitingOn: [...r.waitingOn] }));
   const unreadable = snapshot.undetermined.map((r) => r.id);
   const ungatedUi = (snapshot.ungatedUi ?? []).map((r) => r.id);
@@ -134,6 +148,7 @@ export function keepMovingVerdictFor(
     considered: snapshot.considered,
     stalled,
     unfiled,
+    awaitingPerson,
     waiting,
     unreadable,
     held,
@@ -185,7 +200,8 @@ export class KeepMovingRecorder {
       this.say(
         `[keep-moving] ws=${verdict.workspaceId} verdict=${verdict.verdict} ` +
           `considered=${verdict.considered} stalled=${verdict.stalled.length} ` +
-          `unfiled=${verdict.unfiled.length} waiting=${verdict.waiting.length} ` +
+          `unfiled=${verdict.unfiled.length} awaiting-person=${verdict.awaitingPerson.length} ` +
+          `waiting=${verdict.waiting.length} ` +
           `unreadable=${verdict.unreadable.length} ` +
           `held=${verdict.held.length} escalated=${verdict.escalated} ` +
           `ungated-ui=${verdict.ungatedUi.length} unresumed=${verdict.unresumed.length}`,

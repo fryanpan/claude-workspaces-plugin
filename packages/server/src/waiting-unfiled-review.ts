@@ -1,5 +1,5 @@
 /**
- * The words on the fleet-wide unfiled-wait item — the half a person reads.
+ * The words on a board's unfiled-wait item — the half a person reads.
  *
  * Split out of `waiting-unfiled-escalation.ts` for the reason
  * `docs/architecture/exceptions.md` already names as the obvious seam on its
@@ -15,18 +15,17 @@
  */
 import { taskDeepLink } from './home-brief.ts';
 import { span } from './stall-escalation.ts';
-import { WAITING_UNFILED_BUCKET } from './waiting-unfiled.ts';
 
 /** One task that has been an `unfiled` finding, with its board. */
 export interface AgingWait {
   workspaceId: string;
   taskId: string;
   title: string;
-  /** Which of the two ways it got onto the list — `WAITING_UNFILED_BUCKET`
-   *  or `OWNER_UNFILED_BUCKET`. Carried because it is the EVIDENCE, and the
-   *  item has to say what is actually true of each task: telling the reader
-   *  an agent wrote closing words about a task the board simply has down to
-   *  a person is a sentence they would correct. */
+  /** The bucket that put it on the list — `WAITING_UNFILED_BUCKET`, the only
+   *  one that reaches here. Carried for the Team Lead FRAME, which names each
+   *  row's bucket so the reader knows what kind of evidence it is looking at;
+   *  these words no longer branch on it, because there is nothing to branch
+   *  to (`waiting-unfiled-escalation.ts`, 2026-09-22). */
   bucket: string;
   /** How long the task has been quiet, from the gate's own reading. */
   quietMs: number;
@@ -47,38 +46,22 @@ export function buildWaitingUnfiledReview(input: {
 }): Record<string, unknown> {
   const { rows, agingMs, now } = input;
   const n = rows.length;
-  const boards = new Set(rows.map((r) => r.workspaceId)).size;
   const headline =
     n === 1
       ? `“${clip(rows[0]?.title ?? '', 40)}” is waiting on a person, with nothing filed`
       : `${n} tasks are waiting on a person with nothing filed`;
   const lines = rows.map((row) => {
     const waited = span(Math.max(0, now - row.firstSeen));
-    return `- [${label(row.title)}](${taskDeepLink(row.workspaceId, row.taskId)}) — ${evidence(row.bucket, waited)}`;
+    return `- [${label(row.title)}](${taskDeepLink(row.workspaceId, row.taskId)}) — said it is waiting on a person ${waited} ago, with no question on anybody's queue.`;
   });
-  const where = boards === 1 ? 'one board' : `${boards} boards`;
   const detail = [
-    `Each of these tasks is waiting on a person with nothing that person can answer. Their leads were told over ${span(agingMs)} ago and the asks are still unfiled. ${n === 1 ? 'It is' : 'They are'} on ${where}.`,
+    `Each of these tasks is waiting on a person with nothing that person can answer. Their lead was told over ${span(agingMs)} ago and the asks are still unfiled. ${n === 1 ? 'It is' : 'They are'} on this board.`,
     '',
     ...lines,
     '',
     'Either the ask gets filed where you read it, or the agent says there was no ask. This item is written by the board itself and withdraws on its own once none is left.',
   ].join('\n');
   return { review_type: 'question', headline, detail };
-}
-
-/**
- * The half-sentence that says WHY this task is on the list — which is
- * different for the two buckets, and the difference is what the reader would
- * correct. One sentence covering both would either claim an agent wrote
- * closing words it never wrote, or drop the fact that one of them did.
- * Neither says "you": the item is fleet-wide, and the owner a row names need
- * not be its reader (`blocked-on-owner-unfiled` fires on any person owner).
- */
-function evidence(bucket: string, waited: string): string {
-  return bucket === WAITING_UNFILED_BUCKET
-    ? `said it is waiting on a person ${waited} ago, with no question on anybody's queue.`
-    : `has been down to its owner for ${waited}, with no question on their queue.`;
 }
 
 function clip(text: string, max: number): string {

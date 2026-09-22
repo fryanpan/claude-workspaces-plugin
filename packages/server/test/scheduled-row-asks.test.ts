@@ -212,7 +212,7 @@ describe('an unfiled ask on a rule row reads like an unfiled ask anywhere else',
     expect(rows.get('t-plain')?.bucket).toBe('backlog-unranked');
   });
 
-  it('the gate puts it on the unfiled list under the ask word, not the rule word', () => {
+  it('the gate records it under the ask word, not the rule word', () => {
     const verdict = evaluateStalls({
       tasks: [quietRow({ id: 't-rule', ownerKind: 'person', schedule: RULE })],
       events: [],
@@ -222,10 +222,14 @@ describe('an unfiled ask on a rule row reads like an unfiled ask anywhere else',
       quietMs: STALL,
     });
     expect(verdict.stalled).toHaveLength(0);
-    expect(verdict.unfiled.map((r) => r.id)).toEqual(['t-rule']);
-    // 'scheduled-rule' here would render as "a schedule rule, whose instances
-    // are the work" — the swallowing, one file downstream.
-    expect(verdict.unfiled[0]?.bucket).toBe(OWNER_UNFILED_BUCKET);
+    // A person owns this rule row, so it is a RECORD rather than a finding
+    // (2026-09-22): off `unfiled`, on `awaitingPerson`. The bucket word is
+    // what this case has always been about — 'scheduled-rule' here would
+    // render as "a schedule rule, whose instances are the work", the
+    // swallowing, one file downstream.
+    expect(verdict.unfiled).toHaveLength(0);
+    expect(verdict.awaitingPerson.map((r) => r.id)).toEqual(['t-rule']);
+    expect(verdict.awaitingPerson[0]?.bucket).toBe(OWNER_UNFILED_BUCKET);
   });
 
   it('control: inside the quiet window it is not yet a finding', () => {
@@ -245,6 +249,7 @@ describe('an unfiled ask on a rule row reads like an unfiled ask anywhere else',
       quietMs: STALL,
     });
     expect(verdict.unfiled).toHaveLength(0);
+    expect(verdict.awaitingPerson).toHaveLength(0);
     expect(verdict.stalled).toHaveLength(0);
   });
 });

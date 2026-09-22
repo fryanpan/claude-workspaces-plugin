@@ -99,21 +99,22 @@ function agentOwnedRow(): TaskRow {
   };
 }
 
-/** A row the BOARD itself says a person owns, with nothing filed — the
- *  existing `blocked-on-owner-unfiled` finding, carried here as the control
- *  every narrowing has to leave working. */
-function personOwnedRow(): TaskRow {
-  return {
-    id: 't-date',
-    title: 'Pick the launch date',
-    status: 'todo',
-    goal: GOAL,
-    createdAt: CREATED,
-    updatedAt: CREATED,
-    transitions: MOVED_BY_PERSON,
-    ownerKind: 'person',
-    assignee: PERSON,
-  };
+/**
+ * A frame row under the board-declared bucket, built rather than judged.
+ *
+ * It used to be a `TaskRow` driven through `evaluateStalls`, which put it on
+ * `unfiled` as a finding. The gate stopped doing that on 2026-09-22 — nobody
+ * can act on such a row, so it is a record on `awaitingPerson` and reaches no
+ * frame this server sends (`person-owned-quiet.test.ts`).
+ *
+ * The RENDERER still has to draw it, which is why the control stays. A frame
+ * is written by one server and read by another session's MCP child, and a
+ * child on a new bundle still receives frames from a server that has not
+ * restarted. Drawing an arriving row correctly is the child's job whatever
+ * this server has stopped sending.
+ */
+function personOwnedFrameRow(): { id: string; title: string; bucket: string } {
+  return { id: 't-date', title: 'Pick the launch date', bucket: OWNER_UNFILED_BUCKET };
 }
 
 /** The gate, run the way the server runs it. No cap, so capacity plays no
@@ -192,18 +193,13 @@ describe('the wake line says which of the two doors a row came through', () => {
   });
 
   /**
-   * THE MUTATION CONTROL. A row the board itself says a person owns, with
-   * nothing filed, still reaches `blocked-on-owner-unfiled` and still gets the
-   * original sentence. Drop the bucket split from `stalledLine` and this case
-   * keeps passing while the one above goes red — which is what says the change
-   * narrowed the wording rather than switching the finding off.
+   * THE MUTATION CONTROL. A row under the board-declared bucket still gets
+   * the original sentence. Drop the bucket split from `stalledLine` and this
+   * case keeps passing while the one above goes red — which is what says the
+   * change narrowed the wording rather than switching the finding off.
    */
   it('still tells the reader plainly when the BOARD says a person is waiting', () => {
-    const verdict = judge([personOwnedRow()]);
-    const named = verdict.unfiled.find((r) => r.id === 't-date');
-    expect(named?.bucket).toBe(OWNER_UNFILED_BUCKET);
-
-    const line = render(verdict);
+    const line = stalledLine({ unfiled: [personOwnedFrameRow()] });
     expect(line).toContain('waiting on a person with NO question filed');
     expect(line).toContain('t-date');
     // And it is NOT dressed as a guess — no hedge borrowed from the other
@@ -250,10 +246,14 @@ describe('the wake line says which of the two doors a row came through', () => {
   /** Both on one frame: two sentences, each naming only its own rows, and the
    *  count in each is that sentence's count rather than the list's length. */
   it('keeps the two apart on a frame carrying both', () => {
-    const verdict = judge([agentOwnedRow(), personOwnedRow()]);
-    expect(verdict.unfiled).toHaveLength(2);
-
-    const line = render(verdict);
+    const judged = judge([agentOwnedRow()]);
+    expect(judged.unfiled).toHaveLength(1);
+    const line = stalledLine({
+      consideredCount: judged.considered,
+      stalledCount: judged.stalled.length,
+      rows: judged.stalled,
+      unfiled: [...judged.unfiled, personOwnedFrameRow()],
+    });
     expect(line).toContain('1 task is waiting on a person with NO question filed');
     expect(line).toContain('t-date');
     expect(line).toContain('t-verbs');

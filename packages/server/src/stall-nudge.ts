@@ -88,7 +88,6 @@ import {
   everyNamedTaskMoved,
   rowBucketTokens,
   undeterminedTokens,
-  withoutPersonBlocked,
 } from './stall-frame-news.ts';
 import {
   type AskedBackRow,
@@ -167,8 +166,15 @@ export interface StallSnapshot {
   retired: boolean;
   /** Work that should be moving and is not, quietest first. */
   stalled: readonly StalledRow[];
-  /** Rows waiting on a person with no question filed where they would see it. */
+  /** Rows whose own agent said it waits on a person, with no question filed
+   *  where they would see it. An agent can end each of them. */
   unfiled: readonly StalledRow[];
+  /** Rows the BOARD says a person owns, with nothing on that person's queue
+   *  (`StallVerdict.awaitingPerson`). A RECORD: nothing here reads it, and
+   *  nothing may — it counts toward no verdict, enters no frame and reaches
+   *  no review item. Carried on the snapshot so the keep-moving measurement
+   *  can write it down. Absent when none, the same as empty. */
+  awaitingPerson?: readonly StalledRow[];
   /**
    * Rows whose blockage LIFTED — an ask on them answered, or a done-when line
    * met with later lines still open — and which nothing has touched since
@@ -898,17 +904,17 @@ export class StallNudger {
       // whole, because the keep-moving measurement reads it too.
       const { board, waited } = withoutStandingWaits(snapshot);
       this.forgetWhileWaiting(board.workspaceId, waited);
-      // The fleet pass reads the board WITH its person-blocked rows: that is
-      // the path that puts them on the owner's queue. The lead's wake and the
-      // dead-board escalation read it without, because nothing an agent can
-      // do unblocks a task a person owns (`withoutPersonBlocked`).
+      // Every reader here sees the same `unfiled` list, because the gate no
+      // longer puts a person-blocked row on it at all (2026-09-22): such a
+      // row is a record on `awaitingPerson` and a finding for nobody. The
+      // wake used to filter it out itself (`withoutPersonBlocked`), which
+      // left the gate and the wake holding two readings of one bucket word.
       read.push(board);
-      const agentsView = withoutPersonBlocked(board);
-      this.considerBoard(agentsView, now);
+      this.considerBoard(board, now);
       // After the wake, so a row told for the first time on this very tick is
       // measured from now and cannot escalate in the same pass. Isolated: a
       // filer that throws must cost its own board, never the boards behind it.
-      this.escalate(agentsView, now);
+      this.escalate(board, now);
     }
     // The one finding that belongs to no board: an unfiled wait the lead was
     // told about a window ago and still nobody has filed. After every board,

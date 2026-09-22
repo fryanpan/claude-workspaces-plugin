@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 /**
- * The words on the fleet-wide unfiled-wait item, driven directly.
+ * The words on a board's unfiled-wait item, driven directly.
  *
  * The escalation's own suite reads these words back off a filed review item,
  * which proves the wiring; this drives the renderer itself, so a change to the
@@ -9,7 +9,6 @@ import { describe, expect, it } from 'bun:test';
  *
  * Fixtures are synthetic — invented boards and titles. The repo is public.
  */
-import { OWNER_UNFILED_BUCKET } from '../src/stall-gate.ts';
 import { type AgingWait, buildWaitingUnfiledReview } from '../src/waiting-unfiled-review.ts';
 import { WAITING_UNFILED_BUCKET } from '../src/waiting-unfiled.ts';
 
@@ -27,38 +26,41 @@ const row = (over: Partial<AgingWait> = {}): AgingWait => ({
   ...over,
 });
 
-describe('the fleet-wide unfiled-wait item’s words', () => {
+describe('a board’s unfiled-wait item’s words', () => {
   it('names the one task in the headline, and links it in the detail', () => {
     const review = buildWaitingUnfiledReview({ rows: [row()], agingMs: 30 * MIN, now: NOW });
     expect(review.headline).toBe(
       '“Rebuild the tide table” is waiting on a person, with nothing filed',
     );
     expect(String(review.detail)).toContain('t-tide');
-    expect(String(review.detail)).toContain('one board');
+    // Every row on one item is on the board the item hangs on, so the words
+    // say so rather than counting boards (2026-09-22).
+    expect(String(review.detail)).toContain('on this board');
   });
 
-  it('counts the tasks and the boards when there is more than one', () => {
+  it('counts the tasks when there is more than one', () => {
     const review = buildWaitingUnfiledReview({
-      rows: [row(), row({ workspaceId: 'w-harbor', taskId: 't-ferry' })],
+      rows: [row(), row({ taskId: 't-ferry' })],
       agingMs: 30 * MIN,
       now: NOW,
     });
     expect(review.headline).toBe('2 tasks are waiting on a person with nothing filed');
-    expect(String(review.detail)).toContain('2 boards');
+    expect(String(review.detail)).toContain('t-ferry');
   });
 
-  it('says which of the two ways each row got onto the list', () => {
+  it('says the evidence every row here has: the agent’s own closing words', () => {
     const detail = String(
       buildWaitingUnfiledReview({
-        rows: [row(), row({ taskId: 't-berth', bucket: OWNER_UNFILED_BUCKET })],
+        rows: [row(), row({ taskId: 't-berth' })],
         agingMs: 30 * MIN,
         now: NOW,
       }).detail,
     );
-    // The agent's own closing words…
-    expect(detail).toContain('said it is waiting on a person');
-    // …and the board's ownership, which is a different claim about the row.
-    expect(detail).toContain('has been down to its owner for');
+    for (const line of detail.split('\n').filter((l) => l.startsWith('- ')))
+      expect(line).toContain('said it is waiting on a person');
+    // The board-ownership sentence is gone with the bucket that earned it:
+    // no row reaching this renderer can carry that evidence any more.
+    expect(detail).not.toContain('down to its owner');
   });
 
   it('drops brackets from a title so the markdown link still resolves', () => {

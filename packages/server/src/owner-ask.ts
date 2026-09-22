@@ -107,10 +107,19 @@ export function indexFiledAsks(items: readonly ReviewItemRow[]): FiledAsks {
  * Owner-blocked is only LEGITIMATE waiting when a pending item exists — that
  * is what puts the ask on the owner's Home queue. An owner-band task, or a
  * person-owned one (`ownerKind`, the server's authoritative call), with no
- * pending item is an ask that exists nowhere he reads: a protocol violation
- * counting toward FAIL (the 08-27 review: 7 of 10 "blocked-on-owner" rows
- * were invisible on his queue). Prose is not a third way in — a "waiting on
- * Bryan" note only loses its movement credit (`waiting-unfiled.ts`).
+ * pending item is an ask that exists nowhere he reads (the 08-27 review: 7 of
+ * 10 "blocked-on-owner" rows were invisible on his queue). Prose is not a
+ * third way in — a "waiting on Bryan" note only loses its movement credit
+ * (`waiting-unfiled.ts`).
+ *
+ * **This reading is no longer a FAIL.** It counted toward one until
+ * 2026-09-22, on the reasoning that somebody had to go and file the ask. For
+ * a row the board says a PERSON owns, nobody could: the agent cannot hand
+ * back a row it does not hold, and the person was being asked to file a
+ * question to themselves about work already on their queue. `stall-gate.ts`
+ * keeps the reading and records it on `StallVerdict.awaitingPerson`, which
+ * counts toward no verdict and wakes nobody. What this function decides is
+ * still exactly the same; what reads it changed.
  *
  * UNLESS the task is in the BACKLOG — the band the board runs for nobody,
  * outside the dispatch order AND the owner band — where there is no ask

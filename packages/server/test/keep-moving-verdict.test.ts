@@ -223,7 +223,7 @@ describe('once per board per cadence, and no more', () => {
     });
     r.observe([board('w-1', { stalled: [row('t-a')], unfiled: [row('t-b')] })], T0);
     expect(lines).toEqual([
-      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 waiting=0 unreadable=0 held=0 escalated=0 ungated-ui=0 unresumed=0',
+      '[keep-moving] ws=w-1 verdict=FAIL considered=3 stalled=1 unfiled=1 awaiting-person=0 waiting=0 unreadable=0 held=0 escalated=0 ungated-ui=0 unresumed=0',
     ]);
   });
 });

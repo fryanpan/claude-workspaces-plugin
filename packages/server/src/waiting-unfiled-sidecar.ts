@@ -35,14 +35,33 @@ export interface Seen {
   tells?: number;
 }
 
+/** The standing item on ONE board, and the rows it names. */
+export interface Filed {
+  workspaceId: string;
+  taskId: string;
+  itemId: string;
+  keys: string[];
+}
+
 export interface Sidecar {
   seen: Record<string, Seen>;
-  /** The one fleet item, while one stands. */
-  filed?: { workspaceId: string; taskId: string; itemId: string; keys: string[] };
-  /** When Team Lead was last told, this stretch. */
+  /**
+   * The standing item on each board that has one, keyed by workspace id.
+   *
+   * It was ONE item for the whole server until 2026-09-22, anchored on
+   * whichever board's task was due longest, and later revisions added rows
+   * from other boards to it. The reader of a board could not act on a row
+   * that was not on it, and said so (Bryan, 2026-09-21, on such an item:
+   * "The second isn't even in your project"). One item per board, filed on
+   * that board, naming only that board's rows.
+   */
+  filedByBoard?: Record<string, Filed>;
+  /** When Team Lead was last told, this stretch. One stamp, because the
+   *  frame is still ONE wake for the whole fleet. */
   teamLeadToldAt?: number;
   /** Keys the owner has already been shown on an item they answered or
-   *  withdrew. Not asked about again; a task they were not shown is. */
+   *  withdrew. Not asked about again; a task they were not shown is. Keys
+   *  carry their board, so this is per board already. */
   seenByOwner?: string[];
 }
 
@@ -58,7 +77,13 @@ export function serializeSidecar(sidecar: Sidecar): string {
     const row = sidecar.seen[k];
     if (row) seen[k] = row;
   }
-  return `${JSON.stringify({ ...sidecar, seen }, null, 2)}\n`;
+  const filedByBoard: Record<string, Filed> = {};
+  for (const k of Object.keys(sidecar.filedByBoard ?? {}).sort()) {
+    const row = sidecar.filedByBoard?.[k];
+    if (row) filedByBoard[k] = row;
+  }
+  const out = { ...sidecar, seen, ...(sidecar.filedByBoard ? { filedByBoard } : {}) };
+  return `${JSON.stringify(out, null, 2)}\n`;
 }
 
 /**
@@ -77,7 +102,14 @@ export function loadSidecar(path: string | null): { sidecar: Sidecar; persisted:
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Sidecar>;
     if (!parsed || typeof parsed !== 'object' || typeof parsed.seen !== 'object') return nothing;
     const sidecar: Sidecar = { seen: parsed.seen ?? {} };
-    if (parsed.filed) sidecar.filed = parsed.filed;
+    // A file written before the item went per board carries a single `filed`
+    // object. It is read as that board's entry rather than discarded, so a
+    // restart across the change revises the item that is already standing
+    // instead of filing a second one beside it.
+    const legacy = (parsed as { filed?: Filed }).filed;
+    if (parsed.filedByBoard && typeof parsed.filedByBoard === 'object')
+      sidecar.filedByBoard = parsed.filedByBoard;
+    else if (legacy?.workspaceId) sidecar.filedByBoard = { [legacy.workspaceId]: legacy };
     if (typeof parsed.teamLeadToldAt === 'number') sidecar.teamLeadToldAt = parsed.teamLeadToldAt;
     if (Array.isArray(parsed.seenByOwner)) sidecar.seenByOwner = parsed.seenByOwner;
     return { sidecar, persisted: serializeSidecar(sidecar) };
@@ -105,4 +137,18 @@ export function saveSidecar(path: string | null, sidecar: Sidecar, lastPersisted
     console.error('[stall] could not persist waiting-unfiled escalations:', err);
     return lastPersisted;
   }
+}
+
+/** Record one board's standing item. */
+export function setFiled(sidecar: Sidecar, workspaceId: string, filed: Filed): void {
+  sidecar.filedByBoard = { ...(sidecar.filedByBoard ?? {}), [workspaceId]: filed };
+}
+
+/** Forget one board's standing item, and the map itself once it is empty —
+ *  so a sidecar with no items serializes as it did before the field existed
+ *  and costs no write on the loop that runs once a minute forever. */
+export function dropFiled(sidecar: Sidecar, workspaceId: string): void {
+  if (!sidecar.filedByBoard) return;
+  const { [workspaceId]: _gone, ...rest } = sidecar.filedByBoard;
+  sidecar.filedByBoard = Object.keys(rest).length > 0 ? rest : undefined;
 }

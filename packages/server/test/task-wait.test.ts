@@ -292,12 +292,17 @@ describe('what the stall gate does with a declaration', () => {
     // now, so a sentence about waiting on something else may annotate it and
     // must not excuse it. The clock half of this is pinned in
     // stall-quiet-wait.test.ts.
+    //
+    // The row here is the agent-declared kind: its own closing note asks a
+    // person and nothing is filed. It used to be a person-OWNED row, which
+    // stopped being a finding on 2026-09-22 — a declaration cannot excuse
+    // what is no longer anybody's to answer, so it can no longer show that a
+    // declaration fails to excuse it either.
     const verdict = evaluateStalls({
       tasks: [
         row({
           id: 't-palette',
           title: 'Pick the palette',
-          ownerKind: 'person',
           externalWait: standing(),
         }),
       ],
@@ -305,6 +310,7 @@ describe('what the stall gate does with a declaration', () => {
       reviewItems: [],
       bands,
       now: NOW,
+      noteClocks: new Map([['t-palette', { newestPlainAt: 0, askedAt: NOW - 90 * MIN }]]),
     });
 
     expect(verdict.unfiled.map((r) => r.id)).toEqual(['t-palette']);

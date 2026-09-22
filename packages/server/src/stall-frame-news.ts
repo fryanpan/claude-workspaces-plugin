@@ -1,5 +1,5 @@
 /**
- * Three readings the stall wake takes of a frame it is about to send, after
+ * Two readings the stall wake takes of a frame it is about to send, after
  * `stall-nudge.ts`'s stamp has already said the frame carries news.
  *
  * Measured over a week of the fleet's transcripts, repeat or empty reminders
@@ -14,12 +14,14 @@
  *    window is not sent yet. The quiet window makes a row a finding; this
  *    makes a FRAME worth a turn, and a frame about work that moved within the
  *    hour is about work somebody is on.
- *  - `withoutPersonBlocked` — a task the board says a PERSON owns, with
- *    nothing on their queue, is not the agent's to unblock. It goes to the
- *    owner's standing item (`waiting-unfiled-escalation.ts`) and wakes nobody.
+ * A third reading used to live here: `withoutPersonBlocked`, which took a
+ * task the board says a PERSON owns off the wake's copy of `unfiled`. It is
+ * gone because the gate no longer puts such a row on that list at all
+ * (`StallVerdict.awaitingPerson`, 2026-09-22) — the filter was the wake
+ * holding a second reading of one bucket word, and a filter that can only
+ * ever match nothing is a place for the two readings to drift apart.
  */
-import { OWNER_UNFILED_BUCKET, type StalledRow } from './stall-gate.ts';
-import type { StallNudgeFrame, StallSnapshot } from './stall-nudge.ts';
+import type { StallNudgeFrame } from './stall-nudge.ts';
 
 /**
  * How recently every named task may have moved for a frame to wait.
@@ -118,17 +120,4 @@ export function everyNamedTaskMoved(frame: StallNudgeFrame, withinMs: number): b
     ...(frame.unresumed ?? []),
   ];
   return quiet.length > 0 && quiet.every((row) => row.quietMs < withinMs);
-}
-
-/** A row the board says a person owns with nothing on their queue. */
-export function isPersonBlocked(row: StalledRow): boolean {
-  return row.bucket === OWNER_UNFILED_BUCKET;
-}
-
-/** The board as the lead's wake and the dead-board escalation read it: the
- *  person-blocked rows taken off `unfiled`. The fleet pass still reads the
- *  whole snapshot, which is how those rows reach the owner's queue. */
-export function withoutPersonBlocked(board: StallSnapshot): StallSnapshot {
-  if (!board.unfiled.some(isPersonBlocked)) return board;
-  return { ...board, unfiled: board.unfiled.filter((row) => !isPersonBlocked(row)) };
 }

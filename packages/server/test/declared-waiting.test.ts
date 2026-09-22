@@ -93,11 +93,15 @@ describe('a wait is what somebody filed, never what a note says', () => {
     expect(verdict.waiting[0]?.waitingOn.map((a) => a.kind)).toEqual(['thread', 'task']);
   });
 
-  it('a row the board says waits on the owner, with nothing filed, is unfiled — not waiting', () => {
+  it('a row the board says waits on the owner, with nothing filed, is not waiting', () => {
+    // `waiting` means an ask is filed AND this is where. With nothing filed
+    // the row is on none of the finding lists at all — it is the record
+    // `awaitingPerson` holds (2026-09-22).
     const verdict = gate([row({ ownerKind: 'person' })]);
-    expect(verdict.unfiled.map((r) => r.id)).toEqual(['t-1']);
     expect(verdict.waiting).toEqual([]);
     expect(verdict.stalled).toEqual([]);
+    expect(verdict.unfiled).toEqual([]);
+    expect(verdict.awaitingPerson.map((r) => r.id)).toEqual(['t-1']);
   });
 });
 

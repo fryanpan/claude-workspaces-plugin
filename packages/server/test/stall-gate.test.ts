@@ -193,14 +193,17 @@ describe('rows the gate refuses to name', () => {
       expect(control.considered).toBe(1);
     });
 
-    it('is not an unfiled ask either, whoever owns it', () => {
+    it('is not read for an owner ask either, whoever owns it', () => {
       const verdict = judge([
         task({ id: 't-1', status: 'todo', goal: 'g-pending', ownerKind: 'person' }),
       ]);
       expect(verdict.unfiled).toEqual([]);
+      expect(verdict.awaitingPerson).toEqual([]);
       expect(verdict.considered).toBe(0);
+      // The control is the same row under an agreed band: it IS read there,
+      // and lands on the record list (2026-09-22) rather than on `unfiled`.
       const control = judge([task({ id: 't-1', status: 'todo', goal: 'g1', ownerKind: 'person' })]);
-      expect(control.unfiled.map((r) => r.id)).toEqual(['t-1']);
+      expect(control.awaitingPerson.map((r) => r.id)).toEqual(['t-1']);
     });
 
     it('is judged again the moment the band is agreed to', () => {
@@ -250,22 +253,25 @@ describe('rows the gate refuses to name', () => {
 });
 
 describe('a row waiting on a person with nothing filed is its own list', () => {
-  it('reports it under unfiled rather than under stalled', () => {
+  it('reports it as a record rather than as a stall or a finding', () => {
     const verdict = evaluate({
       tasks: [task({ id: 't-1', status: 'todo', ownerKind: 'person' })],
     });
-    // Not a stall — nobody is failing to work it. It is an ask that exists in
-    // somebody's head, and the lead's move is to file it, not to drive it.
+    // Not a stall — nobody is failing to work it. And since 2026-09-22 not a
+    // finding either: there is no act for an agent or for the person, so it
+    // is written down on `awaitingPerson` and nothing counts or sends it.
     expect(verdict.stalled).toHaveLength(0);
-    expect(verdict.unfiled.map((r) => r.id)).toEqual(['t-1']);
+    expect(verdict.unfiled).toHaveLength(0);
+    expect(verdict.awaitingPerson.map((r) => r.id)).toEqual(['t-1']);
   });
 
-  it('does not report a filed ask as unfiled', () => {
+  it('does not record a filed ask as awaiting a person', () => {
     const verdict = evaluate({
       tasks: [task({ id: 't-1', status: 'todo', ownerKind: 'person' })],
       reviewItems: [{ taskId: 't-1' }],
     });
     expect(verdict.unfiled).toHaveLength(0);
+    expect(verdict.awaitingPerson).toHaveLength(0);
   });
 
   /**
@@ -294,11 +300,12 @@ describe('a row waiting on a person with nothing filed is its own list', () => {
       ],
     });
     expect(verdict.unfiled).toHaveLength(0);
+    expect(verdict.awaitingPerson).toHaveLength(0);
     // …and it was still examined, so the silence is "one row, accounted for".
     expect(verdict.considered).toBe(1);
   });
 
-  it('names the same row once it has been quiet longer than the window', () => {
+  it('records the same row once it has been quiet longer than the window', () => {
     const verdict = evaluate({
       tasks: [
         task({
@@ -309,7 +316,7 @@ describe('a row waiting on a person with nothing filed is its own list', () => {
         }),
       ],
     });
-    expect(verdict.unfiled.map((r) => r.id)).toEqual(['t-1']);
+    expect(verdict.awaitingPerson.map((r) => r.id)).toEqual(['t-1']);
   });
 });
 
@@ -598,7 +605,7 @@ describe('the parallelism cap decides which rows are judged at all', () => {
     expect(verdict.beyondCapacity).toBe(0);
   });
 
-  it('an unfiled ask past the cap is still a finding — capacity excuses no protocol violation', () => {
+  it('a person-owned row past the cap is still recorded — capacity changes no reading', () => {
     const verdict = evaluateStalls({
       tasks: [
         ...quietTasks(),
@@ -616,7 +623,7 @@ describe('the parallelism cap decides which rows are judged at all', () => {
       parallelismCap: 1,
       priorityOrder: ['t-a', 't-b', 't-c', 't-ask'],
     });
-    expect(verdict.unfiled.map((r) => r.id)).toEqual(['t-ask']);
+    expect(verdict.awaitingPerson.map((r) => r.id)).toEqual(['t-ask']);
     expect(verdict.stalled.map((r) => r.id)).toEqual(['t-a']);
   });
 });
