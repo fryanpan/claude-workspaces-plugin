@@ -14,16 +14,20 @@
  * (`notes-regroup-ask.ts`), the server does the noticing and the prompt names
  * the heading id and the number.
  *
- * WHEN IT FIRES, and why it is narrow. A PAGE cue is a sentence that names a
- * page and says what it is ("Page two is the flooding"); on the page's own
- * words alone, "on page two of the report" does not qualify. An ITEM cue is
- * a sentence opening with an ordering word ("start with", "then", "next",
- * "the last thing") — words ordinary meetings use all the time, so an item
- * cue only counts once the document already holds a page heading or this
- * tick opens one. A meeting nobody dictated never sees this block.
+ * WHEN IT FIRES, and why it is narrow. A PAGE cue is a sentence that OPENS
+ * with a page and says what it is ("Page two is the flooding", "Part one:
+ * the streets"); "page two is loading slowly" and "on page two of the
+ * report" do not qualify. An ITEM cue is a sentence opening with an ordering
+ * word ("start with", "then", "next", "the last thing") — words ordinary
+ * meetings use all the time, so an item cue only counts while the speaker is
+ * dictating: a page cue, or an item cue that itself counted, within the last
+ * `DICTATION_WINDOW` ticks (`createDictationMemory`). A page heading existing
+ * somewhere in the doc does not keep dictation open, and a tick with no cue
+ * gets no block at all. A meeting nobody dictated never sees this block.
  */
 
-import type { prose } from '@claude-workspaces/core';
+import { prose } from '@claude-workspaces/core';
+import * as Y from 'yjs';
 import { sentencesOf } from './notes-idea-coverage.ts';
 
 const NUMBER_WORDS = 'one|two|three|four|five|six|seven|eight|nine|ten';
@@ -41,9 +45,15 @@ export function pageOfHeading(text: string): string | undefined {
   return n === undefined ? undefined : pageNumber(n);
 }
 
-/** "Page two is the flooding", "Part one: the streets". */
+/**
+ * "Page two is the flooding", "Part one: the streets". The sentence has to
+ * OPEN with the page, and what follows has to introduce what the page is:
+ * "section 3 is wrong" and "page two is loading slowly" name a page in
+ * ordinary talk and open nothing.
+ */
 const PAGE_CUE = new RegExp(
-  `\\b(?:page|part|section)\\s+(${NUMBER_WORDS}|\\d+)\\s*(?:is|will be|covers|:)`,
+  `^(?:(?:and|so|okay|ok|right)[,\\s]+)?(?:page|part|section)\\s+(${NUMBER_WORDS}|\\d+)\\s*` +
+    '(?::|(?:is|will be) (?:the|about|on|for|called|our|all about)\\b|covers\\b)',
   'i',
 );
 /** A heading that names a dictated page: "Page two: the flooding". */
@@ -52,7 +62,10 @@ const PAGE_HEADING = new RegExp(`^(?:page|part|section)\\s+(${NUMBER_WORDS}|\\d+
 const ITEM_CUE =
   /^(?:(?:and|so|okay|ok)[,\s]+)?(?:start(?:ing)? with|first(?:ly)?,|then\b|next\b|after that|the (?:last|final) (?:thing|item|part|step)|last(?:ly)?,|finally)/i;
 /** "It has two pages": the speaker counting pages before naming any. */
-const PAGE_COUNT = new RegExp(`\\b(?:${NUMBER_WORDS}|\\d+)\\s+(?:pages|parts|sections)\\b`, 'i');
+const PAGE_COUNT = new RegExp(
+  `\\b(?:has|have|in)\\s+(?:${NUMBER_WORDS}|\\d+)\\s+(?:pages|parts|sections)\\b`,
+  'i',
+);
 /** "…on page one…", which says which page an item belongs to. */
 const ON_PAGE = new RegExp(`\\bon (?:page|part|section)\\s+(${NUMBER_WORDS}|\\d+)\\b`, 'i');
 
@@ -131,32 +144,75 @@ function nextNumber(outline: readonly prose.OutlineEntry[], heading: prose.Outli
   return items.length + 1;
 }
 
-/** The last numbered item under `heading`, the one a detail belongs to. */
-function lastItemUnder(
-  outline: readonly prose.OutlineEntry[],
-  heading: prose.OutlineEntry,
-): prose.OutlineEntry | undefined {
-  return outline.filter((e) => e.underHeadingId === heading.id && e.ordered).at(-1);
+/** How many ticks a dictation stays open after its last counting cue. */
+export const DICTATION_WINDOW = 3;
+
+/** What one tick dictates, judged against the ticks before it. */
+export interface DictationTick {
+  /**
+   * This tick's cues that count: a page or count cue always, an item cue only
+   * while the speaker is dictating.
+   */
+  cues: DictationCue[];
+  /**
+   * How many ticks ago the last page or item cue that counted was spoken (1
+   * is the tick just before this one). Absent when there was none within
+   * `DICTATION_WINDOW`.
+   */
+  sinceCue?: number;
+}
+
+/**
+ * The tick's dictation with no memory of earlier ticks: an item cue counts
+ * only beside a page cue in the same tick. What a caller without a session
+ * (a test, a one-off compose) gets.
+ */
+export function dictationTickOf(turns: readonly { text: string }[]): DictationTick {
+  const all = dictationCues(turns);
+  const opens = all.some((c) => c.kind === 'page');
+  return { cues: all.filter((c) => c.kind !== 'item' || opens) };
+}
+
+/**
+ * Per-meeting memory of the last dictation cue, so an ordering word counts as
+ * an item only while a dictation is actually running. Call `see` once per
+ * composed tick, in order.
+ */
+export function createDictationMemory(): {
+  see(turns: readonly { text: string }[]): DictationTick;
+} {
+  let tick = 0;
+  let lastCue: number | undefined;
+  return {
+    see(turns) {
+      tick += 1;
+      const ago = lastCue === undefined ? undefined : tick - lastCue;
+      const recent = ago !== undefined && ago <= DICTATION_WINDOW ? ago : undefined;
+      const all = dictationCues(turns);
+      const dictating = recent !== undefined || all.some((c) => c.kind === 'page');
+      const cues = all.filter((c) => c.kind !== 'item' || dictating);
+      if (cues.some((c) => c.kind !== 'count')) lastCue = tick;
+      return { cues, ...(recent !== undefined ? { sinceCue: recent } : {}) };
+    },
+  };
 }
 
 /**
  * The block that names what this tick's dictation asks for, or null when the
- * tick dictates nothing.
+ * tick carries no cue that counts. A tick that only adds a detail gets no
+ * block: `foldDetailsIntoItem` nests its dash note into the item instead.
  */
 export function dictationDirective(
   outline: readonly prose.OutlineEntry[],
-  turns: readonly { text: string }[],
+  tick: DictationTick,
 ): string | null {
-  const cues = dictationCues(turns);
+  const wanted = tick.cues;
+  if (wanted.length === 0) return null;
   const pages = pageHeadings(outline);
-  const opensPage = cues.some((c) => c.kind === 'page');
-  // An ordering word only means an item once there is a page for it to be on.
-  const wanted = cues.filter((c) => c.kind !== 'item' || pages.length > 0 || opensPage);
   const onPage = currentPage(outline);
-  if (wanted.length === 0 && onPage === undefined) return null;
   // The page this tick's items go on: the one it names, or the one it opens,
   // or the one the speaker is on.
-  const opened = cues.find((c) => c.kind === 'page')?.page;
+  const opened = wanted.find((c) => c.kind === 'page')?.page;
   const lines = [
     "THIS SPEECH DICTATES THE SHAPE OF A DOCUMENT. Keep the speaker's shape:",
     'do not sort these lines into topics of your own, and do not drop one.',
@@ -175,7 +231,7 @@ export function dictationDirective(
         had
           ? `- "${cue.sentence}" names page ${cue.page}, and heading ${had.id} ("${had.text}") ` +
               'is already that page. Do not open a second heading for it. ' +
-              (/^(?:page|part|section)\s+\S+[.:]?$/i.test(had.text.trim())
+              (BARE_PAGE_HEADING.test(had.text.trim())
                 ? `Name it in the speaker's words: {"op":"replace_block","blockId":"${had.id}",` +
                   `"markdown":"${'#'.repeat(had.level ?? 2)} ${had.text.trim().replace(/[.:]$/, '')}: <what the page is>"}.`
                 : "Put the page's items under it.")
@@ -198,20 +254,7 @@ export function dictationDirective(
             '("1. <the item>") under that page\'s heading.',
     );
   }
-  const item = onPage ? lastItemUnder(outline, onPage) : undefined;
-  if (item && !wanted.some((c) => c.kind === 'item')) {
-    const n = nextNumber(outline, onPage as prose.OutlineEntry) - 1;
-    lines.push(
-      `- Speech that adds a detail or a reason to item ${item.id} ("${item.text}") is a ` +
-        'sub-bullet of that item. Keep the words of the item as they are and add the detail ' +
-        `under it: {"op":"replace_block","blockId":"${item.id}","markdown":"${n}. ${item.text}\\n   - <the detail>"}. ` +
-        'A dash note between two numbered items breaks the list in two.',
-    );
-  } else {
-    lines.push(
-      'A detail or a reason about an item stays in that item, or as a sub-bullet under it.',
-    );
-  }
+  lines.push('A detail or a reason about an item stays in that item, or as a sub-bullet under it.');
   return lines.join('\n');
 }
 
@@ -233,33 +276,37 @@ const OWN_NOTE = /^\*\*[^*]+:\*\*|^(?:question|decision|action|ask)\s*:|\?\s*$/i
  * nested under a numbered item afterwards either — `nest_blocks` never
  * gathers across lists of different kinds (`prose-nest.ts`).
  *
- * NARROW ON PURPOSE. Only when this tick names no page and no item, the
- * speaker is on a dictated page, the last note under it is a top-level numbered
- * item the note-taker wrote and whose text the outline did not truncate, and
- * the edit is a plain dash insert at the end of that page. Anything else is
- * left exactly as composed.
+ * NARROW ON PURPOSE. Only on the ONE tick straight after a dictation cue
+ * (`sinceCue === 1`) that carries no cue of its own, while the speaker is on a
+ * dictated page, the last note under it is a top-level numbered item the
+ * note-taker wrote, and the edit is a plain dash insert at the end of that
+ * page. Two ticks on, a dash note is a note of its own, even with the page
+ * still the last heading. Anything else is left exactly as composed.
+ *
+ * THE ITEM KEEPS ITS OWN MARKDOWN. The rewrite replaces the whole item, so
+ * `itemMarkdown` (the item's first line as the doc serializes it) carries its
+ * bold, links and code through. Without it the fold falls back to the
+ * outline's plain text, and refuses an item whose text that outline truncated.
  */
 export function foldDetailsIntoItem(
   edits: readonly prose.BlockEdit[],
   outline: readonly prose.OutlineEntry[],
-  turns: readonly { text: string }[],
+  tick: DictationTick | undefined,
   authorId: string,
+  itemMarkdown?: (blockId: string) => string | undefined,
 ): { edits: prose.BlockEdit[]; folded: number } {
   const unchanged = { edits: [...edits], folded: 0 };
-  if (dictationCues(turns).some((c) => c.kind !== 'count')) return unchanged;
+  if (tick === undefined || tick.cues.length > 0 || tick.sinceCue !== 1) return unchanged;
   const last = currentPage(outline);
   if (last === undefined) return unchanged;
   const item = sectionUnder(outline, last).at(-1);
   const endsDoc = ![...outline].slice(outline.indexOf(last) + 1).some((e) => e.kind === 'heading');
-  if (
-    item === undefined ||
-    !item.ordered ||
-    (item.depth ?? 0) !== 0 ||
-    item.author !== authorId ||
-    item.text.endsWith('…')
-  ) {
+  if (item === undefined || !item.ordered || (item.depth ?? 0) !== 0 || item.author !== authorId) {
     return unchanged;
   }
+  const own = itemMarkdown?.(item.id)?.trim();
+  if (own === undefined && item.text.endsWith('…')) return unchanged;
+  const text = own ?? item.text;
   if (edits.some((e) => 'blockId' in e && e.blockId === item.id)) return unchanged;
   const details: string[] = [];
   const kept: prose.BlockEdit[] = [];
@@ -278,9 +325,24 @@ export function foldDetailsIntoItem(
   }
   if (details.length === 0) return unchanged;
   const markdown = [
-    `${nextNumber(outline, last) - 1}. ${item.text}`,
+    `${nextNumber(outline, last) - 1}. ${text}`,
     ...details.map((d) => `   - ${d}`),
   ];
   kept.push({ op: 'replace_block', blockId: item.id, markdown: markdown.join('\n') });
   return { edits: kept, folded: details.length };
+}
+
+/**
+ * The first line of block `blockId` as the doc serializes it, marks and all:
+ * for a list item, its own paragraph without the items nested under it.
+ * What `foldDetailsIntoItem` rewrites an item with, so folding a detail in
+ * does not strip the item's bold or links.
+ */
+export function itemFirstLine(ydoc: Y.Doc, blockId: string): string | undefined {
+  const el = prose.findBlockById(prose.getProseFragment(ydoc), blockId);
+  if (el === undefined) return undefined;
+  const first = el.nodeName === 'listItem' ? el.toArray()[0] : el;
+  if (!(first instanceof Y.XmlElement) || first.nodeName !== 'paragraph') return undefined;
+  const line = prose.serializeBlockToMarkdown(first).trim();
+  return line.length > 0 && !line.includes('\n') ? line : undefined;
 }

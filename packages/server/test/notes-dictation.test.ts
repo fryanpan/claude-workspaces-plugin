@@ -14,8 +14,12 @@
 import { describe, expect, it } from 'bun:test';
 import type { prose } from '@claude-workspaces/core';
 import {
+  DICTATION_WINDOW,
+  type DictationTick,
+  createDictationMemory,
   dictationCues,
   dictationDirective,
+  dictationTickOf,
   foldDetailsIntoItem,
   pageNumber,
   pageOfHeading,
@@ -26,6 +30,15 @@ import { input } from './notes-compose-input.ts';
 import { createNotesTickHarness } from './notes-tick-harness.ts';
 
 const said = (...texts: string[]): Array<{ text: string }> => texts.map((text) => ({ text }));
+
+/** The tick `last` makes after each of `before`, one tick each, through a session's memory. */
+function tickAfter(before: readonly string[], last: string): DictationTick {
+  const memory = createDictationMemory();
+  for (const text of before) memory.see(said(text));
+  return memory.see(said(last));
+}
+/** `text` spoken while a dictation is running: a page was just opened. */
+const dictating = (text: string): DictationTick => tickAfter(['Page one is the repairs.'], text);
 
 function entry(
   id: string,
@@ -80,12 +93,52 @@ describe('dictationCues', () => {
   it('finds nothing in ordinary talk', () => {
     expect(dictationCues(said('The drains overflow at every spring tide.'))).toEqual([]);
   });
+
+  it('opens no page when a page is only mentioned in conversation', () => {
+    expect(
+      dictationCues(
+        said('Page 2 is broken.', 'Section 3 is wrong.', 'Page two is loading slowly.'),
+      ),
+    ).toEqual([]);
+    expect(dictationCues(said('The fix is on page two of the report.'))).toEqual([]);
+  });
+});
+
+describe('createDictationMemory', () => {
+  it('counts an ordering word as an item only while a dictation is running', () => {
+    expect(dictating('Then the cost per block.').cues.map((c) => c.kind)).toEqual(['item']);
+    expect(tickAfter([], 'Then the cost per block.').cues).toEqual([]);
+    expect(tickAfter(['Page 2 is broken.'], 'Then we fix the login.').cues).toEqual([]);
+  });
+
+  it('keeps a dictation open across a detail, and closes it once the talk moves on', () => {
+    const detail = 'We repave the high street first.';
+    const open = tickAfter(['Page one is the repairs.', detail], 'Then the cost per block.');
+    expect(open.cues.map((c) => c.kind)).toEqual(['item']);
+    expect(open.sinceCue).toBe(2);
+    const lapsed = tickAfter(
+      ['Page one is the repairs.', ...Array(DICTATION_WINDOW).fill(detail)],
+      'Then we move on to the budget.',
+    );
+    expect(lapsed.cues).toEqual([]);
+    expect(lapsed.sinceCue).toBeUndefined();
+  });
 });
 
 describe('dictationDirective', () => {
   it('stays silent in a meeting nobody dictated, even when someone says "then"', () => {
     const outline = [page('h1', 'Riverbend repairs'), entry('b1', 'crews start in June')];
-    expect(dictationDirective(outline, said('Then we move on to the budget.'))).toBeNull();
+    expect(dictationDirective(outline, tickAfter([], 'Then we move on to the budget.'))).toBeNull();
+  });
+
+  it('emits nothing on a tick with no cue, even with a page heading last in the doc', () => {
+    const outline = [page('h1', 'Page one: repairs'), item('b1', 'Cost per block', 'h1')];
+    expect(dictationDirective(outline, dictating('We repave the high street first.'))).toBeNull();
+    expect(dictationDirective(outline, tickAfter([], 'The crews start in June.'))).toBeNull();
+  });
+
+  it('opens no page for a page mentioned in ordinary talk', () => {
+    expect(dictationDirective([], tickAfter([], 'Page 2 is broken on the phone.'))).toBeNull();
   });
 
   it('names the page heading, the next number and the edit for an item', () => {
@@ -93,37 +146,41 @@ describe('dictationDirective', () => {
       page('h1', 'Page one: Riverbend street repairs'),
       item('b1', 'List of streets to repave', 'h1'),
     ];
-    const out = dictationDirective(outline, said('Then the cost per block for each street.')) ?? '';
+    const out =
+      dictationDirective(outline, dictating('Then the cost per block for each street.')) ?? '';
     expect(out).toContain(
       '{"op":"insert_under_heading","headingId":"h1","markdown":"2. <the item>"}',
     );
   });
 
   it("asks for a new page to open with the speaker's words for it", () => {
-    const out = dictationDirective([], said('Page two is the Saltmarsh flooding.')) ?? '';
+    const out =
+      dictationDirective([], dictationTickOf(said('Page two is the Saltmarsh flooding.'))) ?? '';
     expect(out).toContain('"Page 2: <what the page is>"');
   });
 
   it('asks for a bare page heading to be named rather than opened twice', () => {
-    const out = dictationDirective([page('h1', 'Page 1')], said('Page one is the repairs.')) ?? '';
+    const out =
+      dictationDirective(
+        [page('h1', 'Page 1')],
+        dictationTickOf(said('Page one is the repairs.')),
+      ) ?? '';
     expect(out).toContain('{"op":"replace_block","blockId":"h1","markdown":"## Page 1: <what');
-  });
-
-  it('asks for a detail to go under the last item, keeping its words', () => {
-    const outline = [page('h1', 'Page one: repairs'), item('b1', 'Cost per block', 'h1')];
-    const out = dictationDirective(outline, said('We repave the high street first.')) ?? '';
-    expect(out).toContain('"markdown":"1. Cost per block\\n   - <the detail>"');
   });
 
   it('sends items to the page the speaker is on when both pages were opened at once', () => {
     const early = [page('h1', 'Page one: Riverbend repairs'), page('h2', 'Page 2')];
-    expect(dictationDirective(early, said('Then the cost per block.'))).toContain(
+    expect(dictationDirective(early, dictating('Then the cost per block.'))).toContain(
       '"headingId":"h1"',
     );
     const later = [page('h1', 'Page one: Riverbend repairs'), page('h2', 'Page 2: Saltmarsh')];
-    expect(dictationDirective(later, said('Then the complaints.'))).toContain('"headingId":"h2"');
+    expect(dictationDirective(later, dictating('Then the complaints.'))).toContain(
+      '"headingId":"h2"',
+    );
     const bare = [page('h1', 'Page 1'), page('h2', 'Page 2')];
-    expect(dictationDirective(bare, said('Start with the map.'))).toContain('"headingId":"h1"');
+    expect(dictationDirective(bare, dictating('Start with the map.'))).toContain(
+      '"headingId":"h1"',
+    );
   });
 
   it('rides in the tick prompt only when the tick dictates', () => {
@@ -143,7 +200,11 @@ describe('foldDetailsIntoItem', () => {
     headingId: 'h1',
     markdown,
   });
-  const detail = said('We repave the high street before the harbour road.');
+  /** A detail spoken on the tick straight after an item was placed. */
+  const detail = tickAfter(
+    ['Page one is the repairs.', 'Start with the cost per block.'],
+    'We repave the high street before the harbour road.',
+  );
 
   it('turns a dash note after the last item into a sub-bullet of it', () => {
     const out = foldDetailsIntoItem(
@@ -169,8 +230,38 @@ describe('foldDetailsIntoItem', () => {
 
   it('leaves the batch alone when the tick names the next item', () => {
     const edits = [dash('- Crew schedule')];
-    const next = said('Then the crew schedule.');
+    const next = dictating('Then the crew schedule.');
     expect(foldDetailsIntoItem(edits, outline, next, NOTES_AUTHOR_ID).folded).toBe(0);
+  });
+
+  it('folds only on the tick straight after a cue, not every later dash note', () => {
+    const edits = [dash('- Budget review next week')];
+    const later = tickAfter(
+      ['Page one is the repairs.', 'Start with the cost per block.', 'We repave the high street.'],
+      'The budget review is next week.',
+    );
+    expect(later.sinceCue).toBe(2);
+    expect(foldDetailsIntoItem(edits, outline, later, NOTES_AUTHOR_ID).folded).toBe(0);
+    expect(foldDetailsIntoItem(edits, outline, undefined, NOTES_AUTHOR_ID).folded).toBe(0);
+  });
+
+  it("keeps the item's own marks when the doc can say what they are", () => {
+    const out = foldDetailsIntoItem(
+      [dash('- High street first')],
+      outline,
+      detail,
+      NOTES_AUTHOR_ID,
+      (id) =>
+        id === 'b1' ? 'Cost per **block**, see [the table](https://example.com/t)' : undefined,
+    );
+    expect(out.edits).toEqual([
+      {
+        op: 'replace_block',
+        blockId: 'b1',
+        markdown:
+          '1. Cost per **block**, see [the table](https://example.com/t)\n   - High street first',
+      },
+    ]);
   });
 
   it('leaves an item somebody else wrote, or one the outline cut short', () => {
@@ -217,7 +308,7 @@ describe('a dictated page through a notes doc', () => {
         if (step === 2) {
           return [
             { op: 'replace_block', blockId: head.id, markdown: '## Page one: Riverbend repairs' },
-            { op: 'insert_under_heading', headingId: head.id, markdown: '1. List of streets' },
+            { op: 'insert_under_heading', headingId: head.id, markdown: '1. List of **streets**' },
           ];
         }
         if (step === 3) {
@@ -242,7 +333,7 @@ describe('a dictated page through a notes doc', () => {
         .filter((l) => l.trim()),
     ).toEqual([
       '## Page one: Riverbend repairs',
-      '1. List of streets',
+      '1. List of **streets**',
       '   - High street first',
       '2. Crew schedule',
     ]);

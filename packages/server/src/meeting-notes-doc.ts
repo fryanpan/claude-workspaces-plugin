@@ -90,7 +90,7 @@ import { type MeetingTitleStore, createMeetingTitler } from './meeting-titler.ts
 import { meetingTimingPath } from './meetings.ts';
 import { commentedBlockIds, sectionIds } from './notes-cleanup-scope.ts';
 import { recordMeetingCost } from './notes-cost-store.ts';
-import { foldDetailsIntoItem } from './notes-dictation.ts';
+import { foldDetailsIntoItem, itemFirstLine } from './notes-dictation.ts';
 import {
   NOTES_AUTHOR_ID,
   type NotesDocStore,
@@ -721,7 +721,9 @@ export function applyNotesUpdate(
   // both judge the notes in the shape they will land in (`notes-edit-bullets.ts`).
   const bulleted = bulletNotesEdits(update.edits, { outline: full }).edits;
   // A detail about a dictated page's last item nests INTO it (`notes-dictation.ts`).
-  const shaped = foldDetailsIntoItem(bulleted, full, update.tick.turns, NOTES_AUTHOR_ID).edits;
+  const shaped = foldDetailsIntoItem(bulleted, full, update.dictation, NOTES_AUTHOR_ID, (id) =>
+    itemFirstLine(doc.ydoc, id),
+  ).edits;
   const guarded = guardNotesEdits(shaped, {
     notesHeadingId,
     outline: full,

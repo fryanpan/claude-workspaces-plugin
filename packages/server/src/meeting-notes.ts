@@ -64,6 +64,7 @@ import {
 import type { prose } from '@claude-workspaces/core';
 import type { ClaudeKeySlot } from './claude-key-slot.ts';
 import { isQuotaFailure } from './model-quota.ts';
+import { type DictationTick, createDictationMemory } from './notes-dictation.ts';
 import { notesTopicHashes } from './notes-heading-level.ts';
 import { type IdeaCoverage, createIdeaLedger } from './notes-idea-coverage.ts';
 import { type NotesLinkSources, notesLinkSources } from './notes-invented-links.ts';
@@ -325,6 +326,8 @@ export interface NotesComposeInput {
   docId: string;
   meetingId: string;
   tick: NotesTick;
+  /** What this tick dictates, judged against the ticks before it (`notes-dictation.ts`). */
+  dictation?: DictationTick;
   /**
    * The doc as it CURRENTLY READS, block by block, each with the id an edit
    * comes back with and a note of who wrote it. This replaces the old
@@ -552,6 +555,8 @@ export interface NotesUpdate {
   /** The tick as composed — includes any words carried from a failed tick. */
   tick: NotesTick;
   edits: readonly prose.BlockEdit[];
+  /** The compose input's `dictation`; the applier nests a detail only when it says so. */
+  dictation?: DictationTick;
   /**
    * Every URL this tick was GIVEN, and the text it could have read one out
    * of, so the applier can drop a citation the composer invented
@@ -1264,6 +1269,7 @@ export function beginNotesSession(
    * notes it should have produced are in the doc.
    */
   const ideas = createIdeaLedger();
+  const dictation = createDictationMemory();
 
   /**
    * Report through the caller's error sink without letting it fail whatever
@@ -1846,6 +1852,7 @@ export function beginNotesSession(
         docId: ids.docId,
         meetingId: ids.meetingId,
         tick: { ...tick, turns },
+        dictation: dictation.see(turns),
         multiSpeaker: multi,
         ...(retries.length > 0 ? { missed: retries } : {}),
         outline,
@@ -1949,6 +1956,7 @@ export function beginNotesSession(
           meetingId: ids.meetingId,
           tick: input.tick,
           edits,
+          ...(input.dictation ? { dictation: input.dictation } : {}),
           // Collected from the SAME `input` the compose was given: a link
           // is a citation only if this tick could have read the address
           // somewhere.

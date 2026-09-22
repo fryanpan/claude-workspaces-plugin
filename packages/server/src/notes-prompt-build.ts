@@ -64,7 +64,7 @@
  */
 
 import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts';
-import { dictationDirective } from './notes-dictation.ts';
+import { dictationDirective, dictationTickOf } from './notes-dictation.ts';
 import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
 import { missedBlock } from './notes-missed-words.ts';
@@ -245,7 +245,10 @@ export function buildNotesPrompt(
   });
   if (regroup) parts.push(regroup);
   // A dictated page or item, named per tick for the reason regrouping is.
-  const dictation = dictationDirective(input.outline, input.tick.turns);
+  const dictation = dictationDirective(
+    input.outline,
+    input.dictation ?? dictationTickOf(input.tick.turns),
+  );
   if (dictation) parts.push(dictation);
   const reason = reasonDirective(input.tick.turns);
   if (reason) parts.push(reason);
