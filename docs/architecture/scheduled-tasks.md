@@ -126,15 +126,38 @@ witness — it can be reopened, archived, or age off a board — and a record
 that forgot a success every time somebody touched the task would be worse
 than none.
 
-**Stale.** The last success is older than one interval plus a slack, the
-slack being the smaller of one interval and one hour: a daily rule is stale
-twenty-five hours after its last success, an hourly one after two hours. A
-rule that has never succeeded counts from its arming. A one-off has no
-interval and is never stale; a rule past its end limit is finished, not
-stale; an after-completion rule's interval is its delay, so an instance
-nobody closes goes stale like any other — the failure the peers described.
-On the task the word `stale` takes the state slot (blocked and triage outrank
-it) and the record turns red.
+**Stale.** An occurrence has come due since the rule's last success, and the
+wait after it has passed with no success. The due occurrence is the next one
+the rule is owed measured FROM that success, floored at the arming so that
+re-arming a rule cannot leave it owed an instant it never fires. A rule that
+has never succeeded counts from its arming.
+
+The wait depends on whether anything is RUNNING for that occurrence. With
+nothing filed for it, or with what was filed no longer open, the rule gets the
+smaller of one hour and the gap that contains the wait — from the due
+occurrence to the one after it. So a daily rule that succeeded at nine is owed
+again at nine tomorrow and reads stale at ten, twenty-five hours on; a
+ten-minute rule is stale twenty minutes after its last success. **With a run
+filed for that occurrence and still open, the rule gets the whole gap
+instead**, so a job in flight has until the next occurrence is owed: capping
+it at an hour would make a daily nine o'clock job that takes three hours read
+stale from 10:01 to noon every day, filing and withdrawing a Home item each
+time. The after-completion instance nobody closes is still caught — one delay
+later rather than one slack later, which is the failure the peers described.
+
+A one-off and an on-change rule are owed nothing on a cadence and are never
+stale; a rule past its end limit is finished, not stale, and so is one on the
+last run that limit admits. On the task the word `stale` takes the state slot
+(blocked and triage outrank it) and the record turns red.
+
+The measurement used to start from an INTERVAL — the gap between the next two
+occurrences from now — which is not a property an uneven rule has. On 22
+September 2026 a rule firing at 00, 06, 09, 12, 15, 18 and 21 Pacific was
+handed the 06-to-09 gap, and three hours plus an hour of slack filed a stale
+item against a 00:05 success before 06:00 was due. The item's own words
+carried the same mistake, so a calendar rule now names the run it was owed and
+the zone it is read in (`its 06:00 America/Los_Angeles run was due 2h ago`)
+rather than claiming a cadence it does not run on.
 
 **Stale files ONE review item, never one per tick.** The server files it on
 the rule task as the scheduler's own actor, through the same door the stall

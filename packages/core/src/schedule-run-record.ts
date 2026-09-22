@@ -19,22 +19,46 @@
  *
  * ── When is a rule stale? ────────────────────────────────────────────────
  *
- * When its last SUCCESS — the last instance that closed `done`, or the
- * arming if none ever has — is older than one interval plus a slack. The
- * slack is the smaller of one interval and one hour: a daily rule is stale
- * twenty-five hours after its last success (the next run had an hour to
- * finish), an hourly rule after two hours, a weekly rule a week and an hour
- * on. Without the slack a daily job that takes ten minutes would read stale
- * for ten minutes every morning, which trains the reader to ignore the word.
+ * When an OCCURRENCE has come due since the rule's last success — the last
+ * instance that closed `done`, or the arming if none ever has — and a slack
+ * has passed with no success. The due occurrence is `staleDueAt`: the next
+ * one the rule is owed, measured from that success.
  *
- * A one-off has no interval and is never stale; a rule past its end limit is
- * finished, not stale. An after-completion rule's interval is its delay, so
- * one whose instance nobody closes goes stale like any other — that is the
- * failure the peers described, a run that started and never finished.
+ * The wait a rule gets depends on whether anything is RUNNING for the due
+ * occurrence.
+ *
+ *  - **Nothing was filed for it, or what was filed is not open** — the rule
+ *    gets the capped slack: the smaller of one hour and the gap that contains
+ *    the wait, from the due occurrence to the one after it. A daily rule that
+ *    succeeded at nine is owed again at nine tomorrow and reads stale at ten,
+ *    twenty-five hours on; a ten-minute rule is stale twenty minutes after
+ *    its last success. Without a slack a job that takes a few minutes would
+ *    read stale every morning, which trains the reader to ignore the word.
+ *  - **A run was filed for it and is still OPEN** — the rule gets the whole
+ *    gap instead, so a run in flight has until the next occurrence is owed.
+ *    Capping that at an hour would make any run longer than an hour read
+ *    stale on every cycle: a daily nine o'clock job that takes three hours
+ *    would have been stale from 10:01 to 12:00 every day, and because the
+ *    server's dedupe keys on the last success it would file and withdraw a
+ *    fresh Home item daily. The after-completion instance nobody closes is
+ *    still caught — one delay later rather than one slack later.
+ *
+ * Measuring from the due occurrence rather than from the interval is what
+ * makes an UNEVEN rule readable. The interval used to be the gap between the
+ * next two occurrences from now, so a rule firing at 00, 06, 09, 12, 15, 18
+ * and 21 Pacific was handed the 06-to-09 gap: three hours plus an hour made
+ * its 00:05 success read stale before 06:00 was due. That filed a stale
+ * review item against a healthy rule on 22 September 2026.
+ *
+ * A one-off and an on-change rule are owed nothing on a cadence and are never
+ * stale; a rule past its end limit is finished, not stale. An after-completion
+ * rule is owed its delay after the last success, so one whose instance nobody
+ * closes goes stale like any other — that is the failure the peers described,
+ * a run that started and never finished.
  */
 
 import { type WakeStatus, wakeStatus } from './schedule-wake.ts';
-import { type ScheduleCursor, type TaskSchedule, nextOccurrence } from './task-schedule.ts';
+import { type TaskSchedule, nextOccurrence } from './task-schedule.ts';
 
 /** How the last run ended, as the row reads it. */
 export type RunStatus =
@@ -69,9 +93,14 @@ export interface RunRecord {
   ageMs: number;
   /** The newest success the rule has had, if any. */
   lastSuccessAt?: number;
-  /** The gap between two occurrences; absent for a one-off. */
+  /** The gap between the next two occurrences; absent for a one-off. */
   intervalMs?: number;
-  /** The last success is older than the interval plus its slack. */
+  /** The occurrence the next success is owed at, measured from the last
+   *  success (or from the arming). Absent when the rule is owed nothing
+   *  more — a spent one-off, an on-change rule, a rule past its end. */
+  dueAt?: number;
+  /** An occurrence came due since the last success and its slack has passed
+   *  with no success. */
   stale: boolean;
   /** Whether the last instance's wake was answered (`schedule-wake.ts`).
    *  Absent when no wake was ever attempted for it. */
@@ -80,33 +109,68 @@ export interface RunRecord {
 
 export const STALE_SLACK_MAX_MS = 60 * 60_000;
 
-/** How long a rule may go without a success before it reads stale. */
-export function staleAfterMs(intervalMs: number): number {
-  return intervalMs + Math.min(intervalMs, STALE_SLACK_MAX_MS);
+/** How long a run that has come due has to succeed before its rule reads
+ *  stale: its own gap, capped at an hour. */
+export function staleSlackMs(gapMs: number): number {
+  return Math.min(gapMs, STALE_SLACK_MAX_MS);
 }
 
 /**
- * The gap between one occurrence and the next. Closed form for the two kinds
- * that carry it; a calendar rule is asked for its next two occurrences and
- * the gap between them — a weekday rule read on a Friday says three days,
- * which is the honest answer for the weekend it is about to sit through.
+ * The occurrence the rule's next success is owed at, measured from its last
+ * success — or from the arming when it has never had one.
+ *
+ * `nextOccurrence` answers it for every kind but one. An after-completion
+ * rule asked through it needs a completion cursor, and answers "owed
+ * nothing" for exactly the instance nobody closed, which is the failure this
+ * record exists to catch; its delay from the last success says it instead.
  */
-export function scheduleIntervalMs(
+export function staleDueAt(
   schedule: TaskSchedule,
-  cursor: ScheduleCursor = {},
+  lastSuccessAt: number | undefined,
 ): number | undefined {
+  const rule = schedule.rule;
+  // A one-off is spent; an on-change rule has no cadence to be late against.
+  if (rule.kind === 'once' || rule.kind === 'on-change') return undefined;
+  // Floored at the arming, because a success can predate it: re-arming a rule
+  // stamps a new `armedAt` and KEEPS the state when the rule itself has not
+  // changed, so an envelope edit would otherwise leave the rule owed an
+  // occurrence it will never fire — an `every 6h` rule read as stale an hour
+  // after an edit rather than seven.
+  const since = Math.max(lastSuccessAt ?? schedule.armedAt, schedule.armedAt);
+  if (rule.kind === 'after-completion') {
+    if (!(rule.delayMs > 0)) return undefined;
+    const at = since + rule.delayMs;
+    return schedule.until !== undefined && at >= schedule.until ? undefined : at;
+  }
+  return nextOccurrence({ ...schedule, state: { ...schedule.state, lastOccurrenceAt: since } });
+}
+
+/** The gap that CONTAINS the wait being judged — from the due occurrence to
+ *  the one after it. Absent when nothing comes after it, which is a rule on
+ *  the last run its `until` admits: winding down, so not stale. */
+function gapAfter(schedule: TaskSchedule, dueAt: number): number | undefined {
   const rule = schedule.rule;
   if (rule.kind === 'every') return rule.everyMs;
   if (rule.kind === 'after-completion') return rule.delayMs;
-  // A one-off has no next; an on-change rule has no cadence to be late against.
-  if (rule.kind === 'once' || rule.kind === 'on-change') return undefined;
-  const first = nextOccurrence({ ...schedule, until: undefined }, cursor);
-  if (first === undefined) return undefined;
-  const second = nextOccurrence(
-    { ...schedule, until: undefined, state: { ...schedule.state, lastOccurrenceAt: first } },
-    cursor,
-  );
-  return second === undefined ? undefined : second - first;
+  const then = nextOccurrence({
+    ...schedule,
+    state: { ...schedule.state, lastOccurrenceAt: dueAt },
+  });
+  return then === undefined ? undefined : then - dueAt;
+}
+
+/**
+ * The ONE gap a rule runs on, for the two kinds that have one. A calendar
+ * rule has no such number — "every 3h" was true of no pair of runs on a rule
+ * firing at 00, 06, 09, 12, 15, 18 and 21 — so it is answered with nothing
+ * rather than with the gap between whichever two occurrences come next, and
+ * the reader is told `dueAt` instead.
+ */
+export function scheduleIntervalMs(schedule: TaskSchedule): number | undefined {
+  const rule = schedule.rule;
+  if (rule.kind === 'every') return rule.everyMs;
+  if (rule.kind === 'after-completion') return rule.delayMs;
+  return undefined;
 }
 
 /** The record, from the rule, its last instance and the clock. */
@@ -135,10 +199,20 @@ export function runRecord(
       ? wakeStatus(state.wake)
       : undefined;
   const ended = schedule.until !== undefined && schedule.until <= now;
+  const dueAt = staleDueAt(schedule, lastSuccessAt);
+  const gapMs = dueAt === undefined ? undefined : gapAfter(schedule, dueAt);
+  // A run FILED for the due occurrence and still open is in flight, and gets
+  // the whole gap rather than the capped slack.
+  const inFlight =
+    dueAt !== undefined &&
+    last?.status === 'open' &&
+    state.lastOccurrenceAt !== undefined &&
+    state.lastOccurrenceAt >= dueAt;
   const stale =
-    intervalMs !== undefined &&
+    dueAt !== undefined &&
+    gapMs !== undefined &&
     !ended &&
-    now - (lastSuccessAt ?? schedule.armedAt) > staleAfterMs(intervalMs);
+    now > dueAt + (inFlight ? gapMs : staleSlackMs(gapMs));
   return {
     status,
     ...(last?.id !== undefined && status !== 'never' ? { instanceId: last.id } : {}),
@@ -147,6 +221,7 @@ export function runRecord(
     ageMs: Math.max(0, now - stateAt),
     ...(lastSuccessAt !== undefined ? { lastSuccessAt } : {}),
     ...(intervalMs !== undefined ? { intervalMs } : {}),
+    ...(dueAt !== undefined ? { dueAt } : {}),
     stale,
     ...(wake !== undefined ? { wake } : {}),
   };

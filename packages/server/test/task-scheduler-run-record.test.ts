@@ -17,7 +17,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
-import { staleAfterMs } from '@claude-workspaces/core/schedule-run-record';
 import { createTaskScheduler } from '../src/task-scheduler.ts';
 import { TaskStore } from '../src/tasks.ts';
 import { DAY, HOUR, OWNER, instancesOf, seed } from './task-scheduler-seed.ts';
@@ -78,14 +77,19 @@ describe('the run record on a scheduled row', () => {
     scheduler.tick();
     const [first] = instancesOf(store, workspaceId, ruleId);
     if (!first) throw new Error('no instance');
-    // Nobody closes it. A day and change later the rule is owed a success it
-    // never got.
-    now = T0 + staleAfterMs(DAY) + 60_000;
+    // Nobody closes it. A run in flight has until the NEXT occurrence is
+    // owed, so the rule reads stale a day after the one it was filed for —
+    // not an hour after, which would fire on every long-running job.
+    now = FIRST + DAY + 60_000;
     scheduler.tick();
     expect(openItems(ruleId)).toHaveLength(1);
     const item = openItems(ruleId)[0];
     expect(item?.review.headline).toContain('has not succeeded');
-    expect(item?.review.detail).toContain(`?task=${first.id}`);
+    // The item names the run the reader can open — the latest one filed, not
+    // the first, because a second occurrence came due while nobody closed it.
+    const inFlight = instancesOf(store, workspaceId, ruleId).at(-1);
+    expect(inFlight?.id).not.toBe(first.id);
+    expect(item?.review.detail).toContain(`?task=${inFlight?.id}`);
     // Ten more ticks, a day apart: still the one item.
     for (let i = 0; i < 10; i++) {
       now += DAY;
@@ -108,7 +112,7 @@ describe('the run record on a scheduled row', () => {
 
   it('does not refile an item the reader answered until the rule has succeeded and gone stale again', () => {
     const { workspaceId, ruleId } = seed(store, DAILY);
-    let now = T0 + staleAfterMs(DAY) + 60_000;
+    let now = FIRST + DAY + 60_000;
     const scheduler = createTaskScheduler(store, { now: () => now, report: () => {} });
     scheduler.tick();
     const [item] = openItems(ruleId);
@@ -130,8 +134,9 @@ describe('the run record on a scheduled row', () => {
     now = Date.now() + 60_000;
     scheduler.tick();
     // The close was stamped by the wall clock, so the next stretch of silence
-    // is measured from there.
-    now = Date.now() + staleAfterMs(DAY) + 60_000;
+    // is measured from there: the next occurrence a day on, and a day again
+    // for the instance that fires for it and nobody closes.
+    now = Date.now() + 2 * DAY + 60_000;
     scheduler.tick();
     expect(openItems(ruleId)).toHaveLength(1);
     expect(store.listReviewItems(ruleId)).toHaveLength(2);
