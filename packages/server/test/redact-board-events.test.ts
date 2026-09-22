@@ -148,32 +148,6 @@ describe('redactBoardEventForVisitor', () => {
     }
   });
 
-  it('drops the filer id from a review_item event, which names an agent', () => {
-    // `filedById` exists so the MCP child can address a withdrawal and an
-    // answer at the agent that raised the ask rather than waking the board.
-    // It is an id of the same kind as `actor.id` — these derive from an email
-    // address — and it rides one measurement row and one that is not, so it
-    // needs a drop of its own.
-    for (const event of ['review_item.withdrawn', 'review_item.answered']) {
-      const out = redactBoardEventForVisitor({
-        event,
-        workspaceId: 'w-1',
-        taskId: 't-1',
-        reviewItemId: 'r-1',
-        filedById: 'agent-riverbend',
-        isOwner: true,
-        ts: 12,
-      });
-      // Positive control: the row still crosses, and the ids a member may
-      // already see stay on it.
-      expect(out.event, event).toBe(event);
-      const row = out as unknown as Record<string, unknown>;
-      expect(row.reviewItemId, event).toBe('r-1');
-      expect(row.taskId, event).toBe('t-1');
-      expect(row.filedById, event).toBeUndefined();
-    }
-  });
-
   it('drops location from every row, board-shaped or not, and keeps the device', () => {
     // A row a person's browser caused carries where it was (event-origin.ts).
     // `server.started` is outside the board prefixes on purpose: the strip

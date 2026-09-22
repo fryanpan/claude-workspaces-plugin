@@ -224,16 +224,13 @@ describe('nothing else stopped waking', () => {
   it('still delivers an answer on a review item', async () => {
     // Kept deliberately: an answer is the outcome the filer is blocked on.
     // It is ids-only, like the analytics rows the server drops, which is
-    // exactly why it is named here rather than left to a family prefix. It is
-    // now addressed to that filer rather than broadcast, so the frame names
-    // this session as the one that raised the ask — see `review-item-line.ts`.
+    // exactly why it is named here rather than left to a family prefix.
     const { frames, messages } = harness();
     await messages.emitChannelMessage('review_item.answered', {
       workspaceId: 'w1',
       reviewItemId: 'ri-1',
       taskId: 't1',
       actorId: PERSON,
-      filedById: SELF,
       isOwner: true,
       ts: Date.UTC(2026, 8, 17, 11, 0, 0),
     });

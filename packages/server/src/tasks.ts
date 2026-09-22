@@ -1512,17 +1512,6 @@ export interface ReviewItemWithdrawnEvent {
   reinstated?: boolean;
   /** The asker's one line on why, when they wrote one. */
   reason?: string;
-  /**
-   * The agent that FILED the item, which is not `actor` — any agent on the
-   * board may retire somebody else's stale ask, and the server retires its
-   * own filings on a schedule. It is the one reader who can act on this
-   * frame: their ask went away and nothing else will tell them.
-   * `channel-messages.ts` delivers the wake to that agent and to nobody else.
-   * Absent on an item filed before the store began stamping `filedBy`, and
-   * stripped from a visitor's copy with every other id
-   * (`redactBoardEventForVisitor`).
-   */
-  filedById?: string;
   actor: TaskActor;
   links: Ref[];
   ts: number;
@@ -1589,15 +1578,6 @@ export interface ReviewItemAnsweredEvent {
   taskId?: string;
   /** Who answered. */
   actorId: string;
-  /**
-   * The agent that FILED the item, for the same reason the withdrawal row
-   * carries it: the answer is what that agent stopped for, and it is the one
-   * reader the frame is addressed to. Still ids only, so the measurement
-   * contract above is unchanged — a name would be the widening that comment
-   * forbids. Set on a TICKET item whose filer the store recorded; absent on a
-   * doc-thread answer, which names no task and keeps the doc rendering.
-   */
-  filedById?: string;
   isOwner: boolean;
   ts: number;
 }

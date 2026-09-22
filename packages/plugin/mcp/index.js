@@ -14109,6 +14109,11 @@ function isBookkeepingEvent(event, payload) {
       return false;
     return mayCarryAnOpenAsk(payload.thread) === false;
   }
+  if (event === "review_item.withdrawn") {
+    if (!payload || typeof payload !== "object")
+      return false;
+    return payload.reinstated !== true;
+  }
   return false;
 }
 
@@ -14547,10 +14552,8 @@ function reviewItemHeldLine(p) {
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
   "review_item.revised",
-  "review_item.withdrawn",
-  "review_item.answered"
+  "review_item.withdrawn"
 ]);
-var FILER_ADDRESSED_EVENTS = new Set(["review_item.withdrawn", "review_item.answered"]);
 function isTaskReviewItemEvent(event, payload) {
   if (!TASK_REVIEW_ITEM_EVENTS.has(event))
     return false;
@@ -14560,14 +14563,6 @@ function isTaskReviewItemEvent(event, payload) {
   if (typeof p.docId === "string" && p.docId.trim() !== "")
     return false;
   return typeof p.taskId === "string" && p.taskId.trim() !== "";
-}
-function readsThisReviewItemEvent(event, p, selfId) {
-  if (!FILER_ADDRESSED_EVENTS.has(event))
-    return true;
-  const filer = p.filedById?.trim();
-  if (filer === undefined || filer === "")
-    return false;
-  return filer.toLowerCase() === selfId.trim().toLowerCase();
 }
 var HEADLINE_MAX = 100;
 function truncate5(s, n) {
@@ -14582,11 +14577,7 @@ function reviewItemTaskLine(event, p) {
     return `[review item filed] ${ask}${where}${by}`;
   }
   if (event === "review_item.revised") {
-    const after = p.threadId ? ` — after a question on thread ${p.threadId}` : "";
-    return `[review item revised] ${where}${by}${after}`;
-  }
-  if (event === "review_item.answered") {
-    return `[review item answered] ${where} — the ask you filed has an answer`;
+    return `[review item revised] ${where}${by}`;
   }
   if (p.reinstated === true) {
     return `[review item reinstated] ${where}${by} — the ask is back on the ticket`;
@@ -14819,8 +14810,6 @@ async function emitChannelMessage(deps, event, rawPayload) {
     return;
   if (isTaskReviewItemEvent(event, rawPayload)) {
     const r = rawPayload;
-    if (!readsThisReviewItemEvent(event, r, deps.authorId))
-      return;
     await deps.notify({
       method: "notifications/claude/channel",
       params: {
@@ -14831,6 +14820,7 @@ async function emitChannelMessage(deps, event, rawPayload) {
           workspace_id: r.workspaceId ?? "unknown",
           ...r.taskId ? { task_id: r.taskId } : {},
           ...r.reviewItemId ? { review_item_id: r.reviewItemId } : {},
+          ...r.threadId ? { thread_id: r.threadId } : {},
           ...r.shape ? { shape: r.shape } : {},
           event,
           ...r.actor?.name ? { author: r.actor.name } : {}
@@ -20602,7 +20592,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.258";
+var PLUGIN_VERSION = "0.1.259";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

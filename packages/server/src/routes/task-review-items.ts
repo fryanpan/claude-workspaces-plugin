@@ -15,7 +15,7 @@ import { ticketOpenParts } from '../answer-coverage.ts';
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
-import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
+import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
 import {
   SECRET_ANSWER_DENIAL,
   SECRET_FILING_DENIAL,
@@ -231,11 +231,6 @@ export async function handleTaskReviewItems(
         taskId,
         actorId: author.id,
         isOwner: roleFor(workspaceId) === 'owner',
-        // Who the wake is addressed to: the agent that filed the ask is the
-        // one that stopped for the answer. See `ReviewItemAnsweredEvent`.
-        ...(reviewItemFilerId(res.task, reviewItemId) !== undefined
-          ? { filedById: reviewItemFilerId(res.task, reviewItemId) }
-          : {}),
         ts: Date.now(),
       }),
     );
