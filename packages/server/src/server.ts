@@ -2461,6 +2461,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   async function handleRequest(req: Request): Promise<Response | undefined> {
     const startedAt = performance.now();
     const pathname = new URL(req.url).pathname;
+    // Counted before any gate, so the memory line names refused traffic too.
+    docStore.noteRequest(req.method, pathname);
     // A stray `%` anywhere in the path is a caller's typo, and it has to
     // be answered before anything decodes it: `decodeURIComponent` throws a
     // `URIError` inside whichever matcher pulls the id out of the path, and

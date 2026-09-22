@@ -115,6 +115,7 @@ import {
   LiveDocFanout,
   type LiveDocFanoutHost,
 } from './live-doc-fanout.ts';
+import { MemoryLog } from './memory-log.ts';
 import { captureMockup, deleteMockupCapture } from './mockup-capture.ts';
 import { deleteMockupVersions, recordMockupVersion } from './mockup-versions.ts';
 import { preCompactPath, writePreCompactBackup } from './pre-compact-backup.ts';
@@ -425,9 +426,6 @@ const EVICT_SWEEP_MS = 10 * 60_000;
 /** Doc → `.ydoc`: how long a change waits before the CRDT snapshot is persisted. */
 const PERSIST_MS = DOC_STORE_TIMINGS.persistMs;
 
-/** How often the always-on memory line is written. */
-const MEMORY_LOG_MS = 5 * 60_000;
-
 export class DocStore {
   private docs = new Map<string, LiveDoc>();
 
@@ -561,7 +559,8 @@ export class DocStore {
    * already removed, and can re-attach a file the next instance now owns.
    */
   private stopped = false;
-  private memoryTicker: ReturnType<typeof setInterval> | null = null;
+  /** The `[doc-store] mem` sampler; see memory-log.ts. */
+  private readonly memoryLog = new MemoryLog({ stats: () => this.stats() });
   private evictTicker: ReturnType<typeof setInterval> | null = null;
   /**
    * When each resident doc entered memory. The eviction clock reads
@@ -843,8 +842,7 @@ export class DocStore {
     // instead (`bindAfterRead`). Clearing the set lets a later instance over
     // the same data dir start its own read for the same doc.
     this.deferredBinds.clear();
-    if (this.memoryTicker) clearInterval(this.memoryTicker);
-    this.memoryTicker = null;
+    this.memoryLog.stop();
     if (this.evictTicker) clearInterval(this.evictTicker);
     this.evictTicker = null;
     this.disarmParkRetry();
@@ -1046,28 +1044,17 @@ export class DocStore {
   }
 
   /**
-   * One line every few minutes: resident memory, how many docs are in it,
-   * and how many timers this process is actually holding.
-   *
-   * It exists because the 2026-08-29 jetsam kill left nothing to read — the
-   * server was at 2.6 GB and the only evidence of how it got there was the
-   * absence of the process. Cheap enough to leave on forever: `memoryUsage()`
-   * once per five minutes plus a few map sizes.
+   * The always-on memory line — footprint, doc counts, and what the window's
+   * requests and activators were. It exists because the 2026-08-29 jetsam
+   * kill left nothing to read; the sampler and its cadence are memory-log.ts.
    */
   private startMemoryLog(): void {
-    if (this.memoryTicker) return;
-    const timer = setInterval(() => {
-      const s = this.stats();
-      console.error(
-        `[doc-store] mem rss=${s.rssMb}MB residentDocs=${s.residentDocs} bindings=${s.bindings} ` +
-          `activeBindings=${s.activeBindings} awareness=${s.awareness} timers=${s.timers} ` +
-          // The busiest activator, so a log-only reading of an incident still
-          // names a caller instead of only a count.
-          `top=${s.activations[0]?.tag ?? 'none'}x${s.activations[0]?.count ?? 0}`,
-      );
-    }, MEMORY_LOG_MS);
-    timer.unref?.();
-    this.memoryTicker = timer;
+    this.memoryLog.start();
+  }
+
+  /** Count one request toward the memory line's route families. */
+  noteRequest(method: string, pathname: string): void {
+    this.memoryLog.requests.note(method, pathname);
   }
 
   /**
@@ -1111,7 +1098,7 @@ export class DocStore {
         files.timers +
         presence.timers +
         files.tickers +
-        (this.memoryTicker ? 1 : 0) +
+        (this.memoryLog.running ? 1 : 0) +
         (this.evictTicker ? 1 : 0),
       activations: files.activations,
       activationsTotal: files.activationsTotal,
