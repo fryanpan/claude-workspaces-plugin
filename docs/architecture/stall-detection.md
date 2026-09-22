@@ -143,7 +143,9 @@ Home queue's own predicate (`isReviewItemOnQueue` for ticket items,
 `pendingDeclaration` minus a gated payload for comment-borne ones), so an
 answered, withdrawn, held or reader-asked-back item excuses nothing. A task
 whose status says the owner is waiting with nothing filed is
-`blocked-on-owner-unfiled`. Between 2026-09-04 and 2026-09-08 a prose reader (`note-ask.ts`, a
+`blocked-on-owner-unfiled` — a RECORD on the verdict's `awaitingPerson` line
+since 2026-09-22 and a finding for nobody, because neither an agent nor the
+person who already holds the row has an act to perform on it. Between 2026-09-04 and 2026-09-08 a prose reader (`note-ask.ts`, a
 prefilter plus a Haiku confirmation) tried to recover the unfiled ask from
 the note itself; it was removed because a wait that has to be guessed from
 prose is a wait nobody filed, and the fix for that is to file it.

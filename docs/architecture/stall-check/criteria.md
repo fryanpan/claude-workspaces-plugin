@@ -38,6 +38,14 @@ today's code fails is flagged.
 - **Must:** produce `stalled`, `unfiled` and `undetermined` from the
   classifier, gated on the same quiet window, and name a watched builder's
   silence as `builder-silent`.
+- **Must:** keep a task the BOARD says a person owns, with nothing on that
+  person's queue, OFF every finding list — it goes on `awaitingPerson`, a
+  record that counts toward no FAIL, reaches no frame and reaches no review
+  item. Nobody has an act to perform on such a row: an agent cannot hand it
+  back, and the person already holds it. It was on `unfiled` until
+  2026-09-22, and one row reached the owner on three review items in five
+  days that way (Bryan, 2026-09-21: *“The first one is assigned to me
+  already. Work with workspaces to stop alerting me.”*).
 - **Must never:** report as STALLED a task the parallelism cap keeps out of
   flight, report at all a task under a triage band, or report a schedule rule
   task AS WORK. The three are not one shape. A triage-band row is dropped in
@@ -52,7 +60,9 @@ today's code fails is flagged.
   (`owner-ask.ts`, above).
 - **Measured by:** unit tests per exclusion, including a `waiting-unfiled` row
   ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the verdict's
-  `considered` denominator.
+  `considered` denominator; `person-owned-quiet.test.ts` for the record,
+  which drives all four surfaces with the agent-declared bucket as its
+  control on each.
 
 ## `stall-nudge.ts` — the lead wake
 
@@ -379,12 +389,20 @@ would be mistaken for the lift's own write.
 
 ## `waiting-unfiled-escalation.ts` — the aging half — *rebuild step 6*
 
-- **Must:** age EVERY task on the gate's `unfiled` list — both ways onto it,
-  `waiting-unfiled` and `blocked-on-owner-unfiled` — and past a second window
-  address Team Lead first as ONE fleet-wide frame, the owner only when Team
-  Lead is unreachable or the row has spent its wakes, and then as ONE review
-  item however many tasks and boards it spans. Each named task says which of
-  the two it is, in the frame's bucket and in the item's own words.
+- **Must:** age EVERY task on the gate's `unfiled` list — one bucket,
+  `waiting-unfiled`, since 2026-09-22 — and past a second window address
+  Team Lead first as ONE fleet-wide frame, the owner only when Team Lead is
+  unreachable or the row has spent its wakes, and then as ONE review item PER
+  BOARD, filed on that board and naming only that board's tasks.
+- **Must never:** name a `blocked-on-owner-unfiled` row anywhere. It is not a
+  finding (`stall-gate.ts`, above), and this module is the last gate before a
+  person's queue, so it refuses the bucket itself rather than trusting the
+  list it is handed.
+- **Must never:** put a row from one board on another board's item. One item
+  naming rows across boards gives its reader lines they cannot act on (Bryan,
+  2026-09-21: *“The second isn't even in your project”*). The WAKE is still
+  one frame for the whole fleet, because a wake is a turn and the fact is the
+  same fact; an item is a record on a queue, and a queue belongs to a board.
 - **Must:** carry any one task in at most `FLEET_TELL_CAP` fleet frames, and
   count a frame against a task only when the send actually DELIVERED. A task
   past the cap moves to the owner's standing item — a record, not a wake —
@@ -396,9 +414,11 @@ would be mistaken for the lift's own write.
   reached AND every due task still has wakes left, or spend a task's wake on a
   frame that reached nobody. A task that stops being a finding is forgotten
   and its item withdrawn on that tick.
-- **Measured by:** `waiting-unfiled-escalation.test.ts` and
-  `owner-unfiled-escalation.test.ts`, each with the one-window control beside
-  the two-window case; `waiting-unfiled-fleet-quiet.test.ts` for the cap, its
+- **Measured by:** `waiting-unfiled-escalation.test.ts`, with the one-window
+  control beside the two-window case, the two-board case asserting each
+  board's item names only its own rows, and the case where one board's item
+  is withdrawn while the other's stands; `person-owned-quiet.test.ts` for the
+  refused bucket, with its filing control; `waiting-unfiled-fleet-quiet.test.ts` for the cap, its
   `fleetTellCap: 99` control, the move to the owner's item and the
   undelivered-send case; `waiting-unfiled-sidecar.test.ts` for what a restart
   and a pre-cap file remember. The verdict's `escalated` line cannot measure

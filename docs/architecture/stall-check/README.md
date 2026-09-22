@@ -29,9 +29,9 @@ check that serves none of them is weight.
 | Finding | Who hears it | How |
 | --- | --- | --- |
 | A task is quiet with nobody on it, or its builder stopped reporting | The lead | One frame per board on the stall tick, on growth only |
-| A task waits on a person and nothing is filed on that person's queue — the BOARD says so, by who owns the row | Nobody live; the owner, a window later | NOT on the lead's frame since 2026-09-17: no agent can end this wait, so a wake spends a turn that ends where it started. It ages one window like the row below and lands on the owner's standing item as a record, skipping Team Lead — an agent that cannot act on it is not a rung |
+| A task waits on a person and nothing is filed on that person's queue — the BOARD says so, by who owns the row | **Nobody** | Not a finding since 2026-09-22. It is recorded on the verdict's `awaitingPerson` line and goes no further: no FAIL, no frame, no item. Nobody has an act to perform — an agent cannot hand the row back, and the person already holds it |
 | An agent's own closing note says it is waiting on a person, with nothing filed on that person's queue | The lead | Same frame, `unfiled`, bucket `waiting-unfiled` — the note also loses its movement credit, so the task's clock never stopped |
-| An agent-declared wait still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item naming every such task across every board — each line saying which of the two buckets it is, because the evidence differs and the reader would correct a line that claimed the wrong one. The frame carries any one row at most `FLEET_TELL_CAP` times, counting only frames that were delivered; past that the row moves onto the owner's item — a record, not a wake — and stays on the lead's line above it. A board-declared one ages on the same clock and goes straight to that item (`waiting-unfiled-routing.ts`) |
+| An agent-declared wait still unfiled a window later | Team Lead, then the owner | ONE fleet-wide frame, then ONE review item PER BOARD, filed on that board and naming only that board's tasks. The frame carries any one row at most `FLEET_TELL_CAP` times, counting only frames that were delivered; past that the row moves onto the owner's item — a record, not a wake — and stays on the lead's line above it |
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
 | A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
@@ -40,10 +40,12 @@ check that serves none of them is weight.
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 
 The owner is the addressee of exactly two lines of that table, and each only
-when Team Lead cannot be reached either. Both of those lines file ONE item,
-not one per task: a fleet-wide problem that arrives as eleven separate cards
-is a fleet-wide problem nobody reads. A task waiting on the owner with a filed
-item is already on their queue and is never re-announced.
+when Team Lead cannot be reached either. Both of those lines file ONE item per
+BOARD, not one per task: a problem that arrives as eleven separate cards is a
+problem nobody reads, and an item naming rows on boards its reader is not
+working is a card they can act on half of. A task waiting on the owner with a
+filed item is already on their queue and is never re-announced, and a task
+waiting on the owner with NOTHING filed reaches them not at all.
 
 Every line of that table is said again while it stands — but only when the
 SET it names has changed (2026-09-17). A frame naming nothing the reader was
@@ -169,28 +171,30 @@ Approved 2026-09-08, each step one PR, no stopgaps.
    `detectAsk`, the filing nudge's own reader, re-measured over three days of
    real closing notes when this shipped (`unfiled-ask.md`).
 
-   **That ladder is the `unfiled` list's, not this bucket's** (corrected
-   2026-09-17). It was built reading `waiting-unfiled` alone, which left the
-   older way onto the same list — `blocked-on-owner-unfiled`, where the BOARD
-   says a person owns the task and nothing is on that person's queue — with
-   no aging path at all: the only other filer is step 3's, and that fires only
-   when no session on the board is alive, so a board-declared unfiled ask on a
-   LIVE board was told to its lead every repeat window and went past nobody.
-   One remedy, one list, one ladder. The item names each task for the evidence
-   it has, because a line telling the reader an agent wrote closing words it
-   never wrote is a line they would correct.
+   **The ladder carries one bucket** (settled 2026-09-22, after two
+   corrections). It was built reading `waiting-unfiled` alone; on 2026-09-17
+   the older way onto the same list — `blocked-on-owner-unfiled`, where the
+   BOARD says a person owns the task and nothing is on that person's queue —
+   was added to it and routed past Team Lead straight to the owner's item, on
+   the reasoning that no agent can hand such a row back. That was half right.
+   The person could not act on it either: the item asked them to file a
+   question to themselves about work already on their own queue. One row
+   reached the owner on three items in five days (Bryan, 2026-09-21: *“The
+   first one is assigned to me already. Work with workspaces to stop alerting
+   me.”*). So the finding is retired rather than re-addressed. A person-owned
+   row with nothing filed is a RECORD on the verdict's `awaitingPerson` line
+   and nothing else — the ready gate already holds it as `awaiting-person`,
+   and the board still shows the row. `stall-gate.ts` is where that is
+   decided; the escalation refuses the bucket a second time, because it is the
+   last gate before a person's queue.
 
-   **One ladder, two addressees** (2026-09-17). Both buckets still age a full
-   window before anything is filed, and there the paths part.
-   `waiting-unfiled` is an agent saying it waits — an agent can end that, by
-   filing the ask or saying there was none, so it climbs to Team Lead.
-   `blocked-on-owner-unfiled` is the board saying a person owns the row: no
-   agent can hand it back, so it skips the rung and lands on the owner's item
-   directly, and it comes off the lead's frame as well. Stall frames naming
-   rows blocked on a person were part of the 11% of fleet model spend that
-   repeat or empty reminders were measured at. Which bucket goes where is
-   `waiting-unfiled-routing.ts`, read by the escalation and by the wake, so
-   the two halves cannot drift on the word.
+   **One item per board** (2026-09-22). The item used to be one for the whole
+   server, anchored on whichever board's task was due longest and revised
+   later to name rows from other boards. Its reader could act on the rows of
+   the board they were working and on none of the rest (Bryan, on the same
+   item: *“The second isn't even in your project”*). The WAKE is still one
+   frame for the fleet — a wake is a turn, and the fact is the same fact —
+   while an item is a record on a queue, and a queue belongs to a board.
 
 ## How to read the verdict
 
@@ -198,9 +202,9 @@ Approved 2026-09-08, each step one PR, no stopgaps.
 history. Each verdict is PASS or FAIL with the tasks behind it: `stalled`,
 `unfiled`, `unreadable`, `held` (items past the window), `escalated` (items
 the board filed to the owner in the last day) and `ungatedUi` (tasks built past
-the UI gate), plus `waiting` — the tasks a
-filed item excuses, each with the item's address — which is a record rather
-than a finding. The target is PASS on every
-run and `escalated` at zero. The log line is
+the UI gate), plus two RECORDS rather than findings — `waiting`, the tasks a
+filed item excuses, each with the item's address, and `awaitingPerson`, the
+tasks a person owns with nothing on their queue. Neither counts toward FAIL.
+The target is PASS on every run and `escalated` at zero. The log line is
 `[keep-moving] ws=<id> verdict=PASS|FAIL …` with the same counts.
 `CW_KEEP_MOVING_HOURS` sets the cadence; the default is four.
