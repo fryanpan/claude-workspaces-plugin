@@ -80,7 +80,7 @@ export function routeFamily(method: string, pathname: string): string {
   let afterCollection = false;
   for (const seg of pathname.split('/')) {
     if (seg === '') continue;
-    const isId = afterCollection || !LITERAL.test(seg);
+    const isId: boolean = afterCollection || !LITERAL.test(seg);
     out.push(isId ? ':id' : seg);
     afterCollection = !isId && COLLECTIONS.has(seg);
   }

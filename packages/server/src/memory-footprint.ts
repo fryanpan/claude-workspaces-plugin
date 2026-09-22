@@ -18,7 +18,7 @@
  * answer is `null` and stays `null`: a memory sample is not worth a crash,
  * and a load that failed once will fail every time.
  */
-import { FFIType, dlopen, ptr } from 'bun:ffi';
+import type * as BunFfi from 'bun:ffi';
 
 const RUSAGE_INFO_V4 = 4;
 /** sizeof(struct rusage_info_v4) is 296; the buffer is rounded up. */
@@ -44,6 +44,9 @@ export type RusageCall = (pid: number, flavor: number, buf: Uint8Array) => numbe
 export type RusageLoader = () => RusageCall;
 
 export function loadLibprocRusage(): RusageCall {
+  // Required here rather than imported at the top: node-run tests import the
+  // server's modules too, and `bun:ffi` does not resolve there.
+  const { dlopen, FFIType, ptr } = require('bun:ffi') as typeof BunFfi;
   const lib = dlopen('/usr/lib/libproc.dylib', {
     proc_pid_rusage: { args: [FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
   });
