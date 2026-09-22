@@ -375,6 +375,19 @@ export interface StallPayload {
    *  whole signal, and without it the reader has no way to tell why it was
    *  woken about a board it does not lead. */
   escalatedFrom?: string;
+  /** Set only by the fleet carry of unfiled waits — see `unfiledCarryLine`.
+   *  The other reason a lead is woken about a board it does not lead, and
+   *  the one that used to be indistinguishable from the line above. */
+  unfiledCarry?: UnfiledCarryPayload;
+}
+
+/** The fleet carry's marker: the window every unfiled row has already spent
+ *  past its own board's lead, and the leads that were told. Every field
+ *  optional — a server may send the marker with a board list this bundle's
+ *  own server would not. */
+export interface UnfiledCarryPayload {
+  toldAtLeastMs?: number;
+  boards?: { workspaceId?: string; leadAgentId?: string }[];
 }
 
 /** What `workspace.review_item_held` carries — the filer's own wake. */
@@ -735,6 +748,7 @@ const STALL_PAYLOAD_KEYS: Record<keyof StallPayload, true> = {
   declaredWaits: true,
   changed: true,
   escalatedFrom: true,
+  unfiledCarry: true,
   ts: true,
 };
 
@@ -817,6 +831,37 @@ function unrenderableBody(unknown: readonly string[]): string {
     'cause rather than a broken wake. The board is NOT clear: update the plugin ' +
     '(command claude plugin update claude-workspaces@claude-workspaces), restart this session, and ' +
     'read the board with next_tasks / list_tasks meanwhile.'
+  );
+}
+
+/**
+ * The first line of a fleet carry — the wake that is NOT about this board.
+ *
+ * Two sentences, and neither of them is the redirect's. The redirect says the
+ * board's lead seat is unreachable; this says the leads were reached, were
+ * told a window ago, and the asks are still unfiled. A reader handed the
+ * wrong one of those goes hunting a delivery fault, which is what six wakes
+ * between 20 and 22 September 2026 cost.
+ *
+ * The window is stated as a floor. The rows are due on their own clocks and
+ * only the common one is true of every row on the frame, so the line says
+ * "over" rather than a number it would have to pick a row to justify.
+ *
+ * A board whose seat is empty is named with "(no lead named)" rather than
+ * dropped: the reader still has to act on the row, and a silently missing
+ * board reads as a shorter list rather than as an unanswered question.
+ */
+function unfiledCarryLine(carry: UnfiledCarryPayload): string {
+  const boards = (carry.boards ?? [])
+    .filter((b): b is { workspaceId: string; leadAgentId?: string } => Boolean(b.workspaceId))
+    .map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : 'no lead named'})`);
+  const named = boards.length > 0 ? ` — ${boards.join(', ')}` : '';
+  const window =
+    carry.toldAtLeastMs === undefined ? '' : ` over ${humanDuration(carry.toldAtLeastMs)}`;
+  return (
+    `You were woken as Team Lead, not as this board's lead: every row below was named to its own ` +
+    `board's lead${window} ago and is still unfiled${named}. ` +
+    'Tell that lead to file the ask with add_review_item, or file it yourself.'
   );
 }
 
@@ -1085,6 +1130,14 @@ export function stalledLine(p: StallPayload, frameBoard?: string): string {
       'take it (attach_agent) or hand it to a session that is here. Then, on the board itself: ' +
       body
     );
+  }
+  // Then the fleet carry, which is the OTHER reason this reader holds no
+  // stream on the board it is being told about. Never both: the redirect
+  // above is the dead-board path and sets no carry, so if a server ever sends
+  // the two together the reachability claim wins — a seat nobody holds is the
+  // bigger fact, and it is the one whose remedy differs.
+  if (p.unfiledCarry !== undefined) {
+    return `[workspace.stalled] ${unfiledCarryLine(p.unfiledCarry)} ${body}`;
   }
   return `[workspace.stalled] ${body}`;
 }

@@ -785,6 +785,79 @@ describe('stalledLine tells a stand-in why it, and not the lead, was woken', () 
   });
 });
 
+/**
+ * The OTHER frame a lead reads about a board it is not on: the fleet carry of
+ * unfiled waits. Six of them fired between 20 and 22 September rendering as
+ * ordinary board wakes, and the reader could not tell them from the
+ * dead-board redirect above — which says the seat is unreachable, true only
+ * of that path. So the rung is named in the first line, with the act.
+ */
+describe('stalledLine says when a wake is the fleet carry of unfiled waits', () => {
+  const CARRY = {
+    stalledCount: 0,
+    consideredCount: 2,
+    unfiled: [
+      {
+        id: 't-theirs',
+        title: 'Publish the winter timetable',
+        bucket: 'waiting-unfiled',
+        quietMs: 70 * 60_000,
+        workspaceId: 'w-riverbend',
+      },
+    ],
+    unfiledCarry: {
+      toldAtLeastMs: 30 * 60_000,
+      boards: [
+        { workspaceId: 'w-riverbend', leadAgentId: 'agent-cartographer' },
+        { workspaceId: 'w-saltmarsh' },
+      ],
+    },
+  };
+
+  it('leads with the rung, names each board’s lead, and asks for the filing', () => {
+    const line = stalledLine(CARRY, 'w-elsewhere');
+    // FIRST: the reader's question is why a board it does not lead woke it,
+    // so the rung is read before any row is.
+    expect(line.indexOf('still unfiled')).toBeLessThan(line.indexOf('t-theirs'));
+    expect(line).toContain('30m');
+    expect(line).toContain('w-riverbend (lead agent-cartographer)');
+    // A board whose seat is empty is said so rather than dropped.
+    expect(line).toContain('w-saltmarsh (no lead named)');
+    // The act, named as a call.
+    expect(line).toContain('add_review_item');
+    // It is NOT the dead-board redirect, whose claim is about reachability.
+    expect(line).not.toContain('is not reachable');
+    // …and the wake is still the wake.
+    expect(line).toContain('t-theirs');
+  });
+
+  it('POSITIVE CONTROL: an ordinary wake says none of it', () => {
+    const { unfiledCarry: _dropped, ...withoutCarry } = CARRY;
+    const line = stalledLine(withoutCarry, 'w-elsewhere');
+    expect(line).not.toContain('still unfiled');
+    expect(line).not.toContain('add_review_item');
+    expect(line).toContain('t-theirs');
+  });
+
+  it('the dead-board redirect still wins, and never renders the carry line', () => {
+    const line = stalledLine({ ...CARRY, escalatedFrom: 'agent-cartographer' }, 'w-elsewhere');
+    // The redirect's own wording, unchanged.
+    expect(line).toContain('is not reachable');
+    expect(line).toContain('attach_agent');
+    expect(line.startsWith('[workspace.stalled] You are not this board')).toBe(true);
+    // CONTROL: the same frame without the redirect renders the carry line,
+    // so the absence is the precedence rule and not a field nobody reads.
+    expect(stalledLine(CARRY, 'w-elsewhere')).toContain('add_review_item');
+    expect(line).not.toContain('add_review_item');
+  });
+
+  it('a carry that names no board still says which rung it is', () => {
+    const line = stalledLine({ ...CARRY, unfiledCarry: { toldAtLeastMs: 30 * 60_000 } }, 'w-x');
+    expect(line).toContain('still unfiled');
+    expect(line).not.toContain('(lead ');
+  });
+});
+
 const UNGATED_ROW = {
   id: 't-u1',
   title: 'Reader sees one subdued new-content badge',

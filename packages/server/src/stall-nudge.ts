@@ -521,7 +521,45 @@ export interface StallNudgeFrame {
    * "why am I being told this" is answerable only here.
    */
   escalatedFrom?: string;
+  /**
+   * Which rung of the unfiled-wait ladder this frame is — set ONLY by the
+   * fleet carry (`waiting-unfiled-frame.ts`), and never by the dead-board
+   * redirect above.
+   *
+   * The two are the only frames a lead reads about a board it is not on, and
+   * until this field they looked identical on arrival. The redirect's line
+   * says the board's seat is unreachable, which is true of that path alone;
+   * a lead that read it off a carry frame went looking for a delivery fault
+   * that was not there, six times between 20 and 22 September 2026.
+   *
+   * It is one field for the whole frame because the fact is one fact — every
+   * row on `unfiled` has already been named to its own board's lead and is
+   * still unfiled — while `boards` keeps the per-board half the rows need,
+   * since `unfiled` can span boards and each board's lead is a different
+   * agent to tell.
+   */
+  unfiledCarry?: UnfiledCarry;
   ts: number;
+}
+
+/** The fleet carry's marker: the window every row has already spent past its
+ *  own board's lead, and the leads that were told. */
+export interface UnfiledCarry {
+  /**
+   * The aging window. Every row on `unfiled` has been a finding on its own
+   * board's list at LEAST this long — "at least", because the rows are due on
+   * their own clocks and only their common floor is true of all of them. The
+   * board item's words state the same window
+   * (`waiting-unfiled-review.ts`), so the frame and the item cannot drift.
+   */
+  toldAtLeastMs: number;
+  /**
+   * Every board `unfiled` names, once each, in the order the rows arrive —
+   * worst first, so the board holding the oldest wait is named first. A board
+   * whose lead seat is empty carries no `leadAgentId`, and the renderer says
+   * so rather than dropping the board.
+   */
+  boards: readonly { workspaceId: string; leadAgentId?: string }[];
 }
 
 export interface StallNudgerOptions {

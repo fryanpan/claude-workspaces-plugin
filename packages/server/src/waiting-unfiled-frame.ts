@@ -26,6 +26,16 @@
  * So each row keeps its board here, and the frame's own `workspaceId` stays
  * the ANCHOR's board, which is what `taskId` and `title` name.
  *
+ * ── And the frame says which rung it is ─────────────────────────────────
+ *
+ * `unfiledCarry` is the marker. Without it this frame is a plain
+ * `workspace.stalled` tagged with a board Team Lead is not on, which is also
+ * what the dead-board redirect (`stall-escalation.ts`) looks like — and that
+ * one's line claims the board's seat is unreachable, true of that path only.
+ * Six carries fired between 20 and 22 September 2026 and the receiving lead
+ * spent a turn working out which it had. The redirect must never carry this
+ * field, and the child renders it as the wake's first line.
+ *
  * Its own module so that what Team Lead reads can be driven directly, without
  * a reach to send it through — the same seam `waiting-unfiled-review.ts` is
  * on for the item's words.
@@ -39,9 +49,12 @@ export function buildFleetFrame(input: {
   /** The board Team Lead holds a stream on — the frame's tag only when no
    *  row is carrying one, which is a frame with no rows. */
   onBoard: string;
+  /** The aging window, restated on the frame so the reader is told what the
+   *  rows have already cost. The same number the board's item states. */
+  agingMs: number;
   now: number;
 }): StallNudgeFrame {
-  const { due, onBoard, now } = input;
+  const { due, onBoard, agingMs, now } = input;
   const top = due[0];
   return {
     event: STALL_EVENT,
@@ -59,6 +72,26 @@ export function buildFleetFrame(input: {
       quietMs: row.quietMs,
       workspaceId: row.workspaceId,
     })),
+    // Absent when there is nothing to carry: a frame with no rows is not a
+    // rung of the ladder, and a marker on it would be a claim about nothing.
+    ...(due.length > 0 ? { unfiledCarry: { toldAtLeastMs: agingMs, boards: boardsOf(due) } } : {}),
     ts: now,
   };
+}
+
+/** Each board once, in row order, with the lead that was told. A board with
+ *  an empty seat is kept and simply carries no lead — the reader has to know
+ *  the row exists before it can ask who owns it. */
+function boardsOf(due: readonly AgingWait[]): Array<{ workspaceId: string; leadAgentId?: string }> {
+  const out: Array<{ workspaceId: string; leadAgentId?: string }> = [];
+  const seen = new Set<string>();
+  for (const row of due) {
+    if (seen.has(row.workspaceId)) continue;
+    seen.add(row.workspaceId);
+    out.push({
+      workspaceId: row.workspaceId,
+      ...(row.leadAgentId !== undefined ? { leadAgentId: row.leadAgentId } : {}),
+    });
+  }
+  return out;
 }

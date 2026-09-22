@@ -14325,6 +14325,7 @@ var STALL_PAYLOAD_KEYS = {
   declaredWaits: true,
   changed: true,
   escalatedFrom: true,
+  unfiledCarry: true,
   ts: true
 };
 var STALL_ENVELOPE_KEYS = [
@@ -14355,6 +14356,12 @@ function unrenderableBody(unknown3) {
     return "the board reported a stall with no tasks on it — treat this as a bug in the wake, not as a clear board.";
   }
   return `the board reported findings this plugin cannot read — the frame carries ${unknown3.join(", ")}, ` + "which this bundle does not know. Your plugin is OLDER than this server, which is the likely " + "cause rather than a broken wake. The board is NOT clear: update the plugin " + "(command claude plugin update claude-workspaces@claude-workspaces), restart this session, and " + "read the board with next_tasks / list_tasks meanwhile.";
+}
+function unfiledCarryLine(carry) {
+  const boards = (carry.boards ?? []).filter((b) => Boolean(b.workspaceId)).map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : "no lead named"})`);
+  const named = boards.length > 0 ? ` — ${boards.join(", ")}` : "";
+  const window = carry.toldAtLeastMs === undefined ? "" : ` over ${humanDuration2(carry.toldAtLeastMs)}`;
+  return `You were woken as Team Lead, not as this board's lead: every row below was named to its own ` + `board's lead${window} ago and is still unfiled${named}. ` + "Tell that lead to file the ask with add_review_item, or file it yourself.";
 }
 function stalledLine(p, frameBoard) {
   const parts = [];
@@ -14443,6 +14450,9 @@ function stalledLine(p, frameBoard) {
   const body = parts.join(" ");
   if (p.escalatedFrom !== undefined && p.escalatedFrom !== "") {
     return `[workspace.stalled] You are not this board's lead — ${p.escalatedFrom} holds the seat and ` + "is not reachable, so this came to you instead. Nothing addressed to that seat is arriving: " + "take it (attach_agent) or hand it to a session that is here. Then, on the board itself: " + body;
+  }
+  if (p.unfiledCarry !== undefined) {
+    return `[workspace.stalled] ${unfiledCarryLine(p.unfiledCarry)} ${body}`;
   }
   return `[workspace.stalled] ${body}`;
 }
@@ -20511,7 +20521,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.256";
+var PLUGIN_VERSION = "0.1.257";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

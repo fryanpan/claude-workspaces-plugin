@@ -318,6 +318,71 @@ describe('an unfiled wait that ages goes past its lead', () => {
     expect(new Set(rows.map((r) => r.workspaceId ?? frame.workspaceId)).size).toBe(2);
   });
 
+  /**
+   * The frame has to say which RUNG it is, or it reads as an ordinary board
+   * wake from a board the reader does not lead — which is also what the
+   * dead-board redirect looks like, and that one claims the seat is
+   * unreachable. Six carries fired 20-22 September 2026 and cost a turn each.
+   *
+   * Driven through the real escalation rather than the builder, because the
+   * thing that could break is the wiring: the lead is read off each board's
+   * snapshot at the tick, and `AgingWait` had no field for it before.
+   */
+  it('tells Team Lead the window the rows already spent, and each board’s own lead', () => {
+    dir = dir || mkdtempSync(join(tmpdir(), 'wu-escalation-'));
+    const store = new TaskStore({ dataDir: dir });
+    const leads = [LEAD.id, 'agent-harbour-master', undefined];
+    const names = ['harborlight-ferry', 'saltmarsh-yard', 'riverbend-locks'];
+    const titles = ['Cut the release branch', 'Publish the winter timetable', 'Stage the locks'];
+    const boards = names.map(
+      (name, i) =>
+        store.createWorkspace(name, leads[i] === undefined ? {} : { leadAgentId: leads[i] }).id,
+    );
+    const ids = boards.map((ws, i) => {
+      const res = store.createTask(ws, {
+        title: titles[i] as string,
+        body: `Agent can ${(titles[i] as string).toLowerCase()} so that the work lands.`,
+        assignee: LEAD.name,
+        assigneeKind: 'agent',
+      });
+      if (!res.ok) throw new Error('create failed');
+      return res.task.id;
+    });
+    const snapshots = boards.map((ws, i) => ({
+      ...snapshot(ws, [waitingRow(ids[i] as string, titles[i] as string)]),
+      ...(leads[i] === undefined ? { leadAgentId: undefined } : { leadAgentId: leads[i] }),
+    }));
+    const sent: Array<{ agentId: string; frame: StallNudgeFrame }> = [];
+    const teamLead: TeamLeadReach = {
+      agentId: 'agent-team-lead',
+      boards: () => boards,
+      canReach: () => true,
+      send: (_ws, agentId, frame) => {
+        sent.push({ agentId, frame });
+        return 1;
+      },
+    };
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW, teamLead });
+    escalations.onTick(snapshots, START);
+    escalations.onTick(snapshots, START + WINDOW);
+
+    expect(sent).toHaveLength(1);
+    const carry = sent[0]?.frame.unfiledCarry;
+    // The window the frame states is the window the escalation actually ran,
+    // which is the same number the board's own item states.
+    expect(carry?.toldAtLeastMs).toBe(WINDOW);
+    // Each board once, each with the lead that sits on IT — not the anchor's.
+    expect(carry?.boards).toEqual([
+      { workspaceId: boards[0] as string, leadAgentId: LEAD.id },
+      { workspaceId: boards[1] as string, leadAgentId: 'agent-harbour-master' },
+      // The control for the lead: a board with an empty seat is still named,
+      // and carries no lead rather than inheriting one.
+      { workspaceId: boards[2] as string },
+    ]);
+    // This frame is the carry, never the dead-board redirect.
+    expect(sent[0]?.frame.escalatedFrom).toBeUndefined();
+  });
+
   it('the item is withdrawn once every wait is filed', () => {
     const { store, ws, ids } = boardWith(['Cut the release branch']);
     const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW });

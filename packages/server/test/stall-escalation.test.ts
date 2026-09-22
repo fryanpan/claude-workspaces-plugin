@@ -36,6 +36,7 @@ import {
   type StallSnapshot,
 } from '../src/stall-nudge.ts';
 import { type Task, TaskStore } from '../src/tasks.ts';
+import { buildFleetFrame } from '../src/waiting-unfiled-frame.ts';
 
 const PERSON = { id: 'known-robin', name: 'Robin Vale', kind: 'person' };
 const AGENT = { id: 'agent-tide-runner', name: 'Tide Runner', kind: 'agent' };
@@ -324,6 +325,44 @@ describe('a dead board escalates; a live one never does', () => {
           escalatedFrom: AGENT.id,
         },
       });
+    });
+
+    /**
+     * The two frames a lead can be woken with about a board it is not on are
+     * this redirect and the fleet carry of unfiled waits. They ask for
+     * different things — restart the seat, or get an ask filed — so a reader
+     * has to be able to tell them apart from the frame alone.
+     */
+    it('the redirect carries the unreachable seat and NOT the unfiled-carry marker', () => {
+      const a = make('Rank results by recency');
+      reachOn.add(wsId);
+      build().onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), now);
+      expect(sent[0]?.frame.escalatedFrom).toBe(AGENT.id);
+      expect(sent[0]?.frame.unfiledCarry).toBeUndefined();
+      expect('unfiledCarry' in sent[0]!.frame).toBe(false);
+
+      // POSITIVE CONTROL: the frame that IS the carry sets the field, so the
+      // absence above is this path's shape rather than a field nothing sets
+      // or a name misspelled in both places.
+      const carry = buildFleetFrame({
+        due: [
+          {
+            workspaceId: wsId,
+            taskId: a.id,
+            title: a.title,
+            bucket: 'waiting-unfiled',
+            quietMs: 90 * 60_000,
+            firstSeen: now - 2 * ESCALATE_MS,
+            tells: 0,
+            leadAgentId: AGENT.id,
+          },
+        ],
+        onBoard: wsId,
+        agingMs: ESCALATE_MS,
+        now,
+      });
+      expect(carry.unfiledCarry?.boards).toEqual([{ workspaceId: wsId, leadAgentId: AGENT.id }]);
+      expect(carry.escalatedFrom).toBeUndefined();
     });
 
     it('reaches Team Lead on ANOTHER board when it holds no stream on the dead one', () => {
