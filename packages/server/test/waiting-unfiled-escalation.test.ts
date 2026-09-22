@@ -5,14 +5,15 @@ import { join } from 'node:path';
 /**
  * The aging half: an unfiled wait the lead was told about, and nobody filed,
  * goes past the lead a window later — to Team Lead first, to the owner's own
- * queue only when Team Lead cannot be reached, and as ONE item however many
- * tasks and boards it spans.
+ * queue only when Team Lead cannot be reached, and as ONE item per BOARD
+ * however many tasks on it are waiting.
  *
  * Three things are asserted, each with its control:
  *  - the AGE. One window is not enough; two is. The control is the same task
  *    at the same tick with the clock not advanced.
- *  - the SHAPE. Three tasks across two boards produce one item naming all
- *    three, not three items.
+ *  - the SHAPE. Three tasks across two boards produce one item per board,
+ *    each naming only its own board's tasks — not three items, and not one
+ *    item naming rows a reader cannot act on.
  *  - the LADDER. With Team Lead reachable, nothing reaches the owner at all.
  *
  * The store is the real `TaskStore`, so what is read back is what a person
@@ -126,7 +127,7 @@ describe('an unfiled wait that ages goes past its lead', () => {
     expect(boardFiledItems(store, [ws])).toHaveLength(0);
   });
 
-  it('three tasks on two boards make ONE item naming all three', () => {
+  it('three tasks on two boards make ONE item PER BOARD, each naming its own', () => {
     dir = mkdtempSync(join(tmpdir(), 'wu-escalation-two-'));
     const store = new TaskStore({ dataDir: dir });
     const boards = ['release-train', 'search-revamp'].map((name) => {
@@ -159,12 +160,67 @@ describe('an unfiled wait that ages goes past its lead', () => {
     escalations.onTick(snapshots, START);
     escalations.onTick(snapshots, START + WINDOW);
 
-    const filed = boardFiledItems(store, boards);
-    expect(filed).toHaveLength(1);
+    // One item per board, not one for the server: an item revised to name a
+    // board its reader is not working gives them nothing to act on (Bryan,
+    // 2026-09-21: "The second isn't even in your project").
+    expect(escalations.filedCount()).toBe(2);
+    const first = boardFiledItems(store, [boards[0] as string]);
+    const second = boardFiledItems(store, [boards[1] as string]);
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    // Each item names its own board's tasks…
+    for (const id of ids[0] as string[]) expect(first[0]?.detail).toContain(id);
+    for (const id of ids[1] as string[]) expect(second[0]?.detail).toContain(id);
+    // …and none of the other's, which is the half that was wrong.
+    for (const id of ids[1] as string[]) expect(first[0]?.detail).not.toContain(id);
+    for (const id of ids[0] as string[]) expect(second[0]?.detail).not.toContain(id);
+    // The counts are each board's own, not the fleet's three.
+    expect(first[0]?.headline).toContain('2 tasks');
+    expect(second[0]?.headline).toContain('Rank results by recency');
+  });
+
+  it('withdraws one board’s item while the other board is still waiting', () => {
+    // The per-board items have to come back independently, or a board that
+    // filed its asks would keep a standing item because a different board
+    // has not.
+    dir = mkdtempSync(join(tmpdir(), 'wu-escalation-one-clears-'));
+    const store = new TaskStore({ dataDir: dir });
+    const boards = ['harborlight-ferry', 'saltmarsh-yard'].map(
+      (name) => store.createWorkspace(name, { leadAgentId: LEAD.id }).id,
+    );
+    const titles = ['Cut the release branch', 'Publish the winter timetable'];
+    const ids = boards.map((ws, i) => {
+      const res = store.createTask(ws, {
+        title: titles[i] as string,
+        body: `Agent can ${(titles[i] as string).toLowerCase()} so that the work lands.`,
+        assignee: LEAD.name,
+        assigneeKind: 'agent',
+      });
+      if (!res.ok) throw new Error('create failed');
+      return res.task.id;
+    });
+    const both = boards.map((ws, i) =>
+      snapshot(ws, [waitingRow(ids[i] as string, titles[i] as string)]),
+    );
+    const escalations = new WaitingUnfiledEscalations({ store, agingMs: WINDOW });
+    escalations.onTick(both, START);
+    escalations.onTick(both, START + WINDOW);
+    expect(escalations.filedCount()).toBe(2);
+
+    // The first board's ask gets filed, so its finding is gone; the second
+    // board's is untouched.
+    const onlySecond = [snapshot(boards[0] as string, []), both[1] as StallSnapshot];
+    escalations.onTick(onlySecond, START + WINDOW + MIN);
+
     expect(escalations.filedCount()).toBe(1);
-    const only = filed[0];
-    for (const id of ids.flat()) expect(only?.detail).toContain(id);
-    expect(only?.headline).toContain('3 tasks');
+    const cleared = store
+      .listReviewItems(ids[0] as string)
+      .find((i) => i.createdBy === STALL_ESCALATION_ACTOR.name);
+    expect(reviewWithdrawn(cleared?.review as ReviewPayload)).toBe(true);
+    const standing = store
+      .listReviewItems(ids[1] as string)
+      .find((i) => i.createdBy === STALL_ESCALATION_ACTOR.name);
+    expect(reviewWithdrawn(standing?.review as ReviewPayload)).toBe(false);
   });
 
   it('with Team Lead reachable the owner is not the addressee', () => {
