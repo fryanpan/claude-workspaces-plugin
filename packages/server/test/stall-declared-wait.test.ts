@@ -13,10 +13,18 @@
  * window was an unfiled ask further down the frame; the waits were read as
  * the cause because they were named as the stall.
  *
+ * The last describe is the other half of the same question: which declared
+ * waits answer the LIFTED-BLOCKAGE finding, whose whole sentence is that the
+ * board has no record of anybody reading the answer. A wait declared after
+ * the lift IS that record; one declared before it, or one that has lapsed, is
+ * not — and the finding it was built from is a wait of exactly the second
+ * kind.
+ *
  * All fixtures are synthetic — invented titles in a made-up workspace. The
  * repo is public.
  */
 import { describe, expect, it } from 'bun:test';
+import type { Lift } from '../src/blockage-lift.ts';
 import type { TaskRow } from '../src/keep-moving.ts';
 import { evaluateStalls } from '../src/stall-gate.ts';
 import {
@@ -53,7 +61,7 @@ function waitOn(what: string, at: number, forMs: number): NonNullable<TaskRow['e
  * The server's tick with the store taken out: `evaluateStalls` over the rows
  * at the current clock, shaped into the snapshot the wiring hands the nudger.
  */
-function loop(tasks: TaskRow[]) {
+function loop(tasks: TaskRow[], lifts?: Map<string, Lift>) {
   const world = { now: START };
   const sent: StallNudgeFrame[] = [];
   const snapshot = (): StallSnapshot[] => {
@@ -63,6 +71,7 @@ function loop(tasks: TaskRow[]) {
       reviewItems: [],
       bands,
       now: world.now,
+      ...(lifts !== undefined ? { lifts } : {}),
     });
     return [
       {
@@ -71,6 +80,7 @@ function loop(tasks: TaskRow[]) {
         retired: false,
         stalled: verdict.stalled,
         unfiled: verdict.unfiled,
+        ...(verdict.unresumed.length > 0 ? { unresumed: verdict.unresumed } : {}),
         ...(verdict.declaredWaits.length > 0 ? { declaredWaits: verdict.declaredWaits } : {}),
         considered: verdict.considered,
         undetermined: verdict.undetermined,
@@ -237,5 +247,96 @@ describe('a wake that fires for another reason', () => {
         't-rollout',
       ]);
     }
+  });
+});
+
+describe('a declared wait against a lifted blockage', () => {
+  /** Four hours before START, with a later line still open — the shape
+   *  `liftOf` returns for a done-when line reported met mid-ticket. */
+  const LIFT_AT = START - 240 * MIN;
+  /** The eleven seconds the live timeline measured between the two reports
+   *  and the declaration that followed them. */
+  const DECLARED_AFTER = 11_000;
+
+  const lift = (): Map<string, Lift> =>
+    new Map([
+      [
+        't-index',
+        {
+          kind: 'done-when-met' as const,
+          at: LIFT_AT,
+          what: 'The nightly rebuild runs green twice in a row.',
+          next: 'Search reads the new index.',
+        },
+      ],
+    ]);
+
+  /** Quiet since before the lift, so nothing has touched the row since it —
+   *  which is the other half of what the finding asks. */
+  const row = (over: Partial<TaskRow> = {}): TaskRow =>
+    task('t-index', 'Trim the index writer', 300 * MIN, over);
+
+  it('drops the row from every finding when the wait was declared after the lift', () => {
+    const h = loop(
+      [
+        row({
+          externalWait: waitOn('the fleet restart', LIFT_AT + DECLARED_AFTER, 8 * 60 * MIN),
+        }),
+      ],
+      lift(),
+    );
+
+    expect(h.verdict().unresumed ?? []).toHaveLength(0);
+
+    h.tick();
+    h.advance(6 * STALL_REPEAT_DEFAULT_MS);
+
+    // Not a wake with a quieter sentence — no wake at all. The declaration is
+    // the record the finding says is missing, and the stall half of the row
+    // was already covered by the same standing wait.
+    expect(h.sent).toHaveLength(0);
+  });
+
+  it('still names the row when the wait was declared BEFORE the lift', () => {
+    // The 21-hour shape: the wait was declared on something, the answer then
+    // arrived, and nothing about the declaration says anybody read it.
+    const h = loop(
+      [row({ externalWait: waitOn('the fleet restart', LIFT_AT - 20 * MIN, 8 * 60 * MIN) })],
+      lift(),
+    );
+
+    expect((h.verdict().unresumed ?? []).map((r) => r.id)).toEqual(['t-index']);
+
+    h.tick();
+
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.unresumed?.map((r) => r.id)).toEqual(['t-index']);
+  });
+
+  it('still names the row when a wait declared after the lift has lapsed', () => {
+    const h = loop(
+      [row({ externalWait: waitOn('the fleet restart', LIFT_AT + DECLARED_AFTER, 60 * MIN) })],
+      lift(),
+    );
+
+    expect((h.verdict().unresumed ?? []).map((r) => r.id)).toEqual(['t-index']);
+
+    h.tick();
+
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.unresumed?.map((r) => r.id)).toEqual(['t-index']);
+  });
+
+  it('the control: the same row with no wait at all is named', () => {
+    // Without it, the first case's silence could be a board that never wakes
+    // over a lifted blockage rather than the rule under test.
+    const h = loop([row()], lift());
+
+    expect((h.verdict().unresumed ?? []).map((r) => r.id)).toEqual(['t-index']);
+
+    h.tick();
+
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.unresumed?.map((r) => r.id)).toEqual(['t-index']);
   });
 });

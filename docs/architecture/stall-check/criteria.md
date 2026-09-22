@@ -314,7 +314,12 @@ file is what the builder did, the word is what the task claimed to be about.
   thread activity and Activity note.
 - **Must never:** read prose; add a second clock; name a task whose LAST open
   line just went met — completion is not a resumed blockage, and naming it
-  would turn the moment a ticket finishes into a wake; or name a task the
+  would turn the moment a ticket finishes into a wake; name a task whose
+  agent declared a wait AT OR AFTER the lift and whose declaration is still
+  standing — the finding's whole sentence is that nobody has recorded reading
+  the answer, and that declaration is the record (a wait declared BEFORE the
+  lift, or one that has lapsed, says nothing about it and still names the
+  task); or name a task the
   board has recorded any activity on since the lift. That last one is the
   load-bearing guard, not the window: a task answered on Monday, worked all
   week and quiet for forty minutes is not this finding, and a reading that
@@ -331,7 +336,10 @@ file is what the builder did, the word is what the task claimed to be about.
   isolates the rule from the auto-close that would carry the previous control
   on its own. Each control rides a BEACON row that is quiet and on no lift, so
   a silence assertion proves the tick ran rather than that no frame arrived.
-  The unit cases are `blockage-lift.test.ts`. And on the board itself: the
+  The unit cases are `blockage-lift.test.ts`, and the declared-wait rule's
+  are the last describe of `stall-declared-wait.test.ts` — the wait declared
+  after the lift, the one declared before it, the one that has lapsed, and the
+  same row with no wait at all. And on the board itself: the
   verdict's `unresumed` line at zero, and the finding naming a PROPER SUBSET
   of the tasks that merely carry a met line with later lines open — naming all
   of them is the status-age reading again.

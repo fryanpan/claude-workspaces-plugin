@@ -256,6 +256,11 @@ export interface DeclaredWaitRow {
  * wait is still standing (`stall-nudge.ts`'s `withoutStandingWaits` takes
  * those off `stalled` and nothing else), which is exactly the 21-hour shape:
  * a wait declared on a person who had already answered.
+ *
+ * A wait declared AT OR AFTER the lift is the exception, and the only one: it
+ * is itself the record that somebody read the answer, so such a row is not
+ * named here at all. The ordering is what separates the two, and the reading
+ * is at the `unresumed` push below.
  */
 export interface UnresumedRow {
   id: string;
@@ -638,9 +643,34 @@ export function evaluateStalls(input: EvaluateStallsInput): StallVerdict {
     // not applied to an unfiled ask: the cap says why nobody picked the row
     // up and says nothing about an answer already given and read by nobody.
     // It is one line for the lead and no slot is needed to read it.
+    //
+    // And a DECLARED WAIT can answer it, which is the one thing that reads
+    // the answer back. The finding's sentence is that nobody has recorded
+    // reading the answer; an agent that declares, after the lift, what the row
+    // now waits on HAS recorded exactly that, in its own words. Measured
+    // 2026-09-22: two done-when lines reported met at 13:59:38Z, a wait
+    // declared eleven seconds later standing until 21:59Z, and the 15:05Z pass
+    // still naming the row as unresumed.
+    //
+    // THE ORDERING IS THE WHOLE RULE. A wait declared BEFORE the lift says
+    // nothing about the answer — it is the 21-hour shape this finding was
+    // built from, a wait declared on a person who then answered and was never
+    // read — so it does not cover it. A lapsed wait does not cover it either:
+    // the declaration has run out, and the row is loud again by every other
+    // reading here. `declaredAt` rather than `since`, so a wait RENEWED after
+    // the lift covers it: the renewal is the act of somebody looking at the
+    // row again. `since` is the fallback for a sidecar written before
+    // `declaredAt` existed, where it is the only stamp on the wait at all.
     const lift = input.lifts?.get(row.id);
+    const wait = declared.get(row.id);
+    const waitCoversLift =
+      lift !== undefined &&
+      wait !== undefined &&
+      externalWaitActive(wait, input.now) &&
+      (typeof wait.declaredAt === 'number' ? wait.declaredAt : wait.since) >= lift.at;
     if (
       lift !== undefined &&
+      !waitCoversLift &&
       (row.bucket === 'in-progress' || row.bucket === 'ready-unpicked') &&
       unresumedSince(lift, { now: input.now, sinceActivityMs: row.sinceActivityMs, quietMs })
     )

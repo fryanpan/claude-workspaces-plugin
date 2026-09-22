@@ -557,8 +557,10 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       ...(t.notes !== undefined ? { notes: t.notes } : {}),
       // What the row's holder declared it is waiting on, for a thing the
       // board cannot see. Not activity and not a bucket — the gate reads it
-      // only to annotate the rows it names, and the wake only to stop
-      // escalating a stalled one (`task-wait.ts`).
+      // to annotate the rows it names and to decide whether a lifted blockage
+      // has been read (a wait declared at or after the lift says it has), and
+      // the wake reads it only to stop escalating a stalled one
+      // (`task-wait.ts`).
       ...(t.externalWait !== undefined ? { externalWait: t.externalWait } : {}),
     }));
     // Every row timestamp as an activity tick. Deliberately unfiltered by
