@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
-import { staleAfterMs } from '@claude-workspaces/core/schedule-run-record';
+import { staleSlackMs } from '@claude-workspaces/core/schedule-run-record';
 import { createTaskScheduler } from '../src/task-scheduler.ts';
 import { TaskStore } from '../src/tasks.ts';
 import { DAY, HOUR, OWNER, instancesOf, seed } from './task-scheduler-seed.ts';
@@ -80,7 +80,7 @@ describe('the run record on a scheduled row', () => {
     if (!first) throw new Error('no instance');
     // Nobody closes it. A day and change later the rule is owed a success it
     // never got.
-    now = T0 + staleAfterMs(DAY) + 60_000;
+    now = FIRST + staleSlackMs(DAY) + 60_000;
     scheduler.tick();
     expect(openItems(ruleId)).toHaveLength(1);
     const item = openItems(ruleId)[0];
@@ -108,7 +108,7 @@ describe('the run record on a scheduled row', () => {
 
   it('does not refile an item the reader answered until the rule has succeeded and gone stale again', () => {
     const { workspaceId, ruleId } = seed(store, DAILY);
-    let now = T0 + staleAfterMs(DAY) + 60_000;
+    let now = FIRST + staleSlackMs(DAY) + 60_000;
     const scheduler = createTaskScheduler(store, { now: () => now, report: () => {} });
     scheduler.tick();
     const [item] = openItems(ruleId);
@@ -131,7 +131,7 @@ describe('the run record on a scheduled row', () => {
     scheduler.tick();
     // The close was stamped by the wall clock, so the next stretch of silence
     // is measured from there.
-    now = Date.now() + staleAfterMs(DAY) + 60_000;
+    now = Date.now() + DAY + staleSlackMs(DAY) + 60_000;
     scheduler.tick();
     expect(openItems(ruleId)).toHaveLength(1);
     expect(store.listReviewItems(ruleId)).toHaveLength(2);

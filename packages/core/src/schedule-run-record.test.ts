@@ -11,9 +11,9 @@ import {
   formatRunRecord,
   runRecord,
   scheduleIntervalMs,
-  staleAfterMs,
+  staleSlackMs,
 } from './schedule-run-record.ts';
-import type { TaskSchedule } from './task-schedule.ts';
+import { type TaskSchedule, instantForLocal } from './task-schedule.ts';
 
 /** 2026-03-02T00:00:00Z, a Monday. */
 const MON = Date.UTC(2026, 2, 2);
@@ -55,9 +55,9 @@ describe('the interval a rule runs on', () => {
     ).toBe(false);
   });
 
-  it('adds a slack of at most an hour before calling a rule stale', () => {
-    expect(staleAfterMs(DAY)).toBe(DAY + STALE_SLACK_MAX_MS);
-    expect(staleAfterMs(10 * MINUTE)).toBe(20 * MINUTE);
+  it('slacks a due run by the smaller of its gap and an hour', () => {
+    expect(staleSlackMs(DAY)).toBe(STALE_SLACK_MAX_MS);
+    expect(staleSlackMs(10 * MINUTE)).toBe(10 * MINUTE);
   });
 });
 
@@ -158,26 +158,45 @@ describe('what the record says', () => {
 });
 
 describe('when a rule is stale', () => {
-  const closed = { id: 't-run', status: 'done' as const, closedAt: NINE + HOUR };
+  /** Closed on the hour it was owed, so "one day later" is unambiguous. */
+  const closed = { id: 't-run', status: 'done' as const, closedAt: NINE };
   const fired = { ...DAILY_9, state: { lastFiredAt: NINE, lastInstanceId: 't-run' } };
 
-  it('is not stale inside one interval plus the slack, and is past it', () => {
-    const limit = NINE + HOUR + staleAfterMs(DAY);
-    expect(runRecord(fired, closed, limit).stale).toBe(false);
-    expect(runRecord(fired, closed, limit + 1).stale).toBe(true);
+  it('gives a daily rule the hour after its next run was due', () => {
+    expect(runRecord(fired, closed, NINE + DAY).dueAt).toBe(NINE + DAY);
+    expect(runRecord(fired, closed, NINE + DAY).stale).toBe(false);
+    expect(runRecord(fired, closed, NINE + DAY + HOUR).stale).toBe(false);
+    expect(runRecord(fired, closed, NINE + DAY + HOUR + 1).stale).toBe(true);
+    expect(runRecord(fired, closed, NINE + DAY + 90 * MINUTE).stale).toBe(true);
   });
 
-  it('counts from the arming when nothing has ever succeeded', () => {
-    expect(runRecord(DAILY_9, undefined, MON + staleAfterMs(DAY)).stale).toBe(false);
-    expect(runRecord(DAILY_9, undefined, MON + staleAfterMs(DAY) + 1).stale).toBe(true);
+  it('counts a rule that has never succeeded from its arming', () => {
+    // Armed at midnight, so nine o'clock is the first run it was ever owed.
+    expect(runRecord(DAILY_9, undefined, NINE + HOUR).stale).toBe(false);
+    expect(runRecord(DAILY_9, undefined, NINE + HOUR + 1).stale).toBe(true);
   });
 
-  it('calls an open run stale once its rule was owed another success', () => {
+  it('calls an open run stale a slack after the occurrence nobody closed', () => {
     const open = { id: 't-run', status: 'open' as const };
     // Armed an hour before the fire, so the arming is not what makes it late.
     const rule = { ...fired, armedAt: NINE - HOUR };
-    expect(runRecord(rule, open, NINE + 20 * HOUR).stale).toBe(false);
-    expect(runRecord(rule, open, NINE + 2 * DAY).stale).toBe(true);
+    expect(runRecord(rule, open, NINE + 30 * MINUTE).stale).toBe(false);
+    expect(runRecord(rule, open, NINE + 2 * HOUR).stale).toBe(true);
+  });
+
+  it('gives a ten-minute rule ten minutes of slack, not an hour', () => {
+    const rule: TaskSchedule = { rule: { kind: 'every', everyMs: 10 * MINUTE }, armedAt: MON };
+    expect(runRecord(rule, undefined, MON + 20 * MINUTE).stale).toBe(false);
+    expect(runRecord(rule, undefined, MON + 20 * MINUTE + 1).stale).toBe(true);
+  });
+
+  it('leaves an after-completion rule on its delay plus the same slack', () => {
+    const rule: TaskSchedule = {
+      rule: { kind: 'after-completion', delayMs: 3 * DAY },
+      armedAt: MON,
+    };
+    expect(runRecord(rule, undefined, MON + 3 * DAY + HOUR).stale).toBe(false);
+    expect(runRecord(rule, undefined, MON + 3 * DAY + HOUR + 1).stale).toBe(true);
   });
 
   it('is never stale past its end limit — that rule is finished, not stuck', () => {
@@ -187,5 +206,52 @@ describe('when a rule is stale', () => {
     expect(runRecord({ ...fired, until: NINE + 30 * DAY }, closed, NINE + 10 * DAY).stale).toBe(
       true,
     );
+  });
+});
+
+/**
+ * The reading that sent a stale item out on 22 September: a rule running at
+ * 00, 06, 09, 12, 15, 18 and 21 Pacific, read at 04:01 with its midnight run
+ * long since done. The old arithmetic took the 06-to-09 gap as the rule's
+ * interval, so three hours plus an hour of slack made a 00:05 success late
+ * two hours before 06:00 was even due.
+ */
+describe('a calendar rule whose gaps are uneven', () => {
+  const LA = 'America/Los_Angeles';
+  /** A wall-clock reading on 2026-09-22, Pacific. */
+  const la = (hour: number, minute = 0): number => instantForLocal(LA, 2026, 9, 22, hour, minute);
+  const SUCCESS = la(0, 5);
+  const ran = { id: 't-run', status: 'done' as const, closedAt: SUCCESS };
+  const sevenADay: TaskSchedule = {
+    rule: {
+      kind: 'calendar',
+      times: [0, 6, 9, 12, 15, 18, 21].map((hour) => ({ hour, minute: 0 })),
+    },
+    timezone: LA,
+    armedAt: instantForLocal(LA, 2026, 9, 1, 12, 0),
+    state: { lastFiredAt: la(0, 0), lastInstanceId: 't-run', lastSuccessAt: SUCCESS },
+  };
+
+  it('is not stale at 04:01, because 06:00 has not come due', () => {
+    const r = runRecord(sevenADay, ran, la(4, 1));
+    expect(r.dueAt).toBe(la(6, 0));
+    expect(r.stale).toBe(false);
+  });
+
+  it('is stale once an hour has passed with the 06:00 run unanswered', () => {
+    expect(runRecord(sevenADay, ran, la(7, 0)).stale).toBe(false);
+    expect(runRecord(sevenADay, ran, la(7, 30)).stale).toBe(true);
+  });
+
+  it('still calls an even three-hourly rule stale at 04:01 — the control', () => {
+    const every3h: TaskSchedule = {
+      rule: { kind: 'every', everyMs: 3 * HOUR },
+      timezone: LA,
+      armedAt: la(0, 0),
+      state: { lastFiredAt: la(0, 0), lastInstanceId: 't-run', lastSuccessAt: SUCCESS },
+    };
+    const r = runRecord(every3h, ran, la(4, 1));
+    expect(r.dueAt).toBe(la(3, 0));
+    expect(r.stale).toBe(true);
   });
 });

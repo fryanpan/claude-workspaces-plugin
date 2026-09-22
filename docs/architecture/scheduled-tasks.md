@@ -126,15 +126,27 @@ witness — it can be reopened, archived, or age off a board — and a record
 that forgot a success every time somebody touched the task would be worse
 than none.
 
-**Stale.** The last success is older than one interval plus a slack, the
-slack being the smaller of one interval and one hour: a daily rule is stale
-twenty-five hours after its last success, an hourly one after two hours. A
-rule that has never succeeded counts from its arming. A one-off has no
-interval and is never stale; a rule past its end limit is finished, not
-stale; an after-completion rule's interval is its delay, so an instance
-nobody closes goes stale like any other — the failure the peers described.
-On the task the word `stale` takes the state slot (blocked and triage outrank
-it) and the record turns red.
+**Stale.** An occurrence has come due since the rule's last success, and a
+slack has passed with no success. The due occurrence is the next one the rule
+is owed measured FROM that success, and the slack is the smaller of one hour
+and the gap that contains the wait — from the due occurrence to the one after
+it. So a daily rule that succeeded at nine is owed again at nine tomorrow and
+reads stale at ten, twenty-five hours on; a ten-minute rule gets ten minutes.
+A rule that has never succeeded counts from its arming. A one-off and an
+on-change rule are owed nothing on a cadence and are never stale; a rule past
+its end limit is finished, not stale; an after-completion rule is owed its
+delay after the last success, so an instance nobody closes goes stale like any
+other — the failure the peers described. On the task the word `stale` takes
+the state slot (blocked and triage outrank it) and the record turns red.
+
+The measurement used to start from an INTERVAL — the gap between the next two
+occurrences from now — which is not a property an uneven rule has. On 22
+September 2026 a rule firing at 00, 06, 09, 12, 15, 18 and 21 Pacific, read at
+04:01, was handed the 06-to-09 gap, and three hours plus an hour of slack
+filed a stale item against a 00:05 success two hours before 06:00 was even
+due. The item's own words carried the same mistake, so a calendar rule now
+names the run it was owed (`its 06:00 run was due 2h ago`) rather than
+claiming a cadence it does not run on.
 
 **Stale files ONE review item, never one per tick.** The server files it on
 the rule task as the scheduler's own actor, through the same door the stall

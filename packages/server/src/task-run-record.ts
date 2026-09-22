@@ -35,7 +35,11 @@ import {
   ageWord,
   runRecord,
 } from '@claude-workspaces/core/schedule-run-record';
-import type { TaskSchedule } from '@claude-workspaces/core/task-schedule';
+import {
+  DEFAULT_SCHEDULE_TIMEZONE,
+  type TaskSchedule,
+  zonedParts,
+} from '@claude-workspaces/core/task-schedule';
 import type { Task } from '@claude-workspaces/core/task-wire';
 import { taskDeepLink } from './home-brief.ts';
 import type { AddReviewItemResult, WithdrawReviewItemResult } from './review-items/types.ts';
@@ -98,6 +102,24 @@ export function successNote(record: RunRecord, closedAt: number): string {
 }
 
 /**
+ * What the rule was owed, in the words its own shape supports.
+ *
+ * A calendar rule names the RUN and when it was due, because its gaps need
+ * not be even: "it runs every 3h" was what the item said about a rule firing
+ * at 00, 06, 09, 12, 15, 18 and 21, and it was not true of any pair of runs
+ * the reader could point at. Every other kind has one gap, so its cadence is
+ * the more useful sentence.
+ */
+function cadenceClause(schedule: TaskSchedule, record: RunRecord, now: number): string {
+  if (schedule.rule.kind === 'calendar' && record.dueAt !== undefined) {
+    const parts = zonedParts(record.dueAt, schedule.timezone ?? DEFAULT_SCHEDULE_TIMEZONE);
+    const hhmm = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
+    return `its ${hhmm} run was due ${ageWord(now - record.dueAt)} ago`;
+  }
+  return record.intervalMs !== undefined ? `it runs every ${ageWord(record.intervalMs)}` : '';
+}
+
+/**
  * The stale item's words. Exported so a test reads what a person would see.
  * Links are relative and inline, like every other server-written item.
  */
@@ -113,8 +135,7 @@ export function buildStaleReview(input: {
     record.lastSuccessAt !== undefined
       ? `Its last success was ${ageWord(now - record.lastSuccessAt)} ago`
       : `It has never succeeded since it was set ${ageWord(now - rule.schedule!.armedAt)} ago`;
-  const cadence =
-    record.intervalMs !== undefined ? `it runs every ${ageWord(record.intervalMs)}` : '';
+  const cadence = cadenceClause(rule.schedule!, record, now);
   const last =
     record.instanceId === undefined
       ? 'No run has been filed.'
