@@ -441,15 +441,12 @@ export interface FlatRun {
  *   that has points nested under it is not a flat bullet — it is the lead of
  *   a group — so counting it inside the run it introduces would report the
  *   regrouped shape as the unregrouped one.
+ * - A NUMBERED item: an order the speaker dictated is structure, not a wall.
  *
- * Blank lines do NOT break a run: a loose list is still one list to a reader.
- * A note written as a paragraph does not break it either, and it COUNTS as one
- * of the run's notes (`proseNote`). Skipping it let twelve paragraph notes under
- * no heading read as a run of three.
- *
- * `parseNotesTopics` cannot answer this: it trims every line before reading
- * it and flattens each sub-bullet into the list, which is right for the
- * length bar and blind to exactly the nesting this measures.
+ * Blank lines and paragraph notes do NOT break a run, and a paragraph COUNTS
+ * as one of its notes (`proseNote`): skipping it let twelve paragraph notes
+ * under no heading read as a run of three. `parseNotesTopics` cannot answer
+ * this — it flattens each sub-bullet into the list.
  */
 export function flatBulletRuns(markdown: string): FlatRun[] {
   const runs: FlatRun[] = [];
@@ -477,6 +474,10 @@ export function flatBulletRuns(markdown: string): FlatRun[] {
     if (!bullet || !bullet[1]!.trim()) {
       const note = bullet ? undefined : proseNote(raw);
       if (note) run.push(note);
+      continue;
+    }
+    if (/^\d/.test(line) && !/^\s/.test(raw)) {
+      flush();
       continue;
     }
     if (/^\s/.test(raw)) {

@@ -64,6 +64,18 @@ export const NOTES_PROMPT_FILENAME = 'notes-prompt.md';
  *   uncovered ideas had that shape: the point reached a bullet and the reason
  *   the speaker gave for it reached nothing. The retry block's half of the
  *   same fix is `notes-missed-words.ts`.
+ * - ON 2026-09-22 THE REASON MOVED BACK INTO ITS POINT: "keep the reason in
+ *   the same note: X, because Y". A reason in a note of its own reached the
+ *   page, but a reader of that note could not tell which point it answered.
+ *   Over three runs of a synthetic dictation with three "because" claims,
+ *   the older rule kept 5 of 9 reasons with their point and the new one,
+ *   with `notes-reason-ask.ts` naming the sentence per tick, kept 9 of 9
+ *   (`bun run notes:fidelity`).
+ * - "Dictated layout" and the meaning rule in Accuracy came in the same
+ *   change. A speaker who says "page one is… start with… then… the last
+ *   thing" wants that document, not topics of the note-taker's own; the
+ *   prompt names the shape and `notes-dictation.ts` names the heading and
+ *   number on each tick, because the rule alone held on no tick at all.
  * - The strength rule ("an aside is not a proposal") is in Accuracy because
  *   all three shipped methods wrote a joke about the cables on AMI ES2002b as
  *   a design proposal. That is not fabrication — the idea was there, one step
@@ -131,13 +143,23 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '- Each note is one markdown list item. Do not write paragraphs.',
   `- Write one point in each note. Use a maximum of ${MAX_BULLET_WORDS} words. The speaker tag is not part of the ${MAX_BULLET_WORDS}.`,
   '- If a note needs "and", a dash or a semicolon to hold two ideas, write two notes.',
-  '- When the speaker gives a reason, a cause or a trade-off for a point, write it as a second note under that point. The reason is an idea. Do not drop it.',
+  '- When the speaker gives a reason for a point ("because", "since", "so that"), keep the reason in the same note: "X, because Y". A point and its reason are one idea. Make both halves short. Do not drop the reason or move it to a different note.',
   '- Paraphrase. Do not copy the words of the speaker.',
   '  - Remove greetings, false starts and repeats. ',
   '- Keep every idea, also a small idea. If you must choose, write the idea in five words. Do not drop it.',
   '- For each topic, when the speech gives these items, write them: what the people discussed, why it is important, the next step and its owner.',
   '- Put a **Decision:** prefix before each decision. Document what was decided, by whom, and why.',
   '- Put a bold **Question:** prefix before each open question',
+  '- Write each ask as its own note: who is asked, for what, and by when.',
+  '',
+  '### Dictated layout',
+  '',
+  '- Sometimes the speaker dictates the shape of a document: pages or parts, and items in an order ("start with…", "then…", "next…", "the last thing is…"). Keep that shape. Do not sort it into topics of your own. Do not drop an item.',
+  '- When the speaker names a page or a part ("page two is the budget"), add one heading for it in the words of the speaker: "Page two: the budget".',
+  '- Each item is one numbered note under the heading of its page, in the order that the speaker gave it. "Start with X" is item 1. "Then Y" is the next item. "The last thing is Z" is the last item.',
+  '  - Use this edit: `{"op":"insert_under_heading","headingId":"b3","markdown":"2. Budget for each site"}`',
+  '- A detail or a reason about one item goes in the note of that item, or as a sub-bullet under it. It is not a new item and it does not get its own heading.',
+  '- Do not regroup or split a numbered list. The order is the point.',
   '',
   '### Grouping',
   '',
@@ -157,6 +179,7 @@ export const DEFAULT_NOTES_INSTRUCTIONS = [
   '- Write only what the speakers said. Do not invent names, numbers or decisions.',
   '- Keep the strength that the speaker gave. An aside is not a proposal. A fragment is not a commitment. "Right, okay" is not a decision.',
   '- If you are not sure what the speaker meant, write the smaller point that you are sure of. Do not write a larger point with a caveat.',
+  '- Keep the meaning of the speaker. A problem stays a problem: do not write it as a benefit. Keep the action that the speaker named: "replace" is not "inspect". A question stays a question until someone answers it.',
   '- Do not join the words of two speakers who talk at the same time into one intention.',
   '- If a word is garbled, use the reading that agrees with the project context.',
   '',

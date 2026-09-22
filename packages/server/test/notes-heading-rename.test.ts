@@ -253,3 +253,38 @@ describe('a tick that tries to remove a heading', () => {
     expect(harness.markdown()).toContain('onboarding moves with it');
   });
 });
+
+describe('a bare page heading given its name', () => {
+  const PAGE: readonly proseTypes.OutlineEntry[] = [
+    { id: 'p1', kind: 'heading', nodeName: 'heading', level: 2, text: 'Page 1', author: 'notes' },
+  ] as unknown as readonly proseTypes.OutlineEntry[];
+  const name = (markdown: string): proseTypes.BlockEdit => ({
+    op: 'replace_block',
+    blockId: 'p1',
+    markdown,
+  });
+
+  it('is applied when the note-taker wrote it and the name keeps its number', () => {
+    for (const md of ['## Page 1: Riverbend repairs', '## Page one: Riverbend repairs']) {
+      expect(headingRename(name(md), PAGE, 'notes')).toEqual({ edit: name(md), applied: true });
+    }
+  });
+
+  it('is still a proposal when somebody else wrote the heading', () => {
+    expect(headingRename(name('## Page 1: Riverbend repairs'), PAGE, 'someone-else')).toMatchObject(
+      { edit: { propose: true } },
+    );
+  });
+
+  it('is still a proposal when the name moves it to another page', () => {
+    expect(headingRename(name('## Page two: Saltmarsh flooding'), PAGE, 'notes')).toMatchObject({
+      edit: { propose: true },
+    });
+  });
+
+  it('never widens to a topic heading: extending "Pricing" is still a proposal', () => {
+    const edit = { op: 'replace_block' as const, blockId: 'h1', markdown: '## Pricing and tiers' };
+    const out = headingRename(edit, OUTLINE, 'notes');
+    expect(out).toMatchObject({ edit: { propose: true } });
+  });
+});

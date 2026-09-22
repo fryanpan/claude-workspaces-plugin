@@ -431,17 +431,17 @@ export function guardNotesEdits(
     // which decides rewrite-versus-redline everywhere else — would let a
     // silent reorganisation of somebody's page straight through
     // (`notes-heading-rename.ts`).
-    const rename = headingRename(edit, outline ?? []);
+    const rename = headingRename(edit, outline ?? [], ctx.authorId);
     if (rename !== null) {
       if ('refused' in rename) {
         refused.push(`${edit.op} on heading ${edit.blockId}: ${rename.refused}`);
         continue;
       }
       out.push(rename.edit);
-      kept.push(
-        `replace_block on heading ${edit.blockId} renames it — filed as a suggestion, ` +
-          'so the reader decides whether the page is re-filed',
-      );
+      const how = rename.applied
+        ? 'names a bare page heading'
+        : 'renames it — filed as a suggestion, so the reader decides whether the page is re-filed';
+      kept.push(`replace_block on heading ${edit.blockId} ${how}`);
       continue;
     }
     // NO HEADING IS DELETED BY A TICK. Removing one re-files everything under
