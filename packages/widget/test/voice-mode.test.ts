@@ -362,3 +362,70 @@ describe('a workspace that wants a signature', () => {
     ]);
   });
 });
+
+/**
+ * On the tailnet widget door every route but the two static scripts asks for
+ * the reviewer's board token, and a browser cannot set a header on a
+ * WebSocket — so the recorder's socket has to offer it as its one
+ * subprotocol, exactly as the doc socket does (`widget.ts`'s `connect`).
+ */
+describe('the recorder’s socket', () => {
+  function mountWithRealSocket(authToken: string | null): Array<[string, string | undefined]> {
+    document.body.innerHTML = '<main><h1 id="goal">Goal</h1></main>';
+    const host = document.createElement('claude-feedback-widget');
+    const shadow = host.attachShadow({ mode: 'open' });
+    for (const cls of ['fab-list', 'fab']) {
+      const b = document.createElement('button');
+      b.className = cls;
+      shadow.append(b);
+    }
+    document.body.append(host);
+    const widget = Object.assign(host, {
+      shadow,
+      opts: { serverUrl: 'ws://host:8787', workspaceId: 'w-1', docId: 'd-1' },
+      user: { name: 'Ada', color: '#123456' },
+      feedbackMode: false,
+      signInToWrite: false,
+      authToken,
+      currentContext: undefined,
+    }) as unknown as FeedbackWidgetEl;
+
+    const opened: Array<[string, string | undefined]> = [];
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        readyState = 0;
+        constructor(url: string, protocol?: string) {
+          opened.push([url, protocol]);
+        }
+        addEventListener() {}
+        send() {}
+        close() {}
+      },
+    );
+    const mic = fakeMic();
+    const mode = mountVoiceMode(widget, addMic(widget, LABELS), {
+      startCapture: mic.start,
+      shown: () => true,
+    });
+    cleanups.push(() => {
+      if (mode.session.state !== 'idle') mode.session.stop();
+    });
+    mode.toggle();
+    return opened;
+  }
+
+  it('offers the reviewer’s board token as its one subprotocol', () => {
+    const opened = mountWithRealSocket('wt2.abc.def.ghi.jkl');
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.[0]).toBe('ws://host:8787/workspaces/w-1/docs/d-1/voice');
+    expect(opened[0]?.[1]).toBe('wt2.abc.def.ghi.jkl');
+  });
+
+  it('offers nothing where there is no board token, and never a session one', () => {
+    expect(mountWithRealSocket(null)[0]?.[1]).toBeUndefined();
+    // A `wt1` is a SESSION token. It dies at logout, and the doc socket
+    // refuses to ride one for the same reason.
+    expect(mountWithRealSocket('wt1.abc.def')[0]?.[1]).toBeUndefined();
+  });
+});
