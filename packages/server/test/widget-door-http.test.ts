@@ -78,6 +78,7 @@ beforeAll(async () => {
     .sign(privateKey);
   widgetDist = mkdtempSync(join(tmpdir(), 'widget-door-dist-'));
   writeFileSync(join(widgetDist, 'widget.iife.js'), '/* the widget */');
+  writeFileSync(join(widgetDist, 'mic.js'), '/* the mic */');
   writeFileSync(join(widgetDist, 'voice.js'), '/* the voice chunk */');
   // The negative control's file. It is served on every other surface, so a
   // 404 on the door is the door refusing it rather than the file missing.
@@ -250,17 +251,21 @@ describe('the tailnet widget door', () => {
       : undefined;
 
   describe('with no token', () => {
-    it('serves the widget bundle and the voice chunk, the two that need none', async () => {
-      const bundle = await onDoor(base, '/widget.iife.js');
-      expect(bundle.status).toBe(200);
-      expect(await bundle.text()).toBe('/* the widget */');
-      // A `<script src>` can set no Authorization header, so the chunk the
-      // mic fetches on its first tap is admitted on the same terms.
-      const chunk = await onDoor(base, '/widget/voice.js');
-      expect(chunk.status).toBe(200);
-      expect(await chunk.text()).toBe('/* the voice chunk */');
-      // NEGATIVE CONTROL: its neighbour in the same directory, written to the
-      // same fixture and served everywhere else, is not on the list.
+    it('serves the three scripts that need no token, and only those three', async () => {
+      // A `<script src>` can set no Authorization header, so the mic the
+      // bundle fetches at DOMContentLoaded and the chunk the mic fetches on
+      // its first tap are admitted on the bundle's own terms.
+      for (const [path, body] of [
+        ['/widget.iife.js', '/* the widget */'],
+        ['/widget/mic.js', '/* the mic */'],
+        ['/widget/voice.js', '/* the voice chunk */'],
+      ]) {
+        const res = await onDoor(base, path);
+        expect(res.status, path).toBe(200);
+        expect(await res.text(), path).toBe(body);
+      }
+      // NEGATIVE CONTROL: their neighbour in the same directory, written to
+      // the same fixture and served everywhere else, is not on the list.
       expect((await onDoor(base, '/widget/mockup-live.js')).status).toBe(404);
     });
 

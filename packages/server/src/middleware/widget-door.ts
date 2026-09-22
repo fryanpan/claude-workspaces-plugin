@@ -20,15 +20,17 @@
  * What the door admits, and it is an allowlist: a route added to this server
  * tomorrow is 404 on the tailnet hostname by default.
  *
- * 1. `GET /widget.iife.js` and `GET /widget/voice.js` — the bundle and the
- *    lazy voice chunk. Static, and the same bytes every embed gets; the two
- *    requests that need no token, because neither can carry one. The widget
+ * 1. `GET /widget.iife.js`, `GET /widget/mic.js` and `GET /widget/voice.js` —
+ *    the bundle, the microphone it fetches at DOMContentLoaded
+ *    (`widget/src/widget-mic-inject.ts`) and the voice chunk the mic fetches
+ *    on its first tap. Static, and the same bytes every embed gets; the three
+ *    requests that need no token, because none can carry one. The widget
  *    cannot ask for a token before it has run, and a `<script src>` sets no
- *    Authorization header at all (`widget/src/voice/voice-loader.ts`). Both
- *    are already public to a share visitor, so admitting them here widens
- *    nothing. Named one by one rather than as a `/widget/` prefix: the mock
- *    host and bridge sit in that directory too, and an allowlist that grew
- *    with the build output would not be one.
+ *    Authorization header at all (`widget/src/voice/voice-loader.ts`). All
+ *    three are already public to a share visitor, so admitting them here
+ *    widens nothing. Named one by one rather than as a `/widget/` prefix: the
+ *    mock host and bridge sit in that directory too, and an allowlist that
+ *    grew with the build output would not be one.
  * 2. `GET /api/auth/session` and `GET /api/auth/widget-session` — the two
  *    probes the widget makes on load. Without a token they answer the 401 that
  *    tells the widget to offer sign-in, and where to; with one they answer.
@@ -57,7 +59,11 @@ export type WidgetDoorRoute =
 const PROBES: ReadonlySet<string> = new Set(['/api/auth/session', '/api/auth/widget-session']);
 
 /** The widget's own static bytes: the bundle, and the chunk it fetches. */
-const SCRIPTS: ReadonlySet<string> = new Set(['/widget.iife.js', '/widget/voice.js']);
+const SCRIPTS: ReadonlySet<string> = new Set([
+  '/widget.iife.js',
+  '/widget/mic.js',
+  '/widget/voice.js',
+]);
 
 /** The thread verbs the widget posts, and nothing a doc page does beyond them.
  *  `edit-comment` and `reanchor` are the two a SPOKEN comment adds: the words

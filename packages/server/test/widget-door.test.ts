@@ -29,13 +29,13 @@ const PAGE = `http://${DOOR}:8994`;
 const KEY = widgetTokenKey('test-cookie-key');
 
 describe('widgetDoorRoute', () => {
-  it('admits the bundle, the voice chunk and the two load probes, by GET only', () => {
-    expect(widgetDoorRoute('/widget.iife.js', 'GET')).toEqual({ kind: 'bundle' });
-    expect(widgetDoorRoute('/widget/voice.js', 'GET')).toEqual({ kind: 'bundle' });
+  it('admits the bundle, the mic, the voice chunk and the two probes, by GET only', () => {
+    for (const script of ['/widget.iife.js', '/widget/mic.js', '/widget/voice.js']) {
+      expect(widgetDoorRoute(script, 'GET'), script).toEqual({ kind: 'bundle' });
+      expect(widgetDoorRoute(script, 'POST'), script).toBeNull();
+    }
     expect(widgetDoorRoute('/api/auth/session', 'GET')).toEqual({ kind: 'probe' });
     expect(widgetDoorRoute('/api/auth/widget-session', 'GET')).toEqual({ kind: 'probe' });
-    expect(widgetDoorRoute('/widget.iife.js', 'POST')).toBeNull();
-    expect(widgetDoorRoute('/widget/voice.js', 'POST')).toBeNull();
     expect(widgetDoorRoute('/api/auth/session', 'POST')).toBeNull();
   });
 

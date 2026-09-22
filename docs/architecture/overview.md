@@ -530,19 +530,25 @@ settles through the ordinary thread routes, `voice-ui.ts` draws the live
 comment and the settled cards (its styles in `voice-css.ts`, the column
 layout in `voice-column.ts`), and `voice-mode.ts` glues them to the page (a
 tap sends the next words to an element, or back into that element's earlier
-note). The board imports it directly
-(`board/board-feedback-mic.ts`); a mock page gets the mic from
-`mockup-live.js` and fetches the rest as the lazy chunk `voice.js` on the
-first tap (`voice/voice-loader.ts`), so none of it is in `widget.iife.js`,
-which mock pages load against a hard size budget. **A page that embeds the
-widget by hand gets no mic**: `widget.ts` imports neither module, so a
-dev-server embed loading `widget.iife.js` alone plays clips and records
-nothing. Every path below it — the door, the chunk, the socket — is open to
-such a page; the button that starts it is not yet mounted anywhere but a mock
-and the board. On the tailnet name all of it goes through the widget door
-(`middleware/widget-door.ts`), which admits the chunk without a token and the
-socket, the thread verbs `edit-comment` and `reanchor`, and the recordings
-with one. Inside a served mock's frame the browser
+note). Three kinds of page reach it, and none of them puts any of it in the
+budgeted bundle. The board imports it directly
+(`board/board-feedback-mic.ts`). A mock page gets the mic from
+`mockup-live.js`. **An ordinary embed — a tag and a script on somebody else's
+dev server — fetches it**: `widget-mic-inject.ts` is the few bytes in
+`widget.iife.js` that append `<script src="<serverUrl>/widget/mic.js">` at
+DOMContentLoaded, and `mic-entry.ts` is that chunk's entry, mounting the
+button through the same `voice/voice-loader.ts` a mock goes through. Both are
+top-level modules of the widget package; only the first is on the budget, and
+it is reached from `widget-iife.ts` alone, so `widget.esm.js` and the board
+pay nothing and the board's own mount is not doubled. `window.cwMic`, set at
+module scope by `voice-loader.ts`, is how a page carrying `mockup-live.js`
+tells the injector to stand down before either mount runs. Either way the
+first tap fetches the lazy chunk `voice.js` (`voice/voice-loader.ts`), so a
+page that never speaks pays for the button and nothing behind it. On the
+tailnet name all of it goes through the widget door
+(`middleware/widget-door.ts`), which admits the mic and the chunk without a
+token and the socket, the thread verbs `edit-comment` and `reanchor`, and the
+recordings with one. Inside a served mock's frame the browser
 refuses the microphone to an opaque origin, so there the host page holds it
 instead: `mock-host-mic.ts` (widget, a top-level module the host asset
 bundles) opens the capture when the frame asks over its voice socket, streams
