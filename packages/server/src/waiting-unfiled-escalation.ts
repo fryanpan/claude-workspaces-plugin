@@ -1,67 +1,16 @@
-/**
- * An unfiled ask that is still unfiled a second window later goes up the
- * ladder — and does it as ONE item for the whole fleet.
- *
- * `stall-nudge.ts` tells the board's lead about every task on the gate's
- * `unfiled` list on the first window. That is the right first addressee: the
- * lead can file the ask in one call. What it cannot do is notice that the
- * lead did not. An ask nobody filed, that the lead was told about, is
- * invisible to everybody who could act on it — which is the shape that put a
- * fleet's worth of waits in chat and nowhere else.
- *
- * ONE way onto that list ages here (`waitingUnfiledRows`): a row whose own
- * agent said it waits on a person. A row the BOARD says a person owns is
- * refused — nobody has an act to perform on it, so an item naming it is
- * noise; the story is at that function.
- *
- * So this is the aging half, and it is deliberately the SAME ladder
- * `stall-check/README.md` already has: lead → Team Lead → the owner. Team
- * Lead first, on whichever board it holds a stream, once per window; the
- * owner's own queue only when Team Lead cannot be reached either. That order
- * is not a formality — the design's second condition is that the owner is
- * only ever shown something they can act on, and "your agents are asking you
- * things in chat" is a report about the fleet, which Team Lead can fix and
- * the owner would only hand back.
- *
- * ── One item per BOARD, and not one per task ────────────────────────────
- *
- * The queue's failure mode is the wake's, wearing a different hat: an entry
- * per stuck task is a queue that grows with the outage instead of describing
- * it. `stall-escalation.ts` learned this and files one item per dead board;
- * this files one item per board too. Each is revised in place as that
- * board's tasks join and leave, and withdrawn the moment none is left.
- *
- * It was ONE item for the whole SERVER until 2026-09-22, on the reasoning
- * that fleet discipline is a property of the fleet. What that produced was an
- * item anchored on whichever board happened to be due longest, revised later
- * to name rows from boards its reader was not working — and a reader can only
- * act on a board they are on (Bryan, 2026-09-21: "The second isn't even in
- * your project"). The WAKE is still one frame for the whole fleet, because a
- * wake is a turn and the fact is the same fact; an item is a record on a
- * queue, and a queue belongs to a board.
- *
- * The item has to hang on a ticket, so it hangs on that board's worst due
- * task's, the same way the dead-board item does — and, the same way, its own
- * filing must not exonerate that task: the wiring already skips this actor's
- * items when it reads a task's asks (`STALL_ESCALATION_ACTOR`), so the anchor
- * keeps reading as unfiled on every tick.
- */
-import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
-import { STALL_ESCALATION_ACTOR, type TeamLeadReach } from './stall-escalation.ts';
+import { type TeamLeadReach } from './stall-escalation.ts';
 import type { StallSnapshot } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';
+import { type FilingContext, fileEachBoard, withdrawBoardItem } from './waiting-unfiled-filing.ts';
 import { buildFleetFrame } from './waiting-unfiled-frame.ts';
-import { type AgingWait, buildWaitingUnfiledReview } from './waiting-unfiled-review.ts';
+import { type AgingWait } from './waiting-unfiled-review.ts';
 import { isDue, ownerBound, teamLeadCarry } from './waiting-unfiled-routing.ts';
 import {
-  type Filed,
   type Seen,
   type Sidecar,
-  dropFiled,
   emptySidecar,
   loadSidecar,
   saveSidecar,
-  setFiled,
   sidecarPath,
 } from './waiting-unfiled-sidecar.ts';
 
@@ -197,11 +146,11 @@ export class WaitingUnfiledEscalations {
     }
     this.sidecar.seen = seen;
 
-    // Due: named a full window ago and STILL unfiled. ONE window, whatever the
-    // bucket (`isDue`, `waiting-unfiled-routing.ts`) — a finding that clears
-    // inside it should file nothing, and that is as true of the person-blocked
-    // half as of the other. What the bucket changes is the ADDRESSEE, decided
-    // below. Worst first, so the anchor is the task that has waited longest.
+    // Due: named a full window ago and STILL unfiled. One window (`isDue`,
+    // `waiting-unfiled-routing.ts`) — a finding that clears inside it should
+    // file nothing. One bucket reaches here, so nothing about the row changes
+    // the addressee; what does is the tell cap, decided below. Worst first, so
+    // the anchor is the task that has waited longest.
     const due = [...present.values()]
       .filter((row) => isDue(row, now, this.agingMs))
       .sort((a, b) => a.firstSeen - b.firstSeen);
@@ -333,118 +282,25 @@ export class WaitingUnfiledEscalations {
     return delivered > 0;
   }
 
-  private liveItem(filed: Filed): TaskReviewItem | undefined {
-    try {
-      return this.store.listReviewItems(filed.taskId).find((i) => i.id === filed.itemId);
-    } catch {
-      return undefined;
-    }
+  /** What `waiting-unfiled-filing.ts` needs, built fresh each call because
+   *  `load()` replaces the sidecar object. */
+  private filing(): FilingContext {
+    return {
+      store: this.store,
+      sidecar: this.sidecar,
+      agingMs: this.agingMs,
+      say: (message) => this.say(message),
+    };
   }
 
-  /** Can the item still be SEEN where it hangs? `taskReviewItems` skips a done
-   *  ticket's items, so one left on a closed task is off the queue while
-   *  `isReviewItemOpen` still answers true. */
-  private anchorReachable(filed: Filed): boolean {
-    const task = this.store.getTask(filed.taskId);
-    if (!task) return false;
-    return task.status !== 'done' && task.archivedAt === undefined;
-  }
-
-  /**
-   * File or revise ONE item per board, and take back the item of any board
-   * that is no longer due at all.
-   *
-   * `filing` is the set that reaches a person — every due row when Team Lead
-   * cannot be reached, the capped rows when it can. `stillDue` is every due
-   * row on the tick, which is what says whether a board still has a finding:
-   * a board with due rows that all still have wakes left keeps its standing
-   * item rather than having it withdrawn and re-filed a window later.
-   */
+  /** One item per board, then one write. */
   private fileOrReviseEachBoard(
     filing: readonly AgingWait[],
     stillDue: readonly AgingWait[],
     now: number,
   ): void {
-    const dueBoards = new Set(stillDue.map((row) => row.workspaceId));
-    for (const workspaceId of Object.keys(this.sidecar.filedByBoard ?? {})) {
-      if (!dueBoards.has(workspaceId))
-        this.clearBoard(workspaceId, 'every unfiled wait on this board was filed or cleared');
-    }
-    for (const workspaceId of [...new Set(filing.map((row) => row.workspaceId))]) {
-      this.fileOrReviseBoard(
-        workspaceId,
-        filing.filter((row) => row.workspaceId === workspaceId),
-        now,
-      );
-    }
+    fileEachBoard(this.filing(), filing, stillDue, now);
     this.save();
-  }
-
-  /** One board's item. Never writes the sidecar itself — the caller does it
-   *  once, after every board, so one tick costs one write. */
-  private fileOrReviseBoard(workspaceId: string, due: readonly AgingWait[], now: number): void {
-    const keys = due.map((row) => key(row.workspaceId, row.taskId)).sort();
-    const filed = this.sidecar.filedByBoard?.[workspaceId];
-    const item = filed ? this.liveItem(filed) : undefined;
-    const standing =
-      filed !== undefined &&
-      item !== undefined &&
-      isReviewItemOpen(item) &&
-      !reviewWithdrawn(item.review) &&
-      this.anchorReachable(filed);
-    if (filed && standing) {
-      if (sameKeys(keys, filed.keys)) return;
-      const res = this.store.reviseReviewItem(
-        filed.taskId,
-        filed.itemId,
-        buildWaitingUnfiledReview({ rows: due, agingMs: this.agingMs, now }),
-        { actor: { ...STALL_ESCALATION_ACTOR } },
-      );
-      if (!res.ok) {
-        // A refusal is never a reason to file a second item — that is the one
-        // outcome this module must not produce. The next tick tries again.
-        this.say(`[stall] waiting-unfiled revise refused item=${filed.itemId}: ${res.error}`);
-        return;
-      }
-      setFiled(this.sidecar, workspaceId, { ...filed, keys });
-      return;
-    }
-    if (filed) {
-      // Two ways to stop standing, and only one of them means the owner saw
-      // it. ANSWERED or WITHDRAWN is a person having read the list, so those
-      // tasks are not asked about again this stretch. An anchor that CLOSED
-      // took the item off the queue without anybody reading it — marking its
-      // tasks seen there would retire a live finding on the strength of one
-      // ticket being completed, so the keys stay unseen and the next few
-      // lines re-file against a due task that is still open.
-      if (item && this.anchorReachable(filed)) {
-        this.sidecar.seenByOwner = union(this.sidecar.seenByOwner ?? [], filed.keys);
-      }
-      dropFiled(this.sidecar, workspaceId);
-    }
-    const unseen = due.filter(
-      (row) => !(this.sidecar.seenByOwner ?? []).includes(key(row.workspaceId, row.taskId)),
-    );
-    const anchor = unseen[0];
-    if (!anchor) return;
-    const res = this.store.addReviewItem(
-      anchor.taskId,
-      buildWaitingUnfiledReview({ rows: unseen, agingMs: this.agingMs, now }),
-      { actor: { ...STALL_ESCALATION_ACTOR } },
-    );
-    if (!res.ok) {
-      this.say(`[stall] waiting-unfiled filing refused task=${anchor.taskId}: ${res.error}`);
-      return;
-    }
-    setFiled(this.sidecar, workspaceId, {
-      workspaceId: anchor.workspaceId,
-      taskId: anchor.taskId,
-      itemId: res.item.id,
-      keys: unseen.map((row) => key(row.workspaceId, row.taskId)).sort(),
-    });
-    this.say(
-      `[stall] waiting-unfiled filed ws=${workspaceId} rows=${unseen.length} item=${res.item.id}`,
-    );
   }
 
   /** Take every board's item back and forget the stretch. */
@@ -452,23 +308,7 @@ export class WaitingUnfiledEscalations {
     this.sidecar.teamLeadToldAt = undefined;
     this.sidecar.seenByOwner = undefined;
     for (const workspaceId of Object.keys(this.sidecar.filedByBoard ?? {}))
-      this.clearBoard(workspaceId, reason);
-  }
-
-  /** Take ONE board's item back. */
-  private clearBoard(workspaceId: string, reason: string): void {
-    const filed = this.sidecar.filedByBoard?.[workspaceId];
-    dropFiled(this.sidecar, workspaceId);
-    if (!filed) return;
-    const item = this.liveItem(filed);
-    if (!item || !isReviewItemOpen(item) || reviewWithdrawn(item.review)) return;
-    const res = this.store.withdrawReviewItem(filed.taskId, filed.itemId, {
-      actor: { ...STALL_ESCALATION_ACTOR },
-      reason,
-    });
-    if (!res.ok)
-      this.say(`[stall] waiting-unfiled withdraw refused item=${filed.itemId}: ${res.error}`);
-    else this.say(`[stall] waiting-unfiled cleared item=${filed.itemId}: ${reason}`);
+      withdrawBoardItem(this.filing(), workspaceId, reason);
   }
 
   private say(message: string): void {
@@ -489,12 +329,4 @@ export class WaitingUnfiledEscalations {
   private save(): void {
     this.lastPersisted = saveSidecar(this.path, this.sidecar, this.lastPersisted);
   }
-}
-
-function union(a: readonly string[], b: readonly string[]): string[] {
-  return [...new Set([...a, ...b])];
-}
-
-function sameKeys(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((k, i) => k === b[i]);
 }

@@ -1,14 +1,16 @@
 /**
- * Which rung of the unfiled-ask ladder each row belongs on, and nothing else.
+ * The unfiled-ask ladder's two thresholds, as three functions over anything
+ * carrying a first-seen, so the escalation's tick reads as sentences and each
+ * threshold can be driven on its own.
  *
- * One list, one bucket, two rungs. Every row here is `waiting-unfiled` — the
- * task's OWN agent saying, in its closing words, that it waits on a person
- * with nothing filed. An agent can end that: it files the ask, or it says
- * there was none. So the row climbs the ladder — the task's lead first, then
- * Team Lead, and only past the wake cap does it land on the owner's standing
- * item, which is a record rather than a wake and costs nobody a turn.
+ * Every row that reaches them is `waiting-unfiled` — the task's OWN agent
+ * saying, in its closing words, that it waits on a person with nothing filed.
+ * An agent can end that: it files the ask, or it says there was none. So the
+ * row climbs — the task's lead first, then Team Lead, and past the wake cap
+ * onto the owner's standing item, which is a record rather than a wake and
+ * costs nobody a turn.
  *
- * ── What used to be here ────────────────────────────────────────────────
+ * ── What used to be here, and what this module is now ───────────────────
  *
  * A second bucket, `blocked-on-owner-unfiled`: the BOARD saying a person owns
  * the row. It shared the list and skipped straight to the owner's item, on
@@ -21,7 +23,15 @@
  * time on the way in. `StallVerdict.awaitingPerson` is where such a row is
  * written down now.
  *
- * So the split below is the tell cap alone.
+ * `onlyAPersonCanEnd` went with it, and with it this module's original reason
+ * to exist — the point where the two buckets parted company. What is left is
+ * NOT a decision about a row: `teamLeadCarry` and `ownerBound` are exact
+ * complements over one number the caller supplies, and the caller is the only
+ * thing that knows which rows to hand each of them. That is worth keeping as
+ * a named pair rather than inlining, because the two are read at DIFFERENT
+ * moments on purpose (see `ownerBound`), and a reader of the escalation's
+ * tick has to be able to see that they partition rather than infer it from
+ * two filter callbacks twelve lines apart.
  */
 
 /** The shape this decides over: anything carrying a first-seen. */

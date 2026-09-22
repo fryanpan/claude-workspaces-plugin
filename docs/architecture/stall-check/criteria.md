@@ -58,11 +58,16 @@ today's code fails is flagged.
   is a different finding from the rule, so it is reported (#1077) — unless the
   rule's date has not arrived, which is a deferral rather than a question
   (`owner-ask.ts`, above).
+- **Consequence:** a `declare_wait` on a person-owned row now annotates
+  nothing. `declaredWaits` is built from the rows the gate reports, and such a
+  row is on neither, so there is no frame line for the declaration to change.
+  Nothing is lost — the declaration exists to say why a FINDING is quiet, and
+  this row is no longer one.
 - **Measured by:** unit tests per exclusion, including a `waiting-unfiled` row
   ranked past the cap (`waiting-unfiled-beyond-cap.test.ts`); the verdict's
   `considered` denominator; `person-owned-quiet.test.ts` for the record,
-  which drives all four surfaces with the agent-declared bucket as its
-  control on each.
+  which drives all five surfaces with the agent-declared bucket as its
+  control on each; `task-wait.test.ts` for the declaration.
 
 ## `stall-nudge.ts` — the lead wake
 

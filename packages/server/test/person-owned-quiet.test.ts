@@ -16,9 +16,15 @@
  * keeps it as a RECORD on `awaitingPerson`, which counts toward no verdict
  * and enters no frame.
  *
- * Four surfaces, each with the agent-declared bucket as its control — without
+ * Five surfaces, each with the agent-declared bucket as its control — without
  * the control every case here would pass against a build that had simply
  * stopped reporting anything.
+ *
+ * The fifth is the DEAD-BOARD escalation, and it is here because this change
+ * took an explicit guard off it. The wake used to hand that filer a board
+ * already stripped of person-owned rows (`withoutPersonBlocked`); it is now
+ * correct by construction, because the rows never reach the list the filer
+ * reads. Correct by construction is exactly what a test pins.
  *
  * Fixtures are synthetic — invented boards and titles. The repo is public.
  */
@@ -28,7 +34,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { keepMovingVerdictFor } from '../src/keep-moving-verdict.ts';
 import type { TaskRow } from '../src/keep-moving.ts';
-import { STALL_ESCALATION_ACTOR } from '../src/stall-escalation.ts';
+import { STALL_ESCALATION_ACTOR, StallEscalations } from '../src/stall-escalation.ts';
 import { OWNER_UNFILED_BUCKET, evaluateStalls } from '../src/stall-gate.ts';
 import { StallNudger, type StallSnapshot } from '../src/stall-nudge.ts';
 import { TaskStore } from '../src/tasks.ts';
@@ -251,5 +257,81 @@ describe('the unfiled escalation', () => {
 
     expect(escalations.filedCount()).toBe(1);
     expect(serverItems(store, ws)).toHaveLength(1);
+  });
+});
+
+describe('the dead-board escalation', () => {
+  let dir = '';
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = '';
+  });
+
+  const HOUR = 60 * MIN;
+
+  function boardWith(title: string) {
+    dir = dir || mkdtempSync(join(tmpdir(), 'person-owned-dead-'));
+    const store = new TaskStore({ dataDir: dir });
+    const ws = store.createWorkspace('harborlight-ferry', { leadAgentId: 'agent-lead' }).id;
+    const res = store.createTask(ws, {
+      title,
+      body: `Bryan can ${title.toLowerCase()} so that the ferry sails.`,
+      assignee: 'Cartographer',
+      assigneeKind: 'agent',
+    });
+    if (!res.ok) throw new Error('create failed');
+    return { store, ws, id: res.task.id };
+  }
+
+  /** A board nobody has been on for three hours, which is what makes the
+   *  filer look at its rows at all. */
+  const dead = (ws: string, rows: StallSnapshot['unfiled']): StallSnapshot => ({
+    workspaceId: ws,
+    leadAgentId: 'agent-lead',
+    retired: false,
+    stalled: [],
+    unfiled: rows,
+    considered: 1,
+    undetermined: [],
+    sessionLive: false,
+    sessionObservedAt: NOW - 3 * HOUR,
+    agentActiveAt: NOW - 3 * HOUR,
+  });
+
+  const filedItems = (store: TaskStore, taskId: string) =>
+    store.listReviewItems(taskId).filter((i) => i.createdBy === STALL_ESCALATION_ACTOR.name);
+
+  it('files nothing on a dead board whose only stuck row a person owns', () => {
+    const { store, ws, id } = boardWith('Send the Harborlight note');
+    const escalations = new StallEscalations({ store, escalateMs: HOUR });
+
+    // The board IS dead and the row IS stuck. What is missing is a finding:
+    // the gate put the row on `awaitingPerson`, which this filer never reads,
+    // so `qualifying()` comes back empty and there is nothing to file.
+    escalations.onBoard(dead(ws, []), NOW);
+
+    expect(filedItems(store, id)).toHaveLength(0);
+  });
+
+  it('CONTROL: the same dead board files for an agent-declared unfiled row', () => {
+    const { store, ws, id } = boardWith('Send the Harborlight note');
+    const escalations = new StallEscalations({ store, escalateMs: HOUR });
+
+    escalations.onBoard(
+      dead(ws, [
+        {
+          id,
+          title: 'Send the Harborlight note',
+          bucket: WAITING_UNFILED_BUCKET,
+          quietMs: 60 * MIN,
+        },
+      ]),
+      NOW,
+    );
+
+    // Same board, same silence, same three hours — and one row the filer can
+    // see. Without this the case above would pass against a filer that had
+    // stopped working altogether.
+    expect(filedItems(store, id)).toHaveLength(1);
   });
 });
