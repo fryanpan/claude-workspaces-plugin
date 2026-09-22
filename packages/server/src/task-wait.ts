@@ -33,11 +33,16 @@
  *  3. **The wake's other explanations still apply.** A hold or an asked-back
  *     question arriving on the same row is its own finding and is named as
  *     one; nothing here suppresses them.
- *  4. **It never excuses an UNFILED ask.** A row reading
- *     `blocked-on-owner-unfiled` is waiting on a PERSON with the question
- *     filed nowhere they read, and the remedy — file it — is the lead's and
- *     available now. `stall-gate.ts` applies the wait to stalled rows only,
- *     for that reason.
+ *  4. **It never excuses an UNFILED ask.** A `waiting-unfiled` row is one
+ *     whose own agent said, in its closing words, that it waits on a person
+ *     with the question filed nowhere they read; the remedy — file it, or
+ *     say there was none — is the lead's and available now. `stall-gate.ts`
+ *     applies the wait to stalled rows only, for that reason.
+ *
+ *     It used to read `blocked-on-owner-unfiled` here as well, the BOARD
+ *     saying a person owns the row. That is no longer an unfiled ask at all:
+ *     it is a record on `StallVerdict.awaitingPerson`, which no declaration
+ *     needs to excuse because nothing reads it.
  *
  * And it is visible the whole time: `since` survives a renewal that does not
  * change the words, so a wait renewed all day reads as nine hours on the
