@@ -314,17 +314,27 @@ file is what the builder did, the word is what the task claimed to be about.
   thread activity and Activity note.
 - **Must never:** read prose; add a second clock; name a task whose LAST open
   line just went met — completion is not a resumed blockage, and naming it
-  would turn the moment a ticket finishes into a wake; name a task whose
-  agent declared a wait AT OR AFTER the lift and whose declaration is still
+  would turn the moment a ticket finishes into a wake; name a task whose agent
+  FIRST declared a wait at or after the lift and whose declaration is still
   standing — the finding's whole sentence is that nobody has recorded reading
-  the answer, and that declaration is the record (a wait declared BEFORE the
-  lift, or one that has lapsed, says nothing about it and still names the
-  task); or name a task the
-  board has recorded any activity on since the lift. That last one is the
-  load-bearing guard, not the window: a task answered on Monday, worked all
-  week and quiet for forty minutes is not this finding, and a reading that
-  names it has rebuilt the status-age reading that called a merged, deployed
-  task parked for 44.6 hours.
+  the answer, and that declaration is the record; or name a task the board has
+  recorded any activity on since the lift. That last one is the load-bearing
+  guard, not the window: a task answered on Monday, worked all week and quiet
+  for forty minutes is not this finding, and a reading that names it has
+  rebuilt the status-age reading that called a merged, deployed task parked
+  for 44.6 hours.
+- **The declared-wait exception, exactly.** The stamp read is the wait's
+  `since`, which survives a same-words renewal, never `declaredAt`, which
+  moves on every one. Keyed on `declaredAt` an agent could re-state a wait it
+  had been rolling over all day and hide a lift that landed in the middle of
+  it — the 21-hour shape again, with the renewal doing the hiding. The
+  comparison carries `LIFT_CLOCK_EPSILON_MS` of tolerance, because a
+  declaration and a done-when report made in one agent turn are one action and
+  the order the server stamps them in must not decide the verdict. A wait
+  declared before the lift and a lapsed one both still name the task; on a
+  LAPSED one the reported `liftedAt` is the lapse rather than the lift, so the
+  age the lead reads is the time the row has been loud rather than the whole
+  span the declaration stood for.
 - **Measured by:** the wired test (`resumed-work-finding.test.ts`), which
   files an ask on a quiet in-progress task, answers it, and asserts the lead's
   frame and the verdict both name the task with the answer's own timestamp;
@@ -336,13 +346,18 @@ file is what the builder did, the word is what the task claimed to be about.
   isolates the rule from the auto-close that would carry the previous control
   on its own. Each control rides a BEACON row that is quiet and on no lift, so
   a silence assertion proves the tick ran rather than that no frame arrived.
-  The unit cases are `blockage-lift.test.ts`, and the declared-wait rule's
-  are the last describe of `stall-declared-wait.test.ts` — the wait declared
-  after the lift, the one declared before it, the one that has lapsed, and the
-  same row with no wait at all. And on the board itself: the
-  verdict's `unresumed` line at zero, and the finding naming a PROPER SUBSET
-  of the tasks that merely carry a met line with later lines open — naming all
-  of them is the status-age reading again.
+  The unit cases are `blockage-lift.test.ts`, and the declared-wait rule's are
+  the last describe of `stall-declared-wait.test.ts` — the wait first declared
+  after the lift (covered, and no wake at all), the one declared before it,
+  the one merely renewed after it, the one that has lapsed, the lapsed one's
+  age measured from the lapse, the one-turn boundary on both sides of
+  `LIFT_CLOCK_EPSILON_MS`, and the same row with no wait at all as the
+  control. And on the board itself: the verdict's `unresumed` line at zero,
+  and the finding naming a PROPER SUBSET of the tasks that merely carry a met
+  line with later lines open — naming all of them is the status-age reading
+  again. **An `unresumed` of zero now has two causes** — no lift went unread,
+  or every one is covered by a standing declaration — so read the verdict's
+  `declaredWaits` beside it to tell them apart.
 
 ### Why the lift is never a finding on its own
 

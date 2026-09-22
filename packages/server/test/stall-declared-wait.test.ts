@@ -15,16 +15,16 @@
  *
  * The last describe is the other half of the same question: which declared
  * waits answer the LIFTED-BLOCKAGE finding, whose whole sentence is that the
- * board has no record of anybody reading the answer. A wait declared after
- * the lift IS that record; one declared before it, or one that has lapsed, is
- * not — and the finding it was built from is a wait of exactly the second
- * kind.
+ * board has no record of anybody reading the answer. A wait FIRST declared at
+ * or after the lift IS that record; one declared before it, one merely
+ * renewed after it, and one that has lapsed are not — and the finding it was
+ * built from is a wait of exactly the second kind.
  *
  * All fixtures are synthetic — invented titles in a made-up workspace. The
  * repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import type { Lift } from '../src/blockage-lift.ts';
+import { LIFT_CLOCK_EPSILON_MS, type Lift } from '../src/blockage-lift.ts';
 import type { TaskRow } from '../src/keep-moving.ts';
 import { evaluateStalls } from '../src/stall-gate.ts';
 import {
@@ -55,6 +55,21 @@ function task(id: string, title: string, quietFor: number, over: Partial<TaskRow
 /** A wait declared at `at`, standing for `forMs`. */
 function waitOn(what: string, at: number, forMs: number): NonNullable<TaskRow['externalWait']> {
   return { what, since: at, declaredAt: at, until: at + forMs, by: 'Index Keeper' };
+}
+
+/**
+ * A wait FIRST declared at `since` and renewed at `declaredAt` — the shape
+ * `setExternalWait` writes when the words are unchanged, which keeps `since`
+ * and moves `declaredAt`. The gate reads `since`, so this is the shape that
+ * separates "somebody read the answer" from "somebody re-stated an old wait".
+ */
+function renewedWait(
+  what: string,
+  since: number,
+  declaredAt: number,
+  forMs: number,
+): NonNullable<TaskRow['externalWait']> {
+  return { what, since, declaredAt, until: declaredAt + forMs, by: 'Index Keeper' };
 }
 
 /**
@@ -314,8 +329,9 @@ describe('a declared wait against a lifted blockage', () => {
   });
 
   it('still names the row when a wait declared after the lift has lapsed', () => {
+    const declaredAt = LIFT_AT + DECLARED_AFTER;
     const h = loop(
-      [row({ externalWait: waitOn('the fleet restart', LIFT_AT + DECLARED_AFTER, 60 * MIN) })],
+      [row({ externalWait: waitOn('the fleet restart', declaredAt, 60 * MIN) })],
       lift(),
     );
 
@@ -325,6 +341,75 @@ describe('a declared wait against a lifted blockage', () => {
 
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]?.unresumed?.map((r) => r.id)).toEqual(['t-index']);
+  });
+
+  it('ages a lapsed cover from the lapse, not from the lift it answered', () => {
+    // The declaration answered the lift, so the hours it stood are not hours
+    // nobody read the answer. Measured from the lift the lead would be told
+    // the answer had sat unread for four hours; measured from the lapse, for
+    // the three it has actually been loud.
+    const declaredAt = LIFT_AT + DECLARED_AFTER;
+    const lapsesAfter = 60 * MIN;
+    const h = loop(
+      [row({ externalWait: waitOn('the fleet restart', declaredAt, lapsesAfter) })],
+      lift(),
+    );
+
+    const named = (h.verdict().unresumed ?? [])[0];
+    expect(named?.liftedAt, 'the stamp is the lapse').toBe(declaredAt + lapsesAfter);
+    expect(named?.liftedMs, 'and the age runs from it').toBe(START - (declaredAt + lapsesAfter));
+    // The control: the same row with no wait at all is aged from the lift.
+    const bare = (loop([row()], lift()).verdict().unresumed ?? [])[0];
+    expect(bare?.liftedAt).toBe(LIFT_AT);
+    expect(bare?.liftedMs).toBe(START - LIFT_AT);
+  });
+
+  it('still names the row when a standing wait was only RENEWED after the lift', () => {
+    // The mute button this rule must not be. The wait was first declared
+    // twenty minutes before the answer landed, and re-stating it afterwards
+    // says nothing about having read the answer — `setExternalWait` keeps
+    // `since` across a same-words renewal, and `since` is what the gate reads.
+    const h = loop(
+      [
+        row({
+          externalWait: renewedWait(
+            'the fleet restart',
+            LIFT_AT - 20 * MIN,
+            LIFT_AT + DECLARED_AFTER,
+            8 * 60 * MIN,
+          ),
+        }),
+      ],
+      lift(),
+    );
+
+    expect((h.verdict().unresumed ?? []).map((r) => r.id)).toEqual(['t-index']);
+
+    h.tick();
+
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.unresumed?.map((r) => r.id)).toEqual(['t-index']);
+  });
+
+  it('treats a declaration and a report made in one turn as one action', () => {
+    // Which of the two calls the server stamps first must not decide the
+    // verdict, so the cover reaches back by `LIFT_CLOCK_EPSILON_MS` — the same
+    // tolerance `blockage-lift.ts` spends on the lift's own row edit. The
+    // third reading is the control: one millisecond further back is a
+    // different turn, and the row is named.
+    const covered = (since: number): string[] =>
+      (
+        loop(
+          [row({ externalWait: waitOn('the fleet restart', since, 8 * 60 * MIN) })],
+          lift(),
+        ).verdict().unresumed ?? []
+      ).map((r) => r.id);
+
+    expect(covered(LIFT_AT), 'declared on the lift’s own stamp').toEqual([]);
+    expect(covered(LIFT_AT - LIFT_CLOCK_EPSILON_MS), 'the far edge of one turn').toEqual([]);
+    expect(covered(LIFT_AT - LIFT_CLOCK_EPSILON_MS - 1), 'one millisecond past it').toEqual([
+      't-index',
+    ]);
   });
 
   it('the control: the same row with no wait at all is named', () => {

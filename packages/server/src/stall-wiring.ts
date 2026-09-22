@@ -724,8 +724,12 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // untouched since the lift, which is precisely the claim this finding
     // makes. Almost all of them are already here as stalled rows; the ones
     // that are not — a row the parallelism cap holds back, a row whose
-    // declared wait still stands — are exactly the ones with no other reason
-    // to be looked at, so leaving them out would aim the gap at them.
+    // declared wait was declared BEFORE its lift or has lapsed — are exactly
+    // the ones with no other reason to be looked at, so leaving them out
+    // would aim the gap at them. A row whose wait was declared at or after
+    // the lift and still stands is on neither list: the gate reads that
+    // declaration as the answer having been read (`stall-gate.ts`), so it
+    // leaves this set on the first pass and its linked docs are not walked.
     //
     // The person-owned RECORD rides along too. It wakes nobody, but the
     // second pass is where a comment-borne ask on a doc the row LINKS is

@@ -35,7 +35,7 @@ check that serves none of them is weight.
 | A review item is held past the window | Its filer, then the lead | The filer's own wake; then the frame |
 | A person asked a question on a review item and its filer has not revised it past the window — it is off their queue, and a reply on the thread does not bring it back | The lead | Same frame, `askedBack`, with the question's age and the `revise_review_item` call |
 | An agent-filed UI task is being built with no answered review item | The lead | Same frame, `ungatedUi` |
-| A task's blockage LIFTED — an ask on it answered, or a done-when line met with later lines still open — and nothing has touched it since | The lead | Same frame, `unresumed`, each row naming the lift and its timestamp. Gated on the same quiet window as every other finding, measured FROM THE LIFT: an answer a minute old is one somebody may be reading. A wait the agent declared AT OR AFTER the lift and still standing takes the row off this list — the declaration is the record of somebody reading the answer; one declared before the lift, or one that has lapsed, is not |
+| A task's blockage LIFTED — an ask on it answered, or a done-when line met with later lines still open — and nothing has touched it since | The lead | Same frame, `unresumed`, each row naming the lift and its timestamp. Gated on the same quiet window as every other finding, measured FROM THE LIFT: an answer a minute old is one somebody may be reading. A wait the agent FIRST declared at or after the lift and still standing takes the row off this list — the declaration is the record of somebody reading the answer. The stamp read is the wait's `since`, so a renewal of an older wait covers nothing; a wait declared before the lift, and a lapsed one, both still name the row, and a lapsed one is aged from the lapse |
 | An in-progress task has every line met except those written as needing a person (`needs: 'owner'`), and its builder has not reported one of them ready | The task's agent, else the lead | `workspace.done_when_ready`, one per such line, once while it stands (`review-items/done-when-ready.ts`) — never the person, who is asked only once the builder reports the line `owner` |
 | No session on the board is alive | Team Lead, then the owner | The last resort — the board files an item past the lead |
 
@@ -79,10 +79,13 @@ reader asked a question back, is quiet for a reason that belongs to its filer,
 so it is named once and then stops driving that clock (`clockRows` in
 `stall-nudge.ts`) until the wait's identity changes — the item held again, a
 second question, or the wait cleared. A task with a standing `declare_wait`
-is not a finding at all (`withoutStandingWaits`): it wakes nobody, is never
-listed as stopped, and rides along on a wake that fired for something else
-only as a declared wait. The tick after the wait lapses it is a finding again,
-carrying all its silence. A task past the parallelism cap is not judged for
+is not a STALL finding (`withoutStandingWaits` takes it off `stalled` and off
+nothing else): it is never listed as stopped, and rides along on a wake that
+fired for something else only as a declared wait. It can still be a finding
+for another reason — an unfiled ask, or a lifted blockage its wait was
+declared BEFORE and so says nothing about — and then the wake it arrives on is
+its own. The tick after the wait lapses it is a stall finding again, carrying
+all its silence. A task past the parallelism cap is not judged for
 STALLING — there was no slot for it, so its silence is idleness by rule and it
 never enters the clock. It is still judged for an unanswered ask: capacity is
 why nobody picked the row up and says nothing about a question already asked
