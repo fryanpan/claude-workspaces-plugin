@@ -2648,6 +2648,48 @@ to have — so `--smoke` exits 1 on one, and the fix is to raise the structure
 rather than the threshold. The full run still only reports, per meeting, how
 many such topics the meeting ended with.
 
+### Does a note keep its meaning and order? `bun run notes:fidelity`
+
+`notes:eval` asks whether ideas reached the notes. It cannot see a note that
+reached the page in the wrong shape or with the wrong meaning. A solo
+dictation on 2026-09-22 showed three such faults. A laid-out page came back
+as topics of the model's own. A reason was split off its point. A stated
+problem was written as a benefit. The fixes and the checks that hold them:
+
+- **A dictated layout stays that layout.** The prompt's "Dictated layout"
+  section asks for one heading per page in the speaker's words and one
+  numbered note per item. The rule alone held on no tick, so
+  `notes-dictation.ts` names the heading id and the next number on each tick
+  that dictates. Three supports keep the list intact. The regroup scan and the
+  flat-run check treat a numbered item as structure. The rename guard applies,
+  rather than proposes, the one rename that names a bare "Page 1" heading
+  the note-taker wrote. A dash detail after a page's last item becomes a
+  sub-bullet of that item.
+- **A reason stays with its point** ("X, because Y"), asked by the prompt and
+  named per tick by `notes-reason-ask.ts`.
+- **An inversion is flagged at the stop.** `notes-inversions.ts` matches each
+  note to its source sentence and flags three changes of meaning: a problem
+  written as a benefit or the reverse, an action from a different synonym class
+  ("repave" as "reassess"), and a question written as a claim. The record keeps
+  the count, and the review item quotes each note beside its source. It is
+  lexical, so it misses an inversion in words outside its lists. Its bar,
+  `MAX_INVERTED_NOTES = 0`, has not been scored against recorded meetings.
+- **A repeated note ignores filler.** The repeated-bullet count keys each note
+  on its words minus a short filler list ("just", "really", "kind of"), so
+  two notes that differ only by one of those count as one duplicate.
+
+`scripts/notes-eval-fidelity.ts` plays one invented dictation
+(`notes-fidelity-dictation.ts`) through the real composer and scores the
+notes in code (`notes-fidelity-score.ts`). A page counts as kept when its
+heading carries the speaker's words and its items form one numbered list in
+the dictated order. A reason counts as retained when one bullet carries both
+the claim and the reason. Three runs each, on the eval key:
+
+| Arm | Pages kept | Reasons retained | Cost |
+| --- | --- | --- | --- |
+| Before the change | 0 of 6 | 5 of 9 | $0.10 |
+| After the change | 6 of 6 | 9 of 9 | $0.11 |
+
 ### Cost
 
 The four intents are prompt text on a call that was already being made.
