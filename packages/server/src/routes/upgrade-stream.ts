@@ -354,6 +354,15 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             kind: 'voice' as const,
             // Carried, not refused here, so the page can say why — as above.
             ...(requireSignInToWrite && browserProvedNobody() ? { readOnly: true } : {}),
+            // WHAT AUTHORIZED THIS SOCKET, for the same reason `/y` carries
+            // it: the door checks the board token once, at the upgrade, so
+            // without this the sweep could not find a recorder left running
+            // for a person whose token has expired, whose identity has been
+            // archived, or who has been taken off the board. This is the
+            // socket that spends a transcription engine while it is open,
+            // and `socket-handlers.ts` tracks it because it joins no doc's
+            // `conns` for a sweep to walk.
+            ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });

@@ -9,7 +9,7 @@
  * Fixtures are fictional hosts and names; the repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createThread, emailIdentityId } from '@claude-workspaces/core';
@@ -26,6 +26,7 @@ import {
 } from '../src/auth/widget-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
+import { voiceAudioDir, voiceSegmentPath } from '../src/voice-feedback-store.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -55,6 +56,8 @@ const anchor = {
   snippet: { text: 'Go' },
 };
 const claimed = { id: 'known-harborlight', name: 'Harborlight', kind: 'known', color: '#2e7dd7' };
+/** Stand-in for a recording. The door decides the address, not the format. */
+const CLIP_BYTES = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0]);
 
 let jwt = '';
 let widgetDist = '';
@@ -75,6 +78,10 @@ beforeAll(async () => {
     .sign(privateKey);
   widgetDist = mkdtempSync(join(tmpdir(), 'widget-door-dist-'));
   writeFileSync(join(widgetDist, 'widget.iife.js'), '/* the widget */');
+  writeFileSync(join(widgetDist, 'voice.js'), '/* the voice chunk */');
+  // The negative control's file. It is served on every other surface, so a
+  // 404 on the door is the door refusing it rather than the file missing.
+  writeFileSync(join(widgetDist, 'mockup-live.js'), '/* the mock live script */');
   serverOpts.widgetDistDir = widgetDist;
 });
 
@@ -177,6 +184,7 @@ describe('the tailnet widget door', () => {
   let boardB: string;
   let tokenA: string;
   let threadId: string;
+  let commentId: string;
   const docA = 'riverbend-page';
   const docB = 'saltmarsh-page';
 
@@ -201,7 +209,17 @@ describe('the tailnet widget door', () => {
       body: threadBody,
     });
     expect(posted.status).toBe(200);
-    threadId = ((await posted.json()) as { thread: { id: string } }).thread.id;
+    const thread = (
+      (await posted.json()) as {
+        thread: { id: string; comments: Array<{ id: string }> };
+      }
+    ).thread;
+    threadId = thread.id;
+    commentId = thread.comments[0]!.id;
+    // One recording, where the voice relay writes them. The door decides
+    // whether this address is reachable; the bytes only have to exist.
+    mkdirSync(voiceAudioDir(dataDir, docA), { recursive: true });
+    writeFileSync(voiceSegmentPath(dataDir, docA, 'seg-1.wav')!, CLIP_BYTES);
   });
 
   afterAll(async () => {
@@ -219,16 +237,31 @@ describe('the tailnet widget door', () => {
     ['POST', `/workspaces/${boardA}/docs/${docA}/threads/${threadId}/answer`, 'an answer'],
     ['POST', `/workspaces/${boardA}/docs/${docA}/threads/${threadId}/resolve`, 'a resolve'],
     ['POST', `/workspaces/${boardA}/docs/${docA}/threads/${threadId}/reopen`, 'a reopen'],
+    // What a SPOKEN comment adds: the words are rewritten while the speaker
+    // keeps talking, and the note follows the element it is about.
+    ['POST', `/workspaces/${boardA}/docs/${docA}/threads/${threadId}/edit-comment`, 'an edit'],
+    ['POST', `/workspaces/${boardA}/docs/${docA}/threads/${threadId}/reanchor`, 'a reanchor'],
+    ['GET', `/workspaces/${boardA}/docs/${docA}/voice-feedback/seg-1.wav`, 'a recording'],
   ];
 
   const bodyFor = (method: string) =>
-    method === 'POST' ? { text: 'a reply', author: claimed, anchor, answer: 'yes' } : undefined;
+    method === 'POST'
+      ? { text: 'a reply', author: claimed, anchor, answer: 'yes', commentId }
+      : undefined;
 
   describe('with no token', () => {
-    it('serves the widget bundle, the one request that needs none', async () => {
-      const res = await onDoor(base, '/widget.iife.js');
-      expect(res.status).toBe(200);
-      expect(await res.text()).toBe('/* the widget */');
+    it('serves the widget bundle and the voice chunk, the two that need none', async () => {
+      const bundle = await onDoor(base, '/widget.iife.js');
+      expect(bundle.status).toBe(200);
+      expect(await bundle.text()).toBe('/* the widget */');
+      // A `<script src>` can set no Authorization header, so the chunk the
+      // mic fetches on its first tap is admitted on the same terms.
+      const chunk = await onDoor(base, '/widget/voice.js');
+      expect(chunk.status).toBe(200);
+      expect(await chunk.text()).toBe('/* the voice chunk */');
+      // NEGATIVE CONTROL: its neighbour in the same directory, written to the
+      // same fixture and served everywhere else, is not on the list.
+      expect((await onDoor(base, '/widget/mockup-live.js')).status).toBe(404);
     });
 
     it('refuses every other admitted route with the sign-in cue and where to sign in', async () => {
@@ -244,9 +277,11 @@ describe('the tailnet widget door', () => {
       expect(commentActors(dataDir).length).toBe(1);
     });
 
-    it('refuses the socket', async () => {
-      const res = await doorSocket(base, `/workspaces/${boardA}/docs/${docA}/y`, null);
-      expect(res.status).toBe(401);
+    it('refuses both sockets', async () => {
+      for (const verb of ['y', 'voice']) {
+        const res = await doorSocket(base, `/workspaces/${boardA}/docs/${docA}/${verb}`, null);
+        expect(res.status, verb).toBe(401);
+      }
     });
 
     it('refuses a session-shaped or forged token the same way', async () => {
@@ -290,6 +325,20 @@ describe('the tailnet widget door', () => {
       const res = await doorSocket(base, `/workspaces/${boardA}/docs/${docA}/y`, tokenA);
       expect(res.status).toBe(101);
       expect(res.headers.get('sec-websocket-protocol')).toBe(tokenA);
+    });
+
+    it('opens the recorder’s socket on the same token', async () => {
+      const res = await doorSocket(base, `/workspaces/${boardA}/docs/${docA}/voice`, tokenA);
+      expect(res.status).toBe(101);
+      expect(res.headers.get('sec-websocket-protocol')).toBe(tokenA);
+    });
+
+    it('serves a recording, and the same recording is 401 without the token', async () => {
+      const path = `/workspaces/${boardA}/docs/${docA}/voice-feedback/seg-1.wav`;
+      const played = await onDoor(base, path, { token: tokenA });
+      expect(played.status).toBe(200);
+      expect(new Uint8Array(await played.arrayBuffer())).toEqual(CLIP_BYTES);
+      expect((await onDoor(base, path)).status).toBe(401);
     });
   });
 
@@ -445,6 +494,11 @@ describe('the tailnet widget door', () => {
       ['GET', `/workspaces/${boardA}/events:stream`],
       ['GET', '/widget-auth'],
       ['POST', '/api/auth/widget-token'],
+      ['GET', '/widget/mockup-live.js'],
+      // The recordings' neighbours: the raw-words log no widget code reads,
+      // and a file name that is not a recording.
+      ['GET', `/workspaces/${boardA}/docs/${docA}/voice-feedback.md`],
+      ['GET', `/workspaces/${boardA}/docs/${docA}/voice-feedback/seg-1.mp3`],
     ];
 
     it('answers 404 to every other route, even with a valid board token', async () => {

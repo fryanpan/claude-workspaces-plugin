@@ -29,26 +29,49 @@ const PAGE = `http://${DOOR}:8994`;
 const KEY = widgetTokenKey('test-cookie-key');
 
 describe('widgetDoorRoute', () => {
-  it('admits the bundle and the two load probes, by GET only', () => {
+  it('admits the bundle, the voice chunk and the two load probes, by GET only', () => {
     expect(widgetDoorRoute('/widget.iife.js', 'GET')).toEqual({ kind: 'bundle' });
+    expect(widgetDoorRoute('/widget/voice.js', 'GET')).toEqual({ kind: 'bundle' });
     expect(widgetDoorRoute('/api/auth/session', 'GET')).toEqual({ kind: 'probe' });
     expect(widgetDoorRoute('/api/auth/widget-session', 'GET')).toEqual({ kind: 'probe' });
     expect(widgetDoorRoute('/widget.iife.js', 'POST')).toBeNull();
+    expect(widgetDoorRoute('/widget/voice.js', 'POST')).toBeNull();
     expect(widgetDoorRoute('/api/auth/session', 'POST')).toBeNull();
   });
 
-  it("admits one doc's socket, thread list and thread verbs, each by its own method", () => {
+  it("admits one doc's sockets, thread list and thread verbs, each by its own method", () => {
     const doc = { kind: 'doc', workspaceId: 'w-riverbend', docId: 'page-1' } as const;
-    expect(widgetDoorRoute('/workspaces/w-riverbend/docs/page-1/y', 'GET')).toEqual(doc);
+    for (const get of ['y', 'voice', 'voice-feedback/seg-3.wav']) {
+      const path = `/workspaces/w-riverbend/docs/page-1/${get}`;
+      expect(widgetDoorRoute(path, 'GET'), get).toEqual(doc);
+      expect(widgetDoorRoute(path, 'POST'), get).toBeNull();
+    }
     expect(widgetDoorRoute('/workspaces/w-riverbend/docs/page-1/threads', 'GET')).toEqual(doc);
     expect(widgetDoorRoute('/workspaces/w-riverbend/docs/page-1/threads', 'POST')).toEqual(doc);
-    for (const verb of ['comments', 'answer', 'resolve', 'reopen']) {
+    for (const verb of ['comments', 'answer', 'resolve', 'reopen', 'edit-comment', 'reanchor']) {
       const path = `/workspaces/w-riverbend/docs/page-1/threads/t1/${verb}`;
       expect(widgetDoorRoute(path, 'POST'), verb).toEqual(doc);
       expect(widgetDoorRoute(path, 'GET'), verb).toBeNull();
     }
-    expect(widgetDoorRoute('/workspaces/w-riverbend/docs/page-1/y', 'POST')).toBeNull();
     expect(widgetDoorRoute('/workspaces/w-riverbend/docs/page-1/threads', 'DELETE')).toBeNull();
+  });
+
+  it('admits a recording only under the name the store writes', () => {
+    const doc = { kind: 'doc', workspaceId: 'w-riverbend', docId: 'page-1' } as const;
+    const at = (rest: string) =>
+      widgetDoorRoute(`/workspaces/w-riverbend/docs/page-1/${rest}`, 'GET');
+    expect(at('voice-feedback/seg-999999.wav')).toEqual(doc);
+    for (const rest of [
+      'voice-feedback.md',
+      'voice-feedback/',
+      'voice-feedback/seg-3.mp3',
+      'voice-feedback/seg-.wav',
+      'voice-feedback/seg-1234567.wav',
+      'voice-feedback/notes.wav',
+      'voice-feedback/x/seg-3.wav',
+    ]) {
+      expect(at(rest), rest).toBeNull();
+    }
   });
 
   it('decodes the path segments it hands on', () => {
@@ -76,12 +99,13 @@ describe('widgetDoorRoute', () => {
       '/workspaces/w-riverbend/docs',
       '/workspaces/w-riverbend/docs/page-1',
       '/workspaces/w-riverbend/docs/page-1/audio',
-      '/workspaces/w-riverbend/docs/page-1/voice',
       '/workspaces/w-riverbend/docs/page-1/events:stream',
       '/workspaces/w-riverbend/docs/page-1/threads/t1',
       '/workspaces/w-riverbend/docs/page-1/threads/t1/comments/extra',
       '/workspaces/w-riverbend/docs/page-1/y/extra',
       '/widget/widget.iife.js',
+      '/widget/mockup-live.js',
+      '/widget/voice.js.map',
     ]) {
       for (const method of ['GET', 'POST']) {
         expect(widgetDoorRoute(path, method), `${method} ${path}`).toBeNull();
