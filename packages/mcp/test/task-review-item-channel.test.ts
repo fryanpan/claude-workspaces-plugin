@@ -201,9 +201,11 @@ describe('self-authored suppression still holds on the new path', () => {
  * A withdrawal retires an ask and leaves its reader with nothing to do, and
  * the filer's own recovery already exists: the row goes back to having no
  * open question, which is what `workspace.stalled` and `workspace.ready_idle`
- * report. The undo is the exact inverse — the ask is back in front of the
- * reader — so it is delivered, for the same reason `thread.reopened` is not
- * on the bookkeeping list.
+ * report. The undo is the exact inverse — the ask is back on the ticket — so
+ * it is delivered, for the same reason `thread.reopened` is not on the
+ * bookkeeping list. The line stops at the ticket rather than claiming a
+ * reader's queue, because a reinstated item still held by the quality gate is
+ * on nobody's queue and the frame carries no held state to tell.
  */
 describe('review_item.withdrawn', () => {
   const WITHDRAWN = {
@@ -222,7 +224,7 @@ describe('review_item.withdrawn', () => {
     expect(frames).toHaveLength(0);
   });
 
-  it('wakes on the undo, which puts the ask back in front of the reader', async () => {
+  it('wakes on the undo, which puts the ask back on the ticket', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('review_item.withdrawn', {
       ...WITHDRAWN,
@@ -231,7 +233,7 @@ describe('review_item.withdrawn', () => {
     });
     const f = only(frames);
     expect(f.content).toBe(
-      '[review item reinstated] item ri-4 on task t-ZOz by the scheduler — back in front of the reader',
+      '[review item reinstated] item ri-4 on task t-ZOz by the scheduler — the ask is back on the ticket',
     );
     expect(f.meta).toMatchObject({ task_id: 't-ZOz', review_item_id: 'ri-4' });
   });

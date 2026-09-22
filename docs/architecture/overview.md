@@ -598,7 +598,7 @@ is the one place that reasoning comes out the other way: it also retires an
 unanswered ask, but the ticket is left with no open question, which is the
 state `workspace.stalled` and `workspace.ready_idle` already report to the
 agent holding the row — so the withdrawal is dropped and its undo
-(`reinstated: true`), which puts the ask back in front of the reader, is not.
+(`reinstated: true`), which puts the ask back on the ticket, is not.
 Rules in `packages/mcp/src/bookkeeping-events.ts`.
 
 Which rule runs where depends on what it reads. The server drops by event name,

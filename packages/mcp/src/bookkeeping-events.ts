@@ -63,10 +63,14 @@
  *   - `thread.reopened` — a reopen says the work is not done. That is a
  *     request, and it is the exact inverse of a resolve.
  *   - `review_item.withdrawn` with `reinstated: true` — the undo puts the ask
- *     back in front of the reader, which is the exact inverse of the
- *     withdrawal, exactly as a reopen is of a resolve. The plain withdrawal
- *     IS on the list; see the carve-out below for what makes the pair
- *     separable and why the filer is not left in silence by it.
+ *     back on the ticket, which is the exact inverse of the withdrawal,
+ *     exactly as a reopen is of a resolve. It does not always put it back on
+ *     a READER's queue: `routes/task-review-items.ts` withholds its
+ *     announcement when the reinstated item is still quality-gate held, and
+ *     the frame carries no held state — so the line says what the frame knows
+ *     and the wake is delivered, which is the open direction. The plain
+ *     withdrawal IS on the list; see the carve-out below for what makes the
+ *     pair separable and why the filer is not left in silence by it.
  *   - `review_item.answered` — an answer is the outcome the filer is blocked
  *     on. It is ids-only like `viewed`, and its words do ride `thread.replied`
  *     and `decision.answered`, so a case could be made; the case is not

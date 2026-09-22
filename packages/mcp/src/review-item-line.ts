@@ -109,7 +109,13 @@ export function reviewItemTaskLine(event: string, p: ReviewItemEventPayload): st
     return `[review item revised] ${where}${by} — ${answers}back on the queue`;
   }
   if (p.reinstated === true) {
-    return `[review item reinstated] ${where}${by} — back in front of the reader`;
+    // "the ask is back on the ticket", NOT "back in front of the reader".
+    // The frame carries no held state, and `routes/task-review-items.ts`
+    // withholds `announceTaskReview` when the reinstated item is still
+    // quality-gate held — that item is on nobody's queue yet. Claiming a
+    // queue this renderer cannot see would be the same class of invention as
+    // the `doc_id: 'unknown'` this module exists to remove.
+    return `[review item reinstated] ${where}${by} — the ask is back on the ticket`;
   }
   // Reached only if the bookkeeping gate is ever narrowed: a plain withdrawal
   // asks the reader for nothing and is dropped before this renderer runs.

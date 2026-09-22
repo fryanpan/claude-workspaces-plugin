@@ -14581,7 +14581,7 @@ function reviewItemTaskLine(event, p) {
     return `[review item revised] ${where}${by} — ${answers}back on the queue`;
   }
   if (p.reinstated === true) {
-    return `[review item reinstated] ${where}${by} — back in front of the reader`;
+    return `[review item reinstated] ${where}${by} — the ask is back on the ticket`;
   }
   const why = p.reason ? ` — ${truncate5(p.reason, 80)}` : "";
   return `[review item withdrawn] ${where}${by}${why}`;
