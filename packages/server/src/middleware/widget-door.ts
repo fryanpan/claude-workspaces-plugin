@@ -20,15 +20,30 @@
  * What the door admits, and it is an allowlist: a route added to this server
  * tomorrow is 404 on the tailnet hostname by default.
  *
- * 1. `GET /widget.iife.js` — the bundle. Static and the same bytes every
- *    embed gets; the one request that needs no token, because the widget
- *    cannot ask for a token before it has run.
+ * 1. `GET /widget.iife.js`, `GET /widget/mic.js` and `GET /widget/voice.js` —
+ *    the bundle, the microphone it fetches at DOMContentLoaded
+ *    (`widget/src/widget-mic-inject.ts`) and the voice chunk the mic fetches
+ *    on its first tap. Static, and the same bytes every embed gets; the three
+ *    requests that need no token, because none can carry one. The widget
+ *    cannot ask for a token before it has run, and a `<script src>` sets no
+ *    Authorization header at all (`widget/src/voice/voice-loader.ts`). All
+ *    three are already public to a share visitor, so admitting them here
+ *    widens nothing. Named one by one rather than as a `/widget/` prefix: the
+ *    mock host and bridge sit in that directory too, and an allowlist that
+ *    grew with the build output would not be one.
  * 2. `GET /api/auth/session` and `GET /api/auth/widget-session` — the two
  *    probes the widget makes on load. Without a token they answer the 401 that
  *    tells the widget to offer sign-in, and where to; with one they answer.
- * 3. One doc's comment routes and its socket, under the board the token
+ * 3. One doc's comment routes and its two sockets, under the board the token
  *    names: `threads` (read and post), a thread's `comments`, `answer`,
- *    `resolve` and `reopen`, and `y`.
+ *    `resolve`, `reopen`, `edit-comment` and `reanchor`, and `y`.
+ * 4. The same doc's voice feedback: the `voice` socket the recorder streams
+ *    into, and one recording, `voice-feedback/seg-<N>.wav`. The recordings
+ *    are the speaker's own voice, so they keep the board token every other
+ *    route here asks for — which is why the widget fetches a clip rather
+ *    than handing its URL to an `<audio>`, an element that sends no header.
+ *    The log beside them, `voice-feedback.md`, is NOT on the door: no widget
+ *    code reads it.
  *
  * A pure predicate so it can be unit-tested without a server, and exercised
  * again at the HTTP layer in `widget-door-http.test.ts`.
@@ -43,27 +58,47 @@ export type WidgetDoorRoute =
 
 const PROBES: ReadonlySet<string> = new Set(['/api/auth/session', '/api/auth/widget-session']);
 
-/** The thread verbs the widget posts, and nothing a doc page does beyond them. */
-const THREAD_VERBS = '(?:comments|answer|resolve|reopen)';
+/** The widget's own static bytes: the bundle, and the chunk it fetches. */
+const SCRIPTS: ReadonlySet<string> = new Set([
+  '/widget.iife.js',
+  '/widget/mic.js',
+  '/widget/voice.js',
+]);
+
+/** The thread verbs the widget posts, and nothing a doc page does beyond them.
+ *  `edit-comment` and `reanchor` are the two a SPOKEN comment adds: the words
+ *  are rewritten as the speaker keeps talking, and the note follows the
+ *  element it is about (`widget/src/voice/voice-post.ts`). */
+const THREAD_VERBS = '(?:comments|answer|resolve|reopen|edit-comment|reanchor)';
+
+/** One recording, spelled as `clipPath` writes it and `voiceSegmentPath`
+ *  re-reads it (`voice-feedback-store.ts`). Matched here as well as there so
+ *  a name that is not a recording is refused at the door rather than deeper
+ *  in. */
+const CLIP = String.raw`voice-feedback/seg-\d{1,6}\.wav`;
+
+/** The parts of a doc a GET addresses: its two sockets, and one recording. */
+const DOC_GET = `(?:y|voice|${CLIP})`;
 
 const DOC_ROUTE = new RegExp(
-  `^/workspaces/([^/]+)/docs/([^/]+)/(?:(y)|(threads)|threads/[^/]+/${THREAD_VERBS})$`,
+  `^/workspaces/([^/]+)/docs/([^/]+)/(?:(${DOC_GET})|(threads)|threads/[^/]+/${THREAD_VERBS})$`,
 );
 
 /**
  * The route a door request addresses, or null.
  *
- * Methods are named per route. The socket is a GET (an upgrade is one), the
- * thread list is a GET or a POST, and every thread verb is a POST; anything
- * else — a DELETE, a PUT, a HEAD — is refused rather than guessed at.
+ * Methods are named per route. A socket and a recording are GETs (an upgrade
+ * is one), the thread list is a GET or a POST, and every thread verb is a
+ * POST; anything else — a DELETE, a PUT, a HEAD — is refused rather than
+ * guessed at.
  */
 export function widgetDoorRoute(pathname: string, method: string): WidgetDoorRoute | null {
-  if (method === 'GET' && pathname === '/widget.iife.js') return { kind: 'bundle' };
+  if (method === 'GET' && SCRIPTS.has(pathname)) return { kind: 'bundle' };
   if (method === 'GET' && PROBES.has(pathname)) return { kind: 'probe' };
   const m = pathname.match(DOC_ROUTE);
   if (!m) return null;
-  const [, rawWorkspace, rawDoc, socket, threads] = m;
-  const allowed = socket
+  const [, rawWorkspace, rawDoc, getOnly, threads] = m;
+  const allowed = getOnly
     ? method === 'GET'
     : threads
       ? method === 'GET' || method === 'POST'

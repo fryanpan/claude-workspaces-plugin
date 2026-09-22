@@ -86,6 +86,29 @@ function mintThroughAccess(base: string, board: string): Promise<Response> {
   });
 }
 
+/** A door socket on one of the doc's two verbs, opened and watched. */
+function openDoorSocket(
+  base: string,
+  board: string,
+  verb: 'y' | 'voice',
+  token: string,
+): { ws: WebSocket; closed: { code: number | null }; opened: Promise<void> } {
+  const url = `${base.replace('http', 'ws')}/workspaces/${board}/docs/doc-door/${verb}?type=mockup&sourceUrl=${encodeURIComponent(`${PAGE}/`)}`;
+  const ws = new WebSocket(url, {
+    headers: { host: `${DOOR}:8960`, origin: PAGE },
+    protocols: [token],
+  } as unknown as string[]);
+  const closed: { code: number | null } = { code: null };
+  ws.addEventListener('close', (ev) => {
+    closed.code = (ev as CloseEvent).code;
+  });
+  const opened = new Promise<void>((resolve, reject) => {
+    ws.addEventListener('open', () => resolve());
+    ws.addEventListener('error', () => reject(new Error(`door ${verb} socket never opened`)));
+  });
+  return { ws, closed, opened };
+}
+
 describe('an open tailnet widget door socket', () => {
   it('is hung up by the sweep once its token stops verifying, and left open before', async () => {
     const { handle, base, board } = boot();
@@ -93,19 +116,8 @@ describe('an open tailnet widget door socket', () => {
     expect(minted.status).toBe(200);
     const { token } = (await minted.json()) as { token: string };
 
-    const url = `${base.replace('http', 'ws')}/workspaces/${board}/docs/doc-door/y?type=mockup&sourceUrl=${encodeURIComponent(`${PAGE}/`)}`;
-    const ws = new WebSocket(url, {
-      headers: { host: `${DOOR}:8960`, origin: PAGE },
-      protocols: [token],
-    } as unknown as string[]);
-    const closed: { code: number | null } = { code: null };
-    ws.addEventListener('close', (ev) => {
-      closed.code = (ev as CloseEvent).code;
-    });
-    await new Promise<void>((resolve, reject) => {
-      ws.addEventListener('open', () => resolve());
-      ws.addEventListener('error', () => reject(new Error('door socket never opened')));
-    });
+    const { ws, closed, opened } = openDoorSocket(base, board, 'y', token);
+    await opened;
 
     // Control: a sweep while the token is live leaves the socket alone.
     handle.sweepDeadShares();
@@ -117,6 +129,39 @@ describe('an open tailnet widget door socket', () => {
 
     // Archiving the identity is one of the three things the token dies of;
     // the sweep asks the same verifier the upgrade did.
+    handle.identities.archive(emailIdentityId(OPERATOR_EMAIL));
+    handle.sweepDeadShares();
+    await waitFor(() => closed.code !== null);
+    expect(closed.code).toBe(1008);
+  });
+
+  /**
+   * The recorder's socket is the one that costs money while it is open — it
+   * spends a transcription engine on the owner's key — and it is in no doc's
+   * `conns`, so the sweep can only reach it if the upgrade tracked it. Every
+   * `/y` assertion above would pass with that tracking missing.
+   */
+  it('is hung up on the recorder’s socket too, and left open before', async () => {
+    const { handle, base, board } = boot();
+    const minted = await mintThroughAccess(base, board);
+    expect(minted.status).toBe(200);
+    const { token } = (await minted.json()) as { token: string };
+
+    // The doc has to exist before the voice socket will take the upgrade,
+    // and the widget's own first socket is what makes it.
+    const live = openDoorSocket(base, board, 'y', token);
+    await live.opened;
+
+    const { closed, opened, ws } = openDoorSocket(base, board, 'voice', token);
+    await opened;
+
+    handle.sweepDeadShares();
+    const stillOpen = await Promise.race([
+      new Promise<'closed'>((r) => ws.addEventListener('close', () => r('closed'))),
+      new Promise<'open'>((r) => setTimeout(() => r('open'), 200)), // timed: a live token's socket survives a sweep
+    ]);
+    expect(stillOpen).toBe('open');
+
     handle.identities.archive(emailIdentityId(OPERATOR_EMAIL));
     handle.sweepDeadShares();
     await waitFor(() => closed.code !== null);

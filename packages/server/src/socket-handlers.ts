@@ -114,7 +114,14 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
     // context per socket.
     perMessageDeflate: true,
     open(ws) {
-      if (ws.data.kind === 'recall' || ws.data.kind === 'voice') return;
+      if (ws.data.kind === 'recall') return;
+      if (ws.data.kind === 'voice') {
+        // In no doc's `conns`, so the sweeps can only reach it if it is
+        // handed to them here — the same reason the audio socket is tracked
+        // below. A socket carrying no grant and no share is not tracked.
+        docStore.trackShareSocket(ws);
+        return;
+      }
       if (ws.data.kind === 'audio') {
         // Before the relay, because the relay's own bookkeeping is a
         // WeakMap nothing can enumerate: this is what makes the socket
@@ -189,6 +196,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         return;
       }
       if (ws.data.kind === 'voice') {
+        docStore.untrackShareSocket(ws);
         voiceRelay.onClose(ws);
         return;
       }

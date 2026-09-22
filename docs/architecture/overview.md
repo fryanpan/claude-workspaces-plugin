@@ -530,11 +530,25 @@ settles through the ordinary thread routes, `voice-ui.ts` draws the live
 comment and the settled cards (its styles in `voice-css.ts`, the column
 layout in `voice-column.ts`), and `voice-mode.ts` glues them to the page (a
 tap sends the next words to an element, or back into that element's earlier
-note). The board imports it directly
-(`board/board-feedback-mic.ts`); a mock page gets the mic from
-`mockup-live.js` and fetches the rest as the lazy chunk `voice.js` on the
-first tap (`voice/voice-loader.ts`), so none of it is in `widget.iife.js`,
-which mock pages load against a hard size budget. Inside a served mock's frame the browser
+note). Three kinds of page reach it, and none of them puts any of it in the
+budgeted bundle. The board imports it directly
+(`board/board-feedback-mic.ts`). A mock page gets the mic from
+`mockup-live.js`. **An ordinary embed — a tag and a script on somebody else's
+dev server — fetches it**: `widget-mic-inject.ts` is the few bytes in
+`widget.iife.js` that append `<script src="<serverUrl>/widget/mic.js">` at
+DOMContentLoaded, and `mic-entry.ts` is that chunk's entry, mounting the
+button through the same `voice/voice-loader.ts` a mock goes through. Both are
+top-level modules of the widget package; only the first is on the budget, and
+it is reached from `widget-iife.ts` alone, so `widget.esm.js` and the board
+pay nothing and the board's own mount is not doubled. `window.cwMic`, set at
+module scope by `voice-loader.ts`, is how a page carrying `mockup-live.js`
+tells the injector to stand down before either mount runs. Either way the
+first tap fetches the lazy chunk `voice.js` (`voice/voice-loader.ts`), so a
+page that never speaks pays for the button and nothing behind it. On the
+tailnet name all of it goes through the widget door
+(`middleware/widget-door.ts`), which admits the mic and the chunk without a
+token and the socket, the thread verbs `edit-comment` and `reanchor`, and the
+recordings with one. Inside a served mock's frame the browser
 refuses the microphone to an opaque origin, so there the host page holds it
 instead: `mock-host-mic.ts` (widget, a top-level module the host asset
 bundles) opens the capture when the frame asks over its voice socket, streams
@@ -551,7 +565,12 @@ ceiling for talk that never pauses; `voice-feedback-turns.ts` tracks which
 heard words a note holds yet, and `voice-feedback-session.ts` holds the
 relay's per-recording state types. `voice-feedback-store.ts` keeps each
 recording's WAV and a timestamped raw transcript beside the doc
-(`routes/doc-voice-feedback.ts` serves both). No new write path: a spoken
+(`routes/doc-voice-feedback.ts` serves both). A comment's ▶ asks
+`clipAudio` (`widget/src/widget-auth.ts`) for the audio: with no token held
+that is the `<audio>` fetching the clip itself, with its byte ranges and its
+`#t=` seek; with one it is a fetch carrying the Bearer header an `<audio>`
+cannot set, played from a blob, which costs the whole recording rather than
+the stretch the clip names. No new write path: a spoken
 comment is the thread POST the typed composer already makes, carrying a
 `voice` note (clip and raw words).
 

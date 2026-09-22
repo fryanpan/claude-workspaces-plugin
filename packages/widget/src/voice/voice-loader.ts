@@ -28,6 +28,29 @@ export const MOCK_LABELS: MicLabels = {
   icon: MIC_GLYPH,
 };
 
+/** On anybody else's page, it is about the page. `mic-entry.ts` uses these:
+ *  that embed is a guest on a dev server, where "this mock" would be a lie. */
+export const EMBED_LABELS: MicLabels = {
+  comment: 'Type: comment on this page',
+  voice: 'Talk: voice feedback on this page',
+  history: 'Past comments on this page',
+  icon: MIC_GLYPH,
+};
+
+/**
+ * Said while the page is still parsing, because that is when it has to be
+ * heard.
+ *
+ * A served mock loads `widget.iife.js` and `mockup-live.js`, and the injector
+ * in the first must not fetch a second mic for the mount the second is about
+ * to do. Both mounts go through THIS module, and a bundle's module scope runs
+ * as the script is evaluated — before DOMContentLoaded, which is when either
+ * mount happens and when the injector looks. So a page carrying any bundle
+ * that can mount a mic has said so before anything reads it, whatever order
+ * the tags are in. `widget-mic-inject.ts` is the reader.
+ */
+window.cwMic = true;
+
 /** What `voice.js` puts on the window when it has loaded. */
 export interface VoiceChunk {
   mountVoiceMode(widget: FeedbackWidgetEl, mic: WidgetMic): VoiceMode;
@@ -91,7 +114,14 @@ export function mountVoiceLoader(
 ): WidgetMic | null {
   const widget = doc.querySelector('claude-feedback-widget') as FeedbackWidgetEl | null;
   if (!widget?.shadow?.querySelector('.fab')) return null;
+  // A mic already up belongs to whoever mounted it, and `addMic` hands that
+  // one back — but the first-tap handler below is NOT idempotent, and a
+  // second one would open two AudioContexts, two sockets and two live
+  // comments for one sentence. The flag above is what normally keeps a page
+  // to a single mount; this is the check for the page where both ran anyway.
+  const had = widget.shadow.querySelector('.fab-mic') !== null;
   const mic = addMic(widget, labels);
+  if (had) return mic;
   const first = (): void => {
     mic.button.removeEventListener('click', first);
     const ctx = makeContext();

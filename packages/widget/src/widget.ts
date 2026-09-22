@@ -712,6 +712,12 @@ export class FeedbackWidgetEl extends HTMLElement {
 declare global {
   interface Window {
     FeedbackWidget?: typeof FeedbackWidget;
+    /** A mic is mounted on this page, or a bundle that will mount one has
+     *  loaded. Set by `voice/voice-loader.ts` and by the injector in
+     *  `widget-mic-inject.ts`, which is the only reader. Declared here
+     *  because both of those reach this module and neither reaches the
+     *  other. */
+    cwMic?: boolean;
   }
 }
 

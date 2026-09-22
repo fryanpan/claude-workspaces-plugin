@@ -10,4 +10,11 @@
  * for code nothing could call. `widget.esm.js` keeps `widget.ts` as its entry,
  * since an ES module is imported for exactly those exports.
  */
+import { armMicInjection } from './widget-mic-inject.ts';
 import './widget.ts';
+
+// The one thing this entry does beyond loading the widget, and the one thing
+// `widget.esm.js` does not: fetch the microphone. Only the script tag, because
+// only a page that loads the script tag is an ordinary embed — the board
+// imports the module and mounts its own. See `widget-mic-inject.ts`.
+armMicInjection(document);

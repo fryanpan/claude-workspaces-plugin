@@ -208,7 +208,11 @@ export type FeedbackWs = ServerWebSocket<WsCtx>;
  * any `conns` — can be swept by the same three functions.
  */
 export interface ShareAuthorizedSocket {
-  readonly data?: { shareId?: string; shareMember?: string };
+  readonly data?: {
+    shareId?: string;
+    shareMember?: string;
+    widgetDoorGrant?: { token: string; origin: string };
+  };
   close(code?: number, reason?: string): void;
 }
 

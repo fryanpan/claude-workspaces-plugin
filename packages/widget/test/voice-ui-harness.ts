@@ -60,7 +60,7 @@ export function setup() {
     shadow,
     element: (t) => (t === null ? null : (elements.get(t) ?? null)),
     name: (t) => (t === 2 ? 'Goal bar' : `#${t}`),
-    clipUrl: (clip) => `http://host${clip}`,
+    clipAudio: async (clip) => new Audio(`http://host${clip}`),
     onMove: (key) => moved.push(key),
     now: () => now,
   });

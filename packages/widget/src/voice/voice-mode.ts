@@ -1,6 +1,7 @@
 import type { Anchor, ElementAnchor, VoiceTarget } from '@claude-workspaces/core';
 import { hasContext } from '@claude-workspaces/core/anchor/context';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
+import { clipAudio } from '../widget-auth.ts';
 import { SIGN_IN_NOTE, type WidgetMic } from '../widget-mic.ts';
 import type { FeedbackWidgetEl } from '../widget.ts';
 import { hostCapture, startPcmCapture } from './voice-audio.ts';
@@ -122,7 +123,19 @@ export function mountVoiceMode(
   const session = new VoiceSession({
     url,
     openSocket: (u) => {
-      socket = opts.openSocket ? opts.openSocket(u) : (new WebSocket(u) as unknown as SocketLike);
+      socket = opts.openSocket
+        ? opts.openSocket(u)
+        : // The tailnet widget door asks every route but its two static
+          // scripts for the reviewer's board token, and a browser cannot set
+          // a header on a WebSocket — so it rides as the one subprotocol
+          // offered, which is what the door reads. Only a BOARD token, never
+          // a session one, for the reason the doc socket gives in
+          // `widget.ts`: a session token that died on a localhost socket
+          // would turn a read-only socket into a refused one.
+          (new WebSocket(
+            u,
+            widget.authToken?.startsWith('wt2.') ? widget.authToken : undefined,
+          ) as unknown as SocketLike);
       return socket;
     },
     startCapture:
@@ -144,7 +157,7 @@ export function mountVoiceMode(
     shadow: widget.shadow,
     element,
     name: (t) => nameOf(t === null ? undefined : targets.get(t), element(t)),
-    clipUrl: (clip) => `${widget.opts.serverUrl.replace(/^ws/, 'http')}${clip}`,
+    clipAudio: (clip) => clipAudio(widget, clip),
     onMove: (key) => {
       view.picking = key;
       draw();
