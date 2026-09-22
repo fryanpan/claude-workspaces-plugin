@@ -19,8 +19,9 @@
  * duplicate counts are printed beside them.
  *
  * ON DEMAND ONLY, on the eval credential (`eval-credential.ts`), never prod's.
- * A run is sixteen Haiku composes, about two cents; `--max-usd` stops the run
- * before the next call once the spend passes it.
+ * A run is sixteen Haiku composes, measured at about $0.035 to $0.04 (three
+ * runs, $0.10 to $0.11); `--max-usd` stops the run before the next call once
+ * the spend passes it.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

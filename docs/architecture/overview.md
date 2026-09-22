@@ -994,12 +994,15 @@ what takes a stretch already on the page apart.
 `notes-dictation.ts` and `notes-reason-ask.ts` join the same DOMAIN tier and
 add no box. They are two more per-tick directives beside the regroup one. The
 first notices a speaker dictating a document ("page one is…", "start with…",
-"then…") and names the page heading, the next number and the edit. It also
-folds a detail spoken about a page's last item into that item, so a dash note
-cannot split the numbered list. The second quotes any sentence of the tick
-that gives a reason, so the note for that point keeps it. `notes-inversions.ts`
-joins the `notes-quality-*` family: a pure check, run at the stop, for a note
-that says the opposite of its source sentence.
+"then…") and names the page heading, the next number and the edit. The
+session keeps a small per-meeting memory of the last cue, the way it keeps the
+idea ledger, so an ordering word counts only while a dictation is running. On
+the tick after a cue it also folds a detail spoken about a page's last item
+into that item, so a dash note cannot split the numbered list. The second
+quotes any sentence of the tick that gives a reason, so the note for that
+point keeps it. `notes-inversions.ts` joins the `notes-quality-*` family: a
+pure check, run at the stop, that counts notes saying the opposite of their
+source sentence. The count is recorded, not flagged.
 `notes-unconfirmed.ts` joins the same DOMAIN tier as the half that settles the
 guesses a meeting marked "(unconfirmed)" — it finds them and names their ids to
 the cleanup pass, which counts what is left afterwards.
