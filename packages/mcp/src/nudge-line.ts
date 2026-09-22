@@ -847,7 +847,9 @@ function unrenderableBody(unknown: readonly string[]): string {
  * told a window ago" — is not one the payload supports: the seat named here is
  * the one the board holds at this tick, and a seat can have changed hands, or
  * been empty, for the whole window the row aged. So the first sentence is what
- * the row did and the second is who holds the seat now.
+ * the row did and the second is who holds the seat now. The board's own item
+ * makes the same claim in the same words (`waiting-unfiled-review.ts`), so a
+ * reader who sees both is not told two different things.
  *
  * The age is stated as a floor. The rows age on their own clocks and only the
  * common one is true of every row on the frame, so the line says "over" rather
@@ -856,19 +858,34 @@ function unrenderableBody(unknown: readonly string[]): string {
  * A board whose seat is empty is named with "(no lead named)" rather than
  * dropped: the reader still has to act on the row, and a silently missing
  * board reads as a shorter list rather than as an unanswered question.
+ *
+ * The act agrees in number with the list it follows. "Tell that lead" over
+ * three boards reads as one person to go to, which is the opposite of what a
+ * fan-in wake is for.
+ *
+ * Every read here is defensive, because this runs on the ONE line a woken
+ * session gets: a `boards` that is not an array, or an entry that is null,
+ * would throw and cost the reader the whole wake rather than one clause of it.
  */
 function unfiledCarryLine(carry: UnfiledCarryPayload): string {
-  const boards = (carry.boards ?? [])
-    .filter((b): b is { workspaceId: string; leadAgentId?: string } => Boolean(b.workspaceId))
+  const listed = Array.isArray(carry.boards) ? carry.boards : [];
+  const boards = listed
+    .filter(
+      (b): b is { workspaceId: string; leadAgentId?: string } =>
+        typeof b === 'object' &&
+        b !== null &&
+        typeof b.workspaceId === 'string' &&
+        b.workspaceId !== '',
+    )
     .map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : 'no lead named'})`);
   const age =
-    carry.agedAtLeastMs === undefined
-      ? 'for a full window'
-      : `for over ${humanDuration(carry.agedAtLeastMs)}`;
-  const seats =
-    boards.length > 0
-      ? `The seats on those boards now: ${boards.join(', ')} — tell that lead`
-      : 'Tell each board’s lead';
+    typeof carry.agedAtLeastMs === 'number'
+      ? `for over ${humanDuration(carry.agedAtLeastMs)}`
+      : 'for a full window';
+  let seats: string;
+  if (boards.length === 0) seats = 'Tell each board’s lead';
+  else if (boards.length === 1) seats = `The seat on that board now: ${boards[0]} — tell that lead`;
+  else seats = `The seats on those boards now: ${boards.join(', ')} — tell each of those leads`;
   return (
     'You were woken as Team Lead, not as this board’s lead: every row below has stood on its own ' +
     `board’s unfiled list ${age} with nothing filed. ` +
@@ -1147,7 +1164,7 @@ export function stalledLine(p: StallPayload, frameBoard?: string): string {
   // above is the dead-board path and sets no carry, so if a server ever sends
   // the two together the reachability claim wins — a seat nobody holds is the
   // bigger fact, and it is the one whose remedy differs.
-  if (p.unfiledCarry !== undefined) {
+  if (typeof p.unfiledCarry === 'object' && p.unfiledCarry !== null) {
     return `[workspace.stalled] ${unfiledCarryLine(p.unfiledCarry)} ${body}`;
   }
   return `[workspace.stalled] ${body}`;

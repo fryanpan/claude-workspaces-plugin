@@ -14358,9 +14358,16 @@ function unrenderableBody(unknown3) {
   return `the board reported findings this plugin cannot read — the frame carries ${unknown3.join(", ")}, ` + "which this bundle does not know. Your plugin is OLDER than this server, which is the likely " + "cause rather than a broken wake. The board is NOT clear: update the plugin " + "(command claude plugin update claude-workspaces@claude-workspaces), restart this session, and " + "read the board with next_tasks / list_tasks meanwhile.";
 }
 function unfiledCarryLine(carry) {
-  const boards = (carry.boards ?? []).filter((b) => Boolean(b.workspaceId)).map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : "no lead named"})`);
-  const age = carry.agedAtLeastMs === undefined ? "for a full window" : `for over ${humanDuration2(carry.agedAtLeastMs)}`;
-  const seats = boards.length > 0 ? `The seats on those boards now: ${boards.join(", ")} — tell that lead` : "Tell each board’s lead";
+  const listed = Array.isArray(carry.boards) ? carry.boards : [];
+  const boards = listed.filter((b) => typeof b === "object" && b !== null && typeof b.workspaceId === "string" && b.workspaceId !== "").map((b) => `${b.workspaceId} (${b.leadAgentId ? `lead ${b.leadAgentId}` : "no lead named"})`);
+  const age = typeof carry.agedAtLeastMs === "number" ? `for over ${humanDuration2(carry.agedAtLeastMs)}` : "for a full window";
+  let seats;
+  if (boards.length === 0)
+    seats = "Tell each board’s lead";
+  else if (boards.length === 1)
+    seats = `The seat on that board now: ${boards[0]} — tell that lead`;
+  else
+    seats = `The seats on those boards now: ${boards.join(", ")} — tell each of those leads`;
   return "You were woken as Team Lead, not as this board’s lead: every row below has stood on its own " + `board’s unfiled list ${age} with nothing filed. ` + `${seats} to file the ask with add_review_item, or file it yourself.`;
 }
 function stalledLine(p, frameBoard) {
@@ -14451,7 +14458,7 @@ function stalledLine(p, frameBoard) {
   if (p.escalatedFrom !== undefined && p.escalatedFrom !== "") {
     return `[workspace.stalled] You are not this board's lead — ${p.escalatedFrom} holds the seat and ` + "is not reachable, so this came to you instead. Nothing addressed to that seat is arriving: " + "take it (attach_agent) or hand it to a session that is here. Then, on the board itself: " + body;
   }
-  if (p.unfiledCarry !== undefined) {
+  if (typeof p.unfiledCarry === "object" && p.unfiledCarry !== null) {
     return `[workspace.stalled] ${unfiledCarryLine(p.unfiledCarry)} ${body}`;
   }
   return `[workspace.stalled] ${body}`;

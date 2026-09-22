@@ -202,6 +202,17 @@ nothing with either. So `FLEET_TELL_CAP` counts the wakes each row has been
 carried in, beside its `firstSeen` in the same sidecar, and a row past the cap
 is dropped from the FRAME.
 
+**The frame says which rung it is.** It carries `unfiledCarry` — how long the
+rows have stood unfiled, and every board it names with the seat that board
+holds now — and the plugin renders that as the wake's first line, ahead of the
+findings. Without it the carry is a `workspace.stalled` tagged with a board
+Team Lead is not on, which is also what the dead-board redirect looks like,
+and that one's line says the board's seat is unreachable. Six carries fired
+between 20 and 22 September 2026 and the receiver had to work out which it
+had. The line claims the rows' AGE and never a delivery: the seat it names is
+read fresh each tick, so it can have changed hands, or stood empty, for the
+whole window a row aged.
+
 **It stops waking people; it does not stop existing.** A row past the cap
 moves onto the owner's standing item — the same one item the
 unreachable-Team-Lead branch files, revised in place and withdrawn when the

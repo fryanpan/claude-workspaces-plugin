@@ -832,8 +832,10 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
     expect(line).toContain('w-riverbend (lead agent-cartographer)');
     // A board whose seat is empty is said so rather than dropped.
     expect(line).toContain('w-saltmarsh (no lead named)');
-    // The act, named as a call.
-    expect(line).toContain('add_review_item');
+    // The act agrees in number with the list it follows: two boards is two
+    // leads to go to, not one.
+    expect(line).toContain('The seats on those boards now:');
+    expect(line).toContain('tell each of those leads to file the ask with add_review_item');
     // It is NOT the dead-board redirect, whose claim is about reachability.
     expect(line).not.toContain('is not reachable');
     // …and the wake is still the wake.
@@ -846,6 +848,11 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
     expect(line).not.toContain('woken as Team Lead');
     expect(line).not.toContain('add_review_item');
     expect(line).toContain('t-theirs');
+    // The positive half of the same control: the identical frame WITH the
+    // marker says both, so the silences above belong to the missing field.
+    const withCarry = stalledLine(CARRY, 'w-elsewhere');
+    expect(withCarry).toContain('woken as Team Lead');
+    expect(withCarry).toContain('add_review_item');
   });
 
   it('the dead-board redirect still wins, and never renders the carry line', () => {
@@ -860,11 +867,94 @@ describe('stalledLine says when a wake is the fleet carry of unfiled waits', () 
     expect(line).not.toContain('add_review_item');
   });
 
+  it('a carry naming ONE board asks for one lead, not each of several', () => {
+    const one = {
+      ...CARRY,
+      unfiledCarry: {
+        agedAtLeastMs: 30 * 60_000,
+        boards: [{ workspaceId: 'w-riverbend', leadAgentId: 'agent-cartographer' }],
+      },
+    };
+    const line = stalledLine(one, 'w-elsewhere');
+    expect(line).toContain('The seat on that board now: w-riverbend (lead agent-cartographer)');
+    expect(line).toContain('tell that lead to file the ask with add_review_item');
+    expect(line).not.toContain('each of those leads');
+    // CONTROL: the two-board frame in this same suite says the plural form,
+    // so the singular above is the branch and not a line that never pluralises.
+    expect(stalledLine(CARRY, 'w-elsewhere')).toContain('each of those leads');
+  });
+
+  /**
+   * The production call is `stalledLine(p, p.workspaceId)` and a carry frame's
+   * own tag is the ANCHOR row's board — so a carry that spans one board is
+   * delivered with `frameBoard` equal to that board. The rung line still has
+   * to render there: it is the reason the reader was woken, and the per-row
+   * board suffix that would otherwise hint at it is correctly absent.
+   */
+  it('renders through the production frameBoard, where no row names a board', () => {
+    const own = {
+      stalledCount: 0,
+      consideredCount: 1,
+      workspaceId: 'w-riverbend',
+      unfiled: [
+        {
+          id: 't-theirs',
+          title: 'Publish the winter timetable',
+          bucket: 'waiting-unfiled',
+          quietMs: 70 * 60_000,
+          workspaceId: 'w-riverbend',
+        },
+      ],
+      unfiledCarry: {
+        agedAtLeastMs: 30 * 60_000,
+        boards: [{ workspaceId: 'w-riverbend', leadAgentId: 'agent-cartographer' }],
+      },
+    };
+    const line = stalledLine(own, own.workspaceId);
+    // The suffix and the fleet clause are both correctly silent here…
+    expect(line).not.toContain('on board w-riverbend');
+    expect(line).not.toContain('FLEET report');
+    // …so the rung line is the ONLY thing saying why this reader was woken.
+    expect(line).toContain('woken as Team Lead');
+    expect(line).toContain('add_review_item');
+  });
+
   it('a carry that names no board still says which rung it is, and asks for the act', () => {
     const line = stalledLine({ ...CARRY, unfiledCarry: { agedAtLeastMs: 30 * 60_000 } }, 'w-x');
     expect(line).toContain('woken as Team Lead');
     expect(line).toContain('add_review_item');
     expect(line).not.toContain('(lead ');
+  });
+
+  /**
+   * A shape from a server this bundle does not know — the reader is the half
+   * that is OLD. A throw here costs the whole wake, not one clause of it, so
+   * each of these renders rather than raising, and none of them trips the
+   * version-skew notice, because `unfiledCarry` is a known key.
+   */
+  it('survives carry shapes this bundle was not built for', () => {
+    const shapes: Array<Record<string, unknown>> = [
+      {},
+      { boards: [] },
+      { boards: 'w-riverbend' },
+      { boards: [null, {}, { leadAgentId: 'agent-cartographer' }, { workspaceId: '' }] },
+      { agedAtLeastMs: 'half an hour' },
+    ];
+    for (const unfiledCarry of shapes) {
+      const line = stalledLine({ ...CARRY, unfiledCarry }, 'w-elsewhere');
+      // It rendered, it says which rung it is, and it asks for the act…
+      expect(line).toContain('woken as Team Lead');
+      expect(line).toContain('add_review_item');
+      // …it never names a board it was not given…
+      expect(line).not.toContain('(lead ');
+      expect(line).not.toContain('undefined');
+      expect(line).not.toContain('NaN');
+      // …and the wake underneath survives the preamble.
+      expect(line).toContain('t-theirs');
+    }
+    // CONTROL: the shape this bundle DOES know renders the boards, so the
+    // absences above are the guards and not a clause that never fires.
+    expect(stalledLine(CARRY, 'w-elsewhere')).toContain('(lead agent-cartographer)');
   });
 
   it('a carry that states no age claims none, and still says which rung it is', () => {
