@@ -27,6 +27,7 @@ import {
 import {
   type ReviewItemEventPayload,
   isTaskReviewItemEvent,
+  readsThisReviewItemEvent,
   reviewItemTaskLine,
 } from './review-item-line.ts';
 import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
@@ -475,6 +476,10 @@ async function emitChannelMessage(
   // self-echo gate on purpose: a filer must not be handed its own ask back.
   if (isTaskReviewItemEvent(event, rawPayload)) {
     const r = rawPayload as ReviewItemEventPayload;
+    // A withdrawal and an answer are addressed to the agent that raised the
+    // ask and to nobody else; a filing and a revision are news to the board.
+    // See `readsThisReviewItemEvent`.
+    if (!readsThisReviewItemEvent(event, r, deps.authorId)) return;
     await deps.notify({
       method: 'notifications/claude/channel',
       params: {
@@ -485,6 +490,7 @@ async function emitChannelMessage(
           workspace_id: r.workspaceId ?? 'unknown',
           ...(r.taskId ? { task_id: r.taskId } : {}),
           ...(r.reviewItemId ? { review_item_id: r.reviewItemId } : {}),
+          ...(r.shape ? { shape: r.shape } : {}),
           event,
           ...(r.actor?.name ? { author: r.actor.name } : {}),
         },

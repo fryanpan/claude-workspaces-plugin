@@ -593,17 +593,25 @@ MCP child drops the frame before it becomes a wake. It drops it for every
 reader, not only the session that resolved the thread, which is what separates
 this rule from the self-echo one. A resolve retires each review item on its
 thread, so a resolve that closed an unanswered ask still wakes: it is the only
-report that reaches the agent who asked. A review item WITHDRAWN on a ticket
-is the one place that reasoning comes out the other way: it also retires an
-unanswered ask, but the ticket is left with no open question, which is the
-state `workspace.stalled` and `workspace.ready_idle` already report to the
-agent holding the row — so the withdrawal is dropped and its undo
-(`reinstated: true`), which puts the ask back on the ticket, is not.
-Rules in `packages/mcp/src/bookkeeping-events.ts`.
+report that reaches the agent who asked. Rule in
+`packages/mcp/src/bookkeeping-events.ts`.
+
+*An act with one reader.* A review item WITHDRAWN or ANSWERED on a ticket does
+carry a request, but only for the agent that RAISED the ask: its question went
+away, or the answer it stopped for arrived. Nobody else on the board has
+anything to do, and everybody else is the common case — any agent may retire a
+stale ask, and the server's own auto-withdrawals fire as a board actor that the
+self-echo rule suppresses for no one. So the store stamps the filer's id on
+those two events and the child delivers to that session alone
+(`readsThisReviewItemEvent` in `packages/mcp/src/review-item-line.ts`). A
+filing and a revision are not addressed this way: those are news to the board.
+The id is stripped from a visitor's copy with every other id
+(`packages/server/src/share/redact-board-events.ts`).
 
 Which rule runs where depends on what it reads. The server drops by event name,
 which reaches every attached session at the next prod restart. The child drops
-by what the frame carries, because that is where the frame is.
+by what the frame carries, because that is where the frame is — and the third
+rule needs the reader's own identity, which only the child has.
 
 **Board state is server-owned, and Yjs only mirrors it.** The tasks live in the
 sidecar-backed `TaskStore` (`tasks.ts`, JSON on disk). The `ws:<workspaceId>`

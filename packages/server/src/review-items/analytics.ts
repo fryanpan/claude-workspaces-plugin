@@ -18,7 +18,9 @@
  * return a closed shape, so widening the row is an edit to this file — which
  * is the file the no-text test drives.
  */
+import type { StoredReviewItem } from '@claude-workspaces/core/task-wire';
 import type { ReviewItemAnsweredEvent, ReviewItemViewedEvent } from '../tasks.ts';
+import { LEGACY_REVIEW_ITEM_ID } from './derive.ts';
 
 /** Everything either row is allowed to know. */
 export interface ReviewItemMeasurement {
@@ -35,6 +37,17 @@ export interface ReviewItemMeasurement {
   /** Whether that person holds the board's `owner` role. Resolved by the
    *  admission gate; a request body claiming it is ignored. */
   isOwner: boolean;
+  /**
+   * The agent that FILED the item, on the `answered` row only.
+   *
+   * It does not widen the contract above: it is an id, the row already
+   * carries two, and no words come with it. It is here because the answer is
+   * what the filing agent stopped for, and the MCP child addresses the wake
+   * at that agent rather than broadcasting it — see `ReviewItemAnsweredEvent`.
+   * `viewed` does not take it: that row is written far more often and nobody
+   * addresses anything off it.
+   */
+  filedById?: string;
   ts: number;
 }
 
@@ -57,7 +70,30 @@ export function reviewItemViewedEvent(m: ReviewItemMeasurement): ReviewItemViewe
 
 /** An answer landed on this item, wherever it was answered from. */
 export function reviewItemAnsweredEvent(m: ReviewItemMeasurement): ReviewItemAnsweredEvent {
-  return { type: 'review_item.answered', ...row(m) };
+  return {
+    type: 'review_item.answered',
+    ...row(m),
+    ...(m.filedById !== undefined && m.filedById !== '' ? { filedById: m.filedById } : {}),
+  };
+}
+
+/**
+ * The agent that filed one review item on a ticket, or `undefined` when the
+ * store never recorded one.
+ *
+ * Read off the RAW row, because `filedBy` is store-only by the §3.3 visitor
+ * contract and `readTaskReviewItem` drops it — the same read
+ * `review-items/queries.ts` does to address a quality-gate hold. The legacy
+ * `r-legacy` row is the ticket's own decision and keeps its filer on the task
+ * instead, as `decisionFiledBy`.
+ */
+export function reviewItemFilerId(
+  task: { reviews?: readonly StoredReviewItem[]; decisionFiledBy?: { id?: string } } | undefined,
+  reviewItemId: string,
+): string | undefined {
+  if (!task) return undefined;
+  if (reviewItemId === LEGACY_REVIEW_ITEM_ID) return task.decisionFiledBy?.id;
+  return task.reviews?.find((r) => r.id === reviewItemId)?.filedBy?.id;
 }
 
 /**

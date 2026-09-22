@@ -102,6 +102,14 @@ export class ReviewItemStore {
       createdAt: ts,
       // Display name, like every other projected `by` (§3.3 visitor contract).
       createdBy: actor.name,
+      // The filer as an ACTOR, store-only. `recordReviewJudgement` has always
+      // written this field, so every item that reached the quality gate has
+      // carried it; stamping it here makes it true from creation instead,
+      // which is what lets a later withdrawal or answer name the filer it has
+      // to be addressed to. An item the gate never saw — the scheduler's,
+      // every server filing that skips the judge — had no filer id at all
+      // until now.
+      filedBy: actor,
       ...(opts.doneWhenLineId !== undefined ? { doneWhenLineId: opts.doneWhenLineId } : {}),
     };
     task.reviews = [...(task.reviews ?? []), item];
@@ -477,6 +485,11 @@ export class ReviewItemStore {
       reviewItemId,
       ...(opts.undo === true ? { reinstated: true } : {}),
       ...(reason !== undefined && reason !== '' && opts.undo !== true ? { reason } : {}),
+      // Who the frame is FOR, which is not who caused it: any agent on the
+      // board may retire a stale ask, and the one reader who can act on that
+      // is the agent still waiting on the answer. Absent on an item filed
+      // before the store stamped `filedBy`.
+      ...(item.filedBy?.id !== undefined ? { filedById: item.filedBy.id } : {}),
       actor,
       links: task.links,
       ts,

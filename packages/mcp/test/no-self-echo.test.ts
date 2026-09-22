@@ -146,30 +146,35 @@ const FRAMES: Array<{ event: string; frame: (who: string) => Record<string, unkn
     }),
   },
   {
-    // The UNDO, not the plain withdrawal. A withdrawal asks its reader for
-    // nothing and is dropped for everybody by `bookkeeping-events.ts`, so the
-    // delivered-to-a-peer control below could not be asserted on it — and a
-    // row whose control cannot run tests only that something is suppressed,
-    // which is what the whole file exists not to do. `reinstated: true` is
-    // the same event name carrying an ask, so the self-echo rule is still the
-    // only thing deciding this row.
+    // `filedById: SELF` so the delivered-to-a-peer control below can still
+    // run: a withdrawal is addressed to the agent that raised the ask
+    // (`review-item-line.ts`), so a frame filed by anybody else reaches this
+    // session for a reason that is not the self-echo rule, and the row would
+    // then assert only that something is suppressed. With the filer fixed at
+    // this session, the one thing deciding the row is who ACTED — which is
+    // what this file is about.
     event: 'review_item.withdrawn',
     frame: (who) => ({
       workspaceId: 'w1',
       taskId: 't1',
       reviewItemId: 'r1',
-      reinstated: true,
+      reason: 'answered elsewhere',
+      filedById: SELF,
       links: [],
       actor: actor(who),
     }),
   },
   {
+    // Same reason as the withdrawal above: an answer is addressed to the
+    // filer, so the filer is pinned at this session and the actor is what
+    // varies.
     event: 'review_item.answered',
     frame: (who) => ({
       workspaceId: 'w1',
       taskId: 't1',
       reviewItemId: 'r1',
       actorId: who,
+      filedById: SELF,
       isOwner: false,
     }),
   },
