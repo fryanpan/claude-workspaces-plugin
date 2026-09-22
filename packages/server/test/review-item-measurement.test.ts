@@ -43,13 +43,19 @@ const ANSWER_NEEDLE = 'saltmarsh-tideline-verdict';
 /** Every key either row is allowed to carry. `device` and `location` are
  *  added to browser-caused rows by `stampEventOrigin` at the log's own
  *  writer; they are ids-and-place, not content, and they are on every board
- *  event this log holds. */
+ *  event this log holds. `filedById` rides the `answered` row alone: it is a
+ *  fourth id, it carries no words, and the MCP child addresses the wake at
+ *  the agent it names instead of broadcasting the answer to the board. The
+ *  set is what stops a caller spreading an item into the constructor, so a
+ *  new key here is a decision, which is why the rule is still one id at a
+ *  time rather than a shape. */
 const ALLOWED_KEYS = new Set([
   'event',
   'workspaceId',
   'reviewItemId',
   'taskId',
   'actorId',
+  'filedById',
   'isOwner',
   'ts',
   'device',
@@ -62,6 +68,7 @@ interface LoggedRow {
   reviewItemId?: string;
   taskId?: string;
   actorId?: string;
+  filedById?: string;
   isOwner?: boolean;
   ts?: number;
 }
@@ -328,11 +335,18 @@ describe('what a viewed and an answered item write to the board log', () => {
     expect(row.taskId).toBe(task.id);
     expect(row.actorId).toBe(PERSON.id);
     expect(row.isOwner).toBe(true);
+    // Who the answer is FOR. `seedItem` files as AGENT and this answers as
+    // PERSON, so the two ids on the row are different agents and the
+    // assertion cannot pass by accident.
+    expect(row.filedById).toBe(AGENT.id);
     // One log, one clock: the reading time is a subtraction and nothing else.
     expect(row.ts).toBeGreaterThanOrEqual(viewed[0].ts as number);
     for (const key of Object.keys(row)) {
       expect(ALLOWED_KEYS.has(key), `unexpected key on a measurement row: ${key}`).toBe(true);
     }
+    // THE CONTROL on the widened key set: `viewed` is written far more often
+    // and nobody addresses anything off it, so it does not take the field.
+    expect(viewed[0].filedById).toBeUndefined();
   });
 
   it('measures a doc-thread item under its derived id, at both ends', async () => {

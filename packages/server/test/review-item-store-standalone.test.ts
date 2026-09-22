@@ -328,6 +328,35 @@ describe('the review-item stores over a fake persistence', () => {
     expect(f.events.at(-1)?.type).toBe('review_item.revised');
   });
 
+  /**
+   * The filer's ID, which is the field the MCP child addresses a withdrawal
+   * and an answer at. `recordReviewJudgement` has always written `filedBy`,
+   * so an item that reached the quality gate carried one; an item filed
+   * straight through the store — the scheduler's, every server filing that
+   * skips the judge — did not, and its later withdrawal reached the whole
+   * board instead of the one agent waiting on it.
+   */
+  it('records the filer on the item and names it on the withdrawal', () => {
+    const f = fake();
+    const added = f.store.addReviewItem('t-cache', payload(), { actor: AGENT });
+    if (!added.ok) throw new Error('unreachable');
+    const stored = f.rows.get('t-cache')?.reviews?.find((r) => r.id === added.item.id);
+    expect(stored?.filedBy?.id).toBe(AGENT.id);
+
+    // A DIFFERENT actor retires it — the documented case, and the one the
+    // filer has to hear about.
+    const gone = f.store.withdrawReviewItem('t-cache', added.item.id, {
+      actor: PERSON,
+      reason: 'asked twice',
+    });
+    expect(gone.ok).toBe(true);
+    const ev = f.events.at(-1);
+    expect(ev?.type).toBe('review_item.withdrawn');
+    expect((ev as { filedById?: string }).filedById).toBe(AGENT.id);
+    // The CONTROL: the actor is who did it, and is not the filer here.
+    expect((ev as { actor?: { id?: string } }).actor?.id).toBe(PERSON.id);
+  });
+
   it('withdraws an item and puts it back', () => {
     const f = fake();
     const added = f.store.addReviewItem('t-cache', payload(), { actor: AGENT });

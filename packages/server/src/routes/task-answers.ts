@@ -7,7 +7,7 @@ import { answerAsksBack } from '@claude-workspaces/core';
  */
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
+import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
 import { SECRET_ANSWER_DENIAL, asksForSecret, refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { LEGACY_REVIEW_ITEM_ID, legacyDecisionItem } from '../tasks.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -118,6 +118,11 @@ export async function handleTaskAnswers(
         taskId,
         actorId: author.id,
         isOwner: roleFor(scope?.workspaceId ?? res.task.workspaceId) === 'owner',
+        // The ticket's own decision keeps its filer on the task rather than on
+        // a review row; `reviewItemFilerId` reads it there.
+        ...(reviewItemFilerId(res.task, LEGACY_REVIEW_ITEM_ID) !== undefined
+          ? { filedById: reviewItemFilerId(res.task, LEGACY_REVIEW_ITEM_ID) }
+          : {}),
         ts: Date.now(),
       }),
     );

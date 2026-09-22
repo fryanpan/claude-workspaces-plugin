@@ -117,6 +117,41 @@ describe('thread.resolved / thread.reopened — an actor, not a comment', () => 
   });
 });
 
+/**
+ * The ticket review-item family, which this module's own header names as the
+ * events that took the doc path and were never tested against the rule. They
+ * match `ACTOR_FAMILY_RE` and carry a `TaskActor`, so the rule already covers
+ * them — asserted here rather than assumed, now that they render through a
+ * branch of their own.
+ */
+describe('review_item.added / .revised / .withdrawn — a ticket actor', () => {
+  const frame = (id: string) => ({
+    workspaceId: 'w-1',
+    taskId: 't-1',
+    reviewItemId: 'ri-1',
+    headline: 'Which cadence?',
+    actor: { id, name: 'Harborlight' },
+  });
+
+  it('suppresses an item this session filed, revised or took back', () => {
+    for (const event of ['review_item.added', 'review_item.revised', 'review_item.withdrawn']) {
+      expect(isSelfAuthoredEvent(event, frame(SELF), SELF)).toBe(true);
+    }
+  });
+
+  // The positive control: the same three frames from anybody else are news.
+  it('delivers the same three when somebody else filed them', () => {
+    for (const event of ['review_item.added', 'review_item.revised', 'review_item.withdrawn']) {
+      expect(isSelfAuthoredEvent(event, frame(OTHER), SELF)).toBe(false);
+    }
+  });
+
+  it('delivers one from a server that stamps no actor at all', () => {
+    const { actor: _actor, ...noActor } = frame(SELF);
+    expect(isSelfAuthoredEvent('review_item.added', noActor, SELF)).toBe(false);
+  });
+});
+
 describe('events this must never touch', () => {
   // The suggesting agent has to hear the VERDICT on its own suggestion —
   // `suggestion.accepted` / `.rejected` carry the SUGGESTER as author, so

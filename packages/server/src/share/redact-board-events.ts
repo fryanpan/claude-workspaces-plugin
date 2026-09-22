@@ -63,6 +63,18 @@ const VOICE_PRIVATE_FIELDS = ['transcript', 'ack', 'context'] as const;
  */
 const MEASUREMENT_PRIVATE_FIELDS = ['actorId'] as const;
 
+/**
+ * Dropped from a visitor's copy of EVERY `review_item.*` event.
+ *
+ * `filedById` names the agent that raised the ask, so that the MCP child can
+ * address the withdrawal and the answer at that one agent rather than waking
+ * the board. It is an id of exactly the kind this module exists to withhold —
+ * these derive from an email address — and it rides two events, one of which
+ * (`withdrawn`) is not a measurement row, so it needs a drop of its own
+ * rather than an entry in the list above.
+ */
+const REVIEW_ITEM_PRIVATE_FIELDS = ['filedById'] as const;
+
 /** `{id, name, kind}` → `{name, kind}` — the §3.3 display-only actor. */
 function displayActor(actor: unknown): unknown {
   if (typeof actor !== 'object' || actor === null) return actor;
@@ -107,6 +119,9 @@ export function redactBoardEventForVisitor<T extends { event: string }>(payload:
   }
   if (isReviewItemMeasurementEvent(payload.event)) {
     for (const key of MEASUREMENT_PRIVATE_FIELDS) delete out[key];
+  }
+  if (payload.event.startsWith('review_item.')) {
+    for (const key of REVIEW_ITEM_PRIVATE_FIELDS) delete out[key];
   }
   return out as unknown as T;
 }

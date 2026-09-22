@@ -62,6 +62,19 @@
  *
  *   - `thread.reopened` — a reopen says the work is not done. That is a
  *     request, and it is the exact inverse of a resolve.
+ *   - `review_item.withdrawn` and `review_item.answered` — both DO carry a
+ *     request, for exactly one session: the agent that raised the ask. Its
+ *     question went away, or it got the answer it stopped for. That is a
+ *     third rule — who the request is FOR — and it needs the reader's
+ *     identity, which this file's two arguments do not include. It lives in
+ *     `review-item-line.ts` as `readsThisReviewItemEvent`, reading the
+ *     `filedById` the server stamps, and `channel-messages.ts` asks it. The
+ *     earlier draft of this change put the withdrawal on the list below and
+ *     argued that a stalled-row wake covered the filer; it does not
+ *     (`StallNudger.clockRows` takes a row carrying a second held or pending
+ *     item off the clock entirely, and the wake addresses the row's holder
+ *     rather than the ask's filer), so the filer would have waited on an ask
+ *     that no longer existed.
  *   - `review_item.answered` — an answer is the outcome the filer is blocked
  *     on. It is ids-only like `viewed`, and its words do ride `thread.replied`
  *     and `decision.answered`, so a case could be made; the case is not

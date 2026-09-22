@@ -24,6 +24,12 @@ import {
   reviewItemHeldLine,
   stalledLine,
 } from './nudge-line.ts';
+import {
+  type ReviewItemEventPayload,
+  isTaskReviewItemEvent,
+  readsThisReviewItemEvent,
+  reviewItemTaskLine,
+} from './review-item-line.ts';
 import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
 import { voiceRequestLine } from './voice-line.ts';
@@ -462,6 +468,37 @@ async function emitChannelMessage(
   // where it cannot affect a browser, which must still watch its own comment
   // appear. Fails OPEN on any ambiguity; see self-authored.ts.
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId)) return;
+  // A review item on a TICKET, before anything reads `docId`. These events
+  // carry `taskId` and no doc at all, so every field the doc-shaped tail
+  // below reads is absent on them and the frame that reached a reader named
+  // `doc_id: 'unknown'` and nothing else. Wording and the two-part test for
+  // which items are ticket-borne are in review-item-line.ts. BELOW the
+  // self-echo gate on purpose: a filer must not be handed its own ask back.
+  if (isTaskReviewItemEvent(event, rawPayload)) {
+    const r = rawPayload as ReviewItemEventPayload;
+    // A withdrawal and an answer are addressed to the agent that raised the
+    // ask and to nobody else; a filing and a revision are news to the board.
+    // See `readsThisReviewItemEvent`.
+    if (!readsThisReviewItemEvent(event, r, deps.authorId)) return;
+    await deps.notify({
+      method: 'notifications/claude/channel',
+      params: {
+        source: 'claude-workspaces',
+        sent_at: nowIso(deps),
+        content: reviewItemTaskLine(event, r),
+        meta: {
+          workspace_id: r.workspaceId ?? 'unknown',
+          ...(r.taskId ? { task_id: r.taskId } : {}),
+          ...(r.reviewItemId ? { review_item_id: r.reviewItemId } : {}),
+          ...(r.shape ? { shape: r.shape } : {}),
+          event,
+          ...(r.actor?.name ? { author: r.actor.name } : {}),
+        },
+      },
+    });
+    return;
+  }
+
   const p = (rawPayload ?? {}) as ChannelPayload;
   const docId = p.docId ?? 'unknown';
 

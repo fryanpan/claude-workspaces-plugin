@@ -1,5 +1,5 @@
 import { matchRest } from '../middleware/workspace-scope.ts';
-import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
+import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
 import { SECRET_VALUE_MAX_CHARS, isStorableSecretValue, secretValueFits } from '../secret-store.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
@@ -208,6 +208,9 @@ export async function handleTaskSecrets(
         taskId,
         actorId: author.id,
         isOwner: roleFor(res.task.workspaceId) === 'owner',
+        ...(reviewItemFilerId(res.task, reviewItemId) !== undefined
+          ? { filedById: reviewItemFilerId(res.task, reviewItemId) }
+          : {}),
         ts: Date.now(),
       }),
     );
