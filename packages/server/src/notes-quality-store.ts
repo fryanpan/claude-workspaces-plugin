@@ -50,6 +50,9 @@ export interface NotesQualityRecord {
   duplicateHeadings: number;
   longRuns: number;
   unknownVoices: number;
+  /** Notes that invert their source. Absent on a row written before the
+   *  check existed, which is not a reading of zero. */
+  invertedNotes?: number;
   ideas: number;
   /** `null` when the notes could not be read: the count is unknown, and both
    *  0 and `ideas` are lies about it. */
@@ -98,6 +101,7 @@ export function notesQualityRecord(
     duplicateHeadings: report.duplicateHeadings.length,
     longRuns: report.longRuns.length,
     unknownVoices: report.unknownVoices.length,
+    invertedNotes: report.inversions.length,
     ideas: report.coverage.ideas,
     uncoveredIdeas: report.coverage.uncoveredIdeas,
     uncoveredShare: report.coverage.uncoveredShare,

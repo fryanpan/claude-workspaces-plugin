@@ -77,6 +77,20 @@ export const MAX_LONG_FLAT_RUNS = 1;
 export const MAX_UNKNOWN_SPEAKERS = 0;
 
 /**
+ * Notes that say the opposite of their source, before it is reported.
+ *
+ * ZERO, for the reason invented speakers are zero: a note that turns a stated
+ * problem into a benefit, or a repave into a review, is a fabrication a reader
+ * acts on, and one is enough to stop them trusting the rest. The check behind
+ * it (`notes-inversions.ts`) errs towards silence — a finding needs a matched
+ * source, a word from a closed list and no sentence supporting the note — and
+ * it scores zero on a faithful fixture. It has NOT been scored over the
+ * recorded corpus, so how often it fires on a healthy real meeting is not yet
+ * known; that is the number to read before trusting this bar.
+ */
+export const MAX_INVERTED_NOTES = 0;
+
+/**
  * The share of spoken ideas the notes may leave unaccounted for.
  *
  * Half, and the number is a GAP in the measured distribution rather than a

@@ -32,11 +32,13 @@
  */
 
 import { findSpeakerTags } from '@claude-workspaces/core';
+import { type InvertedNote, invertedNotes } from './notes-inversions.ts';
 import { type NotesCoverage, type SpokenTurn, coverageOf } from './notes-quality-coverage.ts';
 import {
   LATE_NOTE_MS,
   MAX_DUPLICATE_BULLET_LINES,
   MAX_DUPLICATE_HEADINGS,
+  MAX_INVERTED_NOTES,
   MAX_LATE_NOTE_SHARE,
   MAX_LONG_FLAT_RUNS,
   MAX_UNCOVERED_IDEA_SHARE,
@@ -51,6 +53,7 @@ import {
   plainWords,
 } from './notes-quality.ts';
 
+export type { InvertedNote } from './notes-inversions.ts';
 export type { SpokenTurn } from './notes-quality-coverage.ts';
 
 /** Who the meeting actually had, as its record knows them. */
@@ -130,6 +133,9 @@ export interface NotesQualityReport {
   longRuns: FlatRun[];
   /** Voices the meeting never had. */
   unknownVoices: UnknownVoice[];
+  /** Notes that say the opposite of the sentence they came from, each with
+   *  that sentence quoted. */
+  inversions: InvertedNote[];
   /** Ideas heard, how many reached a note, and whether the notes could be
    *  read at all. The third state lives here and nowhere else. */
   coverage: NotesCoverage;
@@ -145,6 +151,7 @@ export interface NotesQualityFlag {
     | 'duplicate-headings'
     | 'flat-runs'
     | 'unknown-speakers'
+    | 'inverted-notes'
     | 'coverage'
     | 'notes-unread'
     | 'late';
@@ -152,21 +159,45 @@ export interface NotesQualityFlag {
   text: string;
 }
 
-/** The bullets written more than once, worst first. Compared on their words
- *  alone, so a repeat that gained a full stop or a bold mark still counts —
- *  the failure this catches is the reader's, and a reader sees two lines
- *  saying one thing. */
+/**
+ * Words a speaker leaves in and a note-taker sometimes copies, which change
+ * nothing a note says. Two notes that differ only by one of these are one
+ * note twice to a reader: "Crews start on the high street in June" and
+ * "Crews just start on the high street in June". Deliberately short, for the reason the
+ * stoplist is: a word that can carry meaning ("only", "not", "like") must
+ * never make two different notes read as one.
+ */
+export const FILLER_WORDS: ReadonlySet<string> = new Set(
+  (
+    'just really very actually basically obviously literally quite simply definitely ' +
+    'totally honestly essentially anyway um uh er ah'
+  ).split(' '),
+);
+
+/**
+ * The key two bullets are compared on: their words alone, lowercased, with
+ * punctuation, marks and filler words flattened away. A repeat that gained a
+ * full stop, a bold mark or a "really" is still one line twice to a reader.
+ */
+export function bulletKey(bullet: string): string {
+  return plainWords(bullet)
+    .join(' ')
+    .toLowerCase()
+    .replace(/\b(?:kind|sort) of\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')
+    .filter((w) => w && !FILLER_WORDS.has(w))
+    .join(' ');
+}
+
+/** The bullets written more than once, worst first, compared on
+ *  {@link bulletKey} — the same words-alone key `duplicateTopics` compares
+ *  headings on, and for the same reason. The failure this catches is the
+ *  reader's, and a reader sees two lines saying one thing. */
 export function repeatedBullets(notes: string): RepeatedBullet[] {
   const seen = new Map<string, { bullet: string; times: number }>();
   for (const bullet of allBullets(notes)) {
-    // Words alone, punctuation and marks flattened away — the same key
-    // `duplicateTopics` compares headings on, and for the same reason: a
-    // repeat that gained a full stop is still one line twice to a reader.
-    const key = plainWords(bullet)
-      .join(' ')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim();
+    const key = bulletKey(bullet);
     if (!key) continue;
     const hit = seen.get(key);
     if (hit) hit.times++;
@@ -311,6 +342,7 @@ export function buildNotesQualityReport(input: NotesQualityInput): NotesQualityR
     duplicateBulletLines: duplicateBulletLines(repeats),
     longRuns: longFlatRuns(notes),
     unknownVoices: unknownVoices(notes, voices),
+    inversions: invertedNotes(notes, transcript),
     coverage,
     lateness: latenessFrom(input.waits ?? []),
   };
@@ -343,6 +375,15 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
     flags.push({
       kind: 'unknown-speakers',
       text: `${plural(report.unknownVoices.length, 'speaker')} the meeting never had`,
+    });
+  }
+  if (report.inversions.length > MAX_INVERTED_NOTES) {
+    // The count only. The quotes live on `report.inversions` and reach the
+    // review item; this text also reaches the process log, which never
+    // carries the meeting's words.
+    flags.push({
+      kind: 'inverted-notes',
+      text: `${plural(report.inversions.length, 'note')} saying the opposite of what was said`,
     });
   }
   const { coverage } = report;
@@ -407,6 +448,7 @@ export function notesQualityLogLine(report: NotesQualityReport): string {
     `${report.duplicateHeadings.length} topics twice, ` +
     `${report.longRuns.length} flat runs, ` +
     `${report.unknownVoices.length} unknown speakers, ` +
+    `${report.inversions.length} inverted notes, ` +
     `${coverage}, ${lateness}`
   );
 }
