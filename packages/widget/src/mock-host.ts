@@ -40,7 +40,7 @@ const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffe
 export interface HostEnv {
   script: HTMLScriptElement | null;
   placeholder: HTMLIFrameElement | null;
-  location: { host: string; protocol: string };
+  location: { host: string; protocol: string; hash?: string };
   storage: () => Pick<Storage, 'getItem'>;
   fetch: (path: string, init: RequestInit) => Promise<Response>;
   WebSocket: new (url: string) => WebSocket;
@@ -78,7 +78,7 @@ export function hostMock(env: HostEnv): void {
   frame.name = `cw-mock:${JSON.stringify(seed)}`;
   // The server wrote the page's query into the src; the fragment never
   // reaches a server, so it is added here, where the page can read it.
-  frame.src = `${placeholder.dataset.src ?? '?cw-frame=1'}${location.hash}`;
+  frame.src = `${placeholder.dataset.src ?? '?cw-frame=1'}${location.hash ?? ''}`;
   placeholder.replaceWith(frame);
 
   const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;

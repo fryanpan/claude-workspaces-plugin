@@ -388,6 +388,20 @@ describe('the canonical routes, over HTTP', () => {
       method: 'GET',
       sub: 'mockups/{id}',
     },
+    apps: {
+      // An attached dev server. Nothing listens on port 1, so the own board
+      // answers 502 from the proxy: past the middleware, and not a 404.
+      mint: async (ws) => {
+        const r = await post(`/workspaces/${ws}/apps`, {
+          docId: `app-${ws}`,
+          origin: 'http://127.0.0.1:1',
+        });
+        expect(r.status).toBe(200);
+        return ((await r.json()) as { docId: string }).docId;
+      },
+      method: 'GET',
+      sub: 'apps/{id}/',
+    },
     attachments: {
       // An attachment SET, filed on the board that bound the folder.
       mint: async (ws) => {
