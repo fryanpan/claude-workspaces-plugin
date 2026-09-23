@@ -64,10 +64,12 @@
  */
 
 import type { NotesComposeInput, NotesTick, NotesTurn } from './meeting-notes.ts';
+import { dictationDirective, dictationTickOf } from './notes-dictation.ts';
 import { NOTES_AUTHOR_ID } from './notes-doc-access.ts';
 import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
 import { missedBlock } from './notes-missed-words.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
+import { reasonDirective } from './notes-reason-ask.ts';
 import { regroupDirective } from './notes-regroup-ask.ts';
 
 /**
@@ -242,6 +244,14 @@ export function buildNotesPrompt(
     notesHeadingId: input.notesHeadingId,
   });
   if (regroup) parts.push(regroup);
+  // A dictated page or item, named per tick for the reason regrouping is.
+  const dictation = dictationDirective(
+    input.outline,
+    input.dictation ?? dictationTickOf(input.tick.turns),
+  );
+  if (dictation) parts.push(dictation);
+  const reason = reasonDirective(input.tick.turns);
+  if (reason) parts.push(reason);
 
   if (input.taskLinks?.length) {
     parts.push(
@@ -394,7 +404,9 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
             // to stop acting on. `sub-bullet` is the whole difference.
             (entry.depth ?? 0) > 0
             ? 'sub-bullet'
-            : 'bullet'
+            : entry.ordered
+              ? 'numbered'
+              : 'bullet'
           : 'para';
     // `claimed` is the caller overriding the doc's marks — see
     // `NotesComposeInput.claimed`. Nothing sets it on a tick.

@@ -338,6 +338,12 @@ export function scanRuns(outline: readonly prose.OutlineEntry[], opts: RegroupOp
       continue;
     }
     topicNotes++;
+    // A NUMBERED ITEM IS AN ORDER THE SPEAKER DICTATED, not a flat bullet:
+    // grouping it would undo the order. It ends the run, like a lead does.
+    if (entry.ordered && (entry.depth ?? 0) === 0) {
+      flush();
+      continue;
+    }
     if ((entry.depth ?? 0) > 0) {
       // A sub-bullet. The bullet above it leads a group rather than sitting
       // flat, so it leaves the run before the run is closed.

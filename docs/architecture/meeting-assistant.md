@@ -2648,6 +2648,60 @@ to have — so `--smoke` exits 1 on one, and the fix is to raise the structure
 rather than the threshold. The full run still only reports, per meeting, how
 many such topics the meeting ended with.
 
+### Does a note keep its meaning and order? `bun run notes:fidelity`
+
+`notes:eval` asks whether ideas reached the notes. It cannot see a note that
+reached the page in the wrong shape or with the wrong meaning. A solo
+dictation on 2026-09-22 showed three such faults. A laid-out page came back
+as topics of the model's own. A reason was split off its point. A stated
+problem was written as a benefit. The fixes and the checks that hold them:
+
+- **A dictated layout stays that layout.** The prompt's "Dictated layout"
+  section asks for one heading per page in the speaker's words and one
+  numbered note per item. The rule alone held on no tick, so
+  `notes-dictation.ts` names the heading id and the next number on each tick
+  that dictates. A tick dictates only when it carries a cue. A page cue is a
+  sentence that opens with the page and says what it is ("Page two is the
+  flooding"), so "page 2 is broken" opens nothing. An ordering word ("then",
+  "the last thing") counts as an item only within three ticks of a page or
+  item cue, remembered per meeting. A page heading left in the doc does not
+  keep a dictation open, and a tick with no cue gets no block. Three supports
+  keep the list intact. The regroup scan and the flat-run check treat a
+  numbered item as structure. The rename guard applies, rather than proposes,
+  the one rename that names a bare "Page 1" heading the note-taker wrote. On
+  the one tick straight after a cue, a dash detail after the page's last item
+  becomes a sub-bullet of that item, which keeps the item's own markdown.
+- **A reason stays with its point** ("X, because Y"), asked by the prompt and
+  named per tick by `notes-reason-ask.ts`.
+- **An inversion is counted at the stop, not yet flagged.**
+  `notes-inversions.ts` matches each note to its source sentence and finds
+  three changes of meaning: a problem written as a benefit or the reverse, an
+  action from a different synonym class ("repave" as "reassess"), and a
+  question written as a claim. The report, the stored row and the log line
+  carry the count. A review item filed for another reason quotes each one
+  beside its source. It raises no flag of its own, because a flag files a
+  review item and the rules have not been scored against recorded meetings.
+  The verb classes leave out verbs with an everyday second sense ("raise",
+  "add", "review"). A note asking for a fix ("needs to be better") is a
+  remedy, not a benefit, and ", right?" asks for agreement, not an answer. It
+  is lexical, so it misses an inversion in words outside its lists.
+- **A repeated note ignores filler.** The repeated-bullet count keys each note
+  on its words minus a short filler list ("just", "really", "kind of"), so
+  two notes that differ only by one of those count as one duplicate.
+
+`scripts/notes-eval-fidelity.ts` plays one invented dictation
+(`notes-fidelity-dictation.ts`) through the real composer and scores the
+notes in code (`notes-fidelity-score.ts`). A page counts as kept when its
+heading carries the speaker's words and its items form one numbered list in
+the dictated order. A reason counts as retained when one bullet carries both
+the claim and the reason. Three runs each, on the eval key. One run costs
+about $0.035 to $0.04:
+
+| Arm | Pages kept | Reasons retained | Cost of three runs |
+| --- | --- | --- | --- |
+| Before the change | 0 of 6 | 5 of 9 | $0.10 |
+| After the change | 6 of 6 | 9 of 9 | $0.11 |
+
 ### Cost
 
 The four intents are prompt text on a call that was already being made.

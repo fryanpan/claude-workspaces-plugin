@@ -83,8 +83,9 @@ export function missedBlock<T extends { text: string }>(
     'producing anything. Read them again with the notes above in front of',
     'you: write the note each one should have produced, under the heading',
     'it belongs to. Where a line gives a reason, a cause or a trade-off for',
-    'a point the notes already make, the reason is the note to write — it',
-    'is an idea, not packaging. Leave one out only if it is a greeting or a',
+    'a point the notes already make, replace that note so it carries the',
+    'reason too ("X, because Y") — the reason is an idea, not packaging,',
+    'and it belongs with its point. Leave one out only if it is a greeting or a',
     'false start. A bracket after a line names the words of it that are in',
     'no note yet. This is their last offer; nothing asks again.',
     ...missed.map((t) => {

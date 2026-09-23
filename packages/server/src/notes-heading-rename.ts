@@ -15,6 +15,17 @@
  * `propose` on the edit (`prose-batch.ts`) is what makes that a property of
  * the write path rather than of a prompt the model may or may not follow.
  *
+ * THE ONE RENAME THAT IS APPLIED: A BARE PAGE HEADING GIVEN ITS NAME. A
+ * speaker dictating a document says "it has two pages" and then "page one is
+ * the street repairs". The note-taker opens "Page one" on the first sentence,
+ * nothing yet under it, and names it on the second. Filed as a suggestion,
+ * that name never reached the page on the synthetic dictation — the heading
+ * stayed "Page one" and the speaker's words for it were lost. So a heading
+ * the note-taker wrote that is ONLY a page number, replaced by the same
+ * words with more after them ("Page one" to "Page one: street repairs"), is
+ * applied: nothing under it changes what it is filed under, and no word of
+ * the old heading goes.
+ *
  * WHAT IS REFUSED RATHER THAN PROPOSED. A rename is a rename: the replacement
  * is one heading, at the SAME LEVEL, saying something different. A
  * replacement that is a bullet, or a heading a level deeper, is a
@@ -24,10 +35,15 @@
  */
 
 import type { prose } from '@claude-workspaces/core';
+import { pageOfHeading } from './notes-dictation.ts';
 
 /** The rename to file, or why this replace is not one. Null when the edit is
  *  not about a heading at all, which is the ordinary case. */
-export type HeadingRename = { edit: prose.BlockEdit } | { refused: string } | null;
+export type HeadingRename = { edit: prose.BlockEdit; applied?: true } | { refused: string } | null;
+
+/** A heading that is a page number and nothing else: "Page one", "Part 2". */
+const BARE_PAGE =
+  /^(?:page|part|section)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)[.:]?$/i;
 
 /** The level a markdown heading line declares, or 0 for anything else. */
 function levelOf(markdown: string): number {
@@ -43,6 +59,7 @@ function wordsOf(markdown: string): string {
 export function headingRename(
   edit: prose.BlockEdit,
   outline: readonly prose.OutlineEntry[],
+  authorId?: string,
 ): HeadingRename {
   if (edit.op !== 'replace_block') return null;
   const was = outline.find((e) => e.id === edit.blockId);
@@ -59,5 +76,17 @@ export function headingRename(
   const words = wordsOf(edit.markdown);
   if (words.length === 0) return { refused: 'the replacement for a heading has no words' };
   if (words === was.text.trim()) return { refused: 'the replacement says the same words' };
+  const old = was.text.trim();
+  // The same page by number ("Page 1" named "Page one: …" is still page 1),
+  // with words the bare heading did not have.
+  const page = pageOfHeading(old);
+  const named =
+    authorId !== undefined &&
+    was.author === authorId &&
+    BARE_PAGE.test(old) &&
+    page !== undefined &&
+    pageOfHeading(words) === page &&
+    words.split(/\s+/).length > old.split(/\s+/).length;
+  if (named) return { edit, applied: true };
   return { edit: { ...edit, propose: true } };
 }

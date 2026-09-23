@@ -76,6 +76,15 @@ export const MAX_LONG_FLAT_RUNS = 1;
  */
 export const MAX_UNKNOWN_SPEAKERS = 0;
 
+/*
+ * NO BAR FOR NOTES THAT SAY THE OPPOSITE OF THEIR SOURCE, on purpose. The
+ * count (`notes-inversions.ts`) is recorded on every report, stored on every
+ * row and printed in the log line, but it raises no flag: a flag files a
+ * review item to a person, and the rules have not been scored against
+ * recorded meetings, so how often they fire on a faithful note is not known.
+ * A bar goes here once that rate is measured.
+ */
+
 /**
  * The share of spoken ideas the notes may leave unaccounted for.
  *

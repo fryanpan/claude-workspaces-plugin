@@ -107,6 +107,9 @@ export interface OutlineEntry {
    * a heading whether they were a wall or three tidy groups.
    */
   depth?: number;
+  /** A `listItem` of a numbered list. A dictated order is structure the
+   *  speaker gave, and a check that read it as a flat wall would undo it. */
+  ordered?: true;
 }
 
 /** The Yjs parent of a node, as an untyped walk. Yjs's own `parent` is typed
@@ -367,6 +370,10 @@ export function readOutline(doc: Y.Doc, opts: OutlineOptions = {}): OutlineEntry
       ...(author !== undefined ? { author } : {}),
       ...(!isHeading && underHeadingId !== undefined ? { underHeadingId } : {}),
       ...(el.nodeName === 'listItem' ? { depth: listDepthOf(el) } : {}),
+      ...(el.nodeName === 'listItem' &&
+      (parentOf(el) as Y.XmlElement | null)?.nodeName === 'orderedList'
+        ? { ordered: true as const }
+        : {}),
     });
   }
   const cap = opts.recentBlocks;

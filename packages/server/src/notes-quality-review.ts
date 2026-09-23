@@ -262,6 +262,22 @@ export function buildNotesQualityReview(input: {
         'The transcript carries no voice by that name.',
     );
   }
+  if (report.inversions.length > 0) {
+    lines.push(
+      `- **${report.inversions.length} notes say the opposite of what was said.** ` +
+        'Each is quoted beside the sentence it came from:',
+      ...report.inversions
+        .slice(0, NAMED_OFFENDER_LIMIT)
+        .map(
+          (inv) =>
+            `  - ${inv.detail}: the note “${inv.bullet.replace(/[[\]]/g, '')}” ` +
+            `against “${inv.source.replace(/[[\]]/g, '')}”`,
+        ),
+      ...(report.inversions.length > NAMED_OFFENDER_LIMIT
+        ? [`  - and ${report.inversions.length - NAMED_OFFENDER_LIMIT} more`]
+        : []),
+    );
+  }
   if (report.coverage.source === 'unreadable') {
     // The sentence that replaces a verdict nobody could have answered — and
     // it carries NO COUNT, deliberately. Every leg of a meeting hears more
