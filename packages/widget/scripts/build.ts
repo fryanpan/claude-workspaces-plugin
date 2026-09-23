@@ -185,6 +185,10 @@ await build('iife', 'mic.js', 'mic-entry.ts');
 // Voice feedback: fetched on the mic's first tap, so it rides on no page that
 // never records — and on none of the budgeted bundle's bytes.
 await build('iife', 'voice.js', 'voice/voice-entry.ts');
+// Edit mode: fetched on the pencil's first tap, or at load when the page has
+// edits waiting on the agent. The pencil itself rides in `mic.js` and
+// `mockup-live.js`, so neither is on the budgeted bundle.
+await build('iife', 'edit.js', 'edit/edit-entry.ts');
 // A served mock's sandbox (`server/src/mockup-frame.ts`): the bridge is written
 // into the frame's bytes, the host script is loaded by the page holding it.
 // Both only ever run on a mock, so neither is on the budgeted bundle.
