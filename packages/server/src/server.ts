@@ -1198,6 +1198,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     boardShareTarget,
     proxiedTrustedEmails,
+    boardSharingOpen: (workspaceId) => sharingGate.isBoardOpen(workspaceId),
   });
 
   // The stall / ready-work wiring — both per-board snapshots, the two

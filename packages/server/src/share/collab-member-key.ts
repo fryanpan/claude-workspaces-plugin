@@ -46,3 +46,17 @@ export function collabMembershipEnded(
     return !isMember(workspaceId, email);
   };
 }
+
+/**
+ * A sweep predicate: every membership key of EITHER spelling on one board.
+ * Closing a board to outside visitors ends its share-link and collaboration
+ * connections alike, and nobody else's.
+ */
+export function memberKeyOnBoard(workspaceId: string): (memberKey: string) => boolean {
+  return (memberKey) => {
+    const bare = memberKey.startsWith(COLLAB_KEY_PREFIX)
+      ? memberKey.slice(COLLAB_KEY_PREFIX.length)
+      : memberKey;
+    return bare.split('\u0000')[0] === workspaceId;
+  };
+}

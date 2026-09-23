@@ -183,6 +183,9 @@ export interface BoardMembershipContext {
   boardShareTarget: (share: Share | null | undefined) => ShareTarget | null;
   /** The operator allowlist — this deployment's own people. */
   proxiedTrustedEmails: Set<string>;
+  /** Whether a board is open to outside visitors (share/sharing-gate.ts). A
+   *  closed board admits nobody new through a link it already handed out. */
+  boardSharingOpen: (workspaceId: string) => boolean;
 }
 
 /** What `createServer` keeps a handle on. */
@@ -444,6 +447,7 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
       });
     const link = shareLinks.get(linkId);
     if (!link || !taskStore.getWorkspace(link.workspaceId)) return unavailable();
+    if (!ctx.boardSharingOpen(link.workspaceId)) return unavailable();
     const outcome = shareLinks.redeem(linkId, email ?? '');
     if (!outcome.ok) return unavailable();
     return new Response(null, {
