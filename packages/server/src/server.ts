@@ -26,6 +26,7 @@ import {
   createLegacyAgentWarner,
   agentTokenKey as deriveAgentTokenKey,
 } from './auth/agent-token.ts';
+import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
@@ -164,7 +165,7 @@ import type { ServerOptions } from './server-options.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
-import { SHARING_NOTICE_ACTOR, SharingNotice } from './sharing-notice.ts';
+import { SHARING_NOTICE_ACTOR, SharingNotice, rankFallbackBoards } from './sharing-notice.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
@@ -188,6 +189,7 @@ import { UptimeMonitor } from './uptime.ts';
 import { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { VoiceRouter } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
+import { isRetired } from './workspace-store.ts';
 
 const DEFAULT_PORT = Number(process.env.PORT ?? 8787);
 
@@ -2329,6 +2331,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const sharingNotice = new SharingNotice({
     dataDir,
     boardId: defaultBoardWorkspaceId,
+    isBoardLive: (workspaceId) => {
+      const w = taskStore.getWorkspace(workspaceId);
+      return w !== undefined && !isRetired(w);
+    },
+    fallbackBoards: () =>
+      rankFallbackBoards(
+        taskStore.listWorkspaces().map((w) => ({
+          id: w.id,
+          retired: isRetired(w),
+          shared:
+            (shareLinks?.forWorkspace(w.id).length ?? 0) > 0 ||
+            (shareLinks?.membersOf(w.id).length ?? 0) > 0 ||
+            (shares?.list() ?? []).some((sh) => sh.workspaceId === w.id),
+          activeAt: lastBoardActivityAt(w, taskStore.listTasks(w.id)),
+        })),
+      ),
     getTask: (taskId) => taskStore.getTask(taskId),
     createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
     addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),

@@ -17,6 +17,7 @@ import {
   SharingNotice,
   type SharingNoticeDeps,
   actorOnCard,
+  rankFallbackBoards,
   sharingOffReview,
 } from '../src/sharing-notice.ts';
 
@@ -30,7 +31,9 @@ const OWNER = { id: 'known-owner', name: 'Owner', kind: 'person' };
 function fakeStore(prefix: string) {
   const dataDir = mkdtempSync(join(tmpdir(), prefix));
   dirs.push(dataDir);
-  const tasks = new Map<string, { id: string }>();
+  const tasks = new Map<string, { id: string; workspaceId: string }>();
+  const retired = new Set<string>();
+  const live: string[] = [];
   const open = new Map<string, { taskId: string; review: { detail?: unknown } }>();
   const log: string[] = [];
   const flips: Array<{ actor: string; peer: string; reason: string }> = [];
@@ -39,8 +42,11 @@ function fakeStore(prefix: string) {
     dataDir,
     boardId: () => 'w-unfiled',
     getTask: (id) => tasks.get(id),
+    isBoardLive: (ws) => !retired.has(ws),
+    fallbackBoards: () => live,
     createTask: (ws) => {
-      const task = { id: `t-${++n}` };
+      if (retired.has(ws)) return { ok: false, error: 'workspace-retired' };
+      const task = { id: `t-${++n}`, workspaceId: ws };
       tasks.set(task.id, task);
       log.push(`create ${ws} ${task.id}`);
       return { ok: true, task };
@@ -74,7 +80,7 @@ function fakeStore(prefix: string) {
     },
     say: (line) => log.push(line),
   };
-  return { deps, tasks, open, log, flips };
+  return { deps, tasks, open, log, flips, retired, live };
 }
 
 const flip = (enabled: boolean, extra: Partial<SharingFlip> = {}): SharingFlip => ({
@@ -111,6 +117,35 @@ describe('SharingNotice', () => {
       'gate r-2',
     ]);
     expect(String(s.open.get('r-2')?.review.detail)).toContain('second look');
+  });
+
+  it('files on a live board when the catch-all board is retired', async () => {
+    const s = fakeStore('notice-retired-');
+    s.retired.add('w-unfiled');
+    s.live.push('w-harbor');
+    await new SharingNotice(s.deps).onFlip(flip(false));
+    expect(s.open.size).toBe(1);
+    expect([...s.tasks.values()].map((t) => t.workspaceId)).toEqual(['w-harbor']);
+  });
+
+  it('leaves a standing task whose board was retired later, and files on a live one', async () => {
+    const s = fakeStore('notice-retired-later-');
+    s.live.push('w-harbor');
+    const notice = new SharingNotice(s.deps);
+    await notice.onFlip(flip(false));
+    await notice.onFlip(flip(true));
+    s.retired.add('w-unfiled');
+    await notice.onFlip(flip(false));
+    expect(notice.openItem()?.taskId).not.toBe('t-1');
+    expect(s.tasks.get(notice.openItem()?.taskId ?? '')?.workspaceId).toBe('w-harbor');
+  });
+
+  it('says so when every board refuses', async () => {
+    const s = fakeStore('notice-nowhere-');
+    s.retired.add('w-unfiled');
+    await new SharingNotice(s.deps).onFlip(flip(false));
+    expect(s.open.size).toBe(0);
+    expect(s.log.at(-1)).toContain('filed nowhere');
   });
 
   it('ignores a flip of one board', async () => {
@@ -185,6 +220,19 @@ describe('SharingNotice', () => {
     });
     expect(s.flips).toHaveLength(0);
     expect(notice.openItem()?.itemId).toBe('r-2');
+  });
+});
+
+describe('rankFallbackBoards', () => {
+  it('drops retired boards, puts unshared first, then the most recently active', () => {
+    expect(
+      rankFallbackBoards([
+        { id: 'w-old', retired: false, shared: false, activeAt: 1 },
+        { id: 'w-shared', retired: false, shared: true, activeAt: 9 },
+        { id: 'w-gone', retired: true, shared: false, activeAt: 10 },
+        { id: 'w-new', retired: false, shared: false, activeAt: 5 },
+      ]),
+    ).toEqual(['w-new', 'w-old', 'w-shared']);
   });
 });
 

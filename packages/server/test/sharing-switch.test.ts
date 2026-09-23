@@ -379,5 +379,35 @@ describe('the sharing switch, for one board and for all of them', () => {
       expect(await masterEnabled()).toBe(false);
       await postLocal('/api/share/enabled', { enabled: true });
     });
+
+    it('files on a live board nobody outside can reach when the catch-all board is retired', async () => {
+      const unfiled = await unfiledBoard();
+      expect(unfiled).toBeString();
+      const retired = await req(`/workspaces/${unfiled}/retired`, `localhost:${handle.port}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ retired: true, author: { id: 'known-bryan', name: 'Bryan' } }),
+      });
+      expect(retired.status).toBe(200);
+      const created = await postLocal('/workspaces', { name: 'Saltmarsh board' });
+      const live = ((await created.json()) as { workspace: { id: string } }).workspace.id;
+
+      await postLocal('/api/share/enabled', { enabled: false, reason: 'catch-all retired' });
+
+      const r = await req(`/workspaces/${live}/review-items`, `localhost:${handle.port}`);
+      const rows = ((await r.json()) as { items: Row[] }).items.filter(
+        (row) => row.askedBy === 'Sharing switch',
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.review.headline).toBe(HEADLINE);
+      expect(rows[0]?.review.detail).toContain('catch-all retired');
+      // The shared boards got nothing: the item names an address on this machine.
+      for (const board of [closing, other]) {
+        const shared = await req(`/workspaces/${board}/review-items`, `localhost:${handle.port}`);
+        const items = ((await shared.json()) as { items: Row[] }).items;
+        expect(items.filter((row) => row.askedBy === 'Sharing switch')).toHaveLength(0);
+      }
+      await postLocal('/api/share/enabled', { enabled: true });
+    });
   });
 });
