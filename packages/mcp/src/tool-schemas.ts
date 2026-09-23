@@ -549,6 +549,32 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'attach_app',
+      description:
+        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Reusing a docId repoints that app. Hand reviewUrl to a person.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: {
+            type: 'string',
+            description:
+              'The board this resource is on. get_workspace lists the boards you are attached to.',
+          },
+          docId: {
+            type: 'string',
+            description:
+              'A readable name for the app, not its address. The server mints the real id, returns it, and keeps this name as an alias.',
+          },
+          origin: {
+            type: 'string',
+            description: 'The dev server, e.g. http://127.0.0.1:4321. Loopback only, no path.',
+          },
+          title: { type: 'string' },
+        },
+        required: ['workspaceId', 'docId', 'origin'],
+      },
+    },
+    {
       name: 'attach_folder',
       description:
         'Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing.',

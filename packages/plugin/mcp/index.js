@@ -16000,6 +16000,29 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "attach_app",
+      description: "Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Reusing a docId repoints that app. Hand reviewUrl to a person.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board this resource is on. get_workspace lists the boards you are attached to."
+          },
+          docId: {
+            type: "string",
+            description: "A readable name for the app, not its address. The server mints the real id, returns it, and keeps this name as an alias."
+          },
+          origin: {
+            type: "string",
+            description: "The dev server, e.g. http://127.0.0.1:4321. Loopback only, no path."
+          },
+          title: { type: "string" }
+        },
+        required: ["workspaceId", "docId", "origin"]
+      }
+    },
+    {
       name: "attach_folder",
       description: "Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing.",
       inputSchema: {
@@ -18350,6 +18373,16 @@ async function handleDocsTool(name, a, ctx) {
       });
       return ok2(res);
     }
+    case "attach_app": {
+      const { docId, origin, title } = a;
+      const res = await http("POST", `${board()}/apps`, {
+        docId,
+        origin,
+        owner: CWD,
+        ...title ? { title } : {}
+      });
+      return ok2(res);
+    }
     case "bind_folder":
     case "attach_folder": {
       const { folderPath, setId, title, include, exclude, maxFiles, subscribe, producedBy } = a;
@@ -20602,7 +20635,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.258";
+var PLUGIN_VERSION = "0.1.260";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
