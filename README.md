@@ -84,7 +84,14 @@ claude() { /path/to/claude --dangerously-load-development-channels plugin:claude
 ```
 
 Without the flag the tools still work, but your agent only sees a comment
-when it asks for one.
+when it asks for one. The flag is the development form because this plugin is
+not on Anthropic's approved channel list. Neither form appears in
+`claude --help` during the channels research preview.
+
+On a claude.ai Team or Enterprise plan, channels stay off until an
+organization Owner enables them in the Claude Code admin settings. The tools
+work either way. The details are in the
+[channels docs](https://code.claude.com/docs/en/channels#enterprise-controls).
 
 ### 3. Run the server
 
