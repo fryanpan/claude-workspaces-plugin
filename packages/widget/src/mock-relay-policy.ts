@@ -71,17 +71,22 @@ export function relayTarget(
   const p = u.pathname;
   const docBase = `/workspaces/${enc(scope.workspaceId)}/docs/${enc(scope.docId)}`;
   const mockBase = `/workspaces/${enc(scope.workspaceId)}/mockups/${enc(scope.docId)}`;
+  // An attached dev server's own pages, files and reload stream, when the
+  // page is one (`server/src/routes/apps.ts`). Reads only, under this doc's
+  // app prefix, which the server serves for an app doc and nothing else.
+  const appBase = `/workspaces/${enc(scope.workspaceId)}/apps/${enc(scope.docId)}/`;
   if (kind === 'ws') {
     if (p !== `${docBase}/y` && p !== `${docBase}/voice`) return null;
     u.searchParams.delete('sourceUrl');
     u.searchParams.set(VIA_PARAM, VIA_VALUE);
     return u;
   }
-  if (kind === 'sse') return p === `${docBase}/events:stream` ? u : null;
+  if (kind === 'sse') return p === `${docBase}/events:stream` || p.startsWith(appBase) ? u : null;
   const m = method.toUpperCase();
   if (m === 'GET' || m === 'HEAD') {
     return p === '/api/auth/session' ||
       p === mockBase ||
+      p.startsWith(appBase) ||
       p.startsWith(`${docBase}/`) ||
       p.startsWith('/widget/')
       ? u

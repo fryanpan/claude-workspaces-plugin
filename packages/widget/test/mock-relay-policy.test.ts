@@ -127,6 +127,31 @@ describe('what a frame may open through the host', () => {
   });
 });
 
+describe("an attached app's own reads", () => {
+  const APP = 'http://board.test/workspaces/w-stand/apps/d-price/';
+  it("allows this app's pages, files and reload stream, reads only", () => {
+    expect(ok('fetch', 'GET', `${APP}menu/partial.html`)).toBe(true);
+    expect(ok('fetch', 'HEAD', `${APP}prices.json`)).toBe(true);
+    expect(ok('sse', 'GET', `${APP}__reload`)).toBe(true);
+
+    expect(ok('fetch', 'POST', `${APP}order`)).toBe(false);
+    expect(ok('fetch', 'GET', 'http://board.test/workspaces/w-stand/apps/d-menu/index.html')).toBe(
+      false,
+    );
+    expect(ok('fetch', 'GET', 'http://board.test/workspaces/w-other/apps/d-price/x.js')).toBe(
+      false,
+    );
+    expect(ok('sse', 'GET', 'http://board.test/workspaces/w-stand/apps/d-menu/__reload')).toBe(
+      false,
+    );
+    // A dot segment that climbs out of the app is judged where it lands.
+    expect(ok('fetch', 'GET', `${APP}../d-menu/index.html`)).toBe(false);
+    expect(ok('sse', 'GET', 'http://elsewhere.test/workspaces/w-stand/apps/d-price/__reload')).toBe(
+      false,
+    );
+  });
+});
+
 describe('the headers a relayed fetch carries', () => {
   it('keeps content-type and accept, drops everything else, and adds the mark', () => {
     expect(
