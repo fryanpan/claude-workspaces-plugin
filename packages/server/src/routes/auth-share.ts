@@ -36,6 +36,7 @@ import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import { boardLockedRefusal, lockedBoardNamedBy } from '../share/board-lock.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
 import { readCookie } from '../share/link-session.ts';
@@ -48,6 +49,7 @@ import { DEFAULT_LINK_TTL_SECONDS } from '../share/types.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import { widgetAuthPage } from '../widget-auth-page.ts';
+import { BOARD_LOCK_PATH, handleBoardLock } from './board-lock.ts';
 import { handleShareSwitch } from './share-switch.ts';
 
 /**
@@ -615,6 +617,12 @@ export async function handleAuthShareRoutes(
       sharing: sharingGate.status(),
     });
   }
+  // The never-shareable lock: loopback-only, see routes/board-lock.ts. Not
+  // keyed on sharing being configured — a lock taken before the first share
+  // hostname exists is the lock doing its job early.
+  if (pathname === BOARD_LOCK_PATH && req.method === 'POST') {
+    return handleBoardLock(ctx, { req, provenIdentityFor: rq.provenIdentityFor });
+  }
   // The master switch, and the narrower switch for one board: both in
   // routes/share-switch.ts, called from the position this block held.
   if (pathname === '/api/share/enabled' && req.method === 'POST') {
@@ -633,6 +641,23 @@ export async function handleAuthShareRoutes(
   // its own payload, and the useful reply names the replacement instead
   // of reading as "your server is broken".
   if (pathname === '/api/share/doc' && req.method === 'POST') {
+    // A doc on a LOCKED board hears the lock, not the retirement: a caller
+    // told only "use share_workspace" would try that next, and the useful
+    // answer is that this board cannot be shared by any verb.
+    const lockedBoard = lockedBoardNamedBy(await safeJson(req), {
+      isBoardLocked: (id) => sharingGate.isBoardLocked(id),
+      boardsHolding: (docId) => {
+        const canonical = docStore.resolveDocId(docId);
+        const meta = docStore.peekMeta(canonical);
+        const set = meta?.setId ?? meta?.workspaceId;
+        const ids = set === undefined ? [canonical] : [canonical, set];
+        return taskStore
+          .listWorkspaces()
+          .filter((w) => ids.some((id) => w.docIds.includes(id)))
+          .map((w) => w.id);
+      },
+    });
+    if (lockedBoard) return j(403, boardLockedRefusal(lockedBoard));
     return j(410, {
       error: 'per_doc_sharing_removed',
       hint: 'A workspace is the unit of sharing. File the doc on a workspace (attach_doc / attach_folder / create_diff_review) and call share_workspace or share_link with workspaceId.',
@@ -717,6 +742,10 @@ export async function handleAuthShareRoutes(
     // receive other agents' stray reviews.
     if (linkBoard.name === DEFAULT_BOARD_WORKSPACE_NAME) {
       return j(403, UNFILED_SHARING_REFUSED);
+    }
+    // Locked never-shareable (share/sharing-gate.ts): no mint of any kind.
+    if (sharingGate.isBoardLocked(workspaceId)) {
+      return j(403, boardLockedRefusal(workspaceId));
     }
     // A board share opens the board. There is no entry doc to choose,
     // and an older bundle sharing a board sends this key undefined,
@@ -934,6 +963,12 @@ export async function handleAuthShareRoutes(
     // any board answering that lookup receives other agents' stray reviews.
     if (board.name === DEFAULT_BOARD_WORKSPACE_NAME) {
       return j(403, UNFILED_SHARING_REFUSED);
+    }
+    // Locked never-shareable (share/sharing-gate.ts): the one refusal this
+    // route owes a board that exists and could otherwise be shared, and it
+    // names the lock so the caller knows what would have to change.
+    if (sharingGate.isBoardLocked(workspaceId)) {
+      return j(403, boardLockedRefusal(workspaceId));
     }
     // BELOW the board lookup, in the order the retired mint used: an older
     // bundle sends `entryDocId: undefined` on every board share, and a
