@@ -2310,6 +2310,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
+    requestAddress: (req) => server.requestIP(req)?.address,
+    onSharingFlip: () => {},
     identities,
     emailCodes,
     sessionRevocations,

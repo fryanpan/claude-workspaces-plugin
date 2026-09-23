@@ -41,12 +41,14 @@ import { collabMembershipEnded } from '../share/collab-member-key.ts';
 import { readCookie } from '../share/link-session.ts';
 import { type ShareLinks, shareMemberKey } from '../share/share-links.ts';
 import { ACCESS_NOT_CONFIGURED, type Shares } from '../share/shares.ts';
+import type { SharingFlip } from '../share/sharing-flip.ts';
 import type { SharingGate } from '../share/sharing-gate.ts';
 import { resolveTtl } from '../share/ttl.ts';
 import { DEFAULT_LINK_TTL_SECONDS } from '../share/types.ts';
 import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import { widgetAuthPage } from '../widget-auth-page.ts';
+import { handleShareSwitch } from './share-switch.ts';
 
 /**
  * The refusal a share route gives when handed a GROUPING id.
@@ -149,6 +151,10 @@ export interface AuthShareRoutesContext {
   collabMemberOf: (workspaceId: string, email: string) => boolean;
   /** The master switch for external access. */
   sharingGate: SharingGate;
+  /** The socket's peer address, for the line a switch flip writes. */
+  requestAddress: (req: Request) => string | undefined;
+  /** Told of every sharing-switch flip (routes/share-switch.ts). */
+  onSharingFlip: (flip: SharingFlip) => void;
   /** The email-keyed roster. */
   identities: Identities;
   /** The sign-in challenge store. */
@@ -609,11 +615,8 @@ export async function handleAuthShareRoutes(
       sharing: sharingGate.status(),
     });
   }
-  // Flip the master switch. Local-only, like the rest of /api/share*.
-  // Turning it OFF also hangs up what is already connected: a websocket
-  // and an SSE stream are authorized ONCE at open, so a visitor mid-review
-  // would otherwise keep syncing and keep receiving comments on a doc
-  // that is no longer reachable. Same lesson as share revocation.
+  // The master switch, and the narrower switch for one board: both in
+  // routes/share-switch.ts, called from the position this block held.
   if (pathname === '/api/share/enabled' && req.method === 'POST') {
     // EITHER kind of sharing, for the same reason the GET above takes both.
     // The gate refuses `share`, `share-link`, `collab` and `proxied-local`
@@ -622,40 +625,7 @@ export async function handleAuthShareRoutes(
     // the outside door there was `CW_SHARING_DISABLED` plus a restart. That
     // one is deliberately one-way, so the way back was a restart as well.
     if (!shares && !shareLinkBaseHost) return j(404, { error: 'sharing not enabled' });
-    const body = await safeJson(req);
-    const enabled = body?.enabled;
-    if (typeof enabled !== 'boolean') {
-      return j(400, { error: 'enabled must be a boolean' });
-    }
-    const res = sharingGate.setEnabled(enabled);
-    if (!res.ok) {
-      return j(409, {
-        error: res.error,
-        hint: 'CW_SHARING_DISABLED is set in the environment. Remove it from the service definition and restart to allow runtime control.',
-      });
-    }
-    let closedSockets = 0;
-    let closedStreams = 0;
-    if (!enabled) {
-      for (const share of shares?.list() ?? []) {
-        closedSockets += docStore.closeSocketsForShare(share.shareId);
-        closedStreams += sse.closeForShare(share.shareId);
-      }
-      // And every share-link and collaboration-hostname visitor, neither of
-      // whom carries a Cloudflare shareId for the sweep above to match. Both
-      // carry a membership key, and this matches every one. Without it the
-      // switch closed the door to new requests while an already-open
-      // `/y/<doc>` kept reading AND writing, and an `/events/` stream kept
-      // delivering.
-      closedSockets += docStore.closeSocketsForShareMembers(() => true);
-      closedStreams += sse.closeForShareMembers(() => true);
-    }
-    return j(200, {
-      ok: true,
-      sharing: sharingGate.status(),
-      ...(closedSockets ? { closedSockets } : {}),
-      ...(closedStreams ? { closedStreams } : {}),
-    });
+    return handleShareSwitch(ctx, { req, provenIdentityFor: rq.provenIdentityFor });
   }
   // `POST /api/share/doc` is GONE — a workspace is the unit of sharing.
   // It is answered explicitly rather than left to the 404 fall-through
