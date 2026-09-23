@@ -27,6 +27,7 @@
  * with a round on it.
  */
 
+import { mountEditLoader } from './edit/edit-button.ts';
 import { insertScript } from './mockup-live-scripts.ts';
 import { mountVoiceLoader } from './voice/voice-loader.ts';
 
@@ -386,9 +387,13 @@ if (parsed) {
     script?.src ? 'voice.js' : '/widget/voice.js',
     script?.src || location.href,
   ).href;
+  const editSrc = new URL(script?.src ? 'edit.js' : '/widget/edit.js', script?.src || location.href)
+    .href;
   const start = (): void => {
     startMockupLive(parsed);
     mountVoiceLoader(document, voiceSrc);
+    // The pencil above the mic; edit mode is fetched beside voice.js.
+    mountEditLoader(document, editSrc);
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });

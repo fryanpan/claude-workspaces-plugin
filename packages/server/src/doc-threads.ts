@@ -1,6 +1,7 @@
 import {
   type Anchor,
   type DeliveryStamp,
+  type PageEdit,
   type ReviewAnswerUndone,
   type ReviewItemJudgement,
   type ReviewPayload,
@@ -147,6 +148,9 @@ export class DocThreads {
       review?: ReviewPayload;
       /** A spoken comment's clip and raw words — see `VoiceNote`. */
       voice?: VoiceNote;
+      /** Text a reviewer changed on the page — see `PageEdit`. New threads
+       *  only: a send is its own thread. */
+      pageEdits?: PageEdit[];
       /** This reply was a partial answer: the item's questions it left open,
        *  carried on the frame so a watching filer is told. */
       openParts?: string[];
@@ -168,6 +172,7 @@ export class DocThreads {
           text,
           ...(opts?.review ? { review: opts.review } : {}),
           ...(opts?.voice ? { voice: opts.voice } : {}),
+          ...(opts?.pageEdits ? { pageEdits: opts.pageEdits } : {}),
           ...(opts?.via ? { via: opts.via } : {}),
         },
       });

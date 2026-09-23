@@ -44,6 +44,11 @@ export const READER_CUTS: readonly ReaderCut[] = [
       '    ...(summary ? { summary } : {}),\n',
       "        const edits = readCommentEdits(c.get('edits'));\n",
       '          ...(edits ? { edits } : {}),\n',
+      // A page edit's structure is read by the edit chunk (`edit.js`) off the
+      // raw thread map, never through this reader, so the budgeted bundle
+      // lifts it for nobody.
+      "        const pageEdits = readPageEdits(c.get('pageEdits'));\n",
+      '          ...(pageEdits ? { pageEdits } : {}),\n',
       "        const via = readWriteVia(c.get('via'));\n",
       '          ...(via ? { via } : {}),\n',
       "  const statusVia = readWriteVia(threadMap.get('statusVia'));\n",
@@ -88,6 +93,7 @@ export const READER_CUTS: readonly ReaderCut[] = [
 export const STRIPPED_FIELDS: readonly string[] = [
   'summary',
   'edits',
+  'pageEdits',
   'via',
   'statusVia',
   'commentCount',

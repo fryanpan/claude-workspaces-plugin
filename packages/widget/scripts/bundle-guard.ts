@@ -35,6 +35,12 @@ export const EXCLUDED_MODULES: ReadonlyArray<{ module: string; why: string }> = 
     why: 'the widget renders no secret ask (`strip-secret-shape.ts`).',
   },
   {
+    module: 'core/src/page-edits.ts',
+    why:
+      'the page-edit reader. The edit chunk (`edit.js`) reads edits off the raw thread ' +
+      'map; the base bundle only shows their words (`strip-unread-fields.ts`).',
+  },
+  {
     module: 'core/src/review-judge-prompt.ts',
     why: 'the wording of a server-side model prompt.',
   },

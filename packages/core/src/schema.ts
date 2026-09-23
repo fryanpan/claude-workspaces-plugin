@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { type PageEdit, readPageEdits } from './page-edits.ts';
 import { type ReviewPayload, readReviewPayload } from './review-item.ts';
 import { readStoredSummary } from './thread-summary.ts';
 import {
@@ -206,6 +207,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
         const review = readReviewPayload(c.get('review'));
         const edits = readCommentEdits(c.get('edits'));
         const voice = readVoiceNote(c.get('voice'));
+        const pageEdits = readPageEdits(c.get('pageEdits'));
         const via = readWriteVia(c.get('via'));
         // Written by the server alone, and read as defensively as everything
         // else on this map: a non-number degrades to "not delivered yet",
@@ -220,6 +222,7 @@ export function readThread(threadMap: Y.Map<unknown>, threadId: string): Thread 
           ...(via ? { via } : {}),
           ...(deliveredAt !== undefined ? { deliveredAt } : {}),
           ...(voice ? { voice } : {}),
+          ...(pageEdits ? { pageEdits } : {}),
           ...(review ? { review } : {}),
           ...(edits ? { edits } : {}),
         });
@@ -267,6 +270,8 @@ export interface CreateThreadArgs {
     text: string;
     review?: ReviewPayload;
     voice?: VoiceNote;
+    /** Words the reader changed on the page — see `page-edits.ts`. */
+    pageEdits?: PageEdit[];
     via?: WriteVia;
   };
 }
@@ -285,6 +290,7 @@ export function createThread(doc: Y.Doc, args: CreateThreadArgs): Thread {
     firstCommentMap.set('ts', now);
     if (args.firstComment.review) firstCommentMap.set('review', args.firstComment.review);
     if (args.firstComment.voice) firstCommentMap.set('voice', args.firstComment.voice);
+    if (args.firstComment.pageEdits) firstCommentMap.set('pageEdits', args.firstComment.pageEdits);
     if (args.firstComment.via) firstCommentMap.set('via', args.firstComment.via);
     comments.push([firstCommentMap]);
 

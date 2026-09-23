@@ -1,3 +1,4 @@
+import type { PageEdit } from './page-edits.ts';
 import type { ReviewPayload } from './review-item.ts';
 import type { VoiceNote } from './voice-feedback.ts';
 
@@ -584,6 +585,13 @@ export interface Comment {
    * from and the words as heard, before tidying (`voice-feedback.ts`).
    */
   voice?: VoiceNote;
+  /**
+   * Present on a comment that carries words the reader changed on the page
+   * in place — the element, the words before and the words after — for the
+   * agent to apply to its source (`page-edits.ts`). An open thread is an edit
+   * still waiting; a resolved one is applied.
+   */
+  pageEdits?: PageEdit[];
   /**
    * Every previous version of `text`, oldest first — present only on a
    * comment somebody has edited. See `CommentEdit`.

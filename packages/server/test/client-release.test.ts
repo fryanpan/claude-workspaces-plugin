@@ -44,6 +44,7 @@ function fakeBuild(marker: string): { dir: string; widget: string; markdownApp: 
   writeFileSync(join(widget, 'mockup-live.js'), `//${marker}\n`);
   writeFileSync(join(widget, 'mic.js'), `//${marker}\n`);
   writeFileSync(join(widget, 'voice.js'), `//${marker}\n`);
+  writeFileSync(join(widget, 'edit.js'), `//${marker}\n`);
   writeFileSync(join(markdownApp, 'app.js'), `//${marker}\n`);
   writeFileSync(join(markdownApp, 'board.js'), `//${marker}\n`);
   writeFileSync(join(markdownApp, 'index.html'), `<!--${marker}-->\n`);

@@ -78,6 +78,16 @@ function nowIso(deps: ChannelDeps): string {
   return new Date(nowMs(deps)).toISOString();
 }
 
+/** A comment as a doc-event frame carries it — the fields a line reads. */
+interface ChannelComment {
+  author?: { name?: string };
+  text?: string;
+  ts?: number;
+  via?: string;
+  /** Text a reviewer changed on the page itself (`PageEdit` in core). */
+  pageEdits?: Array<{ selector?: string; before?: string; after?: string }>;
+}
+
 export interface ChannelPayload {
   docId?: string;
   threadId?: string;
@@ -92,9 +102,9 @@ export interface ChannelPayload {
       original?: { snippet?: { text?: string } };
     };
     status?: string;
-    comments?: Array<{ author?: { name?: string }; text?: string; ts?: number; via?: string }>;
+    comments?: Array<ChannelComment>;
   };
-  comment?: { author?: { name?: string }; text?: string; ts?: number; via?: string };
+  comment?: ChannelComment;
   /** A reply that answered some of a review item's questions: the ones still open. */
   openParts?: unknown[];
   /** A resolve/reopen relayed from inside a mock page. A comment event's mark
@@ -580,6 +590,19 @@ async function emitChannelMessage(
     statusChange ? p.via : (p.comment ?? p.thread?.comments?.at(-1))?.via,
   );
   const sentAt = new Date(p.comment?.ts ?? nowMs(deps)).toISOString();
+  // A send from the widget's edit mode: the page's words, changed in place by
+  // the reviewer and never written to its source. The line says what to do
+  // with them; the meta carries each edit whole, since the line quotes short.
+  const pageEdits = statusChange
+    ? undefined
+    : (p.comment ?? p.thread?.comments?.at(-1))?.pageEdits?.map(({ selector, before, after }) => ({
+        selector,
+        before,
+        after,
+      }));
+  const editHint = pageEdits?.length
+    ? '\n(Apply each edit to the page source, then resolve_thread. The full text is in page_edits.)'
+    : '';
 
   // Human-readable body — what the agent reads in their context.
   const action = event.startsWith('thread.') ? event.slice('thread.'.length) : event;
@@ -588,7 +611,7 @@ async function emitChannelMessage(
     ? ` on review item ${reviewItemId}${snippet ? ` "${truncate(snippet, 60)}"` : ''} —`
     : '';
   const body = text
-    ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ''}${text}${openPartsClause(p.openParts)}`
+    ? `[${action}]${onItem} ${author ? `${author}${fromMock}: ` : fromMock ? `${fromMock.trim()}: ` : ''}${text}${openPartsClause(p.openParts)}${editHint}`
     : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
 
   await deps.notify({
@@ -604,6 +627,7 @@ async function emitChannelMessage(
         event,
         author,
         anchor_text: snippet,
+        ...(pageEdits?.length ? { page_edits: JSON.stringify(pageEdits) } : {}),
       },
     },
   });

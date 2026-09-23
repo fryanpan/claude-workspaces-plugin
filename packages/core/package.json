@@ -22,6 +22,7 @@
     "./machine-paths": "./src/machine-paths.ts",
     "./model-cost": "./src/model-cost.ts",
     "./mock-swap-noise": "./src/mock-swap-noise.ts",
+    "./page-edits": "./src/page-edits.ts",
     "./trace-privacy": "./src/trace-privacy.ts",
     "./types": "./src/types.ts",
     "./summary-prompt": "./src/summary-prompt.ts",
