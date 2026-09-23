@@ -313,6 +313,7 @@ function docHref(workspaceId: string, meta: DocMeta): string | undefined {
   const id = encodeURIComponent(meta.docId);
   if (meta.type === 'markdown') return `${base}/docs/${id}`;
   if (meta.type === 'mockup' && meta.sourceUrl) return `${base}/mockups/${id}`;
+  if (meta.type === 'app' && meta.sourceUrl) return `${base}/apps/${id}/`;
   return undefined;
 }
 

@@ -226,6 +226,33 @@ export function renderMockupNotFound(docId: string): string {
   });
 }
 
+/** An app address with no app bound to it (`routes/apps.ts`). */
+export function renderAppNotFound(docId: string): string {
+  const safe = escape(shortAddress(docId));
+  return renderNotFoundPage({
+    title: 'App not found',
+    heading: 'App not found',
+    body: `${SERVER_IS_UP}
+      <p>No dev server is attached as <code>${safe}</code>. An agent attaches
+      one with <code>attach_app</code> and its loopback address.</p>
+      <p class="quiet"><a href="/">All workspaces</a>.</p>`,
+  });
+}
+
+/**
+ * An attached app whose dev server is not answering. The loopback address is
+ * not shown: it is a fact about this machine, and the reader cannot use it.
+ */
+export function renderAppUnreachable(): string {
+  return renderNotFoundPage({
+    title: 'App not running',
+    heading: 'The app is not running',
+    body: `<p>The server is running, and this app is attached, but its dev
+      server is not answering. Ask the agent that attached it to start it,
+      then refresh this page.</p>`,
+  });
+}
+
 /**
  * The board page shell (§3.9). Tab title is `<workspace> · Workspaces` — the
  * browser tab is a workspace switcher, so the WORKSPACE leads and the product
