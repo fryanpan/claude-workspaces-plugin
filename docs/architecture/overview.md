@@ -598,6 +598,28 @@ the stretch the clip names. No new write path: a spoken
 comment is the thread POST the typed composer already makes, carrying a
 `voice` note (clip and raw words).
 
+**Editing the words on a page.** The reader can change a page's text in
+place, and the agent is told what changed; the widget never writes the page's
+source. The pencil is `edit/edit-button.ts`, mounted by `mic-entry.ts` and
+`mockup-live.ts` right after the mic, so like the mic it costs the budgeted
+bundle nothing. Its first tap fetches the lazy chunk `edit.js`
+(`edit/edit-entry.ts`), as does a page whose doc already holds an edit that
+has not been applied, so its marks paint on load. `edit/edit-mode.ts` makes
+the tapped element editable as plain text, keeps the reader's unsent edits
+(`edit/edit-model.ts`), and draws every mark in a fixed layer of its own
+rather than restyling the page. Send is the ordinary thread POST with a
+`pageEdits` list on the first comment: each entry is the element's anchor, a
+short CSS selector, and the words before and after. `core/src/page-edits.ts`
+reads and caps that list and writes the comment's text from it, and
+`routes/doc-threads-routes.ts` refuses a malformed one outright. It rides
+`thread.created`, so there is no new event: the MCP channel line
+(`mcp/src/channel-messages.ts`) carries the list as `page_edits` and tells the
+agent to apply each edit to the source and resolve the thread. An edit counts
+as applied once its thread is resolved, or once the element's words match the
+edit's after-text without the reader having typed them in this visit. On the
+tailnet name the door admits `edit.js` without a token, as it does the other
+scripts.
+
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
 suggestions, anchors, presence, live notes. Agents hold no replica, so an agent
