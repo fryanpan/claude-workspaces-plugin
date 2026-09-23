@@ -27,6 +27,15 @@
  * know" has to mean "no". (Contrast Shares.load, which starts clean on a
  * corrupt registry — losing shares is recoverable; serving them when you
  * meant not to is not.)
+ *
+ * **One board can be closed without the rest.** `closedBoards` is a second,
+ * narrower answer to the same question: while a board is in it, that board's
+ * share, share-link and collaboration visitors are refused and nobody new can
+ * redeem a link to it. The owner's own hostname (`proxied-local`) and every
+ * local caller are untouched, so closing one board as a precaution cannot lock
+ * the owner out of any board, which is what throwing the master switch did on
+ * 23 September. A board id that does not name a board closes nothing and is
+ * refused at the route, not here.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,6 +43,17 @@ import { join } from 'node:path';
 const FILENAME = 'sharing.json';
 
 export type SetResult = { ok: true; enabled: boolean } | { ok: false; error: 'env_locked' };
+
+export type BoardSetResult =
+  | { ok: true; workspaceId: string; enabled: boolean }
+  | { ok: false; error: 'env_locked' };
+
+/** The on-disk shape. `closedBoards` is absent when no board is closed, so a
+ *  file written before it existed reads exactly as it did. */
+interface SharingFile {
+  enabled: boolean;
+  closedBoards?: string[];
+}
 
 export interface SharingGateOptions {
   dataDir: string;
@@ -45,6 +65,8 @@ export class SharingGate {
   private readonly path: string;
   private readonly envLocked: boolean;
   private enabled: boolean;
+  /** Boards whose outside visitors are refused while the master switch is on. */
+  private readonly closed = new Set<string>();
   /** Set when the state on disk was unreadable, so callers can say WHY it's
    *  off rather than leaving the operator to guess at a silent gate. */
   readonly loadError: string | null = null;
@@ -65,6 +87,13 @@ export class SharingGate {
     try {
       const parsed = JSON.parse(readFileSync(this.path, 'utf8'));
       if (typeof parsed?.enabled !== 'boolean') throw new Error('missing "enabled" boolean');
+      const boards: unknown = parsed.closedBoards;
+      if (boards !== undefined) {
+        if (!Array.isArray(boards) || boards.some((b) => typeof b !== 'string')) {
+          throw new Error('"closedBoards" is not a list of board ids');
+        }
+        for (const b of boards as string[]) this.closed.add(b);
+      }
       this.enabled = parsed.enabled;
     } catch (err) {
       this.enabled = false;
@@ -90,15 +119,44 @@ export class SharingGate {
   setEnabled(enabled: boolean): SetResult {
     if (this.envLocked) return { ok: false, error: 'env_locked' };
     this.enabled = enabled;
-    writeFileSync(this.path, `${JSON.stringify({ enabled }, null, 2)}\n`);
+    this.persist();
     return { ok: true, enabled };
   }
 
+  /** May this one board's outside visitors be served? Independent of the
+   *  master switch: the admission gate asks both. */
+  isBoardOpen(workspaceId: string): boolean {
+    return !this.closed.has(workspaceId);
+  }
+
+  /**
+   * Open or close ONE board to outside visitors, and persist. Never touches
+   * the master switch. Refused under the env lock like the master switch is:
+   * every outside door is already shut, and a board list written while the
+   * process cannot read the operator's file would overwrite it.
+   */
+  setBoardEnabled(workspaceId: string, enabled: boolean): BoardSetResult {
+    if (this.envLocked) return { ok: false, error: 'env_locked' };
+    if (enabled) this.closed.delete(workspaceId);
+    else this.closed.add(workspaceId);
+    this.persist();
+    return { ok: true, workspaceId, enabled };
+  }
+
+  private persist(): void {
+    const file: SharingFile = {
+      enabled: this.enabled,
+      ...(this.closed.size > 0 ? { closedBoards: [...this.closed].sort() } : {}),
+    };
+    writeFileSync(this.path, `${JSON.stringify(file, null, 2)}\n`);
+  }
+
   /** Everything a status view needs, in one object. */
-  status(): { enabled: boolean; locked: boolean; loadError?: string } {
+  status(): { enabled: boolean; locked: boolean; closedBoards?: string[]; loadError?: string } {
     return {
       enabled: this.enabled,
       locked: this.envLocked,
+      ...(this.closed.size > 0 ? { closedBoards: [...this.closed].sort() } : {}),
       ...(this.loadError ? { loadError: this.loadError } : {}),
     };
   }

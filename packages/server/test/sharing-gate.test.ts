@@ -70,7 +70,39 @@ describe('SharingGate (unit)', () => {
     expect(gate.isLocked()).toBe(true);
     expect(gate.setEnabled(true)).toEqual({ ok: false, error: 'env_locked' });
     expect(gate.isEnabled()).toBe(false); // the refused call changed nothing
+    expect(gate.setBoardEnabled('w-harbor', false)).toEqual({ ok: false, error: 'env_locked' });
     rmSync(locked, { recursive: true, force: true });
+  });
+
+  it('closes one board without touching the master switch, and persists it', () => {
+    const d = mkdtempSync(join(tmpdir(), 'gate-board-'));
+    const gate = new SharingGate({ dataDir: d });
+    expect(gate.setBoardEnabled('w-harbor', false)).toEqual({
+      ok: true,
+      workspaceId: 'w-harbor',
+      enabled: false,
+    });
+    expect(gate.isEnabled()).toBe(true);
+    expect(gate.isBoardOpen('w-harbor')).toBe(false);
+    expect(gate.isBoardOpen('w-river')).toBe(true);
+    // A master flip keeps the closed board, and a restart keeps both.
+    gate.setEnabled(false);
+    const reread = new SharingGate({ dataDir: d });
+    expect(reread.isEnabled()).toBe(false);
+    expect(reread.isBoardOpen('w-harbor')).toBe(false);
+    expect(reread.status()).toEqual({ enabled: false, locked: false, closedBoards: ['w-harbor'] });
+    reread.setBoardEnabled('w-harbor', true);
+    expect(new SharingGate({ dataDir: d }).status()).toEqual({ enabled: false, locked: false });
+    rmSync(d, { recursive: true, force: true });
+  });
+
+  it('fails closed when "closedBoards" is not a list of ids', () => {
+    const bad = mkdtempSync(join(tmpdir(), 'gate-bad3-'));
+    writeFileSync(join(bad, 'sharing.json'), '{"enabled":true,"closedBoards":"w-harbor"}');
+    const gate = new SharingGate({ dataDir: bad });
+    expect(gate.isEnabled()).toBe(false);
+    expect(gate.status().loadError).toContain('closedBoards');
+    rmSync(bad, { recursive: true, force: true });
   });
 });
 

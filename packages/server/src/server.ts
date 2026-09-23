@@ -14,6 +14,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
+import { isOwnerActor } from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -133,6 +134,7 @@ import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/r
 import { type ReviewQueueRoutesContext, handleReviewQueueRoutes } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
+import { applyMasterFlip } from './routes/share-switch.ts';
 import { createShellStatic } from './routes/shell-static.ts';
 import { handleStaleClient } from './routes/stale-client.ts';
 import { handleTaskPageRoutes } from './routes/task-page.ts';
@@ -162,6 +164,7 @@ import type { ServerOptions } from './server-options.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
+import { SHARING_NOTICE_ACTOR, SharingNotice } from './sharing-notice.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
@@ -1191,6 +1194,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     fileUnderBoardWorkspace,
     unfileFromDefault,
     unlinkFromEveryBoardWorkspace,
+    defaultBoardWorkspaceId,
   } = createBoardMembership({
     docStore,
     taskStore,
@@ -1199,6 +1203,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     boardShareTarget,
     proxiedTrustedEmails,
+    boardSharingOpen: (workspaceId) => sharingGate.isBoardOpen(workspaceId),
   });
 
   // The stall / ready-work wiring — both per-board snapshots, the two
@@ -2312,6 +2317,72 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspacesOfDoc: shareWorkspacesOf,
   };
 
+  // The owner's notice when the master sharing switch goes off: one decision
+  // on the catch-all board, filed by the server and judged like any other
+  // item (sharing-notice.ts). Its "Turn back on" answer flips the switch
+  // through the route's own path, below.
+  const sharingNoticeActor = {
+    id: SHARING_NOTICE_ACTOR.id,
+    name: SHARING_NOTICE_ACTOR.name,
+    kind: SHARING_NOTICE_ACTOR.kind,
+  };
+  const sharingNotice = new SharingNotice({
+    dataDir,
+    boardId: defaultBoardWorkspaceId,
+    getTask: (taskId) => taskStore.getTask(taskId),
+    createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
+    addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
+    reviseReviewItem: (taskId, itemId, patch, o) =>
+      taskStore.reviseReviewItem(taskId, itemId, patch, o),
+    withdrawReviewItem: (taskId, itemId, o) => taskStore.withdrawReviewItem(taskId, itemId, o),
+    refresh: (taskId) => {
+      const task = taskStore.getTask(taskId);
+      if (task) taskProjection.refreshTask(task);
+    },
+    gate: async (taskId, itemId) => {
+      const task = taskStore.getTask(taskId);
+      const item = taskStore.listReviewItems(taskId).find((i) => i.id === itemId);
+      if (!task || !item) return;
+      const verdict = await judgeReviewItem(task, item, sharingNoticeActor);
+      if (verdict.held) {
+        console.error(
+          `[sharing] owner notice held by the review gate item=${itemId}: ${verdict.reason}`,
+        );
+        return;
+      }
+      announceTaskReview(task, verdict.item, {
+        id: sharingNoticeActor.id,
+        name: sharingNoticeActor.name,
+        kind: 'known',
+        color: ANONYMOUS_ACTOR.color,
+      });
+    },
+    isOwner: (actor) => isOwnerActor(actor),
+    turnBackOn: (who) => {
+      const res = applyMasterFlip(
+        {
+          docStore,
+          sse,
+          shares,
+          sharingGate,
+          onSharingFlip: (flip) => void sharingNotice.onFlip(flip),
+        },
+        { enabled: true, actor: who.actor, peer: who.peer, reason: who.reason, at: Date.now() },
+      );
+      return res.ok ? { ok: true } : { ok: false, error: res.error };
+    },
+  });
+  taskStore.onEvent((ev) => {
+    if (ev.type !== 'decision.answered') return;
+    sharingNotice.onAnswered({
+      taskId: ev.taskId,
+      ...(ev.reviewItemId !== undefined ? { reviewItemId: ev.reviewItemId } : {}),
+      ...(ev.optionId !== undefined ? { optionId: ev.optionId } : {}),
+      answer: ev.answer,
+      actor: ev.actor,
+    });
+  });
+
   /**
    * What the sign-in, session and share routes read instead of this closure's
    * scope. Built once — every collaborator in it is long-lived.
@@ -2325,6 +2396,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
+    requestAddress: (req) => server.requestIP(req)?.address,
+    onSharingFlip: (flip) => void sharingNotice.onFlip(flip),
     identities,
     emailCodes,
     sessionRevocations,

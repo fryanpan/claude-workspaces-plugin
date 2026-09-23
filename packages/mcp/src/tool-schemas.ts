@@ -1448,13 +1448,22 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_sharing_enabled',
       description:
-        'Master switch for all external access. Off makes every share and link answer 403, and hangs up the open connections of share visitors and share-link members. Existing shares are preserved and resume when it is on again. The local and tailnet surface is unaffected. Call it with no argument to read the current state.',
+        "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until someone turns it back on from this machine. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Call it without enabled to read the current state. Any other argument is refused.",
       inputSchema: {
         type: 'object',
         properties: {
           enabled: {
             type: 'boolean',
             description: 'Omit to read the current state without changing it.',
+          },
+          workspaceId: {
+            type: 'string',
+            description:
+              "The one board to close or reopen. Omit it only when you mean every board and the owner's own hostname.",
+          },
+          reason: {
+            type: 'string',
+            description: "Why, in a sentence. Written to the log line and the owner's notice.",
           },
         },
       },

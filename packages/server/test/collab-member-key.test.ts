@@ -8,7 +8,11 @@
  * membership question with the workspace and email the key was made from.
  */
 import { describe, expect, it } from 'bun:test';
-import { collabMemberKey, collabMembershipEnded } from '../src/share/collab-member-key.ts';
+import {
+  collabMemberKey,
+  collabMembershipEnded,
+  memberKeyOnBoard,
+} from '../src/share/collab-member-key.ts';
 import { shareMemberKey } from '../src/share/share-links.ts';
 
 describe('collabMemberKey', () => {
@@ -44,5 +48,19 @@ describe('collabMembershipEnded', () => {
     asked.length = 0;
     expect(ended(shareMemberKey('board-harbor', 'reviewer@harborlight.example'))).toBe(false);
     expect(asked).toEqual([]);
+  });
+});
+
+describe('memberKeyOnBoard', () => {
+  const onHarbor = memberKeyOnBoard('board-harbor');
+
+  it('matches both spellings of a key on that board', () => {
+    expect(onHarbor(shareMemberKey('board-harbor', 'bob@riverbend.example'))).toBe(true);
+    expect(onHarbor(collabMemberKey('board-harbor', 'bob@riverbend.example'))).toBe(true);
+  });
+
+  it('leaves keys on another board, including one whose id it prefixes', () => {
+    expect(onHarbor(shareMemberKey('board-marsh', 'bob@riverbend.example'))).toBe(false);
+    expect(onHarbor(collabMemberKey('board-harbor2', 'bob@riverbend.example'))).toBe(false);
   });
 });

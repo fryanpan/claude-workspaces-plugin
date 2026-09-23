@@ -748,6 +748,15 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
       }
+      // One board closed to outside visitors (`closedBoards` in
+      // share/sharing-gate.ts). Only a share, share-link or collab visitor
+      // carries a `visitor` target, so the owner's own hostname and every
+      // local caller never reach this line. Spelled like the master switch:
+      // this caller was already admitted to the board, so naming the reason
+      // tells them nothing they could not see.
+      if (visitor?.workspaceId && !sharingGate.isBoardOpen(visitor.workspaceId)) {
+        return j(403, { error: 'sharing_disabled' });
+      }
       return null;
     })();
     if (answered) return { admitted: false, response: answered };
