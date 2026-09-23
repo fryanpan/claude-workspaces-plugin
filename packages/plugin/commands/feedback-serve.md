@@ -35,8 +35,10 @@ works when the session's working directory is the root of such a clone.
    - starts the server and the web-app bundler in watch mode;
    - writes the port to `~/.claude/claude-workspaces/server.json`, which is
      how the plugin's MCP server finds it (`CW_BASE_URL` overrides it);
-   - prints the URL forms that reach this machine: `http://localhost:<port>`
-     for this machine, plus a Tailscale and a LAN hostname when it finds them.
+   - prints its URLs: `http://localhost:<port>`, plus a Tailscale and a LAN
+     hostname when it finds them. By default only `localhost` opens in a
+     browser; the other names answer 403 until the server is started with
+     `CW_ACCESS_ONLY_BROWSER_HOSTS=0`, which admits anything on that network.
 
 This project does **not** open a public tunnel. Reviews happen on this
 machine, over Tailscale, or on the local network.

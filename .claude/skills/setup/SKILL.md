@@ -112,7 +112,7 @@ After install, the plugin's tools should appear when they ask Claude things like
 bun run dev
 ```
 
-This is the foreground supervisor — fine for development, dies when the terminal closes. It picks a free port starting at 8787, writes it to `~/.claude/claude-workspaces/server.json` so the plugin can find it, and prints the reachable URLs (`localhost`, plus a Tailscale and a LAN name when it finds them). The board is the `localhost` URL with a trailing `/`. Data goes in `data/` inside the clone unless `CW_DATA_DIR` is set.
+This is the foreground supervisor — fine for development, dies when the terminal closes. It picks a free port starting at 8787, writes it to `~/.claude/claude-workspaces/server.json` so the plugin can find it, and prints the reachable URLs (`localhost`, plus a Tailscale and a LAN name when it finds them). The board is the `localhost` URL with a trailing `/`. By default only a browser on this machine gets in: the Tailscale and LAN names answer 403 until the server starts with `CW_ACCESS_ONLY_BROWSER_HOSTS=0`, which admits anything on that network (see `docs/architecture/security.md`). Ask before turning it off. Data goes in `data/` inside the clone unless `CW_DATA_DIR` is set.
 
 Tell them to keep this terminal open while they work; close it when done. For an always-on setup, point them at the next step.
 

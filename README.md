@@ -17,8 +17,8 @@ The aim is to make giving feedback to an agent as fast as pointing and saying
    landscape and for a phone.
 3. **Agents keep the tickets in order.** They work ranked goals in priority
    order, file what they find, and say what blocks them.
-4. **Outside reviewers need no account.** A share link lets someone comment
-   with an emailed sign-in code.
+4. **Outside reviewers can join.** A board published behind Cloudflare
+   Access lets someone outside your network comment on it.
 5. **Meetings happen on the doc.** Live transcription and notes sit beside the
    doc you are discussing.
 
@@ -96,9 +96,20 @@ bun run dev
 ```
 
 `bun run dev` picks a free port starting at 8787, starts the server with hot
-reload, and prints the addresses it can be reached on: `localhost`, plus a
-Tailscale and a LAN name when it finds them. Your data goes in `data/` inside
-the clone unless you set `CW_DATA_DIR`. Keep the terminal open while you work.
+reload, and prints its addresses. Your data goes in `data/` inside the clone
+unless you set `CW_DATA_DIR`. Keep the terminal open while you work.
+
+By default only a browser on the same machine can open the board, at
+`localhost`. The Tailscale and LAN names it prints answer 403. To review from
+a tablet or phone on your network, start it with the rule turned off:
+
+```sh
+CW_ACCESS_ONLY_BROWSER_HOSTS=0 bun run dev
+```
+
+Anything on that network can then reach the board, including the routes that
+bind files on your machine. [docs/architecture/security.md](docs/architecture/security.md)
+explains what the rule protects.
 
 ### 4. Open the board
 
@@ -189,8 +200,9 @@ flowchart LR
 
 ## What it is not
 
-- **Not hosted.** The server runs on your machine. Reviewers reach it on your
-  network, over Tailscale, or through a share link you choose to publish.
+- **Not hosted.** The server runs on your machine. Reviewers reach it on
+  that machine, on your network once you allow it, or through a board you
+  publish.
 - **Not a code review tool.** Diff review covers a branch of a local
   checkout. Pull requests still happen on GitHub.
 - **Not tied to a framework.** The widget works on any HTML page.
