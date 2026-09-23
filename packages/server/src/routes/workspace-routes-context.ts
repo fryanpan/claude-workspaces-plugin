@@ -1,6 +1,7 @@
 import type { DocType, User } from '@claude-workspaces/core';
 import type { AgentWatches } from '../agent-watches.ts';
 import type { AttachMountsBrief } from '../attach-mounts.ts';
+import type { AttachmentPrivacyStore } from '../attachment-privacy.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
@@ -148,6 +149,16 @@ export interface WorkspaceRoutesContext {
    * this caller is on the box.
    */
   mountsBriefFor: (workspaceId: string, req: Request) => AttachMountsBrief;
+  /** Which attachment sets keep their files on this machine
+   *  (`attachment-privacy.ts`). The folder bind writes it. */
+  attachmentPrivacy: AttachmentPrivacyStore;
+  /**
+   * Is this doc withheld from THIS caller — a member of a local-only set,
+   * asked for by a request that is not on the box? The review-item queue
+   * reads it, so an ask on one of those files does not carry its name and
+   * its quoted text off the machine by a door the path gate never sees.
+   */
+  docWithheldFrom: (req: Request, docId: string) => boolean;
   /** Whether a watch key still names something on this server. */
   watchKeyExists: (key: string) => boolean;
   /** The board's keep-moving verdicts (`keep-moving-verdict.ts`), read-only. */

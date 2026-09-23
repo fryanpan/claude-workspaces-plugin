@@ -23,6 +23,12 @@ import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import {
+  AttachmentPrivacyStore,
+  LOCAL_ONLY_REFUSAL,
+  addressesLocalOnlySet,
+  isOnBox,
+} from './attachment-privacy.ts';
+import {
   createLegacyAgentWarner,
   agentTokenKey as deriveAgentTokenKey,
 } from './auth/agent-token.ts';
@@ -2090,6 +2096,26 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * the repo plus the path from its root.
    */
   const mountStore = new MountStore(dataDir, docStore.repos);
+  /**
+   * Which attachment sets keep their files on this machine
+   * (`attachment-privacy.ts`). One gate reads it for every address that
+   * reaches into a set, right after admission and above the upgrades, so a
+   * local-only set's file, file list, socket and stream are refused to every
+   * caller that is not on the box by the same line.
+   */
+  const attachmentPrivacy = new AttachmentPrivacyStore(dataDir);
+  const setOfDoc = (docId: string): string | undefined => {
+    const meta = docStore.peekMeta(docStore.resolveDocId(docId));
+    return meta ? (meta.setId ?? meta.workspaceId) : undefined;
+  };
+  const localOnlyGate = {
+    isLocalOnlySet: (setId: string) => attachmentPrivacy.isLocalOnly(setId),
+    setOfDoc,
+    docOfReviewItem: (itemId: string) => parseThreadReviewItemId(itemId)?.docId,
+  };
+  const docWithheldFrom = (req: Request, docId: string): boolean =>
+    attachmentPrivacy.isLocalOnly(setOfDoc(docId)) &&
+    !isOnBox(req.headers, server.requestIP(req)?.address ?? undefined);
   const mountRoutesCtx: MountRoutesContext = {
     mounts: mountStore,
     j,
@@ -2110,6 +2136,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     unfileFromDefault,
     markdownFiles: createMarkdownLister(),
     requestAddress: (req) => server.requestIP(req)?.address,
+    isLocalOnlySet: (setId) => attachmentPrivacy.isLocalOnly(setId),
   };
   runOutputSource = () =>
     libraryRunOutputSource(libraryRoutesCtx, (id) => taskStore.getWorkspace(id));
@@ -2555,6 +2582,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     keepMovingVerdicts: stallWiring.keepMoving,
     meetingHomeFor,
     mountsBriefFor,
+    attachmentPrivacy,
+    docWithheldFrom,
   };
 
   /**
@@ -2703,6 +2732,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // union is what makes that a compile error rather than a review note.
       const gate = await admit(req, { pathname });
       if (!gate.admitted) return gate.response;
+      // A local-only attachment set's files stay on this machine. Here,
+      // below admission and ABOVE the upgrades, because a socket is
+      // authorized once at open and a gate below it would never see one.
+      if (
+        !isOnBox(req.headers, server.requestIP(req)?.address ?? undefined) &&
+        addressesLocalOnlySet(pathname, localOnlyGate)
+      ) {
+        return j(403, LOCAL_ONLY_REFUSAL);
+      }
       const {
         visitor,
         visitorShareId,

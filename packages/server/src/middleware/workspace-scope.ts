@@ -337,8 +337,12 @@ export function resolveWorkspaceScope<TBoard>(
 
 /** What a canonical remainder addressed, when it addressed one member of a
  *  scoped collection — `undefined` for a collection root, a collection verb,
- *  or a collection nothing checks. */
-function memberAddressed(rest: string): { collection: string; memberId: string } | undefined {
+ *  or a collection nothing checks. Exported for `attachment-privacy.ts`,
+ *  which asks the same question of the same address and must not parse it a
+ *  second way. */
+export function memberAddressed(
+  rest: string,
+): { collection: string; memberId: string } | undefined {
   const cut = rest.indexOf('/');
   if (cut <= 0) return undefined;
   const collection = rest.slice(0, cut);
