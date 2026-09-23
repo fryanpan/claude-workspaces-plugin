@@ -318,6 +318,21 @@ bun share revoke <shareId>
 as routes: they answer with the replacement, so an older plugin bundle calling
 them gets a sentence instead of a 404.
 
+### Keeping a folder on this machine
+
+A share link on a board reaches every folder attached to it. To attach one
+that must never leave this machine, pass `privacy: 'local-only'` to
+`attach_folder`. Its files and their names are then served on this machine
+alone, and every share link, collaboration visitor, tunnel and tailnet caller
+gets `local_only`. The answer to every `attach_folder` call names the folder's
+privacy, and a call that left the flag out is told the folder is shareable.
+
+To make sure no link is ever minted for a board, lock it with
+`set_board_sharing_lock(workspaceId, locked: true)`. A locked board refuses
+`share_workspace` with `board_never_shareable`, and its existing visitors are
+refused as if the board were closed. Only a call from this machine can lock or
+unlock it.
+
 ## What the reviewer sees
 
 1. They click the share URL.

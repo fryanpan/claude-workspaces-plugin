@@ -5,6 +5,11 @@
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
 import { classifyActor } from '../actor-identity.ts';
+import {
+  ATTACHMENT_PRIVACY_ERROR,
+  parseAttachmentPrivacy,
+  privacyNote,
+} from '../attachment-privacy.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -31,6 +36,7 @@ export async function handleWorkspaceCreateRead(
     withReviewUrl,
     parallelismCapView,
     fileUnderBoardWorkspace,
+    attachmentPrivacy,
   } = ctx;
   const { req, pathname, url, scope, visitor, authorFor } = rq;
   // --- REST: workspaces (board create OR folder bind) ---
@@ -79,6 +85,19 @@ export async function handleWorkspaceCreateRead(
     if (!folderPath || typeof folderPath !== 'string') {
       return j(400, { error: 'folderPath (folder bind) or name (board workspace) required' });
     }
+    // Whether the set's files may leave this machine (attachment-privacy.ts).
+    // Checked BEFORE the bind, so a typo binds nothing: the only reason to
+    // write this field is to restrict, and a bind that went ahead as
+    // shareable over a misspelled `local-only` is the one wrong outcome.
+    const requestedPrivacy = parseAttachmentPrivacy(body?.privacy);
+    if (requestedPrivacy === 'bad') return j(400, { error: ATTACHMENT_PRIVACY_ERROR });
+    if (requestedPrivacy !== null && !attachmentPrivacy.writable()) {
+      return j(503, {
+        error: 'privacy_store_unreadable',
+        detail: attachmentPrivacy.loadError,
+        hint: 'attachment-privacy.json in the data directory cannot be read, so every attachment set is served as local-only and none can be changed until it is fixed.',
+      });
+    }
     const res = await docStore.bindFolder({
       folderPath,
       // `workspaceId` is what this body key was called before a review
@@ -105,6 +124,12 @@ export async function handleWorkspaceCreateRead(
         res.error === 'not-found' ? 404 : res.error === 'reserved-namespace' ? 400 : 409;
       return j(status, res);
     }
+    // The privacy is recorded BEFORE the set is filed on a board, so there is
+    // no moment at which a share on that board reaches a set meant to stay
+    // here. Omitted keeps what the set already had: a re-bind that forgot the
+    // flag must not quietly widen a local-only set back to shareable.
+    if (requestedPrivacy !== null) attachmentPrivacy.set(res.workspaceId, requestedPrivacy);
+    const privacy = attachmentPrivacy.privacyOf(res.workspaceId);
     // The GROUPING goes on the board, not its members: `res.workspaceId`
     // is the review id, and one row for the whole bind is the unit a
     // reader thinks in. See the vocabulary note above `fileUnderBoardWorkspace`.
@@ -120,6 +145,10 @@ export async function handleWorkspaceCreateRead(
       // reads it by that name, and a key must never change MEANING.
       setId: res.workspaceId,
       hubWorkspaceId: boardWorkspaceId,
+      // Said on every answer, not only when asked for: a caller that omitted
+      // the flag is told its folder is shareable rather than left to assume.
+      privacy,
+      privacyNote: privacyNote(privacy),
       files: res.files.map((f) => ({
         ...f,
         reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,

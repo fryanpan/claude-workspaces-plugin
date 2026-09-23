@@ -66,6 +66,10 @@ export interface LibraryRoutesContext {
   markdownFiles: (root: string) => readonly ProjectFile[];
   /** The request's SOCKET address, never a header. */
   requestAddress: (req: Request) => string | undefined;
+  /** Whether an attachment set keeps its files on this machine
+   *  (`attachment-privacy.ts`). Absent reads every set as shareable, which is
+   *  what a set was before sets had a privacy. */
+  isLocalOnlySet?: (setId: string | undefined) => boolean;
 }
 
 export interface LibraryRouteRequest {
@@ -129,7 +133,12 @@ function sourcesFor(
 ): LibrarySources {
   const { docStore, mounts, dataDir } = ctx;
   const ids = new Set(scope.board.docIds);
-  const docs = docStore.list().filter((m) => ids.has(m.docId));
+  // A file of a local-only attachment set is not listed off the box: its
+  // name is the first thing that would leave, the same rule `hidden` below
+  // applies to a local-only project.
+  const setHidden = (m: { setId?: string; workspaceId?: string }): boolean =>
+    !onBox && (ctx.isLocalOnlySet?.(m.setId ?? m.workspaceId) ?? false);
+  const docs = docStore.list().filter((m) => ids.has(m.docId) && !setHidden(m));
   const boundPaths = new Map(docs.map((m) => [m.docId, m.sourceUrl]));
   // One stat per bound doc per load, shared by both of its clocks.
   const stats = new Map<string, { mtimeMs: number; birthtimeMs: number } | undefined>();

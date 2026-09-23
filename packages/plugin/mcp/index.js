@@ -16033,6 +16033,11 @@ var TOOL_LIST = {
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
           },
           folderPath: { type: "string" },
+          privacy: {
+            type: "string",
+            enum: ["workspace", "local-only"],
+            description: "Who may open the folder's files. 'local-only' serves them, and their names, on this machine alone: every share link, collaboration visitor, tunnel and tailnet caller is refused. 'workspace' (the default for a new folder) lets anyone a share link on the board admits open them. Omit it to keep the set's current privacy; the answer always names it."
+          },
           exclude: {
             type: "array",
             items: { type: "string" },
@@ -16821,6 +16826,22 @@ var TOOL_LIST = {
             description: "Why, in a sentence. Written to the log line and the owner's notice."
           }
         }
+      }
+    },
+    {
+      name: "set_board_sharing_lock",
+      description: "Lock ONE board never-shareable, or unlock it. A locked board refuses share_workspace and every other share-link mint, naming the lock, and is closed to its share and collaboration visitors, whose open connections hang up. It is stronger than set_sharing_enabled's per-board close, which refuses visitors but still lets a link be minted. Only a call from the owner's machine can set or clear it; through the tunnel or the network it is refused. Call it without locked to read the board's current lock. Any other argument is refused.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: { type: "string", description: "The board to lock or unlock." },
+          locked: {
+            type: "boolean",
+            description: "true locks, false unlocks. Omit to read the current state."
+          },
+          reason: { type: "string", description: "Why, in a sentence. Written to the log line." }
+        },
+        required: ["workspaceId"]
       }
     },
     {
@@ -18208,6 +18229,7 @@ function threadCreateRequest(input, author, board) {
 
 // packages/mcp/src/tools/docs.ts
 var SHARING_SWITCH_ARGS = new Set(["enabled", "workspaceId", "reason"]);
+var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason"]);
 async function handleDocsTool(name, a, ctx) {
   const {
     http,
@@ -18394,7 +18416,17 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "bind_folder":
     case "attach_folder": {
-      const { folderPath, setId, title, include, exclude, maxFiles, subscribe, producedBy } = a;
+      const {
+        folderPath,
+        setId,
+        title,
+        include,
+        exclude,
+        maxFiles,
+        subscribe,
+        producedBy,
+        privacy
+      } = a;
       const res = await http("POST", "/workspaces", {
         folderPath,
         owner: CWD,
@@ -18404,7 +18436,8 @@ async function handleDocsTool(name, a, ctx) {
         ...include ? { include } : {},
         ...exclude ? { exclude } : {},
         ...maxFiles !== undefined ? { maxFiles } : {},
-        ...producedBy ? { producedBy } : {}
+        ...producedBy ? { producedBy } : {},
+        ...privacy !== undefined ? { privacy } : {}
       });
       if (subscribe !== false && res?.workspaceId) {
         await watchWorkspace(res.workspaceId);
@@ -18763,6 +18796,31 @@ async function handleDocsTool(name, a, ctx) {
       const res = await http("POST", "/api/share/enabled", {
         enabled,
         ...workspaceId !== undefined ? { workspaceId } : {},
+        ...reason !== undefined ? { reason } : {},
+        actor: { id: AUTHOR.id, name: AUTHOR.name }
+      });
+      return ok2(res);
+    }
+    case "set_board_sharing_lock": {
+      const extra = Object.keys(a).filter((k) => !BOARD_LOCK_ARGS.has(k));
+      if (extra.length > 0) {
+        return err2(`set_board_sharing_lock does not take ${extra.sort().join(", ")}. It takes workspaceId, locked and reason.`);
+      }
+      const { locked, workspaceId, reason } = a;
+      if (typeof workspaceId !== "string" || workspaceId.trim() === "") {
+        return err2("set_board_sharing_lock needs workspaceId: the board to lock or unlock.");
+      }
+      if (typeof locked !== "boolean") {
+        const res2 = await http("GET", "/api/share");
+        const lockedBoards = res2.sharing?.lockedBoards ?? [];
+        return ok2({
+          workspaceId,
+          board: { workspaceId, locked: lockedBoards.includes(workspaceId) }
+        });
+      }
+      const res = await http("POST", "/api/share/lock", {
+        workspaceId,
+        locked,
         ...reason !== undefined ? { reason } : {},
         actor: { id: AUTHOR.id, name: AUTHOR.name }
       });
@@ -20660,7 +20718,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.260";
+var PLUGIN_VERSION = "0.1.261";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

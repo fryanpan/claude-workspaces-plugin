@@ -28,6 +28,7 @@ export async function handleWorkspaceHome(
     reviewItemsFor,
     resolveWorkspaceForDoc,
     boardsForDoc,
+    docWithheldFrom,
   } = ctx;
   const { req, pathname, scope, url, visitor, authorFor, roleFor } = rq;
   /**
@@ -236,7 +237,11 @@ export async function handleWorkspaceHome(
     const role = roleFor(workspaceId);
     return j(200, {
       workspaceId,
-      items: reviewItemsFor(workspace),
+      // An ask on a file of a local-only folder names the file and quotes it,
+      // so off the box it is left out rather than sent (attachment-privacy.ts).
+      items: reviewItemsFor(workspace).filter(
+        (item) => !('docId' in item) || !docWithheldFrom(req, item.docId),
+      ),
       you: { role, canAnswerSecrets: !visitor && role === 'owner' },
     });
   }

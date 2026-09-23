@@ -83,6 +83,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/share/doc` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/share/enabled` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/share/link` | POST | `routes/auth-share.ts` | trusted-local |  |
+| `/api/share/lock` | POST | `routes/board-lock.ts` | loopback-only |  |
 | `/api/share/member/remove` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/share/workspace` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/summaries/backfill` | POST | `routes/ops.ts` | trusted-local |  |

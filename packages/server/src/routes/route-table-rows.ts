@@ -121,6 +121,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/s/:slug', 'GET'],
   ]),
 
+  ...family('routes/board-lock.ts', [['loopback-only', '/api/share/lock', 'POST']]),
+
   ...family('routes/ops.ts', [
     ['trusted-local', '/api/metrics', 'GET'],
     ['trusted-local', '/api/summaries/backfill', 'POST'],
