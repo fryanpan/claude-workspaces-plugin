@@ -76,6 +76,9 @@ export interface DocsToolContext {
   SHARED_IDENTITY_REASON: string;
 }
 
+/** The arguments `set_sharing_enabled` reads. Anything else is refused. */
+const SHARING_SWITCH_ARGS = new Set(['enabled', 'workspaceId', 'reason']);
+
 /** Answers the document tools; `undefined` means "not one of mine". */
 export async function handleDocsTool(
   name: string,
@@ -944,15 +947,41 @@ export async function handleDocsTool(
       return ok(res);
     }
     case 'set_sharing_enabled': {
-      const { enabled } = a as { enabled?: boolean };
-      // No argument = read-only. GET /api/share carries the same `sharing`
+      // Every argument is read or refused. The 23 September call passed a
+      // workspaceId this handler dropped, and the master switch went off for
+      // every board while the answer said `ok`.
+      const extra = Object.keys(a).filter((k) => !SHARING_SWITCH_ARGS.has(k));
+      if (extra.length > 0) {
+        return err(
+          `set_sharing_enabled does not take ${extra.sort().join(', ')}. It takes enabled, workspaceId and reason.`,
+        );
+      }
+      const { enabled, workspaceId, reason } = a as {
+        enabled?: boolean;
+        workspaceId?: string;
+        reason?: string;
+      };
+      // No `enabled` = read-only. GET /api/share carries the same `sharing`
       // object the POST returns, so a status check costs nothing and can't
       // change anything by accident.
       if (typeof enabled !== 'boolean') {
-        const res = await http('GET', '/api/share');
-        return ok(res);
+        const res = (await http('GET', '/api/share')) as {
+          sharing?: { closedBoards?: string[] };
+        };
+        if (typeof workspaceId !== 'string') return ok(res);
+        const closed = res.sharing?.closedBoards ?? [];
+        return ok({
+          ...res,
+          workspaceId,
+          board: { workspaceId, enabled: !closed.includes(workspaceId) },
+        });
       }
-      const res = await http('POST', '/api/share/enabled', { enabled });
+      const res = await http('POST', '/api/share/enabled', {
+        enabled,
+        ...(workspaceId !== undefined ? { workspaceId } : {}),
+        ...(reason !== undefined ? { reason } : {}),
+        actor: { id: AUTHOR.id, name: AUTHOR.name },
+      });
       return ok(res);
     }
   }

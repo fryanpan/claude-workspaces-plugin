@@ -16781,13 +16781,21 @@ var TOOL_LIST = {
     },
     {
       name: "set_sharing_enabled",
-      description: "Master switch for all external access. Off makes every share and link answer 403, and hangs up the open connections of share visitors and share-link members. Existing shares are preserved and resume when it is on again. The local and tailnet surface is unaffected. Call it with no argument to read the current state.",
+      description: "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until someone turns it back on from this machine. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Call it without enabled to read the current state. Any other argument is refused.",
       inputSchema: {
         type: "object",
         properties: {
           enabled: {
             type: "boolean",
             description: "Omit to read the current state without changing it."
+          },
+          workspaceId: {
+            type: "string",
+            description: "The one board to close or reopen. Omit it only when you mean every board and the owner's own hostname."
+          },
+          reason: {
+            type: "string",
+            description: "Why, in a sentence. Written to the log line and the owner's notice."
           }
         }
       }
@@ -18176,6 +18184,7 @@ function threadCreateRequest(input, author, board) {
 }
 
 // packages/mcp/src/tools/docs.ts
+var SHARING_SWITCH_ARGS = new Set(["enabled", "workspaceId", "reason"]);
 async function handleDocsTool(name, a, ctx) {
   const {
     http,
@@ -18702,12 +18711,28 @@ async function handleDocsTool(name, a, ctx) {
       return ok2(res);
     }
     case "set_sharing_enabled": {
-      const { enabled } = a;
+      const extra = Object.keys(a).filter((k) => !SHARING_SWITCH_ARGS.has(k));
+      if (extra.length > 0) {
+        return err2(`set_sharing_enabled does not take ${extra.sort().join(", ")}. It takes enabled, workspaceId and reason.`);
+      }
+      const { enabled, workspaceId, reason } = a;
       if (typeof enabled !== "boolean") {
         const res2 = await http("GET", "/api/share");
-        return ok2(res2);
+        if (typeof workspaceId !== "string")
+          return ok2(res2);
+        const closed = res2.sharing?.closedBoards ?? [];
+        return ok2({
+          ...res2,
+          workspaceId,
+          board: { workspaceId, enabled: !closed.includes(workspaceId) }
+        });
       }
-      const res = await http("POST", "/api/share/enabled", { enabled });
+      const res = await http("POST", "/api/share/enabled", {
+        enabled,
+        ...workspaceId !== undefined ? { workspaceId } : {},
+        ...reason !== undefined ? { reason } : {},
+        actor: { id: AUTHOR.id, name: AUTHOR.name }
+      });
       return ok2(res);
     }
   }
@@ -20602,7 +20627,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.258";
+var PLUGIN_VERSION = "0.1.259";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
