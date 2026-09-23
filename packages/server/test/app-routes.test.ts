@@ -209,6 +209,22 @@ describe('attaching and serving a dev server', () => {
       expect(seen.headers['cf-access-jwt-assertion']).toBeUndefined();
       expect(seen.headers.accept).toBe('application/json');
       expect(seen.search).toBe('?q=1');
+      // The dev server is addressed as itself, not as the board.
+      expect(seen.headers.host).toBe(`127.0.0.1:${dev.port}`);
+    });
+
+    it("keeps the page's query on the frame and passes it upstream unchanged", async () => {
+      // A fragment never leaves the browser; the host page's script adds it.
+      const host = await (await get(`${prefix}?a=1&b=2#map`)).text();
+      expect(host).toContain('data-src="?a=1&amp;b=2&amp;cw-frame=1"');
+      const r = await get(`${prefix}echo?a=1&b=2&cw-frame=1`);
+      expect(((await r.json()) as { search: string }).search).toBe('?a=1&b=2');
+    });
+
+    it('reaches the same path with a doubled slash after the prefix', async () => {
+      const r = await get(`${prefix}/site.css`);
+      expect(r.status).toBe(200);
+      expect(await r.text()).toBe('h1{color:#036}');
     });
 
     it('gives an HTML fetch from inside the app its bytes, not a host page', async () => {
@@ -261,10 +277,13 @@ describe('attaching and serving a dev server', () => {
     it('streams the reload event stream as it is written', async () => {
       const ctl = new AbortController();
       const r = await fetch(`${base}${prefix}__reload`, {
-        headers: { ...LOCAL(), accept: 'text/event-stream' },
+        headers: { ...LOCAL(), accept: 'text/event-stream', 'accept-encoding': 'gzip' },
         signal: ctl.signal,
       });
       expect(r.headers.get('content-type')).toBe('text/event-stream');
+      // A stream: no length to wait for, and nothing that buffers to compress.
+      expect(r.headers.get('content-length')).toBeNull();
+      expect(r.headers.get('content-encoding')).toBeNull();
       const reader = (r.body as ReadableStream<Uint8Array>).getReader();
       const dec = new TextDecoder();
       let text = '';

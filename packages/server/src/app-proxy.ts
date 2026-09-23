@@ -26,11 +26,14 @@
  * The URL parser already folds `..` and `%2e%2e` before a route sees the
  * path, so a path that climbs out of the app prefix names a different route
  * and never arrives here. What does arrive can still be hostile to the
- * upstream URL we build from it: a tail starting `//host` resolves as a
- * protocol-relative URL onto another host. So a tail is refused on any empty
- * first segment, dot segment, encoded slash, backslash or NUL, and the built
- * URL must still name the bound origin.
+ * upstream URL we build from it: a tail starting `//host` would resolve as a
+ * protocol-relative URL onto another host. So leading slashes are folded
+ * away (`<prefix>/__reload` and `<prefix>__reload` are the same path), a
+ * tail is refused on any dot segment, encoded slash, backslash or NUL, and
+ * the built URL must still name the bound origin.
  */
+
+import { searchWithoutFrameParam } from './mockup-frame.ts';
 
 /** The origin an app may be bound to, or why not. */
 export type LoopbackOrigin = { ok: true; origin: string } | { ok: false; error: string };
@@ -78,12 +81,15 @@ function decodeOrNull(segment: string): string | null {
 
 /**
  * The upstream URL for `tail`, the undecoded path after the app prefix, or
- * null when the tail could leave the app. `search` is passed through as the
- * browser sent it, minus the frame flag, which is the board's and not the
- * app's.
+ * null when the tail could leave the app. `search` is passed through byte
+ * for byte as the browser sent it, minus the frame flag, which is the
+ * board's and not the app's. The upstream `Host` is the bound origin's own
+ * (`127.0.0.1:<port>`), because the request is made to that URL and no
+ * reader header named `host` is forwarded.
  */
-export function upstreamUrl(origin: string, tail: string, search: string): URL | null {
-  if (tail.startsWith('/') || tail.includes('\\')) return null;
+export function upstreamUrl(origin: string, rawTail: string, search: string): URL | null {
+  const tail = rawTail.replace(/^\/+/, '');
+  if (tail.includes('\\')) return null;
   for (const seg of tail.split('/')) {
     const d = decodeOrNull(seg);
     if (d === null || d === '.' || d === '..') return null;
@@ -96,10 +102,7 @@ export function upstreamUrl(origin: string, tail: string, search: string): URL |
     return null;
   }
   if (u.origin !== origin) return null;
-  const q = new URLSearchParams(search);
-  q.delete('cw-frame');
-  const qs = q.toString();
-  u.search = qs === '' ? '' : `?${qs}`;
+  u.search = searchWithoutFrameParam(search);
   return u;
 }
 

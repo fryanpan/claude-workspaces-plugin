@@ -71,10 +71,21 @@ describe('upstreamUrl', () => {
     expect(upstreamUrl(ORIGIN, '__reload', '?cw-frame=1')?.href).toBe(`${ORIGIN}/__reload`);
   });
 
+  it('passes the query byte for byte, minus only the frame flag', () => {
+    expect(upstreamUrl(ORIGIN, 'map', '?a=1&b=2&cw-frame=1')?.search).toBe('?a=1&b=2');
+    expect(upstreamUrl(ORIGIN, 'map', '?c=37.7,-122.4&cw-frame=1&z=a%20b&flag')?.search).toBe(
+      '?c=37.7,-122.4&z=a%20b&flag',
+    );
+    expect(upstreamUrl(ORIGIN, 'map', '?cw-frame=1')?.search).toBe('');
+  });
+
+  it('folds leading slashes, so a doubled slash cannot name another host', () => {
+    expect(upstreamUrl(ORIGIN, '/__reload', '')?.href).toBe(`${ORIGIN}/__reload`);
+    expect(upstreamUrl(ORIGIN, '//evil.example/x', '')?.href).toBe(`${ORIGIN}/evil.example/x`);
+  });
+
   it('refuses any tail that could name another host or climb out', () => {
     for (const tail of [
-      '/evil.example/x',
-      '//evil.example',
       'a\\b',
       '..',
       'a/../b',

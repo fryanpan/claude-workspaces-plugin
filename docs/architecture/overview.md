@@ -434,7 +434,9 @@ as a stream, so the dev server's reload event stream reaches the page, and the
 bridge relays the page's own fetches and event streams under the app's prefix
 (`mock-relay-policy.ts`). `app-proxy.ts` is the pure half: the loopback rule,
 the path check and which headers cross. Nothing inside the page is rewritten,
-so the site builds its links under the prefix. What this does not carry
+so the site builds its links under the prefix. The page's query reaches the dev
+server byte for byte minus the frame flag, and the host page hands its
+fragment to the frame. What this does not carry
 behind a sign-in is in [security.md](security.md).
 
 **A review item raised on a mockup is answerable on the mockup.** The ask used

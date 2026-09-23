@@ -48,12 +48,15 @@ export interface Reading {
   latencyMs: number;
   /** Reload streams the dev server had open when the file changed. */
   streamsAtChange: number;
+  /** The frame's own query and fragment, opened at `?a=1&b=2#map`. */
+  frameLocation: string | null;
 }
 
 const page = (version: string) =>
   `<!doctype html><html><head><meta charset="utf-8"><title>Harborlight events</title></head>
-<body><p id="v">${version}</p>
+<body><p id="v">${version}</p><p id="loc"></p>
 <script>
+  document.getElementById('loc').textContent = location.search + location.hash;
   new EventSource('__reload').addEventListener('reload', () => location.reload());
 </script></body></html>`;
 
@@ -155,13 +158,16 @@ async function attachFrames(cdp: Cdp): Promise<string[]> {
   return sessions;
 }
 
-/** The app frame's `#v` text, or null while no frame holds one. */
-async function frameText(cdp: Cdp, sessions: string[]): Promise<string | null> {
+/** The app frame's text at `#id`, or null while no frame holds one. */
+async function frameText(cdp: Cdp, sessions: string[], id = 'v'): Promise<string | null> {
   for (const sessionId of [...sessions]) {
     const r = (await cdp
       .send(
         'Runtime.evaluate',
-        { expression: "document.getElementById('v')?.textContent ?? null", returnByValue: true },
+        {
+          expression: `document.getElementById(${JSON.stringify(id)})?.textContent ?? null`,
+          returnByValue: true,
+        },
         sessionId,
       )
       .catch(() => null)) as { result?: { value?: string | null } } | null;
@@ -235,13 +241,14 @@ async function main(): Promise<void> {
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     const sessions = await attachFrames(cdp);
-    await cdp.send('Page.navigate', { url: `${base}${prefix}` });
+    await cdp.send('Page.navigate', { url: `${base}${prefix}?a=1&b=2#map` });
 
     const before = await poll(
       'the app showed in its frame',
       () => frameText(cdp, sessions),
       30_000,
     );
+    const frameLocation = await frameText(cdp, sessions, 'loc');
     const d = dev;
     await poll(
       'the page opened its reload stream',
@@ -264,7 +271,14 @@ async function main(): Promise<void> {
     }
     const latencyMs = Math.round(performance.now() - t0);
     cdp.close();
-    const reading: Reading = { before, after, arrived, latencyMs, streamsAtChange };
+    const reading: Reading = {
+      before,
+      after,
+      arrived,
+      latencyMs,
+      streamsAtChange,
+      frameLocation,
+    };
     // Last line of stdout: the server logs its own lines above it.
     process.stdout.write(`\n${JSON.stringify(reading)}\n`);
   } finally {

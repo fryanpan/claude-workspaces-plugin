@@ -41,6 +41,10 @@ describe.skipIf(CHROME === null)("an attached dev server's reload stream", () =>
     expect(reading.streamsAtChange).toBeGreaterThan(0);
   });
 
+  it("hands the frame the page's own query and fragment, with the frame flag added", () => {
+    expect(reading.frameLocation).toBe('?a=1&b=2&cw-frame=1#map');
+  });
+
   it('shows the changed file without the reader doing anything', () => {
     expect(reading.after, JSON.stringify(reading)).toBe('two');
     expect(reading.arrived).toBe(true);

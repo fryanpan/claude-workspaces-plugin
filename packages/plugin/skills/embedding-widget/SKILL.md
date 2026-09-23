@@ -256,8 +256,10 @@ To let board members see it without a tailnet grant, attach it instead:
 (`http://127.0.0.1:<port>`). The board serves it at the `prefix` it returns,
 `/workspaces/<ws>/apps/<id>/`, inside the mock's sandboxed frame, and writes
 the widget in for you, so emit no widget tag. Build the site's links under
-that prefix; the dev server receives paths with it removed. A reload stream at
-`<prefix>__reload` is proxied to `<origin>/__reload`. Behind Cloudflare Access
+that prefix; the dev server receives paths with it removed, its own
+`Host`, and the page's query unchanged. The frame's own query also carries
+`cw-frame=1`, so ignore that key. A reload stream at `<prefix>__reload` is
+proxied to `<origin>/__reload`, unbuffered. Behind Cloudflare Access
 or a share link, the frame's own stylesheets, script files and images do not
 load, because they carry no cookie; inline what a remote reviewer must see.
 
