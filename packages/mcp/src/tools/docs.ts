@@ -366,6 +366,18 @@ export async function handleDocsTool(
       });
       return ok(res);
     }
+    case 'attach_app': {
+      const { docId, origin, title } = a as { docId: string; origin: string; title?: string };
+      // The server owns the loopback rule and answers a refusal naming it, so
+      // nothing is checked here that could disagree with it.
+      const res = await http('POST', `${board()}/apps`, {
+        docId,
+        origin,
+        owner: CWD,
+        ...(title ? { title } : {}),
+      });
+      return ok(res);
+    }
     case 'bind_folder':
     case 'attach_folder': {
       const { folderPath, setId, title, include, exclude, maxFiles, subscribe, producedBy } = a as {

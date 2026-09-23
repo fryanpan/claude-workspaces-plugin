@@ -1020,6 +1020,19 @@ export function shareScopeAllows(
           case 'mockups':
             return insideSharedWorkspace(memberId) && docSubrouteAllowed(verb, method);
           /**
+           * An attached dev server (`routes/apps.ts`). `verb` here is not a
+           * verb but the app's own path, so there is no table to look it up
+           * in: every path under an app filed on THIS board, read-only. That
+           * is exactly what a mockup grants — its page, whatever it shows —
+           * spelled for a resource that has more than one page. The app's
+           * own origin is loopback by the attach rule and the path cannot
+           * leave it (`app-proxy.ts`), so what a member reaches is that one
+           * dev server and nothing else on the machine. The attach itself,
+           * `POST …/apps`, is not under this case and stays refused.
+           */
+          case 'apps':
+            return insideSharedWorkspace(memberId) && (method === 'GET' || method === 'HEAD');
+          /**
            * A task row. Resolved as `task:<rowId>` — the id a board holds a
            * task body under — through the SAME `insideSharedWorkspace` every
            * other question here reads, so a row on another board is refused

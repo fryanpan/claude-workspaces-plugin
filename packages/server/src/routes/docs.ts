@@ -190,6 +190,14 @@ export async function handleDocCreateListRoutes(
     // so they don't need a file.
     // Diff docs are created only via POST /api/diffs, which resolves the
     // range and seeds content from git — a bare create can't do that.
+    // An app's origin is checked by its own route, which is the only one that
+    // knows the loopback rule. Created here, it would be bound unchecked.
+    if (type === 'app') {
+      return j(400, {
+        error: 'use POST /workspaces/{workspaceId}/apps',
+        hint: 'A dev server is attached by POST /workspaces/{workspaceId}/apps {docId, origin}, which accepts only a loopback origin.',
+      });
+    }
     if (type === 'diff') {
       return j(400, {
         error: 'use POST /workspaces/{workspaceId}/attachments',

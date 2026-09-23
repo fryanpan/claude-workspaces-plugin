@@ -485,6 +485,15 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/mounts/:fileId/raw', 'GET HEAD'],
   ]),
 
+  // An attached dev server. The attach is an agent's bind; every path under
+  // an app is a member's read, which the host guard admits for an app filed
+  // on the board in the path.
+  ...family('routes/apps.ts', [
+    ['trusted-local', '/workspaces/:ws/apps', 'POST'],
+    ['share-scope', '/workspaces/:ws/apps/:docId', 'GET HEAD'],
+    ['share-scope', '/workspaces/:ws/apps/:docId/*', 'GET HEAD'],
+  ]),
+
   ...family('routes/shell-static.ts', [
     ['share-scope', '/app/*', 'GET'],
     ['share-scope', '/widget/*', 'GET'],

@@ -100,6 +100,7 @@ import {
   type AgentIdentityRoutesContext,
   handleAgentIdentityRoutes,
 } from './routes/agent-identity.ts';
+import { type AppRoutesContext, handleAppRoutes } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext, handleAuthShareRoutes } from './routes/auth-share.ts';
 import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './routes/chat-audit-routes.ts';
@@ -1632,6 +1633,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       }
       case 'docs':
       case 'mockups':
+      case 'apps':
       case 'attachments': {
         // The board-feedback doc belongs to EVERY board, and that is what it
         // is for: one place feedback about the product lands, reachable from
@@ -2261,6 +2263,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     fileUnderBoardWorkspace,
   };
 
+  /** What the attached-app routes read — see ./routes/apps.ts. */
+  const appRoutesCtx: AppRoutesContext = {
+    docStore,
+    j,
+    safeJson,
+    isValidDocId,
+    fileUnderBoardWorkspace,
+    withReviewUrl,
+    widgetDist,
+    markdownAppDist,
+    browserSentry,
+    ownPort: () => server.port ?? port,
+  };
+
   /**
    * What the doc, thread and bind routes read instead of this closure's
    * scope. Built once — every collaborator in it is long-lived.
@@ -2872,6 +2888,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         if (handled) return handled;
       }
 
+      // --- An attached dev server — ./routes/apps.ts ---
+      // Its attach sits beside the doc create it mirrors, and its reads claim
+      // only `apps/<id>/…`, which no route below answers.
+      {
+        const handled = await handleAppRoutes(appRoutesCtx, { req, url, scope });
+        if (handled) return handled;
+      }
+
       // --- REST: workspaces (the board's own routes) — ./routes/ ---
       // A board is created here, read here, and every field on it is
       // written here: its Home queue, its next-work answer, its settings,
@@ -3412,6 +3436,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     }
     if (meta.type === 'mockup' && meta.sourceUrl) {
       return { ...meta, reviewUrl: `${ws}/mockups/${id}` };
+    }
+    if (meta.type === 'app' && meta.sourceUrl) {
+      return { ...meta, reviewUrl: `${ws}/apps/${id}/` };
     }
     return meta;
   }

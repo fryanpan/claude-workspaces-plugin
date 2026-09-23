@@ -229,6 +229,8 @@ export const SCOPED_COLLECTIONS: Readonly<Record<string, readonly string[]>> = {
    *  here before it can work. */
   docs: [],
   mockups: [],
+  /** An attached dev server, addressed by its doc id; the rest is its path. */
+  apps: [],
   attachments: [],
   /** One filed ask, read by its own id — and `viewed`, the browser's
    *  "I have seen this" beacon, which sits exactly where an item id goes and

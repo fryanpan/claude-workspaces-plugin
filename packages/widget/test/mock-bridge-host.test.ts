@@ -80,7 +80,7 @@ class NativeSocket {
   constructor(readonly url: string) {}
 }
 
-function build(opts: { activated?: boolean } = {}) {
+function build(opts: { activated?: boolean; hash?: string } = {}) {
   HostSocket.made = [];
   HostStream.made = [];
   document.body.innerHTML = '';
@@ -102,7 +102,7 @@ function build(opts: { activated?: boolean } = {}) {
   const env: HostEnv = {
     script,
     placeholder,
-    location: { host: 'harborlight.test', protocol: 'http:' },
+    location: { host: 'harborlight.test', protocol: 'http:', hash: opts.hash ?? '' },
     storage: () => ({
       getItem: (k: string) => (k === 'feedback-user-name' ? 'Sample Reader' : null),
     }),
@@ -172,6 +172,11 @@ describe('the frame is made by the host', () => {
     h.w.localStorage.clear();
     expect(h.w.localStorage.getItem('feedback-user-name')).toBeNull();
     expect(h.w.sessionStorage.length).toBe(0);
+  });
+
+  it("hands the frame the page's fragment, which never reached the server", () => {
+    const withHash = build({ hash: '#map' });
+    expect(withHash.frame?.getAttribute('src')).toBe('?v=2&cw-frame=1#map');
   });
 
   it('sends a direct visit to the frame address to the host page', () => {

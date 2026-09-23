@@ -41,9 +41,11 @@ export function redactMetaForVisitor(
     // language off this, so dropping it entirely would silently turn a
     // visitor's code view into plain text. A bare filename is already
     // visible as the title; the directories are what we're withholding.
+    // An app's source is a loopback origin rather than a file, and its
+    // "basename" would be this machine's port: withheld with the rest.
     ...(meta.relPath !== undefined
       ? { relPath: meta.relPath }
-      : meta.sourceUrl
+      : meta.sourceUrl && meta.type !== 'app'
         ? { relPath: basename(meta.sourceUrl) }
         : {}),
     ...(opts?.workspaceScoped && meta.workspaceId !== undefined

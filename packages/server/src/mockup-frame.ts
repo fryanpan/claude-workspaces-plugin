@@ -125,10 +125,22 @@ export function mayTouchFrom(
 
 /** The frame's address, relative: the page's own query with the frame flag on. */
 export function frameSrcFor(url: URL): string {
-  const q = new URLSearchParams(url.search);
-  q.delete(MOCK_FRAME_PARAM);
-  q.set(MOCK_FRAME_PARAM, '1');
-  return `?${q.toString()}`;
+  const rest = searchWithoutFrameParam(url.search);
+  return rest === '' ? `?${MOCK_FRAME_PARAM}=1` : `${rest}&${MOCK_FRAME_PARAM}=1`;
+}
+
+/**
+ * `search` with every frame flag removed and every other byte as the browser
+ * sent it. Re-serialising through `URLSearchParams` would re-encode the rest
+ * (`,` becomes `%2C`, a bare `a` becomes `a=`), and a page that keeps its
+ * state in the query reads its own string back.
+ */
+export function searchWithoutFrameParam(search: string): string {
+  const parts = search
+    .replace(/^\?/, '')
+    .split('&')
+    .filter((part) => part !== '' && part.split('=')[0] !== MOCK_FRAME_PARAM);
+  return parts.length === 0 ? '' : `?${parts.join('&')}`;
 }
 
 const escapeAttr = (v: string): string =>
