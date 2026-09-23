@@ -161,6 +161,7 @@ import type { ServerOptions } from './server-options.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
+import { SHARING_NOTICE_ACTOR, SharingNotice } from './sharing-notice.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { claimReplayMarks, saveReplayMarks } from './sse-marks.ts';
@@ -1190,6 +1191,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     fileUnderBoardWorkspace,
     unfileFromDefault,
     unlinkFromEveryBoardWorkspace,
+    defaultBoardWorkspaceId,
   } = createBoardMembership({
     docStore,
     taskStore,
@@ -2297,6 +2299,32 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspacesOfDoc: shareWorkspacesOf,
   };
 
+  // The owner's notice when the master sharing switch goes off: one review
+  // item on the catch-all board, filed by the server (sharing-notice.ts).
+  const sharingNotice = new SharingNotice({
+    dataDir,
+    boardId: defaultBoardWorkspaceId,
+    getTask: (taskId) => taskStore.getTask(taskId),
+    createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
+    addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
+    withdrawReviewItem: (taskId, itemId, o) => taskStore.withdrawReviewItem(taskId, itemId, o),
+    refresh: (taskId) => {
+      const task = taskStore.getTask(taskId);
+      if (task) taskProjection.refreshTask(task);
+    },
+    announce: (taskId, itemId) => {
+      const task = taskStore.getTask(taskId);
+      const item = taskStore.listReviewItems(taskId).find((i) => i.id === itemId);
+      if (!task || !item) return;
+      announceTaskReview(task, item, {
+        id: SHARING_NOTICE_ACTOR.id,
+        name: SHARING_NOTICE_ACTOR.name,
+        kind: 'known',
+        color: ANONYMOUS_ACTOR.color,
+      });
+    },
+  });
+
   /**
    * What the sign-in, session and share routes read instead of this closure's
    * scope. Built once — every collaborator in it is long-lived.
@@ -2311,7 +2339,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     collabMemberOf,
     sharingGate,
     requestAddress: (req) => server.requestIP(req)?.address,
-    onSharingFlip: () => {},
+    onSharingFlip: (flip) => sharingNotice.onFlip(flip),
     identities,
     emailCodes,
     sessionRevocations,

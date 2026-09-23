@@ -86,7 +86,7 @@ describe('the sharing switch, for one board and for all of them', () => {
   const status = async () =>
     (
       (await (await req('/api/share', `localhost:${handle.port}`)).json()) as {
-        sharing: { enabled: boolean; closedBoards?: string[] };
+        sharing: { enabled: boolean; locked: boolean; closedBoards?: string[] };
       }
     ).sharing;
 
@@ -198,8 +198,10 @@ describe('the sharing switch, for one board and for all of them', () => {
   });
 
   describe('the log line', () => {
-    const flipLines = (spy: ReturnType<typeof spyOn>) =>
-      spy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('[sharing]'));
+    const flipLines = (spy: { mock: { calls: unknown[][] } }): string[] =>
+      spy.mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .filter((l: string) => l.includes('[sharing]'));
 
     it('names the actor, the peer, the time and the reason, for off and for on', async () => {
       const spy = spyOn(console, 'error');
@@ -253,6 +255,60 @@ describe('the sharing switch, for one board and for all of them', () => {
       } finally {
         spy.mockRestore();
       }
+    });
+  });
+
+  describe("the owner's notice", () => {
+    type Row = { taskId: string; askedBy: string; review: { headline: string; detail: string } };
+    const unfiledBoard = async (): Promise<string | undefined> => {
+      const r = await req('/workspaces?format=json', `localhost:${handle.port}`);
+      const body = (await r.json()) as { boardWorkspaces: Array<{ id: string; name: string }> };
+      return body.boardWorkspaces.find((w) => w.name === 'Unfiled')?.id;
+    };
+    /** Open items on the owner's catch-all board that the switch filed. */
+    const notices = async (): Promise<Row[]> => {
+      const ws = await unfiledBoard();
+      if (!ws) return [];
+      const r = await req(`/workspaces/${ws}/review-items`, `localhost:${handle.port}`);
+      const rows = ((await r.json()) as { items: Row[] }).items;
+      return rows.filter((row) => row.askedBy === 'Sharing switch');
+    };
+
+    it('files nothing when one board is closed', async () => {
+      expect(await notices()).toHaveLength(0);
+      await postLocal('/api/share/enabled', { workspaceId: other, enabled: false });
+      await postLocal('/api/share/enabled', { workspaceId: other, enabled: true });
+      expect(await notices()).toHaveLength(0);
+    });
+
+    it("puts the master switch going off on the owner's queue, naming who, where and why", async () => {
+      const off = await postLocal('/api/share/enabled', {
+        enabled: false,
+        reason: 'a precaution',
+        actor: { id: 'agent-riverbend', name: 'Riverbend Agent' },
+      });
+      expect(off.status).toBe(200);
+      // Read straight after the 200: the item is on the queue before the
+      // route answers, so the owner's open board has it on its next event.
+      const rows = await notices();
+      expect(rows).toHaveLength(1);
+      const [row] = rows as [Row];
+      expect(row.review.headline).toBe('Outside access is off for every board');
+      expect(row.review.detail).toContain('agent Riverbend Agent (agent-riverbend)');
+      expect(row.review.detail).toContain('a precaution');
+      expect(row.review.detail).toMatch(/(::ffff:)?127\.0\.0\.1/);
+    });
+
+    it('keeps one item when it goes off again, naming the latest flip', async () => {
+      await postLocal('/api/share/enabled', { enabled: false, reason: 'second look' });
+      const rows = await notices();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.review.detail).toContain('second look');
+    });
+
+    it('withdraws the item when the switch is turned back on', async () => {
+      await postLocal('/api/share/enabled', { enabled: true });
+      expect(await notices()).toHaveLength(0);
     });
   });
 });

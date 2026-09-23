@@ -32,9 +32,11 @@
  * composes this above the stall wiring and hands that wiring
  * `boardsForDoc` and `backTargetFor` directly rather than as thunks.
  *
- * `boardWorkspacesHolding`, `heldByIndexed`, `queuedForLead` and
- * `defaultBoardWorkspaceId` stay internal: nothing outside this module reached
- * them before the move, and a wider surface is a wider thing to keep true.
+ * `boardWorkspacesHolding`, `heldByIndexed` and `queuedForLead` stay
+ * internal: nothing outside this module reached them before the move, and a
+ * wider surface is a wider thing to keep true. `defaultBoardWorkspaceId` is
+ * exported for the sharing notice (sharing-notice.ts), which files the
+ * owner's notice on the catch-all board.
  */
 import { type DocMeta, attachmentIdOf, normalizeEmail } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
@@ -204,6 +206,8 @@ export interface BoardMembership {
   boardMembersOf: (workspaceId: string) => ShareLinkMember[];
   /** Every board a doc's discussion actually reaches. */
   boardsForDoc: (docId: string) => Set<string>;
+  /** The catch-all board, created on first need. */
+  defaultBoardWorkspaceId: () => string;
   /** One pass over the workspaces, for a whole listing. */
   boardIndexForListing: () => Map<string, string[]>;
   /** `boardsForDoc` against that index. */
@@ -883,5 +887,6 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     fileUnderBoardWorkspace,
     unfileFromDefault,
     unlinkFromEveryBoardWorkspace,
+    defaultBoardWorkspaceId,
   };
 }
