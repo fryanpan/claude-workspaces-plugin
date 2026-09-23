@@ -148,12 +148,14 @@ export function rankFallbackBoards(boards: readonly FallbackCandidate[]): string
  * actor with its id; the card is read on a phone against the review-item
  * criteria, which refuse a raw id, so it carries the name alone.
  */
+const UNATTRIBUTED_ON_CARD = 'An unnamed caller';
+
 export function actorOnCard(actor: string): string {
   const agent = /^agent (.+?)(?: \([^)]*\))?$/.exec(actor);
   if (agent?.[1]) return `The agent ${agent[1]}`;
   const person = /^(?:person|owner) (.+?)(?: \([^)]*\))?$/.exec(actor);
   if (person?.[1]) return person[1];
-  return 'A caller that did not say who it was';
+  return UNATTRIBUTED_ON_CARD;
 }
 
 const MONTHS = [
@@ -193,11 +195,14 @@ export function sharingOffReview(flip: SharingFlip): {
 } {
   const reason = flip.reason === null ? 'They gave no reason.' : `Their reason: “${flip.reason}”.`;
   const detail = [
-    `${actorOnCard(flip.actor)} turned off outside access to every board at ${timeOnCard(flip.at)}, from the address ${peerOnCard(flip.peer)}. ${reason}`,
+    `${actorOnCard(flip.actor)} turned off sharing for every board at ${timeOnCard(flip.at)}, from ${peerOnCard(flip.peer)}. ${reason}`,
     '',
-    'While it stays off, nobody outside this machine can open any board: every share-link visitor, every collaboration visitor and every visitor on a public hostname is refused, your own hostname included. Work on this machine is not affected.',
+    'While it is off, every share-link, collaboration and public-hostname visitor is refused, your own hostname included.',
     '',
-    'If the aim was to shut out one board, turn this back on and have the agent close that board alone.',
+    'Did you or one of your agents mean this?',
+    '- **Intended, for one board:** your agent did it and the reason names a board. Turn back on and have that agent close that board alone.',
+    `- **A mistake:** "${UNATTRIBUTED_ON_CARD}" is a program on this machine with an older plugin, the usual mistake. Turn back on.`,
+    '- **An incident:** nobody you know did this. Leave off, and check each board\u2019s share list before reopening.',
   ].join('\n');
   return {
     review_type: 'decision',

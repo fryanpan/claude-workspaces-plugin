@@ -236,11 +236,37 @@ describe('rankFallbackBoards', () => {
   });
 });
 
+describe('the card says how to decide', () => {
+  // The real judge held the first prod card because it named what happened
+  // and gave no way to decide. These three readings are that way; cutting one
+  // must move a test.
+  it('names the intended, mistaken and incident readings, each with its option', () => {
+    const { detail } = sharingOffReview(flip(false));
+    expect(detail).toContain('Did you or one of your agents mean this?');
+    expect(detail).toMatch(/\*\*Intended, for one board:\*\*[^\n]*Turn back on/);
+    expect(detail).toMatch(/\*\*A mistake:\*\*[^\n]*older plugin[^\n]*Turn back on/);
+    expect(detail).toMatch(/\*\*An incident:\*\*[^\n]*Leave off[^\n]*share list/);
+  });
+
+  it('names the unattributed caller the way the facts line does', () => {
+    const { detail } = sharingOffReview(flip(false, { actor: 'unattributed' }));
+    expect(detail.startsWith('An unnamed caller turned off sharing')).toBe(true);
+    expect(detail).toContain('"An unnamed caller" is a program on this machine');
+  });
+
+  it('stays short enough to read on a phone', () => {
+    const { detail } = sharingOffReview(
+      flip(false, { actor: 'unattributed', reason: 'closing the Harborlight board' }),
+    );
+    expect(detail.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(120);
+  });
+});
+
 describe('actorOnCard', () => {
   it('keeps the name and drops the id the log carries', () => {
     expect(actorOnCard('agent Bob (agent-bob)')).toBe('The agent Bob');
     expect(actorOnCard('person alice@saltmarsh.example')).toBe('alice@saltmarsh.example');
-    expect(actorOnCard('unattributed')).toBe('A caller that did not say who it was');
+    expect(actorOnCard('unattributed')).toBe('An unnamed caller');
   });
 });
 
@@ -254,7 +280,8 @@ describe('sharingOffReview', () => {
     expect(review.detail).toContain('127.0.0.1, this machine');
     expect(review.detail).toContain('00:00 UTC on 23 September 2026');
     expect(review.detail).toContain('\u201creview\u201d');
-    expect(review.detail).toContain('every share-link visitor, every collaboration visitor');
-    expect(review.detail).toContain('public hostname');
+    expect(review.detail).toContain(
+      'every share-link, collaboration and public-hostname visitor is refused',
+    );
   });
 });
