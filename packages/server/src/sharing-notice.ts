@@ -9,7 +9,10 @@
  * So a master switch turned OFF files one DECISION on the owner's queue, on a
  * standing task on the catch-all board: who threw it, from which address,
  * when, why, and what stays refused while it is off. The owner's review page
- * reads every board, so the catch-all board reaches them. A flip that names a
+ * reads every live board, so the catch-all board reaches them. When the
+ * catch-all is retired, which refuses new tasks and drops off that page, the
+ * notice goes to the best live board instead (`rankFallbackBoards`); nothing
+ * here unretires a board. A flip that names a
  * board never reaches here: it closes that board alone and locks the owner
  * out of nothing.
  *
@@ -62,7 +65,17 @@ export interface SharingNoticeDeps {
   dataDir: string;
   /** The owner's catch-all board, created on first need. */
   boardId: () => string;
-  getTask(taskId: string): { id: string; archivedAt?: number } | undefined;
+  /**
+   * Live boards to file on when the catch-all board refuses the task, best
+   * first. The catch-all can be retired, and a retired board refuses new
+   * tasks; the notice must still reach the owner, and nothing here may
+   * unretire a board to get there.
+   */
+  fallbackBoards?: () => string[];
+  getTask(taskId: string): { id: string; workspaceId: string; archivedAt?: number } | undefined;
+  /** Whether a board is live. The owner's review page skips a retired
+   *  board, so a standing task left on one would file items nobody reads. */
+  isBoardLive?: (workspaceId: string) => boolean;
   createTask(
     workspaceId: string,
     opts: { title: string; body: string; goal: string; actor: Actor },
@@ -104,6 +117,30 @@ interface NoticeState {
   taskId?: string;
   /** The open item, while the master switch is off. */
   itemId?: string;
+}
+
+/** A board as the fallback ranking reads it. */
+export interface FallbackCandidate {
+  id: string;
+  retired: boolean;
+  /** Whether the board is open to anyone outside: a share link, a
+   *  share-link member, or a share. */
+  shared: boolean;
+  activeAt: number;
+}
+
+/**
+ * Where the notice goes when the catch-all board refuses it: live boards
+ * only, never a retired one. A board nobody outside is a member of comes
+ * first, because the item names an address on this machine and the members
+ * of a board see everything on it. Among equals, the most recently active
+ * board wins, since that is the one the owner is most likely looking at.
+ */
+export function rankFallbackBoards(boards: readonly FallbackCandidate[]): string[] {
+  return boards
+    .filter((b) => !b.retired)
+    .sort((a, b) => Number(a.shared) - Number(b.shared) || b.activeAt - a.activeAt)
+    .map((b) => b.id);
 }
 
 /**
@@ -278,19 +315,32 @@ export class SharingNotice {
 
   private ensureTask(): string | null {
     const known = this.state.taskId ? this.deps.getTask(this.state.taskId) : undefined;
-    if (known && known.archivedAt === undefined) return known.id;
-    const created = this.deps.createTask(this.deps.boardId(), {
-      title: SHARING_NOTICE_TASK_TITLE,
-      body: 'Where the server tells the owner that the master sharing switch was turned off: who did it, from where, when and why, with a choice to turn it back on. Each item withdraws itself when the switch is turned back on.',
-      goal: 'chores',
-      actor: { ...SHARING_NOTICE_ACTOR },
-    });
-    if (!created.ok) {
-      this.say(`[sharing] owner notice task refused: ${created.error ?? 'unknown'}`);
-      return null;
+    if (
+      known &&
+      known.archivedAt === undefined &&
+      (this.deps.isBoardLive?.(known.workspaceId) ?? true)
+    ) {
+      return known.id;
     }
-    this.state.taskId = created.task.id;
-    return created.task.id;
+    const first = this.deps.boardId();
+    const boards = [first, ...(this.deps.fallbackBoards?.() ?? []).filter((b) => b !== first)];
+    for (const workspaceId of boards) {
+      const created = this.deps.createTask(workspaceId, {
+        title: SHARING_NOTICE_TASK_TITLE,
+        body: 'Where the server tells the owner that the master sharing switch was turned off: who did it, from where, when and why, with a choice to turn it back on. Each item withdraws itself when the switch is turned back on.',
+        goal: 'chores',
+        actor: { ...SHARING_NOTICE_ACTOR },
+      });
+      if (created.ok) {
+        this.state.taskId = created.task.id;
+        return created.task.id;
+      }
+      this.say(
+        `[sharing] owner notice task refused on board ${JSON.stringify(workspaceId)}: ${created.error ?? 'unknown'}`,
+      );
+    }
+    this.say('[sharing] owner notice filed nowhere: every board refused the task');
+    return null;
   }
 
   private withdrawOpen(reason: string): void {
