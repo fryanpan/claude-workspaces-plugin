@@ -13,9 +13,10 @@
  *
  * Spawned by `app-reload.test.ts`, which reads the JSON it prints.
  *
- * audit: no-text — nothing here reads a source file, a bundle or a
- * stylesheet; every value it returns came from the running page.
+ * Nothing here reads a source file, a bundle or a stylesheet; every value
+ * it returns came from the running page.
  */
+// audit: no-text
 import { type ChildProcess, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,7 +36,7 @@ import {
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 
 /** How long a change may take to show. The task's criterion. */
-export const BUDGET_MS = 5000;
+export const BUDGET_MS: number = 5000;
 
 export interface Reading {
   /** The frame's text before the change. */
