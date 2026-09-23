@@ -587,6 +587,12 @@ export const TOOL_LIST: ListToolsResult = {
               'The board this resource is on. get_workspace lists the boards you are attached to.',
           },
           folderPath: { type: 'string' },
+          privacy: {
+            type: 'string',
+            enum: ['workspace', 'local-only'],
+            description:
+              "Who may open the folder's files. 'local-only' serves them, and their names, on this machine alone: every share link, collaboration visitor, tunnel and tailnet caller is refused. 'workspace' (the default for a new folder) lets anyone a share link on the board admits open them. Omit it to keep the set's current privacy; the answer always names it.",
+          },
           exclude: {
             type: 'array',
             items: { type: 'string' },
@@ -1466,6 +1472,23 @@ export const TOOL_LIST: ListToolsResult = {
             description: "Why, in a sentence. Written to the log line and the owner's notice.",
           },
         },
+      },
+    },
+    {
+      name: 'set_board_sharing_lock',
+      description:
+        "Lock ONE board never-shareable, or unlock it. A locked board refuses share_workspace and every other share-link mint, naming the lock, and is closed to its share and collaboration visitors, whose open connections hang up. It is stronger than set_sharing_enabled's per-board close, which refuses visitors but still lets a link be minted. Only a call from the owner's machine can set or clear it; through the tunnel or the network it is refused. Call it without locked to read the board's current lock. Any other argument is refused.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board to lock or unlock.' },
+          locked: {
+            type: 'boolean',
+            description: 'true locks, false unlocks. Omit to read the current state.',
+          },
+          reason: { type: 'string', description: 'Why, in a sentence. Written to the log line.' },
+        },
+        required: ['workspaceId'],
       },
     },
     {
