@@ -3,7 +3,15 @@
 
 set -euo pipefail
 
-LABEL="com.fryanpan.claude-workspaces"
+# Same default and override as install.sh: pass the CW_LAUNCHD_LABEL you
+# installed with.
+LABEL="${CW_LAUNCHD_LABEL:-com.fryanpan.claude-workspaces}"
+case "${LABEL}" in
+    *[!A-Za-z0-9._-]* | "" | .* )
+        echo "error: CW_LAUNCHD_LABEL must be a reverse-DNS name (letters, digits, '.', '-', '_')." >&2
+        exit 1
+        ;;
+esac
 DOMAIN="gui/$(id -u)"
 PLIST_DEST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
