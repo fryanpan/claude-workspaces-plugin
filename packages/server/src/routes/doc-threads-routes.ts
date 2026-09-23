@@ -17,6 +17,7 @@
  */
 import {
   type Anchor,
+  type PageEdit,
   type ReviewPayload,
   type Thread,
   type VoiceNote,
@@ -28,7 +29,9 @@ import {
   latestThreadedQuestion,
   locateReviewItemRange,
   normalizeReviewType,
+  pageEditsText,
   pendingDeclaration,
+  readPageEdits,
   readReviewPayload,
   readVoiceNote,
   reviewGapAdvice,
@@ -84,6 +87,19 @@ function voiceFromBody(raw: unknown, docId: string): VoiceNote | undefined | fal
     return false;
   }
   return note;
+}
+
+/**
+ * The text edits a widget send carries: absent is `undefined`, a list every
+ * entry of which reads whole is the list, anything else is `false` and
+ * refused. All or nothing, because an agent handed some of a reviewer's edits
+ * applies a page the reviewer never asked for.
+ */
+function pageEditsFromBody(raw: unknown): PageEdit[] | undefined | false {
+  if (raw === undefined) return undefined;
+  const edits = readPageEdits(raw);
+  if (!edits || !Array.isArray(raw) || edits.length !== raw.length) return false;
+  return edits.every((e) => anchors.validateAnchor(e.anchor).ok) ? edits : false;
 }
 
 function declaredItemId(docId: string, thread: Thread | null): string | undefined {
@@ -783,7 +799,15 @@ export async function handleDocThreadRoutes(
   if (rest === 'threads' && req.method === 'POST') {
     const body = await safeJson(req);
     const user = authorFor(body?.author);
-    const text = body?.text as string | undefined;
+    const pageEdits = pageEditsFromBody(body?.pageEdits);
+    if (pageEdits === false) {
+      return j(400, {
+        error: 'pageEdits must be 1-50 of { anchor (element), selector, before, after }',
+      });
+    }
+    // A send's words are written here from its edits, so every surface that
+    // shows the thread says what the structure says.
+    const text = pageEdits ? pageEditsText(pageEdits) : (body?.text as string | undefined);
     let anchor = body?.anchor as Anchor | undefined;
     if (!user || !text || !anchor) {
       return j(400, { error: 'author + text + anchor required' });
@@ -938,6 +962,7 @@ export async function handleDocThreadRoutes(
           generate: !visitor,
           ...(declared.review ? { review: declared.review } : {}),
           ...(voice ? { voice } : {}),
+          ...(pageEdits ? { pageEdits } : {}),
           ...viaOpt,
         });
         if (created && itemAsk?.range) {

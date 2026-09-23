@@ -80,6 +80,7 @@ beforeAll(async () => {
   writeFileSync(join(widgetDist, 'widget.iife.js'), '/* the widget */');
   writeFileSync(join(widgetDist, 'mic.js'), '/* the mic */');
   writeFileSync(join(widgetDist, 'voice.js'), '/* the voice chunk */');
+  writeFileSync(join(widgetDist, 'edit.js'), '/* the edit chunk */');
   // The negative control's file. It is served on every other surface, so a
   // 404 on the door is the door refusing it rather than the file missing.
   writeFileSync(join(widgetDist, 'mockup-live.js'), '/* the mock live script */');
@@ -251,7 +252,7 @@ describe('the tailnet widget door', () => {
       : undefined;
 
   describe('with no token', () => {
-    it('serves the three scripts that need no token, and only those three', async () => {
+    it('serves the four scripts that need no token, and only those four', async () => {
       // A `<script src>` can set no Authorization header, so the mic the
       // bundle fetches at DOMContentLoaded and the chunk the mic fetches on
       // its first tap are admitted on the bundle's own terms.
@@ -259,6 +260,7 @@ describe('the tailnet widget door', () => {
         ['/widget.iife.js', '/* the widget */'],
         ['/widget/mic.js', '/* the mic */'],
         ['/widget/voice.js', '/* the voice chunk */'],
+        ['/widget/edit.js', '/* the edit chunk */'],
       ]) {
         const res = await onDoor(base, path);
         expect(res.status, path).toBe(200);

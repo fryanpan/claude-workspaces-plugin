@@ -20,14 +20,16 @@
  * What the door admits, and it is an allowlist: a route added to this server
  * tomorrow is 404 on the tailnet hostname by default.
  *
- * 1. `GET /widget.iife.js`, `GET /widget/mic.js` and `GET /widget/voice.js` —
- *    the bundle, the microphone it fetches at DOMContentLoaded
- *    (`widget/src/widget-mic-inject.ts`) and the voice chunk the mic fetches
- *    on its first tap. Static, and the same bytes every embed gets; the three
- *    requests that need no token, because none can carry one. The widget
- *    cannot ask for a token before it has run, and a `<script src>` sets no
- *    Authorization header at all (`widget/src/voice/voice-loader.ts`). All
- *    three are already public to a share visitor, so admitting them here
+ * 1. `GET /widget.iife.js`, `GET /widget/mic.js`, `GET /widget/voice.js` and
+ *    `GET /widget/edit.js` — the bundle, the microphone it fetches at
+ *    DOMContentLoaded (`widget/src/widget-mic-inject.ts`), the voice chunk the
+ *    mic fetches on its first tap, and the edit mode the pencil fetches
+ *    (`widget/src/edit/edit-button.ts`). Static, and the same bytes every
+ *    embed gets; the four requests that need no token, because none can
+ *    carry one. The widget cannot ask for a token before it has run, and a
+ *    `<script src>` sets no Authorization header at all
+ *    (`widget/src/voice/voice-loader.ts`). All four are already public to a
+ *    share visitor, so admitting them here
  *    widens nothing. Named one by one rather than as a `/widget/` prefix: the
  *    mock host and bridge sit in that directory too, and an allowlist that
  *    grew with the build output would not be one.
@@ -63,6 +65,7 @@ const SCRIPTS: ReadonlySet<string> = new Set([
   '/widget.iife.js',
   '/widget/mic.js',
   '/widget/voice.js',
+  '/widget/edit.js',
 ]);
 
 /** The thread verbs the widget posts, and nothing a doc page does beyond them.

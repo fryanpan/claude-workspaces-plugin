@@ -17,6 +17,7 @@ import {
   type DocOriginRepo,
   type DocTitleSource,
   type DocType,
+  type PageEdit,
   type ReviewItemJudgement,
   type ReviewPayload,
   type Thread,
@@ -2603,6 +2604,10 @@ export class DocStore {
        * layer where the payload has to be accepted, not the routes above it.
        */
       review?: ReviewPayload;
+      /** A spoken comment's note — see `VoiceNote`. */
+      voice?: VoiceNote;
+      /** Text a reviewer changed on the page — see `PageEdit`. */
+      pageEdits?: PageEdit[];
       /** Sent from inside a mock page — see `WriteVia`. */
       via?: WriteVia;
     },

@@ -78,7 +78,9 @@ const REQUIRED: Record<keyof ClientSources, string[]> = {
   // `mic.js` for the same reason and one worse: an embed asks for it on every
   // page load, and a release without it is a widget nobody can speak into,
   // with nothing in the log but a 404 for a script.
-  widget: ['widget.iife.js', 'widget.esm.js', 'mockup-live.js', 'mic.js', 'voice.js'],
+  // `edit.js` is the edit mode the pencil fetches, and the chunk that marks a
+  // pending edit after a reload: without it the marks vanish with no error.
+  widget: ['widget.iife.js', 'widget.esm.js', 'mockup-live.js', 'mic.js', 'voice.js', 'edit.js'],
   // `sw.js` and the manifest are listed because their absence is silent:
   // notifications simply never arrive and the page looks entirely healthy.
   markdownApp: ['app.js', 'index.html', 'sw.js', 'manifest.webmanifest'],
