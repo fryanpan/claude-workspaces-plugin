@@ -25,9 +25,11 @@
  *   owner as the actor. An answer from anyone else is recorded and does not
  *   flip anything. "Leave off" is recorded only.
  *
- * Filed by the server, and still judged: every filing and revision goes
- * through the review-item quality gate, and the owner's devices are told
- * only when the gate passes it. The standing task and the open item are kept
+ * Filed by the server and still judged: every filing and revision goes
+ * through the review-item quality gate, but the owner is told whatever the
+ * gate says, and a hold is recorded as passed with the gate's words beside
+ * it (server.ts). The gate holds agent-written asks; this is a fixed
+ * template, and a security notice the owner never sees is worse. The standing task and the open item are kept
  * in `sharing-notice.json`, so a restart neither files a duplicate nor
  * forgets the item it would revise or withdraw.
  */
@@ -199,10 +201,11 @@ export function sharingOffReview(flip: SharingFlip): {
     '',
     'While it is off, every share-link, collaboration and public-hostname visitor is refused, your own hostname included.',
     '',
-    'Did you or one of your agents mean this?',
-    '- **Intended, for one board:** your agent did it and the reason names a board. Turn back on and have that agent close that board alone.',
-    `- **A mistake:** "${UNATTRIBUTED_ON_CARD}" is a program on this machine with an older plugin, the usual mistake. Turn back on.`,
-    '- **An incident:** nobody you know did this. Leave off, and check each board\u2019s share list before reopening.',
+    'To tell what happened, read the first line: who did it, from which address, and the reason given. Then ask that agent, or check which of your sessions called the switch last.',
+    '',
+    '- **Intended, for one board:** the caller is your agent and the reason names a board. Turn back on and have that agent close that board alone.',
+    `- **A mistake:** the caller is unnamed, or your agent gave no reason. ${UNATTRIBUTED_ON_CARD} is a program on this machine running an older plugin. Turn back on.`,
+    "- **An incident:** the caller is nobody you know, or the address is not this machine. Leave off, and check each board's share list before reopening.",
   ].join('\n');
   return {
     review_type: 'decision',

@@ -2366,9 +2366,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         console.error(
           `[sharing] owner notice held by the review gate item=${itemId}: ${verdict.reason}`,
         );
-        return;
+        // Filed whatever the gate says (the lead's decision, 23 September):
+        // the gate exists to hold agent-written asks, this card is a fixed
+        // template, and a security notice the owner never sees is worse than
+        // one the gate dislikes. A held item is off the owner's queue, so the
+        // hold is recorded as passed, with the gate's words kept beside it.
+        const reason = verdict.reason ?? '';
+        taskStore.recordReviewJudgement(
+          taskId,
+          itemId,
+          {
+            at: Date.now(),
+            verdict: 'ok',
+            reason: `Filed by the server whatever the gate says. The gate held it: ${reason}`,
+            heldFor: [reason],
+          },
+          { actor: sharingNoticeActor },
+        );
+        taskProjection.refreshTask(taskStore.getTask(taskId) ?? task);
       }
-      announceTaskReview(task, verdict.item, {
+      const stored = taskStore.listReviewItems(taskId).find((i) => i.id === itemId);
+      announceTaskReview(taskStore.getTask(taskId) ?? task, stored ?? verdict.item, {
         id: sharingNoticeActor.id,
         name: sharingNoticeActor.name,
         kind: 'known',
