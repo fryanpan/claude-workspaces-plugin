@@ -15,7 +15,7 @@ Brings a fresh checkout of this repo to a working state:
 1. Installs JS dependencies (`bun install`)
 2. Installs the git hooks that gate leaks at commit and push time
 3. Wires the shell alias that enables Claude Channels for `plugin:claude-workspaces@claude-workspaces`
-4. Registers the local repo as a Claude Code marketplace and installs the plugin at user scope
+4. Registers this repo's GitHub marketplace and installs the plugin at user scope
 5. (Optional) Installs the macOS launchd supervisor so the claude-workspaces server survives logout / Mac reboot / crashes
 6. (Optional on macs with home on a non-default volume) Surfaces the Full Disk Access prereq for the launchd-spawned bun
 
@@ -25,11 +25,11 @@ Brings a fresh checkout of this repo to a working state:
 
 Ask once:
 
-> "I'll run first-time setup for this repo. Plan: install JS deps, wire the dev-channels shell alias in your `~/.zshrc` (or equivalent), register this repo as a local Claude Code marketplace, and install the plugin at user scope. Optionally I can install the macOS launchd supervisor so the server runs in the background and survives reboots. Anything you want to skip up front?"
+> "I'll run first-time setup for this repo. Plan: install JS deps, wire the dev-channels shell alias in your `~/.zshrc` (or equivalent), register the plugin marketplace, and install the plugin at user scope. Optionally I can install the macOS launchd supervisor so the server runs in the background and survives reboots. Anything you want to skip up front?"
 
 Wait for their answer. If they say "just do it," proceed; if they want to skip parts (e.g. the launchd supervisor), honor that.
 
-If `node_modules/` already exists, `~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist` is present, and the alias is already in their shell init — recap "Already set up — here's what I'd suggest next" and exit. Don't redo steps unnecessarily.
+If `node_modules/` already exists, `command claude plugin list` shows `claude-workspaces@claude-workspaces`, and the alias is already in their shell init — recap "Already set up — here's what I'd suggest next" and exit. Don't redo steps unnecessarily.
 
 ### 2. Install JS dependencies
 
@@ -88,14 +88,16 @@ If they'd rather edit the file themselves, give them the exact line and the file
 
 ### 4. Register the plugin + install at user scope
 
-From the repo root:
-
 ```sh
-claude plugin marketplace add .
-claude plugin install claude-workspaces@claude-workspaces --scope user
+command claude plugin marketplace add fryanpan/claude-workspaces-plugin
+command claude plugin install claude-workspaces@claude-workspaces --scope user
 ```
 
-Explain: the first command registers this checkout as a local plugin marketplace; the second installs the claude-workspaces plugin user-wide so it's available in every Claude Code session.
+Explain: the first command registers the GitHub repo as a plugin marketplace; the second installs the claude-workspaces plugin user-wide so it's available in every Claude Code session. Updates come from GitHub: `command claude plugin marketplace update claude-workspaces`, then `command claude plugin update claude-workspaces@claude-workspaces`, then restart the session.
+
+Use `command claude`, not bare `claude`: once step 3's shell function exists, bare `claude` prepends the channels flag, and that breaks the `plugin` subcommands.
+
+If they are changing the plugin itself and want a session to load their working copy, run `command claude plugin marketplace add .` from the clone root INSTEAD of the GitHub line. The marketplace is then this checkout, and a plugin update reads whatever it holds.
 
 There is **no `npm link` step** — the MCP server bundle is vendored into the plugin tree at `packages/plugin/mcp/index.js` and invoked via `${CLAUDE_PLUGIN_ROOT}` substitution in `.mcp.json`. (See PR #35 for why we moved off the `npm link` install path.)
 
@@ -110,7 +112,7 @@ After install, the plugin's tools should appear when they ask Claude things like
 bun run dev
 ```
 
-This is the foreground supervisor — fine for development, dies when the terminal closes. Lists three reachable URLs (`localhost`, Tailscale hostname, LAN). Hand them one of those URLs combined with the review URL pattern Claude will give them once a doc is bound.
+This is the foreground supervisor — fine for development, dies when the terminal closes. It picks a free port starting at 8787, writes it to `~/.claude/claude-workspaces/server.json` so the plugin can find it, and prints the reachable URLs (`localhost`, plus a Tailscale and a LAN name when it finds them). The board is the `localhost` URL with a trailing `/`. By default only a browser on this machine gets in: the Tailscale and LAN names answer 403 until the server starts with `CW_ACCESS_ONLY_BROWSER_HOSTS=0`, which admits anything on that network (see `docs/architecture/security.md`). Ask before turning it off. Data goes in `data/` inside the clone unless `CW_DATA_DIR` is set.
 
 Tell them to keep this terminal open while they work; close it when done. For an always-on setup, point them at the next step.
 
@@ -128,10 +130,10 @@ Before running it, **check the repo path**:
 pwd -P
 ```
 
-**Heads-up for macs with home on a non-default volume.** If the resolved path starts with `/Volumes/<X>/Users/...` (e.g. `/Volumes/Data/Users/bryanchan/...`), the launchd-spawned bun needs **Full Disk Access** to read the repo — otherwise it wedges in `getcwd()` with EPERM, logs stay empty, and the install script times out. Grant it FIRST:
+**Heads-up for macs with home on a non-default volume.** If the resolved path starts with `/Volumes/<X>/...`, the launchd-spawned bun needs **Full Disk Access** to read the repo — otherwise it wedges in `getcwd()` with EPERM, logs stay empty, and the install script times out. Grant it FIRST:
 
 1. System Settings → Privacy & Security → Full Disk Access
-2. Click "+", then ⌘⇧G to type `/Users/<user>/.bun/bin/bun`
+2. Click "+", then ⌘⇧G to type the path `command -v bun` prints (usually `~/.bun/bin/bun`)
 3. Toggle it on
 4. Then re-run `./scripts/launchd/install.sh`
 
@@ -139,11 +141,13 @@ If `pwd -P` shows a `/Users/...` path directly (standard macOS install), the FDA
 
 `install.sh` does its own detection and will print the same instructions if it sees the symptom pattern (empty logs + repo under `/Volumes/`). Either way, the recovery is the same.
 
-Verify after:
+The service label defaults to the one in the plist template. `CW_LAUNCHD_LABEL=<reverse-dns-name>` on `install.sh` and `uninstall.sh` installs it under another; the server's self-deploy restart and its Keychain key lookup still expect the default, so only change it when two services must coexist.
+
+Verify after (`install.sh` prints the label it used):
 
 ```sh
-launchctl print "gui/$(id -u)/com.fryanpan.claude-workspaces" | grep "state ="
-curl -sS http://localhost:8788/ -o /dev/null -w "%{http_code}\n"
+launchctl print "gui/$(id -u)/<label>" | grep "state ="
+curl -sS http://localhost:8787/ -o /dev/null -w "%{http_code}\n"
 ```
 
 Should print `state = running` and `200`.
@@ -197,7 +201,7 @@ Recap in one line: "Setup complete. Plugin installed at user scope; server <fore
 
 Then suggest the natural next move:
 - "Bind a markdown file you want to review: ask me `please bring docs/foo.md into a workspace` — I'll create the review doc and give you a URL."
-- "Or try the demo mockup at `http://<host>:8788/demos/mockup` to see the comment widget in action."
+- "Or try the demo mockup at `http://localhost:<port>/demos/mockup` to see the comment widget in action."
 
 ## What to avoid
 

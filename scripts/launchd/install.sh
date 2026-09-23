@@ -13,7 +13,22 @@ set -euo pipefail
 # because BSD lsof lives at /usr/sbin/lsof, not /usr/bin/lsof.
 PATH="/usr/bin:/bin:/usr/sbin:${PATH:-}"
 
-LABEL="com.fryanpan.claude-workspaces"
+# The template's own label. It is the file name of the template and the label
+# the server itself restarts on deploy, so it is the default and changing it
+# is opt-in.
+DEFAULT_LABEL="com.fryanpan.claude-workspaces"
+# CW_LAUNCHD_LABEL names the service something else on a machine that wants
+# its own reverse-DNS label. Two things still key on the default: the
+# server's self-deploy restarts DEFAULT_LABEL, and only DEFAULT_LABEL reads
+# the summary key from the Keychain. Keep the default unless you need two
+# services side by side.
+LABEL="${CW_LAUNCHD_LABEL:-${DEFAULT_LABEL}}"
+case "${LABEL}" in
+    *[!A-Za-z0-9._-]* | "" | .* )
+        echo "error: CW_LAUNCHD_LABEL must be a reverse-DNS name (letters, digits, '.', '-', '_')." >&2
+        exit 1
+        ;;
+esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # `pwd -P` resolves through symlinks. macOS launchd processes given a
 # symlinked WorkingDirectory can wedge in `getcwd()` walking parent inodes
@@ -22,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # never reaching `pickFreePort` or `spawn`. Pass the real path so the
 # child process can `getcwd()` cleanly.
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd -P)"
-TEMPLATE="${SCRIPT_DIR}/${LABEL}.plist.template"
+TEMPLATE="${SCRIPT_DIR}/${DEFAULT_LABEL}.plist.template"
 PLIST_DEST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="${HOME}/Library/Logs"
 
@@ -194,8 +209,13 @@ fi
 
 mkdir -p "$(dirname "${PLIST_DEST}")" "${LOG_DIR}"
 
-# Substitute placeholders. Use a delimiter unlikely to appear in paths.
+# Substitute placeholders. Use a delimiter unlikely to appear in paths. The
+# first expression renames the template's label (and the log files named
+# after it) when CW_LAUNCHD_LABEL asked for another; with the default it
+# changes nothing. The label was validated above, so it carries no `|`.
+DEFAULT_LABEL_RE="${DEFAULT_LABEL//./\\.}"
 sed \
+    -e "s|${DEFAULT_LABEL_RE}|${LABEL}|g" \
     -e "s|{{REPO_DIR}}|${REPO_DIR}|g" \
     -e "s|{{BUN_BIN}}|${BUN_BIN}|g" \
     -e "s|{{BUN_DIR}}|${BUN_DIR}|g" \
