@@ -240,25 +240,35 @@ describe('the card says how to decide', () => {
   // The real judge held the first prod card because it named what happened
   // and gave no way to decide. These three readings are that way; cutting one
   // must move a test.
-  it('names the intended, mistaken and incident readings, each with its option', () => {
+  it('names the intended, mistaken and incident readings, each with its option and what to look at', () => {
     const { detail } = sharingOffReview(flip(false));
-    expect(detail).toContain('Did you or one of your agents mean this?');
+    expect(detail).toContain('To tell what happened, read the first line');
     expect(detail).toMatch(/\*\*Intended, for one board:\*\*[^\n]*Turn back on/);
     expect(detail).toMatch(/\*\*A mistake:\*\*[^\n]*older plugin[^\n]*Turn back on/);
     expect(detail).toMatch(/\*\*An incident:\*\*[^\n]*Leave off[^\n]*share list/);
+    // One observable per reading, so the reader can tell them apart.
+    expect(detail).toMatch(
+      /\*\*Intended, for one board:\*\* the caller is your agent and the reason names a board/,
+    );
+    expect(detail).toMatch(
+      /\*\*A mistake:\*\* the caller is unnamed, or your agent gave no reason/,
+    );
+    expect(detail).toMatch(
+      /\*\*An incident:\*\* the caller is nobody you know, or the address is not this machine/,
+    );
   });
 
   it('names the unattributed caller the way the facts line does', () => {
     const { detail } = sharingOffReview(flip(false, { actor: 'unattributed' }));
     expect(detail.startsWith('An unnamed caller turned off sharing')).toBe(true);
-    expect(detail).toContain('"An unnamed caller" is a program on this machine');
+    expect(detail).toContain('An unnamed caller is a program on this machine');
   });
 
   it('stays short enough to read on a phone', () => {
     const { detail } = sharingOffReview(
       flip(false, { actor: 'unattributed', reason: 'closing the Harborlight board' }),
     );
-    expect(detail.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(120);
+    expect(detail.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(160);
   });
 });
 
