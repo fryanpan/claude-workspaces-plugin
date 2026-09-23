@@ -159,7 +159,10 @@ async function attachFrames(cdp: Cdp): Promise<string[]> {
   return sessions;
 }
 
-/** The app frame's text at `#id`, or null while no frame holds one. */
+/**
+ * The app frame's text at `#id`, or null while no frame holds it with text.
+ * An element that exists but is still empty is a page not yet filled in.
+ */
 async function frameText(cdp: Cdp, sessions: string[], id = 'v'): Promise<string | null> {
   for (const sessionId of [...sessions]) {
     const r = (await cdp
@@ -173,7 +176,7 @@ async function frameText(cdp: Cdp, sessions: string[], id = 'v'): Promise<string
       )
       .catch(() => null)) as { result?: { value?: string | null } } | null;
     const v = r?.result?.value;
-    if (typeof v === 'string') return v;
+    if (typeof v === 'string' && v !== '') return v;
   }
   return null;
 }
@@ -249,7 +252,11 @@ async function main(): Promise<void> {
       () => frameText(cdp, sessions),
       30_000,
     );
-    const frameLocation = await frameText(cdp, sessions, 'loc');
+    const frameLocation = await poll(
+      'the frame wrote its location',
+      () => frameText(cdp, sessions, 'loc'),
+      30_000,
+    );
     const d = dev;
     await poll(
       'the page opened its reload stream',
