@@ -81,6 +81,8 @@ Above all of this is a master switch. Off, every outside hostname is refused bef
 
 One board can also be closed on its own. Its share, share-link and collaboration visitors are refused, its links admit nobody new and their open connections drop, while the master switch, every other board and the owner's own hostname stay as they were. The same local-only call does both: naming a board closes that board, and leaving the board out is the master switch.
 
+A board can also be locked never-shareable. Closing a board refuses its visitors but still lets a link be minted, so a board holding files that must never leave the machine stayed one `share_workspace` call away from a link. A locked board refuses every mint, `share_workspace`, the share-link route and the retired `share_doc` alike, with `board_never_shareable` naming the lock and the board. It is also closed to its visitors, and reopening it with the sharing switch does not undo the lock. `POST /api/share/lock` sets and clears it, and it is loopback-only: a call carrying `cf-ray` is refused with `lock_through_the_edge`, and one from a non-loopback peer with `lock_from_the_box`, before the body is read, so the owner's own tunnel cannot unlock it either. Every change writes one line to the error log naming who, from which address and why.
+
 ### Layer 3: inside a workspace, an Owner and Regular Users
 
 A member is a participant, not a reader. They can file and edit tasks, move status, answer review items and decisions, comment anywhere, edit any document filed on the board, file onto the board a document they can already open on it, start and join a meeting on it, name and rank the goal bands, open and read the board's settings, read its activity log and the roster of agents working it, and turn a comment into a task. Every write is attributed to the email Cloudflare confirmed; whatever the request claims about its author is ignored.
@@ -130,6 +132,27 @@ combined answer: the address a file answers at (`routes/mounts.ts`) and the
 Library listing that would carry its NAME off the machine first
 (`routes/workspace-library.ts`, which drops a hidden folder from both the
 mount listing and the project's own git listing).
+
+**An attached folder can be local-only too.** A folder bound with
+`attach_folder` has no project around it, so it carries its own privacy, set
+by passing `privacy: 'local-only'` on the bind. Its files and their names are
+then served to a caller on this machine alone: a loopback peer with no
+`cf-ray`, the rule a local-only mount is served under. A share-link visitor, a
+collaboration visitor, the owner through the tunnel and a page on the tailnet
+are all refused with `local_only`. The check is one function
+(`addressesLocalOnlySet` in `attachment-privacy.ts`) that runs right after
+admission and before the websocket upgrades, on every address under a board
+that names the set or one of its files: the file list and tree, a file's
+content, socket and threads, and an ask derived from a file's thread. The
+Library listing and the board's review-item queue drop the set's names for
+off-box callers. The answer to every bind names the set's privacy, and says
+`shareable` when the flag was left out. Leaving it out on a later bind keeps
+the set's current setting, so a re-bind never widens a local-only set. The
+record fails closed: an `attachment-privacy.json` that cannot be read serves
+every set as local-only and refuses changes until it is fixed. Three surfaces
+still carry a file's name or title off the machine without passing the check:
+the board brief's text, the activity feed and a task's link chips. Opening
+any of them reaches the refusal.
 
 **A shared folder shows only what git lists.** A reviewer can open a file from a shared folder or diff review only if `git ls-files` lists it, so ignored files and anything under `.git` never appear. Files whose names look like credentials (`.env`, `*.pem`, `*.key`, `id_*` and their relatives) are refused even when untracked. Outside a git checkout, every dotfile is hidden.
 
