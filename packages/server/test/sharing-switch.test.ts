@@ -21,6 +21,7 @@ import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } fro
 import { STAMP_PATTERN } from '../src/log-stamp.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
+import { waitFor } from './wait-for.ts';
 
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
 const KID = 'sharing-switch-kid';
@@ -55,6 +56,7 @@ beforeAll(async () => {
 });
 
 describe('the sharing switch, for one board and for all of them', () => {
+  const judged: string[] = [];
   let handle: ServerHandle;
   let dataDir: string;
   let base: string;
@@ -111,6 +113,12 @@ describe('the sharing switch, for one board and for all of them', () => {
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
+      // The quality gate, stubbed to pass and to record what it was shown, so
+      // the notice block can see the server's own item went through it.
+      reviewJudge: async (input) => {
+        judged.push(input.item.headline ?? '');
+        return { ok: true, reason: 'fine' };
+      },
     });
     base = `http://127.0.0.1:${handle.port}`;
     const a = await boardWithLink('Harborlight board');
@@ -259,7 +267,13 @@ describe('the sharing switch, for one board and for all of them', () => {
   });
 
   describe("the owner's notice", () => {
-    type Row = { taskId: string; askedBy: string; review: { headline: string; detail: string } };
+    type Row = {
+      reviewItemId: string;
+      taskId: string;
+      askedBy: string;
+      review: { headline: string; detail: string; options?: Array<{ id: string; label: string }> };
+    };
+    const HEADLINE = 'External sharing was turned off';
     const unfiledBoard = async (): Promise<string | undefined> => {
       const r = await req('/workspaces?format=json', `localhost:${handle.port}`);
       const body = (await r.json()) as { boardWorkspaces: Array<{ id: string; name: string }> };
@@ -273,6 +287,10 @@ describe('the sharing switch, for one board and for all of them', () => {
       const rows = ((await r.json()) as { items: Row[] }).items;
       return rows.filter((row) => row.askedBy === 'Sharing switch');
     };
+    const masterEnabled = async (): Promise<boolean> => {
+      const r = await req('/api/share', `localhost:${handle.port}`);
+      return ((await r.json()) as { sharing: { enabled: boolean } }).sharing.enabled;
+    };
 
     it('files nothing when one board is closed', async () => {
       expect(await notices()).toHaveLength(0);
@@ -281,7 +299,7 @@ describe('the sharing switch, for one board and for all of them', () => {
       expect(await notices()).toHaveLength(0);
     });
 
-    it("puts the master switch going off on the owner's queue, naming who, where and why", async () => {
+    it("puts the master switch going off on the owner's queue as a decision, through the quality gate", async () => {
       const off = await postLocal('/api/share/enabled', {
         enabled: false,
         reason: 'a precaution',
@@ -293,22 +311,73 @@ describe('the sharing switch, for one board and for all of them', () => {
       const rows = await notices();
       expect(rows).toHaveLength(1);
       const [row] = rows as [Row];
-      expect(row.review.headline).toBe('Outside access is off for every board');
-      expect(row.review.detail).toContain('agent Riverbend Agent (agent-riverbend)');
+      expect(row.review.headline).toBe(HEADLINE);
+      expect(row.review.options?.map((o) => o.label)).toEqual(['Turn back on', 'Leave off']);
+      expect(row.review.detail).toContain('The agent Riverbend Agent turned off');
+      expect(row.review.detail).not.toContain('agent-riverbend');
       expect(row.review.detail).toContain('a precaution');
       expect(row.review.detail).toMatch(/(::ffff:)?127\.0\.0\.1/);
+      // The gate was asked about it and passed it; it is not held.
+      await waitFor(() => judged.includes(HEADLINE));
     });
 
-    it('keeps one item when it goes off again, naming the latest flip', async () => {
+    it('revises the one item when it goes off again, naming the latest flip', async () => {
+      const before = (await notices())[0]?.reviewItemId;
+      expect(before).toBeString();
       await postLocal('/api/share/enabled', { enabled: false, reason: 'second look' });
       const rows = await notices();
       expect(rows).toHaveLength(1);
+      expect(rows[0]?.reviewItemId).toBe(before as string);
       expect(rows[0]?.review.detail).toContain('second look');
     });
 
     it('withdraws the item when the switch is turned back on', async () => {
       await postLocal('/api/share/enabled', { enabled: true });
       expect(await notices()).toHaveLength(0);
+    });
+
+    it('turns the switch back on when the owner answers Turn back on, and logs the owner as the actor', async () => {
+      await postLocal('/api/share/enabled', { enabled: false, reason: 'third time' });
+      const [row] = (await notices()) as [Row];
+      const ws = await unfiledBoard();
+      const lines: string[] = [];
+      const spy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(' '));
+      });
+      try {
+        const answered = await postLocal(
+          `/workspaces/${ws}/tasks/${row.taskId}/review-items/${row.reviewItemId}/answer`,
+          {
+            text: 'Turn back on',
+            answeredWith: 'turn-back-on',
+            author: { id: 'known-bryan', name: 'Bryan', kind: 'person' },
+          },
+        );
+        expect(answered.status).toBe(200);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await masterEnabled()).toBe(true);
+      const line = lines.find((l) => l.includes('[sharing] master switch ON'));
+      expect(line).toContain('by "owner Bryan (known-bryan)"');
+      expect(await notices()).toHaveLength(0);
+    });
+
+    it('leaves the switch off when an agent answers Turn back on', async () => {
+      await postLocal('/api/share/enabled', { enabled: false, reason: 'fourth time' });
+      const [row] = (await notices()) as [Row];
+      const ws = await unfiledBoard();
+      const answered = await postLocal(
+        `/workspaces/${ws}/tasks/${row.taskId}/review-items/${row.reviewItemId}/answer`,
+        {
+          text: 'Turn back on',
+          answeredWith: 'turn-back-on',
+          author: { id: 'agent-riverbend', name: 'Riverbend Agent', kind: 'agent' },
+        },
+      );
+      expect(answered.status).toBe(200);
+      expect(await masterEnabled()).toBe(false);
+      await postLocal('/api/share/enabled', { enabled: true });
     });
   });
 });

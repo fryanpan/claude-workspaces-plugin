@@ -115,10 +115,32 @@ export async function handleShareSwitch(
     });
   }
 
-  const res = sharingGate.setEnabled(enabled);
-  if (!res.ok) return j(409, { error: res.error, hint: ENV_LOCKED_HINT });
+  const applied = applyMasterFlip(ctx, flip);
+  if (!applied.ok) return j(409, { error: applied.error, hint: ENV_LOCKED_HINT });
+  return j(200, {
+    ok: true,
+    sharing: sharingGate.status(),
+    ...(applied.closedSockets ? { closedSockets: applied.closedSockets } : {}),
+    ...(applied.closedStreams ? { closedStreams: applied.closedStreams } : {}),
+  });
+}
+
+/**
+ * Flip the master switch and do everything a flip does: the log line, the
+ * hang-ups on off, and the `onSharingFlip` hand-off. The route calls it, and
+ * so does the owner's "Turn back on" answer, so the two cannot drift.
+ */
+export function applyMasterFlip(
+  ctx: Pick<ShareSwitchContext, 'docStore' | 'sse' | 'shares' | 'sharingGate' | 'onSharingFlip'>,
+  flip: SharingFlip,
+): { ok: true; closedSockets: number; closedStreams: number } | { ok: false; error: string } {
+  const { docStore, sse, shares, sharingGate } = ctx;
+  const res = sharingGate.setEnabled(flip.enabled);
+  if (!res.ok) return { ok: false, error: res.error };
   console.error(sharingFlipLine(flip));
-  if (!enabled) {
+  let closedSockets = 0;
+  let closedStreams = 0;
+  if (!flip.enabled) {
     for (const share of shares?.list() ?? []) {
       closedSockets += docStore.closeSocketsForShare(share.shareId);
       closedStreams += sse.closeForShare(share.shareId);
@@ -133,13 +155,8 @@ export async function handleShareSwitch(
     closedStreams += sse.closeForShareMembers(() => true);
   }
   ctx.onSharingFlip(flip);
-  return j(200, {
-    ok: true,
-    sharing: sharingGate.status(),
-    ...(closedSockets ? { closedSockets } : {}),
-    ...(closedStreams ? { closedStreams } : {}),
-  });
+  return { ok: true, closedSockets, closedStreams };
 }
 
-const ENV_LOCKED_HINT =
+export const ENV_LOCKED_HINT =
   'CW_SHARING_DISABLED is set in the environment. Remove it from the service definition and restart to allow runtime control.';

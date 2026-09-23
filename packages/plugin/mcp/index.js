@@ -16781,7 +16781,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_sharing_enabled",
-      description: "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until someone turns it back on from this machine. Every flip is logged with who, from where and the reason, and the owner is told when the master switch goes off. Call it without enabled to read the current state. Any other argument is refused.",
+      description: "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until someone turns it back on from this machine. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Call it without enabled to read the current state. Any other argument is refused.",
       inputSchema: {
         type: "object",
         properties: {
@@ -18721,7 +18721,11 @@ async function handleDocsTool(name, a, ctx) {
         if (typeof workspaceId !== "string")
           return ok2(res2);
         const closed = res2.sharing?.closedBoards ?? [];
-        return ok2({ ...res2, workspaceId, board: { workspaceId, enabled: !closed.includes(workspaceId) } });
+        return ok2({
+          ...res2,
+          workspaceId,
+          board: { workspaceId, enabled: !closed.includes(workspaceId) }
+        });
       }
       const res = await http("POST", "/api/share/enabled", {
         enabled,
