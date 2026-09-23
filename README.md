@@ -1,126 +1,219 @@
-# Claude Workspaces Plugin
+# Claude Workspaces
 
-A Claude Code plugin that gives an owner and a team of Claude Code agents one shared surface — a board, the docs and mockups and dev servers hanging off it, and comment threads that survive edits — so the owner can review, redirect, and decide from a browser tab while the agents do the work. Point at a line, say "this", and the agent's edit lands seconds later.
+A Claude Code plugin that gives you and your Claude Code agents one shared
+surface: a board of tasks, the docs, mockups and dev servers attached to it,
+and comment threads that survive edits. You review and redirect from a browser
+tab while the agents do the work. Point at a line, say "this", and the agent's
+edit lands seconds later.
 
 ## Goals
 
-The root idea has not changed: make giving feedback to an agent as fast as pointing and saying "this." What changed is how much of my day runs through it. It began as a feedback widget for one agent and one doc; it is now the workspace I run a fleet of agents from, and the goals below are the ones it serves today.
+The aim is to make giving feedback to an agent as fast as pointing and saying
+"this".
 
-1. **Work from the board, not chat.** Review, redirect, and meet in flows built for it. Agents file tasks and review items — a decision with options, or a question — and I answer them from a Home queue, one at a time. Each task carries an activity feed of what every agent did lately, so redirecting takes a comment on the task, not a chat session to find out where things stand.
-2. **Review and steer from an iPad or phone, staying in flow.** Every surface is laid out for a tablet in landscape and a phone first; a review item is answerable with a thumb.
-3. **Agents manage and prioritize the tickets so I rarely intervene.** Goals are ranked bands on the board; agents work them in strict priority order, file what they discover, and mark what blocks them. The server watches for stalled rows and unfiled asks and wakes the lead agent only when there is something to do. The `working-in-a-workspace` and `leading-a-workspace` skills the plugin ships are the contract every agent follows.
-4. **An outside collaborator can review dev artifacts in under a minute of my time and five of theirs.** A share link publishes a board outside the tailnet; email-code sign-in means no account to create and nothing to install.
-5. **Meetings on the doc.** Press one button and talk: live transcription in a strip beside the doc, and meeting notes that compose themselves at the natural pauses, with "file a ticket for that" landing on the board. A planning huddle starts from the board with one tap — a doc tied to the board, mic already on — and each person's recent edits carry a wash of their color so a huddle can see who touched what.
+1. **Work from the board, not from chat.** Agents file tasks and questions.
+   You answer them from one queue.
+2. **Review from a tablet or phone.** Every surface is laid out for an iPad in
+   landscape and for a phone.
+3. **Agents keep the tickets in order.** They work ranked goals in priority
+   order, file what they find, and say what blocks them.
+4. **Outside reviewers need no account.** A share link lets someone comment
+   with an emailed sign-in code.
+5. **Meetings happen on the doc.** Live transcription and notes sit beside the
+   doc you are discussing.
 
 ## What it does
 
-- **The board.** Goals, ranked tasks, review items, comments, an activity feed per task, and a Home queue of everything waiting on me. Agents read it with `next_tasks`, write it with `create_tasks` / `task_transition` / `add_review_item`, and take the lead seat with `set_workspace_lead`.
-- **Markdown docs** with comment threads anchored to text ranges. I edit the doc at the same time as the agent; the agent can propose edits as suggestions I accept or reject instead of applying them outright. `create_diff_review` turns a branch of a local repo into one review doc per changed file, with line comments.
-- **Interactive mockups** — an HTML file served with the widget injected; point at an element and comment on it. Threads persist across the live reload when the agent updates the file.
-- **Live dev servers** — the same flow, except the agent edits the source and the dev server's own reload pushes the change back to my browser.
-- **Meetings** — live transcription and pause-driven notes on any doc; the transcript is durable and the notes go through the same edit path every other writer uses.
-- **Voice navigation** — say what you want to see and the board opens it; a spoken change on the resource in view is applied on your own authority, and anything else goes to the attached agent verbatim.
+- **The board.** Goals, ranked tasks, review items, comments, an activity
+  feed per task, and a Home queue of everything waiting on you.
+- **Markdown docs** with comment threads anchored to text. You and the agent
+  edit the same doc at the same time. `create_diff_review` turns a branch of a
+  local repo into one review doc per changed file.
+- **Mockups and live dev servers.** An HTML page or a running app gets the
+  comment widget injected. Point at an element and comment on it.
+- **Meetings.** Live transcription and notes that write themselves at natural
+  pauses, on any doc.
 
-## Installation
+## Install
 
-The fastest path:
+You need [Claude Code](https://code.claude.com/docs), [Bun](https://bun.sh)
+and git. The server is tested on macOS.
+
+There are two parts. The **plugin** comes from the Claude Code plugin
+marketplace and carries the MCP tools, hooks and skills. The **server** runs
+from a clone of this repo. The plugin finds the server through
+`~/.claude/claude-workspaces/server.json`, which the server writes when it
+starts.
+
+### 1. Install the plugin
+
+```sh
+claude plugin marketplace add fryanpan/claude-workspaces-plugin
+claude plugin install claude-workspaces@claude-workspaces --scope user
+```
+
+The first command registers this GitHub repo as a plugin marketplace. The
+second installs the plugin for every Claude Code session you start. To update
+later:
+
+```sh
+command claude plugin marketplace update claude-workspaces
+command claude plugin update claude-workspaces@claude-workspaces
+```
+
+`command claude` skips the shell function from step 2, whose extra flag
+breaks the `plugin` subcommands.
+
+Restart your Claude Code sessions after an update.
+
+### 2. Launch Claude Code with channels turned on
+
+The server pushes comments and task changes into your session as channel
+events. Claude Code only accepts channel events from a plugin you name at
+launch:
+
+```sh
+claude --dangerously-load-development-channels plugin:claude-workspaces@claude-workspaces
+```
+
+To make that the default, add a shell function to `~/.zshrc` or `~/.bashrc`.
+Replace the path with the output of `command -v claude`:
+
+```sh
+claude() { /path/to/claude --dangerously-load-development-channels plugin:claude-workspaces@claude-workspaces "$@"; }
+```
+
+Without the flag the tools still work, but your agent only sees a comment
+when it asks for one.
+
+### 3. Run the server
 
 ```sh
 git clone https://github.com/fryanpan/claude-workspaces-plugin.git
 cd claude-workspaces-plugin
-claude
+bun install
+bun run dev
 ```
 
-Then in the Claude Code session, run:
+`bun run dev` picks a free port starting at 8787, starts the server with hot
+reload, and prints the addresses it can be reached on: `localhost`, plus a
+Tailscale and a LAN name when it finds them. Your data goes in `data/` inside
+the clone unless you set `CW_DATA_DIR`. Keep the terminal open while you work.
+
+### 4. Open the board
+
+Open the `localhost` address the server printed, for example:
 
 ```
-/setup
+http://localhost:8787/
 ```
 
-Claude walks through every step — `bun install`, the dev-channels shell alias, plugin registration + install, and (optionally) the macOS launchd supervisor — pausing for confirmation on each side-effect.
+Then, in a Claude Code session launched as in step 2, ask things like:
 
-After setup, ask Claude things like:
+- "Create a workspace for this project and file what we just discussed as
+  tasks."
+- "Show me docs/plan.md in a workspace."
+- "Show me the dev server in a workspace."
 
-- "Show me the doc &lt;your doc name&gt; with workspaces"
-- "Show me a mockup with workspaces"
-- "Show me the dev server with workspaces"
-- "Create a workspace for this project and file what we just discussed as tasks"
+The plugin's `working-in-a-workspace` skill tells the agent how to work from
+the board.
 
-### Manual install (if you'd rather do it yourself)
+### Or let Claude do the setup
 
-1. Install JS deps:
+Open Claude Code inside the clone and run `/setup`. It walks through the same
+steps and asks before each one that changes your machine.
 
-   ```sh
-   bun install
-   ```
+## Keep the server running (macOS, optional)
 
-2. Enable channel events for the plugin. Add this one-line alias to your shell init file (e.g., `~/.zshrc`):
-
-   ```sh
-   claude() { /path/to/claude --dangerously-load-development-channels plugin:claude-workspaces@claude-workspaces "$@"; }
-   ```
-
-   Reload your shell (`source ~/.zshrc`) and relaunch Claude Code.
-
-3. Register + install the plugin at user scope:
-
-   ```sh
-   claude plugin marketplace add .
-   claude plugin install claude-workspaces@claude-workspaces --scope user
-   ```
-
-   The MCP server is bundled inside the plugin tree at `packages/plugin/mcp/index.js` and invoked via Claude Code's `${CLAUDE_PLUGIN_ROOT}` substitution, so no `npm link` step or PATH setup is needed — the plugin install is the complete install. Installing on another machine without a clone works too: `claude plugin marketplace add fryanpan/claude-workspaces-plugin`, then the same install command, and `claude plugin update claude-workspaces@claude-workspaces` afterwards.
-
-## Run as a service (macOS)
-
-By default `bun run scripts/serve.ts` runs in the foreground — convenient for development, but the server dies when the terminal closes. To keep it always-on (survives logout, Mac reboot, and crashes), install the launchd supervisor:
+`bun run dev` stops when its terminal closes. To keep the server up across
+logout, reboot and crashes, install it as a per-user launchd service from the
+clone:
 
 ```sh
 ./scripts/launchd/install.sh
 ```
 
-> **If your home directory lives on a non-default volume** (e.g. `/Volumes/Data/Users/...` symlinked into `/Users/`), grant **Full Disk Access** to `bun` first: System Settings → Privacy & Security → Full Disk Access → "+" → `~/.bun/bin/bun` (⌘⇧G to type the hidden path). Without it, the launchd-spawned bun gets EPERM on the repo's working directory and wedges in `getcwd()` — symptom is empty `~/Library/Logs/com.fryanpan.claude-workspaces.{out,err}.log`. Shell-spawned processes inherit Terminal's TCC scope and avoid this; launchd-spawned ones start fresh. `install.sh` detects the case and prints the same instructions.
-
-The script writes `~/Library/LaunchAgents/com.fryanpan.claude-workspaces.plist`, bootstraps it into your user session, and waits for port 8787 to come up. Logs land at `~/Library/Logs/com.fryanpan.claude-workspaces.{out,err}.log`. The service runs as a per-user `LaunchAgent` — it starts at login (not boot) and stops at logout, which matches my always-logged-in Mac mini.
-
-Re-run `install.sh` after pulling code that changes the launch args (it's idempotent — boots out the old plist first).
-
-To uninstall:
+It writes a plist to `~/Library/LaunchAgents/`, starts the service on port
+8787, and logs to `~/Library/Logs/`. It builds the web app once and serves
+that build, with no hot reload. Re-run it after pulling changes to the launch
+arguments. It is safe to run twice. To remove it:
 
 ```sh
 ./scripts/launchd/uninstall.sh
 ```
 
-Useful commands once installed:
+The service label defaults to the one in the plist template. Set
+`CW_LAUNCHD_LABEL` on both scripts to install under a label of your own.
+Two features still look for the default label: the server's self-deploy
+restart, and reading the summary API key from the Keychain.
 
-```sh
-launchctl list | grep com.fryanpan.claude-workspaces   # status
-launchctl kickstart -k gui/$(id -u)/com.fryanpan.claude-workspaces   # force restart
-tail -f ~/Library/Logs/com.fryanpan.claude-workspaces.err.log         # follow logs
+If the clone lives on a volume other than the boot disk, the launchd copy of
+`bun` needs Full Disk Access first: System Settings, Privacy & Security, Full
+Disk Access, then add the `bun` binary. `install.sh` prints the same advice
+when it sees the symptom, which is empty logs and no listener.
+
+Serving the board over HTTPS on a tailnet, which the microphone needs on any
+device other than the host, is in
+[docs/process/tailnet-https.md](docs/process/tailnet-https.md).
+
+## How it works
+
+- **Push, not polling.** Comments, review answers and new tasks reach the
+  agent as `<channel source="claude-workspaces" ...>` events through
+  [Claude Code channels](https://code.claude.com/docs/en/channels).
+- **Comments are anchored to the surface.** Docs are Yjs CRDTs. Each comment
+  is anchored to a text range or a DOM element, and the anchor moves with
+  concurrent edits. A large rewrite can still detach a thread, and the thread
+  survives.
+- **Small, composable tools.** `get_doc`, `find_and_replace`,
+  `create_anchor`, `edit_at_anchor`, `post_reply`, `add_review_item`,
+  `create_tasks` and `next_tasks` are combined however a workflow needs.
+- **A vanilla web-component widget.** One `<script>` tag with Shadow DOM and
+  no framework, so it can be injected into any page.
+
+```mermaid
+flowchart LR
+  Browser["Browser: board, editor,<br/>or widget on a page"]
+  Server["Bun server<br/>(Yjs rooms)"]
+  Disk[(".md files")]
+  MCP["Plugin MCP server<br/>(stdio)"]
+  Agent["Claude Code agent"]
+
+  Browser <-->|WebSocket| Server
+  Server <-->|watch + debounced write| Disk
+  Server -->|SSE events| MCP
+  MCP -->|channel notifications| Agent
+  Agent -->|tool calls| MCP
+  MCP -->|REST| Server
 ```
 
-## What It Does Under The Hood
+## What it is not
 
-- **Uses [Claude Channels](https://code.claude.com/docs/en/channels) for push.** Comments, review answers, new tasks, voice requests, and board wakes arrive at the agent's session as `<channel source="claude-workspaces" ...>` events the same way GitHub mentions and CI failures do — no polling, no MCP round-trips just to check an inbox. A stalled board wakes the lead once per finding, not per tick, because a wake is a whole agent turn and priced like one.
-- **Surface-anchored, not chat-anchored.** Docs are Yjs CRDTs; every comment carries an anchor to the exact text range or DOM element it is about, and the anchors ride along through concurrent edits. A big rewrite of the surrounding text can still detach a thread; the thread survives, and re-attaching it is manual.
-- **Primitives, not bespoke flows.** The MCP surface is small and composable: `get_doc`, `find_and_replace`, `create_anchor`, `edit_at_anchor`, `rewrite_thread_region`, `post_reply`, `add_review_item`, `create_tasks`, `next_tasks`. Agents stitch them however the workflow needs. Two hooks close the loop from the other side: a Stop hook posts a one-line note of each turn to the agent's current task, which is what the activity feed is made of, and a PermissionDenied hook notes the denial there too.
-- **A vanilla web-component widget.** One `<script>` tag, Shadow DOM, no framework dependencies, so it injects into any mockup or dev server without fighting the host page.
-
-## What it's not
-
-- **Not a hosted SaaS.** The server runs on your machine, on your network. Reviewers reach you over Tailscale or LAN, or through a share link you choose to publish. No public tunnel by default.
-- **Not a replacement for issue trackers, except that for me it has become one.** It started as the inner loop — minutes-to-hours iterative review — and the board grew out of needing somewhere for the agents' questions to wait for me. On personal projects, where I can build things faster than I can come up with ideas to build, the board is now the tracker.
-- **Not a code review tool.** Diff review covers a branch of a local checkout; pull requests still happen on GitHub.
-- **Not framework-specific.** The widget is a vanilla web component; inject one `<script>` tag into any HTML page.
+- **Not hosted.** The server runs on your machine. Reviewers reach it on your
+  network, over Tailscale, or through a share link you choose to publish.
+- **Not a code review tool.** Diff review covers a branch of a local
+  checkout. Pull requests still happen on GitHub.
+- **Not tied to a framework.** The widget works on any HTML page.
 
 ## Status
 
-v0.1.0 — beta. My own fleet of agents works from it every day, which is a different claim from "works for you"; expect sharp edges.
+Beta. One person's fleet of agents works from it every day, which is a
+different claim from "works for you". Expect sharp edges.
 
-- Comment anchors hold through ordinary editing; a large rewrite of the surrounding text can still detach a thread, and re-attaching it is manual.
-- Mobile and tablet layouts are still being tuned surface by surface; iPad landscape and a phone are the targets, and not every surface fits both yet.
-- Disk ↔ doc sync is bidirectional (`fs.watch` plus a debounced write-back), so a bound file is edited through the plugin's tools, never with a plain editor save that races the flush.
-- Meetings need a transcription API key on the server; without one the strip says so and everything else works.
+- A bound markdown file syncs both ways with its live doc. Edit it through the
+  plugin's tools, not with a plain editor save that races the write-back.
+- Meetings need a transcription API key on the server. Without one the
+  transcript strip says so and everything else works.
+- Mobile and tablet layouts are still being tuned surface by surface.
+
+## Contributing
+
+Run `git config core.hooksPath .githooks` once after cloning. It turns on the
+leak gates that keep private names and keys out of this public repo.
+`bun run verify` runs every check CI runs.
+[CLAUDE.md](CLAUDE.md) and [docs/architecture/overview.md](docs/architecture/overview.md)
+are the starting points. [REVIEW.md](REVIEW.md) is what the code-review agents
+check, and [WORKSPACES.md](WORKSPACES.md) says where each kind of doc goes.
 
 ## License
 

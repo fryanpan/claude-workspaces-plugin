@@ -351,7 +351,7 @@ if (publishedPid === null)
 // bin.ts prints its own URL banner (tailscale + lan + localhost), so we
 // stay quiet here — just leave a hint after about the review URL shape.
 console.log('');
-console.log('[supervisor] markdown review: .../review/<docId>?as=bryan');
+console.log('[supervisor] markdown review: .../review/<docId>?as=<your-name>');
 console.log('[supervisor] demo mockup:    .../demos/mockup');
 console.log('[supervisor] mobile preview: append  &mobile=iphone16pm  to a review URL');
 if (noWatch) console.log('[supervisor] mode: prod (no hot-reload; health watchdog on)');
