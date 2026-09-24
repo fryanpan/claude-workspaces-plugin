@@ -129,8 +129,9 @@ interface Draft {
 }
 
 /**
- * The edits typed and not yet sent. Held in memory only: a reload loses an
- * unsent draft, which the page says before it happens (`edit-mode.ts`).
+ * The edits typed and not yet sent. Held against the elements they change;
+ * `edit-mode.ts` writes them out as they change, so a reload puts them back
+ * (`draft-store.ts`).
  */
 export class EditDrafts {
   private drafts = new Map<HTMLElement, Draft>();
@@ -168,6 +169,11 @@ export class EditDrafts {
     const d = this.drafts.get(el);
     if (!d) return;
     el.replaceChildren(...d.nodes.map((n) => n.cloneNode(true)));
+    this.drafts.delete(el);
+  }
+
+  /** Forget one draft, leaving its element as it is: it has left the page. */
+  forget(el: HTMLElement): void {
     this.drafts.delete(el);
   }
 

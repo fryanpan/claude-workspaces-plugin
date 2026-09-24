@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { draftKey, writeDraft } from '../src/draft-store.ts';
 import { hasOpenEdits, mountEditLoader } from '../src/edit/edit-button.ts';
 
 /**
@@ -24,6 +25,7 @@ function page(ydoc?: Y.Doc): HTMLElement {
   const ready: Array<() => void> = [];
   Object.assign(host, {
     shadow,
+    opts: { docId: 'd-harbor' },
     client: ydoc ? { ydoc, onReady: (cb: () => void) => ready.push(cb) } : null,
     fireReady: () => {
       for (const cb of ready) cb();
@@ -35,6 +37,7 @@ function page(ydoc?: Y.Doc): HTMLElement {
 let scripts: HTMLScriptElement[] = [];
 
 beforeEach(() => {
+  sessionStorage.clear();
   scripts = [];
   vi.spyOn(document.head, 'append').mockImplementation((...nodes) => {
     for (const n of nodes) if (n instanceof HTMLScriptElement) scripts.push(n);
@@ -102,6 +105,20 @@ describe('the pencil', () => {
     scripts[0]?.onload?.(new Event('load'));
     await vi.waitFor(() => expect(c.mountEditMode).toHaveBeenCalledTimes(1));
     expect(c.toggle).not.toHaveBeenCalled();
+  });
+
+  it('loads edit mode at load when this tab holds edits a reload interrupted', () => {
+    page(new Y.Doc());
+    writeDraft(draftKey('edits', 'd-harbor'), [{ anchor: {}, before: 'a', after: 'b' }]);
+    mountEditLoader(document, SRC);
+    expect(scripts).toHaveLength(1);
+  });
+
+  it('loads nothing for unsent edits kept for another doc', () => {
+    page(new Y.Doc());
+    writeDraft(draftKey('edits', 'd-riverbend'), [{ anchor: {}, before: 'a', after: 'b' }]);
+    mountEditLoader(document, SRC);
+    expect(scripts).toHaveLength(0);
   });
 
   it('loads nothing for a page whose sends are all applied', () => {

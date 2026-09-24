@@ -28,6 +28,7 @@ import {
   isInOwnChrome,
   toggleFeedbackMode,
 } from './widget-picker.ts';
+import { restoreDraft } from './widget-restore.ts';
 import { type PinPosition, positionPins, renderThreadsInto } from './widget-threads.ts';
 
 /**
@@ -259,6 +260,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     this.renderShell();
     this.connect();
     this.startObserver();
+    restoreDraft(this);
     if (this.opts.authOffer) void validateStoredAuth(this);
     void askIfSignInRequired(this);
   }
