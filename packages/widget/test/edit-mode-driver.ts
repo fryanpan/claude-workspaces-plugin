@@ -37,6 +37,7 @@ import {
   resolveChromeBin,
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
+import { holdSendAnswer } from './edit-mode-hold.ts';
 
 const BEFORE = 'Harborlight Street Projects';
 const AFTER = 'Harborlight Street Works';
@@ -405,6 +406,7 @@ async function main(): Promise<void> {
       step(`open ${url}`);
       await reload(cdp, url);
       const original = readFileSync(file, 'utf8');
+      const hold = await holdSendAnswer(cdp, sessions);
       await editHeading(cdp, surface);
       step('sent');
       const thread = await poll(
@@ -413,8 +415,10 @@ async function main(): Promise<void> {
       );
       const first = thread.comments[0];
       const sourceUnchanged = readFileSync(file, 'utf8') === original;
-      step('stored; reloading');
+      await poll("the send's answer is held", () => (hold.held() > 0 ? true : null));
+      step('stored, answer held; reloading');
       await reload(cdp, url);
+      await hold.release();
       const reloaded = await readMarks(surface, (m) => m.pending > 0);
       // The agent: apply the edit to the source, resolve the thread.
       writeFileSync(file, applied);

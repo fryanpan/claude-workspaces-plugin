@@ -162,6 +162,45 @@ describe('edit mode', () => {
     h1().textContent = 'Harborlight Projects';
   });
 
+  it('holds no draft while the send is on its way, so a reload cannot send it twice', async () => {
+    let answer: (r: Response) => void = () => {};
+    fetchMock.mockImplementation(() => new Promise<Response>((r) => (answer = r)));
+    const { widget, button } = page();
+    mountEditMode(widget, button).toggle();
+    h1().click();
+    type(h1(), 'Harborlight Works');
+    const stored = () => sessionStorage.getItem(draftKey('edits', 'd-mock'));
+    expect(stored()).not.toBeNull();
+    (bannerOf(widget).querySelector('.edit-send') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // The board has the thread and the page has not heard: a reload now
+    // must find nothing to put back.
+    const inFlight = stored();
+    answer(Response.json({ thread: { id: 't-new' } }));
+    expect(inFlight).toBeNull();
+    await vi.waitFor(() =>
+      expect((bannerOf(widget).querySelector('.edit-count') as HTMLElement).hidden).toBe(true),
+    );
+    expect(stored()).toBeNull();
+  });
+
+  it('writes the draft again when the send fails', async () => {
+    fetchMock.mockImplementation(async () => new Response('no', { status: 500 }));
+    const { widget, button } = page();
+    mountEditMode(widget, button).toggle();
+    h1().click();
+    type(h1(), 'Harborlight Works');
+    (bannerOf(widget).querySelector('.edit-send') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(bannerOf(widget).querySelector('.edit-note')?.textContent).toBe(
+        'Could not send. Your edits are kept.',
+      ),
+    );
+    const kept = JSON.parse(sessionStorage.getItem(draftKey('edits', 'd-mock')) ?? '[]');
+    expect(kept.map((e: { after: string }) => e.after)).toEqual(['Harborlight Works']);
+    h1().textContent = 'Harborlight Projects';
+  });
+
   it('leaves on Escape, and stops editing', () => {
     const { widget, button } = page();
     mountEditMode(widget, button).toggle();
