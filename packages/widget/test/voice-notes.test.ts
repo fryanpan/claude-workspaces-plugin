@@ -56,25 +56,16 @@ describe('the session', () => {
     expect(t.session.heard).toBe('so the goal bar is tall');
   });
 
-  it('a tap on an element with a note from this recording adds to that note', async () => {
+  it('a note from this recording takes the next words, until a pin replaces it', async () => {
     const t = await recording();
     t.socket().recv(commentFrame({ key: 'v1', target: 1, final: true }));
-    t.session.pointAt(1);
+    t.session.reopen('1.v1');
     expect(t.socket().json().at(-1)).toEqual({ type: 'reopen', key: 'v1' });
     expect(t.session.comments.get('1.v1')?.reopening).toBe(true);
 
-    t.session.pointAt(2);
-    expect(t.socket().json().at(-1), 'CONTROL: an element with no note').toEqual({
-      type: 'pin',
-      target: 2,
-    });
+    t.session.pin(2);
+    expect(t.socket().json().at(-1)).toEqual({ type: 'pin', target: 2 });
     expect(t.session.comments.get('1.v1')?.reopening, 'the pin replaced it').toBe(false);
-    t.socket().recv(commentFrame({ key: 'v2', target: null, final: true }));
-    t.session.pointAt(null);
-    expect(t.socket().json().at(-1), 'the page as a whole is never a note').toEqual({
-      type: 'pin',
-      target: null,
-    });
   });
 
   it('a note from an earlier recording starts a new one on its element', async () => {

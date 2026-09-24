@@ -140,56 +140,64 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+/** A comment the server placed, posted, with Move pressed on its card. */
+async function armMove(t: ReturnType<typeof setup>): Promise<void> {
+  t.socket().recv(commentFrame({ key: 'v1', target: null }));
+  await vi.waitFor(() => expect(t.mode.session.comments.get('1.v1')?.posted).toBeTruthy());
+  t.tap(t.mode.view.live.querySelector('.vmove') as HTMLElement);
+  expect(t.mode.view.picking, 'Move is inside the widget, so it reaches its button').toBe('1.v1');
+}
+
+const moved = (t: ReturnType<typeof setup>) =>
+  t
+    .socket()
+    .json()
+    .filter((m) => m.type === 'move');
+
 describe('tapping the page while recording', () => {
-  it('pins the next words to the tapped element instead of clicking it', async () => {
+  it('leaves the tap to the page and pins nothing', async () => {
     const t = setup();
     await recording(t);
+    const before = t.socket().json().length;
     const pageHandler = vi.fn();
     document.getElementById('goal')?.addEventListener('click', pageHandler);
     const ev = t.tap(document.getElementById('goal') as HTMLElement);
-    expect(ev.defaultPrevented).toBe(true);
-    expect(pageHandler, 'the page’s own click does not run').not.toHaveBeenCalled();
-    expect(t.socket().json().at(-1)).toEqual({ type: 'pin', target: t.indexOf('goal') });
-    expect(t.mode.session.pinned).toBe(t.indexOf('goal'));
+    expect(ev.defaultPrevented).toBe(false);
+    expect(pageHandler, 'the page’s own click runs').toHaveBeenCalledTimes(1);
+    expect(t.socket().json().length, 'nothing is sent to the server').toBe(before);
+    expect(t.mode.session.pinned).toBeUndefined();
   });
 
-  it('pins the nearest element the catalog names when the tap lands inside it', async () => {
+  it('moves to the nearest element the catalog names when the tap lands inside it', async () => {
     const t = setup();
     await recording(t);
+    await armMove(t);
     t.tap(document.querySelector('#done b') as HTMLElement);
-    expect(t.socket().json().at(-1)).toEqual({ type: 'pin', target: t.indexOf('done') });
-  });
-
-  it('adds to the note this recording already made on the tapped element', async () => {
-    const t = setup();
-    await recording(t);
-    t.socket().recv(commentFrame({ key: 'v1', target: t.indexOf('goal'), final: true }));
-    t.tap(document.getElementById('goal') as HTMLElement);
-    expect(t.socket().json().at(-1)).toEqual({ type: 'reopen', key: 'v1' });
-    t.tap(document.getElementById('done') as HTMLElement);
-    expect(t.socket().json().at(-1), 'CONTROL: an element with no note').toEqual({
-      type: 'pin',
+    expect(t.socket().json().at(-1)).toEqual({
+      type: 'move',
+      key: 'v1',
       target: t.indexOf('done'),
     });
   });
 
-  it('describes an element added since the start before pinning it', async () => {
+  it('describes an element added since the start before moving to it', async () => {
     const t = setup();
     await recording(t);
+    await armMove(t);
     const late = document.createElement('button');
     late.textContent = 'Harborlight follow-up';
     document.body.append(late);
     t.tap(late);
     const sent = t.socket().json();
-    const pin = sent.at(-1) as { type: string; target: number };
-    expect(pin.type).toBe('pin');
+    const move = sent.at(-1) as { type: string; target: number };
+    expect(move.type).toBe('move');
     const described = sent
       .slice(0, -1)
       .filter((m) => m.type === 'targets')
       .at(-1) as { targets: VoiceTarget[] } | undefined;
     expect(
-      described?.targets.find((x) => x.i === pin.target)?.text,
-      'the server heard of the element before the pin named it',
+      described?.targets.find((x) => x.i === move.target)?.text,
+      'the server heard of the element before the move named it',
     ).toBe('Harborlight follow-up');
   });
 
@@ -205,20 +213,27 @@ describe('tapping the page while recording', () => {
   it('moves the open comment to the element tapped after Move', async () => {
     const t = setup();
     await recording(t);
-    t.socket().recv(commentFrame({ key: 'v1', target: null }));
-    await vi.waitFor(() => expect(t.mode.session.comments.get('1.v1')?.posted).toBeTruthy());
+    await armMove(t);
     expect(t.posted[0]?.url).toBe('http://host:8787/workspaces/w-1/docs/d-1/threads');
     expect(t.posted[0]?.body.anchor, 'about the page as a whole').toEqual({ kind: 'subject' });
 
-    t.tap(t.mode.view.live.querySelector('.vmove') as HTMLElement);
-    expect(t.mode.view.picking, 'Move is inside the widget, so it reaches its button').toBe('1.v1');
-    t.tap(document.getElementById('done') as HTMLElement);
+    const pageHandler = vi.fn();
+    document.getElementById('done')?.addEventListener('click', pageHandler);
+    const ev = t.tap(document.getElementById('done') as HTMLElement);
+    expect(ev.defaultPrevented, 'the Move tap is the widget’s').toBe(true);
+    expect(pageHandler).not.toHaveBeenCalled();
     expect(t.socket().json().at(-1)).toEqual({
       type: 'move',
       key: 'v1',
       target: t.indexOf('done'),
     });
     expect(t.mode.view.picking).toBeNull();
+    expect(
+      t.tap(document.getElementById('done') as HTMLElement).defaultPrevented,
+      'the tap after it is the page’s again',
+    ).toBe(false);
+    expect(pageHandler).toHaveBeenCalledTimes(1);
+    expect(moved(t)).toHaveLength(1);
     expect(
       t
         .socket()
@@ -265,7 +280,7 @@ describe('tapping the page while recording', () => {
   it('stops taking the page’s clicks once the recording has ended', async () => {
     const t = setup();
     await recording(t);
-    expect(t.tap(document.getElementById('goal') as HTMLElement).defaultPrevented).toBe(true);
+    await armMove(t);
     t.mode.toggle();
     expect(t.socket().json().at(-1)).toEqual({ type: 'stop' });
     t.socket().recv({ type: 'stopped' });
@@ -277,11 +292,26 @@ describe('tapping the page while recording', () => {
     expect(pageHandler).toHaveBeenCalledTimes(1);
   });
 
-  it('stops on Escape', async () => {
+  it('leaves Escape to the page and keeps recording', async () => {
     const t = setup();
     await recording(t);
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(t.mode.session.state).toBe('stopping');
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(t.mode.session.state).toBe('recording');
+  });
+
+  it('cancels an armed Move on Escape, and keeps recording', async () => {
+    const t = setup();
+    await recording(t);
+    await armMove(t);
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    window.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(t.mode.view.picking).toBeNull();
+    expect(t.mode.session.state).toBe('recording');
+    t.tap(document.getElementById('done') as HTMLElement);
+    expect(moved(t), 'CONTROL: the tap after a cancelled Move moves nothing').toHaveLength(0);
   });
 
   it('describes the page again once it has changed and gone still', async () => {
