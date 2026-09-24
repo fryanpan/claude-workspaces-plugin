@@ -49,6 +49,7 @@ import {
   isMockFrameRequest,
   renderMockHost,
 } from '../mockup-frame.ts';
+import { appLinkWarning, linksOutsidePrefix, rootRelativePageLinks } from '../mockup-page-links.ts';
 import { injectWidget } from '../mockup-widget.ts';
 import { readAppAssetManifest, renderAppNotFound, renderAppUnreachable } from '../shells.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
@@ -158,30 +159,51 @@ async function attachApp(
   // is, and an origin is not a path.
   docStore.getOrCreate(docId, { sourceUrl: origin.origin });
   ctx.fileUnderBoardWorkspace(docId, workspaceId);
-  const reachable = await probe(origin.origin);
+  const root = await probe(origin.origin);
   const meta = ctx.withReviewUrl(docStore.get(docId)?.meta ?? created.doc.meta);
+  const prefix = appPrefix(workspaceId, docId);
+  // A dev server started without the board's base path writes links that
+  // leave the mount. An unreachable app is not judged: there is no page yet.
+  const escaping =
+    root.html === null ? [] : linksOutsidePrefix(rootRelativePageLinks(root.html), prefix);
+  const warning = appLinkWarning(escaping, prefix);
   return j(200, {
+    ...(warning ? { warning: warning.message, linkWarning: warning } : {}),
     docId,
-    prefix: appPrefix(workspaceId, docId),
+    prefix,
     origin: origin.origin,
-    reachable,
+    reachable: root.reachable,
     reviewUrl: meta.reviewUrl,
     meta,
   });
 }
 
-/** Does anything answer at the origin? Informational: a server not started
- *  yet is an ordinary state to attach in. */
-async function probe(origin: string): Promise<boolean> {
+/** The most of the root page the link check reads. */
+const PROBE_HTML_MAX = 2 * 1024 * 1024;
+
+/** Does anything answer at the origin, and what HTML is its root page?
+ *  Informational: a server not started yet is an ordinary state to attach
+ *  in. `html` is null for anything but a 2xx HTML answer. */
+async function probe(origin: string): Promise<{ reachable: boolean; html: string | null }> {
+  let r: Response;
   try {
-    const r = await fetch(`${origin}/`, {
+    r = await fetch(`${origin}/`, {
       redirect: 'manual',
       signal: AbortSignal.timeout(PROBE_MS),
     });
-    await r.body?.cancel();
-    return true;
   } catch {
-    return false;
+    return { reachable: false, html: null };
+  }
+  const length = Number(r.headers.get('content-length') ?? 0);
+  if (!r.ok || !isHtmlResponse(r.headers) || length > PROBE_HTML_MAX) {
+    await r.body?.cancel();
+    return { reachable: true, html: null };
+  }
+  try {
+    const html = await r.text();
+    return { reachable: true, html: html.length > PROBE_HTML_MAX ? null : html };
+  } catch {
+    return { reachable: true, html: null };
   }
 }
 
