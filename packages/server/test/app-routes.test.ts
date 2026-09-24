@@ -304,7 +304,7 @@ describe('attaching and serving a dev server', () => {
     });
   });
 
-  it('502s when nothing answers at the origin', async () => {
+  it('503s when nothing answers at the origin', async () => {
     const gone = startDevServer();
     const origin = gone.origin;
     await gone.stop();
@@ -312,7 +312,7 @@ describe('attaching and serving a dev server', () => {
     expect(r.status).toBe(200);
     const body = (await r.json()) as { prefix: string; reachable: boolean };
     expect(body.reachable).toBe(false);
-    expect((await get(body.prefix)).status).toBe(502);
+    expect((await get(body.prefix)).status).toBe(503);
   });
 
   it('keeps the attachment across a restart', async () => {

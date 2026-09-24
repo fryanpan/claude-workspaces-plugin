@@ -19,6 +19,7 @@ import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
 import { AllowRuleProposals } from './allow-rules.ts';
+import { AppOutages } from './app-outage.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
@@ -2304,6 +2305,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     markdownAppDist,
     browserSentry,
     ownPort: () => server.port ?? port,
+    appOutages: new AppOutages({
+      leadOf: (workspaceId) => taskStore.getWorkspace(workspaceId)?.leadAgentId,
+      send: (workspaceId, agentId, frame) =>
+        sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+    }),
   };
 
   /**
