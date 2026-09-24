@@ -1,3 +1,4 @@
+import { DRAFTS_ARRIVED, draftKey, readDraft } from '../draft-store.ts';
 import type { FeedbackWidgetEl } from '../widget.ts';
 
 /**
@@ -129,14 +130,24 @@ export function mountEditLoader(doc: Document, chunkSrc: string): HTMLButtonElem
   });
 
   // Marks for edits already waiting: load the mode, without entering it, as
-  // soon as the doc says there is one.
+  // soon as the doc says there is one — or this tab holds unsent edits a
+  // reload interrupted (`draft-store.ts`), which the mode puts back.
+  // The doc is only read once it has synced; the tab's own drafts at once.
   const threads = widget.client?.ydoc.getMap('threads');
+  const load = (): void => {
+    if (!mode) void ready().catch(() => {});
+  };
+  const check = (): void => {
+    if (threads && hasOpenEdits(threads.toJSON())) load();
+  };
+  const unsent = (): void => {
+    if (readDraft(draftKey('edits', widget.opts.docId)) !== null) load();
+  };
   if (threads) {
-    const check = (): void => {
-      if (!mode && hasOpenEdits(threads.toJSON())) void ready().catch(() => {});
-    };
     widget.client?.onReady(check);
     threads.observeDeep(check);
   }
+  unsent();
+  window.addEventListener(DRAFTS_ARRIVED, unsent);
   return button;
 }

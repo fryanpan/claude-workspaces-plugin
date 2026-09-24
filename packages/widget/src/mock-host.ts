@@ -20,6 +20,11 @@
  *    opaque origin cannot open (`mock-host-mic.ts`). The frame asks for it and
  *    lets go of it over its voice socket; the audio goes from here to the
  *    server and never into the frame.
+ * 4. keeps the reader's unsent drafts across a reload of the frame
+ *    (`draft-store.ts`) in this page's own `sessionStorage`, filed under the
+ *    doc the server named, and hands them back when the frame asks. Only
+ *    draft keys, only this doc's, and each one capped: the frame's scripts
+ *    can write here, and the most they can reach is this doc's drafts.
  */
 import { createHostMic, tapConfirmed } from './mock-host-mic.ts';
 import { type RelayScope, relayHeaders, relayTarget } from './mock-relay-policy.ts';
@@ -36,12 +41,24 @@ const SEEDED_KEYS = [
 
 const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffer;
 
+/** The keys a frame may keep here (`draft-store.ts`), and how much of them:
+ *  16K chars a draft, 50 a doc, and 256K chars across every doc's drafts on
+ *  this page, so a frame cannot fill the page's ~5MB of storage. */
+const DRAFT = 'cfw:draft:';
+const DRAFT_KEY_MAX = 2048;
+const DRAFT_VALUE_MAX = 16 * 1024;
+const DRAFTS_PER_DOC = 50;
+const DRAFTS_TOTAL_MAX = 256 * 1024;
+const SHELVES = 'cw-frame-draft:';
+
 /** What the host reaches for on the page: the window's own, handed in so a test can stand in. */
 export interface HostEnv {
   script: HTMLScriptElement | null;
   placeholder: HTMLIFrameElement | null;
   location: { host: string; protocol: string; hash?: string };
   storage: () => Pick<Storage, 'getItem'>;
+  /** Where the frame's drafts are kept: the page's own `sessionStorage`. */
+  session: () => Storage;
   fetch: (path: string, init: RequestInit) => Promise<Response>;
   WebSocket: new (url: string) => WebSocket;
   EventSource: new (url: string) => EventSource;
@@ -83,6 +100,43 @@ export function hostMock(env: HostEnv): void {
 
   const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 
+  // The frame's drafts, filed under this doc in the page's own session. Read
+  // once here and kept in step, so a keystroke costs one write, not a scan.
+  const shelf = `${SHELVES}${scope.docId}:`;
+  const mine = new Map<string, string>();
+  let total = 0;
+  try {
+    const s = env.session();
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      const v = k?.startsWith(SHELVES) ? s.getItem(k) : null;
+      if (!k || v === null) continue;
+      total += v.length;
+      if (k.startsWith(shelf)) mine.set(k.slice(shelf.length), v);
+    }
+  } catch {}
+  const keepDraft = (k: unknown, v: unknown): void => {
+    if (typeof k !== 'string' || !k.startsWith(DRAFT) || k.length > DRAFT_KEY_MAX) return;
+    const had = mine.get(k);
+    const rest = total - (had?.length ?? 0);
+    try {
+      if (v === null) {
+        env.session().removeItem(shelf + k);
+        mine.delete(k);
+        total = rest;
+      } else if (
+        typeof v === 'string' &&
+        v.length <= DRAFT_VALUE_MAX &&
+        rest + v.length <= DRAFTS_TOTAL_MAX &&
+        (had !== undefined || mine.size < DRAFTS_PER_DOC)
+      ) {
+        env.session().setItem(shelf + k, v);
+        mine.set(k, v);
+        total = rest + v.length;
+      }
+    } catch {}
+  };
+
   env.onMessage((ev) => {
     if (ev.source !== frame.contentWindow) return;
     const m = ev.data as {
@@ -92,8 +146,12 @@ export function hostMock(env: HostEnv): void {
       method?: string;
       headers?: [string, string][];
       body?: ArrayBuffer | null;
+      k?: unknown;
+      v?: unknown;
     };
     const port = ev.ports[0];
+    if (m?.cw === 'draft') return keepDraft(m.k, m.v);
+    if (m?.cw === 'drafts') return port?.postMessage([...mine]);
     if (!port || m?.cw !== 'relay' || typeof m.url !== 'string') return;
 
     if (m.kind === 'fetch') {
@@ -200,6 +258,7 @@ hostMock({
   placeholder: document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
   location: window.location,
   storage: () => window.localStorage,
+  session: () => window.sessionStorage,
   fetch: (input, init) => window.fetch(input, init),
   WebSocket: window.WebSocket,
   EventSource: window.EventSource,

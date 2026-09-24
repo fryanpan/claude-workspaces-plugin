@@ -16,8 +16,12 @@
  * - Storage. An opaque origin throws on `localStorage`; the widget reads it at
  *   startup. It gets an in-memory stand-in, seeded with the reader's display
  *   name and guest id from the host (through `window.name`, which the host sets
- *   before the frame loads). Nothing written here goes back to the host — a
- *   mock that could write the reader's stored name could rename them.
+ *   before the frame loads). Nothing written there goes back to the host — a
+ *   mock that could write the reader's stored name could rename them. The one
+ *   exception is the reader's unsent drafts (`draft-store.ts`): keys under
+ *   `cfw:draft:` in the `sessionStorage` stand-in go to the host, which keeps
+ *   them for this doc alone, and come back when the frame loads again, so a
+ *   reload of the frame does not take a half-typed comment with it.
  * - Links. A tap on a link to another board page opens it at the top, rather
  *   than as a sandboxed page inside the mock.
  * - A direct visit to the frame's address, with nothing holding it, goes to
@@ -66,28 +70,65 @@ export function installBridge(window: Window & typeof globalThis): void {
     } catch {}
     window.name = '';
   }
-  const memory = (init: Record<string, string>): Storage => {
-    const m = new Map(Object.entries(init));
+  /** `told` hears every write, so the drafts can go to the host. */
+  const memory = (
+    m: Map<string, string>,
+    told?: (k: string, v: string | null) => void,
+  ): Storage => {
+    const tell = (k: string, v: string | null) => told?.(k, v);
     return {
       getItem: (k: string) => m.get(String(k)) ?? null,
-      setItem: (k: string, v: string) => void m.set(String(k), String(v)),
-      removeItem: (k: string) => void m.delete(String(k)),
-      clear: () => m.clear(),
+      setItem: (k: string, v: string) => {
+        m.set(String(k), String(v));
+        tell(String(k), String(v));
+      },
+      removeItem: (k: string) => {
+        m.delete(String(k));
+        tell(String(k), null);
+      },
+      clear: () => {
+        for (const k of [...m.keys()]) tell(k, null);
+        m.clear();
+      },
       key: (i: number) => [...m.keys()][i] ?? null,
       get length() {
         return m.size;
       },
     };
   };
+  const DRAFT = 'cfw:draft:';
+  const session = new Map<string, string>();
+  const keepDraft = (k: string, v: string | null): void => {
+    if (k.startsWith(DRAFT)) window.parent.postMessage({ cw: 'draft', k, v }, boardOrigin, []);
+  };
   for (const k of ['localStorage', 'sessionStorage'] as const) {
     try {
       void window[k].length;
     } catch {
       Object.defineProperty(window, k, {
-        value: memory(k === 'localStorage' ? seed : {}),
+        value:
+          k === 'localStorage' ? memory(new Map(Object.entries(seed))) : memory(session, keepDraft),
         configurable: true,
       });
+      if (k === 'sessionStorage') askForDrafts();
     }
+  }
+  /** The drafts the host kept for this doc, into the stand-in without being
+   *  sent back, then announced: the page has started by the time they come. */
+  function askForDrafts(): void {
+    const ch = new MessageChannel();
+    window.parent.postMessage({ cw: 'drafts' }, boardOrigin, [ch.port2]);
+    ch.port1.onmessage = (e) => {
+      ch.port1.close();
+      const got: unknown = e.data;
+      if (!Array.isArray(got)) return;
+      for (const pair of got) {
+        const [k, v] = Array.isArray(pair) ? pair : [];
+        if (typeof k === 'string' && typeof v === 'string' && k.startsWith(DRAFT))
+          session.set(k, v);
+      }
+      window.dispatchEvent(new Event('cw-drafts'));
+    };
   }
 
   // --- fetch ---

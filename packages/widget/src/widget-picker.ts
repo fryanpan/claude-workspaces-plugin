@@ -3,7 +3,17 @@ import { type ElementAnchor, escapeHtml as escape } from '@claude-workspaces/cor
 import { hasContext } from '@claude-workspaces/core/anchor/context';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
 import { composerNote, composerSignIn } from './widget-auth.ts';
-import { cardTarget, drafts, isPhoneFace, keepDraft, placeCards } from './widget-card.ts';
+import {
+  cardAnchor,
+  cardTarget,
+  drafts,
+  dropDraft,
+  isPhoneFace,
+  keepDraft,
+  placeCards,
+  postingDraft,
+  saveDraft,
+} from './widget-card.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
@@ -291,7 +301,7 @@ let highlighted: HTMLElement | null = null;
  *  the outline off the element the OTHER widget is still composing about. */
 let highlightOwner: FeedbackWidgetEl | null = null;
 
-function setHighlight(owner: FeedbackWidgetEl, target: HTMLElement | null): void {
+export function setHighlight(owner: FeedbackWidgetEl, target: HTMLElement | null): void {
   if (highlighted !== target) {
     if (highlighted) {
       highlighted.style.outline = prevOutline.get(highlighted) ?? '';
@@ -349,7 +359,11 @@ const SAVED_MS = 4000;
  * of a screen the keyboard has halved. The page behind holds still, so the
  * element stays on screen and outlined.
  */
-function showComposer(el: FeedbackWidgetEl, anchor: ElementAnchor, target: HTMLElement): void {
+export function showComposer(
+  el: FeedbackWidgetEl,
+  anchor: ElementAnchor,
+  target: HTMLElement,
+): void {
   const existing = el.shadow.querySelector('.composer') as HTMLElement | null;
   // The draft moves with you. Tapping an element while a draft is open
   // RE-ANCHORS what you were writing rather than throwing it away and
@@ -367,6 +381,7 @@ function showComposer(el: FeedbackWidgetEl, anchor: ElementAnchor, target: HTMLE
   const composer = document.createElement('div');
   composer.className = quick ? 'composer quick' : 'composer';
   cardTarget.set(composer, target);
+  cardAnchor.set(composer, anchor);
   // "on <quote>"; the "on" is drawn by the stylesheet, so the text a reader
   // (or a test) takes from the line is the anchor's own words.
   const head = `<b>${escape((target.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) || anchor.snippet.text)}</b>`;
@@ -388,6 +403,8 @@ function showComposer(el: FeedbackWidgetEl, anchor: ElementAnchor, target: HTMLE
   // the page holds still while you type.
   ta.focus({ preventScroll: true });
   ta.setSelectionRange(carried.length, carried.length);
+  ta.addEventListener('input', () => saveDraft(el, true));
+  if (carried) saveDraft(el, true);
   // The one exception to holding still: an element the panel would sit on
   // top of cannot be "still on screen", so the page moves by the least that
   // clears it — and not at all if that would push its top off the screen.
@@ -404,7 +421,10 @@ function showComposer(el: FeedbackWidgetEl, anchor: ElementAnchor, target: HTMLE
   // so the next element is one tap away. Leaving the mode is the banner's
   // Done, and it never sits beside Post; at phone width Cancel sits at the
   // far end of the row from Post, for the same reason.
-  composer.querySelector('.cancel')?.addEventListener('click', () => closeComposer(el, composer));
+  composer.querySelector('.cancel')?.addEventListener('click', () => {
+    dropDraft(el);
+    closeComposer(el, composer);
+  });
   const submit = composer.querySelector('.submit') as HTMLButtonElement;
   // Say it before the first attempt when the widget already knows.
   if (el.signInToWrite && !el.authToken) composerSignIn(el, composer, submit);
@@ -417,6 +437,7 @@ function showComposer(el: FeedbackWidgetEl, anchor: ElementAnchor, target: HTMLE
     const text = ta.value.trim();
     if (inFlight || !text || !el.user) return;
     inFlight = true;
+    postingDraft(el, composer, true);
     // A silent await reads as a dead button — say the click landed.
     submit.disabled = true;
     submit.textContent = 'Posting…';
@@ -428,6 +449,7 @@ function showComposer(el: FeedbackWidgetEl, anchor: ElementAnchor, target: HTMLE
     } catch {}
     inFlight = false;
     if (!posted) {
+      postingDraft(el, composer, false);
       // Kept on failure, with the text still in it.
       submit.disabled = false;
       submit.textContent = 'Post';

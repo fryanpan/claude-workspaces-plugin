@@ -1,3 +1,5 @@
+import type { ElementAnchor } from '@claude-workspaces/core';
+import { draftKey, writeDraft } from './draft-store.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
@@ -22,6 +24,9 @@ import type { FeedbackWidgetEl } from './widget.ts';
  *  bookkeeping, so nothing is written onto the host page's elements. */
 export const cardTarget = new WeakMap<Element, HTMLElement>();
 
+/** The anchor each composer will post with. */
+export const cardAnchor = new WeakMap<Element, ElementAnchor>();
+
 /** Words typed and not posted, by the element they are about, kept when the
  *  mode closes over them. */
 export const drafts = new WeakMap<HTMLElement, string>();
@@ -29,7 +34,40 @@ export function keepDraft(el: FeedbackWidgetEl): void {
   const c = el.shadow.querySelector('.composer');
   const t = c && cardTarget.get(c);
   const v = c?.querySelector('textarea')?.value;
-  if (t && v) drafts.set(t, v);
+  if (t && v) {
+    drafts.set(t, v);
+    saveDraft(el, false);
+  }
+}
+
+/** A comment as it waits out a reload (`draft-store.ts`): its words, its
+ *  anchor, and whether its composer was open. One per page — the latest. */
+export interface CommentDraft {
+  t: string;
+  a: ElementAnchor;
+  o: boolean;
+}
+
+/** Write the open composer's draft as it is typed, or forget it when the
+ *  field is empty. Nothing is written while it posts (`postingDraft`). */
+export function saveDraft(el: FeedbackWidgetEl, open: boolean): void {
+  const c = el.shadow.querySelector('.composer');
+  const a = c && !c.hasAttribute('data-posting') && cardAnchor.get(c);
+  const t = c?.querySelector('textarea')?.value;
+  if (a) writeDraft(draftKey('comment', el.opts.docId), t ? { t, a, o: open } : null);
+}
+
+/** Sent or cancelled: nothing comes back on the next load. */
+export function dropDraft(el: FeedbackWidgetEl): void {
+  writeDraft(draftKey('comment', el.opts.docId), null);
+}
+
+/** A post on its way holds no draft, so a reload mid-post cannot bring the
+ *  comment back to be posted twice; a post that fails writes it again. */
+export function postingDraft(el: FeedbackWidgetEl, composer: HTMLElement, on: boolean): void {
+  composer.toggleAttribute('data-posting', on);
+  if (on) dropDraft(el);
+  else saveDraft(el, true);
 }
 
 /**

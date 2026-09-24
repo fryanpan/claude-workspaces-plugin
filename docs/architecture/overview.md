@@ -620,6 +620,17 @@ edit's after-text without the reader having typed them in this visit. On the
 tailnet name the door admits `edit.js` without a token, as it does the other
 scripts.
 
+**Unsent words across a reload.** A comment half-typed and edits not yet sent
+come back when the page reloads under the reader. `draft-store.ts`, a
+top-level module of the widget package, keys both in `sessionStorage` by doc
+and page; the composer (`widget-picker.ts`, in the budgeted bundle) writes on
+every keystroke, `widget-restore.ts` reopens it at load, and `edit/edit-mode.ts` does the same
+for edits, the pencil loading `edit.js` when a draft waits. Inside a mock's or
+an app's sandboxed frame there is no browser storage, so `mock-bridge.ts`
+sends draft keys to the host page, which files them under its own doc in its
+`sessionStorage` (`mock-host.ts`) and hands them back when the frame asks on
+load. No server route and no event: the drafts never leave the browser.
+
 **Which channel carries what.** *Yjs*, one WebSocket per document, carries what
 two people watch change under each other's cursors: text, threads, replies,
 suggestions, anchors, presence, live notes. Agents hold no replica, so an agent

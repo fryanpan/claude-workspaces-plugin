@@ -80,7 +80,24 @@ class NativeSocket {
   constructor(readonly url: string) {}
 }
 
-function build(opts: { activated?: boolean; hash?: string } = {}) {
+/** The host page's own `sessionStorage`, which outlives the frame's reloads. */
+function sessionStore(): Storage {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+    clear: () => m.clear(),
+    key: (i: number) => [...m.keys()][i] ?? null,
+    get length() {
+      return m.size;
+    },
+  };
+}
+
+function build(opts: { activated?: boolean; hash?: string; session?: Storage } = {}) {
+  const session = opts.session ?? sessionStore();
+  const announced: string[] = [];
   HostSocket.made = [];
   HostStream.made = [];
   document.body.innerHTML = '';
@@ -106,6 +123,7 @@ function build(opts: { activated?: boolean; hash?: string } = {}) {
     storage: () => ({
       getItem: (k: string) => (k === 'feedback-user-name' ? 'Sample Reader' : null),
     }),
+    session: () => session,
     fetch: hostFetch as unknown as HostEnv['fetch'],
     WebSocket: HostSocket as unknown as HostEnv['WebSocket'],
     EventSource: HostStream as unknown as HostEnv['EventSource'],
@@ -135,6 +153,7 @@ function build(opts: { activated?: boolean; hash?: string } = {}) {
     WebSocket: NativeSocket,
     EventSource: NativeSocket,
     EventTarget: PlainTarget,
+    dispatchEvent: (ev: Event) => announced.push(ev.type) > 0,
     parent: {
       postMessage: (data: unknown, _origin: string, transfer: MessagePort[]) =>
         hostListener?.({ source: frame?.contentWindow ?? null, data, ports: transfer } as never),
@@ -144,7 +163,17 @@ function build(opts: { activated?: boolean; hash?: string } = {}) {
   Object.defineProperty(win, 'sessionStorage', { get: throwing, configurable: true });
   installBridge(win as unknown as Window & typeof globalThis);
   const w = win as unknown as Window & typeof globalThis;
-  return { w, frame, hostFetch, nativeFetch, replace, captures, hostListener: () => hostListener };
+  return {
+    w,
+    frame,
+    hostFetch,
+    nativeFetch,
+    replace,
+    captures,
+    session,
+    announced,
+    hostListener: () => hostListener,
+  };
 }
 
 // The host sets the frame's address; happy-dom would go and load it.
@@ -366,5 +395,77 @@ describe('links', () => {
     expect(tap(`${BOARD}${MOCK}?cw-frame=1`).target).toBe('');
     expect(tap('https://tides.saltmarsh.test/').target).toBe('');
     expect(tap(`${BOARD}/workspaces/w-harbor/home`, '_blank').target).toBe('_blank');
+  });
+});
+
+describe("the reader's drafts", () => {
+  const KEY = 'cfw:draft:comment:d-moorings:/workspaces/w-harbor/mockups/d-moorings?cw-frame=1';
+  const SHELF = 'cw-frame-draft:d-moorings:';
+
+  it('keeps a draft the frame writes on the host, under this doc, and forgets it when the frame does', () => {
+    h.w.sessionStorage.setItem(KEY, '{"t":"Saltmarsh first"}');
+    h.w.sessionStorage.setItem('mock-own-state', 'kept in the frame');
+    expect([h.session.length, h.session.getItem(SHELF + KEY)]).toEqual([
+      1,
+      '{"t":"Saltmarsh first"}',
+    ]);
+    h.w.sessionStorage.removeItem(KEY);
+    expect(h.session.length).toBe(0);
+  });
+
+  it("hands this doc's drafts to the frame that loads next, and says they have arrived", async () => {
+    const session = sessionStore();
+    session.setItem(SHELF + KEY, '{"t":"Riverbend"}');
+    session.setItem(`cw-frame-draft:d-other:${KEY}`, '{"t":"another mock"}');
+    const next = build({ session });
+    await vi.waitFor(() => expect(next.announced).toEqual(['cw-drafts']));
+    expect(next.w.sessionStorage.getItem(KEY)).toBe('{"t":"Riverbend"}');
+    expect(next.w.sessionStorage.length).toBe(1);
+    // Taken in without being written back.
+    expect(session.length).toBe(2);
+  });
+
+  it('refuses a draft too large, a key that is not a draft, and a message from anything but its frame', () => {
+    h.w.sessionStorage.setItem(KEY, 'x'.repeat(16 * 1024 + 1));
+    h.hostListener()?.({
+      source: h.frame?.contentWindow ?? null,
+      data: { cw: 'draft', k: 'feedback-user-name', v: 'Mallory' },
+      ports: [],
+    } as never);
+    h.hostListener()?.({
+      source: {},
+      data: { cw: 'draft', k: KEY, v: '{"t":"planted"}' },
+      ports: [],
+    } as never);
+    expect(h.session.length).toBe(0);
+  });
+
+  it('keeps at most fifty drafts for one doc', () => {
+    for (let i = 0; i < 60; i++) h.w.sessionStorage.setItem(`${KEY}#${i}`, '{}');
+    expect(h.session.length).toBe(50);
+  });
+
+  it("keeps no draft that would take this page's drafts past their total, whichever doc holds them", () => {
+    const session = sessionStore();
+    session.setItem(`cw-frame-draft:d-other:${KEY}`, 'x'.repeat(250 * 1024));
+    const next = build({ session });
+    next.w.sessionStorage.setItem(KEY, 'y'.repeat(8 * 1024));
+    expect(session.getItem(SHELF + KEY)).toBeNull();
+    next.w.sessionStorage.setItem(KEY, 'y'.repeat(4 * 1024));
+    expect(session.getItem(SHELF + KEY)).toHaveLength(4 * 1024);
+    // Freeing room elsewhere is counted too: replacing the draft with a
+    // shorter one leaves room for a longer one again.
+    next.w.sessionStorage.setItem(KEY, '{}');
+    next.w.sessionStorage.setItem(KEY, 'y'.repeat(5 * 1024));
+    expect(session.getItem(SHELF + KEY)).toHaveLength(5 * 1024);
+  });
+
+  it('reads the page storage once, not again on every keystroke', () => {
+    const session = sessionStore();
+    const next = build({ session });
+    const scan = vi.spyOn(session, 'key');
+    for (let i = 0; i < 20; i++) next.w.sessionStorage.setItem(KEY, `{"t":"${'R'.repeat(i)}"}`);
+    expect(scan).not.toHaveBeenCalled();
+    expect(session.getItem(SHELF + KEY)).toBe(`{"t":"${'R'.repeat(19)}"}`);
   });
 });

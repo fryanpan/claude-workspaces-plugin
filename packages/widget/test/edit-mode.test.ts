@@ -1,6 +1,7 @@
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { draftKey, writeDraft } from '../src/draft-store.ts';
 import { mountEditMode as mountReal } from '../src/edit/edit-mode.ts';
 import type { FeedbackWidgetEl } from '../src/widget.ts';
 
@@ -69,6 +70,7 @@ function type(el: HTMLElement, text: string): void {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   fetchMock = vi.fn(async () =>
     Response.json({ thread: { id: 't-new', comments: [{ id: 'c1' }] } }),
   );
@@ -155,6 +157,9 @@ describe('edit mode', () => {
       ),
     );
     expect(bannerOf(widget).querySelector('.edit-count')?.textContent).toBe('1 edit');
+    // A mode lives on past its test and would carry the unsent edit onto the
+    // next page, as it carries one onto a mock's next round.
+    h1().textContent = 'Harborlight Projects';
   });
 
   it('leaves on Escape, and stops editing', () => {
@@ -187,6 +192,79 @@ describe('after a reload', () => {
     t.set('comments', comments);
     ydoc.getMap('threads').set('t1', t);
   }
+
+  function unsent(before: string): void {
+    const edit = { anchor: createAnchor(h1()), selector: 'h1', before, after: 'Harborlight Works' };
+    writeDraft(draftKey('edits', 'd-mock'), [edit]);
+  }
+
+  it('puts back an edit the reload interrupted before it was sent', async () => {
+    const { widget, button } = page();
+    unsent('Harborlight Projects');
+    mountEditMode(widget, button);
+    await frame();
+    expect(h1().textContent).toBe('Harborlight Works');
+    h1().textContent = 'Harborlight Projects'; // as in the refused send above
+  });
+
+  it('leaves the words alone when the page no longer reads as the edit began', async () => {
+    const { widget, button } = page();
+    unsent('Harborlight Studios');
+    mountEditMode(widget, button);
+    await frame();
+    expect(h1().textContent).toBe('Harborlight Projects');
+  });
+
+  it('keeps an edit whose element has not arrived yet, and puts it back when it does', async () => {
+    const { widget, button } = page();
+    const main = document.querySelector('main') as HTMLElement;
+    const landing = () => {
+      const h2 = document.createElement('h2');
+      h2.textContent = 'Saltmarsh landing';
+      h2.getBoundingClientRect = () => BOX as DOMRect;
+      main.append(h2);
+      return h2;
+    };
+    const late = landing();
+    const edit = { anchor: createAnchor(late), selector: 'h2', before: 'Saltmarsh landing' };
+    late.remove();
+    writeDraft(draftKey('edits', 'd-mock'), [{ ...edit, after: 'Saltmarsh quay' }]);
+    const mode = mountEditMode(widget, button);
+    mode.toggle();
+    // Typing elsewhere writes the draft again, and the waiting edit with it.
+    h1().click();
+    type(h1(), 'Harborlight Works');
+    const kept = () => JSON.parse(sessionStorage.getItem(draftKey('edits', 'd-mock')) ?? '[]');
+    expect(kept().map((e: { after: string }) => e.after)).toEqual([
+      'Harborlight Works',
+      'Saltmarsh quay',
+    ]);
+    const arrived = landing();
+    await vi.waitFor(() => expect(arrived.textContent).toBe('Saltmarsh quay'));
+    // Back as they were, so this mode carries nothing onto the next test's page.
+    arrived.textContent = 'Saltmarsh landing';
+    h1().textContent = 'Harborlight Projects';
+  });
+
+  it('asks before a reload only when the edits could not be written out', () => {
+    const unload = () => {
+      const ev = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    const { widget, button } = page();
+    mountEditMode(widget, button).toggle();
+    h1().click();
+    type(h1(), 'Harborlight Works');
+    expect(unload()).toBe(false);
+    const full = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError');
+    });
+    type(h1(), 'Harborlight Studios');
+    expect(unload()).toBe(true);
+    full.mockRestore();
+    h1().textContent = 'Harborlight Projects';
+  });
 
   it('shows the original words with the waiting edit marked', async () => {
     const ydoc = new Y.Doc();

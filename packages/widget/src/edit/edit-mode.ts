@@ -1,6 +1,7 @@
 import { contextMatches, hasContext } from '@claude-workspaces/core/anchor/context';
 import { resolve } from '@claude-workspaces/core/anchor/element';
 import { type PageEdit, pageEditsText } from '@claude-workspaces/core/page-edits';
+import { DRAFTS_ARRIVED, draftKey, readDraft, writeDraft } from '../draft-store.ts';
 import { authedPost, httpBase } from '../widget-auth.ts';
 import type { FeedbackWidgetEl } from '../widget.ts';
 import type { EditMode } from './edit-button.ts';
@@ -116,6 +117,7 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
   }
 
   function paint(): void {
+    rebind();
     layer.replaceChildren();
     const drafted = new Set(drafts.elements());
     for (const sent of sentEdits(threads())) {
@@ -166,6 +168,56 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
     send.disabled = sending;
   }
 
+  // ---- keeping unsent edits across a reload -------------------------------
+
+  const key = draftKey('edits', widget.opts.docId);
+  /** Stored edits whose element this page does not have yet: kept, and
+   *  placed when it arrives. */
+  let waiting: PageEdit[] = [];
+  /** The last write failed, so a reload would lose what is on screen. */
+  let unsaved = false;
+  const save = (): void => {
+    const edits = [...drafts.changed(), ...waiting];
+    unsaved = !writeDraft(key, edits.length > 0 ? edits : null);
+  };
+
+  /** Put an edit back on the element its anchor finds, if that element
+   *  still shows the words the edit started from and holds no edit yet.
+   *  `wait` when no element answers the anchor yet; `gone` when one does
+   *  and the edit no longer fits it. */
+  function place(edit: PageEdit): 'placed' | 'wait' | 'gone' {
+    const res = resolve(edit.anchor, { root: document });
+    const el = res.ok ? res.element : null;
+    if (!el) return 'wait';
+    if (drafts.has(el) || normText(el.textContent) !== edit.before) return 'gone';
+    drafts.begin(el);
+    el.textContent = edit.after;
+    typedHere.add(el);
+    return 'placed';
+  }
+
+  /** The edits a reload interrupted. Asking twice changes nothing. */
+  function restore(): void {
+    waiting = (readDraft<PageEdit[]>(key) ?? []).filter((edit) => place(edit) === 'wait');
+    schedule();
+  }
+
+  /** A mock's next round replaces the elements unsent edits were on: each
+   *  moves to the element in its place. One whose element the round no
+   *  longer has stays as it was, and still goes with the next Send. And an
+   *  edit still waiting for its element is placed once the page has it. */
+  function rebind(): void {
+    const edits = drafts.changed();
+    drafts.elements().forEach((el, i) => {
+      const edit = edits[i];
+      if (!el.isConnected && edit && place(edit) === 'placed') drafts.forget(el);
+    });
+    if (waiting.length === 0) return;
+    const before = waiting.length;
+    waiting = waiting.filter((edit) => place(edit) === 'wait');
+    if (waiting.length !== before) save();
+  }
+
   // ---- typing ------------------------------------------------------------
 
   let priorEditable: string | null = null;
@@ -195,6 +247,7 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
   function onInput(): void {
     if (editing) typedHere.add(editing);
     note = '';
+    save();
     schedule();
   }
 
@@ -214,6 +267,7 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
     el.removeAttribute('data-cfw-editing');
     if (priorEditable === null) el.removeAttribute('contenteditable');
     else el.setAttribute('contenteditable', priorEditable);
+    save();
     schedule();
   }
 
@@ -221,6 +275,7 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
     if (editing === el) commit();
     drafts.undo(el);
     typedHere.delete(el);
+    save();
     if (sheet) openSheet();
     schedule();
   }
@@ -321,6 +376,7 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
         const { thread } = (await res.json()) as { thread?: { id?: string } };
         if (thread?.id) sentHere.set(thread.id, els);
         drafts.clear();
+        save();
         note = '';
         closeSheet();
       } else if (widget.signInToWrite && !widget.authToken) {
@@ -421,13 +477,20 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
   new MutationObserver((records) => {
     if (records.some((r) => !layer.contains(r.target))) schedule();
   }).observe(document.body, { childList: true, subtree: true, characterData: true });
-  // A reload loses what has not been sent, so the browser asks first.
+  // What has not been sent is written out as it is typed and comes back with
+  // the page, so a reload asks nothing — a prompt held a dev server's live
+  // reload until the reader answered. Only when that write failed does the
+  // browser ask first, since then the reload would lose it.
   window.addEventListener('beforeunload', (ev) => {
-    if (drafts.elements().length === 0) return;
+    if (!unsaved || drafts.elements().length === 0) return;
     ev.preventDefault();
     ev.returnValue = '';
   });
   schedule();
+  // Put back at load, as the comment is, once the page's content is there.
+  if (document.readyState === 'complete') restore();
+  else window.addEventListener('load', restore, { once: true });
+  window.addEventListener(DRAFTS_ARRIVED, restore);
 
   return { toggle: () => (on ? leave() : enter()) };
 }
