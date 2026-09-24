@@ -30,7 +30,7 @@ the same view of its resources and the same shared understanding. Tasks,
 descriptions, goals, threads, docs — if it is in the workspace, a member sees
 it. Granular roles and permissions may arrive later; until they do, do not
 design around a narrower default, and **do not ask whether some field should
-be withheld from workspace members.** That question is settled (Bryan,
+be withheld from workspace members.** That question is settled (the owner,
 2026-08-13).
 
 The one thing this does not cover is data that is not workspace content at
@@ -58,14 +58,14 @@ higher-priority work is actually taken care of, not merely started. The point
 is that the main flow keeps moving; a background researcher is fine, a
 foreground detour is not.
 
-## The keep-moving protocol (Bryan, 2026-08-22)
+## The keep-moving protocol (the owner, 2026-08-22)
 
 Adopted after a 24-hour transcript audit of two lead sessions found 18
 chat-only asks (13 died unanswered) and ~15 hours of dark stalls, every one
-ended by Bryan typing. Full evidence and his verbatim refinements live on the
+ended by the owner typing. Full evidence and their verbatim refinements live on the
 board task that proposed it; what follows is the operating rule.
 
-- **No unfiled asks.** Any ask to Bryan exists as an answerable review item
+- **No unfiled asks.** Any ask to the owner exists as an answerable review item
   before the turn ends; chat carries a pointer only. A "still waiting on you"
   list in chat is a smell — each entry must already be an item he can answer
   where he reads.
@@ -78,7 +78,7 @@ board task that proposed it; what follows is the operating rule.
   forbade progress-chat without naming a size, which agents met while still
   writing paragraphs. Contract ships in the
   `claude-workspaces:working-in-a-workspace` skill; this bullet is the number.
-- **Status goes to the Activity tab, not the comments** (Bryan, 2026-08-29:
+- **Status goes to the Activity tab, not the comments** (the owner, 2026-08-29:
   *"there's too much crap in the comments"*). The Stop hook posts every
   end-of-turn message to the task's Activity tab in full; `post_status`
   adds a named milestone; both count as movement to the stall clock. A
@@ -87,18 +87,18 @@ board task that proposed it; what follows is the operating rule.
   without being told, unless a task is blocked by a decision or dependency —
   and record that blockage as an `after` edge, never in your head. **Backlog
   is NOT dispatched at all** — *"above all else go in priority order"*
-  (Bryan, 2026-08-22, superseding the earlier "obviously useful items only,
+  (the owner, 2026-08-22, superseding the earlier "obviously useful items only,
   lead's judgment" clause; the judgment call is withdrawn for now). When
-  everything above the backlog is blocked or waiting on Bryan, the correct
+  everything above the backlog is blocked or waiting on the owner, the correct
   state is idle capacity plus filed review items naming what it is blocked
   on — not a backlog pick. A `ready_idle` nudge naming a backlog task is
   awareness, not a dispatch order.
 - **Complex tasks clear a human gate first.** When an agent files a task that
   is complex by the usual risk assessment — or includes UI design — its
   acceptance criteria must include "review ticket body (and mocks, for UI)
-  with Bryan before implementing", surfaced as a review item when the task
+  with the owner before implementing", surfaced as a review item when the task
   comes up for dispatch. Small/obvious tasks run without the gate.
-- **Never go dark — and never poll FOR WORK.** (Bryan, 2026-08-22, then
+- **Never go dark — and never poll FOR WORK.** (the owner, 2026-08-22, then
   narrowed 2026-08-25: *"Narrow it."*) Every resume source already pushes,
   so when blocked with nothing ready, end the turn and wait to be woken; a
   timed re-read reloads the whole context to learn nothing changed. What
@@ -124,8 +124,8 @@ board task that proposed it; what follows is the operating rule.
   resource-exclusive lanes hold ONE agent at a time — a physical device, host
   Gradle builds, this repo's merge/deploy queue. Work needing an occupied
   lane queues behind it. Peers discuss overlap and coordination directly with
-  each other over hive messages, not through Bryan.
-- **Re-rank the band on a trigger** (Bryan's chosen mechanism for band
+  each other over hive messages, not through the owner.
+- **Re-rank the band on a trigger** (the owner's chosen mechanism for band
   order): when a task is filed above the band's median, a goal is edited, or
   several tasks have arrived since the last pass, the lead re-reads the whole
   band against the current goal and rewrites the order — never moving a task a

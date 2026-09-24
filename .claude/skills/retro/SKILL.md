@@ -9,7 +9,7 @@ Run this skill when:
 - The user explicitly invokes `/retro`
 - A full plan implementation is complete (all work packages done and verified)
 
-**Don't offer a retro nobody asked for** (Bryan, 2026-08-13). This skill used to
+**Don't offer a retro nobody asked for** (the owner, 2026-08-13). This skill used to
 suggest itself after every PR and every code review; that turns finishing a
 piece of work into a prompt, and a prompt is a stop. If a retro is worth
 running, the person will ask.
