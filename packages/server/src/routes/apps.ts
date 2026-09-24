@@ -28,6 +28,7 @@
  * the visitor.
  */
 import type { DocMeta, DocType } from '@claude-workspaces/core';
+import type { AppOutages } from '../app-outage.ts';
 import {
   appPrefix,
   isHtmlResponse,
@@ -67,6 +68,8 @@ export interface AppRoutesContext {
   browserSentry: BrowserSentryConfig | null;
   /** This server's own port, which an app may not be bound to. */
   ownPort: () => number | undefined;
+  /** Who is told when an app's dev server stops answering (`app-outage.ts`). */
+  appOutages: AppOutages;
 }
 
 export interface AppRouteRequest {
@@ -80,6 +83,25 @@ const APP_ADDRESS = /^apps\/([^/]+)(?:\/(.*))?$/;
 
 /** How long an attach waits to learn whether the dev server answers. */
 const PROBE_MS = 1500;
+
+/**
+ * The status "The app is not running" is served with. NOT 502: Cloudflare
+ * replaces an origin's 502 or 504 with its own branded "Bad gateway" page
+ * (developers.cloudflare.com/support/troubleshooting/http-status-codes/
+ * cloudflare-5xx-errors/error-502-504/), and that is what the owner read
+ * through the tunnel on 24 September while this server was up and answering.
+ * An origin 503 reaches the visitor with the origin's own HTML — Cloudflare's
+ * 503 page tells the two apart by whether the page names cloudflare (same
+ * docs, error-503/) — and 503 is also the true statement: this server is
+ * fine, the service behind it is temporarily unavailable.
+ */
+const APP_DOWN_STATUS = 503;
+
+/** An attach's `producedBy`, kept only when it is a plain agent id. */
+function producedByOf(v: unknown): { agentId: string } | undefined {
+  const id = (v as { agentId?: unknown } | null | undefined)?.agentId;
+  return typeof id === 'string' && /^[\w.:-]{1,128}$/.test(id) ? { agentId: id } : undefined;
+}
 
 const html = (body: string, status: number): Response =>
   new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -121,10 +143,13 @@ async function attachApp(
       message: `"${name}" is already a ${held.type} doc. Pick another name for the app.`,
     });
   }
+  const producedBy = producedByOf(body?.producedBy);
   const created = docStore.createForCaller(name, {
     type: 'app',
     ...(typeof body?.title === 'string' ? { title: body.title } : {}),
     ...(typeof body?.owner === 'string' ? { owner: body.owner } : {}),
+    // Who to tell when the dev server stops answering (`app-outage.ts`).
+    ...(producedBy ? { producedBy } : {}),
   });
   if (!created.ok) return j(400, { error: created.error });
   const docId = created.doc.docId;
@@ -194,9 +219,24 @@ async function serveApp(
       // is what ends a proxied event stream rather than leaving it open.
       signal: req.signal,
     });
-  } catch {
-    return html(renderAppUnreachable(), 502);
+  } catch (err) {
+    // A reader who closed the page aborts the fetch; that is not an outage.
+    if (req.signal.aborted) return html(renderAppUnreachable(), APP_DOWN_STATUS);
+    ctx.appOutages.failed({
+      workspaceId,
+      docId: meta.docId,
+      ...(meta.title ? { title: meta.title } : {}),
+      origin,
+      prefix,
+      reason: err instanceof Error ? err.message : String(err),
+      ...(meta.producedBy?.agentId ? { attachedBy: meta.producedBy.agentId } : {}),
+    });
+    const down = html(renderAppUnreachable(), APP_DOWN_STATUS);
+    // The edge must not keep the error page once the app is back.
+    down.headers.set('cache-control', 'no-store');
+    return down;
   }
+  ctx.appOutages.answered(meta.docId);
   const headers = relayedResponseHeaders(up.headers, origin, prefix);
 
   if (req.method === 'GET' && isHtmlResponse(up.headers)) {
