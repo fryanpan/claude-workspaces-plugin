@@ -401,7 +401,9 @@ size.
 `mockup-page-links.ts` reads the HTML at bind time for root-relative `<a
 href>` and `<form action>` links, which resolve against the workspaces host
 inside a mockup, and the bind answers with a warning naming them and the
-board's app address when one exists.
+board's app address when one exists. `attach_app` runs the same detector on
+the app's root page, fetched once, and warns about links outside
+`/workspaces/<ws>/apps/<doc>/`: a dev server started without that base path.
 
 `mockup-capture.ts`
 still keeps the single fallback copy that lets a link outlive its scratch

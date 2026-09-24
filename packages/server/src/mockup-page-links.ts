@@ -8,6 +8,11 @@
  * `<a href>` and `<form action>`. A page of a multi-page site belongs on
  * `attach_app`, whose proxy keeps those links on the site.
  *
+ * An attached app has the same failure one level up: the board mounts it at
+ * `/workspaces/<ws>/apps/<doc>/`, and a dev server started without that base
+ * path writes links that leave the mount. `attach_app` reads the app's root
+ * page once and warns about those.
+ *
  * A warning, not a refusal: the page itself still renders and can still be
  * commented on. The caller learns at bind time which clicks will break,
  * instead of the reviewer learning it by clicking one.
@@ -71,5 +76,28 @@ export function mockupLinkWarning(
     links: named,
     count: links.length,
     ...(appUrl ? { appUrl } : {}),
+  };
+}
+
+/** Root-relative page links that leave an app's mount. `prefix` is the
+ *  mount with its trailing slash; the mount without it counts as inside. */
+export function linksOutsidePrefix(links: readonly string[], prefix: string): string[] {
+  const bare = prefix.replace(/\/$/, '');
+  return links.filter((l) => !l.startsWith(prefix) && l !== bare && !l.startsWith(`${bare}?`));
+}
+
+/** The attach_app warning for links that leave the mount, or undefined. */
+export function appLinkWarning(
+  links: readonly string[],
+  prefix: string,
+): Omit<MockupLinkWarning, 'appUrl'> | undefined {
+  if (links.length === 0) return undefined;
+  const named = links.slice(0, NAMED_LINK_LIMIT);
+  const more = links.length > named.length ? `, and ${links.length - named.length} more` : '';
+  const noun = links.length === 1 ? 'link' : 'links';
+  return {
+    message: `The app's root page has ${links.length} root-relative page ${noun} outside ${prefix} (${named.join(', ')}${more}). The board serves the app under that prefix, so a reviewer who clicks one leaves the app. Restart the dev server with its base path set to ${prefix}.`,
+    links: named,
+    count: links.length,
   };
 }

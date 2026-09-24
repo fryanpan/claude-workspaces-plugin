@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   NAMED_LINK_LIMIT,
+  appLinkWarning,
+  linksOutsidePrefix,
   mockupLinkWarning,
   rootRelativePageLinks,
 } from '../src/mockup-page-links.ts';
@@ -55,5 +57,32 @@ describe('mockupLinkWarning', () => {
     });
     expect(w?.appUrl).toBe('http://h.test/workspaces/w-1/apps/site/');
     expect(w?.message).toContain('share http://h.test/workspaces/w-1/apps/site/ instead');
+  });
+});
+
+describe('linksOutsidePrefix', () => {
+  const prefix = '/workspaces/w-1/apps/site/';
+  it('keeps links that leave the mount and drops the mount itself', () => {
+    expect(
+      linksOutsidePrefix(
+        [
+          '/projects/a/',
+          `${prefix}projects/a/`,
+          '/workspaces/w-1/apps/site',
+          '/workspaces/w-1/apps/site?x=1',
+          '/workspaces/w-1/apps/other/',
+        ],
+        prefix,
+      ),
+    ).toEqual(['/projects/a/', '/workspaces/w-1/apps/other/']);
+  });
+});
+
+describe('appLinkWarning', () => {
+  it('is undefined with no links, and names the base path otherwise', () => {
+    expect(appLinkWarning([], '/p/')).toBeUndefined();
+    const w = appLinkWarning(['/a'], '/workspaces/w-1/apps/site/');
+    expect(w?.links).toEqual(['/a']);
+    expect(w?.message).toContain('base path set to /workspaces/w-1/apps/site/');
   });
 });
