@@ -19,15 +19,15 @@ The biggest source of rework on UI work is shipping something that the agent has
 
 - The UI running locally (a dev server URL) OR a deployed URL
 - The user goal(s) the page is supposed to enable
-- A browser that is **not Bryan's window** — `bun run ui:shot` (`scripts/ui-shot.ts`), which launches Chrome's own binary headless with a throwaway profile and drives it over CDP at an exact viewport
+- A browser that is **not the owner's window** — `bun run ui:shot` (`scripts/ui-shot.ts`), which launches Chrome's own binary headless with a throwaway profile and drives it over CDP at an exact viewport
 
-### The browser rule: not Bryan's window — never "no browser"
+### The browser rule: not the owner's window — never "no browser"
 
 The rule is stated exactly this way because both halves have been broken. Three
-agents in one day opened tabs in Bryan's live Chrome under briefs that only
+agents in one day opened tabs in the owner's live Chrome under briefs that only
 forbade *closing* tabs; two others over-corrected into no browser at all and
-reviewed from the code. `claude-in-chrome` tools open tabs in Bryan's running
-Chrome — do not use them for this review, and do not ask him to start Chrome
+reviewed from the code. `claude-in-chrome` tools open tabs in the owner's running
+Chrome — do not use them for this review, and do not ask them to start Chrome
 with the extension. Do not "review from the code" either — that defeats the
 purpose. The script satisfies both halves: it is a real Chrome, and it is a
 separate instance nobody is looking at.
@@ -250,7 +250,7 @@ Produce a single markdown report with:
 ## Anti-patterns
 
 - **Don't review from the code.** The whole point is to see what the user sees. If you can't run it, say so and stop.
-- **Don't review in Bryan's browser.** "Not his window" is the rule, and "no browser" is the other way to break it. The headless script is the browser.
+- **Don't review in the owner's browser.** "Not their window" is the rule, and "no browser" is the other way to break it. The headless script is the browser.
 - **Don't grade your own homework.** If the agent that built the feature is doing the review, dispatch a fresh subagent without context to walk it cold. Familiarity hides friction.
 - **Don't over-engineer the heuristics.** The point is to catch obvious problems quickly, not write a 10-page evaluation.
 - **Don't skip the goal-completion test.** Heuristic violations can be wrong; failure to complete a goal can't.

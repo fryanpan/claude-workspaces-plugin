@@ -30,7 +30,7 @@ remainder, and when a goal lands),
 [scheduled-tasks](docs/architecture/scheduled-tasks.md) (a row's rule for when
 its work starts, and the loop that files each occurrence),
 [unfiled-ask](docs/architecture/unfiled-ask.md) (whether a closing message
-asked Bryan something with nothing filed, and the measured rates at which that
+asked the owner something with nothing filed, and the measured rates at which that
 judgement is wrong),
 [scrub-name-finder](docs/architecture/scrub-name-finder.md) (the free pass
 that picks which pushed lines Haiku reads, its measured recall, and the
@@ -48,14 +48,14 @@ that way and add new subsystem docs to the list here.
 
 - Lead with goals, not implementation, in top-level docs.
 - Public repo, branch protection on main — all changes via PR.
-- **Never hard delete user content — soft delete** (Bryan, 2026-08-17,
+- **Never hard delete user content — soft delete** (the owner, 2026-08-17,
   project-wide). The `.ydoc` is the durable record analyses are rebuilt from.
   Use `archive_attachment_set` / `archive_doc` (reversible); `delete_doc` and
   `purge:true` destroy — calling them is a decision, never a default.
   Transient files (old releases, `.tmp`) are correctly hard-deleted.
   Mechanics and which verb does what: grep learnings.md "Soft delete".
 - When narrowing an existing verb, keep accepting the old payload if a caller
-  exists that you cannot restart — the shared server's REST routes. Bryan
+  exists that you cannot restart — the shared server's REST routes. The owner
   waived compatibility shims for prototype-phase surfaces (2026-08-18).
 - **Don't append CSS at EOF of any stylesheet under
   `packages/workspaces-app/src/`** — put rules in the
@@ -69,17 +69,17 @@ that way and add new subsystem docs to the list here.
   order is load-bearing and measured: `board.css` BEFORE `styles.css`, `doc.css`
   and `signin.css` AFTER it, `tokens.css` last. Parallel branches that both
   append at EOF conflict every time.
-- **Edit Bryan's bound docs directly; don't default to `suggest: true`.**
+- **Edit the owner's bound docs directly; don't default to `suggest: true`.**
   Concurrent editing is the norm; reserve suggestions for judgment calls.
-- **Calm by default** (Bryan, 2026-09-13): spend the reader's limited
+- **Calm by default** (the owner, 2026-09-13): spend the reader's limited
   attention only where it pays. No pulsing, no blinking, no badges; a steady
   indicator (the red Recording dot) is clear enough.
-- **A UI element keeps its size and position as its state changes** (Bryan,
+- **A UI element keeps its size and position as its state changes** (the owner,
   2026-09-17), unless the change is the thing the reader has to notice. Size a
   control for its widest option and keep the part of its label that does not
   change in the same place, so nothing beside it moves and the reader's target
   stays where they aimed.
-- **Verify UI at 1180x820 (iPad landscape — Bryan's main device) AND 430px**
+- **Verify UI at 1180x820 (iPad landscape — the owner's main device) AND 430px**
   per [docs/product/design-mobile.md](docs/product/design-mobile.md). Tiers:
   mobile ≤1100, tablet/laptop 1101–1920 (iPad and MacBook alike — the scarce
   axis there is HEIGHT, ~750px usable), 4K above. Width cannot identify a
@@ -99,7 +99,7 @@ that way and add new subsystem docs to the list here.
 - **One mock per surface, changed in place.** Each round edits the file the
   existing mock serves from (a reload shows it), keeps the elements the
   reader's comments point at, and answers on the reader's thread there. Never
-  a new mock doc, a new link or a new review item per round (Bryan,
+  a new mock doc, a new link or a new review item per round (the owner,
   2026-09-14: "there should be one collaboration surface").
 
 ## The gates — `bun run verify` before you push
