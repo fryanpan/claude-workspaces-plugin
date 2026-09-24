@@ -194,15 +194,6 @@ export class VoiceSession {
     this.change();
   }
 
-  /** The person tapped an element: the next words go there — into the note
-   *  this recording already has on it, or a new one. */
-  pointAt(target: number | null): void {
-    const notes = [...this.comments.values()].reverse();
-    const had = notes.find((c) => c.take === this.take && target !== null && c.target === target);
-    if (had) this.reopen(had.key);
-    else this.pin(target);
-  }
-
   /** The next words start a new note on `target`. */
   pin(target: number | null): void {
     if (this.state !== 'recording' && this.state !== 'connecting') return;
