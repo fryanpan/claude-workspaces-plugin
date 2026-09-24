@@ -355,6 +355,11 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
     const first = pageEdits[0];
     if (!first || sending) return;
     sending = true;
+    // A send on its way holds no draft of what it sends, so a reload before
+    // the answer cannot bring the edits back to be sent twice — the comment
+    // composer's rule (`postingDraft`). Edits still waiting for their
+    // element are not in this send and stay. A send that fails saves again.
+    unsaved = !writeDraft(key, waiting.length > 0 ? waiting : null);
     paintBanner();
     const url =
       `${httpBase(widget)}/workspaces/${enc(widget.opts.workspaceId)}` +
@@ -382,11 +387,14 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
       } else if (widget.signInToWrite && !widget.authToken) {
         note = 'Sign in to send. Your edits are kept.';
         widget.retryAfterSignIn = () => void send();
+        save();
       } else {
         note = 'Could not send. Your edits are kept.';
+        save();
       }
     } catch {
       note = 'Could not send. Your edits are kept.';
+      save();
     }
     sending = false;
     schedule();
