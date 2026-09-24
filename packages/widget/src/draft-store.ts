@@ -8,9 +8,10 @@
  * up again — the comment by the widget (`widget-picker.ts`), the edits by edit
  * mode (`edit/edit-mode.ts`). Sent or cancelled, the entry goes.
  *
- * Keyed by doc and by page (path, query and fragment), so one page's draft
- * never opens on another. Session, not local: a draft belongs to the tab it
- * was typed in, and a tab closed on purpose takes its drafts with it.
+ * Keyed by doc and by page (its whole address, fragment too), so one
+ * page's draft never opens on another. Session, not local: a draft belongs
+ * to the tab it was typed in, and a tab closed on purpose takes its drafts
+ * with it.
  *
  * Inside a served mock's sandboxed frame there is no `sessionStorage` of the
  * browser's; the bridge's stand-in sends every key under `DRAFT_PREFIX` to the
@@ -27,7 +28,7 @@ export const DRAFT_PREFIX = 'cfw:draft:';
 export const DRAFTS_ARRIVED = 'cw-drafts';
 
 export function draftKey(kind: 'comment' | 'edits', docId: string): string {
-  return `${DRAFT_PREFIX}${kind}:${docId}:${location.pathname}${location.search}${location.hash}`;
+  return `${DRAFT_PREFIX}${kind}:${docId}:${location.href}`;
 }
 
 export function readDraft<T>(key: string): T | null {
@@ -39,11 +40,14 @@ export function readDraft<T>(key: string): T | null {
   }
 }
 
-/** `null` forgets it. Storage that throws or is full keeps nothing, quietly:
- *  the draft is still on screen, as it always was. */
-export function writeDraft(key: string, value: unknown): void {
+/** `null` forgets it. False when storage threw or is full and kept nothing:
+ *  the draft is still on screen, but will not survive a reload. */
+export function writeDraft(key: string, value: unknown): boolean {
   try {
     if (value === null) sessionStorage.removeItem(key);
     else sessionStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }

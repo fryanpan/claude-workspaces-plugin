@@ -11,6 +11,7 @@ import {
   isPhoneFace,
   keepDraft,
   placeCards,
+  postingDraft,
   saveDraft,
 } from './widget-card.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
@@ -362,7 +363,6 @@ export function showComposer(
   el: FeedbackWidgetEl,
   anchor: ElementAnchor,
   target: HTMLElement,
-  text?: string,
 ): void {
   const existing = el.shadow.querySelector('.composer') as HTMLElement | null;
   // The draft moves with you. Tapping an element while a draft is open
@@ -374,8 +374,7 @@ export function showComposer(
   const own = drafts.get(target);
   if (own) keepDraft(el);
   const carried =
-    text ??
-    (own || (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value || '');
+    own || (existing?.querySelector('textarea') as HTMLTextAreaElement | null)?.value || '';
   drafts.delete(target);
   existing?.remove();
   const quick = isPhoneFace();
@@ -404,7 +403,6 @@ export function showComposer(
   // the page holds still while you type.
   ta.focus({ preventScroll: true });
   ta.setSelectionRange(carried.length, carried.length);
-  // Kept against a reload as it is typed, carried-over words too (`draft-store.ts`).
   ta.addEventListener('input', () => saveDraft(el, true));
   if (carried) saveDraft(el, true);
   // The one exception to holding still: an element the panel would sit on
@@ -439,6 +437,7 @@ export function showComposer(
     const text = ta.value.trim();
     if (inFlight || !text || !el.user) return;
     inFlight = true;
+    postingDraft(el, composer, true);
     // A silent await reads as a dead button — say the click landed.
     submit.disabled = true;
     submit.textContent = 'Posting…';
@@ -450,6 +449,7 @@ export function showComposer(
     } catch {}
     inFlight = false;
     if (!posted) {
+      postingDraft(el, composer, false);
       // Kept on failure, with the text still in it.
       submit.disabled = false;
       submit.textContent = 'Post';
@@ -460,7 +460,6 @@ export function showComposer(
     // Posted, so nothing is waiting any more: a copy kept when the mode closed
     // mid-post would otherwise come back to be posted twice.
     drafts.delete(target);
-    dropDraft(el);
     clearHighlight(el);
     el.hoverEl = null;
     if (quick) {

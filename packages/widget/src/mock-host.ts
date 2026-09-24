@@ -41,11 +41,15 @@ const SEEDED_KEYS = [
 
 const REFUSED = new TextEncoder().encode('{"error":"mock_relay_refused"}').buffer;
 
-/** The keys a frame may keep here (`draft-store.ts`), and how much of them. */
+/** The keys a frame may keep here (`draft-store.ts`), and how much of them:
+ *  16K chars a draft, 50 a doc, and 256K chars across every doc's drafts on
+ *  this page, so a frame cannot fill the page's ~5MB of storage. */
 const DRAFT = 'cfw:draft:';
 const DRAFT_KEY_MAX = 2048;
-const DRAFT_VALUE_MAX = 64 * 1024;
+const DRAFT_VALUE_MAX = 16 * 1024;
 const DRAFTS_PER_DOC = 50;
+const DRAFTS_TOTAL_MAX = 256 * 1024;
+const SHELVES = 'cw-frame-draft:';
 
 /** What the host reaches for on the page: the window's own, handed in so a test can stand in. */
 export interface HostEnv {
@@ -96,29 +100,39 @@ export function hostMock(env: HostEnv): void {
 
   const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 
-  // The frame's drafts, filed under this doc in the page's own session.
-  const shelf = `cw-frame-draft:${scope.docId}:`;
-  const shelved = (): [string, string][] => {
-    const out: [string, string][] = [];
-    try {
-      const s = env.session();
-      for (let i = 0; i < s.length; i++) {
-        const k = s.key(i);
-        const v = k?.startsWith(shelf) ? s.getItem(k) : null;
-        if (k && v !== null) out.push([k.slice(shelf.length), v]);
-      }
-    } catch {}
-    return out;
-  };
+  // The frame's drafts, filed under this doc in the page's own session. Read
+  // once here and kept in step, so a keystroke costs one write, not a scan.
+  const shelf = `${SHELVES}${scope.docId}:`;
+  const mine = new Map<string, string>();
+  let total = 0;
+  try {
+    const s = env.session();
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      const v = k?.startsWith(SHELVES) ? s.getItem(k) : null;
+      if (!k || v === null) continue;
+      total += v.length;
+      if (k.startsWith(shelf)) mine.set(k.slice(shelf.length), v);
+    }
+  } catch {}
   const keepDraft = (k: unknown, v: unknown): void => {
     if (typeof k !== 'string' || !k.startsWith(DRAFT) || k.length > DRAFT_KEY_MAX) return;
+    const had = mine.get(k);
+    const rest = total - (had?.length ?? 0);
     try {
-      if (v === null) env.session().removeItem(shelf + k);
-      else if (typeof v === 'string' && v.length <= DRAFT_VALUE_MAX) {
-        const have = shelved();
-        if (have.length < DRAFTS_PER_DOC || have.some(([at]) => at === k)) {
-          env.session().setItem(shelf + k, v);
-        }
+      if (v === null) {
+        env.session().removeItem(shelf + k);
+        mine.delete(k);
+        total = rest;
+      } else if (
+        typeof v === 'string' &&
+        v.length <= DRAFT_VALUE_MAX &&
+        rest + v.length <= DRAFTS_TOTAL_MAX &&
+        (had !== undefined || mine.size < DRAFTS_PER_DOC)
+      ) {
+        env.session().setItem(shelf + k, v);
+        mine.set(k, v);
+        total = rest + v.length;
       }
     } catch {}
   };
@@ -137,7 +151,7 @@ export function hostMock(env: HostEnv): void {
     };
     const port = ev.ports[0];
     if (m?.cw === 'draft') return keepDraft(m.k, m.v);
-    if (m?.cw === 'drafts') return port?.postMessage(shelved());
+    if (m?.cw === 'drafts') return port?.postMessage([...mine]);
     if (!port || m?.cw !== 'relay' || typeof m.url !== 'string') return;
 
     if (m.kind === 'fetch') {

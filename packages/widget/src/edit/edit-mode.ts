@@ -171,38 +171,51 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
   // ---- keeping unsent edits across a reload -------------------------------
 
   const key = draftKey('edits', widget.opts.docId);
+  /** Stored edits whose element this page does not have yet: kept, and
+   *  placed when it arrives. */
+  let waiting: PageEdit[] = [];
+  /** The last write failed, so a reload would lose what is on screen. */
+  let unsaved = false;
   const save = (): void => {
-    const edits = drafts.changed();
-    writeDraft(key, edits.length > 0 ? edits : null);
+    const edits = [...drafts.changed(), ...waiting];
+    unsaved = !writeDraft(key, edits.length > 0 ? edits : null);
   };
 
   /** Put an edit back on the element its anchor finds, if that element
-   *  still shows the words the edit started from and holds no edit yet. */
-  function place(edit: PageEdit): boolean {
+   *  still shows the words the edit started from and holds no edit yet.
+   *  `wait` when no element answers the anchor yet; `gone` when one does
+   *  and the edit no longer fits it. */
+  function place(edit: PageEdit): 'placed' | 'wait' | 'gone' {
     const res = resolve(edit.anchor, { root: document });
     const el = res.ok ? res.element : null;
-    if (!el || drafts.has(el) || normText(el.textContent) !== edit.before) return false;
+    if (!el) return 'wait';
+    if (drafts.has(el) || normText(el.textContent) !== edit.before) return 'gone';
     drafts.begin(el);
     el.textContent = edit.after;
     typedHere.add(el);
-    return true;
+    return 'placed';
   }
 
   /** The edits a reload interrupted. Asking twice changes nothing. */
   function restore(): void {
-    for (const edit of readDraft<PageEdit[]>(key) ?? []) place(edit);
+    waiting = (readDraft<PageEdit[]>(key) ?? []).filter((edit) => place(edit) === 'wait');
     schedule();
   }
 
   /** A mock's next round replaces the elements unsent edits were on: each
    *  moves to the element in its place. One whose element the round no
-   *  longer has stays as it was, and still goes with the next Send. */
+   *  longer has stays as it was, and still goes with the next Send. And an
+   *  edit still waiting for its element is placed once the page has it. */
   function rebind(): void {
     const edits = drafts.changed();
     drafts.elements().forEach((el, i) => {
       const edit = edits[i];
-      if (!el.isConnected && edit && place(edit)) drafts.forget(el);
+      if (!el.isConnected && edit && place(edit) === 'placed') drafts.forget(el);
     });
+    if (waiting.length === 0) return;
+    const before = waiting.length;
+    waiting = waiting.filter((edit) => place(edit) === 'wait');
+    if (waiting.length !== before) save();
   }
 
   // ---- typing ------------------------------------------------------------
@@ -464,10 +477,19 @@ export function mountEditMode(widget: FeedbackWidgetEl, button: HTMLButtonElemen
   new MutationObserver((records) => {
     if (records.some((r) => !layer.contains(r.target))) schedule();
   }).observe(document.body, { childList: true, subtree: true, characterData: true });
-  // No prompt before a reload: what has not been sent is written out as it
-  // is typed, and comes back with the page. A dev server's live reload is
-  // the agent's, and a prompt there held the page until the reader answered.
-  restore();
+  // What has not been sent is written out as it is typed and comes back with
+  // the page, so a reload asks nothing — a prompt held a dev server's live
+  // reload until the reader answered. Only when that write failed does the
+  // browser ask first, since then the reload would lose it.
+  window.addEventListener('beforeunload', (ev) => {
+    if (!unsaved || drafts.elements().length === 0) return;
+    ev.preventDefault();
+    ev.returnValue = '';
+  });
+  schedule();
+  // Put back at load, as the comment is, once the page's content is there.
+  if (document.readyState === 'complete') restore();
+  else window.addEventListener('load', restore, { once: true });
   window.addEventListener(DRAFTS_ARRIVED, restore);
 
   return { toggle: () => (on ? leave() : enter()) };

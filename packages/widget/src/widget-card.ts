@@ -48,10 +48,11 @@ export interface CommentDraft {
   o: boolean;
 }
 
-/** Write the open composer's draft, or forget it when the field is empty. */
+/** Write the open composer's draft as it is typed, or forget it when the
+ *  field is empty. Nothing is written while it posts (`postingDraft`). */
 export function saveDraft(el: FeedbackWidgetEl, open: boolean): void {
   const c = el.shadow.querySelector('.composer');
-  const a = c && cardAnchor.get(c);
+  const a = c && !c.hasAttribute('data-posting') && cardAnchor.get(c);
   const t = c?.querySelector('textarea')?.value;
   if (a) writeDraft(draftKey('comment', el.opts.docId), t ? { t, a, o: open } : null);
 }
@@ -59,6 +60,14 @@ export function saveDraft(el: FeedbackWidgetEl, open: boolean): void {
 /** Sent or cancelled: nothing comes back on the next load. */
 export function dropDraft(el: FeedbackWidgetEl): void {
   writeDraft(draftKey('comment', el.opts.docId), null);
+}
+
+/** A post on its way holds no draft, so a reload mid-post cannot bring the
+ *  comment back to be posted twice; a post that fails writes it again. */
+export function postingDraft(el: FeedbackWidgetEl, composer: HTMLElement, on: boolean): void {
+  composer.toggleAttribute('data-posting', on);
+  if (on) dropDraft(el);
+  else saveDraft(el, true);
 }
 
 /**

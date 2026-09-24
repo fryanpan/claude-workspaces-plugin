@@ -426,7 +426,7 @@ describe("the reader's drafts", () => {
   });
 
   it('refuses a draft too large, a key that is not a draft, and a message from anything but its frame', () => {
-    h.w.sessionStorage.setItem(KEY, 'x'.repeat(64 * 1024 + 1));
+    h.w.sessionStorage.setItem(KEY, 'x'.repeat(16 * 1024 + 1));
     h.hostListener()?.({
       source: h.frame?.contentWindow ?? null,
       data: { cw: 'draft', k: 'feedback-user-name', v: 'Mallory' },
@@ -443,5 +443,29 @@ describe("the reader's drafts", () => {
   it('keeps at most fifty drafts for one doc', () => {
     for (let i = 0; i < 60; i++) h.w.sessionStorage.setItem(`${KEY}#${i}`, '{}');
     expect(h.session.length).toBe(50);
+  });
+
+  it("keeps no draft that would take this page's drafts past their total, whichever doc holds them", () => {
+    const session = sessionStore();
+    session.setItem(`cw-frame-draft:d-other:${KEY}`, 'x'.repeat(250 * 1024));
+    const next = build({ session });
+    next.w.sessionStorage.setItem(KEY, 'y'.repeat(8 * 1024));
+    expect(session.getItem(SHELF + KEY)).toBeNull();
+    next.w.sessionStorage.setItem(KEY, 'y'.repeat(4 * 1024));
+    expect(session.getItem(SHELF + KEY)).toHaveLength(4 * 1024);
+    // Freeing room elsewhere is counted too: replacing the draft with a
+    // shorter one leaves room for a longer one again.
+    next.w.sessionStorage.setItem(KEY, '{}');
+    next.w.sessionStorage.setItem(KEY, 'y'.repeat(5 * 1024));
+    expect(session.getItem(SHELF + KEY)).toHaveLength(5 * 1024);
+  });
+
+  it('reads the page storage once, not again on every keystroke', () => {
+    const session = sessionStore();
+    const next = build({ session });
+    const scan = vi.spyOn(session, 'key');
+    for (let i = 0; i < 20; i++) next.w.sessionStorage.setItem(KEY, `{"t":"${'R'.repeat(i)}"}`);
+    expect(scan).not.toHaveBeenCalled();
+    expect(session.getItem(SHELF + KEY)).toBe(`{"t":"${'R'.repeat(19)}"}`);
   });
 });

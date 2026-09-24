@@ -215,6 +215,57 @@ describe('after a reload', () => {
     expect(h1().textContent).toBe('Harborlight Projects');
   });
 
+  it('keeps an edit whose element has not arrived yet, and puts it back when it does', async () => {
+    const { widget, button } = page();
+    const main = document.querySelector('main') as HTMLElement;
+    const landing = () => {
+      const h2 = document.createElement('h2');
+      h2.textContent = 'Saltmarsh landing';
+      h2.getBoundingClientRect = () => BOX as DOMRect;
+      main.append(h2);
+      return h2;
+    };
+    const late = landing();
+    const edit = { anchor: createAnchor(late), selector: 'h2', before: 'Saltmarsh landing' };
+    late.remove();
+    writeDraft(draftKey('edits', 'd-mock'), [{ ...edit, after: 'Saltmarsh quay' }]);
+    const mode = mountEditMode(widget, button);
+    mode.toggle();
+    // Typing elsewhere writes the draft again, and the waiting edit with it.
+    h1().click();
+    type(h1(), 'Harborlight Works');
+    const kept = () => JSON.parse(sessionStorage.getItem(draftKey('edits', 'd-mock')) ?? '[]');
+    expect(kept().map((e: { after: string }) => e.after)).toEqual([
+      'Harborlight Works',
+      'Saltmarsh quay',
+    ]);
+    const arrived = landing();
+    await vi.waitFor(() => expect(arrived.textContent).toBe('Saltmarsh quay'));
+    // Back as they were, so this mode carries nothing onto the next test's page.
+    arrived.textContent = 'Saltmarsh landing';
+    h1().textContent = 'Harborlight Projects';
+  });
+
+  it('asks before a reload only when the edits could not be written out', () => {
+    const unload = () => {
+      const ev = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    const { widget, button } = page();
+    mountEditMode(widget, button).toggle();
+    h1().click();
+    type(h1(), 'Harborlight Works');
+    expect(unload()).toBe(false);
+    const full = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError');
+    });
+    type(h1(), 'Harborlight Studios');
+    expect(unload()).toBe(true);
+    full.mockRestore();
+    h1().textContent = 'Harborlight Projects';
+  });
+
   it('shows the original words with the waiting edit marked', async () => {
     const ydoc = new Y.Doc();
     const { widget, button } = page(ydoc);

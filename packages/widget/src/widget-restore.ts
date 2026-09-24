@@ -30,7 +30,10 @@ export function restoreDraft(el: FeedbackWidgetEl): void {
       el.hoverEl = t;
       setHighlight(el, t);
     }
-    showComposer(el, d.a, t ?? document.createElement('p'), d.t);
+    // The composer carries the words an element holds, as a tap on it would.
+    const at = t ?? document.createElement('p');
+    drafts.set(at, d.t);
+    showComposer(el, d.a, at);
   };
   if (document.readyState === 'complete') go();
   else addEventListener('load', go, { once: true });
