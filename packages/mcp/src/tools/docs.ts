@@ -377,6 +377,8 @@ export async function handleDocsTool(
         docId,
         origin,
         owner: CWD,
+        // Who the server tells when the dev server stops answering.
+        producedBy: { agentId: AUTHOR.id },
         ...(title ? { title } : {}),
       });
       return ok(res);

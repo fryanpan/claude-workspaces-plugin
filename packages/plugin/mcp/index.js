@@ -14086,6 +14086,14 @@ function createCallToolHandler(deps) {
   };
 }
 
+// packages/mcp/src/app-unreachable-line.ts
+function appUnreachableLine(p) {
+  const app = p.title ? `"${p.title}" (${p.docId ?? "?"})` : p.docId ?? "an attached app";
+  const why = p.reason ? ` (${p.reason})` : "";
+  const whose = p.addressedAs === "lead" ? " You are told as the board lead: the attach recorded no agent, so pass this to whoever runs it." : "";
+  return `[workspace.app_unreachable] ${app} is not answering at ${p.origin ?? "its origin"}${why}; readers opening ${p.prefix ?? "it"} see "The app is not running". Start its dev server on that origin.${whose} This notice fires once per outage and re-arms after the app next answers.`;
+}
+
 // packages/mcp/src/bookkeeping-events.ts
 function mayCarryAnOpenAsk(thread) {
   if (!thread || typeof thread !== "object")
@@ -14769,6 +14777,9 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
       break;
     case "workspace.done_when_ready":
       body = doneWhenReadyLine(p);
+      break;
+    case "workspace.app_unreachable":
+      body = appUnreachableLine(rawPayload);
       break;
     case "dispatch.reported":
       body = dispatchReportedLine(p);
@@ -18418,6 +18429,7 @@ async function handleDocsTool(name, a, ctx) {
         docId,
         origin,
         owner: CWD,
+        producedBy: { agentId: AUTHOR.id },
         ...title ? { title } : {}
       });
       return ok2(res);
@@ -20726,7 +20738,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.263";
+var PLUGIN_VERSION = "0.1.265";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

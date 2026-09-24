@@ -13,6 +13,7 @@
  * `workspace.`, `agent.`, `voice.`, `dispatch.`) go to
  * `emitBoardChannelMessage`; everything else keeps the doc-shaped path.
  */
+import { appUnreachableLine } from './app-unreachable-line.ts';
 import { isBookkeepingEvent } from './bookkeeping-events.ts';
 import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
@@ -385,6 +386,11 @@ async function emitBoardChannelMessage(
     // the one who says it is ready, so the line names the call that does.
     case 'workspace.done_when_ready':
       body = doneWhenReadyLine(p);
+      break;
+    // An attached app's dev server stopped answering, once per outage and
+    // addressed to whoever can start it again.
+    case 'workspace.app_unreachable':
+      body = appUnreachableLine(rawPayload as Parameters<typeof appUnreachableLine>[0]);
       break;
     // A builder's closing report. Counts and ids only: the reader's next act
     // is to open the record, and the frame's job is to say that there is one
