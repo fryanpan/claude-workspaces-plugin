@@ -24,7 +24,7 @@ function recorder(answer: (path: string) => unknown) {
 }
 
 describe('attach_app', () => {
-  it("posts the name, origin, title and the agent's directory to the board's apps", async () => {
+  it("posts the name, origin, title, the agent's directory and its id to the board's apps", async () => {
     const r = recorder(() => ({ docId: 'd-1', prefix: `/workspaces/${WS}/apps/d-1/` }));
     const out = await handleDocsTool(
       'attach_app',
@@ -39,6 +39,7 @@ describe('attach_app', () => {
           docId: 'site',
           origin: 'http://127.0.0.1:4321',
           owner: '/tmp/harborlight-site',
+          producedBy: { agentId: 'a1' },
           title: 'Site',
         },
       ],
