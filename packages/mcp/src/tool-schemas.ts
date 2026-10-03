@@ -364,6 +364,35 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'coach_moment',
+      description:
+        "The coach session speaks up: a card on the owner's page with your line and Thanks / Not now / Not this. Call it only when a coach.event plainly matches one goal's \"Act differently when\"; otherwise say nothing. The server refuses a quote that is not that goal's words, a goal with no trigger, and a second moment while one is open, and says why (raised:false).",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal: {
+            type: 'number',
+            description: "The goal's number in the Learning goals doc, from 1.",
+          },
+          matched: {
+            type: 'string',
+            description:
+              'At least three words copied in order from that goal\'s "Act differently when".',
+          },
+          observed: {
+            type: 'string',
+            description: 'What you saw them do, naming the actual work. 8 to 140 characters.',
+          },
+          line: {
+            type: 'string',
+            description:
+              'What the card says, 20 to 220 characters: start "Hi, I\'m noticing", name what they are doing and the goal, end with one short question.',
+          },
+        },
+        required: ['goal', 'matched', 'observed', 'line'],
+      },
+    },
+    {
       name: 'create_thread',
       description:
         'Open a comment thread on a doc. Pass find to anchor the thread to a phrase, or omit find for a thread about the whole doc. On an app or a mock, find is words the page shows, and suggest proposes new words the reader accepts or rejects on the page; an accepted one reaches you as page_edits on a new thread. Pass review when you ask a person to decide or to look. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread.',

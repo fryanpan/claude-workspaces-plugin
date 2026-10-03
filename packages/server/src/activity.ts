@@ -323,4 +323,25 @@ export function appendActivity(dataDir: string, event: Event): void {
   } catch (err) {
     console.error('[activity] append failed:', err);
   }
+  for (const fn of listeners) {
+    try {
+      fn(dataDir, event);
+    } catch (err) {
+      console.error('[activity] listener failed:', err);
+    }
+  }
+}
+
+type ActivityListener = (dataDir: string, event: Event) => void;
+const listeners = new Set<ActivityListener>();
+
+/**
+ * Hear each row as it is appended, live — the coach's feed (`coach/
+ * stream.ts`). Keyed by data dir because one process can hold several
+ * servers (the test suites do). A listener that throws is logged, never
+ * the action being recorded. Returns the unsubscribe.
+ */
+export function onActivity(fn: ActivityListener): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
 }

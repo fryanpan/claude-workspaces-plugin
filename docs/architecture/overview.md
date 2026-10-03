@@ -53,7 +53,7 @@ flowchart TB
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options<br/>connector/ (hosted MCP at /mcp)"]
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
-    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs · inbox/"]
+    board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review<br/>review-size-prefs · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts"]
@@ -1815,6 +1815,33 @@ box is `workspaces-app/src/landing-inbox-reply.ts`, and the snooze picker,
 the key list behind `?` and the Undo toast are `landing-inbox-modals.ts`
 beside it. Bryan's Remove is a tap like snooze: the row goes to `dismissed`
 with no reason, and a new message on its thread reopens it.
+
+**The coach** helps the owner with habits he names, in three parts. It is not a
+board feature; the one agent it reaches is its own session.
+(A) *Goals*: "Set up my coach" on the front page makes one learning-goals doc
+and the session's Coach memory doc on a board of their own (`coach/setup.ts`,
+`coach/goals-doc.ts`); the planning interview fills the goals when he taps
+Talk. The front page's section (`coach/section.ts`, `coach/landing.ts`) lists
+the goals, offers a review when they have not changed in a week, holds the
+how-readily setting, and says how many events the session read today.
+(B) *Observe*: board and doc pages send what he is looking at, and each
+paragraph he writes when he pauses, to `/coach/here`
+(`workspaces-app/src/coach-card.ts`); `coach/stream.ts` turns that and his
+own comment, reply and open rows (through `onActivity` in `activity.ts`)
+into one event per thing he does, dropping repeats.
+(C) *Intervene*: `coach/moment.ts` sends every event, his answers and his
+how-readily setting to the coach's Claude Code session, the Coach board's
+lead, as addressed frames (`coach/session-feed.ts`); there is no trigger, cap
+or timer. The session raises a moment on `POST /coach/moments`, and
+`coach/judge.ts` refuses one that does not quote a goal's "act differently
+when", or arrives while another is open. A moment goes to his pages over
+`/coach/stream` (`coach/hub.ts`) and stays until he answers or moves to
+another page. In the session, `mcp/src/coach-line.ts` renders each frame and
+`coach_moment` raises a moment; the persona is the plugin's `coaching` skill.
+With no session holding a stream nothing is sent and the front page says it
+is offline. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
+`coach/wiring.ts` composes it for `server.ts`. `scripts/coach-eval.ts` plays
+the fixture days to a real coach session and scores it.
 
 **How long an item waited to be READ** is two rows on the board's own event
 log, and nothing else: `review_item.viewed` when somebody's client first puts

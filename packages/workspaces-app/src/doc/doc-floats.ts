@@ -11,7 +11,8 @@
  */
 import type { User } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
-import { docJsonUrl } from '../doc-path.ts';
+import { mountCoachCard } from '../coach-card.ts';
+import { currentWorkspaceId, docJsonUrl } from '../doc-path.ts';
 import type { LeadBanner } from '../lead-banner.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { mountPlanGate } from '../plan-gate.ts';
@@ -38,6 +39,8 @@ export interface DocFloatsOptions {
   fetchJson?: (url: string) => Promise<unknown>;
   /** The linked-item dock's answer request, injected by a test. */
   postAnswer?: LinkedDockOptions['post'];
+  /** False leaves the coach off. */
+  coach?: boolean;
 }
 
 async function defaultFetchJson(url: string): Promise<unknown> {
@@ -121,4 +124,13 @@ export function mountDocFloats(opts: DocFloatsOptions): void {
     scope,
     ...(opts.postAnswer ? { post: opts.postAnswer } : {}),
   });
+
+  // The coach hears which doc he is reading, and where in it; its card sits
+  // in the opposite corner from these floats. It stops itself for anyone but
+  // the owner. Off in tests that drive the floats without a server.
+  const workspaceId = currentWorkspaceId();
+  if (workspaceId && opts.coach !== false) {
+    const coach = mountCoachCard({ workspaceId, docId, root });
+    scope.onCleanup(() => coach.destroy());
+  }
 }

@@ -18,6 +18,7 @@
  */
 import type { FeedbackClient, User } from '@claude-workspaces/core';
 import type { BootHistory, BootLocation, BootStorage, BootWindow } from '../boot-env.ts';
+import { mountCoachCard } from '../coach-card.ts';
 import { renderConnectionBanner, watchConnection } from '../connection-state.ts';
 import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
@@ -182,6 +183,8 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   }
   // The one page that may ask for location, once per device (device-context.ts).
   void syncDeviceContext(browserDeviceEnv(localStorage), { mayAsk: true });
+  // The coach hears which board he is on; it stops itself for anyone else.
+  mountCoachCard({ workspaceId });
 
   // Publish `--kb-bottom` before anything is drawn. The doc surface has done
   // this since its composer first went under the keyboard; the board is a

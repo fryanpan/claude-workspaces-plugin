@@ -788,6 +788,27 @@ export async function handleWorkspaceTool(
           : { note: 'No page is waiting for this answer. Post it on the task or a thread.' }),
       });
     }
+    case 'coach_moment': {
+      const { goal, matched, observed, line } = a as Record<string, unknown>;
+      try {
+        const r = (await http('POST', '/coach/moments', { goal, matched, observed, line })) as {
+          id?: string;
+        };
+        return ok({ raised: true, id: r.id });
+      } catch (e) {
+        // The server's refusal names its reason; hand it back as an answer.
+        const m = String(e).match(/→ (409|422): (.*)$/s);
+        if (!m) throw e;
+        const body = (() => {
+          try {
+            return JSON.parse(m[2] ?? '') as { error?: string; message?: string };
+          } catch {
+            return {};
+          }
+        })();
+        return ok({ raised: false, reason: body.error ?? 'refused', message: body.message });
+      }
+    }
     case 'request_plugin_refresh': {
       // No arguments reach the process this runs — the server's argv is
       // fixed. Nothing a caller can send gets spawned.

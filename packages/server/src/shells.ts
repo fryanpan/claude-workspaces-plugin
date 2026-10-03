@@ -1068,6 +1068,8 @@ export function renderLanding(
   review: LandingReview = { items: [], rankOf: new Map(), summaryOf: () => undefined },
   /** Incoming Messages with its styles, second on the page (inbox/landing.ts). */
   inbox = '',
+  /** The week's goals and the coach's nudge, first on the page (coach/landing.ts). */
+  coach = '',
 ): string {
   const days = Math.round(model.windowMs / 86_400_000);
   // Retired boards are NOT in this denominator. "Nothing active, 3 inactive
@@ -1113,6 +1115,7 @@ export function renderLanding(
     `<h1>Workspaces</h1>
 <meeting-banner workspace-name="${escape(notesWorkspaceName)}"></meeting-banner>
 <script type="module" src="${assetHref(assets, 'landing.js')}"></script>
+${coach}
 ${renderReviewBar(review)}
 ${inbox}
 ${active}

@@ -43,6 +43,7 @@ import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-mem
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
+import { wireCoach } from './coach/wiring.ts';
 import { maybeCompress, maybeNotModified } from './compress.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
@@ -126,6 +127,7 @@ import { type AppRoutesContext, handleAppRoutes } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext, handleAuthShareRoutes } from './routes/auth-share.ts';
 import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './routes/chat-audit-routes.ts';
+import { type CoachRoutesContext, handleCoachRoutes } from './routes/coach.ts';
 import { type DocMoveRoutesContext, handleDocMoveRoute } from './routes/doc-move.ts';
 import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import {
@@ -1424,6 +1426,33 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     config: inboxConfig,
     transport: opts.inboxTransport ?? systemTransport(),
   });
+  /** The coach: the owner's learning goals, what he is doing, and the moments
+   *  it raises (coach/wiring.ts). The Coach board's lead session hears every
+   *  event; with no session listening, the coach stays quiet. */
+  const coachWiring = wireCoach({
+    dataDir,
+    docStore,
+    createBoard: (name) => taskStore.createWorkspace(name).id,
+    fileUnderBoard: (docId, workspaceId) => {
+      fileUnderBoardWorkspace(docId, workspaceId);
+    },
+    label: (docId) => {
+      const task = docId.startsWith('task:') ? taskStore.getTask(docId.slice(5)) : undefined;
+      const ws = task?.workspaceId ?? taskStore.workspaceOfDoc(docId);
+      const board = ws ? taskStore.getWorkspace(ws)?.name : undefined;
+      const title = task?.title ?? docStore.get(docId)?.meta.title ?? undefined;
+      return { ...(title ? { title } : {}), ...(board ? { board } : {}) };
+    },
+    boardName: (workspaceId) => taskStore.getWorkspace(workspaceId)?.name,
+    workspaceOf: (docId) =>
+      docId.startsWith('task:')
+        ? taskStore.getTask(docId.slice(5))?.workspaceId
+        : (taskStore.workspaceOfDoc(docId) ?? undefined),
+    leadOf: (workspaceId) => taskStore.getWorkspace(workspaceId)?.leadAgentId,
+    sendToAgent: (workspaceId, agentId, frame) =>
+      sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+    agentConnected: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+  });
   // One queue over every board, in project order, and the ledger that records
   // where each answered item stood in it. Composed beside the Home pane
   // because it reads that pane's own rows — the cross-board order and a
@@ -2155,6 +2184,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
     landingInbox: (rankOf) =>
       inboxSectionFor({ store: inboxStore, config: inboxConfig(), taskStore, rankOf }),
+    landingCoach: () => coachWiring.landing(),
   });
 
   /**
@@ -2276,6 +2306,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         key: agentTokenKeyFor(),
         requireToken: true,
       }),
+    j,
+    safeJson,
+  };
+
+  /** The coach's pages, stream and the session's moments (routes/coach.ts). */
+  const coachRoutesCtx: CoachRoutesContext = {
+    wiring: coachWiring,
+    boardExists: (workspaceId) => taskStore.getWorkspace(workspaceId) !== undefined,
+    docOnBoard: (workspaceId, docId) =>
+      docId.startsWith('task:')
+        ? taskStore.getTask(docId.slice(5))?.workspaceId === workspaceId
+        : (taskStore.getWorkspace(workspaceId)?.docIds ?? []).includes(docId),
+    refuseNonLocal: (req) => refuseNonLocalAgentCaller(req, server.requestIP(req)?.address),
     j,
     safeJson,
   };
@@ -3554,6 +3597,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         if (handled) return handled;
       }
 
+      // --- REST: the goal coach --- see ./routes/coach.ts. Top-level for
+      // the inbox's reason: the goals are the owner's, not a board's.
+      // Claims `/coach/` alone, which nothing above answers.
+      {
+        const handled = await handleCoachRoutes(coachRoutesCtx, {
+          req,
+          pathname,
+          visitor,
+          ownerProven: () => ownerProven(),
+          requestOrigin: () => policyFor(req).requestOrigin,
+        });
+        if (handled) return handled;
+      }
+
       // --- Web log --- see ./routes/ops.ts. Same chain position as before
       // the split: under the doc resource routes, above the shell tail.
       {
@@ -3984,6 +4041,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // output for the rest of the run.
       loopLag.stop();
       taskScheduler.stop();
+      coachWiring.stop();
       leadPresence.stop();
       // The boot re-scoring pass runs for as long as there are stale rows, so
       // a short-lived server (every test) can still be mid-loop here. Setting

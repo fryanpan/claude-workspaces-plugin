@@ -10,11 +10,12 @@
  * sink, the HTTP client, this session's identity, and the clock.
  *
  * `emitChannelMessage` is the entry point. Board families (`task.`, `decision.`,
- * `workspace.`, `agent.`, `voice.`, `dispatch.`) go to
+ * `workspace.`, `agent.`, `voice.`, `dispatch.`, `coach.`) go to
  * `emitBoardChannelMessage`; everything else keeps the doc-shaped path.
  */
 import { appUnreachableLine } from './app-unreachable-line.ts';
 import { isBookkeepingEvent } from './bookkeeping-events.ts';
+import { type CoachPayload, coachLine } from './coach-line.ts';
 import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
 import {
@@ -136,7 +137,7 @@ export interface ChannelPayload {
 /** Board/workspace event families formatted by emitBoardChannelMessage. Thread
  *  and suggestion events on the same workspace stream keep the doc-shaped
  *  path below. */
-const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch)\./;
+const BOARD_EVENT_RE = /^(task|decision|workspace|agent|voice|dispatch|coach)\./;
 
 export interface BoardEventPayload {
   workspaceId?: string;
@@ -413,6 +414,15 @@ async function emitBoardChannelMessage(
     // to do; see voice-line.ts.
     case 'voice.request': {
       const line = voiceRequestLine(p);
+      if (line === null) return;
+      body = line;
+      break;
+    }
+    // Addressed to the coach session alone: what the owner does, and says.
+    case 'coach.event':
+    case 'coach.answer':
+    case 'coach.preference': {
+      const line = coachLine(event, rawPayload as CoachPayload);
       if (line === null) return;
       body = line;
       break;

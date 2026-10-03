@@ -146,6 +146,9 @@ export interface ShellStaticContext {
   /** Incoming Messages for the owner, ranked by the page's project order,
    *  or '' (inbox/landing.ts). Asked only when `ownerProven`. */
   landingInbox?: (rankOf: ReadonlyMap<string, number>) => string;
+  /** The owner's goals for the week and the coach's open nudge, or ''
+   *  (coach/landing.ts). Asked only when `ownerProven`. */
+  landingCoach?: () => string;
 }
 
 /** The address this request is asking about, and who is asking. */
@@ -190,6 +193,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     landingReview,
     defaultBoardWorkspaceName,
     landingInbox,
+    landingCoach,
   } = ctx;
 
   /**
@@ -428,6 +432,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // Bryan's messages, for Bryan's own session only: never for an agent
     // reading `/` from this machine, which proves nobody.
     const inbox = ownerProven && landingInbox ? landingInbox(review.rankOf) : '';
+    const coach = ownerProven && landingCoach ? landingCoach() : '';
     const model = buildLandingModel(
       collectLandingWorkspaces(docStore, taskStore),
       collectLandingProjects(docStore),
@@ -449,6 +454,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         readAppAssetManifest(markdownAppDist),
         review,
         inbox,
+        coach,
       ),
       { headers: HTML_SHELL_HEADERS },
     );

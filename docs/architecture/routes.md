@@ -97,6 +97,14 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/workspaces/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/app/*` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/apple-touch-icon.png` | GET | `routes/shell-static.ts` | share-scope |  |
+| `/coach/goals/add` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/here` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/moments` | POST | `routes/coach.ts` | loopback-only |  |
+| `/coach/moments/:id/answer` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/prefs` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/review` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/setup` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/stream` | GET | `routes/coach.ts` | trusted-local |  |
 | `/demos/*` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/events/agent/:agentId` | GET | `routes/upgrade-stream.ts` | loopback-only |  |
 | `/favicon.ico` | GET | `routes/shell-static.ts` | share-scope |  |
