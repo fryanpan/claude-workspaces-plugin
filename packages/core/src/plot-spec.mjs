@@ -1,4 +1,4 @@
-// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 10 (2026-10-11, sha256 3809c63d1592cb2d). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
+// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 11 (2026-10-11, sha256 afa2955be9fdc820). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
 // @ts-check
 
 /**
@@ -23,7 +23,7 @@
  * Plain JavaScript importing nothing: sf-works runs it under Node as it is.
  */
 
-export const PLOT_SPEC_VERSION = 10;
+export const PLOT_SPEC_VERSION = 11;
 
 export const PLOT_MARKS = /* @__PURE__ */ Object.freeze([
   'areaY',
@@ -1352,9 +1352,10 @@ function stackedArea(p, rows, own, width) {
 
 /**
  * One line per series, each labelled at its end with its name and last
- * value; named series dashed; an optional goal rule; an optional baseline for
- * an index or ratio chart, which then starts at zero with the baseline drawn,
- * labelled and ticked.
+ * value in ink beside the series-colour dot that ends its line (no series
+ * colour reaches 4.5:1 as text on the paper); named series dashed; an
+ * optional goal rule; an optional baseline for an index or ratio chart, which
+ * then starts at zero with the baseline drawn, labelled and ticked.
  * @param {Record<string, unknown>} p
  * @param {unknown[]} rows
  * @param {Record<string, unknown>} own
@@ -1457,7 +1458,7 @@ function lines(p, rows, own, width) {
           x: 'x',
           y: 'y',
           text: 'label',
-          fill: 'series',
+          fill: HOUSE.ink,
           textAnchor: 'start',
           dx: 8,
           ...end.fit,

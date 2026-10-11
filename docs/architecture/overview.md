@@ -1873,6 +1873,9 @@ own band and its goal above the rule, so the right margin goes to the data.
 At 600px and wider a stacked chart's end labels are set in ink beside a dot
 of the series' colour, and labels whose bands are too thin to keep them
 apart are moved apart on y around where they want to be (`spreadEnds`).
+A lines chart's end labels are set in ink too, at every width, each beside
+the dot of its series' colour that ends its line, because no Observable 10
+colour reaches 4.5:1 as text on the paper.
 A band label's width is estimated glyph by glyph against Chrome's system-ui
 widths, because a thin band's level window is often only a few px wider than
 its name. The file's first line names its version and the

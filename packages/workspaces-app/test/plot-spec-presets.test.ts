@@ -233,9 +233,9 @@ describe('a preset it refuses', () => {
   });
 });
 
-/** Each end label's lines, as Plot drew them. */
+/** Each end label's lines, as Plot drew them: the text drawn right after the end dots. */
 const endLines = (svg: Element) =>
-  [...svg.querySelectorAll('[aria-label="text"] text[fill]')].map((t) =>
+  [...svg.querySelectorAll('[aria-label="dot"] + [aria-label="text"] text')].map((t) =>
     [...t.querySelectorAll('tspan')].map((s) => s.textContent ?? ''),
   );
 /** The x where the data stops: the right edge of the areas or lines. */
@@ -387,8 +387,9 @@ describe('a chart 600px or wider', () => {
   // Each file is what a wide chart draws, so a difference here is a change to
   // it. The stacked ones were rewritten in Version 9 for inked end labels with
   // swatches; the lines ones date from before narrow charts were handled,
-  // and lines-640 was rewritten in Version 10, when it stopped ticking
-  // "2020 2020 2021 2021" and took one tick a year.
+  // lines-640 was rewritten in Version 10, when it stopped ticking
+  // "2020 2020 2021 2021" and took one tick a year; and both lines files in
+  // Version 11, when their end labels moved from series colour to ink.
   it.each([
     ['stacked-area-820', PRESET_SPEC, undefined],
     ['stacked-area-ticks-600', SCHOOL_YEARS, 600],
