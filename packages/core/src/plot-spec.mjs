@@ -1,4 +1,4 @@
-// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 11 (2026-10-11, sha256 afa2955be9fdc820). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
+// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 11 (2026-10-11, sha256 45eacf433eadc109). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
 // @ts-check
 
 /**
@@ -1130,12 +1130,13 @@ const SWATCH = 12;
 const END_GAP = 4;
 
 /**
- * Where the labels at a stacked chart's right edge sit on y so that no two
- * overlap: each wants its own y; labels that would touch are set edge to edge
- * around the mean of what they want, inside the frame. The wanted ys come
- * back unchanged when the y scale is anything but plain linear.
+ * Where the labels at a stacked or lines chart's right edge sit on y so that
+ * no two overlap: each wants its own y; labels that would touch are set edge
+ * to edge around the mean of what they want, inside the frame. The wanted ys
+ * come back unchanged when the y scale is anything but plain linear.
  * @param {Array<{ y: number, lines: number }>} want
- * @param {number[]} totals Each x's stacked total.
+ * @param {number[]} totals The values the y scale spans from zero: each x's
+ *   stacked total, or every value a line draws.
  * @param {Record<string, unknown>} own
  * @param {number} width
  * @param {number} margin
@@ -1353,7 +1354,9 @@ function stackedArea(p, rows, own, width) {
 /**
  * One line per series, each labelled at its end with its name and last
  * value in ink beside the series-colour dot that ends its line (no series
- * colour reaches 4.5:1 as text on the paper); named series dashed; an
+ * colour reaches 4.5:1 as text on the paper), the labels moved apart on y
+ * where they would overlap (`spreadEnds`) while each dot stays on its line's
+ * last point; named series dashed; an
  * optional goal rule; an optional baseline for an index or ratio chart, which
  * then starts at zero with the baseline drawn, labelled and ticked.
  * @param {Record<string, unknown>} p
@@ -1385,14 +1388,37 @@ function lines(p, rows, own, width) {
   const baseText = baseline ? (baseline.label ?? fy(baseline.value)) : '';
   const longer = [goal?.label ?? '', baseText].reduce((a, b) => (b.length > a.length ? b : a));
   const end = endLayout(ends, longer || undefined, width, own);
-  const labelled = ends.map(({ value, ...e }) => ({ ...e, label: end.label({ ...e, value }) }));
+  const narrow = finite(width) && /** @type {number} */ (width) < NARROW;
+  const ys = rows
+    .map((r) => get(r, y))
+    .filter(finite)
+    .map(Number);
+  const want = [
+    ...ends.map((e) => ({ y: Number(e.y), lines: narrow ? 2 : 1 })),
+    ...(goal ? [{ y: goal.value, lines: 1 }] : []),
+  ];
+  // A negative value or an end with no number sits outside the domain
+  // spreadEnds assumes, so those labels stay where they are.
+  const spread =
+    ys.some((v) => v < 0) || want.some((w) => !finite(w.y))
+      ? []
+      : spreadEnds(
+          want,
+          baseline ? [...ys, baseline.value] : ys,
+          own,
+          finite(width) ? /** @type {number} */ (width) : PLOT_DEFAULT_WIDTH,
+          end.margin,
+        );
+  const dotted = ends.map(({ value: _, ...e }) => e);
+  const labelled = ends.map(({ value, ...e }, i) => ({
+    ...e,
+    y: spread[i] ?? e.y,
+    label: end.label({ ...e, value }),
+  }));
+  const goalY = goal ? spread[ends.length] : undefined;
   const axes = axisDefaults(own, rows, x, formats, 'y');
   const ownY = isRecord(own.y) ? own.y : {};
   if (baseline && !('domain' in ownY)) {
-    const ys = rows
-      .map((r) => get(r, y))
-      .filter(finite)
-      .map(Number);
     const ticks = zeroTicks(Math.max(baseline.value, goal?.value ?? 0, ...ys));
     if (!ticks.includes(baseline.value)) ticks.push(baseline.value);
     axes.y = { zero: true, ticks: ticks.sort((a, b) => a - b), .../** @type {object} */ (axes.y) };
@@ -1440,7 +1466,14 @@ function lines(p, rows, own, width) {
                 frameAnchor: 'right',
                 textAnchor: 'start',
                 dx: 8,
-                dy: baselineDy(baseline.value, rows, y, goal, labelled, own),
+                dy: baselineDy(
+                  baseline.value,
+                  rows,
+                  y,
+                  goal && { value: goal.value, labelY: goalY },
+                  labelled,
+                  own,
+                ),
                 ...end.fit,
               },
             },
@@ -1449,8 +1482,8 @@ function lines(p, rows, own, width) {
       ...(solid.length > 0 ? [line(solid, false)] : []),
       ...(dash.length > 0 ? [line(dash, true)] : []),
       ...eventMarks(laid),
-      ...goalMarks(goal, fy, end.fit),
-      { mark: 'dot', data: labelled, options: { x: 'x', y: 'y', fill: 'series', r: 3.5 } },
+      ...goalMarks(goal, fy, end.fit, goalY),
+      { mark: 'dot', data: dotted, options: { x: 'x', y: 'y', fill: 'series', r: 3.5 } },
       {
         mark: 'text',
         data: labelled,
@@ -1492,8 +1525,9 @@ function lines(p, rows, own, width) {
  * @param {number} base
  * @param {unknown[]} rows
  * @param {string} y
- * @param {{ value: number } | undefined} goal
- * @param {Array<{ y: unknown, label: string }>} ends
+ * @param {{ value: number, labelY?: number } | undefined} goal Its label
+ *   sits at `labelY` when the end labels' spread moved it off the rule.
+ * @param {Array<{ y: unknown, label: string }>} ends Where each end label sits.
  * @param {Record<string, unknown>} own
  */
 function baselineDy(base, rows, y, goal, ends, own) {
@@ -1515,7 +1549,7 @@ function baselineDy(base, rows, y, goal, ends, own) {
     ...ends
       .filter((e) => finite(e.y))
       .map((e) => ({ c: py(e.y), h: e.label.split('\n').length * LINE + END_GAP })),
-    ...(goal ? [{ c: py(goal.value), h }] : []),
+    ...(goal ? [{ c: py(goal.labelY ?? goal.value), h }] : []),
   ];
   const want = py(base) - 8;
   const clear = (/** @type {number} */ c) => taken.every((t) => Math.abs(c - t.c) >= (t.h + h) / 2);
