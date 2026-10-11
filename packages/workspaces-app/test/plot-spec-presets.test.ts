@@ -386,7 +386,9 @@ describe('a chart 600px or wider', () => {
 
   // Each file is what a wide chart draws, so a difference here is a change to
   // it. The stacked ones were rewritten in Version 9 for inked end labels with
-  // swatches; the lines ones date from before narrow charts were handled.
+  // swatches; the lines ones date from before narrow charts were handled,
+  // and lines-640 was rewritten in Version 10, when it stopped ticking
+  // "2020 2020 2021 2021" and took one tick a year.
   it.each([
     ['stacked-area-820', PRESET_SPEC, undefined],
     ['stacked-area-ticks-600', SCHOOL_YEARS, 600],
