@@ -61,7 +61,7 @@ function endLabels(svg: Element) {
         name: (lines[0] ?? '').split(' ')[0],
         fill: t.getAttribute('fill') ?? g.getAttribute('fill'),
         a: x + dx,
-        b: x + dx + Math.max(...lines.map(measured)),
+        b: x + dx + Math.max(...lines.map((l) => measured(l))),
         top,
         bottom: top + lines.length * LINE_BOX,
       };
