@@ -1,4 +1,4 @@
-// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 9 (2026-10-11, sha256 c9e3bdcab9c6b7ad). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
+// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 10 (2026-10-11, sha256 3809c63d1592cb2d). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
 // @ts-check
 
 /**
@@ -23,7 +23,7 @@
  * Plain JavaScript importing nothing: sf-works runs it under Node as it is.
  */
 
-export const PLOT_SPEC_VERSION = 9;
+export const PLOT_SPEC_VERSION = 10;
 
 export const PLOT_MARKS = /* @__PURE__ */ Object.freeze([
   'areaY',
@@ -1380,9 +1380,11 @@ function lines(p, rows, own, width) {
     return [{ x: get(last, x), y: get(last, y), series: s, value: fy(get(last, y)) }];
   });
   const goal = lineOf(p.goal, 'goal');
-  const end = endLayout(ends, goal?.label, width, own);
-  const labelled = ends.map(({ value, ...e }) => ({ ...e, label: end.label({ ...e, value }) }));
   const baseline = lineOf(p.baseline, 'baseline');
+  const baseText = baseline ? (baseline.label ?? fy(baseline.value)) : '';
+  const longer = [goal?.label ?? '', baseText].reduce((a, b) => (b.length > a.length ? b : a));
+  const end = endLayout(ends, longer || undefined, width, own);
+  const labelled = ends.map(({ value, ...e }) => ({ ...e, label: end.label({ ...e, value }) }));
   const axes = axisDefaults(own, rows, x, formats, 'y');
   const ownY = isRecord(own.y) ? own.y : {};
   if (baseline && !('domain' in ownY)) {
@@ -1430,8 +1432,16 @@ function lines(p, rows, own, width) {
             { mark: 'ruleY', data: [baseline.value], options: { stroke: HOUSE.muted } },
             {
               mark: 'text',
-              data: [{ y: baseline.value, label: baseline.label ?? fy(baseline.value) }],
-              options: { y: 'y', text: 'label', frameAnchor: 'left', textAnchor: 'start', dy: -8 },
+              data: [{ y: baseline.value, label: baseText }],
+              options: {
+                y: 'y',
+                text: 'label',
+                frameAnchor: 'right',
+                textAnchor: 'start',
+                dx: 8,
+                dy: baselineDy(baseline.value, rows, y, goal, labelled, own),
+                ...end.fit,
+              },
             },
           ]
         : []),
@@ -1470,6 +1480,48 @@ function lines(p, rows, own, width) {
       },
     ],
   };
+}
+
+/**
+ * How far, in px, the baseline's label sits from its rule on y. It sits in
+ * the right margin with the end labels, past the end dots, where no line
+ * reaches; 8px above the rule, else at the nearest place on y that touches
+ * no end label and no goal label. Above the rule, unmoved, when the y scale
+ * is anything but plain linear.
+ * @param {number} base
+ * @param {unknown[]} rows
+ * @param {string} y
+ * @param {{ value: number } | undefined} goal
+ * @param {Array<{ y: unknown, label: string }>} ends
+ * @param {Record<string, unknown>} own
+ */
+function baselineDy(base, rows, y, goal, ends, own) {
+  const ownY = isRecord(own.y) ? own.y : {};
+  const shaped =
+    Object.keys(ownY).some((k) => SCALE_SHAPES.includes(k) || k.startsWith('inset')) ||
+    Object.keys(own).some((k) => k.startsWith('inset'));
+  const vs = [base, ...(goal ? [goal.value] : []), ...rows.map((r) => get(r, y)).filter(finite)];
+  const d = ownY.domain;
+  const [y0, y1] =
+    Array.isArray(d) && d.length === 2 && d.every(finite)
+      ? /** @type {number[]} */ (d)
+      : [Math.min(0, ...vs.map(Number)), Math.max(0, ...vs.map(Number))];
+  const { top, bottom } = frameOf(own, PLOT_DEFAULT_WIDTH, 0);
+  if (shaped || !(y1 !== y0 && bottom > top)) return -8;
+  const py = (/** @type {unknown} */ v) => bottom - ((Number(v) - y0) / (y1 - y0)) * (bottom - top);
+  const h = LINE + END_GAP;
+  const taken = [
+    ...ends
+      .filter((e) => finite(e.y))
+      .map((e) => ({ c: py(e.y), h: e.label.split('\n').length * LINE + END_GAP })),
+    ...(goal ? [{ c: py(goal.value), h }] : []),
+  ];
+  const want = py(base) - 8;
+  const clear = (/** @type {number} */ c) => taken.every((t) => Math.abs(c - t.c) >= (t.h + h) / 2);
+  const best = [want, ...taken.flatMap((t) => [t.c - (t.h + h) / 2, t.c + (t.h + h) / 2])]
+    .filter(clear)
+    .sort((a, b) => Math.abs(a - want) - Math.abs(b - want) || a - b)[0];
+  return (best ?? want) - py(base);
 }
 
 /**
@@ -1639,15 +1691,18 @@ function setStyle(el, key, value) {
 }
 
 /**
- * Year ticks for the marks form: when the spec sets no x `tickFormat`, and
- * every x value its marks read (or its x domain) is a year, x ticks and every
- * tip's x read "2005", not "2,005".
+ * Year ticks: when every x value the marks read (or the x domain) is a year,
+ * x ticks and every tip's x read "2005", not "2,005", unless the spec sets
+ * its own x `tickFormat`; and, unless it sets its own x `ticks` or
+ * `interval`, the ticks are whole years, every `yearStep` years, so Plot's
+ * own half-year ticks never print one year twice.
  * @param {Record<string, unknown>} options
  * @param {ReturnType<typeof checkPlotSpec>} marks
+ * @param {unknown} width
  */
-function yearAxis(options, marks) {
+function yearAxis(options, marks, width) {
   const x = isRecord(options.x) ? options.x : {};
-  if (x.tickFormat !== undefined || x.type !== undefined) return;
+  if (x.type !== undefined) return;
   const domain = Array.isArray(x.domain) ? x.domain : [];
   const xs = [...domain];
   for (const m of marks) {
@@ -1655,12 +1710,59 @@ function yearAxis(options, marks) {
     if (typeof field === 'string') for (const r of m.data) xs.push(get(r, field));
   }
   if (!yearLike(xs)) return;
-  options.x = { ...x, tickFormat: 'd' };
-  for (const m of marks) {
-    if (m.mark !== 'tip' || typeof m.options.x !== 'string') continue;
-    const format = isRecord(m.options.format) ? m.options.format : {};
-    if (format.x === undefined) m.options = { ...m.options, format: { ...format, x: 'd' } };
+  /** @type {Record<string, unknown>} */
+  const next = { ...x };
+  if (x.ticks === undefined && x.interval === undefined) {
+    const years = /** @type {number[]} */ (domain.length === 2 ? domain : xs);
+    const lo = Math.min(...years);
+    const hi = Math.max(...years);
+    const named = typeof x.tickFormat === 'string' ? x.tickFormat : 'd';
+    const format = named === 'd' ? String : plotFormat(named);
+    const label = (Math.max(format(lo).length, format(hi).length) + 2) * CH;
+    const step = yearStep(hi - lo, plotWidthOf(options, width), label);
+    /** @type {number[]} */
+    const ticks = [];
+    for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push(t);
+    next.ticks = ticks.length > 0 ? ticks : [lo];
   }
+  if (x.tickFormat === undefined) {
+    next.tickFormat = 'd';
+    for (const m of marks) {
+      if (m.mark !== 'tip' || typeof m.options.x !== 'string') continue;
+      const format = isRecord(m.options.format) ? m.options.format : {};
+      if (format.x === undefined) m.options = { ...m.options, format: { ...format, x: 'd' } };
+    }
+  }
+  options.x = next;
+}
+
+/**
+ * The fewest years between two ticks, 1, 2 or 5 times a power of ten, that
+ * keeps a tick's label clear of the next across `plotWidth` px.
+ * @param {number} span Years from the first to the last.
+ * @param {number} plotWidth
+ * @param {number} label A tick label's px, with two glyphs of gap.
+ */
+function yearStep(span, plotWidth, label) {
+  for (let mag = 1; ; mag *= 10) {
+    for (const k of [1, 2, 5]) {
+      const step = k * mag;
+      if (span <= 0 || plotWidth <= 0 || (step / span) * plotWidth >= label) return step;
+    }
+  }
+}
+
+/**
+ * The px between the plot's left and right margins at `width`, else at Plot's
+ * default width: the spec's margins, else Plot's 40 and 20.
+ * @param {Record<string, unknown>} options
+ * @param {unknown} width
+ */
+function plotWidthOf(options, width) {
+  const w = finite(width) ? /** @type {number} */ (width) : PLOT_DEFAULT_WIDTH;
+  const margin = (/** @type {unknown} */ m, /** @type {number} */ d) =>
+    /** @type {number} */ (finite(m) ? m : finite(options.margin) ? options.margin : d);
+  return w - margin(options.marginLeft, 40) - margin(options.marginRight, 20);
 }
 
 /**
@@ -1691,12 +1793,7 @@ function thinTicks(options, marks, width) {
   }
   const all = [...ticks, ...xs.filter(finite).map(Number)];
   const span = Math.max(...all) - Math.min(...all);
-  const margin = (/** @type {unknown} */ m, /** @type {number} */ d) =>
-    finite(m) ? /** @type {number} */ (m) : finite(options.margin) ? options.margin : d;
-  const plotWidth =
-    /** @type {number} */ (width) -
-    /** @type {number} */ (margin(options.marginLeft, 40)) -
-    /** @type {number} */ (margin(options.marginRight, 20));
+  const plotWidth = plotWidthOf(options, width);
   const gap = Math.min(...ticks.slice(1).map((t, i) => t - /** @type {number} */ (ticks[i])));
   if (!(span > 0 && gap > 0 && plotWidth > 0)) return;
   const step = Math.ceil(label / ((gap / span) * plotWidth));
@@ -1721,8 +1818,8 @@ export function buildPlot(Plot, spec, env = {}) {
   // Plot function is called.
   const checked = checkPlotSpec(expanded);
   const own = { ...expanded.options };
-  yearAxis(own, checked);
   const width = finite(env.width) && /** @type {number} */ (env.width) > 0 ? env.width : own.width;
+  yearAxis(own, checked, width);
   thinTicks(own, checked, width);
   const steps = checked.map((m) => ({
     m,
