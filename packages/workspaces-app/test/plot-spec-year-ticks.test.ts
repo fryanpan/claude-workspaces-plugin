@@ -168,6 +168,19 @@ describe('year ticks', () => {
     expectWholeYears(at(spec, 1180));
   });
 
+  it('spaces ticks for the label the spec’s own format prints', () => {
+    const spec = {
+      data: { rows: index(2005, 21, { Riverbend: 0.05 }) },
+      options: { x: { tickFormat: 'schoolYear' } },
+      marks: [{ mark: 'lineY', data: 'rows', options: { x: 'year', y: 'v' } }],
+    } as Spec;
+    const ticks = xTicks(at(spec, 600));
+    expect(ticks[0]?.text).toBe('2005-06');
+    for (let i = 1; i < ticks.length; i++) {
+      expect(ticks[i]?.a ?? 0).toBeGreaterThan(ticks[i - 1]?.b ?? 0);
+    }
+  });
+
   it('keeps a spec’s own ticks and interval', () => {
     const own = (x: Record<string, unknown>) =>
       ({

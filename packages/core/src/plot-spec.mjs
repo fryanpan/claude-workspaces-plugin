@@ -1,4 +1,4 @@
-// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 10 (2026-10-11, sha256 0131a866a6864b38). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
+// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 10 (2026-10-11, sha256 3809c63d1592cb2d). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
 // @ts-check
 
 /**
@@ -1716,11 +1716,14 @@ function yearAxis(options, marks, width) {
     const years = /** @type {number[]} */ (domain.length === 2 ? domain : xs);
     const lo = Math.min(...years);
     const hi = Math.max(...years);
-    const step = yearStep(hi - lo, plotWidthOf(options, width));
+    const named = typeof x.tickFormat === 'string' ? x.tickFormat : 'd';
+    const format = named === 'd' ? String : plotFormat(named);
+    const label = (Math.max(format(lo).length, format(hi).length) + 2) * CH;
+    const step = yearStep(hi - lo, plotWidthOf(options, width), label);
     /** @type {number[]} */
     const ticks = [];
     for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push(t);
-    next.ticks = ticks;
+    next.ticks = ticks.length > 0 ? ticks : [lo];
   }
   if (x.tickFormat === undefined) {
     next.tickFormat = 'd';
@@ -1733,20 +1736,18 @@ function yearAxis(options, marks, width) {
   options.x = next;
 }
 
-/** The px a tick label takes on x: four digits plus two glyphs of gap. */
-const YEAR_LABEL = 6 * CH;
-
 /**
  * The fewest years between two ticks, 1, 2 or 5 times a power of ten, that
- * keeps a year's label clear of the next across `plotWidth` px.
+ * keeps a tick's label clear of the next across `plotWidth` px.
  * @param {number} span Years from the first to the last.
  * @param {number} plotWidth
+ * @param {number} label A tick label's px, with two glyphs of gap.
  */
-function yearStep(span, plotWidth) {
+function yearStep(span, plotWidth, label) {
   for (let mag = 1; ; mag *= 10) {
     for (const k of [1, 2, 5]) {
       const step = k * mag;
-      if (span <= 0 || plotWidth <= 0 || (step / span) * plotWidth >= YEAR_LABEL) return step;
+      if (span <= 0 || plotWidth <= 0 || (step / span) * plotWidth >= label) return step;
     }
   }
 }
