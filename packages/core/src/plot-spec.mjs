@@ -1,4 +1,4 @@
-// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 11 (2026-10-11, sha256 45eacf433eadc109). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
+// plot-spec.mjs: the canonical copy, in claude-workspaces packages/core/src. Version 11 (2026-10-11, sha256 309aaa1dfa56921b). Other repos copy these bytes verbatim and compare this line; `tail -n +2` of the file hashes to that sha256 prefix.
 // @ts-check
 
 /**
@@ -1356,9 +1356,9 @@ function stackedArea(p, rows, own, width) {
  * value in ink beside the series-colour dot that ends its line (no series
  * colour reaches 4.5:1 as text on the paper), the labels moved apart on y
  * where they would overlap (`spreadEnds`) while each dot stays on its line's
- * last point; named series dashed; an
- * optional goal rule; an optional baseline for an index or ratio chart, which
- * then starts at zero with the baseline drawn, labelled and ticked.
+ * last point; named series dashed; an optional goal rule; an optional
+ * baseline for an index or ratio chart, which then starts at zero with the
+ * baseline drawn, labelled and ticked.
  * @param {Record<string, unknown>} p
  * @param {unknown[]} rows
  * @param {Record<string, unknown>} own
