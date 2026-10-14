@@ -26,6 +26,7 @@ import {
   resolveRelativePositionRaw,
   walkProse,
 } from './prose-fragment.ts';
+import { promoteImageParagraphOf } from './prose-image-line.ts';
 import {
   inlineMarksToDelta,
   isInsideTableCell,
@@ -535,6 +536,8 @@ export function findAndReplace(
           attributes: siteMarks.attributes,
         });
       }
+      for (const node of new Set(kept.map((m) => m.segment.node)))
+        promoteImageParagraphOf(doc, node);
     }, opts.transactionOrigin ?? 'agent');
     return {
       ok: true,
@@ -575,6 +578,7 @@ export function findAndReplace(
       replacementFor(chosen, opts.replace),
       { parseInlineMarks: opts.parseInlineMarks === true, attributes: marks.attributes },
     );
+    promoteImageParagraphOf(doc, chosen.segment.node);
   }, opts.transactionOrigin ?? 'agent');
 
   return { ok: true, ...marksReport(marks.dropped) };
@@ -922,6 +926,7 @@ export function rewriteRange(
         parseInlineMarks,
         attributes: marks.attributes,
       });
+      promoteImageParagraphOf(doc, start.node);
     }, opts.transactionOrigin ?? 'agent');
     return { ok: true, ...marksReport(marks.dropped) };
   }
@@ -981,6 +986,7 @@ export function rewriteRange(
         seg.node.delete(0, seg.length);
       }
     }
+    promoteImageParagraphOf(doc, firstNode);
   }, opts.transactionOrigin ?? 'agent');
   return { ok: true, ...marksReport(marks.dropped) };
 }
@@ -1002,9 +1008,14 @@ export function insertAfterRange(
   const end = resolveRelativePositionRaw(doc, opts.endRel);
   if (!end) return { ok: false, error: 'anchor-orphaned' };
   if (opts.text.length === 0) return { ok: false, error: 'empty-text' };
+  let promoted = false;
   doc.transact(() => {
     end.node.insert(end.offset, opts.text);
+    promoted = promoteImageParagraphOf(doc, end.node);
   }, opts.transactionOrigin ?? 'agent');
+  // The paragraph is an image node now, so there is no text node left to
+  // read back; the line it was promoted from is what landed.
+  if (promoted) return { ok: true, landed: opts.text.trim() };
   // Read the node back rather than trust the call: a peer's insert reported
   // `ok` twice while nothing reached the doc, and the only way a caller can
   // tell an insert that landed from one that did not is to be handed what

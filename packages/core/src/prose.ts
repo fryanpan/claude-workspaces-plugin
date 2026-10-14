@@ -22,6 +22,8 @@
  *                        ends, so the parser holds each as one block.
  *   `prose-mdx-retype.ts` re-types an `.mdx` doc's paragraphs that the MDX
  *                        grammar reads as blocks, keeping their bytes.
+ *   `prose-image-line.ts` a standalone `![alt](src)` line, and promoting a
+ *                        paragraph that holds one as text into an image node.
  *   `prose-math.ts`      where a remark-math `$…$` or `$$` … `$$` equation
  *                        starts and ends, so its TeX is held as one run.
  *
@@ -68,6 +70,7 @@ export type { SourceLayout } from './prose-keep-source.ts';
 export { isMdxPath, MDX_FLOW_LANGUAGE, mdxFlowEnd } from './prose-mdx.ts';
 export type { MarkdownParseOptions } from './prose-mdx.ts';
 export { retypeMdxParagraphs } from './prose-mdx-retype.ts';
+export { imageFromLine, isImageLine, promoteImageParagraphs } from './prose-image-line.ts';
 export {
   MATH_DISPLAY_LANGUAGE,
   mathDisplayTex,

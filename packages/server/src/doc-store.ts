@@ -1996,6 +1996,13 @@ export class DocStore {
     // disk on its own. It rides the next save a real edit causes.
     if (!isNew && contentKind(meta.type) === 'prose') {
       ydoc.transact(() => prose.remintDuplicateIds(prose.getProseFragment(ydoc)), 'block-ids');
+      // An image line an edit wrote into a paragraph as text serializes to the
+      // same `.md` line as an image node, so no reconcile ever rebuilds it.
+      // Promote it here, for the same no-save reason (`prose-image-line.ts`).
+      ydoc.transact(
+        () => prose.promoteImageParagraphs(ydoc, prose.getProseFragment(ydoc)),
+        'image-heal',
+      );
     }
     this.docs.set(docId, doc);
     this.hydratedAt.set(docId, this.now());
