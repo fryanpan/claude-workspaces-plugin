@@ -58,6 +58,7 @@ describe('choice block text', () => {
     expect(set).toBe('id=a options="yes,maybe,no" picked=yes');
     expect(setChoicePick(set, 'no')).toBe('id=a options="yes,maybe,no" picked=no');
     expect(setChoicePick(set, null)).toBe(bare);
+    expect(setChoicePick('picked=no options="yes,no"', null)).toBe('options="yes,no"');
     expect(setChoicePick(LINE, 'no')).toBe('id=lead-riverbend options="yes,maybe,no" picked=no');
     expect(setChoicePick('options="sure,not sure"', 'not sure')).toBe(
       'options="sure,not sure" picked="not sure"',

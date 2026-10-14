@@ -82,9 +82,11 @@ export function setChoicePick(text: string, option: string | null): string {
   const field = fieldsOf(text).find((f) => f.key === 'picked');
   if (option === null) {
     if (!field) return text;
-    // Take the one space before the field with it, so set-then-clear is a no-op.
-    const from = field.start > 0 && text[field.start - 1] === ' ' ? field.start - 1 : field.start;
-    return text.slice(0, from) + text.slice(field.end);
+    // Take one space beside the field with it, so set-then-clear is a no-op.
+    if (field.start > 0 && text[field.start - 1] === ' ')
+      return text.slice(0, field.start - 1) + text.slice(field.end);
+    const to = text[field.end] === ' ' ? field.end + 1 : field.end;
+    return text.slice(0, field.start) + text.slice(to);
   }
   const written = `picked=${quote(option)}`;
   if (field) return text.slice(0, field.start) + written + text.slice(field.end);
