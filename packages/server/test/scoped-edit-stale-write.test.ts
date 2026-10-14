@@ -7,7 +7,10 @@ import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as Y from 'yjs';
 import { getProseFragment } from '../../core/src/prose.ts';
+import { DocStore } from '../src/doc-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { SseBus } from '../src/sse.ts';
+import { createWebhookDispatcher } from '../src/webhooks.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
@@ -301,5 +304,34 @@ describe('scoped edits under the stale-write rule', () => {
     });
     expect(del.status).toBe(409);
     expect(await docText()).toContain('Saltmarsh');
+  });
+});
+
+describe('the dry run behind the guard', () => {
+  it('tries the edit on a copy and leaves the live doc without a presence object', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'cw-scoped-dry-'));
+    try {
+      const docStore = new DocStore({
+        dataDir,
+        sse: new SseBus(),
+        webhooks: createWebhookDispatcher({ onLog: () => {} }),
+      });
+      docStore.getOrCreate('d1', { type: 'markdown' });
+      docStore.setDocContent('d1', '# Doc\n\nHarborlight body.\n');
+      // A person's edit inside the window, with no block stamps: the dry run
+      // runs, finds no stamped block, and the edit lands.
+      docStore.noteHumanEdit('d1', Date.now() - 1_000);
+      const res = docStore.guardScopedEdit('d1', {}, () =>
+        docStore.findAndReplace('d1', { find: 'Harborlight', replace: 'Riverbend' }),
+      );
+      expect(res.ok).toBe(true);
+      const live = docStore.get('d1');
+      expect(getProseFragment(live?.ydoc as Y.Doc).toString()).toContain('Riverbend body.');
+      // `awareness` is constructed on first read and starts a timer that
+      // never stops; the dry run must not read it.
+      expect(live?.peekAwareness()).toBeNull();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
   });
 });

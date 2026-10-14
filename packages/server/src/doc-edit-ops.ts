@@ -95,7 +95,11 @@ export class DocEditOps {
       const stale = this.p.staleWrite(docId, guard.reader);
       if (stale) {
         const { touched } = touchedByDryRun(doc.ydoc, prose.getProseFragment, (copy) => {
-          this.dryRun = { real: doc, copy: { ...doc, ydoc: copy } };
+          // A view over the live doc with only `ydoc` swapped, never a spread:
+          // spreading reads every getter, and `awareness` constructs a
+          // presence object with a timer that never stops.
+          const view = Object.create(doc, { ydoc: { value: copy } }) as LiveDoc;
+          this.dryRun = { real: doc, copy: view };
           try {
             return run();
           } finally {
