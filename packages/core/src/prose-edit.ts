@@ -28,8 +28,10 @@ import {
 } from './prose-fragment.ts';
 import {
   inlineMarksToDelta,
-  insertDeltaInto,
+  isInsideTableCell,
   splitTableRow,
+  tableCellBlocks,
+  tableCellMarkdown,
   textContent,
 } from './prose-markdown.ts';
 import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK } from './suggest.ts';
@@ -528,7 +530,7 @@ export function findAndReplace(
           { node: m.segment.node, offset: m.offsetInNode, length: m.length },
         ]);
         for (const k of siteMarks.dropped) droppedUnion.add(k);
-        spliceText(m.segment.node, m.offsetInNode, m.length, opts.replace, {
+        spliceText(m.segment.node, m.offsetInNode, m.length, replacementFor(m, opts.replace), {
           parseInlineMarks: opts.parseInlineMarks === true,
           attributes: siteMarks.attributes,
         });
@@ -566,13 +568,28 @@ export function findAndReplace(
   ]);
 
   doc.transact(() => {
-    spliceText(chosen.segment.node, chosen.offsetInNode, chosen.length, opts.replace, {
-      parseInlineMarks: opts.parseInlineMarks === true,
-      attributes: marks.attributes,
-    });
+    spliceText(
+      chosen.segment.node,
+      chosen.offsetInNode,
+      chosen.length,
+      replacementFor(chosen, opts.replace),
+      { parseInlineMarks: opts.parseInlineMarks === true, attributes: marks.attributes },
+    );
   }, opts.transactionOrigin ?? 'agent');
 
   return { ok: true, ...marksReport(marks.dropped) };
+}
+
+/**
+ * The text a match inside a table cell is replaced with: a `<br>` becomes a
+ * line break. An agent reads a cell's breaks as `<br>` — that is how the row
+ * is written (`tableCellMarkdown`) — so `<br>` is what it writes back, and
+ * left as characters it showed in the editor as a literal tag. Outside a cell
+ * a `<br>` stays text, as it always was.
+ */
+function replacementFor(m: LocatedMatch, replace: string): string {
+  if (!/<br\s*\/?>/i.test(replace) || !isInsideTableCell(m.segment.node)) return replace;
+  return replace.replace(/<br\s*\/?>/gi, '\n');
 }
 
 /** Table-row syntax, shared with the parser's heuristics: a line whose
@@ -656,7 +673,11 @@ function rowMatches(row: Y.XmlElement, findCells: string[]): boolean {
   if (cells.length !== findCells.length) return false;
   return cells.every((cell, i) => {
     const want = normCell(findCells[i] ?? '');
-    return want === normCell(rawCellText(cell)) || want === normCell(textContent(cell));
+    return (
+      want === normCell(rawCellText(cell)) ||
+      want === normCell(textContent(cell)) ||
+      want === normCell(tableCellMarkdown(cell).replace(/\\\|/g, '|'))
+    );
   });
 }
 
@@ -764,14 +785,10 @@ function tryTableRowReplace(
           const after = replaceRows[r]?.[c] ?? '';
           // An unchanged cell is left alone — its marks and anchors survive.
           if (normCell(before) === normCell(after)) return;
-          const p = new Y.XmlElement('paragraph');
-          if (after.length > 0) {
-            const t = new Y.XmlText();
-            insertDeltaInto(t, inlineMarksToDelta(after));
-            p.insert(0, [t]);
-          }
+          // Built the way the parser builds a cell, so the `<br>` breaks and
+          // `- ` items an agent quoted from the row come back as structure.
           cell.delete(0, cell.length);
-          cell.insert(0, [p]);
+          cell.insert(0, tableCellBlocks(after));
         });
       });
     }

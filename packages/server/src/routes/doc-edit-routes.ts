@@ -20,6 +20,7 @@ import {
   PLACEMENT_INVALID,
   parsePlacement,
   parseSuggestionAuthor,
+  scopedEditGuard,
   withSyncError,
 } from './docs-routes-context.ts';
 
@@ -205,7 +206,9 @@ export async function handleDocEditRoutes(
       if (kind !== 'replace' && kind !== 'insert_after') {
         return j(400, { error: 'kind must be replace or insert_after' });
       }
-      const res = docStore.editAtAgentAnchor(docId, anchorId, { kind, text });
+      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.editAtAgentAnchor(docId, anchorId, { kind, text }),
+      );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (anchorRest === '/insert_blocks' && req.method === 'POST') {
@@ -216,7 +219,9 @@ export async function handleDocEditRoutes(
       if (placement === PLACEMENT_INVALID) {
         return j(400, { error: "placement must be 'after-block' or 'top-level'" });
       }
-      const res = docStore.insertBlocksAtAnchor(docId, anchorId, markdown, { placement });
+      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.insertBlocksAtAnchor(docId, anchorId, markdown, { placement }),
+      );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (anchorRest === '' && req.method === 'DELETE') {
@@ -257,15 +262,17 @@ export async function handleDocEditRoutes(
       });
       return res.ok ? j(200, res) : j(409, res);
     }
-    const res = docStore.findAndReplace(docId, {
-      find,
-      replace,
-      contextBefore,
-      contextAfter,
-      occurrence,
-      replaceAll,
-      parseInlineMarks: body?.parseInlineMarks === true,
-    });
+    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      docStore.findAndReplace(docId, {
+        find,
+        replace,
+        contextBefore,
+        contextAfter,
+        occurrence,
+        replaceAll,
+        parseInlineMarks: body?.parseInlineMarks === true,
+      }),
+    );
     // Piggy-back any pending sync trouble on the response: agents act
     // on edit results, not on get_doc, so this is where a conflict
     // actually gets seen.
@@ -326,9 +333,11 @@ export async function handleDocEditRoutes(
     if ((threadId && anchorId) || (!threadId && !anchorId)) {
       return j(400, { error: 'exactly one of threadId or anchorId required' });
     }
-    const res = threadId
-      ? docStore.deleteBlockAtThread(docId, threadId)
-      : docStore.deleteBlockAtAgentAnchor(docId, anchorId!);
+    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      threadId
+        ? docStore.deleteBlockAtThread(docId, threadId)
+        : docStore.deleteBlockAtAgentAnchor(docId, anchorId!),
+    );
     return res.ok ? j(200, res) : j(409, res);
   }
   if (rest === 'delete_blocks_in_range' && req.method === 'POST') {
@@ -338,27 +347,31 @@ export async function handleDocEditRoutes(
     if (startFind.length === 0 || endFind.length === 0) {
       return j(400, { error: 'startFind and endFind are required' });
     }
-    const res = docStore.deleteBlocksInRange(docId, {
-      startFind,
-      endFind,
-      contextBefore: body?.contextBefore ? String(body.contextBefore) : undefined,
-      contextAfter: body?.contextAfter ? String(body.contextAfter) : undefined,
-      startOccurrence:
-        typeof body?.startOccurrence === 'number' ? Number(body.startOccurrence) : undefined,
-      endOccurrence:
-        typeof body?.endOccurrence === 'number' ? Number(body.endOccurrence) : undefined,
-    });
+    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      docStore.deleteBlocksInRange(docId, {
+        startFind,
+        endFind,
+        contextBefore: body?.contextBefore ? String(body.contextBefore) : undefined,
+        contextAfter: body?.contextAfter ? String(body.contextAfter) : undefined,
+        startOccurrence:
+          typeof body?.startOccurrence === 'number' ? Number(body.startOccurrence) : undefined,
+        endOccurrence:
+          typeof body?.endOccurrence === 'number' ? Number(body.endOccurrence) : undefined,
+      }),
+    );
     return res.ok ? j(200, res) : j(409, res);
   }
   if (rest === 'delete_section' && req.method === 'POST') {
     const body = await safeJson(req);
     const heading = String(body?.heading ?? '');
     if (heading.length === 0) return j(400, { error: 'heading is required' });
-    const res = docStore.deleteSection(docId, {
-      heading,
-      level: typeof body?.level === 'number' ? Number(body.level) : undefined,
-      occurrence: typeof body?.occurrence === 'number' ? Number(body.occurrence) : undefined,
-    });
+    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      docStore.deleteSection(docId, {
+        heading,
+        level: typeof body?.level === 'number' ? Number(body.level) : undefined,
+        occurrence: typeof body?.occurrence === 'number' ? Number(body.occurrence) : undefined,
+      }),
+    );
     return res.ok ? j(200, res) : j(409, res);
   }
   return undefined;

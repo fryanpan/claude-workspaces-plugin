@@ -134,6 +134,11 @@ import {
 } from './private-meta.ts';
 import { RepoRegistry } from './repo-registry.ts';
 import { type ArchivedDoc, type ArchivedReview } from './review-archive.ts';
+import {
+  STALE_WRITE_WINDOW_MS,
+  type ScopedEditGuard,
+  type ScopedEditRefusal,
+} from './scoped-edit-guard.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
 import type { ScheduleArgs, ThreadSummarizer } from './summarize.ts';
@@ -266,6 +271,17 @@ export interface LiveDoc {
    * In-memory only: after a restart there are no live edits to protect yet.
    */
   lastHumanEditAt?: number;
+  /**
+   * The same marker per top-level block, keyed by the block's Yjs item id:
+   * which blocks a person changed, and when. Lets a SCOPED agent edit be
+   * judged by the blocks it touches rather than the whole doc
+   * (`scoped-edit-guard.ts`). In-memory, like `lastHumanEditAt`.
+   */
+  humanBlockEditAt?: Map<string, number>;
+  /** Counts person's edits, so a pre-edit backup is written once per edit
+   *  of theirs (`backedUpHumanEditSeq` is the one last backed up). */
+  humanEditSeq?: number;
+  backedUpHumanEditSeq?: number;
   /**
    * Wall-clock time of the last change to this doc's CONTENT made by a
    * person or an agent — the signal the stall loop reads so that a row whose
@@ -418,11 +434,6 @@ export interface DocStoreConfig {
  *  `contentRevision` bump. Same order as the ~1s write-back flush: a burst
  *  is a person or agent mid-thought, not N revisions. */
 const REVISION_SETTLE_MS = DOC_STORE_TIMINGS.revisionSettleMs;
-
-/** How long after a human's live edit an UNTRACKED caller's whole-doc
- *  rewrite is refused (callers with a tracked read are judged by order,
- *  not the clock). See `DocStore.staleWriteCheck`. */
-const STALE_WRITE_WINDOW_MS = 10 * 60_000;
 
 // How long a doc may sit untouched in memory before it is dropped is
 // `doc-residency.ts`: a week for a doc a person opened, within a cap, and
@@ -636,6 +647,7 @@ export class DocStore {
       dataDir: () => this.cfg.dataDir,
       doc: (docId) => this.resolveDoc(docId),
       thread: (docId, threadId) => this.getThread(docId, threadId),
+      staleWrite: (docId, reader) => this.staleWriteCheck(docId, reader),
       announceSuggestion: (doc, event, sid, summary) =>
         this.fanout.fireSuggestionEvent(doc, event, sid, summary),
     };
@@ -3660,7 +3672,19 @@ export class DocStore {
 
   noteHumanEdit(docId: string, at: number = Date.now()): void {
     const doc = this.get(docId);
-    if (doc) doc.lastHumanEditAt = at;
+    if (!doc) return;
+    doc.lastHumanEditAt = at;
+    doc.humanEditSeq = (doc.humanEditSeq ?? 0) + 1;
+  }
+
+  /** Run one scoped agent edit under the stale-write rule and the pre-edit
+   *  backup. See `DocEditOps.guardScopedEdit`. */
+  guardScopedEdit<R extends { ok: boolean }>(
+    docId: string,
+    guard: ScopedEditGuard | undefined,
+    run: () => R,
+  ): R | (R & { backup: string }) | ScopedEditRefusal {
+    return this.docEdits.guardScopedEdit(docId, guard, run);
   }
 
   /** Record that `reader` fetched this doc's content (their copy is current

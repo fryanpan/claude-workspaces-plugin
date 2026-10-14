@@ -45,6 +45,7 @@ import { type EditSessionTracker, noteEditTransaction } from './edit-sessions.ts
 import { newEventId } from './event-id.ts';
 import { isPrivateMetaKey } from './private-meta.ts';
 import { newlyOrphaned, orphanedThreadIds } from './review-stale-notify.ts';
+import { touchedBlockKeys } from './scoped-edit-guard.ts';
 import type { SseBus } from './sse.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import type { WebhookDispatcher } from './webhooks.ts';
@@ -770,17 +771,22 @@ export class LiveDocFanout {
     // Debounced so a burst of keystrokes only does one sweep.
     const fragment = prose.getProseFragment(doc.ydoc);
     let reanchorTimer: ReturnType<typeof setTimeout> | null = null;
-    fragment.observeDeep((_events, tr) => {
+    fragment.observeDeep((events, tr) => {
       // A prose transaction whose origin is one of this doc's live
       // websockets is a person typing in the browser editor — every
       // server-side writer stamps a string origin instead. That marker is
-      // what stops set_doc_content from silently rewriting over them.
+      // what stops set_doc_content from silently rewriting over them, and
+      // the per-block stamps are what a scoped edit is judged by.
       if (
         typeof tr.origin === 'object' &&
         tr.origin !== null &&
         doc.conns.has(tr.origin as FeedbackWs)
       ) {
-        doc.lastHumanEditAt = Date.now();
+        const at = Date.now();
+        doc.lastHumanEditAt = at;
+        doc.humanEditSeq = (doc.humanEditSeq ?? 0) + 1;
+        doc.humanBlockEditAt ??= new Map();
+        for (const key of touchedBlockKeys(fragment, events)) doc.humanBlockEditAt.set(key, at);
       }
       // Don't re-enter on our own re-anchor writes. NOTE: 'file-watch' must
       // NOT be skipped here — a disk reparse is exactly when anchors inside a

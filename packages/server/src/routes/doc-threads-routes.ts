@@ -58,6 +58,7 @@ import {
   type ThreadReviewGate,
   parsePlacement,
   parseSuggestionAuthor,
+  scopedEditGuard,
   withSyncError,
 } from './docs-routes-context.ts';
 
@@ -787,9 +788,9 @@ export async function handleDocThreadRoutes(
         });
         return res.ok ? j(200, res) : j(409, res);
       }
-      const res = docStore.rewriteThreadRegion(docId, threadId, replacement, {
-        parseInlineMarks,
-      });
+      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.rewriteThreadRegion(docId, threadId, replacement, { parseInlineMarks }),
+      );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (threadRest === '/insert_after' && req.method === 'POST') {
@@ -803,7 +804,9 @@ export async function handleDocThreadRoutes(
             'text required — a non-empty string. A new block goes to insert_blocks_after (its field is markdown).',
         });
       }
-      const res = docStore.insertAfterThread(docId, threadId, text);
+      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.insertAfterThread(docId, threadId, text),
+      );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (threadRest === '/insert_blocks_after' && req.method === 'POST') {
@@ -813,7 +816,9 @@ export async function handleDocThreadRoutes(
       if (placement === PLACEMENT_INVALID) {
         return j(400, { error: "placement must be 'after-block' or 'top-level'" });
       }
-      const res = docStore.insertBlocksAfterThread(docId, threadId, markdown, { placement });
+      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.insertBlocksAfterThread(docId, threadId, markdown, { placement }),
+      );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
   }

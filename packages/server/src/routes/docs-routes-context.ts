@@ -30,6 +30,7 @@ import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { LinkedDockItem } from '../mockup-linked-items.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
+import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
@@ -78,6 +79,20 @@ export function parsePlacement(
   if (value === undefined || value === null) return undefined;
   if (value === 'after-block' || value === 'top-level') return value;
   return PLACEMENT_INVALID;
+}
+
+/** What a scoped edit's body says about the stale-write rule: whose reads to
+ *  judge it by, and whether the caller confirmed writing over a person's
+ *  change. Used by both `doc-threads-routes.ts` and `doc-edit-routes.ts`. */
+export function scopedEditGuard(
+  body: Record<string, unknown> | null,
+  authorFor: (claimed: unknown) => User | undefined,
+): ScopedEditGuard {
+  const reader = authorFor(body?.author)?.id;
+  return {
+    ...(reader !== undefined ? { reader } : {}),
+    confirm: body?.confirmOverwriteHumanEdits === true,
+  };
 }
 
 /** Parse a `suggest: true` request body's `author` field into a
