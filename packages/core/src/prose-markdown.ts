@@ -900,13 +900,7 @@ function mkTable(headerCells: string[], bodyRows: string[][]): Y.XmlElement {
   // unbounded log.
   const mkCell = (name: 'tableHeader' | 'tableCell', text: string): Y.XmlElement => {
     const cell = new Y.XmlElement(name);
-    const p = new Y.XmlElement('paragraph');
-    if (text.length > 0) {
-      const t = new Y.XmlText();
-      insertDeltaInto(t, inlineMarksToDelta(text));
-      p.insert(0, [t]);
-    }
-    cell.insert(0, [p]);
+    cell.insert(0, tableCellBlocks(text));
     return cell;
   };
   const mkRow = (cells: Y.XmlElement[]): Y.XmlElement => {
@@ -922,6 +916,166 @@ function mkTable(headerCells: string[], bodyRows: string[][]): Y.XmlElement {
   const table = new Y.XmlElement('table');
   table.insert(0, [headerRow, ...rows]);
   return table;
+}
+
+// --- Inside a table cell ----------------------------------------------------
+// A pipe-table row is one line, so whatever a person typed inside a cell —
+// a line break, a second paragraph, a bullet list — has to be written within
+// that line. GFM's own form is `<br>`, so that is the vocabulary: a hard break
+// is `<br>`, a paragraph boundary is `<br><br>`, and a list is its items, each
+// on its own `<br>`-separated line behind a `- ` or `1. ` marker. The cell
+// used to be written as its bare text, which ran every line, paragraph and
+// item together, and an agent editing from that copy wrote the flattening
+// back (2026-10-14). A cell holding one plain paragraph is written exactly as
+// it was, so a doc with no formatted cells does not change on its next flush.
+
+/** How a line break inside a cell is written. */
+const CELL_BREAK = '<br>';
+/** Every spelling of a break the parser accepts inside a cell. */
+const CELL_BREAK_RE = /<br\s*\/?>/gi;
+const CELL_BULLET_RE = /^[-*+]\s+/;
+const CELL_ORDERED_RE = /^\d{1,9}[.)]\s+/;
+
+/** True when `node` sits inside a table cell — a line break written into it
+ *  must then be `<br>`, never a raw newline, or it ends the row. */
+export function isInsideTableCell(node: Y.XmlText | Y.XmlElement): boolean {
+  let t: unknown = node;
+  while (t instanceof Y.XmlElement || t instanceof Y.XmlText) {
+    if (t instanceof Y.XmlElement && (t.nodeName === 'tableCell' || t.nodeName === 'tableHeader')) {
+      return true;
+    }
+    t = t.parent;
+  }
+  return false;
+}
+
+/** A cell's content as the one-line markdown its row carries. */
+export function tableCellMarkdown(cell: Y.XmlElement): string {
+  const parts: string[] = [];
+  for (const child of cell.toArray()) {
+    const md =
+      child instanceof Y.XmlText
+        ? cellText(textWithMarks(child))
+        : child instanceof Y.XmlElement
+          ? cellBlockMarkdown(child)
+          : '';
+    if (md.length > 0) parts.push(md);
+  }
+  return parts.join(CELL_BREAK + CELL_BREAK);
+}
+
+/** Pipe-escape a run of cell text and write its newlines as breaks. */
+function cellText(s: string): string {
+  return s.replace(/\|/g, '\\|').replace(/\n/g, CELL_BREAK);
+}
+
+/** One block of a cell. Lines are trimmed and empty edges dropped, because
+ *  the parser trims them too and the written form must survive a re-read. */
+function cellBlockMarkdown(el: Y.XmlElement): string {
+  if (el.nodeName === 'bulletList' || el.nodeName === 'orderedList') {
+    const ordered = el.nodeName === 'orderedList';
+    const lines: string[] = [];
+    let n = 0;
+    const walk = (list: Y.XmlElement) => {
+      for (const li of list.toArray()) {
+        if (!(li instanceof Y.XmlElement) || li.nodeName !== 'listItem') continue;
+        if (isEntirelySuggestedInsert(li)) continue;
+        n++;
+        const own: string[] = [];
+        const nested: Y.XmlElement[] = [];
+        for (const c of li.toArray()) {
+          if (!(c instanceof Y.XmlElement)) continue;
+          if (c.nodeName === 'bulletList' || c.nodeName === 'orderedList') nested.push(c);
+          else own.push(cellBlockMarkdown(c));
+        }
+        const text = own.filter((t) => t.length > 0).join(CELL_BREAK);
+        lines.push(`${ordered ? `${n}.` : '-'} ${text}`.trimEnd());
+        // A cell has one level: a nested item is written as the next item.
+        for (const sub of nested) walk(sub);
+      }
+    };
+    walk(el);
+    return lines.join(CELL_BREAK);
+  }
+  if (el.nodeName !== 'paragraph') return textContent(el).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  let out = '';
+  for (const child of el.toArray()) {
+    if (child instanceof Y.XmlText) out += cellText(textWithMarks(child));
+    else if (child instanceof Y.XmlElement) {
+      out += child.nodeName === 'hardBreak' ? CELL_BREAK : cellText(textContent(child));
+    }
+  }
+  if (!out.includes(CELL_BREAK)) return out;
+  const lines = out.split(CELL_BREAK).map((l) => l.trim());
+  while (lines.length > 0 && lines[0] === '') lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join(CELL_BREAK);
+}
+
+/**
+ * The blocks one cell's markdown describes — the inverse of
+ * `tableCellMarkdown`. Text with no break is the single paragraph it always
+ * was. Otherwise lines separated by an empty line are separate blocks; a
+ * block whose first line carries a list marker is a list, and a later line
+ * without one continues the item above it.
+ */
+export function tableCellBlocks(text: string): Y.XmlElement[] {
+  const lines = text.split(CELL_BREAK_RE);
+  if (lines.length === 1) return [cellParagraph([text])];
+  const groups: string[][] = [];
+  let cur: string[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.length > 0) {
+      cur.push(line);
+      continue;
+    }
+    if (cur.length > 0) groups.push(cur);
+    cur = [];
+  }
+  if (cur.length > 0) groups.push(cur);
+  if (groups.length === 0) return [cellParagraph([''])];
+  return groups.map((g) => {
+    const first = g[0] ?? '';
+    const marker = CELL_BULLET_RE.test(first)
+      ? CELL_BULLET_RE
+      : CELL_ORDERED_RE.test(first)
+        ? CELL_ORDERED_RE
+        : null;
+    if (!marker) return cellParagraph(g);
+    const items: string[][] = [];
+    for (const line of g) {
+      if (marker.test(line)) items.push([line.replace(marker, '')]);
+      else items[items.length - 1]?.push(line);
+    }
+    const list = new Y.XmlElement(marker === CELL_BULLET_RE ? 'bulletList' : 'orderedList');
+    list.insert(
+      0,
+      items.map((item) => {
+        const li = new Y.XmlElement('listItem');
+        li.insert(0, [cellParagraph(item)]);
+        return li;
+      }),
+    );
+    return list;
+  });
+}
+
+/** A paragraph of `lines` joined by hard breaks. Built whole and inserted
+ *  once: every element here is a prelim type (see `mkTable`). */
+function cellParagraph(lines: string[]): Y.XmlElement {
+  const p = new Y.XmlElement('paragraph');
+  const kids: Array<Y.XmlElement | Y.XmlText> = [];
+  lines.forEach((line, i) => {
+    if (i > 0) kids.push(new Y.XmlElement('hardBreak'));
+    if (line.length > 0) {
+      const t = new Y.XmlText();
+      insertDeltaInto(t, inlineMarksToDelta(line));
+      kids.push(t);
+    }
+  });
+  if (kids.length > 0) p.insert(0, kids);
+  return p;
 }
 
 /**
@@ -1091,7 +1245,7 @@ function serializeTable(table: Y.XmlElement): string {
         (c): c is Y.XmlElement =>
           c instanceof Y.XmlElement && (c.nodeName === 'tableCell' || c.nodeName === 'tableHeader'),
       )
-      .map((c) => textContent(c).replace(/\|/g, '\\|').replace(/\n/g, ' ')),
+      .map(tableCellMarkdown),
   );
   const colCount = Math.max(...cells.map((r) => r.length));
   // Pad ragged rows to rectangular shape.
