@@ -27,6 +27,14 @@ import {
 } from './doc-outline-ops.ts';
 import type { LiveDoc } from './doc-store.ts';
 import { type TimeSlice, timeSlice } from './event-loop.ts';
+import {
+  STALE_WRITE_WINDOW_MS,
+  type ScopedEditGuard,
+  type ScopedEditRefusal,
+  scopedEditRefusal,
+  touchedByDryRun,
+  unseenHumanEdit,
+} from './scoped-edit-guard.ts';
 
 /** Backups kept per doc by `backupReplacedContent` before rotation. */
 const REPLACE_BACKUP_CAP = 20;
@@ -39,6 +47,8 @@ export interface DocEditPersistence {
   /** The hydrated doc behind a docId or alias, or nothing. */
   doc(docId: string): LiveDoc | undefined;
   thread(docId: string, threadId: string): Thread | null;
+  /** `DocStore.staleWriteCheck`: has a person edited since this reader read? */
+  staleWrite(docId: string, reader?: string): { humanEditedAt: number; lastReadAt?: number } | null;
   /** Bump the doc's sequence and broadcast one suggestion event. */
   announceSuggestion(
     doc: LiveDoc,
@@ -52,15 +62,77 @@ export interface DocEditPersistence {
  *  which nothing outside a backup has ever read. */
 export class DocEditOps {
   private backupSeq = 0;
+  /** While `guardScopedEdit` dry-runs an edit, the copy the verbs resolve to. */
+  private dryRun: { real: LiveDoc; copy: LiveDoc } | null = null;
 
   constructor(private readonly p: DocEditPersistence) {}
+
+  /** The doc a verb edits: the live one, or its copy during a dry run. */
+  private live(docId: string): LiveDoc | undefined {
+    const doc = this.p.doc(docId);
+    return doc && this.dryRun?.real === doc ? this.dryRun.copy : doc;
+  }
+
+  /**
+   * Run one scoped edit under the stale-write rule (`scoped-edit-guard.ts`).
+   * When a person has edited since the caller's last read, the edit is first
+   * tried on a copy, and refused if a block it changes is one they changed.
+   * Before an edit lands on a doc a person edited inside the window, the doc
+   * as it stands is backed up — once per person's edit, not once per agent
+   * edit, so an agent working through a doc does not rotate the person's
+   * version out of the backups. No `guard` is a server-side writer acting for
+   * a person, which runs unchecked as it always did.
+   */
+  guardScopedEdit<R extends { ok: boolean }>(
+    docId: string,
+    guard: ScopedEditGuard | undefined,
+    run: () => R,
+  ): R | (R & { backup: string }) | ScopedEditRefusal {
+    const doc = this.p.doc(docId);
+    if (!doc || !guard) return run();
+    const now = Date.now();
+    if (guard.confirm !== true) {
+      const stale = this.p.staleWrite(docId, guard.reader);
+      if (stale) {
+        const { touched } = touchedByDryRun(doc.ydoc, prose.getProseFragment, (copy) => {
+          this.dryRun = { real: doc, copy: { ...doc, ydoc: copy } };
+          try {
+            return run();
+          } finally {
+            this.dryRun = null;
+          }
+        });
+        const at = unseenHumanEdit(touched, doc.humanBlockEditAt, {
+          lastReadAt: stale.lastReadAt,
+          now,
+        });
+        if (at !== undefined) return scopedEditRefusal(at, stale.lastReadAt);
+      }
+    }
+    let backup: string | null = null;
+    if (
+      doc.lastHumanEditAt !== undefined &&
+      now - doc.lastHumanEditAt < STALE_WRITE_WINDOW_MS &&
+      doc.humanEditSeq !== doc.backedUpHumanEditSeq
+    ) {
+      backup = this.backupReplacedContent(
+        docId,
+        prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc)),
+      );
+      if (backup) doc.backedUpHumanEditSeq = doc.humanEditSeq;
+    }
+    const res = run();
+    return backup && res.ok ? { ...res, backup } : res;
+  }
 
   /**
    * Snapshot the markdown a whole-doc rewrite is about to replace into
    * `<dataDir>/backups/<docId>/<ts>-<seq>.md`, rotating to a cap. Runs on
    * EVERY accepted set_doc_content — including a confirmed overwrite — so
    * "the guard was bypassed" is never the same event as "the words are
-   * gone". Backups are transient files: rotation hard-deletes the oldest.
+   * gone", and before a scoped edit on a doc a person just edited
+   * (`guardScopedEdit`). Backups are transient files: rotation hard-deletes
+   * the oldest.
    * Never throws; the rewrite proceeds either way.
    */
   private backupReplacedContent(docId: string, content: string): string | null {
@@ -79,7 +151,7 @@ export class DocEditOps {
       }
       return file;
     } catch (err) {
-      console.error(`[doc-store] set_doc_content backup failed for ${docId}:`, err);
+      console.error(`[doc-store] pre-edit backup failed for ${docId}:`, err);
       return null;
     }
   }
@@ -88,7 +160,7 @@ export class DocEditOps {
     docId: string,
     markdown: string,
   ): { ok: true } | { ok: false; error: 'not-found' | 'unsupported' | 'empty' | 'parse-failed' } {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     // Flat docs (code / diff) are read-only review surfaces; their content
     // comes from disk or a pinned commit, never from an agent payload.
@@ -134,7 +206,7 @@ export class DocEditOps {
       parseInlineMarks?: boolean;
     },
   ): prose.ReplaceResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'no-match' };
     return prose.findAndReplace(doc.ydoc, opts);
   }
@@ -152,7 +224,7 @@ export class DocEditOps {
     replacement: string,
     opts?: { parseInlineMarks?: boolean },
   ): prose.AnchoredEditResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-not-found' };
     const thread = this.p.thread(docId, threadId);
     if (!thread) return { ok: false, error: 'anchor-not-found' };
@@ -179,7 +251,7 @@ export class DocEditOps {
       label?: string;
     },
   ): prose.CreateAnchorResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'no-match' };
     return prose.createAgentAnchor(doc.ydoc, opts);
   }
@@ -189,7 +261,7 @@ export class DocEditOps {
     anchorId: string,
     op: { kind: 'replace'; text: string } | { kind: 'insert_after'; text: string },
   ): prose.AnchoredEditResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-not-found' };
     const anchor = prose.readAgentAnchor(doc.ydoc, anchorId);
     if (!anchor) return { ok: false, error: 'anchor-not-found' };
@@ -204,7 +276,7 @@ export class DocEditOps {
   }
 
   deleteAgentAnchor(docId: string, anchorId: string): boolean {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return false;
     return prose.deleteAgentAnchor(doc.ydoc, anchorId);
   }
@@ -222,7 +294,7 @@ export class DocEditOps {
   /** All pending proposals on the doc, in doc order. Empty for unknown docs
    *  and for flat (code/diff) docs, whose prose fragment has no content. */
   listSuggestions(docId: string): suggestOps.SuggestionSummary[] {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return [];
     return suggestOps.listSuggestions(doc.ydoc);
   }
@@ -255,7 +327,7 @@ export class DocEditOps {
         error: 'not-found' | 'no-match' | 'ambiguous' | 'match-in-pending-suggestion';
         candidates?: Array<{ docOffset: number; preview: string }>;
       } {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     const res = suggestOps.suggestReplace(doc.ydoc, opts);
     if (!res.ok) return res;
@@ -288,7 +360,7 @@ export class DocEditOps {
   ):
     | { ok: true; suggestionId: string }
     | { ok: false; error: 'anchor-not-found' | 'anchor-orphaned' | 'cross-block' } {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-not-found' };
     const thread = this.p.thread(docId, threadId);
     if (!thread) return { ok: false, error: 'anchor-not-found' };
@@ -318,7 +390,7 @@ export class DocEditOps {
    *  normal debounced write-back. Missing sid (or doc) → not-found — also
    *  the correct answer to the double-accept race. */
   acceptSuggestion(docId: string, sid: string): suggestOps.SuggestionOpResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     const before = suggestOps.listSuggestions(doc.ydoc).find((s) => s.sid === sid);
     const res = suggestOps.acceptSuggestion(doc.ydoc, sid);
@@ -328,7 +400,7 @@ export class DocEditOps {
 
   /** Reject a proposal: restores exactly the pre-suggestion text. */
   rejectSuggestion(docId: string, sid: string): suggestOps.SuggestionOpResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     const before = suggestOps.listSuggestions(doc.ydoc).find((s) => s.sid === sid);
     const res = suggestOps.rejectSuggestion(doc.ydoc, sid);
@@ -358,7 +430,7 @@ export class DocEditOps {
     opts: { action: 'accept' | 'reject'; authorId?: string },
     slice: TimeSlice = timeSlice(),
   ): Promise<{ ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' }> {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     const before = new Map(suggestOps.listSuggestions(doc.ydoc).map((s) => [s.sid, s]));
     // The same selection, in the same order, that core's synchronous
@@ -395,7 +467,7 @@ export class DocEditOps {
     markdown: string,
     opts?: { placement?: prose.BlockPlacement },
   ): prose.AnchoredEditResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-not-found' };
     const anchor = prose.readAgentAnchor(doc.ydoc, anchorId);
     if (!anchor) return { ok: false, error: 'anchor-not-found' };
@@ -409,7 +481,7 @@ export class DocEditOps {
 
   /** Append text at the END position of a thread's anchored range. */
   insertAfterThread(docId: string, threadId: string, text: string): prose.AnchoredEditResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-not-found' };
     const thread = this.p.thread(docId, threadId);
     if (!thread) return { ok: false, error: 'anchor-not-found' };
@@ -429,7 +501,7 @@ export class DocEditOps {
     markdown: string,
     opts?: { placement?: prose.BlockPlacement },
   ): prose.AnchoredEditResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-not-found' };
     const thread = this.p.thread(docId, threadId);
     if (!thread) return { ok: false, error: 'anchor-not-found' };
@@ -449,7 +521,7 @@ export class DocEditOps {
    * empty block element behind.
    */
   deleteBlockAtThread(docId: string, threadId: string): prose.DeleteBlockResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-orphaned' };
     const thread = this.p.thread(docId, threadId);
     if (!thread) return { ok: false, error: 'anchor-orphaned' };
@@ -459,7 +531,7 @@ export class DocEditOps {
 
   /** Same, keyed on an agent anchor. */
   deleteBlockAtAgentAnchor(docId: string, anchorId: string): prose.DeleteBlockResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'anchor-orphaned' };
     const anchor = prose.readAgentAnchor(doc.ydoc, anchorId);
     if (!anchor) return { ok: false, error: 'anchor-orphaned' };
@@ -479,7 +551,7 @@ export class DocEditOps {
       endOccurrence?: number;
     },
   ): prose.DeleteBlocksInRangeResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'no-match' };
     return prose.deleteBlocksInRange(doc.ydoc, opts);
   }
@@ -489,7 +561,7 @@ export class DocEditOps {
     docId: string,
     opts: { heading: string; level?: number; occurrence?: number },
   ): prose.DeleteSectionResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'no-match' };
     return prose.deleteSection(doc.ydoc, opts);
   }
@@ -500,7 +572,7 @@ export class DocEditOps {
    * no prose. Lives in `doc-outline-ops.ts` — see that file's header.
    */
   readOutline(docId: string, opts: prose.OutlineOptions = {}): DocOutline | null {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return null;
     return readDocOutline(doc, opts);
   }
@@ -511,7 +583,7 @@ export class DocEditOps {
     edits: prose.BlockEdit[],
     who: BlockEditsAuthor,
   ): BlockEditsResult {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return { ok: false, error: 'not-found' };
     return applyDocBlockEdits(doc, edits, who);
   }
@@ -522,7 +594,7 @@ export class DocEditOps {
    * safe to call on every significant doc change.
    */
   autoReanchor(docId: string): { checked: number; reanchored: number; stillOrphan: number } | null {
-    const doc = this.p.doc(docId);
+    const doc = this.live(docId);
     if (!doc) return null;
     return prose.autoReanchorDoc(doc.ydoc);
   }

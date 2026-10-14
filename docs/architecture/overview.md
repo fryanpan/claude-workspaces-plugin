@@ -1946,6 +1946,17 @@ and refuses rather than carry a line a person owns. Server-side they are reached
 for the reason that module already gives: `doc-edit-ops.ts` was at the
 500-line bar, and the outline verbs are a family of their own.
 
+The scoped edit verbs — find_and_replace, rewrite_thread_region, the anchor
+inserts and the block deletes — run through `DocEditOps.guardScopedEdit`, the
+rule `set_doc_content` already had, narrowed to blocks. `scoped-edit-guard.ts`
+holds the pieces: the per-block stamps `live-doc-fanout.ts` takes when a
+person's edit arrives over the websocket, the dry run that tries an edit on a
+copy of the doc to learn which blocks it would change, and the 409 it returns
+when one of them changed after the agent's last read. A doc a person edited in
+the last ten minutes is backed up before the first scoped edit after each of
+their edits. `block_edits` is not guarded: it already turns an edit to a
+person's block into a proposal.
+
 The note-taker is the first caller and deliberately not a privileged one. It
 holds no private write path into a document: it reads an outline and posts
 block edits through the same `DocStore` verbs the MCP tools expose, which is
