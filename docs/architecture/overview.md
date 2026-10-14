@@ -1833,6 +1833,12 @@ flush had written one onto a single line, the doc and its file serialized
 alike, so the attach never re-read it. The attach now re-types each such
 paragraph in place into the block the grammar makes, with the same text, so
 the file does not change.
+`prose-image-line.ts` is the same repair for images and does not move the
+picture. An agent's text edit could leave a standalone `![alt](src)` line as
+paragraph text, which serializes to the same line as an image node, so no
+reconcile rebuilt it. A doc now promotes such a paragraph to an image node
+when it loads and when the edit writes it; an open thread in the paragraph
+holds it as text until that thread is resolved.
 The editor draws that block through four client modules beside
 `mermaid-code-block.ts`, and they do not move the picture either.
 `mdx-flow-block.ts` is the node view and the plugin that makes the block

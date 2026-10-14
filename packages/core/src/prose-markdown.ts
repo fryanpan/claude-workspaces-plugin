@@ -21,6 +21,7 @@ import { footnoteEndAt } from './footnotes.ts';
 import { LCS_CELL_BUDGET, lcsKept } from './lcs.ts';
 import { getProseFragment, headingLevelOf } from './prose-fragment.ts';
 import { BLOCK_IDENTITY_ATTRS } from './prose-identity.ts';
+import { imageFromLine, isImageLine } from './prose-image-line.ts';
 import {
   MATH_DISPLAY_LANGUAGE,
   mathDollars,
@@ -496,7 +497,7 @@ export function parseMarkdownSource(
   // A line that is *only* a markdown image: ![alt](src) or ![alt](src "title").
   // Captured as an image node so the src lives in an attribute and never gets
   // run through inline emphasis parsing (which would mangle `_` in URLs).
-  const isImage = (s: string) => /^!\[[^\]]*\]\([^)]*\)\s*$/.test(s.trim());
+  const isImage = isImageLine;
 
   // A block starter ALWAYS interrupts a paragraph, wherever it sits on the
   // line. The predicates above anchor at column 0, which is what a plain
@@ -531,19 +532,8 @@ export function parseMarkdownSource(
     return p;
   };
 
-  // Build an `image` node from a standalone `![alt](src "title")` line. The
-  // node name matches the Tiptap Image extension so it renders in the live
-  // editor; src/alt/title round-trip as attributes. src is matched as a run
-  // of non-space chars, so remote URLs and relative paths both work and
-  // underscores in the path are never parsed as emphasis.
-  const mkImage = (raw: string): Y.XmlElement => {
-    const m = raw.trim().match(/^!\[([^\]]*)\]\(\s*(\S+?)(?:\s+"([^"]*)")?\s*\)$/);
-    const img = new Y.XmlElement('image');
-    img.setAttribute('src', m?.[2] ?? '');
-    img.setAttribute('alt', m?.[1] ?? '');
-    if (m?.[3]) img.setAttribute('title', m[3]);
-    return img;
-  };
+  // Build an `image` node from a standalone image line (`prose-image-line.ts`).
+  const mkImage = imageFromLine;
 
   // --- Nested list parsing -------------------------------------------------
   // The serializer emits 2-space-per-level indentation; the parser reads

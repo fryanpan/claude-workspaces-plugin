@@ -849,6 +849,15 @@ export class DocThreads {
     const doc = this.p.doc(docId);
     if (!doc) return null;
     const t = schemaSetStatus(doc.ydoc, threadId, 'resolved', opts?.via);
+    // An open thread holds back the promotion of an image line written into
+    // its paragraph as text (`prose-image-line.ts`); its resolve releases it,
+    // so the image appears now rather than on the next load.
+    if (t && contentKind(doc.meta.type) === 'prose') {
+      doc.ydoc.transact(
+        () => prose.promoteImageParagraphs(doc.ydoc, prose.getProseFragment(doc.ydoc)),
+        'agent',
+      );
+    }
     if (t) {
       // The frame names WHO resolved. Without it, 17 resolves in the field
       // were each attributed to the thread's creator by the channel
