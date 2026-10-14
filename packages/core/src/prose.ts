@@ -26,6 +26,7 @@
  *                        paragraph that holds one as text into an image node.
  *   `prose-math.ts`      where a remark-math `$…$` or `$$` … `$$` equation
  *                        starts and ends, so its TeX is held as one run.
+ *   `prose-choice.ts`    a ```` ```choice ```` block's options and pick.
  *
  * This file exports exactly what it exported when it was one 2,847-line
  * module, which is why the re-exports below are written out by name rather
@@ -80,6 +81,8 @@ export {
   mathTextAt,
 } from './prose-math.ts';
 export type { MathTextRun } from './prose-math.ts';
+export { CHOICE_LANGUAGE, parseChoice, setChoicePick } from './prose-choice.ts';
+export type { ChoiceBlock } from './prose-choice.ts';
 export { nestBlocksOutcome, nestBlocksUnderLead } from './prose-nest.ts';
 export type { NestBlocksError, NestBlocksOptions, NestBlocksResult } from './prose-nest.ts';
 export {

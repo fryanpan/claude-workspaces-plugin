@@ -158,6 +158,19 @@ or move the CTA above the fold in the layout component.
 Use a label like `"ux-finding"`, `"code-review"`, `"a11y"` in
 `create_anchor` so the "All threads" panel groups findings by source.
 
+## Asking the reader to pick
+
+To let the reader choose among options in place, write a `choice` fenced
+block with one line: `id=<name> options="yes,maybe,no"`. The editor shows
+it as buttons, and a tap writes `picked=<option>` into that line. Read the
+picks back from `get_doc`, or from the `.md` file once it has flushed.
+
+````markdown
+```choice
+id=lead-riverbend options="yes,maybe,no" picked=maybe
+```
+````
+
 ## Signals the file is under review
 
 - The user said "review", "workspace", "live feedback", or "the editor" — the
