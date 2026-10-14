@@ -163,6 +163,13 @@ const SECRET_PROPERTIES = {
   },
 } as const;
 
+/** The scoped edit tools' escape from the stale-write refusal. */
+const CONFIRM_SCOPED_OVERWRITE = {
+  type: 'boolean',
+  description:
+    'Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance.',
+};
+
 const TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -1042,10 +1049,11 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'find_and_replace',
       description:
-        "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
+        "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. Inside a table cell, <br> in replace is a line break. An edit to a block a human changed after your last get_doc is refused with 409 stale-write. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1083,6 +1091,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1184,6 +1193,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1203,6 +1213,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1250,6 +1261,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1365,6 +1377,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1407,6 +1420,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1426,6 +1440,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:
@@ -1449,6 +1464,7 @@ export const TOOL_LIST: ListToolsResult = {
       inputSchema: {
         type: 'object',
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: 'string',
             description:

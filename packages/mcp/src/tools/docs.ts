@@ -113,6 +113,13 @@ export async function handleDocsTool(
   /** The board this call is addressed under — see board-path.ts. */
   const boardId = (): string => boardIdOf(name, a);
   const board = (): string => boardPathOf(name, a);
+  // Sent on every scoped edit: the author is whose get_doc reads the server's
+  // stale-write rule judges the edit by, and the confirm flag is forwarded
+  // only when true, so the default stays the protected path.
+  const scoped = (): Record<string, unknown> => ({
+    author: AUTHOR,
+    ...(a.confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}),
+  });
   switch (name) {
     case 'list_docs': {
       // Every param has to reach the wire: this handler used to issue a
@@ -609,6 +616,7 @@ export async function handleDocsTool(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/find_and_replace`,
         {
+          ...scoped(),
           find,
           replace,
           ...(contextBefore !== undefined ? { contextBefore } : {}),
@@ -637,6 +645,7 @@ export async function handleDocsTool(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/rewrite_region`,
         {
+          ...scoped(),
           replacement,
           // Forwarded as a boolean, never only-when-true — see
           // find_and_replace above.
@@ -697,7 +706,7 @@ export async function handleDocsTool(
       const res = await http(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`,
-        { text },
+        { ...scoped(), text },
       );
       return ok(res);
     }
@@ -711,7 +720,7 @@ export async function handleDocsTool(
       const res = await http(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_blocks_after`,
-        { markdown, ...(placement !== undefined ? { placement } : {}) },
+        { ...scoped(), markdown, ...(placement !== undefined ? { placement } : {}) },
       );
       return ok(res);
     }
@@ -742,7 +751,7 @@ export async function handleDocsTool(
       const res = await http(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/edit`,
-        op,
+        { ...scoped(), ...op },
       );
       return ok(res);
     }
@@ -796,7 +805,7 @@ export async function handleDocsTool(
       const res = await http(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/insert_blocks`,
-        { markdown, ...(placement !== undefined ? { placement } : {}) },
+        { ...scoped(), markdown, ...(placement !== undefined ? { placement } : {}) },
       );
       return ok(res);
     }
@@ -818,6 +827,7 @@ export async function handleDocsTool(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/delete_block_at_anchor`,
         {
+          ...scoped(),
           ...(threadId !== undefined ? { threadId } : {}),
           ...(anchorId !== undefined ? { anchorId } : {}),
         },
@@ -846,6 +856,7 @@ export async function handleDocsTool(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/delete_blocks_in_range`,
         {
+          ...scoped(),
           startFind,
           endFind,
           ...(contextBefore !== undefined ? { contextBefore } : {}),
@@ -867,6 +878,7 @@ export async function handleDocsTool(
         'POST',
         `${board()}/docs/${encodeURIComponent(docId)}/delete_section`,
         {
+          ...scoped(),
           heading,
           ...(level !== undefined ? { level } : {}),
           ...(occurrence !== undefined ? { occurrence } : {}),

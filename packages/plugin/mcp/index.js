@@ -15951,6 +15951,10 @@ var SECRET_PROPERTIES = {
     }
   }
 };
+var CONFIRM_SCOPED_OVERWRITE = {
+  type: "boolean",
+  description: "Acknowledge a 409 stale-write refusal, after you re-read the doc with get_doc and re-applied your change onto its current content. It lets the edit change a block a human edited after your last read, so never pass it in advance."
+};
 var TASK_REVIEW_ITEM_SCHEMA = {
   ...REVIEW_ITEM_SCHEMA,
   properties: { ...REVIEW_ITEM_SCHEMA.properties, ...SECRET_PROPERTIES },
@@ -16726,10 +16730,11 @@ var TOOL_LIST = {
     },
     {
       name: "find_and_replace",
-      description: "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
+      description: "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. Inside a table cell, <br> in replace is a line break. An edit to a block a human changed after your last get_doc is refused with 409 stale-write. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -16762,6 +16767,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -16851,6 +16857,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -16868,6 +16875,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -16910,6 +16918,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -17015,6 +17024,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -17053,6 +17063,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -17070,6 +17081,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -17091,6 +17103,7 @@ var TOOL_LIST = {
       inputSchema: {
         type: "object",
         properties: {
+          confirmOverwriteHumanEdits: CONFIRM_SCOPED_OVERWRITE,
           workspaceId: {
             type: "string",
             description: "The board this resource is on. get_workspace lists the boards you are attached to."
@@ -18728,6 +18741,10 @@ async function handleDocsTool(name, a, ctx) {
   } = ctx;
   const boardId = () => boardIdOf(name, a);
   const board = () => boardPathOf(name, a);
+  const scoped = () => ({
+    author: AUTHOR,
+    ...a.confirmOverwriteHumanEdits === true ? { confirmOverwriteHumanEdits: true } : {}
+  });
   switch (name) {
     case "list_docs": {
       const { kind, query, sourcePrefix, limit, cursor, full } = a;
@@ -19031,6 +19048,7 @@ async function handleDocsTool(name, a, ctx) {
         suggest
       } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/find_and_replace`, {
+        ...scoped(),
         find,
         replace,
         ...contextBefore !== undefined ? { contextBefore } : {},
@@ -19045,6 +19063,7 @@ async function handleDocsTool(name, a, ctx) {
     case "rewrite_thread_region": {
       const { docId, threadId, replacement, parseInlineMarks, suggest } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/rewrite_region`, {
+        ...scoped(),
         replacement,
         ...typeof parseInlineMarks === "boolean" ? { parseInlineMarks } : {},
         ...suggest === true ? { suggest: true, author: suggestionAuthor() } : {}
@@ -19076,12 +19095,12 @@ async function handleDocsTool(name, a, ctx) {
       if (typeof text !== "string" || text.length === 0) {
         return err2(markdown !== undefined ? "insert_after_thread takes `text`, not `markdown` — nothing was inserted. For a new paragraph or section use insert_blocks_after_thread, whose field is `markdown`." : "insert_after_thread needs a non-empty `text` — nothing was inserted.");
       }
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`, { text });
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_after`, { ...scoped(), text });
       return ok2(res);
     }
     case "insert_blocks_after_thread": {
       const { docId, threadId, markdown, placement } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_blocks_after`, { markdown, ...placement !== undefined ? { placement } : {} });
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/insert_blocks_after`, { ...scoped(), markdown, ...placement !== undefined ? { placement } : {} });
       return ok2(res);
     }
     case "create_anchor": {
@@ -19097,7 +19116,7 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "edit_at_anchor": {
       const { docId, anchorId, op } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/edit`, op);
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/edit`, { ...scoped(), ...op });
       return ok2(res);
     }
     case "read_doc_outline": {
@@ -19129,7 +19148,7 @@ async function handleDocsTool(name, a, ctx) {
     }
     case "insert_blocks_at_anchor": {
       const { docId, anchorId, markdown, placement } = a;
-      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/insert_blocks`, { markdown, ...placement !== undefined ? { placement } : {} });
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/agent_anchors/${encodeURIComponent(anchorId)}/insert_blocks`, { ...scoped(), markdown, ...placement !== undefined ? { placement } : {} });
       return ok2(res);
     }
     case "delete_anchor": {
@@ -19140,6 +19159,7 @@ async function handleDocsTool(name, a, ctx) {
     case "delete_block_at_anchor": {
       const { docId, threadId, anchorId } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/delete_block_at_anchor`, {
+        ...scoped(),
         ...threadId !== undefined ? { threadId } : {},
         ...anchorId !== undefined ? { anchorId } : {}
       });
@@ -19156,6 +19176,7 @@ async function handleDocsTool(name, a, ctx) {
         endOccurrence
       } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/delete_blocks_in_range`, {
+        ...scoped(),
         startFind,
         endFind,
         ...contextBefore !== undefined ? { contextBefore } : {},
@@ -19168,6 +19189,7 @@ async function handleDocsTool(name, a, ctx) {
     case "delete_section": {
       const { docId, heading, level, occurrence } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/delete_section`, {
+        ...scoped(),
         heading,
         ...level !== undefined ? { level } : {},
         ...occurrence !== undefined ? { occurrence } : {}
@@ -21316,7 +21338,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.307";
+var PLUGIN_VERSION = "0.1.308";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
