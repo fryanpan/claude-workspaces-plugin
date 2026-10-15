@@ -109,13 +109,17 @@ const cssMinify: BunPlugin = {
 const threadReaderCuts: BunPlugin = {
   name: 'widget-thread-reader-cuts',
   setup(build) {
-    build.onLoad({ filter: /core[/\\]src[/\\](review-item-wire|schema)\.ts$/ }, (args) => {
-      let contents = readFileSync(args.path, 'utf8');
-      if (/review-item-wire\.ts$/.test(args.path)) contents = stripSecretShape(contents, args.path);
-      const cut = readerCutFor(args.path);
-      if (cut) contents = stripUnreadFields(contents, cut, args.path);
-      return { contents, loader: 'ts' };
-    });
+    build.onLoad(
+      { filter: /core[/\\]src[/\\](review-item-wire|schema|ws-client)\.ts$/ },
+      (args) => {
+        let contents = readFileSync(args.path, 'utf8');
+        if (/review-item-wire\.ts$/.test(args.path))
+          contents = stripSecretShape(contents, args.path);
+        const cut = readerCutFor(args.path);
+        if (cut) contents = stripUnreadFields(contents, cut, args.path);
+        return { contents, loader: 'ts' };
+      },
+    );
   },
 };
 
