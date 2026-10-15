@@ -86,7 +86,22 @@ export interface FeedbackClient {
   reconnect(): void;
 }
 
-export function connect(url: string, protocol?: () => string | undefined): FeedbackClient {
+/**
+ * Asked with each sync frame from the server, whole, before the client applies
+ * or answers it. False drops the frame unanswered, and the caller owns what
+ * follows: it must close the client before the next frame. For a doc seeded
+ * from a local copy whose history the server may no longer hold
+ * (workspaces-app doc-cache-boot.ts). A bare positional function, decoded by
+ * the caller, because the widget bundles this file, never passes it, and sits
+ * within bytes of its size ceiling.
+ */
+export type AcceptSync = (frame: Uint8Array) => boolean;
+
+export function connect(
+  url: string,
+  protocol?: () => string | undefined,
+  acceptSync?: AcceptSync,
+): FeedbackClient {
   const ydoc = new Y.Doc();
   const awareness = new awarenessProtocol.Awareness(ydoc);
   let ws: WebSocket;
@@ -200,6 +215,7 @@ export function connect(url: string, protocol?: () => string | undefined): Feedb
       const dec = decoding.createDecoder(data);
       const kind = decoding.readVarUint(dec);
       if (kind === MSG_SYNC) {
+        if (acceptSync?.(data) === false) return;
         const enc = encoding.createEncoder();
         encoding.writeVarUint(enc, MSG_SYNC);
         const type = syncProtocol.readSyncMessage(dec, enc, ydoc, ws);

@@ -5,9 +5,9 @@
  *
  * Plot and `buildPlot` are fetched the first time a doc shows a
  * `<PlotChart>`, never before.
- * Not an `import('@observablehq/plot')`: the doc bundle is built with
- * splitting off, which inlines a dynamic import, so every page load would
- * carry it. `scripts/build.ts` builds `plot-entry.ts` to `/app/plot/plot.js`
+ * Not an `import('@observablehq/plot')`: the doc bundle was built with
+ * splitting off when this was written, which inlined a dynamic import into
+ * every page load. `scripts/build.ts` builds `plot-entry.ts` to `/app/plot/plot.js`
  * and this module asks for that URL by value, as `math-katex.ts` does.
  *
  * A spec that names anything outside the allowlists, or a prop that is not a

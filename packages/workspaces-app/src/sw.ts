@@ -1,20 +1,29 @@
 /**
- * The service worker. Its whole job is the two halves of a push
- * notification: show one when the server sends it, and land the reader on
- * the right thing when they tap it.
+ * The service worker. Two jobs: the two halves of a push notification (show
+ * one when the server sends it, land the reader on the right thing when they
+ * tap it), and keeping a doc page loadable with no network (sw-offline.ts).
  *
- * It exists because a notification has to arrive when no tab is open. The
- * in-page Notification API can only fire while the site is on screen, which
- * is precisely when the reviewer does not need telling — and on an iOS Home
- * Screen web app it is not available at all.
+ * Push is why it exists: a notification has to arrive when no tab is open.
+ * The in-page Notification API can only fire while the site is on screen,
+ * which is precisely when the reviewer does not need telling — and on an iOS
+ * Home Screen web app it is not available at all.
  *
- * Deliberately has no imports. A service worker is fetched, byte-compared and
- * re-evaluated by the browser on its own schedule; keeping it a single
- * self-contained file means an update to it is one file changing rather than
- * a chunk graph the browser has to re-fetch piecemeal.
+ * Its one import is bundled in: the build emits a single self-contained
+ * `sw.js`, because a service worker is fetched, byte-compared and re-evaluated
+ * by the browser on its own schedule, and an update to it should be one file
+ * changing rather than a chunk graph the browser has to re-fetch piecemeal.
  */
 
-export {};
+import {
+  CURRENT_CACHES,
+  type OfflineDeps,
+  answerApp,
+  answerHashed,
+  answerShell,
+  isKeepPage,
+  keepPage,
+  offlineRoute,
+} from './sw-offline.ts';
 
 /** The pieces of the worker global this file touches. Declared locally
  *  because the project compiles against the DOM lib, where `self` is a
@@ -37,6 +46,13 @@ interface WorkerScope extends EventTarget {
     claim(): Promise<void>;
   };
   skipWaiting(): Promise<void>;
+}
+interface FetchEventLike extends ExtendableEventLike {
+  request: Request;
+  respondWith(response: Promise<Response>): void;
+}
+interface MessageEventLike extends ExtendableEventLike {
+  data: unknown;
 }
 interface ExtendableEventLike extends Event {
   waitUntil(promise: Promise<unknown>): void;
@@ -94,15 +110,44 @@ function readPayload(data: PushEventLike['data']): PushPayload {
 }
 
 worker.addEventListener('install', (event) => {
-  // Take over immediately rather than waiting for every tab to close. There
-  // is no cached app shell here to version against, so the usual reason to
-  // wait does not apply, and waiting would leave a just-enabled subscription
-  // being handled by a worker that does not know about it yet.
+  // Take over immediately rather than waiting for every tab to close. The
+  // usual reason to wait is a cached shell that must not be mixed with the
+  // new worker's bundles; here the shell is network first and every bundle a
+  // shell names is content-addressed, so an open tab keeps running what it
+  // loaded either way. Waiting would leave a just-enabled push subscription
+  // handled by a worker that does not know about it yet.
   (event as ExtendableEventLike).waitUntil(worker.skipWaiting());
 });
 
 worker.addEventListener('activate', (event) => {
-  (event as ExtendableEventLike).waitUntil(worker.clients.claim());
+  (event as ExtendableEventLike).waitUntil(
+    (async () => {
+      for (const name of await caches.keys()) {
+        if (name.startsWith('cw-') && !CURRENT_CACHES.includes(name)) await caches.delete(name);
+      }
+      await worker.clients.claim();
+    })(),
+  );
+});
+
+function offlineDeps(e: ExtendableEventLike): OfflineDeps {
+  return { caches, fetch: (r) => fetch(r), waitUntil: (p) => e.waitUntil(p) };
+}
+
+worker.addEventListener('fetch', (event) => {
+  const e = event as FetchEventLike;
+  if (e.request.method !== 'GET') return;
+  const route = offlineRoute(new URL(e.request.url), e.request.mode, worker.location.origin);
+  if (route === null) return;
+  const d = offlineDeps(e);
+  const answer = route === 'shell' ? answerShell : route === 'hashed' ? answerHashed : answerApp;
+  e.respondWith(answer(e.request, d));
+});
+
+worker.addEventListener('message', (event) => {
+  const e = event as MessageEventLike;
+  if (!isKeepPage(e.data)) return;
+  e.waitUntil(keepPage(e.data, worker.location.origin, offlineDeps(e)));
 });
 
 worker.addEventListener('push', (event) => {

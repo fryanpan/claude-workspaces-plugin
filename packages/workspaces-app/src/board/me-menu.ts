@@ -1,4 +1,5 @@
 import { escapeHtml, storeUserName } from '@claude-workspaces/core';
+import { clearDocCache } from '../doc-cache.ts';
 import { hasSignInPage, signInHref } from '../signin/write-gate.ts';
 
 /**
@@ -49,6 +50,9 @@ async function defaultFetchSession(): Promise<MeSession> {
 
 async function defaultSignOut(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST' });
+  // This browser's copies of the docs it opened belong to the session that
+  // just ended (doc-cache.ts).
+  await clearDocCache();
 }
 
 /** The rename form's persist step when there is no session to write to —

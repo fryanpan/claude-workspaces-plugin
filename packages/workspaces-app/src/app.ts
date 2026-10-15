@@ -1,8 +1,8 @@
-import type { FeedbackClient, User } from '@claude-workspaces/core';
+import type { User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
 import { mountCode } from './code/code-app.ts';
 import { browserDeviceEnv, syncDeviceContext } from './device-context.ts';
-import { fetchDocMeta } from './doc-meta.ts';
+import { type DocBootConnect, startDocBoot } from './doc-cache-boot.ts';
 import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
 import { el, showToast } from './doc/chrome-dom.ts';
 import { wireThreadRangeClicks } from './doc/chrome-panels.ts';
@@ -20,19 +20,21 @@ import { wireDocReady } from './doc/doc-ready.ts';
 import { mountDocSaveState } from './doc/doc-save-state.ts';
 import { mountDocSetNav } from './doc/doc-set-nav.ts';
 import { mountDocSpeakerMenu } from './doc/doc-speaker-menu.ts';
+import { wireDocSwitcher } from './doc/doc-switcher.ts';
 import { mountDocVoices } from './doc/doc-voice-mount.ts';
 import { createNotesLinkRefs } from './doc/notes-link-refs.ts';
 import { wireEditViewport } from './edit-viewport.ts';
 import { type EditorHandle, createEditor } from './editor.ts';
 import { wantsHuddleStart } from './huddle-entry.ts';
-import { ensureUserIdentity } from './identity-prompt.ts';
+import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import type { MountContext } from './mount-context.ts';
+import { registerOfflineWorker } from './offline-worker.ts';
 import { startReadingTracker } from './reading-tracker.ts';
 import { mountRedline } from './redline/redline-app.ts';
 import { type ReviewChrome, mountReviewChrome } from './review-chrome.ts';
-import { navigateTo, startRouter } from './router.ts';
+import { navigateTo, remountCurrent, startRouter } from './router.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
 import { registerMarkdownMount } from './surface-registry.ts';
@@ -50,7 +52,11 @@ export interface AppBootEnv {
   location: BootLocation;
   localStorage: BootStorage;
   window: BootWindow;
-  connect: (url: string) => FeedbackClient;
+  connect: DocBootConnect;
+  /** For the docs' local copies; a test that passes none boots as before. */
+  indexedDB?: IDBFactory;
+  /** The offline service worker's registration (offline-worker.ts). */
+  registerWorker?: () => void;
 }
 
 /**
@@ -70,58 +76,33 @@ export interface AppBootEnv {
 export async function bootApp(env: AppBootEnv): Promise<() => void> {
   const { document, location, localStorage, window, connect } = env;
 
-  /**
-   * Wire the topbar doc-switcher dropdown ONCE (shell-level, doc-independent).
-   * The dropdown's CONTENTS are repopulated per navigation by the sidebar
-   * renderers; only the open/close behaviour lives here.
-   */
-  function wireDocSwitcher(): void {
-    const docMenu = document.getElementById('doc-menu');
-    const docSwitcher = document.getElementById('doc-switcher') as HTMLButtonElement | null;
-    if (!docSwitcher || !docMenu) return;
-    const close = () => {
-      docMenu.classList.add('hidden');
-      docMenu.setAttribute('aria-hidden', 'true');
-      docSwitcher.setAttribute('aria-expanded', 'false');
-    };
-    docSwitcher.addEventListener('click', (ev) => {
-      if (!document.body.classList.contains('has-set')) return;
-      ev.stopPropagation();
-      const isOpen = !docMenu.classList.contains('hidden');
-      docMenu.classList.toggle('hidden', isOpen);
-      docMenu.setAttribute('aria-hidden', String(isOpen));
-      docSwitcher.setAttribute('aria-expanded', String(!isOpen));
-    });
-    document.addEventListener('click', (ev) => {
-      if (docMenu.classList.contains('hidden')) return;
-      if (!docMenu.contains(ev.target as Node) && !docSwitcher.contains(ev.target as Node)) close();
-    });
-    document.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && !docMenu.classList.contains('hidden')) close();
-    });
-    // Auto-close on scroll. The dropdown overlays the doc, and on mobile the
-    // user reaching the content is the strongest "I'm done with the nav" signal.
-    const closeOnScroll = () => {
-      if (!docMenu.classList.contains('hidden')) close();
-    };
-    document.getElementById('editor')?.addEventListener('scroll', closeOnScroll, { passive: true });
-    window.addEventListener('scroll', closeOnScroll, { passive: true });
-  }
-
   // Before anything can write: a refused write raises a sign-in prompt
   // wherever it happened, rather than a "try again" this person can never
   // satisfy. See signin/write-gate.ts.
   installWriteGateNotice();
   wireKeyboardInset();
-  wireDocSwitcher();
+  wireDocSwitcher(document, window);
+  (env.registerWorker ?? registerOfflineWorker)();
   const asParam = new URL(location.href).searchParams.get('as');
+  // The session, the first doc's meta and its local copy, all at once.
+  const { session, docs } = startDocBoot({
+    pathname: location.pathname,
+    indexedDB: env.indexedDB,
+    storage: localStorage,
+    connect,
+    page: window,
+    onCopyRefused: remountCurrent,
+  });
   // May this browser write at all? Asked BEFORE the name prompt, because the
   // answer decides whether that prompt should be shown: where the server
   // requires a session, "what shall we call you?" is a modal that blocks boot
   // to collect a name the server will not accept, in place of the one
   // question this person actually has to answer.
-  const writeAccess = await fetchWriteAccess();
+  const writeAccess = await fetchWriteAccess(session);
   if (!writeAccess.canWrite) showSignInBar();
+  // No session answer (offline, a failed route) asks no name: anonymous this
+  // visit, and the next answered visit asks.
+  const sessionUnknown = (await session) === null;
   // First arrival with no stored name shows the name prompt; this awaits the
   // user's answer (or skip) before anything connects, so awareness, comments,
   // and edits all carry the chosen identity from the first packet.
@@ -131,7 +112,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       get: (k) => localStorage.getItem(k),
       set: (k, v) => localStorage.setItem(k, v),
     },
-    writeAccess.canWrite ? {} : { suppressNamePrompt: true },
+    {
+      fetchSession: () => sessionAnswerOf(session),
+      ...(writeAccess.canWrite && !sessionUnknown ? {} : { suppressNamePrompt: true }),
+    },
   );
   registerMarkdownMount(mountMarkdown);
   return startRouter({
@@ -139,10 +123,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
     // The answer is already in hand — every mount gets it as a value rather
     // than asking again. A mount that re-asks is editable while it waits.
     canWrite: writeAccess.canWrite,
-    fetchMeta: fetchDocMeta,
+    fetchMeta: (docId) => docs.fetchMeta(docId),
     connectFor: (docId, docType) => {
       const board = workspaceIdFromPath(location.pathname + location.search);
-      const client = connect(docSocketUrl(location, docId, docType, board));
+      const client = docs.connect(docId, docType, docSocketUrl(location, docId, docType, board));
       installStaleClientNotice(client);
       return client;
     },

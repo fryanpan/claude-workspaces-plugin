@@ -89,6 +89,16 @@ export const READER_CUTS: readonly ReaderCut[] = [
     ],
     blocks: ['  if (Array.isArray(value.answerHistory)) {\n'],
   },
+  {
+    // Not a field, but the same reason: the doc page's offline copy hands
+    // the socket an `acceptSync` check (workspaces-app doc-cache-boot.ts),
+    // and no widget code passes one, so the call is made by nobody here.
+    // The parameter goes with the call: left in, it alone renamed enough of
+    // the minified bundle to cost 27 gzip bytes, with base main 6 under.
+    file: 'core/src/ws-client.ts',
+    lines: ['  acceptSync?: AcceptSync,\n', '        if (acceptSync?.(data) === false) return;\n'],
+    blocks: [],
+  },
 ];
 
 /** The fields those cuts stop lifting, which the bundle must therefore never read. */

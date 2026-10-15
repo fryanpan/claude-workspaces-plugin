@@ -1649,6 +1649,21 @@ request and returns no `Response`, so it belongs beside the other functions over
 values; leaving it in `routes/` would have meant a module outside `routes/`
 importing out of it, which is the direction `check:imports` exists to refuse.
 
+Four top-level modules keep a doc page readable with no network, and none of
+them changes a layer. `doc-cache.ts` is a store adapter: the browser's
+IndexedDB copy of each opened markdown doc, written only once a server sync
+has given it a state vector to check against, tagged with the session's
+identity and cleared when another identity answers. `doc-cache-boot.ts` is
+the controller tier between the router's two hooks and that store: with a
+copy, the doc's meta comes from it and the socket's doc is seeded from it
+before the socket opens; core's `connect` takes an `acceptServerState` option
+so a copy the server's history no longer covers is refused, not merged.
+`offline-worker.ts` registers the same root-scoped `/sw.js` push enrolment
+uses and tells it what the page loaded, and `sw-offline.ts` is the worker's
+offline half, bundled into `sw.js`: a network-first doc shell with a kept
+fallback, and the `/app/` bundles. The worker holds no doc content and answers
+no API read.
+
 `workspaces-app` layers the same way — entries, controllers, views, models,
 transport — and its models are DOM-free, which is what lets `board/board-model.ts`,
 `board/board-review-model.ts` and `board/board-presence-model.ts` be tested without a
