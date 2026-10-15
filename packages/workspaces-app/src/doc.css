@@ -1263,6 +1263,46 @@ body.has-set .doc-switcher-caret {
 #editor > .ProseMirror .mdx-edit-error[hidden] {
   display: none;
 }
+/* A ```choice block (choice-block.ts): a row of buttons, its source hidden
+   while it parses. Every button is the same size picked or not, and only its
+   colours change, so a tap moves nothing. 44px is a thumb's target. */
+#editor > .ProseMirror .choice-block {
+  margin: 0.8em 0;
+}
+#editor > .ProseMirror .choice-block.is-choice .choice-source {
+  display: none;
+}
+#editor > .ProseMirror .choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  user-select: none;
+}
+#editor > .ProseMirror .choice-option {
+  min-width: 88px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font: 500 15px / 1 var(--sans);
+  color: var(--fg);
+  cursor: pointer;
+}
+#editor > .ProseMirror .choice-option:hover {
+  background: var(--bg-hover);
+}
+#editor > .ProseMirror .choice-option[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-subtle, rgba(46, 125, 215, 0.1));
+  color: var(--accent);
+}
+#editor > .ProseMirror[contenteditable="false"] .choice-option {
+  cursor: default;
+}
+#editor > .ProseMirror[contenteditable="false"] .choice-option:not([aria-pressed="true"]):hover {
+  background: var(--bg);
+}
 #editor > .ProseMirror .cm-diagram-error {
   color: var(--red);
   font-family: var(--mono);

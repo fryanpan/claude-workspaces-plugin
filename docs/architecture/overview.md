@@ -1915,6 +1915,13 @@ before, and fixes its options (`trust: false`, `throwOnError: false`);
 `math-markdown-it.ts` gives tiptap-markdown, which the redline and paste use,
 the same boundaries through the same core functions.
 
+`prose-choice.ts` joins the same tier and does not move the picture. A
+```` ```choice ```` block is an ordinary code block whose one line names its
+options and its pick (`id=… options="yes,maybe,no" picked=maybe`), so the
+parser and serializer need nothing new. The client's `choice-block.ts` is
+the node view that draws the buttons, and a tap rewrites `picked` in the
+block's text, so a pick reaches other pages and the file the way typing does.
+
 `prose-identity.ts`, `prose-outline.ts` and `prose-batch.ts` join that same
 document-model tier, and together they are how an agent addresses a block
 rather than a region of text. `prose-identity.ts` is the leaf that names the

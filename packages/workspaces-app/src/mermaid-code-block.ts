@@ -2,6 +2,7 @@ import { MATH_DISPLAY_LANGUAGE, mathDisplayTex } from '@claude-workspaces/core/p
 import { InputRule, type NodeViewRendererProps } from '@tiptap/core';
 import CodeBlock from '@tiptap/extension-code-block';
 import { TextSelection } from '@tiptap/pm/state';
+import { CHOICE_LANGUAGE, choiceNodeView } from './choice-block.ts';
 import { renderTex } from './math-katex.ts';
 import { MDX_FLOW_LANGUAGE, mdxFlowNodeView, mdxReadOnly } from './mdx-flow-block.ts';
 
@@ -95,6 +96,9 @@ export const MermaidCodeBlock = CodeBlock.extend({
       // An `.mdx` component has a view of its own (mdx-flow-block.ts).
       if (initial.attrs.language === MDX_FLOW_LANGUAGE)
         return mdxFlowNodeView(initial, editor, getPos);
+      // So does a ```choice block (choice-block.ts).
+      if (initial.attrs.language === CHOICE_LANGUAGE)
+        return choiceNodeView(initial, editor, getPos);
       let node = initial;
 
       const wrapper = document.createElement('div');
@@ -192,6 +196,7 @@ export const MermaidCodeBlock = CodeBlock.extend({
         update(newNode) {
           if (newNode.type !== node.type) return false;
           if (newNode.attrs.language === MDX_FLOW_LANGUAGE) return false;
+          if (newNode.attrs.language === CHOICE_LANGUAGE) return false;
           node = newNode;
           // Keep the language class in sync if the block's language attr changed.
           const newLang = (newNode.attrs.language as string | null) ?? '';
