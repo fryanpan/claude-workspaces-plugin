@@ -12,6 +12,7 @@ import {
 } from '@claude-workspaces/core/asset-manifest';
 import { computeBuildId } from '../src/build-id.ts';
 import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
+import { injectModulePreloads, staticChunkClosure } from './module-preload.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
@@ -60,12 +61,18 @@ async function emit(buildId: string): Promise<boolean> {
   mkdirSync(dist, { recursive: true });
   const define = { __LF_BUILD_ID__: JSON.stringify(buildId) };
 
+  // Splitting is ON for the doc editor too, for the board's reason below.
+  // Off, Bun inlined mermaid's `import()` into app.js: 1,497,866 bytes
+  // gzipped, about 12 seconds of a 1 Mbps plane link before any doc could
+  // paint, for diagrams most docs do not have. Its static chunks are named in
+  // index.html as modulepreloads so they download beside the entry rather
+  // than after it.
   const result = await Bun.build({
     entrypoints: [join(pkgRoot, 'src', 'app-entry.ts')],
     outdir: dist,
     target: 'browser',
     format: 'esm',
-    splitting: false,
+    splitting: true,
     sourcemap: 'external',
     define,
     naming: {
@@ -402,9 +409,14 @@ async function emit(buildId: string): Promise<boolean> {
   // index.html is copied LAST, after the hashes exist, and rewritten on the
   // way so it references them. The server rewrites its own shells at serve
   // time from the same manifest.
+  const readDist = (name: string) =>
+    existsSync(join(dist, name)) ? readFileSync(join(dist, name), 'utf8') : null;
   writeFileSync(
     join(dist, 'index.html'),
-    rewriteAssetRefs(readFileSync(join(pkgRoot, 'index.html'), 'utf8'), assets),
+    injectModulePreloads(
+      rewriteAssetRefs(readFileSync(join(pkgRoot, 'index.html'), 'utf8'), assets),
+      staticChunkClosure('app.js', readDist),
+    ),
   );
 
   if (!existsSync(join(dist, 'app.js'))) {

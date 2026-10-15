@@ -48,6 +48,11 @@ function loadMermaid(): Promise<MermaidModule> {
       });
       return m as unknown as MermaidModule;
     });
+    // A failed chunk fetch (offline, or a chunk a deploy removed) is retried
+    // by the next render rather than remembered for the life of the tab.
+    mermaidPromise.catch(() => {
+      mermaidPromise = null;
+    });
   }
   return mermaidPromise;
 }

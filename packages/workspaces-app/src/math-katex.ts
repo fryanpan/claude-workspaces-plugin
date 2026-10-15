@@ -1,10 +1,11 @@
 /**
  * KaTeX, fetched the first time a doc shows an equation and never before.
  *
- * Not an `import('katex')`: the doc bundle is built with splitting off, and
- * Bun inlines a dynamic import into the entry when it cannot split, so the
- * library would ride in every page load whether or not the doc holds math.
- * `scripts/build.ts` builds it as its own file under `/app/katex/` beside its
+ * Not an `import('katex')`: the doc bundle was built with splitting off when
+ * this was written, and Bun inlines a dynamic import into the entry when it
+ * cannot split, so the library would have ridden in every page load. The
+ * bundle splits now; this stays a fixed URL because the fonts and stylesheet
+ * sit beside it. `scripts/build.ts` builds it as its own file under `/app/katex/` beside its
  * stylesheet and fonts, and this module asks for that URL by value, which the
  * bundler leaves alone.
  *
