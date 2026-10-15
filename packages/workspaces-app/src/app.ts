@@ -1,11 +1,9 @@
-import type { AcceptSync, FeedbackClient, User } from '@claude-workspaces/core';
+import type { User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
 import { mountCode } from './code/code-app.ts';
 import { browserDeviceEnv, syncDeviceContext } from './device-context.ts';
-import { cachedDocs } from './doc-cache-boot.ts';
-import { cacheIdentity, openDocCacheStore, settleCacheIdentity } from './doc-cache.ts';
-import { fallbackDocMeta, readDocMetaOrNull } from './doc-meta.ts';
-import { docIdFromPathOrNull, docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
+import { type DocBootConnect, startDocBoot } from './doc-cache-boot.ts';
+import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
 import { el, showToast } from './doc/chrome-dom.ts';
 import { wireThreadRangeClicks } from './doc/chrome-panels.ts';
 import { marginComposerSlot } from './doc/composer-slot.ts';
@@ -22,6 +20,7 @@ import { wireDocReady } from './doc/doc-ready.ts';
 import { mountDocSaveState } from './doc/doc-save-state.ts';
 import { mountDocSetNav } from './doc/doc-set-nav.ts';
 import { mountDocSpeakerMenu } from './doc/doc-speaker-menu.ts';
+import { wireDocSwitcher } from './doc/doc-switcher.ts';
 import { mountDocVoices } from './doc/doc-voice-mount.ts';
 import { createNotesLinkRefs } from './doc/notes-link-refs.ts';
 import { wireEditViewport } from './edit-viewport.ts';
@@ -36,13 +35,7 @@ import { startReadingTracker } from './reading-tracker.ts';
 import { mountRedline } from './redline/redline-app.ts';
 import { type ReviewChrome, mountReviewChrome } from './review-chrome.ts';
 import { navigateTo, remountCurrent, startRouter } from './router.ts';
-import {
-  WRITE_ACCESS_LOOKUP_MS,
-  fetchWriteAccess,
-  installWriteGateNotice,
-  readSessionBody,
-  showSignInBar,
-} from './signin/write-gate.ts';
+import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
 import { registerMarkdownMount } from './surface-registry.ts';
 
@@ -59,15 +52,10 @@ export interface AppBootEnv {
   location: BootLocation;
   localStorage: BootStorage;
   window: BootWindow;
-  connect: (
-    url: string,
-    protocol?: () => string | undefined,
-    acceptSync?: AcceptSync,
-  ) => FeedbackClient;
-  /** IndexedDB, for this browser's copies of opened docs. Absent in a test
-   *  that does not pass one, which boots exactly as before. */
+  connect: DocBootConnect;
+  /** For the docs' local copies; a test that passes none boots as before. */
   indexedDB?: IDBFactory;
-  /** Registers the service worker that keeps the page loadable offline. */
+  /** The offline service worker's registration (offline-worker.ts). */
   registerWorker?: () => void;
 }
 
@@ -88,83 +76,19 @@ export interface AppBootEnv {
 export async function bootApp(env: AppBootEnv): Promise<() => void> {
   const { document, location, localStorage, window, connect } = env;
 
-  /**
-   * Wire the topbar doc-switcher dropdown ONCE (shell-level, doc-independent).
-   * The dropdown's CONTENTS are repopulated per navigation by the sidebar
-   * renderers; only the open/close behaviour lives here.
-   */
-  function wireDocSwitcher(): void {
-    const docMenu = document.getElementById('doc-menu');
-    const docSwitcher = document.getElementById('doc-switcher') as HTMLButtonElement | null;
-    if (!docSwitcher || !docMenu) return;
-    const close = () => {
-      docMenu.classList.add('hidden');
-      docMenu.setAttribute('aria-hidden', 'true');
-      docSwitcher.setAttribute('aria-expanded', 'false');
-    };
-    docSwitcher.addEventListener('click', (ev) => {
-      if (!document.body.classList.contains('has-set')) return;
-      ev.stopPropagation();
-      const isOpen = !docMenu.classList.contains('hidden');
-      docMenu.classList.toggle('hidden', isOpen);
-      docMenu.setAttribute('aria-hidden', String(isOpen));
-      docSwitcher.setAttribute('aria-expanded', String(!isOpen));
-    });
-    document.addEventListener('click', (ev) => {
-      if (docMenu.classList.contains('hidden')) return;
-      if (!docMenu.contains(ev.target as Node) && !docSwitcher.contains(ev.target as Node)) close();
-    });
-    document.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape' && !docMenu.classList.contains('hidden')) close();
-    });
-    // Auto-close on scroll. The dropdown overlays the doc, and on mobile the
-    // user reaching the content is the strongest "I'm done with the nav" signal.
-    const closeOnScroll = () => {
-      if (!docMenu.classList.contains('hidden')) close();
-    };
-    document.getElementById('editor')?.addEventListener('scroll', closeOnScroll, { passive: true });
-    window.addEventListener('scroll', closeOnScroll, { passive: true });
-  }
-
   // Before anything can write: a refused write raises a sign-in prompt
   // wherever it happened, rather than a "try again" this person can never
   // satisfy. See signin/write-gate.ts.
   installWriteGateNotice();
   wireKeyboardInset();
-  wireDocSwitcher();
+  wireDocSwitcher(document, window);
   (env.registerWorker ?? registerOfflineWorker)();
   const asParam = new URL(location.href).searchParams.get('as');
-  // Everything the first mount needs from the network starts NOW, together:
-  // the session (asked once, shared by the write gate and the identity), the
-  // first doc's meta, and its local copy. They used to run one after another,
-  // three round trips before the socket even opened.
-  const session = readSessionBody();
-  const store = env.indexedDB ? openDocCacheStore(env.indexedDB) : null;
-  // Bounded once, and every reader below takes this bounded answer: a session
-  // that never answers is an unknown identity, not a page that never mounts.
-  // Each reader used to start its own 4s bound in series, so a stalled link
-  // waited 8s for one unanswered read.
-  const sessionOrUnknown = Promise.race([
-    session,
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), WRITE_ACCESS_LOOKUP_MS)),
-  ]);
-  const who = sessionOrUnknown.then((body) =>
-    settleCacheIdentity(cacheIdentity(body), localStorage, store),
-  );
-  const firstDocId = docIdFromPathOrNull(location.pathname);
-  const firstMeta = firstDocId ? readDocMetaOrNull(firstDocId) : null;
-  let firstMetaUsed = false;
-  const docs = cachedDocs({
-    store,
-    who,
-    readMeta: (docId) => {
-      if (docId === firstDocId && firstMeta && !firstMetaUsed) {
-        firstMetaUsed = true;
-        return firstMeta;
-      }
-      return readDocMetaOrNull(docId);
-    },
-    fallbackMeta: fallbackDocMeta,
+  // The session, the first doc's meta and its local copy, all at once.
+  const { session, docs } = startDocBoot({
+    pathname: location.pathname,
+    indexedDB: env.indexedDB,
+    storage: localStorage,
     connect,
     page: window,
     onCopyRefused: remountCurrent,
@@ -174,12 +98,11 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
   // requires a session, "what shall we call you?" is a modal that blocks boot
   // to collect a name the server will not accept, in place of the one
   // question this person actually has to answer.
-  const writeAccess = await fetchWriteAccess(sessionOrUnknown);
+  const writeAccess = await fetchWriteAccess(session);
   if (!writeAccess.canWrite) showSignInBar();
-  // No session answer (offline, or a route that failed) is no reason to ask a
-  // reader their name over a doc this browser already holds: they stay
-  // anonymous this visit, and the next answered visit asks.
-  const sessionUnknown = (await sessionOrUnknown) === null;
+  // No session answer (offline, a failed route) asks no name: anonymous this
+  // visit, and the next answered visit asks.
+  const sessionUnknown = (await session) === null;
   // First arrival with no stored name shows the name prompt; this awaits the
   // user's answer (or skip) before anything connects, so awareness, comments,
   // and edits all carry the chosen identity from the first packet.
@@ -190,7 +113,7 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       set: (k, v) => localStorage.setItem(k, v),
     },
     {
-      fetchSession: () => sessionAnswerOf(sessionOrUnknown),
+      fetchSession: () => sessionAnswerOf(session),
       ...(writeAccess.canWrite && !sessionUnknown ? {} : { suppressNamePrompt: true }),
     },
   );

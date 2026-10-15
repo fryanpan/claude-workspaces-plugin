@@ -30,27 +30,7 @@ import {
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
-
-export interface DocOfflineRun {
-  /** The editor's text on the first, online load. */
-  online: string;
-  /** Whether the service worker controlled the page before the cut. */
-  controlled: boolean;
-  /** The editor's text after a reload with the server stopped. */
-  offline: string;
-  /** What the offline page's top bar named the doc. */
-  labelOffline: string;
-  /** Comment highlights in the offline page's prose. */
-  commentsOffline: number;
-  /** The save chip once the offline page has settled. */
-  chipOffline: string;
-  /** The file on disk while the server was down: the typed words are not in it. */
-  fileWhileOffline: string;
-  /** The editor's text after typing offline and reloading, still offline. */
-  offlineAfterEdit: string;
-  /** The file on disk once the server is back. */
-  fileAfterReconnect: string;
-}
+import type { DocOfflineRun } from './doc-offline-browser-reading.ts';
 
 const DOC = '# Saltmarsh field notes\n\nThe tide table for Harborlight.\n';
 const TYPED = ' Riverbend ferry added offline.';

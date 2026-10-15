@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chromeForSuite } from '../../../scripts/browser-tests.ts';
-import type { DocOfflineRun } from './doc-offline-browser-driver.ts';
+import type { DocOfflineRun } from './doc-offline-browser-reading.ts';
 
 /** The browser these cases may launch, or null to skip them.
  *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */

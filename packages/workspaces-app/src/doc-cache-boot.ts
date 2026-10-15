@@ -14,14 +14,76 @@ import {
   type CachedDoc,
   type DocCacheStore,
   type DocPersistence,
+  cacheIdentity,
+  openDocCacheStore,
   persistDoc,
   seedFromCopy,
+  settleCacheIdentity,
 } from './doc-cache.ts';
+import { fallbackDocMeta, readDocMetaOrNull } from './doc-meta.ts';
+import { docIdFromPathOrNull } from './doc-path.ts';
 import type { DocMeta } from './mount-context.ts';
+import { WRITE_ACCESS_LOOKUP_MS, readSessionBody } from './signin/write-gate.ts';
 
 interface PageEvents {
   addEventListener(type: string, fn: () => void): void;
   removeEventListener(type: string, fn: () => void): void;
+}
+
+/** `connect` from core, as the boot calls it. */
+export type DocBootConnect = (
+  url: string,
+  protocol?: () => string | undefined,
+  acceptSync?: AcceptSync,
+) => FeedbackClient;
+
+export interface DocBootOptions {
+  pathname: string;
+  /** Absent in a test that passes none, which boots with no copies. */
+  indexedDB?: IDBFactory | undefined;
+  storage: { getItem(k: string): string | null; setItem(k: string, v: string): void };
+  connect: DocBootConnect;
+  page?: PageEvents;
+  onCopyRefused: () => void;
+}
+
+/**
+ * Everything the first mount needs from the network, started together: the
+ * session (asked once, shared by the write gate and the identity), the first
+ * doc's meta, and its local copy. They used to run one after another, three
+ * round trips before the socket opened.
+ *
+ * `session` is bounded once, and every reader takes this bounded answer: a
+ * session that never answers is an unknown identity (null), not a page that
+ * never mounts. Each reader used to start its own 4s bound in series, so a
+ * stalled link waited 8s for one unanswered read.
+ */
+export function startDocBoot(o: DocBootOptions): {
+  session: Promise<unknown>;
+  docs: CachedDocs;
+} {
+  const store = o.indexedDB ? openDocCacheStore(o.indexedDB) : null;
+  const session = Promise.race([
+    readSessionBody(),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), WRITE_ACCESS_LOOKUP_MS)),
+  ]);
+  const who = session.then((body) => settleCacheIdentity(cacheIdentity(body), o.storage, store));
+  const firstDocId = docIdFromPathOrNull(o.pathname);
+  let firstMeta = firstDocId ? readDocMetaOrNull(firstDocId) : null;
+  const docs = cachedDocs({
+    store,
+    who,
+    readMeta: (docId) => {
+      const early = docId === firstDocId ? firstMeta : null;
+      firstMeta = null;
+      return early ?? readDocMetaOrNull(docId);
+    },
+    fallbackMeta: fallbackDocMeta,
+    connect: o.connect,
+    ...(o.page ? { page: o.page } : {}),
+    onCopyRefused: o.onCopyRefused,
+  });
+  return { session, docs };
 }
 
 export interface CachedDocsOptions {
@@ -32,11 +94,7 @@ export interface CachedDocsOptions {
   readMeta: (docId: string) => Promise<DocMeta | null>;
   /** What the router mounts when there is neither a copy nor an answer. */
   fallbackMeta: () => DocMeta;
-  connect: (
-    url: string,
-    protocol?: () => string | undefined,
-    acceptSync?: AcceptSync,
-  ) => FeedbackClient;
+  connect: DocBootConnect;
   page?: PageEvents;
   /**
    * The copy was refused by the server's history: remount from the server.
