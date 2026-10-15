@@ -18,20 +18,24 @@ import type { DocMeta } from './mount-context.ts';
  * to the machine index than to a guess.
  */
 export async function fetchDocMeta(docId: string): Promise<DocMeta> {
-  const fallback: DocMeta = {
-    docType: 'markdown',
-    sourceUrl: '',
-    workspaceId: '',
-    relPath: '',
-    diffTarget: '',
-  };
+  return (await readDocMetaOrNull(docId)) ?? fallbackDocMeta();
+}
+
+/** What a doc mounts as when its meta cannot be read: a markdown doc with no source. */
+export function fallbackDocMeta(): DocMeta {
+  return { docType: 'markdown', sourceUrl: '', workspaceId: '', relPath: '', diffTarget: '' };
+}
+
+/** `fetchDocMeta` that says when it could not read: null, where the other
+ *  answers the fallback. A cached copy's meta must not be replaced by a guess. */
+export async function readDocMetaOrNull(docId: string): Promise<DocMeta | null> {
   try {
     const url = docJsonUrl(docId);
     // An older read's record that no mount took (a superseded navigation, a
     // code doc) must not stand in for this one if this read fails.
     takeDocRecord(url);
     const res = await fetch(url);
-    if (!res.ok) return fallback;
+    if (!res.ok) return null;
     const data = (await res.json()) as {
       meta?: {
         type?: string;
@@ -73,6 +77,6 @@ export async function fetchDocMeta(docId: string): Promise<DocMeta> {
         : {}),
     };
   } catch {
-    return fallback;
+    return null;
   }
 }

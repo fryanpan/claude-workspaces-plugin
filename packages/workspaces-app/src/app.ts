@@ -1,9 +1,11 @@
-import type { FeedbackClient, User } from '@claude-workspaces/core';
+import type { AcceptSync, FeedbackClient, User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
 import { mountCode } from './code/code-app.ts';
 import { browserDeviceEnv, syncDeviceContext } from './device-context.ts';
-import { fetchDocMeta } from './doc-meta.ts';
-import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
+import { cachedDocs } from './doc-cache-boot.ts';
+import { cacheIdentity, openDocCacheStore, settleCacheIdentity } from './doc-cache.ts';
+import { fallbackDocMeta, readDocMetaOrNull } from './doc-meta.ts';
+import { docIdFromPathOrNull, docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
 import { el, showToast } from './doc/chrome-dom.ts';
 import { wireThreadRangeClicks } from './doc/chrome-panels.ts';
 import { marginComposerSlot } from './doc/composer-slot.ts';
@@ -25,15 +27,22 @@ import { createNotesLinkRefs } from './doc/notes-link-refs.ts';
 import { wireEditViewport } from './edit-viewport.ts';
 import { type EditorHandle, createEditor } from './editor.ts';
 import { wantsHuddleStart } from './huddle-entry.ts';
-import { ensureUserIdentity } from './identity-prompt.ts';
+import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import type { MountContext } from './mount-context.ts';
+import { registerOfflineWorker } from './offline-worker.ts';
 import { startReadingTracker } from './reading-tracker.ts';
 import { mountRedline } from './redline/redline-app.ts';
 import { type ReviewChrome, mountReviewChrome } from './review-chrome.ts';
-import { navigateTo, startRouter } from './router.ts';
-import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
+import { navigateTo, remountCurrent, startRouter } from './router.ts';
+import {
+  WRITE_ACCESS_LOOKUP_MS,
+  fetchWriteAccess,
+  installWriteGateNotice,
+  readSessionBody,
+  showSignInBar,
+} from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
 import { registerMarkdownMount } from './surface-registry.ts';
 
@@ -50,7 +59,16 @@ export interface AppBootEnv {
   location: BootLocation;
   localStorage: BootStorage;
   window: BootWindow;
-  connect: (url: string) => FeedbackClient;
+  connect: (
+    url: string,
+    protocol?: () => string | undefined,
+    acceptSync?: AcceptSync,
+  ) => FeedbackClient;
+  /** IndexedDB, for this browser's copies of opened docs. Absent in a test
+   *  that does not pass one, which boots exactly as before. */
+  indexedDB?: IDBFactory;
+  /** Registers the service worker that keeps the page loadable offline. */
+  registerWorker?: () => void;
 }
 
 /**
@@ -114,14 +132,54 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
   installWriteGateNotice();
   wireKeyboardInset();
   wireDocSwitcher();
+  (env.registerWorker ?? registerOfflineWorker)();
   const asParam = new URL(location.href).searchParams.get('as');
+  // Everything the first mount needs from the network starts NOW, together:
+  // the session (asked once, shared by the write gate and the identity), the
+  // first doc's meta, and its local copy. They used to run one after another,
+  // three round trips before the socket even opened.
+  const session = readSessionBody();
+  const store = env.indexedDB ? openDocCacheStore(env.indexedDB) : null;
+  // Bounded once, and every reader below takes this bounded answer: a session
+  // that never answers is an unknown identity, not a page that never mounts.
+  // Each reader used to start its own 4s bound in series, so a stalled link
+  // waited 8s for one unanswered read.
+  const sessionOrUnknown = Promise.race([
+    session,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), WRITE_ACCESS_LOOKUP_MS)),
+  ]);
+  const who = sessionOrUnknown.then((body) =>
+    settleCacheIdentity(cacheIdentity(body), localStorage, store),
+  );
+  const firstDocId = docIdFromPathOrNull(location.pathname);
+  const firstMeta = firstDocId ? readDocMetaOrNull(firstDocId) : null;
+  let firstMetaUsed = false;
+  const docs = cachedDocs({
+    store,
+    who,
+    readMeta: (docId) => {
+      if (docId === firstDocId && firstMeta && !firstMetaUsed) {
+        firstMetaUsed = true;
+        return firstMeta;
+      }
+      return readDocMetaOrNull(docId);
+    },
+    fallbackMeta: fallbackDocMeta,
+    connect,
+    page: window,
+    onCopyRefused: remountCurrent,
+  });
   // May this browser write at all? Asked BEFORE the name prompt, because the
   // answer decides whether that prompt should be shown: where the server
   // requires a session, "what shall we call you?" is a modal that blocks boot
   // to collect a name the server will not accept, in place of the one
   // question this person actually has to answer.
-  const writeAccess = await fetchWriteAccess();
+  const writeAccess = await fetchWriteAccess(sessionOrUnknown);
   if (!writeAccess.canWrite) showSignInBar();
+  // No session answer (offline, or a route that failed) is no reason to ask a
+  // reader their name over a doc this browser already holds: they stay
+  // anonymous this visit, and the next answered visit asks.
+  const sessionUnknown = (await sessionOrUnknown) === null;
   // First arrival with no stored name shows the name prompt; this awaits the
   // user's answer (or skip) before anything connects, so awareness, comments,
   // and edits all carry the chosen identity from the first packet.
@@ -131,7 +189,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       get: (k) => localStorage.getItem(k),
       set: (k, v) => localStorage.setItem(k, v),
     },
-    writeAccess.canWrite ? {} : { suppressNamePrompt: true },
+    {
+      fetchSession: () => sessionAnswerOf(sessionOrUnknown),
+      ...(writeAccess.canWrite && !sessionUnknown ? {} : { suppressNamePrompt: true }),
+    },
   );
   registerMarkdownMount(mountMarkdown);
   return startRouter({
@@ -139,10 +200,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
     // The answer is already in hand — every mount gets it as a value rather
     // than asking again. A mount that re-asks is editable while it waits.
     canWrite: writeAccess.canWrite,
-    fetchMeta: fetchDocMeta,
+    fetchMeta: (docId) => docs.fetchMeta(docId),
     connectFor: (docId, docType) => {
       const board = workspaceIdFromPath(location.pathname + location.search);
-      const client = connect(docSocketUrl(location, docId, docType, board));
+      const client = docs.connect(docId, docType, docSocketUrl(location, docId, docType, board));
       installStaleClientNotice(client);
       return client;
     },

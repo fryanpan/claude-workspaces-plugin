@@ -52,9 +52,13 @@ describe('service worker source', () => {
     expect(source).toContain('clients.claim');
   });
 
-  it('has no imports — a worker that imports a chunk can fail to install', () => {
-    const imports = source.match(/^\s*import\s.+from\s/gm);
-    expect(imports).toBeNull();
+  it('imports only sw-offline.ts, which the iife build inlines', () => {
+    // A worker that imports a chunk can fail to install when the chunk 404s.
+    // The build is `format: 'iife'`, `splitting: false`, so a sibling module
+    // is inlined; anything from a package would still be, but would also put
+    // that package's weight in a file the browser re-fetches on its own.
+    const imports = [...source.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gms)].map((m) => m[1]);
+    expect(imports).toEqual(['./sw-offline.ts']);
   });
 
   it('points its icons at the root paths the server actually aliases', () => {

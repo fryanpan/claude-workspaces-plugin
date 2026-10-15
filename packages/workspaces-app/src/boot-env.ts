@@ -64,6 +64,16 @@ export const browserStorage: BootStorage = {
   },
 };
 
+/** IndexedDB, or undefined where the getter throws (a sandboxed frame, a
+ *  blocked profile) — the same hazard `browserStorage` guards against. */
+export function browserIndexedDB(): IDBFactory | undefined {
+  try {
+    return globalThis.indexedDB;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The global event target a boot subscribes to — popstate on the board, scroll
  * on the document editor — and hands on to the repaint guard, which watches it
