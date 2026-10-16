@@ -152,6 +152,22 @@ describe('review_item.added / .revised / .withdrawn — a ticket actor', () => {
   });
 });
 
+describe('whiteboard.changed — the actor who drew', () => {
+  const changed = (actor: unknown) => ({ docId: 'd', actor, changed: ['a'], shapes: [], count: 1 });
+
+  it('suppresses strokes this session drew', () => {
+    expect(
+      isSelfAuthoredEvent('whiteboard.changed', changed({ id: SELF, kind: 'agent' }), SELF),
+    ).toBe(true);
+  });
+
+  it('delivers strokes a person drew', () => {
+    expect(
+      isSelfAuthoredEvent('whiteboard.changed', changed({ id: OTHER, kind: 'person' }), SELF),
+    ).toBe(false);
+  });
+});
+
 describe('events this must never touch', () => {
   // The suggesting agent has to hear the VERDICT on its own suggestion —
   // `suggestion.accepted` / `.rejected` carry the SUGGESTER as author, so

@@ -37,6 +37,7 @@ import { type ReviewItemStalePayload, reviewItemStaleLine } from './review-stale
 import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
 import { voiceRequestLine } from './voice-line.ts';
+import { type WhiteboardChangedLike, whiteboardChangedLine } from './whiteboard-line.ts';
 
 /** One `notifications/claude/channel` frame, as the MCP server sends it. */
 export interface ChannelNotification {
@@ -570,6 +571,20 @@ async function emitChannelMessage(
           ...(p.path ? { path: p.path } : {}),
           ...(p.backupPath ? { backup_path: p.backupPath } : {}),
         },
+      },
+    });
+    return;
+  }
+
+  if (event === 'whiteboard.changed') {
+    const w = rawPayload as WhiteboardChangedLike;
+    await deps.notify({
+      method: 'notifications/claude/channel',
+      params: {
+        source: 'claude-workspaces',
+        sent_at: nowIso(deps),
+        content: whiteboardChangedLine(w),
+        meta: { doc_id: docId, event, ...(w.actor?.name ? { author: w.actor.name } : {}) },
       },
     });
     return;

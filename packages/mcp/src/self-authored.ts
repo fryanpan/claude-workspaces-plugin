@@ -108,8 +108,9 @@ const ACTOR_ID_EVENTS = new Set(['review_item.viewed', 'review_item.answered']);
  * (`workspace.ready_idle`, `workspace.stalled`, `workspace.review_item_held`,
  * `workspace.review_answered`, `workspace.done_when_ready`) carry no
  * top-level actor at all, so they fail open and keep waking their addressee.
+ * `whiteboard.changed` names who drew, so an agent's own strokes are dropped.
  */
-const ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch)\./;
+const ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard)\./;
 
 /**
  * The attachment family, whose subject IS its actor: `agent.attached` and

@@ -22,12 +22,14 @@ import { warnDeprecatedAlias } from './deprecated-aliases.ts';
 import type { DocsToolContext } from './tools/docs.ts';
 import type { InboxToolContext } from './tools/inbox.ts';
 import type { TaskToolContext } from './tools/tasks.ts';
+import type { WhiteboardToolContext } from './tools/whiteboard.ts';
 import type { WorkspaceToolContext } from './tools/workspace.ts';
 
 /** The slice of the process the domain handlers in `tools/` read. */
 export type ToolContext = DocsToolContext &
   InboxToolContext &
   TaskToolContext &
+  WhiteboardToolContext &
   WorkspaceToolContext;
 
 /** One domain family. `undefined` means "not one of mine". */
