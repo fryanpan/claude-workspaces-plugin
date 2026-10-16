@@ -72,7 +72,10 @@ Agents never write to Cloudflare. In order:
 
 - Paths that name no board and carry no same-host Referer get a 404 from this
   Worker. With the route bound to `/workspaces/*` none of them reach it; they
-  go to the Mac. Home across servers is its own task.
+  go to the Mac. Home across servers rides this table: the Mac reads the same
+  JSON (`CW_HOME_REMOTES_FILE`, `packages/server/src/home-remotes.ts`) and
+  pulls each remote board's feed at `/workspaces/<board>/home-feed`, which
+  this Worker routes like any other board path.
 - `resolveOverride` and the tunnel's Host-based ingress are documented
   Cloudflare behaviour that this repo's tests stand in for, not run.
   `packages/server/test/board-router-two-servers.test.ts` drives the handler

@@ -261,6 +261,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/goals/rename` | POST | `routes/workspace-goals.ts` | share-scope |  |
 | `/workspaces/:ws/goals/reorder` | POST | `routes/workspace-goals.ts` | share-scope |  |
 | `/workspaces/:ws/home` | GET | `routes/workspace-home.ts` | share-scope |  |
+| `/workspaces/:ws/home-feed` | GET | `routes/home-feed.ts` | home-feed |  |
+| `/workspaces/:ws/home-feed/events:stream` | GET | `routes/home-feed.ts` | home-feed |  |
 | `/workspaces/:ws/home/instructions` | PUT | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/home/read` | POST | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/huddles` | POST | `routes/workspace-content.ts` | share-scope |  |

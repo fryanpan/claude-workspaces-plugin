@@ -36,6 +36,7 @@ import {
 import { type BrowserSentryConfig, sentryHeadTags } from './browser-sentry.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import type { DocStore, WorkspaceDirNode, WorkspaceFileNode } from './doc-store.ts';
+import { LANDING_REMOTE_CSS } from './landing-remote.ts';
 import {
   LANDING_REVIEW_CSS,
   type LandingReview,
@@ -1061,7 +1062,7 @@ function landingShell(
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#2e7dd7">${sentryMeta}
-<style>${LANDING_CSS}${LANDING_REVIEW_CSS}</style>
+<style>${LANDING_CSS}${LANDING_REVIEW_CSS}${LANDING_REMOTE_CSS}</style>
 ${body}
 <footer>POST /workspaces/&lt;ws&gt;/docs · /widget.iife.js · /demos/mockup</footer>`;
 }
@@ -1116,6 +1117,9 @@ export function renderLanding(
   /** A board to reach the Workspaces feedback doc at, or '' for no widget.
    *  The board shell's widget, for the same reasons; '' for a visitor. */
   feedbackWorkspaceId = '',
+  /** Review items on other servers (landing-remote.ts), inside the review
+   *  region so the live swap redraws them with the bar. */
+  remote = '',
 ): string {
   const days = Math.round(model.windowMs / 86_400_000);
   // Retired boards are NOT in this denominator. "Nothing active, 3 inactive
@@ -1170,7 +1174,7 @@ export function renderLanding(
         : ''
     }
 ${coach}
-<div id="landing-review">${renderReviewBar(review)}</div>
+<div id="landing-review">${renderReviewBar(review)}${remote}</div>
 ${inbox}
 <div id="landing-boards">${active}
 ${inactive}

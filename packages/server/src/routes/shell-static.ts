@@ -154,6 +154,8 @@ export interface ShellStaticContext {
   /** The owner's goals for the week and the coach's open nudge, or ''
    *  (coach/landing.ts). Asked only when `ownerProven`. */
   landingCoach?: () => string;
+  /** Review items on other servers, text only, or '' (landing-remote.ts). */
+  landingRemote?: () => string;
 }
 
 /** The address this request is asking about, and who is asking. */
@@ -200,6 +202,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     defaultBoardWorkspaceName,
     landingInbox,
     landingCoach,
+    landingRemote,
   } = ctx;
 
   /**
@@ -479,6 +482,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
         inbox,
         coach,
         feedback ? feedbackWorkspaceId() : '',
+        landingRemote ? landingRemote() : '',
       ),
       { headers: HTML_SHELL_HEADERS },
     );
