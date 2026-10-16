@@ -36,6 +36,7 @@ import {
 import { type ReviewItemStalePayload, reviewItemStaleLine } from './review-stale-line.ts';
 import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
+import { UNTRUSTED_LABEL, quoteUntrusted, quoteUntrustedInline } from './untrusted-quote.ts';
 import { voiceRequestLine } from './voice-line.ts';
 
 /** One `notifications/claude/channel` frame, as the MCP server sends it. */
@@ -84,7 +85,7 @@ function nowIso(deps: ChannelDeps): string {
 
 /** A comment as a doc-event frame carries it — the fields a line reads. */
 interface ChannelComment {
-  author?: { name?: string };
+  author?: { id?: string; name?: string };
   text?: string;
   ts?: number;
   via?: string;
@@ -114,7 +115,10 @@ export interface ChannelPayload {
   docTitle?: string;
   /** On a reply: the comment it follows. Absent on a first comment and from
    *  servers older than the stamp. */
-  inReplyTo?: { author?: string; text?: string };
+  inReplyTo?: { author?: string; authorId?: string; trust?: string; text?: string };
+  /** `owner` when the comment the line quotes is the board owner's; anything
+   *  else, or absent, and the line quotes it as untrusted data. */
+  commentTrust?: string;
   /** A reply that answered some of a review item's questions: the ones still open. */
   openParts?: unknown[];
   /** A resolve/reopen relayed from inside a mock page. A comment event's mark
@@ -655,10 +659,25 @@ async function emitChannelMessage(
   // older server, which leaves the line as it was.
   const onDoc = text && p.docTitle ? ` on "${truncate(p.docTitle, 60)}"` : '';
   const parentText = event === 'thread.replied' ? oneLine(p.inReplyTo?.text ?? '') : '';
-  const toParent = parentText ? ` — to "${truncate(parentText, 100)}"` : '';
+  // A comment that is not the owner's, nor this agent's own, is quoted as
+  // data — and so is the comment it replies to, by the same rule. See
+  // untrusted-quote.ts.
+  const spokenBy = (p.comment ?? p.thread?.comments?.at(-1))?.author?.id;
+  const trusted = p.commentTrust === 'owner' || (!!spokenBy && spokenBy === deps.authorId);
+  const parentTrusted =
+    p.inReplyTo?.trust === 'owner' ||
+    (!!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId);
+  const toParent = !parentText
+    ? ''
+    : parentTrusted
+      ? ` — to "${truncate(parentText, 100)}"`
+      : ` — to ${quoteUntrustedInline(truncate(parentText, 100), p.inReplyTo?.author ?? '')}`;
   const who = `${author ? `${author}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
+  const said = trusted
+    ? `${who ? `${who}: ` : ''}${text}`
+    : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}\n${quoteUntrusted(text, author)}`;
   const body = text
-    ? `[${action}]${onItem} ${who ? `${who}: ` : ''}${text}${openPartsClause(p.openParts)}${editHint}`
+    ? `[${action}]${onItem} ${said}${openPartsClause(p.openParts)}${editHint}`
     : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
 
   await deps.notify({
@@ -675,7 +694,10 @@ async function emitChannelMessage(
         author,
         anchor_text: snippet,
         ...(p.docTitle ? { doc_title: p.docTitle } : {}),
-        ...(parentText ? { in_reply_to: parentText } : {}),
+        ...(text && !trusted ? { trust: 'untrusted' } : {}),
+        // An untrusted parent is quoted in the line; the meta does not repeat
+        // it bare.
+        ...(parentText && parentTrusted ? { in_reply_to: parentText } : {}),
         ...(parentText && p.inReplyTo?.author ? { in_reply_to_author: p.inReplyTo.author } : {}),
         ...(pageEdits?.length ? { page_edits: JSON.stringify(pageEdits) } : {}),
       },
