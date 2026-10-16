@@ -169,7 +169,7 @@ export async function handleDocResourceCore(
     const filter = status ? { status } : undefined;
     const threads: Array<Thread & { docId?: string }> = docStore
       .listThreads(docId, filter)
-      .map((t) => withTaskChips(docId, t));
+      .map((t) => ctx.threadOpenerProofs.decorate(docId, withTaskChips(docId, t)));
     // A `.md` diff member's companion editor doc holds the threads
     // the reviewer left in the File view. The agent asked about the
     // member because that is the id it was handed; answer for the

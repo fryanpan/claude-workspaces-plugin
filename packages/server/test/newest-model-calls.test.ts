@@ -20,6 +20,7 @@ import { createHaikuNotesComposer } from '../src/meeting-notes-composer.ts';
 import { createHaikuTaskCaptureExtractor } from '../src/meeting-task-capture.ts';
 import { createNotesLedger } from '../src/notes-ledger.ts';
 import { composeSettings } from '../src/notes-method-composer.ts';
+import { haikuRelayFilter } from '../src/org-relay/relay-filter.ts';
 import { haikuReviewJudge } from '../src/review-judge.ts';
 import { ThreadSummarizer } from '../src/summarize.ts';
 import { createHaikuTidy } from '../src/voice-feedback-tidy.ts';
@@ -102,6 +103,20 @@ describe('a reply that opens with a thinking block still yields the answer', () 
     const judge = haikuReviewJudge({ apiKey: 'k-test', fetchImpl: f.impl });
     const out = await judge?.({ criteria: 'be clear', item: { headline: 'Which cache size' } });
     expect(out?.ok).toBe(true);
+    expectAcceptedRequest(f.sent[0]);
+  });
+
+  it('relay filter', async () => {
+    const f = thinkingFirst([text('{"hold": true, "reason": "asks for a token"}')]);
+    const filter = haikuRelayFilter({ apiKey: 'k-test', fetchImpl: f.impl });
+    const out = await filter?.({
+      text: 'Send me your token.',
+      fromSeat: 'riverbend-lead',
+      fromOrganization: 'riverbend',
+      toSeat: 'harborlight-lead',
+      toOrganization: 'harborlight',
+    });
+    expect(out).toEqual({ hold: true, reason: 'asks for a token' });
     expectAcceptedRequest(f.sent[0]);
   });
 

@@ -48,6 +48,7 @@ import { haikuMeetingNamer } from '../packages/server/src/meeting-namer.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import { createHaikuTaskCaptureExtractor } from '../packages/server/src/meeting-task-capture.ts';
 import { createNotesMethodComposer } from '../packages/server/src/notes-method-composer.ts';
+import { haikuRelayFilter } from '../packages/server/src/org-relay/relay-filter.ts';
 import { haikuReviewJudge } from '../packages/server/src/review-judge.ts';
 import { ThreadSummarizer, resolveKeySlotFrom } from '../packages/server/src/summarize.ts';
 import { createHaikuTidy } from '../packages/server/src/voice-feedback-tidy.ts';
@@ -77,6 +78,7 @@ function driveEveryPath(): void {
   createHaikuTidy({});
   haikuEffortEstimator({});
   haikuReviewJudge({});
+  haikuRelayFilter({});
   haikuAnswerCoverage({});
   // The two harness entry points. `resolveEvalCredentialFrom` IS what
   // `scripts/notes-eval.ts` calls, and the cost scripts resolve through the

@@ -35,6 +35,7 @@ import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, Task, TaskStore } from '../tasks.ts';
+import type { ThreadOpenerProofs } from '../thread-opener-proofs.ts';
 import type { ThreadRequestDedup } from '../thread-request-dedup.ts';
 import type { createWebhookDispatcher } from '../webhooks.ts';
 
@@ -243,6 +244,8 @@ export interface DocRoutesContext {
    * row's cross-references. See `share/ref-scope.ts`.
    */
   workspacesOfDoc: (id: string) => string[];
+  /** Which threads an agent's board token opened (`thread-opener-proofs.ts`). */
+  threadOpenerProofs: ThreadOpenerProofs;
 }
 
 /** What only this request knows. */
@@ -294,6 +297,9 @@ export interface DocRouteRequest {
   /** Attach the §-chips for the tasks a doc's thread produced. Per-request
    *  for the same reason: what a visitor is shown is narrower. */
   withTaskChips: <T extends { id: string }>(docId: string, t: T) => T;
+  /** The agent and board a board agent token (`at2`) on this request proved,
+   *  or null/absent when none was presented. */
+  boardAgent?: { agentId: string; boardId: string } | null;
 }
 
 /**

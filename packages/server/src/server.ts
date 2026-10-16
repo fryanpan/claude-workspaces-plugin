@@ -250,6 +250,7 @@ import {
   type Task,
   TaskStore,
 } from './tasks.ts';
+import { ThreadOpenerProofs, threadOpenerProofsPath } from './thread-opener-proofs.ts';
 import { ThreadRequestDedup } from './thread-request-dedup.ts';
 import type { TranscriptionEngine } from './transcribe.ts';
 import { UptimeMonitor } from './uptime.ts';
@@ -2280,6 +2281,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
+  /** The threads those tokens opened, which the org relay checks a sender by. */
+  const threadOpenerProofs = new ThreadOpenerProofs(threadOpenerProofsPath(dataDir));
 
   const { admit } = createRequestAdmission({
     opts,
@@ -2938,6 +2941,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     readyNudger,
     ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     threadRequestDedup,
+    threadOpenerProofs,
     summarizer,
     dataDir,
     j,
@@ -3928,6 +3932,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           url,
           pathname,
           visitor,
+          boardAgent: gate.boardAgent,
           authorFor,
           refuseCategoryAuthor,
           roleFor,

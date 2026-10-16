@@ -781,8 +781,15 @@ class HaikuStub(BaseHTTPRequestHandler):
         pass
 
 
+class HaikuStubServer(ThreadingHTTPServer):
+    # The default listen queue is 5 and scrub-haiku.py opens CHUNK_JOBS = 6
+    # connections at once, so the sixth was sometimes reset (Broken pipe) and
+    # the "push in pieces" case failed 5 runs in 250.
+    request_queue_size = 64
+
+
 def start_haiku_stub() -> tuple[ThreadingHTTPServer, str]:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), HaikuStub)
+    server = HaikuStubServer(("127.0.0.1", 0), HaikuStub)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}"
 
