@@ -66,17 +66,24 @@ async function main(): Promise<void> {
     await buildWidget(widgetDist);
     step('build the doc bundle');
     const appPkg = join(import.meta.dirname, '..');
-    const built = spawnSync('bun', ['run', join(appPkg, 'scripts', 'build.ts')], {
-      encoding: 'utf8',
-      timeout: 120_000,
-    });
+    // Its own folder: the build deletes its output first, so a shared one
+    // races any other driver building at the same time (scripts/build.ts).
+    const appDist = join(dir, 'app');
+    const built = spawnSync(
+      'bun',
+      ['run', join(appPkg, 'scripts', 'build.ts'), '--outdir', appDist],
+      {
+        encoding: 'utf8',
+        timeout: 120_000,
+      },
+    );
     if (built.status !== 0) throw new Error(`doc bundle build failed:\n${built.stderr}`);
     const serve = (port: number) =>
       createServer({
         port,
         dataDir: join(dir, 'data'),
         widgetDistDir: widgetDist,
-        markdownAppDistDir: join(appPkg, 'dist'),
+        markdownAppDistDir: appDist,
         requireSignInToWrite: false,
       });
     handle = serve(0);

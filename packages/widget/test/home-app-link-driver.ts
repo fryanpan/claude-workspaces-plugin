@@ -70,16 +70,23 @@ async function main(): Promise<void> {
     await buildWidget(dist);
     step('build the board client');
     const appPkg = join(import.meta.dirname, '../../workspaces-app');
-    const built = spawnSync('bun', ['run', join(appPkg, 'scripts', 'build.ts')], {
-      encoding: 'utf8',
-      timeout: 120_000,
-    });
+    // Its own folder: the build deletes its output first, so a shared one
+    // races any other driver building at the same time (scripts/build.ts).
+    const appDist = join(dir, 'app');
+    const built = spawnSync(
+      'bun',
+      ['run', join(appPkg, 'scripts', 'build.ts'), '--outdir', appDist],
+      {
+        encoding: 'utf8',
+        timeout: 120_000,
+      },
+    );
     if (built.status !== 0) throw new Error(`board client build failed:\n${built.stderr}`);
     handle = createServer({
       port: 0,
       dataDir: join(dir, 'data'),
       widgetDistDir: dist,
-      markdownAppDistDir: join(appPkg, 'dist'),
+      markdownAppDistDir: appDist,
       requireSignInToWrite: false,
     });
     const base = `http://127.0.0.1:${handle.port}`;
