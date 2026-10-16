@@ -122,6 +122,9 @@ function main(argv: string[]): number {
         `warning: this script runs from ${here}, inside ${lead.name}'s own project, so the lead can edit the generator of its next profile. Launch from prod's checkout.`,
       );
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
+    // Ctrl-C interrupts the lead's turn; it must not kill this wrapper and
+    // leave the session running without its parent.
+    for (const sig of ['SIGINT', 'SIGQUIT'] as const) process.on(sig, () => {});
     const r = spawnSync(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
       cwd: launch.cwd,
       stdio: 'inherit',
