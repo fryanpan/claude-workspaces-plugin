@@ -3,26 +3,24 @@
  *
  * The coach session reads what the owner reads and writes, and sends it to
  * the Anthropic API. Some boards must never go there: a client's board, a
- * board shared with someone else, a family member's records. So a board is
- * off when any of these holds, and an event on it is not sent at all, not
- * even the board's title:
+ * family member's records. So a board is off when any of these holds, and an
+ * event on it is not sent at all, not even the board's title:
  *
  *  - it, or a doc on it, keeps its files on this machine (`local-only`, the
  *    attachment-set and project privacy);
  *  - its sharing lock is on;
- *  - anyone besides the owner can reach it: a member, a share, a link;
  *  - he turned the coach off for it ("Coach off for this board").
  *
- * The coach session and the plan lead pass `allowShared`: the owner wants the
+ * A member or a share link does not turn a board off. The owner wants the
  * coach to see everything he does (2026-10-16), and what reaches it from a
- * shared board is only his own actions there. The other three still hold.
+ * shared board is only his own actions there.
  *
  * A doc is off when it is local-only itself or any board holding it is off.
  * A check that throws counts as off: the question is what may leave the
  * machine, and "could not tell" is not a yes.
  */
 
-export type CoachOffReason = 'local-only' | 'locked' | 'shared' | 'turned-off' | 'unknown';
+export type CoachOffReason = 'local-only' | 'locked' | 'turned-off' | 'unknown';
 
 export interface BoardPrivacy {
   /** The board, or a doc on it, keeps its files on this machine. */
@@ -31,8 +29,6 @@ export interface BoardPrivacy {
   localOnlyDoc(docId: string): boolean;
   /** The board's sharing lock is on. */
   locked(workspaceId: string): boolean;
-  /** Anyone besides the owner can reach the board. */
-  shared(workspaceId: string): boolean;
   /** Every board holding the doc. */
   boardsOfDoc(docId: string): readonly string[];
 }
@@ -60,17 +56,10 @@ export function boardOffReason(
   try {
     if (privacy.localOnlyBoard(workspaceId)) return 'local-only';
     if (privacy.locked(workspaceId)) return 'locked';
-    if (privacy.shared(workspaceId)) return 'shared';
     return null;
   } catch {
     return 'unknown';
   }
-}
-
-export interface PlaceOffOptions {
-  /** A board shared with someone else still counts as on. The coach
-   *  session's feed uses this, and so do the plan lead's rank and goal tag. */
-  allowShared?: boolean;
 }
 
 /** True when nothing about this place may reach the coach session. */
@@ -78,12 +67,8 @@ export function placeIsOff(
   place: CoachPlaceRef,
   privacy: BoardPrivacy,
   turnedOff: ReadonlySet<string>,
-  opts: PlaceOffOptions = {},
 ): boolean {
-  const boardOff = (id: string): boolean => {
-    const reason = boardOffReason(id, privacy, turnedOff);
-    return reason !== null && !(opts.allowShared && reason === 'shared');
-  };
+  const boardOff = (id: string): boolean => boardOffReason(id, privacy, turnedOff) !== null;
   if (boardOff(place.workspaceId)) return true;
   const { docId } = place;
   if (!docId) return false;
@@ -107,7 +92,6 @@ export interface BoardPrivacySources {
   projectIsLocalOnly: (repoKey: string) => boolean;
   docIdsOf: (workspaceId: string) => readonly string[];
   isBoardLocked: (workspaceId: string) => boolean;
-  isBoardShared: (workspaceId: string) => boolean;
   boardsOfDoc: (docId: string) => Iterable<string>;
 }
 
@@ -121,7 +105,6 @@ export function boardPrivacyFrom(src: BoardPrivacySources): BoardPrivacy {
     localOnlyDoc,
     localOnlyBoard: (id) => src.isLocalOnlySet(id) || src.docIdsOf(id).some(localOnlyDoc),
     locked: src.isBoardLocked,
-    shared: src.isBoardShared,
     boardsOfDoc: (docId) => [...src.boardsOfDoc(docId)],
   };
 }

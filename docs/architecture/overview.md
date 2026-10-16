@@ -2112,9 +2112,8 @@ agent token (MCP verb `rank_review_item`). The lead hears what to rank from
 `ask-feed.ts`: every new review item on another board, batched over a
 10-minute window into one addressed `workspace.new_asks` frame carrying board,
 row, key, headline and filing time, never the detail. A board the coach is
-off for (`coach/exclusion.ts`) is excluded from the feed. The ranks use the
-same check but allow a shared board, since a rank is read only on the owner's
-Home.
+off for (`coach/exclusion.ts`) is excluded from the feed and from the ranks.
+A board with members or a share link is not off.
 The window is `held-window.ts`, which the coach's session feed uses too, and
 `lead-rank-wiring.ts` composes the three against the stores.
 

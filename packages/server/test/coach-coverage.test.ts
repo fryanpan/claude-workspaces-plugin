@@ -3,7 +3,8 @@
  * and a prompt he types through Remote Control both reach the coach
  * session's next digest, with the comment's text and the prompt said in a
  * few words with its repo and board. Both happen while the coach session is
- * away, and the digest goes when its stream comes back. A headless run's
+ * away, and the digest goes when its stream comes back. The board they
+ * happen on has a share link, which no longer leaves it out. A headless run's
  * prompt does not reach it.
  *
  * The real server and the real UserPromptSubmit hook. The phone is an Access
@@ -13,7 +14,8 @@
  * here reaches a model.
  *
  * This is the regression check for the coach's coverage: it fails if either
- * the phone comment or the Remote Control prompt stops reaching the digest.
+ * the phone comment or the Remote Control prompt stops reaching the digest,
+ * including when the board is shared.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -143,7 +145,7 @@ async function coachStream(workspaceId: string, agentId: string) {
 }
 
 describe('the coach digest covers his day', () => {
-  it('carries a phone comment and a Remote Control prompt, held while the coach was away', async () => {
+  it('carries a phone comment and a Remote Control prompt on a shared board, held while the coach was away', async () => {
     const setup = await fetch(`${base}/coach/setup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(await phone()) },
@@ -155,6 +157,13 @@ describe('the coach digest covers his day', () => {
     expect(coachBoard).not.toBe('');
 
     const board = await seedBoard(base, { name: 'Riverbend' });
+    // Someone else can reach this board now; his own actions on it still count.
+    const shared = await fetch(`${base}/api/share/workspace`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: board }),
+    });
+    expect(shared.status, await shared.clone().text()).toBe(200);
     const created = await fetch(`${base}/workspaces/${board}/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

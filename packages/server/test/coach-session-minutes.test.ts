@@ -41,7 +41,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function wire(privacy: Partial<BoardPrivacy> = {}) {
+function wire(privacy: Partial<BoardPrivacy> = {}, overrides: Partial<CoachWiringDeps> = {}) {
   const windows: (() => void)[] = [];
   const sent: unknown[] = [];
   const deps: CoachWiringDeps = {
@@ -62,7 +62,6 @@ function wire(privacy: Partial<BoardPrivacy> = {}) {
       localOnlyBoard: () => false,
       localOnlyDoc: () => false,
       locked: () => false,
-      shared: () => false,
       boardsOfDoc: () => [],
       ...privacy,
     },
@@ -78,6 +77,7 @@ function wire(privacy: Partial<BoardPrivacy> = {}) {
       windows.push(fn);
       return () => {};
     },
+    ...overrides,
   };
   const w = wireCoach(deps);
   w.store.setGoalsDoc({ workspaceId: 'w-coach', docId: 'd-goals', createdAt: at(9) });
@@ -176,12 +176,31 @@ describe('the digest’s Claude Code section', () => {
   });
 });
 
-describe('a shared board', () => {
-  it('still counts his own session on it: only the per-board switches leave a board out', () => {
-    const { w, sent, closeWindows } = wire({ shared: (ws) => ws === 'w-river' });
-    expect(w.sessionPrompt('w-river', typed(RIVER_LEAD, 0), '/work/riverbend')).toBe(true);
-    closeWindows();
-    expect(JSON.stringify(sent)).toContain('"repo":"riverbend"');
+describe('the coach lead’s stream', () => {
+  it('logs one timestamped line per connect and disconnect, and nothing for other agents or boards', () => {
+    let connected = false;
+    let clock = at(9);
+    const lines: string[] = [];
+    const { w } = wire(
+      {},
+      {
+        agentConnected: (_ws, agent) => agent === LEADS['w-coach'] && connected,
+        now: () => clock,
+        log: (line) => lines.push(line),
+      },
+    );
+    connected = true;
+    w.agentStreamsChanged('w-coach', LEADS['w-coach']);
+    w.agentStreamsChanged('w-coach', LEADS['w-coach']);
+    w.agentStreamsChanged('w-coach', agentIdForName(HARBOR_LEAD));
+    w.agentStreamsChanged('w-harbor', LEADS['w-harbor']);
+    clock = at(10, 5);
+    connected = false;
+    w.agentStreamsChanged('w-coach', LEADS['w-coach']);
+    expect(lines).toEqual([
+      `[coach] session stream connected at ${new Date(at(9)).toISOString()}`,
+      `[coach] session stream disconnected at ${new Date(at(10, 5)).toISOString()}`,
+    ]);
     w.stop();
   });
 });

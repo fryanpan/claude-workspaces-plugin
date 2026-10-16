@@ -2,8 +2,7 @@
  * The plan lead's ranks and feed, composed: a ticket's `review_item.added`
  * and a doc thread's declared item reach the lead in one frame, a person
  * moving a task voids the lead's earlier rank on it, and a rank on a board
- * the lead may not hear from never counts. A shared board's asks stay out of
- * the feed, but its ranks and tags count.
+ * the lead may not hear from never counts.
  *
  * Fixtures are invented; the repo is public.
  */
@@ -26,7 +25,7 @@ afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-function wired(locked = new Set<string>(), shared = new Set<string>()) {
+function wired(locked = new Set<string>()) {
   dir = mkdtempSync(join(tmpdir(), 'lead-rank-wiring-'));
   let now = 1_000_000;
   let pending: (() => void) | null = null;
@@ -37,8 +36,7 @@ function wired(locked = new Set<string>(), shared = new Set<string>()) {
     planBoard: () => PLAN,
     leadOf: (ws) => (ws === PLAN ? LEAD : undefined),
     boardName: (ws) => NAMES[ws],
-    isOff: (place) => locked.has(place.workspaceId) || shared.has(place.workspaceId),
-    rankIsOff: (place) => locked.has(place.workspaceId),
+    isOff: (place) => locked.has(place.workspaceId),
     taskWorkspace: (taskId) => (taskId === 't-ferry' ? 'w-river' : undefined),
     goalWorkspace: () => undefined,
     boardsForDoc: (docId) => (docId === 'd-tides' ? ['w-harbor'] : []),
@@ -162,19 +160,6 @@ describe('wireLeadRanks', () => {
     tick(5);
     emit(regrouped('person', 2_000_000));
     expect(w.leadRank(it1)).toBeUndefined();
-    w.stop();
-  });
-
-  it('keeps a shared board’s asks out of the feed, and counts its rank and tag', () => {
-    const { w, sent, emit, closeWindow } = wired(new Set(), new Set(['w-river']));
-    emit(added('w-river', 't-ferry', 'Shared ferry question', 10));
-    closeWindow();
-    expect(sent).toHaveLength(0);
-    const it1 = item('w-river:task-review:t-ferry:r-1', 'w-river', 't-ferry');
-    w.ranks.set(it1.key, 3, LEAD);
-    w.ranks.setGoal(it1.key, 'urgent', LEAD);
-    expect(w.leadRank(it1)).toBe(3);
-    expect(w.leadGoal(it1)).toBe('urgent');
     w.stop();
   });
 
