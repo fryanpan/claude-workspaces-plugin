@@ -107,7 +107,10 @@ describe('the one address routes a board to the server that holds it', () => {
    * header stays the one address, and the edge's `cf-ray` is added, which is
    * what a request through a real tunnel carries.
    */
-  const tunnel = async (request: Request, init: { cf: { resolveOverride: string } }) => {
+  const tunnel = async (
+    request: Request,
+    init: { redirect?: 'manual'; cf: { resolveOverride: string } },
+  ) => {
     const origin = init.cf.resolveOverride;
     reached.push(origin);
     const port = origin === MAC_ORIGIN ? mac.port : origin === CLOUD_ORIGIN ? cloud.port : null;

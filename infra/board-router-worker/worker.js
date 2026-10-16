@@ -91,7 +91,9 @@ export async function handleBoardRequest(request, env, upstream = fetch) {
   if (route.kind !== 'forward') {
     return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   }
-  return upstream(request, { cf: { resolveOverride: route.origin } });
+  // `manual`: a redirect the server answers (sign-in, a share redeem) goes
+  // back to the browser to follow, never followed here on its behalf.
+  return upstream(request, { redirect: 'manual', cf: { resolveOverride: route.origin } });
 }
 
 export default {

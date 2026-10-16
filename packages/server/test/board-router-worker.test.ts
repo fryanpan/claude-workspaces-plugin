@@ -117,9 +117,12 @@ describe('routeBoardRequest', () => {
 });
 
 describe('handleBoardRequest', () => {
-  const calls: Array<{ request: Request; origin: string }> = [];
-  const upstream = async (request: Request, init: { cf: { resolveOverride: string } }) => {
-    calls.push({ request, origin: init.cf.resolveOverride });
+  const calls: Array<{ request: Request; origin: string; redirect: string }> = [];
+  const upstream = async (
+    request: Request,
+    init: { redirect: 'manual'; cf: { resolveOverride: string } },
+  ) => {
+    calls.push({ request, origin: init.cf.resolveOverride, redirect: init.redirect });
     return new Response('from origin', { status: 200 });
   };
 
@@ -135,6 +138,7 @@ describe('handleBoardRequest', () => {
     expect(res.status).toBe(200);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.origin).toBe(RIVERBEND);
+    expect(calls[0]?.redirect).toBe('manual');
     expect(calls[0]?.request.url).toBe(`${ONE}/workspaces/w-river?format=json`);
     expect(calls[0]?.request.headers.get('cf-access-jwt-assertion')).toBe('stamp-value');
     expect(calls[0]?.request.headers.get('cookie')).toBe('CF_Authorization=c');

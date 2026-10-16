@@ -8,7 +8,7 @@ export type BoardRoute =
 
 export type Upstream = (
   request: Request,
-  init: { cf: { resolveOverride: string } },
+  init: { redirect: 'manual'; cf: { resolveOverride: string } },
 ) => Promise<Response>;
 
 export function parseBoardOrigins(raw: unknown): Map<string, string> | null;
