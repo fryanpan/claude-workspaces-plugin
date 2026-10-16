@@ -2167,8 +2167,13 @@ untrusted message passes; a flag, an error or a timeout holds the message.
 `relay.ts` delivers onto the recipient's inbox doc as a quoted subject thread
 marked with its source, and `relay-log.ts` keeps the append-only log (no
 bodies) and the hold queue that `relay-bin.ts release <id>` empties. Every
-call is an existing thread verb (`relay-client.ts`). Tests:
-`org-relay-two-servers.test.ts` (two real servers), `org-relay-units.test.ts`.
+call is an existing thread verb (`relay-client.ts`). The relay takes a
+thread as the seat's only when the server says the seat's own board token
+opened it: `thread-opener-proofs.ts`, top-level in the server beside the doc
+store it decorates, keeps that record outside the doc and the thread list
+returns it as `openerProof`. It joins the doc-store group and moves no
+boundary. Tests: `org-relay-two-servers.test.ts` (two real servers),
+`org-relay-units.test.ts`, `org-relay-sender.test.ts`.
 
 **Incoming Messages** is a section on the landing page that lists the
 message threads an inbox reader agent judged worth Bryan's time. It is not a
