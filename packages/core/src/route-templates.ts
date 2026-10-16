@@ -190,6 +190,9 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'home'],
   ['workspaces', ':id', 'home', 'read'],
   ['workspaces', ':id', 'home', 'instructions'],
+  // A board's review items for Home on another machine (routes/home-feed.ts).
+  ['workspaces', ':id', 'home-feed'],
+  ['workspaces', ':id', 'home-feed', 'events:stream'],
   ['workspaces', ':id', 'tasks'],
   ['workspaces', ':id', 'tasks', 'batch'],
   ['workspaces', ':id', 'activity'],
