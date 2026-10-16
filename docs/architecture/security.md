@@ -63,6 +63,8 @@ There is one other way in from a browser, and it carries a token Access vouched 
 
 A name that is on two lists resolves to the narrower grant, never the wider one.
 
+**The board router Worker places a request; it never vouches for one.** At the one address, `infra/board-router-worker/worker.js` reads the board id from `/workspaces/<id>/…` and sends the request down the tunnel of the machine that holds that board, with the Host header, the Access stamp and the cookies unchanged. A board its table does not list gets a 404 at the edge, and no request falls back to a default server. Each board server verifies the stamp against Cloudflare's keys itself, exactly as it does for the operator's hostname today, so a request a broken or hostile Worker routes is still refused without a valid stamp for the one address's Access application. The origin hostnames the Worker resolves to sit on no server's list, so typing one directly is refused at the host gate. Tests: `packages/server/test/board-router-worker.test.ts`, `board-router-two-servers.test.ts`.
+
 ### Layer 2: a workspace gate checks the email
 
 An email gets a workspace in one of two ways:

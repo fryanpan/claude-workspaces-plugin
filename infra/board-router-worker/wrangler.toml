@@ -1,0 +1,22 @@
+# Deploy config for the board router Worker (see README.md).
+# The committed file carries placeholder hostnames; the real ones stay out of
+# the public repo. Copy it to wrangler.local.toml (gitignored), fill it in, and
+# deploy with `npx wrangler deploy -c wrangler.local.toml`.
+name = "board-router"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+# Only board paths go through the Worker; everything else at the one address
+# reaches the Mac's tunnel as it does today (README "Deploying").
+routes = [
+  { pattern = "<one-address>/workspaces/*", zone_name = "<zone-name>" },
+]
+
+# The routing table: origin hostname -> the board ids that machine holds.
+# Every origin hostname is a proxied DNS record in the same zone, pointing at
+# that machine's tunnel. A board not listed here gets a 404 at the edge.
+[vars]
+BOARD_ORIGINS = '{"<mac-origin-hostname>":["<board-id>"],"<project-origin-hostname>":["<board-id>"]}'
+
+[observability]
+enabled = false
