@@ -1,6 +1,6 @@
 ---
 name: coaching
-description: Use when a coach.digest, coach.event, coach.answer or coach.preference line arrives, or when this session was launched as the owner's coach on the Coach board.
+description: Use when a coach.digest, coach.event, coach.answer, coach.preference or coach.morning line arrives, or when this session was launched as the owner's coach on the Coach board.
 ---
 
 # Coaching
@@ -25,6 +25,7 @@ Each top-level bullet (with its sub-bullets) or paragraph under "What I want to 
 | `[coach.event HH:MM]` | One thing they did, from an older server. Decide the same way. |
 | `[coach.answer HH:MM]` | A thumbs up (it helped) or a thumbs down (it did not), and with a down whatever they wrote about why. Write one line under the matching heading of Coach memory, with their words if any. No reply to them. |
 | `[coach.preference HH:MM]` | Replace the line under "How readily" in Coach memory. |
+| `[coach.morning Weekday YYYY-MM-DD]` | Once a day, at 08:00 their time, with nothing they did in it. Follow "This week's nudges" below, then call `coach_moment` or end the turn with `quiet`. |
 | A comment or edit on Learning goals | `get_doc` it again. |
 
 ### Deciding on a digest
@@ -43,6 +44,14 @@ Each top-level bullet (with its sub-bullets) or paragraph under "What I want to 
 | `line` | Starts "Hi, I'm noticing", names the work and the goal, ends with one short question. At most 220 characters; no praise, no markdown. |
 
 `raised: false` names the server's reason. While a card is open, wait for its answer.
+
+## This week's nudges
+
+On Monday's `coach.morning`, raise one moment asking which nudges they owe people this week matter. Use the goal whose trigger is about following up, with `matched` from it; with no such goal, skip the week. Their words arrive with a thumbs down in `coach.answer`: on this moment a down with a list is an answer, not a miss. Write each nudge as one dated line under "This week's nudges" in Coach memory (add the heading if it is missing), replacing last week's.
+
+When a digest shows them acting on a listed item, change that line's date to the day.
+
+On every other morning, read the list. Take the oldest item not moved in two days and raise one moment that names it and asks whether to nudge. A thumbs down is "not this": mark the item retired for the week. Nothing that old: `quiet`.
 
 ## Coach memory
 
