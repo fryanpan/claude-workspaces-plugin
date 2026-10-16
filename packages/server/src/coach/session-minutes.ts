@@ -8,9 +8,12 @@
  * lists, per session, the repo and its active minutes.
  *
  * What reaches the coach: the board's id and name, the repo's folder name,
- * the minutes, and how many typed prompts and turn ends it counted. Never
- * the prompt or the turn's text, the session id or any other part of the
- * path.
+ * the minutes, how many typed prompts and turn ends it counted, and a short
+ * summary of each: what he asked, and what the session answered (the owner,
+ * 2026-10-16: the digest shows what he did, not just minutes). The summary
+ * is made from the prompt's text and the turn's closing message
+ * (`coach/summary.ts`); the text itself, the session id and the rest of the
+ * path stay here.
  *
  * Who counts: any attached session he types into. A typed prompt starts a
  * run, and the turn ends that follow it count until the next prompt the
@@ -35,7 +38,7 @@ const SESSIONS_CAP = 500;
 const REPO_MAX = 100;
 
 export const SESSIONS_NOT_COUNTED =
-  'Claude Code sessions not attached to a board are not counted, and neither are turns only a channel or another agent started.';
+  'Claude Code sessions that never joined a board are not counted, nor are headless runs (claude -p, the SDK), nor turns only a channel or another agent started.';
 
 /** One counted mark: a typed prompt, or a turn end in its run with the time it adds. */
 export interface SessionTurn {
@@ -47,6 +50,16 @@ export interface SessionTurn {
   session: string;
   repo: string;
   creditMs: number;
+  /** The prompt he typed, or the turn's closing message, as the hook
+   *  reduced it. Summarised before a digest goes; never sent whole. */
+  text?: string;
+}
+
+/** One prompt or turn end in a session's line, said in a few words. */
+export interface SessionActivity {
+  at: number;
+  kind: 'prompt' | 'turn';
+  summary: string;
 }
 
 /** One session's line in a digest. */
@@ -57,6 +70,8 @@ export interface SessionMinutes {
   minutes: number;
   prompts: number;
   turns: number;
+  /** Each mark that carried text, oldest first. */
+  activity?: SessionActivity[];
 }
 
 /**
@@ -98,10 +113,14 @@ export class SessionRuns {
   }
 }
 
-/** One line per session, in the order each first appears in the window. */
-export function sessionMinutesOf(turns: readonly SessionTurn[]): SessionMinutes[] {
+/** One line per session, in the order each first appears in the window.
+ *  `summaryOf` says a mark's text in a few words, by its index in `turns`. */
+export function sessionMinutesOf(
+  turns: readonly SessionTurn[],
+  summaryOf: (index: number) => string | undefined = () => undefined,
+): SessionMinutes[] {
   const bySession = new Map<string, SessionMinutes & { ms: number }>();
-  for (const t of turns) {
+  for (const [i, t] of turns.entries()) {
     const key = `${t.boardId}\u0000${t.session}`;
     const line = bySession.get(key) ?? {
       boardId: t.boardId,
@@ -116,6 +135,8 @@ export function sessionMinutesOf(turns: readonly SessionTurn[]): SessionMinutes[
     if (t.kind === 'prompt') line.prompts += 1;
     else line.turns += 1;
     line.ms += t.creditMs;
+    const summary = summaryOf(i);
+    if (summary) line.activity = [...(line.activity ?? []), { at: t.at, kind: t.kind, summary }];
     bySession.set(key, line);
   }
   return [...bySession.values()].map(({ ms, ...line }) => ({

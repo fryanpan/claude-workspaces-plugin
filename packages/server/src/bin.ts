@@ -155,6 +155,7 @@ const {
   calendarBot,
   notesComposer,
   titleNamer,
+  coachSummarizer,
   pluginRefresher,
   deployer,
 } = deps;
@@ -290,6 +291,7 @@ while (!handle) {
       ...(answerCoverage ? { answerCoverage } : {}),
       promptStore,
       ...(effortEstimator ? { effortEstimator } : {}),
+      ...(coachSummarizer ? { coachSummarizer } : {}),
       ...(voiceComplete ? { voiceComplete, voiceRouterArm: 'choice' as const } : {}),
       ...(voiceFeedbackTidy ? { voiceFeedbackTidy } : {}),
       ...(transcription ? { transcription } : {}),

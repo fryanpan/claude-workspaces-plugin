@@ -55,6 +55,30 @@ export class HeldWindow<T> {
     this.held = [];
   }
 
+  /** What an open window holds and when it opened, or null. Read so a feed
+   *  can keep it across a restart. */
+  snapshot(): { items: T[]; openedAt: number } | null {
+    return this.cancel ? { items: [...this.held], openedAt: this.openedAt } : null;
+  }
+
+  /** Closes an open window now, handing it over as its timer would. */
+  closeNow(): void {
+    if (this.cancel) {
+      this.cancel();
+      this.flush();
+    }
+  }
+
+  /** Opens a window a restart interrupted: it closes when it would have,
+   *  or at once if that time has passed. */
+  resume(items: T[], openedAt: number): void {
+    if (this.cancel || items.length === 0) return;
+    this.held = [...items];
+    this.openedAt = openedAt;
+    const left = Math.max(0, openedAt + this.deps.windowMs - (this.deps.now ?? Date.now)());
+    this.cancel = (this.deps.schedule ?? timer)(() => this.flush(), left);
+  }
+
   private flush(): void {
     const items = this.held;
     this.cancel = null;

@@ -13,6 +13,10 @@
  *  - anyone besides the owner can reach it: a member, a share, a link;
  *  - he turned the coach off for it ("Coach off for this board").
  *
+ * The coach session and the plan lead pass `allowShared`: the owner wants the
+ * coach to see everything he does (2026-10-16), and what reaches it from a
+ * shared board is only his own actions there. The other three still hold.
+ *
  * A doc is off when it is local-only itself or any board holding it is off.
  * A check that throws counts as off: the question is what may leave the
  * machine, and "could not tell" is not a yes.
@@ -64,8 +68,8 @@ export function boardOffReason(
 }
 
 export interface PlaceOffOptions {
-  /** A board shared with someone else still counts as on. The plan lead's
-   *  rank and goal tag use this: they reach only the owner's Home. */
+  /** A board shared with someone else still counts as on. The coach
+   *  session's feed uses this, and so do the plan lead's rank and goal tag. */
   allowShared?: boolean;
 }
 

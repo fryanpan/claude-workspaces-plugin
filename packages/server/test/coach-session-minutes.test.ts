@@ -158,7 +158,7 @@ describe('the digest’s Claude Code section', () => {
   });
 
   it('leaves out a session on a board the coach is off for, entirely, and the coach’s own', () => {
-    const { w, sent, closeWindows } = wire({ shared: (ws) => ws === 'w-river' });
+    const { w, sent, closeWindows } = wire({ locked: (ws) => ws === 'w-river' });
     expect(w.sessionPrompt('w-river', typed(RIVER_LEAD, 0), '/work/riverbend')).toBe(false);
     closeWindows();
     expect(sent).toEqual([]);
@@ -172,6 +172,16 @@ describe('the digest’s Claude Code section', () => {
     expect(JSON.stringify(sent)).not.toContain('"repo":"coach"');
     w.store.setBoardOff('w-harbor', true);
     expect(w.sessionPrompt('w-harbor', typed('Bob', 3), HARBOR_CWD)).toBe(false);
+    w.stop();
+  });
+});
+
+describe('a shared board', () => {
+  it('still counts his own session on it: only the per-board switches leave a board out', () => {
+    const { w, sent, closeWindows } = wire({ shared: (ws) => ws === 'w-river' });
+    expect(w.sessionPrompt('w-river', typed(RIVER_LEAD, 0), '/work/riverbend')).toBe(true);
+    closeWindows();
+    expect(JSON.stringify(sent)).toContain('"repo":"riverbend"');
     w.stop();
   });
 });

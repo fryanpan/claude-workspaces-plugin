@@ -1,12 +1,14 @@
 /**
  * `POST /workspaces/{id}/agents/{name}/prompts` — the plugin's
  * UserPromptSubmit hook says a session got a prompt, and whether a person
- * typed it. The body is `{ typed, sessionId?, cwd?, at? }` and carries no
- * prompt text: the hook classifies on the machine and drops it.
+ * typed it. The body is `{ typed, sessionId?, cwd?, at?, text? }`; `text`
+ * is a typed prompt as the hook reduced it (`note-redact.ts`), and an
+ * injected one carries none.
  *
  * Nothing is stored. The mark goes to the coach (`coach/session-minutes.ts`),
- * which counts the owner's Claude Code time from his typed prompts, and only
- * the repo's folder name is taken from `cwd`. Same posture as the notes route
+ * which counts the owner's Claude Code time from his typed prompts and says
+ * each in a few words in its digest (`coach/summary.ts`); only the repo's
+ * folder name is taken from `cwd`. Same posture as the notes route
  * beside it: under a board scope, refused to share visitors, and a shared
  * agent name is refused.
  */
@@ -17,6 +19,8 @@ import { matchRest } from '../middleware/workspace-scope.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 const SESSION_ID_MAX = 200;
+/** What the hook sends at most; the coach keeps less. */
+const TEXT_MAX = 4_000;
 
 export async function handlePromptMarkRoute(
   ctx: TaskRoutesContext,
@@ -43,6 +47,10 @@ export async function handlePromptMarkRoute(
   ) {
     return j(400, { error: 'bad-session' });
   }
+  const { text } = raw;
+  if (text !== undefined && (typeof text !== 'string' || text.length > TEXT_MAX)) {
+    return j(400, { error: 'bad-text' });
+  }
   // The hook's clock inside the window the notes route trusts, else ours.
   const now = Date.now();
   const at =
@@ -52,7 +60,13 @@ export async function handlePromptMarkRoute(
   try {
     ctx.coachSessionPrompt(
       boardId,
-      { agent, typed: raw.typed, at, ...(sessionId !== undefined ? { sessionId } : {}) },
+      {
+        agent,
+        typed: raw.typed,
+        at,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(text !== undefined && raw.typed ? { text } : {}),
+      },
       raw.cwd,
     );
   } catch (err) {

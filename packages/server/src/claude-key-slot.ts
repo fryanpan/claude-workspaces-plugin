@@ -110,6 +110,7 @@ export const CLAUDE_CALL_PATHS = [
   'review-gate',
   'relay-filter',
   'answer-coverage',
+  'coach-digest',
   'notes-eval',
   'cost-script',
 ] as const;

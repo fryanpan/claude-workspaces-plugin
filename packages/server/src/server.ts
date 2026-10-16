@@ -1554,6 +1554,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const board = id ? taskStore.getWorkspace(id) : undefined;
       return board ? planBoardReading(board.goals, taskStore.listGoalRows(board.id)) : undefined;
     },
+    ...(opts.coachSummarizer ? { summarizer: opts.coachSummarizer } : {}),
+    ...(opts.coachDigestWindowMs === undefined ? {} : { digestWindowMs: opts.coachDigestWindowMs }),
   });
   // "Your coach" on `/` reads the coach store, the goals doc and whether the
   // coach session is connected. None of the three broadcasts, so each tells
@@ -1570,7 +1572,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse.onAgentStreams = (channel, agentId) => {
       onAgentStreams?.(channel, agentId);
       const board = coachWiring.store.goalsDoc?.workspaceId;
-      if (board && channel === `ws~${board}`) landingChanges.notify('coach');
+      if (board && channel === `ws~${board}`) {
+        landingChanges.notify('coach');
+        // The coach session is back: what waited while it was away goes now.
+        coachWiring.agentStreamsChanged(board);
+      }
     };
   }
   /** The plan lead's per-item ranks and its batched feed of new asks

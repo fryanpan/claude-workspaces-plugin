@@ -46,7 +46,9 @@ import {
 import { ACCESS_TOKEN_ENV, claudeKeyAddHint } from './claude-key-source.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
-const MODEL = 'claude-haiku-5-5';
+/** The Haiku model every small server call runs on. */
+export const HAIKU_MODEL = 'claude-haiku-5-5';
+const MODEL = HAIKU_MODEL;
 
 /**
  * Thinking off, on every Haiku call this server makes.
