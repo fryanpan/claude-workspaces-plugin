@@ -14823,7 +14823,7 @@ function spawnRequestedLine(p) {
 var COMMENT_EVENTS = new Set(["thread.created", "thread.replied"]);
 var STATUS_EVENTS = new Set(["thread.resolved", "thread.reopened"]);
 var ACTOR_ID_EVENTS = new Set(["review_item.viewed", "review_item.answered"]);
-var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch)\./;
+var ACTOR_FAMILY_RE = /^(task|decision|workspace|voice|review_item|dispatch|whiteboard)\./;
 var AGENT_FAMILY_RE = /^agent\./;
 function identifiesOneSession(selfId) {
   const id = selfId.trim();
@@ -14924,6 +14924,34 @@ function meetingBlock(p) {
     "--- END MEETING CONTENT ---"
   ].join(`
 `);
+}
+
+// packages/mcp/src/whiteboard-line.ts
+var SHOWN = 8;
+function shapeText(s) {
+  const kind = typeof s.kind === "string" ? s.kind : "shape";
+  const at = typeof s.x === "number" && typeof s.y === "number" ? ` at (${s.x}, ${s.y})` : "";
+  const size = typeof s.w === "number" && typeof s.h === "number" ? ` ${s.w}x${s.h}` : "";
+  const words = typeof s.text === "string" && s.text ? ` "${s.text.slice(0, 80)}"` : "";
+  const join = typeof s.from === "string" || typeof s.to === "string" ? ` ${typeof s.from === "string" ? s.from : "?"}→${typeof s.to === "string" ? s.to : "?"}` : "";
+  return `${kind} ${String(s.id ?? "")}${words}${at}${size}${join}`;
+}
+function whiteboardChangedLine(p) {
+  const who = p.actor?.name || "Someone";
+  const board = p.docTitle ? `"${p.docTitle}"` : p.docId ?? "a whiteboard";
+  const shapes = p.shapes ?? [];
+  const removed = p.removed ?? [];
+  const parts = [];
+  if (shapes.length > 0) {
+    const listed = shapes.slice(0, SHOWN).map(shapeText).join("; ");
+    const more = shapes.length > SHOWN ? `; and ${shapes.length - SHOWN} more` : "";
+    parts.push(`drew or changed ${listed}${more}`);
+  }
+  if (removed.length > 0)
+    parts.push(`removed ${removed.slice(0, SHOWN).join(", ")}`);
+  const what = parts.length > 0 ? parts.join("; ") : "changed the board";
+  const count = typeof p.count === "number" ? ` The board holds ${p.count} element(s).` : "";
+  return `[whiteboard] ${who} ${what} on ${board}.${count} get_whiteboard reads it all.`;
 }
 
 // packages/mcp/src/channel-messages.ts
@@ -15126,6 +15154,19 @@ async function emitChannelMessage(deps, event, rawPayload) {
           ...p.path ? { path: p.path } : {},
           ...p.backupPath ? { backup_path: p.backupPath } : {}
         }
+      }
+    });
+    return;
+  }
+  if (event === "whiteboard.changed") {
+    const w = rawPayload;
+    await deps.notify({
+      method: "notifications/claude/channel",
+      params: {
+        source: "claude-workspaces",
+        sent_at: nowIso(deps),
+        content: whiteboardChangedLine(w),
+        meta: { doc_id: docId, event, ...w.actor?.name ? { author: w.actor.name } : {} }
       }
     });
     return;
@@ -15856,6 +15897,72 @@ function secretReadCommand(service) {
 
 // packages/core/src/task-wire.ts
 var TASK_STATUSES = ["triage", "todo", "in-progress", "done"];
+
+// packages/mcp/src/whiteboard-schemas.ts
+var WORKSPACE_ID = {
+  type: "string",
+  description: "The board this whiteboard is on. get_workspace lists the boards you are attached to."
+};
+var SHAPE = {
+  type: "object",
+  properties: {
+    id: {
+      type: "string",
+      description: "Your name for the shape (letters, digits, - and _). Reusing an id already on the board replaces that shape. Omit for a new one; the reply names the id given."
+    },
+    kind: { type: "string", enum: ["box", "ellipse", "arrow", "text"] },
+    x: { type: "number", description: "Left edge, in canvas units." },
+    y: { type: "number", description: "Top edge, in canvas units." },
+    w: { type: "number", description: "Width. Defaults: box 160, ellipse 140, arrow 120." },
+    h: { type: "number", description: "Height. Defaults: box 80, ellipse 90, arrow 0." },
+    text: {
+      type: "string",
+      description: "The words: a box or ellipse shows them inside; required for text."
+    },
+    from: { type: "string", description: "Arrow only: the id of the shape it starts at." },
+    to: { type: "string", description: "Arrow only: the id of the shape it points to." }
+  },
+  required: ["kind", "x", "y"]
+};
+var WHITEBOARD_TOOLS = [
+  {
+    name: "create_whiteboard",
+    description: "Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you.",
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, title: { type: "string" } },
+      required: ["workspaceId"]
+    }
+  },
+  {
+    name: "draw_on_whiteboard",
+    description: 'Draw boxes, ellipses, arrows and text on a whiteboard. mode "add" (the default) draws over what is there, a shape whose id is already on the board replacing it; mode "replace" makes the board hold exactly these shapes and deletes the rest. Pass point {x, y} to show people where you are looking, labelled with your name; null clears it, omitted leaves it. Your presence on the canvas is only that point, never your last stroke. Returns the ids written and the element count. At most 200 shapes per call.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceId: WORKSPACE_ID,
+        docId: { type: "string" },
+        shapes: { type: "array", items: SHAPE },
+        mode: { type: "string", enum: ["add", "replace"] },
+        point: {
+          type: ["object", "null"],
+          properties: { x: { type: "number" }, y: { type: "number" } },
+          required: ["x", "y"]
+        }
+      },
+      required: ["workspaceId", "docId", "shapes"]
+    }
+  },
+  {
+    name: "get_whiteboard",
+    description: `Read a whiteboard as shapes: {shapes: [{id, kind, x, y, w, h, text, from, to}], count}. A box's words are its text. A person's pen stroke reads kind "freedraw" with its bounding box.`,
+    inputSchema: {
+      type: "object",
+      properties: { workspaceId: WORKSPACE_ID, docId: { type: "string" } },
+      required: ["workspaceId", "docId"]
+    }
+  }
+];
 
 // packages/mcp/src/tool-schemas.ts
 var REVIEW_ITEM_SCHEMA = {
@@ -18672,7 +18779,8 @@ var TOOL_LIST = {
         },
         required: ["workspaceId"]
       }
-    }
+    },
+    ...WHITEBOARD_TOOLS
   ]
 };
 
@@ -20353,6 +20461,46 @@ async function handleTaskTool(name, a, ctx) {
   return;
 }
 
+// packages/mcp/src/tools/whiteboard.ts
+async function handleWhiteboardTool(name, a, ctx) {
+  switch (name) {
+    case "create_whiteboard": {
+      const title = typeof a.title === "string" ? a.title : undefined;
+      const res = await ctx.http("POST", `${boardPathOf(name, a)}/whiteboards`, {
+        ...title !== undefined ? { title } : {},
+        author: ctx.AUTHOR
+      });
+      if (typeof res?.docId !== "string")
+        return ctx.err("the server did not return a whiteboard");
+      await ctx.watchDoc(res.docId);
+      return ctx.ok({ docId: res.docId, url: res.meta?.reviewUrl ?? res.url });
+    }
+    case "draw_on_whiteboard": {
+      const docId = typeof a.docId === "string" ? a.docId : "";
+      if (docId === "")
+        return ctx.err("docId is required");
+      if (!Array.isArray(a.shapes))
+        return ctx.err("shapes must be a list");
+      const res = await ctx.http("POST", `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`, {
+        shapes: a.shapes,
+        ...a.mode !== undefined ? { mode: a.mode } : {},
+        ...a.point !== undefined ? { point: a.point } : {},
+        author: ctx.AUTHOR
+      });
+      return ctx.ok(res);
+    }
+    case "get_whiteboard": {
+      const docId = typeof a.docId === "string" ? a.docId : "";
+      if (docId === "")
+        return ctx.err("docId is required");
+      const res = await ctx.http("GET", `${boardPathOf(name, a)}/docs/${encodeURIComponent(docId)}/whiteboard`);
+      return ctx.ok(res);
+    }
+    default:
+      return;
+  }
+}
+
 // packages/mcp/src/declare-lead.ts
 async function declareWorkspaceLead(args, deps) {
   const { workspaceId } = args;
@@ -21324,7 +21472,13 @@ function createConnectorSession(deps) {
     sendDueHeartbeats: () => sendDueHeartbeats2(),
     watchDoc: (docId) => registry2.watchDoc(docId),
     toolContext,
-    handlers: [handleDocsTool, handleTaskTool, handleWorkspaceTool, handleInboxTool],
+    handlers: [
+      handleDocsTool,
+      handleTaskTool,
+      handleWorkspaceTool,
+      handleInboxTool,
+      handleWhiteboardTool
+    ],
     err
   });
   return {
@@ -21344,7 +21498,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.310";
+var PLUGIN_VERSION = "0.1.311";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
