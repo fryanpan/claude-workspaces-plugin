@@ -1,3 +1,4 @@
+import { findJoinedBoard } from './joined-board.ts';
 /**
  * Agent notes — the pure half of the plugin's Stop and PermissionDenied
  * hooks. Each hook posts one note to
@@ -75,9 +76,9 @@ export function readAgentName(env: EnvLike): string | undefined {
  * The board this session's notes land on. Every note route lives under
  * `/workspaces/{id}` (the owner moved the last top-level one, 2026-09-06),
  * and a hook has no board in hand — so it is a launch setting, read once
- * like the agent name, and a session launched without it posts nothing
- * until it is restarted with it set. That silence is the cost the owner
- * accepted when choosing the move over leaving the route where it was.
+ * like the agent name. A session launched without it falls back to the
+ * board it joined with `attach_agent` (`joined-board.ts`); one that never
+ * joined a board posts nothing.
  */
 export function readWorkspaceId(env: EnvLike): string | undefined {
   return readRenamed(env, 'CW_WORKSPACE_ID', 'FEEDBACK_WORKSPACE_ID')?.trim();
@@ -252,6 +253,9 @@ export interface HookDeps {
   log?: (line: string) => void;
   /** True when this hook's shape was already logged; marks it seen. */
   shapeSeen?: (kind: NoteKind) => boolean;
+  /** With no board in the env, ask the server which board the session
+   *  joined (`joined-board.ts`). */
+  joinedBoard?: boolean;
 }
 
 /**
@@ -293,10 +297,14 @@ export async function runHook(
     const decision =
       kind === 'turn' ? decideTurnNote(payload, ctx) : decideDenialNote(payload, ctx);
     if ('skip' in decision) return undefined;
-    const workspaceId = readWorkspaceId(deps.env);
-    if (!workspaceId) return undefined;
     const baseUrl = deps.baseUrl ? deps.baseUrl() : resolveBaseUrl(deps.env, deps.discoveryPort);
     if (!baseUrl) return undefined;
+    const workspaceId =
+      readWorkspaceId(deps.env) ??
+      (deps.joinedBoard
+        ? await findJoinedBoard(baseUrl, decision.post.agent, deps.fetch ?? fetch)
+        : undefined);
+    if (!workspaceId) return undefined;
     const sent = await postNote(baseUrl, workspaceId, decision.post, deps.fetch ?? fetch);
     // Only a turn can be nudged. A denial note is a record of something the
     // agent already saw refused, and blocking on it would nag about the

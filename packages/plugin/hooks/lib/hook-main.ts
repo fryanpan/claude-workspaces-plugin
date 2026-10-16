@@ -57,6 +57,7 @@ export async function hookMain(kind: NoteKind): Promise<never> {
       env: process.env,
       discoveryPort,
       shapeSeen,
+      joinedBoard: true,
       log: (line) => process.stderr.write(`${line}\n`),
     });
     const decision = blockDecision(nudge);

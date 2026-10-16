@@ -10,8 +10,10 @@
  * session stays quiet unless an event plainly matches a goal, and speaks
  * through `coach_moment`; what to do with each line is the
  * `claude-workspaces:coaching` skill. A digest then lists
- * the owner's Claude Code sessions, repo and active minutes, and ends with
- * this week's plan goals in plan order, or says there is no current plan.
+ * the owner's Claude Code sessions, repo and active minutes, with a line for
+ * each prompt he typed and each turn end, and ends with this week's plan
+ * goals in plan order, or says there is no current plan. A digest that
+ * waited while the session was away says how many windows it covers.
  *
  * Kept out of channel-messages.ts for the reason voice-line.ts is: the
  * wording is a decision, and this is where a test can read it.
@@ -45,6 +47,10 @@ export interface CoachPayload {
   sessions?: CoachSessionMinutes[];
   /** The server's words for what the sessions list cannot see. */
   sessionsNote?: string;
+  /** Windows the digest covers, when the session was away for more than one. */
+  windows?: number;
+  /** Windows dropped while it was away. */
+  dropped?: number;
 }
 
 /** One Claude Code session's line in a digest. */
@@ -55,6 +61,8 @@ export interface CoachSessionMinutes {
   minutes?: number;
   prompts?: number;
   turns?: number;
+  /** What he asked and what the session answered, a few words each. */
+  activity?: { at?: number; kind?: string; summary?: string }[];
 }
 
 /** One line of a digest: a stay in one place, or one thing done. */
@@ -142,14 +150,22 @@ function planLines(plan: CoachPayload['plan']): string[] {
 
 /** Repo and minutes per session, then the server's note; nothing from an
  *  older server. */
-function sessionLines(p: CoachPayload): string[] {
+function sessionLines(p: CoachPayload, timeZone?: string): string[] {
   if (p.sessions === undefined) return [];
   const lines = p.sessions.flatMap((s) => {
     if (!s.repo || !s.boardId) return [];
     const n = (count: number | undefined, one: string) =>
       `${count ?? 0} ${one}${count === 1 ? '' : 's'}`;
+    const said = (s.activity ?? []).flatMap((a) =>
+      a.summary
+        ? [
+            `  -${clock(a.at, timeZone)} ${a.kind === 'turn' ? 'session' : 'he asked'}: ${a.summary}`,
+          ]
+        : [],
+    );
     return [
       `- ${s.repo}, on board "${s.board ?? s.boardId}": ${s.minutes ?? 0} min, ${n(s.prompts, 'typed prompt')}, ${n(s.turns, 'turn end')}`,
+      ...said,
     ];
   });
   const head =
@@ -161,11 +177,15 @@ function sessionLines(p: CoachPayload): string[] {
 
 function digestLine(p: CoachPayload, timeZone?: string): string | null {
   const lines = (p.items ?? []).flatMap((i) => digestItemLine(i, timeZone) ?? []);
-  const sessions = sessionLines(p);
+  const sessions = sessionLines(p, timeZone);
   if (lines.length === 0 && !(p.sessions ?? []).some((s) => s.repo && s.boardId)) return null;
   const span = `${clock(p.from, timeZone)}–${clock(p.to, timeZone).trim()}`;
+  const away =
+    (p.windows ?? 0) > 1 || (p.dropped ?? 0) > 0
+      ? ` (held while you were away: ${p.windows ?? 1} windows${p.dropped ? `, ${p.dropped} older ones dropped` : ''})`
+      : '';
   return [
-    `[coach.digest${span}] What the owner did:`,
+    `[coach.digest${span}] What the owner did${away}:`,
     ...lines,
     ...sessions,
     ...planLines(p.plan),

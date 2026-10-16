@@ -157,6 +157,45 @@ describe('coachLine', () => {
     );
   });
 
+  it('says under each session what he asked and what it answered, and how long the session was away', () => {
+    const line = coachLine(
+      'coach.digest',
+      {
+        from: Date.UTC(2026, 9, 16, 9, 0),
+        to: Date.UTC(2026, 9, 16, 10, 0),
+        windows: 4,
+        dropped: 2,
+        items: [],
+        sessions: [
+          {
+            boardId: 'w-1',
+            board: 'Riverbend',
+            repo: 'riverbend',
+            minutes: 6,
+            prompts: 1,
+            turns: 1,
+            activity: [
+              {
+                at: Date.UTC(2026, 9, 16, 9, 5),
+                kind: 'prompt',
+                summary: 'Asked for a tide table',
+              },
+              { at: Date.UTC(2026, 9, 16, 9, 11), kind: 'turn', summary: 'Drew the tide table' },
+            ],
+          },
+        ],
+      },
+      'UTC',
+    );
+    expect(line?.split('\n').slice(0, 5)).toEqual([
+      '[coach.digest 09:00–10:00] What the owner did (held while you were away: 4 windows, 2 older ones dropped):',
+      'Claude Code sessions (active minutes):',
+      '- riverbend, on board "Riverbend": 6 min, 1 typed prompt, 1 turn end',
+      '  - 09:05 he asked: Asked for a tide table',
+      '  - 09:11 session: Drew the tide table',
+    ]);
+  });
+
   it('reads an answer, with what a thumbs down wrote, and a preference as things to remember', () => {
     const moment = {
       momentId: 'cm-aaaaaaaaaaaa',
