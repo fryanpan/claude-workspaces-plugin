@@ -72,6 +72,13 @@ export function isMockFrameRequest(url: URL): boolean {
 export const MOCK_FRAME_SANDBOX =
   'allow-scripts allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation';
 
+/**
+ * The sandbox on the frame-only hostname (`frame-host.ts`): the same flags
+ * plus `allow-same-origin`, which there grants the FRAME hostname's origin —
+ * never the board's, which is a different hostname.
+ */
+export const FRAME_HOST_SANDBOX = `${MOCK_FRAME_SANDBOX} allow-same-origin`;
+
 /** The frame response's policy: sandboxed, and framed only by the board. */
 export const MOCK_FRAME_CSP = `sandbox ${MOCK_FRAME_SANDBOX}; frame-ancestors 'self'`;
 
@@ -189,10 +196,22 @@ export function renderMockHost(args: {
   visitor: boolean;
   /** The coach card's script, on every page but a share visitor's. */
   coachHref?: string;
+  /**
+   * The frame-only hostname's origin (`frame-host.ts`), when this page frames
+   * its attachment there: the frame's address is the same path on that
+   * origin, and its sandbox adds `allow-same-origin`, which there grants the
+   * frame hostname's origin and never the board's. Unset, the frame is the
+   * opaque same-host one.
+   */
+  frameOrigin?: string | null;
 }): string {
   const title = TITLE.exec(args.html)?.[1]?.trim() ?? '';
   const boardLink = args.visitor ? BOARD_LINK(args.workspaceId) : { style: '', anchor: '' };
   const items = JSON.stringify(args.items.map((i) => [i.taskId, i.reviewItemId]));
+  const sandbox = args.frameOrigin ? FRAME_HOST_SANDBOX : MOCK_FRAME_SANDBOX;
+  const src = args.frameOrigin
+    ? `${args.frameOrigin}${args.url.pathname}${frameSrcFor(args.url)}`
+    : frameSrcFor(args.url);
   const coach =
     args.coachHref && !args.visitor
       ? `<script type="module" src="${escapeAttr(args.coachHref)}" data-coach-page` +
@@ -208,8 +227,8 @@ export function renderMockHost(args: {
     '<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}' +
     `iframe{border:0;width:100%;height:100%;display:block}${boardLink.style}</style></head><body>` +
     boardLink.anchor +
-    `<iframe data-cw-mock-frame sandbox="${MOCK_FRAME_SANDBOX}" allow="microphone"` +
-    ` title="${escapeAttr(title || 'Mock')}" data-src="${escapeAttr(frameSrcFor(args.url))}"></iframe>` +
+    `<iframe data-cw-mock-frame sandbox="${sandbox}" allow="microphone"` +
+    ` title="${escapeAttr(title || 'Mock')}" data-src="${escapeAttr(src)}"></iframe>` +
     `<script src="/widget/mock-host.js" data-workspace-id="${escapeAttr(args.workspaceId)}"` +
     ` data-doc-id="${escapeAttr(args.docId)}" data-items="${escapeAttr(items)}"></script>` +
     coach +

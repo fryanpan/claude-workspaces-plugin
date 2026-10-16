@@ -92,6 +92,10 @@ export function hostMock(env: HostEnv): void {
   // iframe now would leave the frame's `window.name` empty. So the frame that
   // loads is a copy, named before it joins the page.
   const frame = placeholder.cloneNode(false) as HTMLIFrameElement;
+  // And where this page is: a frame on the frame-only hostname
+  // (`server/src/frame-host.ts`) has an origin of its own, and posts to this
+  // one by name.
+  seed['cw:board-origin'] = `${location.protocol}//${location.host}`;
   frame.name = `cw-mock:${JSON.stringify(seed)}`;
   // The server wrote the page's query into the src; the fragment never
   // reaches a server, so it is added here, where the page can read it.
