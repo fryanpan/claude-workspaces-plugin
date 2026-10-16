@@ -228,8 +228,11 @@ async function main(): Promise<void> {
 
     // The board's page plants a cookie and a stored value, and the reader's
     // name as a board page stores it. Then the control reads them back there.
+    // Planted on a board page that holds no mock: a mock loaded here would
+    // report what it saw before the name was planted, and that report could
+    // land after the count below and be read as the frame's.
     step('plant on the board');
-    await navigate(cdp, `${base}/workspaces/${ws}/mockups/${spy}`);
+    await navigate(cdp, `${base}/workspaces/${ws}`);
     await cdp.evaluate(
       `document.cookie = 'cw_board_probe=${PLANTED}; path=/'; ` +
         `localStorage.setItem('cw-board-probe', '${PLANTED}'); ` +
