@@ -40,9 +40,8 @@ symlink (`~/.claude` and `~/dev` point onto the data volume).
 **1. Write the config**, outside every lead's project, at
 `~/.config/claude-workspaces/lead-sandbox.json`. Paths are absolute or start
 `~/`. Name the data volume's copy of the home in `protect`. Add a lead's
-other needs to `allowRead` (read only) or `allow` (read and write): git and
-`gh` need their config, and an MCP server installed inside some repo needs
-that folder.
+other needs to `allowRead` (read only) or `allow` (read and write). This is
+the default every lead on the owner's Mac starts from:
 
 ```json
 {
@@ -50,13 +49,42 @@ that folder.
     {
       "name": "harborlight-lead",
       "projects": ["~/dev/harborlight"],
-      "allowRead": ["~/.gitconfig", "~/.config/gh"]
+      "allowRead": [
+        "~/.gitconfig",
+        "~/.config/git",
+        "~/.config/gh",
+        "~/.nvm/versions/node",
+        "~/Library/Caches/claude-workspaces/relay",
+        "~/claude-hive-mcp",
+        "~/dev/github-claude-channel",
+        "~/dev/<hook-repo>/scripts/gradle/pretooluse-gradle.sh",
+        "~/dev/ai-team-lead/scripts/usage_statusline.py"
+      ]
     },
     { "name": "riverbend-lead", "projects": ["~/dev/riverbend"] }
   ],
   "protect": ["/Volumes/Data/Users/<owner>"]
 }
 ```
+
+Each line is there because a session with the owner's full settings broke
+without it. All of them are read only.
+
+| Path | What broke without it | Why reading it is safe |
+|---|---|---|
+| `~/.gitconfig`, `~/.config/git` | `git status` and `git commit`: `unable to access '~/.config/git/config'` | git's own settings and ignore list; no credential lives there |
+| `~/.config/gh` | `gh auth status` exits 1: `failed to load config` | the lead could already act as the owner on GitHub through `gh`; reading its config grants nothing more |
+| `~/.nvm/versions/node` | the claude-workspaces MCP server's node fallback (used when the compiled relay is missing) | installed node versions: code, no data |
+| `~/Library/Caches/claude-workspaces/relay` | the claude-workspaces MCP server: the compiled relay is exec'd, then dies (exit 139) when it cannot read itself | read only on purpose: write would let a lead replace a binary that every unsandboxed session runs. A new plugin version cannot build its relay inside the wall, and falls back to node |
+| `~/claude-hive-mcp` | the `claude-hive` MCP server failed to start | the server's code; its message store is `~/.claude-hive.db`, which stays denied and is reached through the broker as before |
+| `~/dev/github-claude-channel` | the GitHub channel plugin did not load: it is installed from a `directory` marketplace, so Claude Code reads the plugin from that repo, not from the cache | the plugin's own code; the repo holds no `.env` at its root, and its token reaches the broker from the environment, not a file |
+| `…/pretooluse-gradle.sh` | the owner's `PreToolUse` hook in `settings.json` exited 126 on every Bash call | one self-contained script that reads only its stdin |
+| `…/usage_statusline.py` | the status line (interactive sessions only) | one script. It reads `~/.claude.json`, already open, and its write of the usage meter in `~/Library/Application Support/team-lead` is refused, so only an unsandboxed session updates the meter |
+
+Two rules carry to a lead with other needs. A hook or status line that
+lives in another repo gets that one file, never the repo. A plugin from a
+`directory` marketplace (`extraKnownMarketplaces` in `settings.json`) gets
+its folder, read only.
 
 **2. Dry run.** It writes nothing, and prints each profile and the command
 that launches each lead.
@@ -95,14 +123,40 @@ Nothing here restarts a session. Moving a lead is a session restart:
 1. Add the lead to the config and run `--check` until it holds.
 2. End the lead's session at a quiet point, as for any restart.
 3. Start it again through the wrapper with the flags and environment it
-   uses today (`FEEDBACK_BASE_URL`, `FEEDBACK_AGENT_NAME`, channel flags).
-   `--resume <session id>` works, because the transcript folder is the
-   lead's own.
+   uses today (`CW_AGENT_NAME`, `CW_WORKSPACE_ID`, channel flags).
+   `--continue` and `--resume <session id>` work, because the transcript
+   folder is the lead's own.
 4. From the new session, `ls` another project's folder must answer
    `Operation not permitted`, and its own project must list.
 
-A lead whose launch is a launchd job or a shell alias needs that launcher
-changed to call the wrapper. That edit is separate work.
+What step 3 looks like depends on what started the lead. The wrapper runs
+the binary it is given, so a shell function or alias named `claude` does
+not apply after `--`; and a shell started inside the wall cannot read
+`~/.zshrc`. The shell therefore runs outside, expands the flags, and hands
+the wrapper the binary. Below, `$WRAP` is shorthand, written out in full, for
+`bun "$HOME/Library/Application Support/claude-workspaces/repo/scripts/lead-sandbox.ts" --config ~/.config/claude-workspaces/lead-sandbox.json --lead <lead>`.
+
+- **tmux through `zsh -ic`** (every lead on the owner's Mac today: the Team
+  Lead's respawn skill starts each one as `tmux new-session -d -s <slug> -c
+  <project> -e … /bin/zsh -ic "claude --continue -n <Name> --remote-control
+  <Name>"`). Keep the tmux line and its `-e` list, and change only the
+  command zsh runs:
+  `/bin/zsh -ic '$WRAP -- "$(whence -p claude)" "${CLAUDE_CHANNEL_FLAGS[@]}" --continue -n <Name> --remote-control <Name>'`.
+  The change belongs in the respawn skill, in the Team Lead's repo.
+- **A shell alias or function**: the same expansion, typed or put in a new
+  function: `$WRAP -- "$(whence -p claude)" <the flags the alias adds> "$@"`.
+- **A launchd job**: `ProgramArguments` becomes `bun`, the wrapper's path,
+  its flags, `--`, and the absolute path of `claude` with the job's flags.
+  launchd runs no shell, so every flag is written out. None of the owner's
+  launchd jobs starts a lead today.
+- **FleetView**: whatever command it runs for a lead takes the same prefix,
+  `$WRAP -- <absolute claude path> <flags>`. No lead was running under it on
+  16 October.
+
+Two leads are not candidates yet. The Team Lead drives tmux and reads every
+lead's folder to respawn them. The Workspaces lead's deploy fallback runs
+`git pull` in prod's checkout, which the profile denies after every other
+rule.
 
 ## What it was proved against
 
@@ -116,8 +170,30 @@ throwaway Harborlight and Riverbend folders:
   `--permission-mode bypassPermissions`, so the refusals came from the
   sandbox and not from Claude Code's own permission checks.
 - That run loaded no user settings, plugins, hooks or MCP servers
-  (`--setting-sources project --strict-mcp-config`). An interactive session
-  with the plugin, hooks, git and `gh` was not run inside the wall.
+  (`--setting-sources project --strict-mcp-config`).
+
+The same day, a second probe ran `claude -p` through the wrapper with the
+owner's full settings: every plugin, hook and MCP server, the permission
+mode they set (`auto`), and the channel flags the leads launch with. No
+board id was set, so no hook posted anywhere. With the default config
+above:
+
+- the claude-workspaces MCP server connected and answered a read
+  (`list_watched_docs`), as did the `claude-hive` server and the GitHub
+  channel plugin;
+- `git status`, `git commit` and `gh auth status` succeeded in the probe's
+  repo;
+- every hook ran and exited 0: three on SessionStart, the PreToolUse hooks
+  on each Bash call, UserPromptSubmit and Stop;
+- `--continue` resumed the probe's previous session;
+- reading a Riverbend file and listing `~/dev` still answered
+  `Operation not permitted`.
+
+Without the config's `allowRead` list, the same probe broke on each row of
+the table in step 1. The status line is the exception: `claude -p` draws
+none, so its script was run inside the wall by hand, on a sample input, and
+printed its line. `--remote-control` and an interactive session were not run
+inside the wall.
 
 `scripts/lead-sandbox.test.ts` drives the real `sandbox-exec` when it is
 present and skips, saying so, when it is not (Linux CI).
