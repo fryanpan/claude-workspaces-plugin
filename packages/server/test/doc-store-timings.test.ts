@@ -29,6 +29,7 @@ describe('doc timings', () => {
       reanchorMs: 250,
       boundReadDeadlineMs: 3000,
       boundReadRetryMs: 60000,
+      whiteboardSettleMs: 1500,
     });
   });
 
@@ -73,6 +74,7 @@ describe('doc timings', () => {
       reanchorMs: 25,
       boundReadDeadlineMs: 300,
       boundReadRetryMs: 6000,
+      whiteboardSettleMs: 150,
     });
     // The ORDER is the load-bearing part: the .ydoc persist has to still land
     // before the .md write-back, which is what makes "a crash inside the flush

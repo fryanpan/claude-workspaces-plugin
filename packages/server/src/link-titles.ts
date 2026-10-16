@@ -86,7 +86,8 @@ export function linkInfoFor(url: string, sources: LinkTitleSources): ResolvedLin
       return taskLink(goal);
     }
     case 'doc':
-    case 'mockup': {
+    case 'mockup':
+    case 'whiteboard': {
       // A task's body doc is addressed as `task:<id>` — its title is the
       // task's, which is also the only title it has.
       const taskId = taskIdOfBodyDoc(link.docId);

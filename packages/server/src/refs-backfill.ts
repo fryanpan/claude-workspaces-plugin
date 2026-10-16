@@ -124,7 +124,7 @@ export function scanDocRefs(ctx: Ctx, docId: string): void {
     let rowId: string | null = null;
     if (link.kind === 'task') rowId = link.taskId;
     else if (link.kind === 'goal') rowId = link.goalId;
-    else if (link.kind === 'doc' || link.kind === 'mockup') {
+    else if (link.kind === 'doc' || link.kind === 'mockup' || link.kind === 'whiteboard') {
       // A task's body doc is addressed as `task:<id>` — a link to it is a
       // link to the row.
       rowId = taskIdOfBodyDoc(ctx.docStore.resolveDocId(link.docId));

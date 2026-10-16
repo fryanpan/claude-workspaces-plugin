@@ -62,6 +62,7 @@
     "./task-blocked": "./src/task-blocked.ts",
     "./task-schedule": "./src/task-schedule.ts",
     "./task-wire": "./src/task-wire.ts",
+    "./whiteboard-scene": "./src/whiteboard-scene.ts",
     "./word-count": "./src/word-count.ts"
   },
   "dependencies": {

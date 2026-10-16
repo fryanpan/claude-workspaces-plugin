@@ -140,3 +140,11 @@ export const insideWriteBack = (): number => Math.round(DOC_STORE_TIMINGS.writeB
 
 /** Long enough that the thread re-anchor sweep would have run. */
 export const pastReanchor = (): number => Math.ceil(DOC_STORE_TIMINGS.reanchorMs * 2);
+
+/** Well inside a whiteboard's settle window: a second stroke here restarts it. */
+export const insideWhiteboardSettle = (): number =>
+  Math.round(DOC_STORE_TIMINGS.whiteboardSettleMs * 0.15);
+
+/** Long enough that a whiteboard's settle window has closed and its event fired. */
+export const pastWhiteboardSettle = (): number =>
+  Math.ceil(DOC_STORE_TIMINGS.whiteboardSettleMs * 2);

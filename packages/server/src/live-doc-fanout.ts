@@ -41,7 +41,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import type { FeedbackWs, LiveDoc, ShareAuthorizedSocket } from './doc-store.ts';
-import { type EditSessionTracker, noteEditTransaction } from './edit-sessions.ts';
+import { type EditSessionTracker, editAuthorOf, noteEditTransaction } from './edit-sessions.ts';
 import { newEventId } from './event-id.ts';
 import { isPrivateMetaKey } from './private-meta.ts';
 import { newlyOrphaned, orphanedThreadIds } from './review-stale-notify.ts';
@@ -49,6 +49,7 @@ import { touchedBlockKeys } from './scoped-edit-guard.ts';
 import type { SseBus } from './sse.ts';
 import type { ThreadSummarizer } from './summarize.ts';
 import type { WebhookDispatcher } from './webhooks.ts';
+import { describeChange, watchSceneChanges } from './whiteboard/scene-events.ts';
 
 /** Yjs origin for the private-meta guard's own deletes, so it never
  *  re-enters on its own transaction. */
@@ -711,6 +712,32 @@ export class LiveDocFanout {
     });
   }
 
+  /** `whiteboard.changed`, once per author after `whiteboardSettleMs` of quiet. */
+  private watchWhiteboard(doc: LiveDoc): void {
+    watchSceneChanges(doc.ydoc, {
+      settleMs: DOC_STORE_TIMINGS.whiteboardSettleMs,
+      actorOf: (origin) => {
+        const a = editAuthorOf(doc, origin);
+        if (a?.actor !== 'person') return null;
+        return { id: a.actorId ?? a.key, name: a.actorName ?? 'Someone', kind: 'person' };
+      },
+      onSettled: (actor, ids) => {
+        doc.seq++;
+        const docTitle = this.host.titleOf(doc);
+        this.broadcastToDoc(doc, {
+          event: 'whiteboard.changed',
+          docId: doc.docId,
+          doc: this.host.decorate(doc.meta),
+          ...(docTitle ? { docTitle } : {}),
+          actor,
+          ...describeChange(doc.ydoc, ids),
+          at: Date.now(),
+          seq: doc.seq,
+        });
+      },
+    });
+  }
+
   wireEvents(doc: LiveDoc): void {
     doc.ydoc.on('update', (_update: Uint8Array, origin: unknown) => {
       // One hook, every writer. See `LiveDoc.lastContentChangeAt` for why the
@@ -733,6 +760,12 @@ export class LiveDocFanout {
     });
     this.guardPrivateMeta(doc);
     this.guardServerMeta(doc);
+    // A whiteboard has no text to re-anchor; its watchers hear one event per
+    // settled burst instead (`whiteboard/scene-events.ts`).
+    if (contentKind(doc.meta.type) === 'scene') {
+      this.watchWhiteboard(doc);
+      return;
+    }
     // Code and diff docs have no prose fragment — the prose-fragment
     // auto-reanchor sweep below would find nothing and orphan every thread.
     // Run the flat-text twin instead: observe the raw `content` Y.Text and

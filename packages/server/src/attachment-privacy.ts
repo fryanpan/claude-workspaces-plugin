@@ -160,7 +160,14 @@ export interface LocalOnlyGateDeps {
 
 /** The collections whose members are docs or sets. Rows (`tasks`, `goals`,
  *  `dispatches`) are board content, never a set's files. */
-const SET_BEARING = new Set(['docs', 'mockups', 'apps', 'attachments', 'review-items']);
+const SET_BEARING = new Set([
+  'docs',
+  'mockups',
+  'whiteboards',
+  'apps',
+  'attachments',
+  'review-items',
+]);
 
 /**
  * Does this address reach into a local-only set — its tree, its file list,

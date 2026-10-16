@@ -1020,6 +1020,8 @@ export function shareScopeAllows(
            */
           case 'docs':
           case 'mockups':
+          // A whiteboard's page; its data and its socket are the doc's.
+          case 'whiteboards':
             return insideSharedWorkspace(memberId) && docSubrouteAllowed(verb, method);
           /**
            * An attached dev server (`routes/apps.ts`). `verb` here is not a
