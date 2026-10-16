@@ -45,14 +45,14 @@ arranged. Read it before non-trivial work.
 ```mermaid
 flowchart TB
   subgraph browser[Browser]
-    app["workspaces-app<br/>7 bundles: doc · board · settings · signin · landing · reviews · sentry"]
+    app["workspaces-app<br/>8 bundles: doc · board · settings · signin · landing · reviews · whiteboard · sentry"]
     wid["widget<br/>injectable web component"]
   end
   plug["plugin<br/>skills · hooks · bundled mcp"]
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -493,6 +493,31 @@ frame, an app door's paths and the widget's public scripts, each only as the
 fetch type it is loaded as; everything else is a 404 before a route runs. The
 bridge learns the host page's origin from the frame's seed and relays every
 call by path, so the host still resolves it against the board's hostname.
+
+**A whiteboard is a doc whose content is a drawing.** Its type is
+`whiteboard`, and its `.ydoc` holds one Y.Map of Excalidraw elements keyed by
+element id, with no bound file. Every write replaces a whole element, and the
+copy with the higher `version` wins, then the lower `versionNonce`
+(`incomingWins` in core's `whiteboard-scene.ts`). That is Excalidraw's own
+reconcile rule, so the server, every page and every agent converge on the same
+scene. A delete is a newer copy with `isDeleted` set, never a removed key.
+`/workspaces/<ws>/whiteboards/<id>` serves `whiteboard/page-shell.ts`, and the
+page is its own bundle, `whiteboard.js`. It is the one place the app runs real
+React, because Excalidraw needs it; React and Excalidraw load behind one
+`import()` so the header and socket come up first. The page writes to the
+scene only when no gesture is in progress, so a half-drawn stroke never
+reaches anyone, and it holds back a remote copy of an element the person is
+still drawing or dragging until they let go (`whiteboard/scene-sync.ts` in the
+app). Agents draw through `POST …/docs/<id>/whiteboard`
+(`routes/whiteboard-routes.ts`), which turns boxes, ellipses, arrows and text
+into elements (`whiteboard/elements.ts` on the server) and can set the one
+spot the agent points at. That pointer lives in the server's awareness state
+under `agentPointers`, keyed by agent, because the server holds one awareness
+state per doc. A burst of strokes from one actor becomes one
+`whiteboard.changed` frame once that actor has been still for
+`whiteboardSettleMs` (`whiteboard/scene-events.ts`), and the MCP child drops a
+frame its own agent caused (`self-authored.ts`). Comments on a whiteboard are
+not wired yet.
 
 **An attached dev server is served like a mock, from the board's own
 address.** An agent runs a site's dev server on a loopback port and binds it

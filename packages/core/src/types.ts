@@ -1,6 +1,7 @@
 import type { PageEdit, PageSuggestion } from './page-edits.ts';
 import type { ReviewPayload } from './review-item.ts';
 import type { VoiceNote } from './voice-feedback.ts';
+import type { WhiteboardShape } from './whiteboard-scene.ts';
 
 /** Kinds of surfaces the feedback core can power.
  *  - markdown: WYSIWYG prose editing (Tiptap), bidirectional file sync.
@@ -14,12 +15,15 @@ import type { VoiceNote } from './voice-feedback.ts';
  *    through it under `/workspaces/<ws>/apps/<id>/` (server `routes/apps.ts`).
  *    `sourceUrl` is its origin. No server-held content: the widget on its
  *    pages comments on it, as on a mockup.
+ *  - whiteboard: a canvas people and agents draw on together, served at
+ *    `/workspaces/<ws>/whiteboards/<id>`. Its content is the Excalidraw
+ *    elements in the `elements` Y.Map (`whiteboard-scene.ts`); no file.
  *  - workspace: a board workspace's board doc (`ws:<workspaceId>`). Carries
  *    no server-held content surface of its own — its `tasks`/`workspace` maps
  *    are a server-written projection of the task store (see the server's
  *    task-projection module), never edited through a content editor.
  */
-export type DocType = 'markdown' | 'mockup' | 'code' | 'diff' | 'workspace' | 'app';
+export type DocType = 'markdown' | 'mockup' | 'code' | 'diff' | 'workspace' | 'app' | 'whiteboard';
 
 /**
  * Which Yjs content surface a doc kind uses — THE derived concept most
@@ -27,9 +31,11 @@ export type DocType = 'markdown' | 'mockup' | 'code' | 'diff' | 'workspace' | 'a
  * instead of adding `type === '…'` checks at every call site.
  *  - prose: editable `prose` XmlFragment (Tiptap), markdown file write-back.
  *  - flat:  read-only `content` Y.Text (code viewer / diff viewer).
+ *  - scene: a whiteboard's `elements` Y.Map, one Excalidraw element per key.
+ *           Edited over the doc socket and the whiteboard verbs; no file.
  *  - none:  no server-held content — the surface is a host page (widget).
  */
-export type ContentKind = 'prose' | 'flat' | 'none';
+export type ContentKind = 'prose' | 'flat' | 'scene' | 'none';
 
 export function contentKind(type: DocType): ContentKind {
   switch (type) {
@@ -38,6 +44,8 @@ export function contentKind(type: DocType): ContentKind {
     case 'code':
     case 'diff':
       return 'flat';
+    case 'whiteboard':
+      return 'scene';
     default:
       return 'none';
   }
@@ -804,9 +812,35 @@ export interface MockupUpdatedPayload {
   eid?: string;
 }
 
+/**
+ * Somebody finished a change to a whiteboard: one frame about 1.5s after the
+ * last commit from one author (`whiteboardSettleMs`), never one per stroke.
+ * `actor` names who drew, so an agent's own strokes come back to nobody
+ * (`packages/mcp/src/self-authored.ts`).
+ */
+export interface WhiteboardChangedPayload {
+  event: 'whiteboard.changed';
+  docId: string;
+  doc: DocMeta;
+  docTitle?: string;
+  actor: { id: string; name: string; kind: 'person' | 'agent' };
+  /** The ids this author changed, in the order they were first changed. */
+  changed: string[];
+  /** The changed elements still on the board, in the simple form. */
+  shapes: WhiteboardShape[];
+  /** The changed ids that are now deleted. */
+  removed: string[];
+  /** Elements on the board after the change, deleted ones not counted. */
+  count: number;
+  at: number;
+  seq: number;
+  eid?: string;
+}
+
 /** Payload POSTed to a host integration webhook. */
 export type WebhookPayload =
   | ThreadWebhookPayload
   | SuggestionWebhookPayload
   | DocSyncErrorPayload
-  | MockupUpdatedPayload;
+  | MockupUpdatedPayload
+  | WhiteboardChangedPayload;

@@ -37,6 +37,12 @@ export type DocStoreTimings = {
   boundReadDeadlineMs: number;
   /** Minimum gap between attempts on a bound file that blew the deadline. */
   boundReadRetryMs: number;
+  /**
+   * How long a whiteboard must go quiet before its watchers hear one
+   * `whiteboard.changed`. Restarted by every commit, so a person sketching a
+   * flow in several strokes reaches the agent once, after the pen rests.
+   */
+  whiteboardSettleMs: number;
 };
 
 /** The production cadences. Every one of these is a documented number elsewhere. */
@@ -49,6 +55,7 @@ export const DEFAULT_DOC_STORE_TIMINGS: DocStoreTimings = {
   reanchorMs: 250,
   boundReadDeadlineMs: 3000,
   boundReadRetryMs: 60000,
+  whiteboardSettleMs: 1500,
 };
 
 /**
@@ -78,6 +85,7 @@ export function resolveDocStoreTimings(scale: string | undefined): DocStoreTimin
     reanchorMs: scaled(DEFAULT_DOC_STORE_TIMINGS.reanchorMs),
     boundReadDeadlineMs: scaled(DEFAULT_DOC_STORE_TIMINGS.boundReadDeadlineMs),
     boundReadRetryMs: scaled(DEFAULT_DOC_STORE_TIMINGS.boundReadRetryMs),
+    whiteboardSettleMs: scaled(DEFAULT_DOC_STORE_TIMINGS.whiteboardSettleMs),
   };
 }
 

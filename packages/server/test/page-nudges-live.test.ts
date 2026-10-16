@@ -81,6 +81,23 @@ describe('page nudges', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('an open Library hears a whiteboard made on its board, and lists it at its own page', async () => {
+    const page = await open(`/workspaces/${WS}/events:stream`);
+    try {
+      const made = await send(`/workspaces/${WS}/whiteboards`, 'POST', { title: 'Ferry flow' });
+      expect(made.status).toBe(200);
+      const { docId } = (await made.json()) as { docId: string };
+      await waitFor(() => page.names().includes('library.changed'));
+      const items = (await (
+        await fetch(`${base}/workspaces/${WS}/library/items`, { headers: host })
+      ).json()) as { files: Array<{ name: string; href?: string }> };
+      const row = items.files.find((f) => f.name === 'Ferry flow');
+      expect(row?.href).toBe(`/workspaces/${WS}/whiteboards/${docId}`);
+    } finally {
+      page.stop();
+    }
+  });
+
   it('an open Library hears a doc filed on its board, then renamed', async () => {
     const page = await open(`/workspaces/${WS}/events:stream`);
     const agent = await open(`/workspaces/${WS}/events:stream?agentId=saltmarsh`);

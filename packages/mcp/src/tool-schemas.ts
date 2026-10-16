@@ -19,6 +19,7 @@
 import { secretReadCommand } from '@claude-workspaces/core/secret-name';
 import { TASK_STATUSES } from '@claude-workspaces/core/task-wire';
 import type { ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import { WHITEBOARD_TOOLS } from './whiteboard-schemas.ts';
 
 /**
  * A Review Item: the declaration that turns a comment into a row on a
@@ -3239,5 +3240,6 @@ export const TOOL_LIST: ListToolsResult = {
         required: ['workspaceId'],
       },
     },
+    ...WHITEBOARD_TOOLS,
   ],
 };

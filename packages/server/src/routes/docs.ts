@@ -89,6 +89,7 @@ import type {
   DocRouteRequest,
   DocRoutesContext,
 } from './docs-routes-context.ts';
+import { handleWhiteboardRoutes } from './whiteboard-routes.ts';
 /** The anchor's display snippet, whichever anchor kind carries it — an
  *  orphan keeps its original's snippet. */
 function anchorSnippetText(anchor: Anchor): string | undefined {
@@ -669,6 +670,7 @@ export async function handleDocResourceRoutes(
     (await handleDocTitleRoute(ctx, docRq)) ??
     (await handleDocVoiceFeedbackRoute(ctx, docRq)) ??
     (await handleDocThreadRoutes(ctx, docRq)) ??
-    (await handleDocEditRoutes(ctx, docRq))
+    (await handleDocEditRoutes(ctx, docRq)) ??
+    (await handleWhiteboardRoutes(ctx, docRq))
   );
 }

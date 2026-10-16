@@ -36,6 +36,7 @@ import { TOOL_LIST } from './tool-schemas.ts';
 import { handleDocsTool } from './tools/docs.ts';
 import { handleInboxTool } from './tools/inbox.ts';
 import { handleTaskTool } from './tools/tasks.ts';
+import { handleWhiteboardTool } from './tools/whiteboard.ts';
 import { handleWorkspaceTool } from './tools/workspace.ts';
 import { SHARED_IDENTITY_REASON, createWatchRegistry, isSharedIdentity } from './watch-registry.ts';
 import { createWatchRestore } from './watch-restore.ts';
@@ -269,7 +270,13 @@ export function createConnectorSession(deps: ConnectorSessionDeps): ConnectorSes
     sendDueHeartbeats: () => sendDueHeartbeats(),
     watchDoc: (docId) => registry.watchDoc(docId),
     toolContext,
-    handlers: [handleDocsTool, handleTaskTool, handleWorkspaceTool, handleInboxTool],
+    handlers: [
+      handleDocsTool,
+      handleTaskTool,
+      handleWorkspaceTool,
+      handleInboxTool,
+      handleWhiteboardTool,
+    ],
     err,
   });
 

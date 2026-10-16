@@ -30,14 +30,16 @@ export type { LinkedDockItem };
  */
 export function itemLinkedDocIds(detail: string | undefined, taskLinks: Ref[]): string[] {
   const fromDetail = extractWorkspaceLinks(detail ?? '').flatMap(({ link }) =>
-    link.kind === 'doc' || link.kind === 'mockup' ? [link.docId] : [],
+    link.kind === 'doc' || link.kind === 'mockup' || link.kind === 'whiteboard' ? [link.docId] : [],
   );
   if (fromDetail.length > 0) return fromDetail;
   return taskLinks.flatMap((ref) => {
     if (ref.kind === 'doc' || ref.kind === 'thread') return [ref.docId];
     if (ref.kind !== 'url') return [];
     return extractWorkspaceLinks(ref.url).flatMap(({ link }) =>
-      link.kind === 'doc' || link.kind === 'mockup' ? [link.docId] : [],
+      link.kind === 'doc' || link.kind === 'mockup' || link.kind === 'whiteboard'
+        ? [link.docId]
+        : [],
     );
   });
 }

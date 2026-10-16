@@ -104,6 +104,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       <div class="library-top-row">
         <h1 class="library-proj"></h1>
         <span class="library-repo"></span>
+        <button type="button" class="library-new-whiteboard">New whiteboard</button>
       </div>
       <input class="library-search" type="search" autocomplete="off" spellcheck="false">
     </header>
@@ -313,8 +314,34 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     }
   }
 
+  /** Make a whiteboard on this board and go to it. */
+  async function newWhiteboard(): Promise<void> {
+    if (opening) return;
+    opening = true;
+    try {
+      const res = await deps.send(
+        `/workspaces/${encodeURIComponent(workspaceId)}/whiteboards`,
+        'POST',
+        { title: 'Whiteboard' },
+      );
+      const url = res.data?.url;
+      if (res.ok && typeof url === 'string') deps.navigate(url);
+      else
+        body.insertAdjacentHTML(
+          'afterbegin',
+          '<div class="library-empty library-error">The whiteboard could not be made.</div>',
+        );
+    } finally {
+      opening = false;
+    }
+  }
+
   root.addEventListener('click', (e) => {
     const target = e.target as Element;
+    if (target.closest('.library-new-whiteboard')) {
+      void newWhiteboard();
+      return;
+    }
     const burst = target.closest<HTMLElement>('.library-burst-head');
     if (burst) {
       const key = burst.dataset.burst ?? '';

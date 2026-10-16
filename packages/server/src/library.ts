@@ -313,6 +313,7 @@ function docHref(workspaceId: string, meta: DocMeta): string | undefined {
   const id = encodeURIComponent(meta.docId);
   if (meta.type === 'markdown') return `${base}/docs/${id}`;
   if (meta.type === 'mockup' && meta.sourceUrl) return `${base}/mockups/${id}`;
+  if (meta.type === 'whiteboard') return `${base}/whiteboards/${id}`;
   if (meta.type === 'app' && meta.sourceUrl) return `${base}/apps/${id}/`;
   return undefined;
 }
@@ -388,7 +389,7 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       created: src.fileBirth?.(meta.docId),
     };
     docFiles.push(fileRow);
-    const kind = meta.type === 'mockup' ? 'mockups' : 'documents';
+    const kind = meta.type === 'mockup' || meta.type === 'whiteboard' ? 'mockups' : 'documents';
     placed.push({ row: fileRow, doc: placedDoc(meta, kind, parsed, fileRow.at) });
   }
 

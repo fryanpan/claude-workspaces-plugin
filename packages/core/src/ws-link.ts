@@ -28,13 +28,15 @@ export type WorkspaceLink =
   | { kind: 'goal'; workspaceId: string; goalId: string }
   | { kind: 'doc'; workspaceId: string; docId: string }
   | { kind: 'mockup'; workspaceId: string; docId: string }
+  | { kind: 'whiteboard'; workspaceId: string; docId: string }
   | { kind: 'review'; workspaceId: string; reviewId: string };
 
 // The optional suffix is the board's nav destinations: the board keeps its
 // panel params on every nav page, so a link copied from `/home` addresses
 // the same task a link copied from the bare path does.
 const WS_PATH = /^\/workspaces\/([^/?#]+)(?:\/(?:home|tasks|library|activity))?\/?$/;
-const WS_CHILD_PATH = /^\/workspaces\/([^/?#]+)\/(docs|mockups|attachments)\/([^/?#]+)\/?$/;
+const WS_CHILD_PATH =
+  /^\/workspaces\/([^/?#]+)\/(docs|mockups|whiteboards|attachments)\/([^/?#]+)\/?$/;
 
 function decode(part: string): string {
   try {
@@ -78,6 +80,7 @@ export function parseWorkspaceLink(urlOrPath: string): WorkspaceLink | null {
     const id = decode(child[3]);
     if (child[2] === 'docs') return { kind: 'doc', workspaceId, docId: id };
     if (child[2] === 'mockups') return { kind: 'mockup', workspaceId, docId: id };
+    if (child[2] === 'whiteboards') return { kind: 'whiteboard', workspaceId, docId: id };
     return { kind: 'review', workspaceId, reviewId: id };
   }
 

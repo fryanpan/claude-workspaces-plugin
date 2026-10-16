@@ -188,6 +188,7 @@ import {
 } from './routes/voice-agent-llm.ts';
 import { type VoiceApiRoutesContext, handleVoiceApiRoutes } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext, handleVoicePageRoutes } from './routes/voice-page.ts';
+import { handleWhiteboardCreateRoute } from './routes/whiteboard-routes.ts';
 import {
   type LibraryRoutesContext,
   handleLibraryRoutes,
@@ -1987,6 +1988,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       }
       case 'docs':
       case 'mockups':
+      case 'whiteboards':
       case 'apps':
       case 'attachments': {
         // The board-feedback doc belongs to EVERY board, and that is what it
@@ -3543,8 +3545,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       }
 
       // --- REST: docs, created and listed — ./routes/docs.ts ---
+      // A whiteboard is created beside them (./routes/whiteboard-routes.ts):
+      // `whiteboards` is an exact remainder no other route here answers.
       {
-        const handled = await handleDocCreateListRoutes(docRoutesCtx, {
+        const docRq = {
           scope,
           req,
           url,
@@ -3556,7 +3560,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           requireOwner,
           metaFor,
           withTaskChips,
-        });
+        };
+        const handled =
+          (await handleDocCreateListRoutes(docRoutesCtx, docRq)) ??
+          (await handleWhiteboardCreateRoute(docRoutesCtx, docRq));
         if (handled) return handled;
       }
 
@@ -4187,6 +4194,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     if (!home) return meta;
     const ws = `${base}/workspaces/${encodeURIComponent(home)}`;
     const id = encodeURIComponent(meta.docId);
+    // A whiteboard has content but not the doc editor: it has its own page.
+    if (meta.type === 'whiteboard') return { ...meta, reviewUrl: `${ws}/whiteboards/${id}` };
     if (contentKind(meta.type) !== 'none') {
       // Every doc kind with server-held content (markdown/code/diff) shares
       // the SPA route; the app branches the editor on the doc's type at boot.

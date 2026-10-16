@@ -84,6 +84,7 @@ import {
   serveStaticUnder,
 } from '../shells.ts';
 import type { TaskStore } from '../tasks.ts';
+import { renderWhiteboardShell } from '../whiteboard/page-shell.ts';
 import { BOARD_PAGE_PATH, BOARD_PAGE_RESOURCE_PATH } from '../workspace-path.ts';
 
 /** Files the workspaces-app build emits that must ALSO answer at the root
@@ -629,6 +630,27 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       if (!isValidDocId(id)) return j(400, { error: 'bad docId' });
       const canonical = docStore.get(id)?.docId ?? id;
       if (kind === 'mockups') return serveMockup(canonical, wsSeg, req, url, visitor);
+      const whiteboard = docStore.peekMeta(canonical);
+      if (kind === 'whiteboards' || whiteboard?.type === 'whiteboard') {
+        if (whiteboard?.type !== 'whiteboard' || !docStore.get(canonical)) {
+          return new Response(renderReviewNotFound(canonical), {
+            status: 404,
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+          });
+        }
+        if (kind !== 'whiteboards') {
+          return redirectTo(
+            `/workspaces/${encodeURIComponent(wsSeg)}/whiteboards/${encodeURIComponent(canonical)}`,
+            url.search,
+          );
+        }
+        const page = renderWhiteboardShell(
+          { workspaceId: wsSeg, docId: canonical, title: whiteboard.title ?? 'Whiteboard' },
+          browserSentry,
+          readAppAssetManifest(markdownAppDist),
+        );
+        return new Response(page, { headers: HTML_SHELL_HEADERS });
+      }
       if (isMockupDoc(canonical)) {
         return redirectTo(
           `/workspaces/${encodeURIComponent(wsSeg)}/mockups/${encodeURIComponent(canonical)}`,
