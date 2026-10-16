@@ -131,7 +131,20 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
     // as an argument removes that ordering dependency without changing a
     // single value any of them sees.
     const { visitor, visitorShareId } = admitted;
-    const { accessEmail } = admitted;
+    const { accessEmail, boardAgent } = admitted;
+
+    /**
+     * The agent a board agent token (`at2`) names, as a roster row — the
+     * token's proof outranks every other on a request that carried it,
+     * because the door judged the whole request on it. Null when the roster
+     * row has gone or is not an agent's, and the request is then a guest
+     * like any other visitor.
+     */
+    const boardAgentUser = (): User | null => {
+      if (!boardAgent) return null;
+      const rec = identities.get(boardAgent.agentId) ?? identities.upsertAgent(boardAgent.agentId);
+      return rec && rec.kind === 'agent' && rec.status === 'active' ? userForIdentity(rec) : null;
+    };
 
     /**
      * The identity this request has PROVEN, resolved at most once.
@@ -194,6 +207,9 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
      * was whichever way the flag is set.
      */
     const authorFor = (claimed: unknown): User | undefined => {
+      // Rung -2: the agent a board token proved. The body names nobody else.
+      const tokenAgent = boardAgentUser();
+      if (tokenAgent) return tokenAgent;
       /**
        * Rung -1, and it exists ONLY on a share surface: the identity the
        * boundary itself proved outranks a widget popup-token.
@@ -346,6 +362,8 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
      * unattributed here rather than given a guest or anonymous id.
      */
     const provenAuthor = (): User | null => {
+      const tokenAgent = boardAgentUser();
+      if (tokenAgent) return tokenAgent;
       const proven = visitor
         ? (provenIdentityFor() ?? widgetIdentity)
         : (widgetIdentity ?? provenIdentityFor());

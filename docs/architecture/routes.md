@@ -23,7 +23,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/agent-token` | GET | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/merge` | POST | `routes/agent-identity.ts` | loopback-only |  |
 | `/api/agents/:agentId/token` | GET | `routes/agent-identity.ts` | loopback-only |  |
-| `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | loopback-only |  |
+| `/api/agents/:agentId/watches` | GET, POST | `routes/agent-identity.ts` | loopback-only | Also served to a board agent token (`at2`) for its own agent id, cut to its one board (`middleware/board-agent-door.ts`). |
 | `/api/attachments` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/attachments/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/auth/logout` | POST | `routes/auth-share.ts` | trusted-local |  |
@@ -33,6 +33,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/auth/verify` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-session` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-token` | POST | `routes/auth-share.ts` | trusted-local |  |
+| `/api/board-tokens` | GET, POST | `routes/board-tokens.ts` | loopback-only |  |
+| `/api/board-tokens/:id/revoke` | POST | `routes/board-tokens.ts` | loopback-only |  |
 | `/api/calendar` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/calendar/events` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/calendar/google` | DELETE | `routes/meetings-calendar.ts` | trusted-local |  |

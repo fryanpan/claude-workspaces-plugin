@@ -254,6 +254,8 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // a client too old to have been restarted reaches them.
   ['api', 'agent-notes'],
   ['api', 'agents', ':id', 'token'],
+  ['api', 'board-tokens'],
+  ['api', 'board-tokens', ':id', 'revoke'],
   ['api', 'attachments'],
   ['api', 'calendar', 'events'],
   ['api', 'calendar', 'google', 'callback'],

@@ -30,6 +30,7 @@ import {
   mintAgentToken,
   refuseNonLocalAgentCaller,
 } from '../auth/agent-token.ts';
+import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import { readIdentityHeaders, resolveIdentity } from '../connector/identity.ts';
 import type { Identities } from '../identities.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -64,6 +65,8 @@ export interface AgentIdentityRoutesContext {
   watchCoverageFor: (agentId: string, keys: string[]) => unknown;
   /** A doc's own id, whichever spelling it was addressed by. */
   canonicalDocId: (addressed: string) => string;
+  /** Whether a canonical watch key names this board or a doc filed on it. */
+  watchKeyOnBoard: (key: string, boardId: string) => boolean;
 
   /** The key the `at1` agent bearer is minted and verified under. A thunk
    *  because the key file is read lazily, the way every other derived key on
@@ -91,6 +94,8 @@ export interface AgentIdentityRouteRequest {
   visitor: ShareTarget | null;
   /** The author this request is allowed to claim. */
   authorFor: (claimed: unknown) => User | undefined;
+  /** The agent and board an `at2` bearer proved, or null. */
+  boardAgent: BoardAgentClaims | null;
 }
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
@@ -112,7 +117,7 @@ export async function handleAgentIdentityRoutes(
     requireAgentToken,
     warnLegacyAgentCaller,
   } = ctx;
-  const { req, pathname, visitor, authorFor } = rq;
+  const { req, pathname, visitor, authorFor, boardAgent } = rq;
 
   // --- REST: mint this agent's stream bearer ---
   //
@@ -191,11 +196,18 @@ export async function handleAgentIdentityRoutes(
     // host never reaches here today (`shareScopeAllows` is a closed
     // allowlist), and this keeps a later allowlisting from exposing one
     // agent's subscription list to an external reviewer.
-    if (visitor) return j(403, { error: 'not available to share visitors' });
+    // The one visitor this route serves is a board agent token's holder
+    // (middleware/board-agent-door.ts), and only its own set, cut to its
+    // board: it reads and writes the keys on that board and sees no other.
+    if (visitor && !boardAgent) return j(403, { error: 'not available to share visitors' });
     const agentId = decodeURIComponent(agentWatchesMatch[1] ?? '');
     if (!isValidAgentId(agentId)) return j(400, { error: 'bad agentId' });
     if (SHARED_AGENT_IDS.has(agentId)) {
       return j(400, { error: SHARED_IDENTITY_ERROR, message: SHARED_IDENTITY_MESSAGE });
+    }
+    if (boardAgent) {
+      if (agentId !== boardAgent.agentId) return j(403, { error: 'out_of_board_token_scope' });
+      return boardWatches(ctx, req, agentId, boardAgent.boardId);
     }
     // Prove it is that agent. This list IS the feed's index — it names every
     // key `/events/agent/<id>` will carry — so it is gated identically to the
@@ -391,4 +403,42 @@ async function mintForCaller(
     });
   }
   return ctx.j(200, { agentId, token: mintAgentToken(agentId, ctx.agentTokenKey()) });
+}
+
+/**
+ * A board agent token's watch set: the keys on its one board, read and
+ * written exactly as the full set is, and no key from any other board in
+ * either direction. A key off the board is refused rather than dropped, so
+ * the caller learns its watch did not land.
+ */
+async function boardWatches(
+  ctx: AgentIdentityRoutesContext,
+  req: Request,
+  agentId: string,
+  boardId: string,
+): Promise<Response> {
+  const { agentWatches, j, safeJson, watchKeyExists, canonicalDocId, watchKeyOnBoard } = ctx;
+  const onBoard = (key: string) => watchKeyOnBoard(key, boardId);
+  if (req.method === 'GET') {
+    const listed = agentWatches.list(agentId, watchKeyExists);
+    return j(200, {
+      ...listed,
+      watches: listed.watches.filter((w) => onBoard(w.key)),
+      pruned: listed.pruned.filter(onBoard),
+    });
+  }
+  if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+  const body = await safeJson(req);
+  const rawAdd = Array.isArray(body?.add) ? (body?.add as unknown[]) : [];
+  const rawRemove = Array.isArray(body?.remove) ? (body?.remove as unknown[]) : [];
+  const badKey = [...rawAdd, ...rawRemove].find((k) => !isValidWatchKey(k));
+  if (badKey !== undefined) return j(400, { error: 'bad watch key', key: String(badKey) });
+  const add = (rawAdd as string[]).map((k) => canonicalDocId(k));
+  const remove = (rawRemove as string[]).map((k) => canonicalDocId(k));
+  const offBoard = [...add, ...remove].find((k) => !onBoard(k));
+  if (offBoard !== undefined) {
+    return j(403, { error: 'out_of_board_token_scope', key: offBoard });
+  }
+  const res = agentWatches.update(agentId, { add, remove });
+  return j(200, { ...res, watches: res.watches.filter((w) => onBoard(w.key)) });
 }
