@@ -59,6 +59,7 @@ import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
 import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-watch.ts';
+import { createFrameHost } from './frame-host.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { createHomePane } from './home-pane.ts';
 import { spokenReviewComment } from './huddle.ts';
@@ -2199,6 +2200,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const mayCommentOnBoard = (workspaceId: string, email: string): boolean =>
     collabMemberOf(workspaceId, email) || shareLinkMemberOf(workspaceId, email);
 
+  /** The frame-only hostname, when configured — see frame-host.ts. */
+  const frameHost = opts.frameOrigin
+    ? createFrameHost({
+        origin: opts.frameOrigin,
+        boardHosts: opts.frameBoardHosts ?? proxiedTrustedHosts,
+      })
+    : null;
+
   const { policyFor, applyCors } = createOriginPolicy({
     opts,
     proxiedTrustedHosts,
@@ -2284,6 +2293,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // address is only ever asked during a request. Same shape, and the same
     // reason, as the identity setup's own `requestAddress` above.
     requestAddress: (req) => server.requestIP(req)?.address,
+    frameHost,
   });
 
   /**
@@ -2333,6 +2343,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore,
     taskStore,
     browserSentry,
+    frameHost,
     emailCodeSignIn,
     j,
     isValidDocId,
@@ -2848,6 +2859,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
     }),
     agentName: (agentId) => identities.displayNameFor(agentId) ?? undefined,
+    frameHost,
   };
 
   /**

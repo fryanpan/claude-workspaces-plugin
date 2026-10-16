@@ -51,6 +51,7 @@ import { APP_DOWN_HEADER, renderAppWaiting } from '../app-waiting-page.ts';
 import type { BrowserSentryConfig } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';
+import type { FrameHost } from '../frame-host.ts';
 import { type WorkspaceScope, restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -84,6 +85,8 @@ export interface AppRoutesContext {
   appOutages: AppOutages;
   /** An agent's display name off the identity roster, when it has one. */
   agentName: (agentId: string) => string | undefined;
+  /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
+  frameHost: FrameHost | null;
 }
 
 export interface AppRouteRequest {
@@ -338,10 +341,15 @@ async function serveApp(
   if (req.method === 'GET' && isHtmlResponse(up.headers)) {
     const page = await up.text();
     const dest = req.headers.get('sec-fetch-dest');
-    if (isMockFrameRequest(url)) return frameResponse(ctx, page, url, workspaceId, meta, up.status);
+    const onFrameHost = ctx.frameHost?.isFrameHost(req) === true;
+    if (isMockFrameRequest(url)) {
+      return frameResponse(ctx, page, url, workspaceId, meta, up.status, onFrameHost);
+    }
     // A person opening the address gets the host page. A fetch of HTML from
     // inside the app (a partial, relayed through the host) gets the bytes.
-    if (dest === null || dest === 'document') {
+    // Never on the frame hostname, which holds frames and is framed by the
+    // board alone (`frame-host.ts`).
+    if ((dest === null || dest === 'document') && !onFrameHost) {
       const assets = readAppAssetManifest(ctx.markdownAppDist);
       const host = injectSentryHead(
         renderMockHost({
@@ -352,6 +360,7 @@ async function serveApp(
           items: [],
           visitor: rq.visitor,
           coachHref: assetHref(assets, 'coach.js'),
+          frameOrigin: ctx.frameHost?.frameOriginFor(req, rq.visitor) ?? null,
         }),
         ctx.browserSentry,
         'mockup',
@@ -379,6 +388,7 @@ function frameResponse(
   workspaceId: string,
   meta: DocMeta,
   status: number,
+  onFrameHost: boolean,
 ): Response {
   // A doc's board embed (`doc/board-embed-frames.ts`) is read-only, so it
   // gets the app's page without the comment widget's buttons over it.
@@ -390,7 +400,8 @@ function frameResponse(
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-cache',
-      'content-security-policy': MOCK_FRAME_CSP,
+      'content-security-policy':
+        onFrameHost && ctx.frameHost ? ctx.frameHost.frameCsp : MOCK_FRAME_CSP,
     },
   });
 }

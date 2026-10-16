@@ -40,6 +40,7 @@
  */
 import { normalizeEmail } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
+import { type FrameHost, frameGate, frameGateRefusal } from './frame-host.ts';
 import { memberBoards, memberHomeResponse, notAMemberResponse, wantsPage } from './member-home.ts';
 import { LOOPBACK_HOSTS, type OriginPolicy, corsHeadersFor } from './middleware/browser-origin.ts';
 import type { CfAccessVerifier } from './middleware/cf-access.ts';
@@ -258,6 +259,8 @@ export interface RequestAdmissionContext {
   /** The peer address of a request. A forward reference on purpose: the Bun
    *  server is bound below this factory and is only ever asked per request. */
   requestAddress: (req: Request) => string | undefined;
+  /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
+  frameHost: FrameHost | null;
 }
 
 /** Doc metadata as one caller may see it — the full record on the tailnet,
@@ -364,6 +367,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     widgetBearerOf,
     boardWidgetGrantFor,
     docTypeOf,
+    frameHost,
   } = ctx;
 
   const admit = async (req: Request, addressed: { pathname: string }): Promise<Admission> => {
@@ -482,6 +486,28 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      * Falling off the end means admitted.
      */
     const answered = await (async (): Promise<Response | null> => {
+      // The frame-only hostname (frame-host.ts): two read families, for the
+      // operator alone. Ahead of every other kind, so nothing else this
+      // server answers is reachable on it, whatever the lists say.
+      if (frameHost?.isFrameHost(req)) {
+        const verdict = frameGate(req, pathname, new URL(req.url).searchParams);
+        if (!verdict.ok) return frameGateRefusal(verdict.status);
+        // Off the tunnel: a caller on this machine, as the box's own pages are.
+        if (!req.headers.has('cf-ray')) {
+          return isLoopbackAddress(requestAddress(req)) ? null : j(403, { error: 'unknown_host' });
+        }
+        // Through it: external reach, so the master switch covers it, and the
+        // operator's own token and allowlisted email exactly as on their
+        // proxied hostname. A member's token opens nothing here.
+        if (!sharingGate.isEnabled()) return j(403, { error: 'sharing_disabled' });
+        if (!proxiedTrustedVerifier) return j(503, { error: 'access_not_configured' });
+        const result = await proxiedTrustedVerifier(req);
+        if (!result.ok) return j(result.status, { error: result.error });
+        const who = result.email ? normalizeEmail(result.email) : '';
+        if (who === '' || !proxiedTrustedEmails.has(who)) return j(403, { error: 'forbidden' });
+        accessEmail = result.email ?? null;
+        return null;
+      }
       const decision = classifyHost(req.headers.get('host'), {
         // Cached (60s TTL) — this used to spawn `tailscale status` on
         // every single request.

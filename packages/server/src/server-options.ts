@@ -593,6 +593,27 @@ export interface ServerOptions {
    */
   widgetDoorHosts?: readonly string[];
   /**
+   * The FRAME-ONLY hostname's origin (`CW_FRAME_ORIGIN`, e.g.
+   * `https://frames.example.com`): where a host page on one of
+   * `frameBoardHosts` frames its mock or app door, so the attachment's
+   * scripts get an origin of their own instead of an opaque one, and never
+   * the board's (`frame-host.ts`). Unset — every deployment that has not
+   * opted in — keeps every frame opaque, exactly as before.
+   *
+   * It must be the same SITE as the board hostnames (a subdomain of the same
+   * domain), and behind the same Access application as the operator's
+   * proxied hostname: the frame hostname admits the operator alone, by the
+   * same verifier and allowlist.
+   */
+  frameOrigin?: string;
+  /**
+   * The board hostnames whose host pages use `frameOrigin`
+   * (`CW_FRAME_BOARD_HOSTS`). Defaults to `proxiedTrustedHosts`. A host page
+   * on any other hostname, and every share or collaboration visitor's, keeps
+   * the opaque frame.
+   */
+  frameBoardHosts?: readonly string[];
+  /**
    * The external base URL this deployment is reached on, when something in
    * front terminates TLS (`tailscale serve` → this process on loopback).
    * Already normalized — bin.ts runs `normalizePublicBaseUrl` on
