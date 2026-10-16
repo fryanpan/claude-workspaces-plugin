@@ -30,6 +30,9 @@ export interface CfAccessOptions {
 export interface CfAccessSuccess {
   ok: true;
   email: string | undefined;
+  /** A service token's client id, which Access stamps in place of an
+   *  email. Read only by the home feed's gate (`routes/home-feed.ts`). */
+  commonName?: string;
 }
 
 export interface CfAccessFailure {
@@ -72,7 +75,8 @@ export function createCfAccessVerifier(opts: CfAccessOptions): CfAccessVerifier 
         requiredClaims: ['exp'],
       });
       const email = typeof payload.email === 'string' ? payload.email : undefined;
-      return { ok: true, email };
+      const commonName = typeof payload.common_name === 'string' ? payload.common_name : undefined;
+      return { ok: true, email, ...(commonName !== undefined ? { commonName } : {}) };
     } catch {
       // Generic on purpose. jose's messages name the check that failed
       // ("unexpected aud", "exp timestamp check failed"), which is a guide to

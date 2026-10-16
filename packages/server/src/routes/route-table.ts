@@ -85,6 +85,11 @@
  * - `recall-callback` — served only on the vendor callback host, and carrying
  *   its own credential (an unguessable token in the path, a Svix signature
  *   over the body, or setup 4's bearer secret).
+ * - `home-feed` — answered ABOVE the host guard by `routes/home-feed.ts`,
+ *   which admits two callers only: a loopback peer with no `cf-ray`, or an
+ *   Access stamp naming no email whose `common_name` is the service token
+ *   client id this server was configured with. No person and no share or
+ *   collab visitor reaches it.
  * - `open` — answered ABOVE the host guard. A row claiming this must say in
  *   `reason` why reading it is free; `gated` refuses one that does not.
  */
@@ -95,6 +100,7 @@ export type RouteGate =
   | 'owner-in-handler'
   | 'collab-scope'
   | 'recall-callback'
+  | 'home-feed'
   | 'open';
 
 /** One front-door path pattern. */

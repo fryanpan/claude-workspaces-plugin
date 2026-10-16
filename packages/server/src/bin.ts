@@ -6,6 +6,7 @@ import { readDiscovery } from '@claude-workspaces/core/discovery-file';
 import { dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
+import { homeRemotesFromEnv } from './home-remotes.ts';
 import { cacheDiscoveryReads } from './liveness.ts';
 import { installLogSquelch } from './log-squelch.ts';
 import { acquirePort, classifyBindError, probeLocalPort, shouldWalkPorts } from './port-bind.ts';
@@ -45,6 +46,11 @@ function arg(name: string, fallback?: string): string | undefined {
 const thisStart = recordThisServerStart(dataDirFromArgs(process.env, repoRoot, arg));
 
 const cfg = resolveServerConfig({ env: process.env, repoRoot, arg });
+// Home across servers: the remotes this Mac pulls from, and the service
+// token a Home elsewhere pulls this server with (home-remotes.ts,
+// routes/home-feed.ts). Either unset turns that half off.
+const homeRemotesConfig = homeRemotesFromEnv(process.env);
+const homeFeedClientId = process.env.CW_HOME_FEED_CLIENT_ID?.trim() || undefined;
 const {
   requestedPort,
   hostname,
@@ -239,6 +245,8 @@ while (!handle) {
       ...(recallCallbackHost ? { recallCallbackHost } : {}),
       ...(calendarBot ? { calendarBot } : {}),
       proxiedTrustedEmails,
+      ...(homeRemotesConfig ? { homeRemotes: { config: homeRemotesConfig } } : {}),
+      ...(homeFeedClientId ? { homeFeedClientId } : {}),
       ...(frameOrigin ? { frameOrigin } : {}),
       ...(frameBoardHosts ? { frameBoardHosts } : {}),
       allowedOrigins,

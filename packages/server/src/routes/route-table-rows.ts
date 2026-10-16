@@ -100,6 +100,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['collab-scope', '/workspaces/:ws/y', 'GET'],
   ]),
   ...family('routes/recall-webhook.ts', [['recall-callback', '/recall/status', 'POST']]),
+  // Bryan's Home on another machine pulling one board's review items: above
+  // the host guard, carrying its own gate (loopback, or one service token).
+  ...family('routes/home-feed.ts', [
+    ['home-feed', '/workspaces/:ws/home-feed', 'GET'],
+    ['home-feed', '/workspaces/:ws/home-feed/events:stream', 'GET'],
+  ]),
   // ElevenLabs' agent asking for setup 4's reply: the callback host's third
   // address, armed only while setup 4 is configured; its own bearer secret.
   ...family('routes/voice-agent-llm.ts', [

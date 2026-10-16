@@ -24,6 +24,7 @@ import type { Deployer } from './deploy.ts';
 import type { WatchFactory } from './dispatch-registry.ts';
 import type { EffortEstimator } from './effort-estimator.ts';
 import type { GoogleOauthApp, RefreshTokenVault } from './google-oauth.ts';
+import type { FetchLike, HomeRemotesConfig } from './home-remotes.ts';
 import type { ReplyTransport } from './inbox/send-transport.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
@@ -528,6 +529,19 @@ export interface ServerOptions {
    * on from outside.
    */
   proxiedTrustedHosts?: string[];
+  /**
+   * Home across servers: the other board servers this one pulls review
+   * items from (`home-remotes.ts`, from `CW_HOME_REMOTES_FILE`). Absent
+   * pulls nothing. `fetch` is a seam for tests; production calls out with
+   * the global one.
+   */
+  homeRemotes?: { config: HomeRemotesConfig; fetch?: FetchLike; retryMs?: number };
+  /**
+   * The Access service token client id a Home on another machine pulls
+   * this server's feed with (`routes/home-feed.ts`, from
+   * `CW_HOME_FEED_CLIENT_ID`). Absent, only a loopback caller reads it.
+   */
+  homeFeedClientId?: string;
   /**
    * WHO may come through `proxiedTrustedHosts`, by the email Cloudflare
    * Access verified — folded the way the roster folds addresses.

@@ -61,7 +61,9 @@ import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-watch.ts';
 import { createFrameHost } from './frame-host.ts';
 import { taskDeepLink } from './home-brief.ts';
+import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
+import { createHomeRemotes } from './home-remotes.ts';
 import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
@@ -74,6 +76,7 @@ import { systemTransport } from './inbox/send-transport.ts';
 import { InboxSends } from './inbox/sends.ts';
 import { InboxStore } from './inbox/store.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
+import { renderRemoteReview } from './landing-remote.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
@@ -147,6 +150,7 @@ import {
   handleDocPromoteRoute,
   handleDocResourceRoutes,
 } from './routes/docs.ts';
+import { type HomeFeedRoutesContext, handleHomeFeedRoute } from './routes/home-feed.ts';
 import { type InboxRoutesContext, handleInboxRoutes } from './routes/inbox.ts';
 import { handleLandingStreamRoute } from './routes/landing-stream.ts';
 import { handleMcpConnectorRoute } from './routes/mcp-connector.ts';
@@ -492,6 +496,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     },
   });
   sse.tap(landingChanges.observe);
+  // Home across servers: pulled from each other server, never pushed here
+  // (home-remotes.ts). Started once the port is bound, below.
+  const homeRemotes = opts.homeRemotes
+    ? createHomeRemotes({
+        config: opts.homeRemotes.config,
+        ...(opts.homeRemotes.fetch ? { fetch: opts.homeRemotes.fetch } : {}),
+        ...(opts.homeRemotes.retryMs !== undefined ? { retryMs: opts.homeRemotes.retryMs } : {}),
+        onChange: () => landingChanges.notify('boards'),
+      })
+    : null;
   const webhookLog: WebhookLogEntry[] = [];
   const webhooks = createWebhookDispatcher({
     onLog: (e) => {
@@ -2370,7 +2384,23 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     landingInbox: (rankOf) =>
       inboxSectionFor({ store: inboxStore, config: inboxConfig(), taskStore, rankOf }),
     landingCoach: () => coachWiring.landing(),
+    landingRemote: () => (homeRemotes ? renderRemoteReview(homeRemotes.boards()) : ''),
   });
+
+  /** This server's side of Home across servers — see routes/home-feed.ts. */
+  const homeFeedCtx: HomeFeedRoutesContext = {
+    sse,
+    boardName: (id) => taskStore.getWorkspace(id)?.name,
+    feed: async (id) => {
+      await crossReview.prepare();
+      const { items } = await crossReview.queue();
+      return homeFeedOf(id, taskStore.getWorkspace(id)?.name ?? id, items);
+    },
+    verifier: staticAccessVerifier,
+    clientId: opts.homeFeedClientId,
+    peerAddress: (req) => server.requestIP(req)?.address ?? undefined,
+    j,
+  };
 
   /**
    * The requests that end in a connection rather than a body — see
@@ -3300,6 +3330,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         return j(403, { error: 'origin_not_allowed' });
       }
 
+      // ── The home feed ── see routes/home-feed.ts. ABOVE admission, with a
+      // gate of its own: its one remote caller is a service token, which
+      // names nobody, and admission refuses a stamp that names nobody.
+      const homeFeed = await handleHomeFeedRoute(homeFeedCtx, req, pathname);
+      if (homeFeed) return homeFeed;
+
       // ── Request admission ── see request-admission.ts.
       // The gate ANSWERS this request or hands back what it proved. A
       // refused answer carries no per-request value with it, so nothing
@@ -4086,6 +4122,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // over the same 99 rows, and the abandoned one still calling the API.
   // Reaching this line is what makes a server real.
   void rescoreStaleEffortEstimates();
+  // Bound, so the remote streams open for the server that was kept.
+  homeRemotes?.start();
   // The old clock titles are renamed here for the same reason: once, by the
   // server that was kept, never blocking the boot it follows.
   void retitleClockTitlesAtBoot(docStore, opts.meetingNotes?.titleNamer ?? null);
@@ -4388,6 +4426,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       taskScheduler.stop();
       unwatchInbox();
       landingChanges.dispose();
+      homeRemotes?.dispose();
       pageNudges.dispose();
       unwatchStreams();
       folderWatches.dispose();
