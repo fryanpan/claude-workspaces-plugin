@@ -40,7 +40,10 @@ export function interviewDocs(
    *  (`plan-minutes.ts`). */
   wrote?: (docId: string, headingId: string) => void,
 ): InterviewDocs {
-  let seq = 0;
+  // A page scrolls once per `seq` and keeps the last one it scrolled for
+  // across a server restart, so the count starts at the clock: a restarted
+  // server's first question never repeats a number a page already holds.
+  let seq = Date.now();
   const write = (docId: string, edit: prose.BlockEdit): InterviewWrite => {
     const res = docStore.applyBlockEdits(docId, [edit], INTERVIEW_AUTHOR);
     if (!res.ok) return res.error === 'not-found' ? 'gone' : 'failed';

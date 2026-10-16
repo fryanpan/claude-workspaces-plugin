@@ -9,16 +9,20 @@ import type { prose } from '@claude-workspaces/core';
  * first. On a doc on the socket's board every turn is this module's: the
  * first pause begins the run, and the socket's session ends each turn only
  * at a confirmed pause (`pause-gate.ts`), so a question never cuts into a
- * sentence. After each answer it does one of three things, logged as
+ * sentence. After each answer it does one of four things, logged as
  * `after-answer`:
  *
  *  - `edit`: the answer is written under its heading, and the next question
  *    is asked at once, since the person has just paused;
  *  - `follow-up`: a bare "yes" or "maybe" says nothing yet, so it asks once
  *    for more;
- *  - `quiet`: "I don't know yet", or a second bare answer: it says nothing,
- *    puts the question back in the queue, and asks its next one at the next
- *    pause.
+ *  - `discuss`: the words are about the question but answer nothing — a
+ *    question back, a disagreement, thinking aloud — so it says one sentence
+ *    back (`interview-discuss.ts`) and the same question stays open, its
+ *    cursor where it was, until an answer is written under its heading;
+ *  - `quiet`: "I don't know yet", a second bare answer, or words about
+ *    something else: it says nothing, puts the question back in the queue,
+ *    and asks its next one at the next pause.
  *
  * WHILE IT ASKS, its cursor is on the words it means — the open question as
  * written, or the heading — in every open view of the doc
@@ -44,7 +48,8 @@ import type { prose } from '@claude-workspaces/core';
  * only clamped, never trusted, before it gets here.
  */
 import type { VoiceContext } from '../voice-prompt.ts';
-import { answerPart } from './interview-answer.ts';
+import { judgeHeard } from './interview-answer.ts';
+import { discussReply } from './interview-discuss.ts';
 import {
   type PlanGap,
   findPlanGaps,
@@ -58,11 +63,13 @@ import {
   answerMarkdown,
   asksForQuestions,
   bareAnswer,
+  hushReply,
   interviewCommand,
   oneSentence,
+  sayReply,
   wordCount,
 } from './interview-phrases.ts';
-import { readPlan } from './interview-reader.ts';
+import { ReadingMemory, readPlan } from './interview-reader.ts';
 import { InterviewRecord, OUTCOME, type Running } from './interview-record.ts';
 import { InterviewSlots, MeetingWarmup, type SlotTransition } from './interview-state.ts';
 import {
@@ -79,9 +86,6 @@ export {
   type SpokenInterviewDeps,
 } from './interview-types.ts';
 
-/** The most of what was said since the last question a reading is given. */
-const HEARD_KEPT = 2_000;
-
 function docOf(context: VoiceContext | undefined): string | undefined {
   return context?.surface === 'doc' ? context.docId : undefined;
 }
@@ -97,13 +101,8 @@ export class SpokenInterview {
   private readonly over = new Set<string>();
   /** The doc the agent's cursor is on. */
   private focused: string | null = null;
-  /** The questions asked on each doc, so a reading never repeats one. */
-  private readonly asked = new Map<string, string[]>();
-  /** What was said at pauses since the last question, per doc: a reading
-   *  hears all of it, not only the last turn. */
-  private readonly since = new Map<string, string>();
-  /** What `since` held when the latest question was asked. */
-  private sinceAsked = '';
+  /** What each doc's readings have asked and heard so far. */
+  private readonly readings = new ReadingMemory();
   /** The latest turn was heard in a planning meeting. */
   private meeting = false;
   private readonly now: () => number;
@@ -147,17 +146,13 @@ export class SpokenInterview {
    * (`cut-in.ts`), so what they say next is not its answer. A reading's
    * question is dropped as if it had not been asked, and the next pause reads
    * again with everything said; a gap's is asked again at the next pause.
+   * A discussion reply talked over leaves its question open: that was heard.
    */
   withdraw(): void {
     this.goals.withdraw();
     const run = this.run;
-    if (!run) return;
-    const asked = questionFor(this.slot(run));
-    this.asked.set(
-      run.docId,
-      (this.asked.get(run.docId) ?? []).filter((q) => q !== asked),
-    );
-    if (this.sinceAsked) this.since.set(run.docId, this.sinceAsked);
+    if (!run || run.discussing) return;
+    this.readings.unask(run.docId, questionFor(this.slot(run)));
     if (run.reading) this.run = null;
     else run.waiting = true;
     this.unfocus();
@@ -191,12 +186,12 @@ export class SpokenInterview {
       if (cmd === 'start') return this.begin(context, transcript, 'asked');
       const docId = docOf(context);
       const asks = invited || asksForQuestions(transcript);
-      if (!docId || !this.listensOn(context)) return meeting ? this.hush(true) : null;
+      if (!docId || !this.listensOn(context)) return meeting ? hushReply(true) : null;
       if (meeting && cmd === 'enough') {
         this.over.add(docId);
-        return this.say('I’ll stop asking.');
+        return sayReply('I’ll stop asking.');
       }
-      if (this.over.has(docId) && !asks) return meeting ? this.hush(true) : null;
+      if (this.over.has(docId) && !asks) return meeting ? hushReply(true) : null;
       return this.begin(context, transcript, asks ? 'invited' : 'pause');
     }
     const text = transcript.trim();
@@ -237,14 +232,14 @@ export class SpokenInterview {
   ): Promise<InterviewReply | null> {
     const docId = docOf(context);
     if (!docId || !this.deps.docs.onBoard(this.workspaceId, docId)) {
-      return this.say('Open a plan and say interview me there.');
+      return sayReply('Open a plan and say interview me there.');
     }
     if (why === 'pause' && this.meeting && this.warmup.warming(docId)) {
-      this.keep(docId, heard);
-      return this.hush(true);
+      this.readings.keep(docId, heard);
+      return hushReply(true);
     }
     const outline = this.deps.docs.outline(docId);
-    if (!outline) return why === 'pause' ? null : this.say('I can’t read this doc.');
+    if (!outline) return why === 'pause' ? null : sayReply('I can’t read this doc.');
     const gaps = findPlanGaps(outline);
     // A reading costs a model call, so it is made only for words somebody
     // said since the last question; "interview me" asks the gap list.
@@ -254,16 +249,16 @@ export class SpokenInterview {
         this.over.delete(docId);
         return this.question(this.open(docId, [read.ask], true), '');
       }
-      if (why !== 'invited') return this.hush(true);
+      if (why !== 'invited') return hushReply(true);
       // "No." is the answer; the reason is written, never said (Bryan,
       // 3 Oct: a sentence where "no" would do wastes the listener's time).
       const reason = read.none.replace(/[.!]*$/, '');
-      return { ...this.say('No.'), detail: reason ? [`${reason}.`] : [], asking: true };
+      return { ...sayReply('No.'), detail: reason ? [`${reason}.`] : [], asking: true };
     }
     if (gaps.length === 0) {
       // Unasked, there is nothing to say: keep listening, and look again at
       // the next pause, since the plan may have grown a question by then.
-      return why === 'pause' ? this.hush(true) : this.say('I found no gaps in this plan.');
+      return why === 'pause' ? hushReply(true) : sayReply('I found no gaps in this plan.');
     }
     this.over.delete(docId);
     const run = this.open(docId, gaps, false);
@@ -287,6 +282,9 @@ export class SpokenInterview {
       askedAt: at,
       startedAt: at,
       filledMs: 0,
+      discussed: 0,
+      discussMs: 0,
+      discussing: false,
       followedUp: false,
       waiting: false,
       reading,
@@ -307,17 +305,10 @@ export class SpokenInterview {
     return readPlan(complete, {
       outline,
       gaps,
-      heard: this.keep(docId, heard),
-      asked: this.asked.get(docId) ?? [],
+      heard: this.readings.keep(docId, heard),
+      asked: this.readings.askedOn(docId),
       invited,
     });
-  }
-
-  /** `heard` added to what a reading hears since the last question. */
-  private keep(docId: string, heard: string): string {
-    const all = `${this.since.get(docId) ?? ''} ${heard}`.trim().slice(-HEARD_KEPT);
-    this.since.set(docId, all);
-    return all;
   }
 
   /** After a reading's question is settled: read again for the next one,
@@ -327,14 +318,15 @@ export class SpokenInterview {
     const read = outline
       ? await this.read(docId, outline, findPlanGaps(outline), heard, false)
       : { none: '' };
-    if (!('ask' in read)) return { ...this.say(lead), asking: true };
+    if (!('ask' in read)) return { ...sayReply(lead), asking: true };
     return this.question(this.open(docId, [read.ask], true), lead);
   }
 
   private async write(run: Running, text: string): Promise<InterviewReply> {
     // Only what answers the question goes in; the rest stays with the notes.
-    const kept = await answerPart(this.deps.complete, questionFor(this.slot(run)), text);
-    if (!kept) return this.quiet(run);
+    const heard = await judgeHeard(this.deps.complete, questionFor(this.slot(run)), text);
+    const kept = heard.answer;
+    if (!kept) return heard.discuss ? this.discuss(run, text) : this.quiet(run);
     const markdown = answerMarkdown(kept);
     let gap = this.slot(run);
     let res = this.deps.docs.writeUnder(run.docId, gap.headingId, markdown);
@@ -371,6 +363,32 @@ export class SpokenInterview {
     return this.question(run, 'Can you say more?');
   }
 
+  /** Talk about the question, not an answer to it: one sentence back, and
+   *  the slot stays open — no settle, the cursor where it was. Its time is
+   *  the discussion's, so the answer's clock starts again from this reply. */
+  private async discuss(run: Running, said: string): Promise<InterviewReply> {
+    const gap = this.slot(run);
+    const outline = this.deps.docs.outline(run.docId);
+    const question = questionFor(gap);
+    const quote = gap.kind === 'read' ? gap.quote : gap.asks;
+    const reply =
+      this.deps.complete && outline
+        ? await discussReply(this.deps.complete, {
+            outline,
+            question,
+            said,
+            ...(quote ? { quote } : {}),
+          })
+        : '';
+    if (!reply) return this.quiet(run);
+    this.recordAnswer(run, 'discuss');
+    run.discussed++;
+    run.discussMs += this.now() - run.askedAt;
+    run.askedAt = this.now();
+    run.discussing = true;
+    return { spoken: reply, detail: [], asking: true, route: INTERVIEW_ROUTE, question };
+  }
+
   /** Nothing to write and nothing to press for: say nothing, put the
    *  question back, and ask the next one at the next pause. */
   private quiet(run: Running): InterviewReply {
@@ -380,11 +398,11 @@ export class SpokenInterview {
     run.followedUp = false;
     if (!next || again) {
       this.finish(run, !run.reading);
-      return this.hush(run.reading);
+      return hushReply(run.reading);
     }
     run.waiting = true;
     this.unfocus();
-    return this.hush(true);
+    return hushReply(true);
   }
 
   /** Record the current slot's outcome, settle it, and ask the next. */
@@ -411,9 +429,9 @@ export class SpokenInterview {
 
   private ended(run: Running, lead: string): InterviewReply {
     this.finish(run, true);
-    if (run.reading) return this.say(lead);
+    if (run.reading) return sayReply(lead);
     const { slots } = run;
-    const said = this.say(`${lead} ${slots.placed} of ${plural(slots.total, 'gap')} filled.`);
+    const said = sayReply(`${lead} ${slots.placed} of ${plural(slots.total, 'gap')} filled.`);
     return {
       ...said,
       detail: [...said.detail, ...slots.unasked.map((g) => `Not asked: ${gapLine(g)}`)],
@@ -445,11 +463,9 @@ export class SpokenInterview {
       quote: (gap.kind === 'read' ? gap.quote : gap.asks) ?? gap.heading,
     });
     this.deps.docs.hold?.(run.docId);
-    this.sinceAsked = this.since.get(run.docId) ?? '';
-    this.since.delete(run.docId);
     const asked = questionFor(gap);
-    const before = this.asked.get(run.docId) ?? [];
-    if (!before.includes(asked)) this.asked.set(run.docId, [...before, asked]);
+    this.readings.ask(run.docId, asked);
+    run.discussing = false;
     // One short sentence aloud: the question. The lead is only written.
     // A lead that is itself a question ("Can you say more?") is the one said.
     const own = lead.trim().endsWith('?');
@@ -470,16 +486,6 @@ export class SpokenInterview {
       this.deps.docs.release?.(this.focused);
     }
     this.focused = null;
-  }
-
-  private say(text: string): InterviewReply {
-    const { spoken, rest } = oneSentence(text);
-    return { spoken, detail: rest, asking: false, route: INTERVIEW_ROUTE };
-  }
-
-  /** Nothing said. `listening`: the page keeps listening for the next pause. */
-  private hush(listening: boolean): InterviewReply {
-    return { spoken: '', detail: [], asking: listening, route: INTERVIEW_ROUTE };
   }
 
   private recordAnswer(run: Running, after: AfterAnswer): void {

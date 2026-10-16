@@ -22,7 +22,15 @@ export interface Running {
   /** When the current slot was asked. */
   askedAt: number;
   startedAt: number;
+  /** Question (or the last discussion reply) to answer written, summed over
+   *  filled slots. */
   filledMs: number;
+  /** Discussion replies, and the time spent talking questions over before
+   *  their answers: kept out of `filledMs`. */
+  discussed: number;
+  discussMs: number;
+  /** The latest reply talked the current question over; it is still open. */
+  discussing: boolean;
   /** The current slot has had its one follow-up. */
   followedUp: boolean;
   /** The last answer settled nothing: the next question waits for a pause. */
@@ -48,6 +56,8 @@ interface Tally {
   filled: number;
   skipped: number;
   filledMs: number;
+  discussed: number;
+  discussMs: number;
 }
 
 export class InterviewRecord {
@@ -98,11 +108,15 @@ export class InterviewRecord {
         filled: 0,
         skipped: 0,
         filledMs: 0,
+        discussed: 0,
+        discussMs: 0,
       });
       t.gaps += slots.total;
       t.filled += slots.placed;
       t.skipped += slots.skipped;
       t.filledMs += run.filledMs;
+      t.discussed += run.discussed;
+      t.discussMs += run.discussMs;
       return;
     }
     this.row({
@@ -113,6 +127,8 @@ export class InterviewRecord {
       filled: slots.placed,
       skipped: slots.skipped,
       filledMs: run.filledMs,
+      discussed: run.discussed,
+      discussMs: run.discussMs,
     });
   }
 
@@ -132,6 +148,7 @@ export class InterviewRecord {
       skipped: t.skipped,
       ms: this.now() - t.startedAt,
       ...(t.filled > 0 ? { minutesPerFilled: t.filledMs / t.filled / 60_000 } : {}),
+      ...(t.discussed > 0 ? { discussed: t.discussed, discussMs: t.discussMs } : {}),
       at: this.now(),
     });
   }

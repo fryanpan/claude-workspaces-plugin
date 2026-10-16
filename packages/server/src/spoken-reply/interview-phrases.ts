@@ -15,6 +15,7 @@
  *    the next pause.
  */
 import { capWords } from '../voice-status.ts';
+import { INTERVIEW_ROUTE, type InterviewReply } from './interview-types.ts';
 import { sentences } from './reply-shape.ts';
 
 export type InterviewCommand = 'start' | 'skip' | 'later' | 'enough' | 'repeat' | 'unsure';
@@ -124,4 +125,15 @@ export function oneSentence(text: string): { spoken: string; rest: string[] } {
     spoken: capWords(said, PLANNING_MAX_WORDS),
     rest: all.filter((_, j) => j !== i),
   };
+}
+
+/** A planning reply that says `text`, one sentence aloud, and asks nothing. */
+export function sayReply(text: string): InterviewReply {
+  const { spoken, rest } = oneSentence(text);
+  return { spoken, detail: rest, asking: false, route: INTERVIEW_ROUTE };
+}
+
+/** Nothing said. `listening`: the page keeps listening for the next pause. */
+export function hushReply(listening: boolean): InterviewReply {
+  return { spoken: '', detail: [], asking: listening, route: INTERVIEW_ROUTE };
 }

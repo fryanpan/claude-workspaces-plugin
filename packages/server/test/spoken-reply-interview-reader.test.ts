@@ -11,6 +11,7 @@ import { findPlanGaps } from '../src/spoken-reply/interview-gaps.ts';
 import { asksForQuestions } from '../src/spoken-reply/interview-phrases.ts';
 import {
   READER_SYSTEM,
+  ReadingMemory,
   parseReading,
   readPlan,
   readingPrompt,
@@ -85,6 +86,22 @@ describe('parseReading', () => {
     const bare = parseReading(JSON.stringify({ ask: 'Why spring?' }), outlineOf(fx));
     expect(bare && 'ask' in bare ? bare.ask.heading : null).toBe('Goal');
     expect(bare && 'ask' in bare ? bare.ask.asksId : 'x').toBeUndefined();
+  });
+
+  it('takes the quoted words under the heading it names, and a heading by its words alone', async () => {
+    fx = await planFixture({
+      markdown:
+        '# Harborlight berth plan\n\nThe Saltmarsh channel is shallow today.\n\n## 1. Goal\n\nOpen the berth by spring.\n\n### Work\n\n- Dredge the Saltmarsh channel to four metres.\n',
+    });
+    const read = parseReading(ASK, outlineOf(fx));
+    if (!read || !('ask' in read)) throw new Error('no question');
+    const block = outlineOf(fx).find((b) => b.id === read.ask.asksId);
+    expect(block?.text).toBe('Dredge the Saltmarsh channel to four metres.');
+    const goal = parseReading(
+      JSON.stringify({ ask: 'Why spring?', heading: 'Goal.' }),
+      outlineOf(fx),
+    );
+    expect(goal && 'ask' in goal ? goal.ask.heading : null).toBe('1. Goal');
   });
 
   it('reads no question, a reason, or nothing usable', async () => {
@@ -234,5 +251,19 @@ describe('the planning voice reading a plan with no gaps', () => {
     );
     expect(r.spoken).toBe('');
     expect(r.route).not.toBe('fast-path');
+  });
+});
+
+describe('ReadingMemory', () => {
+  it('hears everything said since the last question, and forgets a question never heard', () => {
+    const mem = new ReadingMemory();
+    mem.keep(DOC_ID, 'We dredge first.');
+    expect(mem.keep(DOC_ID, 'Then the office.')).toBe('We dredge first. Then the office.');
+    mem.ask(DOC_ID, 'Who pays?');
+    expect(mem.askedOn(DOC_ID)).toEqual(['Who pays?']);
+    expect(mem.keep(DOC_ID, 'In March.')).toBe('In March.');
+    mem.unask(DOC_ID, 'Who pays?');
+    expect(mem.askedOn(DOC_ID)).toEqual([]);
+    expect(mem.keep(DOC_ID, '')).toBe('We dredge first. Then the office.');
   });
 });

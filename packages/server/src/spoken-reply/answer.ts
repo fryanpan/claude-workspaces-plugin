@@ -65,6 +65,8 @@ export interface SpokenAnswer {
   navigate?: string;
   /** A review decision for the page to write (`review-walk.ts`). */
   decide?: SpokenDecide;
+  /** The planning voice's open question, when `spoken` talks it over. */
+  question?: string;
   /** The queue row the lead will answer; its answer is said on this socket
    *  (`lead-answer.ts`). Never sent to the page. */
   awaiting?: string;
@@ -89,6 +91,7 @@ export function replyMessage(a: SpokenAnswer): SpokenServerMessage {
     route: a.route,
     ...(a.navigate ? { navigate: a.navigate } : {}),
     ...(a.decide ? { decide: a.decide } : {}),
+    ...(a.question ? { question: a.question } : {}),
   };
 }
 

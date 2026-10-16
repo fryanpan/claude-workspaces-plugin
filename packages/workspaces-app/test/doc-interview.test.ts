@@ -183,6 +183,31 @@ describe('doc interview', () => {
     for (const b of h.view.commands) expect(b.disabled).toBe(false);
   });
 
+  it('a reply talking the question over keeps the question on the card, and listens after it', async () => {
+    const h = harness();
+    h.view.button.click();
+    h.socket().open();
+    speak(h, QUESTION);
+    await vi.waitFor(() => expect(h.starts()).toHaveLength(2));
+    h.socket().reply({ type: 'turn-end', text: 'What do you mean by goals?' });
+    speak(h, {
+      type: 'reply',
+      spoken: 'I mean what the plan is for, in a sentence.',
+      detail: [],
+      asking: true,
+      route: 'interview',
+      question: 'What goes under Goals?',
+    });
+    expect(h.text('.doc-interview-question')).toBe('What goes under Goals?');
+    expect(
+      Array.from(h.view.card.querySelectorAll('.doc-interview-detail li')).map(
+        (l) => l.textContent,
+      ),
+    ).toEqual(['I mean what the plan is for, in a sentence.']);
+    await vi.waitFor(() => expect(h.starts()).toHaveLength(3));
+    expect(h.view.card.dataset.phase).toBe('listening');
+  });
+
   it.each([
     ['Skip', 'skip'],
     ['Later', 'come back to that'],

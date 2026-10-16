@@ -12,7 +12,10 @@
  * the state with everyone else's presence and scrolls there too.
  *
  * Decorations only, so nothing here syncs. A page scrolls once per question
- * (`seq`), never on a repaint, and never moves the reader's caret.
+ * (`seq`), never on a repaint, and never moves the reader's caret. The
+ * scroll moves the doc's own scroller and nothing else: `scrollIntoView`
+ * walks up and scrolls every ancestor too, the page itself included
+ * (`mobile-review.ts` and `edit-viewport.ts` avoid it for the same reason).
  *
  * Presence is whatever a page set, so a focus is read only from a state with
  * no `user` — the server's; every page announces one — and its colour and
@@ -28,7 +31,9 @@ import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { EditorHandle } from '../editor.ts';
+import { centreScrollTop } from '../mobile-review.ts';
 import type { MountScope } from '../mount-scope.ts';
+import { prefersReducedMotion } from '../thread-morph.ts';
 
 export const agentFocusKey = new PluginKey<DecorationSet>('agentFocus');
 
@@ -107,12 +112,31 @@ function caret(f: AgentFocus): HTMLElement {
   return el;
 }
 
+/** Centre `el` in `scroller`, moving that scroller alone. */
+function centreIn(scroller: HTMLElement, el: HTMLElement): void {
+  if (!scroller.contains(el)) return;
+  const top = centreScrollTop({
+    elTop:
+      el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop,
+    elHeight: el.offsetHeight,
+    clientHeight: scroller.clientHeight,
+    scrollHeight: scroller.scrollHeight,
+  });
+  if (typeof scroller.scrollTo === 'function') {
+    scroller.scrollTo({ top, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+  } else {
+    scroller.scrollTop = top;
+  }
+}
+
 export function wireAgentFocus(opts: {
   editor: EditorHandle;
   presence: FocusPresence;
+  /** The element the doc scrolls in: `#editor` on the doc page. */
+  scroller: HTMLElement;
   scope: MountScope;
 }): void {
-  const { editor: handle, presence, scope } = opts;
+  const { editor: handle, presence, scroller, scope } = opts;
   const tiptap = handle.editor;
   tiptap.registerPlugin(
     new Plugin<DecorationSet>({
@@ -156,7 +180,7 @@ export function wireAgentFocus(opts: {
     if (f && r && f.seq !== scrolledSeq) {
       scrolledSeq = f.seq;
       const dom = view.nodeDOM(r.block);
-      if (dom instanceof HTMLElement) dom.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (dom instanceof HTMLElement) centreIn(scroller, dom);
     }
   };
   const onTransaction = (): void => {
