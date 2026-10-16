@@ -17,7 +17,7 @@ import {
 import { haikuRelayFilter, parseRelayFilterResponse } from '../src/org-relay/relay-filter.ts';
 import { createRelayStore } from '../src/org-relay/relay-log.ts';
 import { applyOrganizationRule, fixedCheckHit } from '../src/org-relay/relay-rule.ts';
-import { parseOutboxText } from '../src/org-relay/relay.ts';
+import { createRelay, parseOutboxText } from '../src/org-relay/relay.ts';
 
 const fake = () => `test-${crypto.randomUUID()}`;
 const serviceToken = { clientId: `${fake()}.access`, clientSecret: fake() };
@@ -284,6 +284,38 @@ describe('the relay state files', () => {
       expect(statSync(join(dir, 'state', 'relay-log.jsonl')).mode & 0o777).toBe(0o600);
       expect(statSync(join(dir, 'state', 'relay-held.jsonl')).mode & 0o777).toBe(0o600);
       expect([...store.handledIds()]).toEqual(['a:1']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('a delivery that fails in transit', () => {
+  it('gets no verdict, and its retry is delivered without asking the filter again', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'relay-retry-'));
+    try {
+      const store = createRelayStore(dir);
+      let judged = 0;
+      let posts = 0;
+      const relay = createRelay({
+        config: parsed(config()),
+        store,
+        filter: async () => {
+          judged += 1;
+          return { hold: false };
+        },
+        fetch: async () => {
+          posts += 1;
+          return new Response('{}', { status: posts === 1 ? 502 : 200 });
+        },
+        log: () => {},
+      });
+      const message = { id: 'river-lead:t1', from: 'river-lead', to: 'harbor-lead', text: 'hi' };
+      expect(await relay.handle(message)).toEqual({ verdict: 'failed', reason: 'delivery-failed' });
+      expect(store.entries()).toEqual([]);
+      expect(await relay.handle(message)).toEqual({ verdict: 'delivered' });
+      expect(judged).toBe(1);
+      expect(store.entries().map((e) => e.verdict)).toEqual(['delivered']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

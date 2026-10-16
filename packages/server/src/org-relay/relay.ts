@@ -97,6 +97,8 @@ export function createRelay(opts: RelayOptions): Relay {
   const handled = store.handledIds();
   /** Ids whose delivery failed in transit and was already logged once. */
   const failedOnce = new Set<string>();
+  /** Ids the filter passed whose delivery failed: a retry is not judged again. */
+  const passed = new Set<string>();
   let polling = false;
 
   const record = (
@@ -119,15 +121,19 @@ export function createRelay(opts: RelayOptions): Relay {
     handled.add(m.id);
   };
 
-  /** Why a filtered message must be held, or null to deliver it. */
+  /**
+   * Why a filtered message must be held, or null to deliver it. `logged` is
+   * what the log may say; `detail` is the classifier's own sentence, which
+   * may quote the message and so goes only into the hold queue.
+   */
   async function holdReason(
     m: RelayMessage,
     from: RelaySeat,
     to: RelaySeat,
-  ): Promise<string | null> {
+  ): Promise<{ logged: string; detail: string } | null> {
     const hit = fixedCheckHit(m.text);
-    if (hit) return `fixed-check:${hit}`;
-    if (!opts.filter) return 'no-filter';
+    if (hit) return { logged: `fixed-check:${hit}`, detail: `fixed-check:${hit}` };
+    if (!opts.filter) return { logged: 'no-filter', detail: 'no-filter' };
     try {
       const verdict = await withTimeout(
         opts.filter({
@@ -139,9 +145,9 @@ export function createRelay(opts: RelayOptions): Relay {
         }),
         filterTimeoutMs,
       );
-      return verdict.hold ? `filter:${verdict.reason}` : null;
+      return verdict.hold ? { logged: 'filter-flagged', detail: verdict.reason } : null;
     } catch {
-      return 'filter-unavailable';
+      return { logged: 'filter-unavailable', detail: 'filter-unavailable' };
     }
   }
 
@@ -166,19 +172,28 @@ export function createRelay(opts: RelayOptions): Relay {
       return { verdict: 'refused', reason: rule.reason };
     }
     const { from, to, crossOrganization } = rule;
-    if (rule.filter) {
+    if (rule.filter && !passed.has(m.id)) {
       const reason = await holdReason(m, from, to);
       if (reason) {
-        store.hold({ ts: now(), id: m.id, from: m.from, to: m.to, reason, text: m.text });
-        record(m, 'held', from, to, reason);
-        return { verdict: 'held', reason };
+        store.hold({
+          ts: now(),
+          id: m.id,
+          from: m.from,
+          to: m.to,
+          reason: reason.detail,
+          text: m.text,
+        });
+        record(m, 'held', from, to, reason.logged);
+        return { verdict: 'held', reason: reason.logged };
       }
+      passed.add(m.id);
     }
     if (!(await deliver(m, from, to, crossOrganization))) {
       if (!failedOnce.has(m.id)) log(`[relay] delivery of ${m.id} to ${to.id} failed; will retry`);
       failedOnce.add(m.id);
       return { verdict: 'failed', reason: 'delivery-failed' };
     }
+    passed.delete(m.id);
     record(m, 'delivered', from, to);
     return { verdict: 'delivered' };
   }

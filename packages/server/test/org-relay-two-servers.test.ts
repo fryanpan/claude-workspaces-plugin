@@ -247,11 +247,15 @@ describe('the relay between two organizations', () => {
     const id = await send('riverbend-bridge', 'harborlight-lead', INJECTION);
     await relay.pollOnce();
     expect(allText(await inbox('harborlight-lead'))).not.toContain(INJECTION);
+    // The classifier's sentence may quote the message, so only the hold
+    // queue keeps it; the log names the kind of hold.
     expect(store.entries().find((e) => e.id === id)).toMatchObject({
       verdict: 'held',
-      reason: 'filter:instruction aimed at the receiving agent',
+      reason: 'filter-flagged',
     });
-    expect(store.pending().map((h) => [h.id, h.text])).toEqual([[id, INJECTION]]);
+    expect(store.pending().map((h) => [h.id, h.text, h.reason])).toEqual([
+      [id, INJECTION, 'instruction aimed at the receiving agent'],
+    ]);
 
     // Bryan releases it: only then does it land, still quoted and marked.
     expect(await relay.release(id)).toBe('released');
