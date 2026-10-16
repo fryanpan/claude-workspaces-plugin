@@ -133,7 +133,7 @@ What step 3 looks like depends on what started the lead. The wrapper runs
 the binary it is given, so a shell function or alias named `claude` does
 not apply after `--`; and a shell started inside the wall cannot read
 `~/.zshrc`. The shell therefore runs outside, expands the flags, and hands
-the wrapper the binary. Below, `$WRAP` stands for
+the wrapper the binary. Below, `$WRAP` is shorthand, written out in full, for
 `bun "$HOME/Library/Application Support/claude-workspaces/repo/scripts/lead-sandbox.ts" --config ~/.config/claude-workspaces/lead-sandbox.json --lead <lead>`.
 
 - **tmux through `zsh -ic`** (every lead on the owner's Mac today: the Team
