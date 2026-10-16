@@ -152,6 +152,7 @@ describe('a doc-thread review item keeps the doc rendering', () => {
   it('still renders doc_id and thread_id for a comment on a doc-borne item', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 'th-8',
       reviewItemId: 'ri-9',

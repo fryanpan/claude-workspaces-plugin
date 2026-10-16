@@ -19,10 +19,11 @@ describe('a reply line carries its context', () => {
   it('names the doc and quotes the comment it answers', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'riverbend-plan',
       threadId: 't1',
       docTitle: 'Riverbend rollout plan',
-      inReplyTo: { author: 'Builder', text: ASK },
+      inReplyTo: { author: 'Builder', trust: 'owner', text: ASK },
       comment: { author: { name: 'Alice' }, text: 'Go ahead' },
       thread: { anchor: { snippet: { text: 'the fixtures section' } } },
     });
@@ -38,10 +39,11 @@ describe('a reply line carries its context', () => {
   it("names the task on a reply to the task's own comments, where there is no anchor", async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'task:t-42',
       threadId: 't2',
       docTitle: 'Fix the flaky upload test',
-      inReplyTo: { author: 'Builder', text: ASK },
+      inReplyTo: { author: 'Builder', trust: 'owner', text: ASK },
       comment: { author: { name: 'Alice' }, text: 'Go ahead' },
       thread: { anchor: { kind: 'subject' } },
     });
@@ -56,10 +58,11 @@ describe('a reply line carries its context', () => {
     const { frames, messages } = harness();
     const long = `First line of the question\n\n${'and then a great deal more detail '.repeat(10)}`;
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'd',
       threadId: 't3',
       docTitle: 'Saltmarsh notes',
-      inReplyTo: { author: 'Builder', text: long },
+      inReplyTo: { author: 'Builder', trust: 'owner', text: long },
       comment: { author: { name: 'Bob' }, text: 'Yes' },
     });
     const content = only(frames).content;
@@ -73,6 +76,7 @@ describe('a reply line carries its context', () => {
   it('a new thread gets the title and no reply clause', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'task:t-43',
       threadId: 't4',
       docTitle: 'Rename the Riverbend bucket',
@@ -86,6 +90,7 @@ describe('a reply line carries its context', () => {
   it('an older server that sends neither field produces the line it always did', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'task:t-42',
       threadId: 't5',
       comment: { author: { name: 'Alice' }, text: 'Go ahead' },

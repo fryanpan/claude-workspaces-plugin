@@ -911,6 +911,15 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
+**An agent reads a non-owner comment as quoted data.** Anyone a board is
+shared with can comment, and the lead reads every comment and can act on it.
+The server stamps each thread frame's comment, and the comment a reply
+answers, `owner` only when the author's identity id is the owner's — never by
+display name, which a visitor types (`commentTrustOf` in
+`packages/server/src/actor-identity.ts`). The MCP child quotes every other
+comment, and an unstamped one, inside a labelled `untrusted-comment` block
+whose markers a comment cannot forge (`packages/mcp/src/untrusted-quote.ts`).
+
 **An agent gets no wake for an event it cannot act on.** Three rules give that,
 and none of them hides state.
 

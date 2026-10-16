@@ -43,6 +43,7 @@ describe('a review-item comment names the item on the channel', () => {
   it('names the item in the readable line, where the agent actually reads', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'task:t-4',
       threadId: 'th-1',
       reviewItemId: 'ri-9',
@@ -56,6 +57,7 @@ describe('a review-item comment names the item on the channel', () => {
   it('carries the id in the structured meta as well', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'task:t-4',
       threadId: 'th-1',
       reviewItemId: 'ri-9',
@@ -73,6 +75,7 @@ describe('a review-item comment names the item on the channel', () => {
   it('falls back to the anchor when an older server stamps no top-level id', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'task:t-4',
       threadId: 'th-2',
       comment: { author: { name: 'Jordan' }, text: 'ok' },
@@ -86,6 +89,7 @@ describe('a review-item comment names the item on the channel', () => {
   it('ignores an anchor that is not a review item', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 'th-3',
       comment: { author: { name: 'Jordan' }, text: 'ok' },
@@ -106,6 +110,7 @@ describe('a review-item comment names the item on the channel', () => {
   it('leaves an ordinary comment untouched — no phrase, no key', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 'th-4',
       comment: { author: { name: 'Bryan' }, text: 'tighten this', ts: FIXED_MS },
@@ -132,6 +137,7 @@ describe('a review-item comment names the item on the channel', () => {
     const { frames, messages } = harness();
     const long = 'x'.repeat(200);
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'task:t-4',
       threadId: 'th-6',
       reviewItemId: 'ri-9',

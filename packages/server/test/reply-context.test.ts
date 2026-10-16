@@ -109,7 +109,7 @@ describe('reply frames carry their context', () => {
     const frame = await replyOn(`task:${task.id}`, 'Go ahead');
 
     expect(frame.docTitle).toBe('Fix the flaky upload test');
-    expect(frame.inReplyTo).toEqual({ author: LEAD.name, text: ASK });
+    expect(frame.inReplyTo).toMatchObject({ author: LEAD.name, text: ASK });
   });
 
   it("a reply on a doc names the doc's title and cuts a long parent", async () => {
