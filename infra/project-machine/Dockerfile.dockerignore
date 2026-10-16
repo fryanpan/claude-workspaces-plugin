@@ -1,0 +1,12 @@
+# Read by BuildKit for this Dockerfile only. The COPY lines already name what
+# goes in; this keeps a working copy's local state out of those paths.
+**/node_modules
+**/dist
+**/.coverage
+**/data
+**/data-staging
+**/.env
+**/.env.*
+**/*.local.*
+.git
+.claude
