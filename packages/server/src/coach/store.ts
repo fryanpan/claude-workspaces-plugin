@@ -129,6 +129,19 @@ export class CoachStore {
     return this.state.eventsByDay[localDay(now, this.state.timeZone)] ?? 0;
   }
 
+  /** The last local day the morning wake-up came, if it ever has. */
+  get morningDay(): string | undefined {
+    const d = this.state.morningDay;
+    return typeof d === 'string' ? d : undefined;
+  }
+
+  /** The morning came on `day`: written at once, so a restart that day
+   *  cannot send it again. */
+  setMorningDay(day: string): void {
+    this.state.morningDay = day;
+    this.write();
+  }
+
   /** He edited the goals doc. Written at most once a minute. */
   noteGoalsChanged(at: number): void {
     const last = this.state.goalsChangedAt ?? 0;

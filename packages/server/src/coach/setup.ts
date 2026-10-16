@@ -53,6 +53,8 @@ The coach writes here what it learns about when to speak up and when to stay qui
 ## When a moment helped
 
 ## When to stay quiet
+
+## This week's nudges
 `;
 
 const writeOnce = (dataDir: string, path: string, text: string) => {

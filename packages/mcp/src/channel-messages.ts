@@ -438,6 +438,7 @@ async function emitBoardChannelMessage(
     case 'coach.digest':
     case 'coach.event':
     case 'coach.answer':
+    case 'coach.morning':
     case 'coach.preference': {
       const line = coachLine(event, rawPayload as CoachPayload);
       if (line === null) return;

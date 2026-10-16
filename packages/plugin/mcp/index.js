@@ -14294,6 +14294,11 @@ function coachLine(event, p, timeZone) {
     const wrote = p.answer === "down" && p.text ? ` They wrote: "${p.text}".` : "";
     return `[coach.answer${clock2(p.at, timeZone)}] The owner ${how}.${wrote} Your moment ${p.momentId} (goal: ${p.goal ?? "?"}) said: "${p.line ?? ""}". Write what it teaches you in your memory doc.`;
   }
+  if (event === "coach.morning") {
+    if (!p.day || !p.weekday)
+      return null;
+    return `[coach.morning ${p.weekday} ${p.day}] It is morning for the owner. Check "This week's nudges" in your memory doc.`;
+  }
   if (event === "coach.preference") {
     const how = p.readiness ? READINESS[p.readiness] : undefined;
     if (!how)
@@ -15041,6 +15046,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
     case "coach.digest":
     case "coach.event":
     case "coach.answer":
+    case "coach.morning":
     case "coach.preference": {
       const line = coachLine(event, rawPayload);
       if (line === null)
@@ -21338,7 +21344,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.309";
+var PLUGIN_VERSION = "0.1.310";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

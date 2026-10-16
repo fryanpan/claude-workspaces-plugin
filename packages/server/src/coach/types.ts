@@ -83,11 +83,17 @@ export interface CoachState {
   eventsByDay: Record<string, number>;
   /** Boards he turned the coach off for ("Coach off for this board"). */
   offBoards: string[];
+  /** The last local day (`YYYY-MM-DD`) the morning wake-up came, whether
+   *  the session took it or not (`coach/morning.ts`): never twice a day. */
+  morningDay?: string;
 }
 
 export const KEEP_EVENT_DAYS = 14;
 /** Events a day the coach session is sent, then nothing until tomorrow: the
  *  spend limit, about $20 at the estimated $0.05 a turn. */
 export const DAILY_EVENT_LIMIT = 400;
+/** The local hour the coach session gets its one morning wake-up
+ *  (`coach/morning.ts`), in his zone. */
+export const MORNING_HOUR = 8;
 /** The weekly offer to review the goals. */
 export const REVIEW_AFTER_MS = 7 * 24 * 60 * 60_000;

@@ -10,7 +10,9 @@
  *  - the Coach board's lead, and an addressed frame to it: the coach's
  *    Claude Code session, which hears every event (`session-feed.ts`);
  *  - each attached session's prompt marks and turn notes, for his Claude
- *    Code time (`session-minutes.ts`).
+ *    Code time (`session-minutes.ts`);
+ *  - a timer to the next morning in his zone, for the session's one wake-up
+ *    a day (`morning.ts`).
  */
 import { agentIdForName } from '@claude-workspaces/core';
 import { type Event, onActivity } from '../activity.ts';
@@ -19,6 +21,7 @@ import { type GoalsDocReading, readGoalsDoc } from './goals-doc.ts';
 import { CoachHub } from './hub.ts';
 import { coachSectionFor } from './landing.ts';
 import { type Coach, type DocLabel, createCoach } from './moment.ts';
+import { MorningWake } from './morning.ts';
 import { SessionFeed, type SessionFrame } from './session-feed.ts';
 import { repoOfCwd } from './session-minutes.ts';
 import { type CoachSetupDeps, ensureMemoryDoc } from './setup.ts';
@@ -55,6 +58,10 @@ export interface CoachWiringDeps {
   now?: () => number;
   /** The digest window's timer (`SessionFeedDeps.schedule`). */
   schedule?: (fn: () => void, ms: number) => () => void;
+  /** The morning wake-up's timer and hour (`coach/morning.ts`); default an
+   *  unref'd timer and `MORNING_HOUR`. */
+  morningSchedule?: (fn: () => void, ms: number) => () => void;
+  morningHour?: number;
 }
 
 export interface CoachWiring {
@@ -62,6 +69,7 @@ export interface CoachWiring {
   coach: Coach;
   hub: CoachHub;
   feed: SessionFeed;
+  morning: MorningWake;
   setup: CoachSetupDeps;
   /** The front page's section, for the owner. */
   landing: () => string;
@@ -119,6 +127,16 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.schedule ? { schedule: deps.schedule } : {}),
   });
+  const morning = new MorningWake({
+    timeZone: () => store.timeZone,
+    lastDay: () => store.morningDay,
+    setLastDay: (day) => store.setMorningDay(day),
+    wake: (news, at) => feed.wake(news, at),
+    ...(deps.morningHour === undefined ? {} : { hour: deps.morningHour }),
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.morningSchedule ? { schedule: deps.morningSchedule } : {}),
+  });
+  morning.start();
   const coach = createCoach({
     store,
     stream: new CoachStream(),
@@ -195,6 +213,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     coach,
     hub,
     feed,
+    morning,
     setup,
     landing: () => {
       const t = (deps.now ?? Date.now)();
@@ -210,6 +229,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     sessionPrompt,
     stop: () => {
       unsubscribe();
+      morning.stop();
       feed.stop();
       store.flush();
       hub.close();
