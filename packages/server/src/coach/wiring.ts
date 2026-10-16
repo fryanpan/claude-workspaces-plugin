@@ -60,6 +60,9 @@ export interface CoachWiringDeps {
   /** Team Lead's plan board, its name and goals in order (`review-plan.ts`). */
   planBoard: () => PlanBoardReading | undefined;
   now?: () => number;
+  /** Where the coach lead's connect and disconnect lines go; console.log by
+   *  default. */
+  log?: (line: string) => void;
   /** The digest window's timer (`SessionFeedDeps.schedule`). */
   schedule?: (fn: () => void, ms: number) => () => void;
   /** The digest window's length; `DIGEST_WINDOW_MS` by default. */
@@ -91,8 +94,8 @@ export interface CoachWiring {
   /** A session's prompt mark, from the prompts route: typed or injected. */
   sessionPrompt: (workspaceId: string, mark: PromptMark, cwd?: unknown) => boolean;
   /** An agent's stream on `workspaceId` came or went: a waiting digest may
-   *  go now. */
-  agentStreamsChanged: (workspaceId: string) => void;
+   *  go now, and the coach lead's connect or disconnect is logged. */
+  agentStreamsChanged: (workspaceId: string, agentId?: string) => void;
   stop: () => void;
 }
 
@@ -126,7 +129,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
   // from it is his own doing (the owner, 2026-10-16: "full visibility into
   // everything I'm doing"), and nothing here reads anyone else's rows.
   const isOff = (place: { workspaceId: string; docId?: string }) =>
-    store.readFailed || placeIsOff(place, deps.privacy, store.offBoards, { allowShared: true });
+    store.readFailed || placeIsOff(place, deps.privacy, store.offBoards);
   const hub = new CoachHub({ offAt: isOff });
   const readGoals = (): GoalsDocReading | null => {
     const doc = store.goalsDoc;
@@ -236,8 +239,23 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     const news = sessionOf(workspaceId, mark.agent, mark.at, mark.sessionId, cwd, text);
     return news !== null && feed.prompt(news, mark.typed);
   };
-  const agentStreamsChanged = (workspaceId: string): void => {
-    if (store.goalsDoc?.workspaceId === workspaceId) void feed.reconnected();
+  // One line per change in whether the coach lead holds a stream, with the
+  // time and nothing else, so a gap in the digests can be told apart from a
+  // session that was away.
+  const log = deps.log ?? ((line: string) => console.log(line));
+  let leadWasConnected: boolean | undefined;
+  const agentStreamsChanged = (workspaceId: string, agentId?: string): void => {
+    if (store.goalsDoc?.workspaceId !== workspaceId) return;
+    const lead = deps.leadOf(workspaceId);
+    if (lead && (agentId === undefined || agentId === lead)) {
+      const connected = deps.agentConnected(workspaceId, lead);
+      if (connected !== leadWasConnected) {
+        leadWasConnected = connected;
+        const at = new Date((deps.now ?? Date.now)()).toISOString();
+        log(`[coach] session stream ${connected ? 'connected' : 'disconnected'} at ${at}`);
+      }
+    }
+    void feed.reconnected();
   };
   return {
     store,

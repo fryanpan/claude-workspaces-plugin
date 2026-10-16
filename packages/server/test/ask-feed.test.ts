@@ -49,11 +49,10 @@ function fakeTime(start = 1_000_000) {
 const PLAN = 'w-saltmarsh';
 const LEAD = 'agent-team-lead';
 
-function feed(opts: { locked?: Set<string>; shared?: Set<string>; connected?: boolean } = {}) {
+function feed(opts: { locked?: Set<string>; connected?: boolean } = {}) {
   const time = fakeTime();
   const sent: [string, string, AskFrame][] = [];
   const locked = opts.locked ?? new Set<string>();
-  const shared = opts.shared ?? new Set<string>();
   const privacy = boardPrivacyFrom({
     isLocalOnlySet: () => false,
     setOfDoc: () => undefined,
@@ -61,7 +60,6 @@ function feed(opts: { locked?: Set<string>; shared?: Set<string>; connected?: bo
     projectIsLocalOnly: () => false,
     docIdsOf: () => [],
     isBoardLocked: (id) => locked.has(id),
-    isBoardShared: (id) => shared.has(id),
     boardsOfDoc: () => [],
   });
   const f = new AskFeed({
@@ -135,19 +133,14 @@ describe('AskFeed', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('never sends an ask on a locked or shared board', () => {
-    const { f, sent, time } = feed({
-      locked: new Set(['w-river']),
-      shared: new Set(['w-tide']),
-    });
+  it('never sends an ask on a locked board', () => {
+    const { f, sent, time } = feed({ locked: new Set(['w-river']) });
     expect(f.offer(ticketAsk('w-river', 't-2', 'Private ferry question', 1_000_100))).toBe(false);
-    expect(f.offer(ticketAsk('w-tide', 't-3', 'Shared board question', 1_000_200))).toBe(false);
     expect(f.offer(ticketAsk('w-harbor', 't-1', 'Which tide table?', 1_000_300))).toBe(true);
     time.advance(ASK_WINDOW_MS);
     const frame = sent[0]?.[2];
     expect(frame?.items.map((i) => i.workspaceId)).toEqual(['w-harbor']);
     expect(JSON.stringify(sent)).not.toContain('Private ferry question');
-    expect(JSON.stringify(sent)).not.toContain('Shared board question');
   });
 
   it('drops an ask whose board was locked while its window was open', () => {

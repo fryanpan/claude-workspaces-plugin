@@ -25,7 +25,6 @@ const OPEN: BoardPrivacy = {
   localOnlyBoard: () => false,
   localOnlyDoc: () => false,
   locked: () => false,
-  shared: () => false,
   boardsOfDoc: () => [],
 };
 const NONE = new Set<string>();
@@ -36,10 +35,9 @@ describe('boardOffReason', () => {
     expect(boardOffReason('w-a', OPEN, new Set(['w-a']))).toBe('turned-off');
     expect(boardOffReason('w-a', { ...OPEN, localOnlyBoard: () => true }, NONE)).toBe('local-only');
     expect(boardOffReason('w-a', { ...OPEN, locked: () => true }, NONE)).toBe('locked');
-    expect(boardOffReason('w-a', { ...OPEN, shared: () => true }, NONE)).toBe('shared');
     const broken = {
       ...OPEN,
-      shared: () => {
+      locked: () => {
         throw new Error('not built yet');
       },
     };
@@ -52,25 +50,14 @@ describe('placeIsOff', () => {
     expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, OPEN, NONE)).toBe(false);
     const localDoc = { ...OPEN, localOnlyDoc: (id: string) => id === 'd-1' };
     expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, localDoc, NONE)).toBe(true);
-    const alsoShared = {
+    const alsoLocked = {
       ...OPEN,
       boardsOfDoc: () => ['w-a', 'w-b'],
-      shared: (id: string) => id === 'w-b',
+      locked: (id: string) => id === 'w-b',
     };
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, alsoShared, NONE)).toBe(true);
-    expect(placeIsOff({ workspaceId: 'w-a' }, alsoShared, NONE)).toBe(false);
-  });
-
-  it('with allowShared, a shared board is on and a locked or local-only one stays off', () => {
-    const shared = { ...OPEN, boardsOfDoc: () => ['w-a', 'w-b'], shared: () => true };
-    const opts = { allowShared: true };
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, shared, NONE)).toBe(true);
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, shared, NONE, opts)).toBe(false);
-    const lockedToo = { ...shared, locked: (id: string) => id === 'w-b' };
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, lockedToo, NONE, opts)).toBe(true);
-    const localToo = { ...shared, localOnlyBoard: (id: string) => id === 'w-a' };
-    expect(placeIsOff({ workspaceId: 'w-a' }, localToo, NONE, opts)).toBe(true);
-    expect(placeIsOff({ workspaceId: 'w-a' }, shared, new Set(['w-a']), opts)).toBe(true);
+    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, alsoLocked, NONE)).toBe(true);
+    expect(placeIsOff({ workspaceId: 'w-a' }, alsoLocked, NONE)).toBe(false);
+    expect(placeIsOff({ workspaceId: 'w-a' }, OPEN, new Set(['w-a']))).toBe(true);
   });
 
   it('counts a check that throws as off', () => {
@@ -111,7 +98,6 @@ function coachWithRecords() {
     projectIsLocalOnly: () => false,
     docIdsOf: (ws) => Object.keys(docBoard).filter((d) => docBoard[d] === ws),
     isBoardLocked: () => false,
-    isBoardShared: () => false,
     boardsOfDoc: (d) => (docBoard[d] ? [docBoard[d]] : []),
   });
   let clock = at(9);

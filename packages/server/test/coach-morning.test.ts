@@ -87,7 +87,6 @@ function boot(time: ReturnType<typeof fakeTime>, connected: () => boolean = () =
       localOnlyBoard: () => false,
       localOnlyDoc: () => false,
       locked: () => false,
-      shared: () => false,
       boardsOfDoc: () => [],
     },
     leadOf: () => 'agent-coach',

@@ -478,7 +478,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isBoard: (workspaceId) => taskStore.getWorkspace(workspaceId) !== undefined,
   });
   /** Anyone besides the owner can reach the board: a share link, a member
-   *  who redeemed one, or a share. Read by the sharing notice and the coach. */
+   *  who redeemed one, or a share. Read by the sharing notice. */
   const boardIsShared = (workspaceId: string): boolean =>
     (shareLinks?.forWorkspace(workspaceId).length ?? 0) > 0 ||
     (shareLinks?.membersOf(workspaceId).length ?? 0) > 0 ||
@@ -1519,7 +1519,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     projectIsLocalOnly: (repoKey) => mountStore.privacyOf(repoKey) === 'local-only',
     docIdsOf: (id) => taskStore.getWorkspace(id)?.docIds ?? [],
     isBoardLocked: (id) => sharingGate.isBoardLocked(id),
-    isBoardShared: boardIsShared,
     boardsOfDoc: (docId) => boardsForDoc(docId),
   });
   /** The coach: the owner's learning goals, what he is doing, and the moments
@@ -1575,18 +1574,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       if (board && channel === `ws~${board}`) {
         landingChanges.notify('coach');
         // The coach session is back: what waited while it was away goes now.
-        coachWiring.agentStreamsChanged(board);
+        coachWiring.agentStreamsChanged(board, agentId);
       }
     };
   }
   /** The plan lead's per-item ranks and its batched feed of new asks
-   *  (lead-rank-wiring.ts). The feed skips every board the coach may not hear
-   *  from; a rank or tag skips the same boards except shared ones. */
+   *  (lead-rank-wiring.ts). Both skip every board the coach may not hear
+   *  from. */
   const isOffForLead = (place: { workspaceId: string; docId?: string }): boolean =>
     coachWiring.store.readFailed || placeIsOff(place, boardPrivacy, coachWiring.store.offBoards);
-  const isOffForRank = (place: { workspaceId: string; docId?: string }): boolean =>
-    coachWiring.store.readFailed ||
-    placeIsOff(place, boardPrivacy, coachWiring.store.offBoards, { allowShared: true });
   const leadRanks = wireLeadRanks({
     dataDir,
     planBoard: () => crossReview.projects().planWorkspaceId,
@@ -1594,7 +1590,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardName: (workspaceId) => taskStore.getWorkspace(workspaceId)?.name,
     goalTitle: (goalId) => taskStore.getGoalRow(goalId)?.title,
     isOff: isOffForLead,
-    rankIsOff: isOffForRank,
     taskWorkspace: (taskId) => taskStore.getTask(taskId)?.workspaceId,
     goalWorkspace: (rowId) => taskStore.getGoalRow(rowId)?.workspaceId,
     boardsForDoc: (docId) => boardsForDoc(docId),
@@ -2561,7 +2556,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         key: agentTokenKeyFor(),
         requireToken: true,
       }),
-    isOff: isOffForRank,
+    isOff: isOffForLead,
     sessionIdentityId: (req) => sessionIdentityFor(req)?.id ?? null,
     renderPage: () => renderReviewsShell(browserSentry, readAppAssetManifest(markdownAppDist)),
     pageHeaders: HTML_SHELL_HEADERS,

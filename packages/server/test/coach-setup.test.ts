@@ -101,7 +101,6 @@ const OPEN_PRIVACY: BoardPrivacy = {
   localOnlyBoard: () => false,
   localOnlyDoc: () => false,
   locked: () => false,
-  shared: () => false,
   boardsOfDoc: () => [],
 };
 
