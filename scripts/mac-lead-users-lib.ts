@@ -133,6 +133,18 @@ export function parseConfig(
   return { ok: true, config: { users, protect } };
 }
 
+/**
+ * Each path and, where a symlink leads elsewhere, its real path too. A
+ * protection on one end of a symlink alone does not hold: an ACL sits on the
+ * real folder, and Seatbelt matches the resolved path.
+ */
+export function expandRealPaths(
+  paths: readonly string[],
+  realpath: (path: string) => string,
+): string[] {
+  return [...new Set(paths.flatMap((p) => [p, realpath(p)]))];
+}
+
 /** The user's home folder as directory services records it, or null. */
 function homeOf(sys: System, name: string): string | null {
   const r = sys.run([DSCL, '.', '-read', `/Users/${name}`, 'NFSHomeDirectory']);
@@ -208,7 +220,7 @@ export function plan(sys: System, config: LeadUsersConfig): Plan {
     }
   }
 
-  const protectedPaths = [...new Set(config.protect.flatMap((p) => [p, sys.realpath(p)]))];
+  const protectedPaths = expandRealPaths(config.protect, (p) => sys.realpath(p));
   for (const u of config.users) {
     if (blocked.has(u.name)) continue;
     const others = config.users

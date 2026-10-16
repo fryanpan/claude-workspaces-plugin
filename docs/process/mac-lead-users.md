@@ -9,6 +9,11 @@ cannot read the owner's folders or another lead's home.
 Bryan runs it, because creating users needs his admin rights. An agent writes
 and tests the script, and never runs it.
 
+**The default is the sandbox in [lead-sandbox.md](lead-sandbox.md)**, which
+an agent applies with no admin password: it starts each lead's `claude` under
+a Seatbelt profile that refuses it the other projects' files. This runbook is
+the optional stronger step on top of it.
+
 ## What the script does
 
 `scripts/mac-lead-users.ts` reads a config that lists the users. For each one
