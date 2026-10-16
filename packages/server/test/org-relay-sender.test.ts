@@ -9,9 +9,12 @@
  *  - a person who is a member of the lead's board, coming through the tunnel
  *    with their own Access identity (a share link redeemed, then a stamp from
  *    the share application), and
- *  - an agent holding an `at2` of its own on the same board.
+ *  - an agent holding an `at2` of its own on the same board, and
+ *  - a caller on the server's own machine, over loopback with no token at
+ *    all. The server still records the author that caller claims, since
+ *    loopback is trusted-local; the relay must not take that as the seat.
  *
- * Both post `author: <the lead's agent>` on the lead's outbox. The positive
+ * All three post `author: <the lead's agent>` on the lead's outbox. The positive
  * control is the lead itself, posting with its own `at2`: that message
  * crosses to the other organization's server. Every key here is made in the
  * test, and the email is assembled at runtime rather than written down.
@@ -42,6 +45,7 @@ interface ThreadRow {
   id: string;
   createdBy: { id: string; kind?: string };
   comments: Array<{ author: { id: string }; text: string }>;
+  openerProof?: { kind: string; agentId: string; boardId: string };
 }
 
 describe('the relay’s sender check holds against a forged author', () => {
@@ -221,6 +225,8 @@ describe('the relay’s sender check holds against a forged author', () => {
     const fromWriter = await postToOutbox('Sent by the writer as the lead.', {
       authorization: `Bearer ${tokens.get(`${harbor.port}/${WRITER}`)}`,
     });
+    // A caller on this machine, over loopback, presenting no token.
+    const fromLoopback = await postToOutbox('Sent from loopback as the lead.', {});
     // The control: the lead, with its own at2.
     const fromLead = await postToOutbox('Sent by the lead itself.', {
       authorization: `Bearer ${tokens.get(`${harbor.port}/${LEAD}`)}`,
@@ -231,15 +237,32 @@ describe('the relay’s sender check holds against a forged author', () => {
     expect(fromMember.createdBy.kind).not.toBe('agent');
     expect(fromWriter.createdBy.id).toBe(WRITER);
     expect(fromLead.createdBy.id).toBe(LEAD);
+    // Loopback is trusted-local, so the claimed author stands on the thread.
+    // The relay has to tell this one from the lead's own by something else.
+    expect(fromLoopback.createdBy.id).toBe(LEAD);
+    // Only the lead's own token left the server's opener proof.
+    const proofs = new Map(
+      (await threads(harbor, harborBoard, outbox)).map((t) => [t.id, t.openerProof ?? null]),
+    );
+    expect(proofs.get(fromLead.id)).toEqual({
+      kind: 'board-token',
+      agentId: LEAD,
+      boardId: harborBoard,
+    });
+    expect(proofs.get(fromLoopback.id)).toBeNull();
+    expect(proofs.get(fromMember.id)).toBeNull();
+    expect(proofs.get(fromWriter.id)?.agentId).toBe(WRITER);
 
     await relay.pollOnce();
     const delivered = allText(await threads(river, riverBoard, riverInbox));
     expect(delivered).toContain('> Sent by the lead itself.');
     expect(delivered).not.toContain('Sent by the member');
     expect(delivered).not.toContain('Sent by the writer');
+    expect(delivered).not.toContain('Sent from loopback');
     const ids = new Set(store.entries().map((e) => e.id));
     expect(ids.has(`harborlight-lead:${fromLead.id}`)).toBe(true);
     expect(ids.has(`harborlight-lead:${fromMember.id}`)).toBe(false);
     expect(ids.has(`harborlight-lead:${fromWriter.id}`)).toBe(false);
+    expect(ids.has(`harborlight-lead:${fromLoopback.id}`)).toBe(false);
   });
 });

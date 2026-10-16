@@ -34,6 +34,13 @@ export interface OutboxThread {
   status: string;
   createdById: string;
   comments: OutboxComment[];
+  /**
+   * The agent and board whose board token opened the thread, as the server
+   * recorded it outside the doc (`thread-opener-proofs.ts`), or null. An
+   * author id alone is not this: loopback and a writable socket can both
+   * write one without a token.
+   */
+  openerProof: { agentId: string; boardId: string } | null;
 }
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -118,11 +125,18 @@ export async function readOutbox(
         comments.push({ authorId: author.id, text: words });
       }
     }
+    const proof = r.openerProof as { kind?: unknown; agentId?: unknown; boardId?: unknown } | null;
     out.push({
       id: r.id,
       status: typeof r.status === 'string' ? r.status : '',
       createdById: createdBy.id,
       comments,
+      openerProof:
+        proof?.kind === 'board-token' &&
+        typeof proof.agentId === 'string' &&
+        typeof proof.boardId === 'string'
+          ? { agentId: proof.agentId, boardId: proof.boardId }
+          : null,
     });
   }
   return out;

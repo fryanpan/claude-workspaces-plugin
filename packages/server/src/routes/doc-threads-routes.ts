@@ -201,6 +201,7 @@ export async function handleDocThreadRoutes(
     readyNudger,
     answerCoverage,
     threadRequestDedup,
+    threadOpenerProofs,
     summarizer,
     j,
     safeJson,
@@ -223,6 +224,13 @@ export async function handleDocThreadRoutes(
    *  measurement rows leave `taskId` off rather than empty. */
   const rowOfDoc = taskIdOfBodyDoc(docId);
   const viaOpt = via ? { via } : {};
+  /** Record a thread this request's board token opened, for the org relay. */
+  const recordOpener = (thread: Thread | null | undefined): void => {
+    const opener = thread?.comments[0];
+    if (thread && opener && rq.boardAgent && opener.author.id === rq.boardAgent.agentId) {
+      threadOpenerProofs.record(docId, thread.id, rq.boardAgent, opener.text);
+    }
+  };
   /** A blocking ask carries the goal it stops (`review-blocks.ts`): its
    *  task's, a goal thread's own, else the asker's if that goal is on this
    *  doc's board. The lead still ranks; this is what it ranks with. */
@@ -991,6 +999,7 @@ export async function handleDocThreadRoutes(
           ...(pageEdits ? { pageEdits } : {}),
           ...viaOpt,
         });
+        recordOpener(created);
         if (created && itemAsk?.range) {
           const asked = taskStore.requestMoreInfoOnReview(
             itemAsk.taskId,
@@ -1083,6 +1092,7 @@ export async function handleDocThreadRoutes(
         writeOpts,
       );
     }
+    if (res.ok) recordOpener(res.thread);
     const findGate =
       res.ok && declared.review
         ? await gateThreadDeclaration(docId, res.thread, declared.review, author)
