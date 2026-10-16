@@ -137,6 +137,21 @@ async function main(): Promise<void> {
       source: `try { localStorage.setItem('feedback-user-name', 'Alice'); } catch {}`,
     });
     const text = async () => String(await cdp.evaluate(TEXT));
+    /** When this browser's copy of the doc was last written, or 0 for none. */
+    const copySavedAt = async (): Promise<number> =>
+      Number(
+        await cdp.evaluate(`new Promise((r) => {
+          const o = indexedDB.open('cw-doc-cache');
+          o.onsuccess = () => {
+            const d = o.result;
+            if (!d.objectStoreNames.contains('docs')) return r(0);
+            const g = d.transaction('docs').objectStore('docs').get(${JSON.stringify(docId)});
+            g.onsuccess = () => r(g.result?.savedAt ?? 0);
+            g.onerror = () => r(0);
+          };
+          o.onerror = () => r(0);
+        })`),
+      );
     const shot = async (name: string) => {
       if (!shots) return;
       for (const [w, h] of [
@@ -173,21 +188,7 @@ async function main(): Promise<void> {
     const controlled = await until('the worker in control', async () =>
       (await cdp.evaluate('!!navigator.serviceWorker.controller')) ? true : null,
     );
-    await until('the copy kept', async () =>
-      (await cdp.evaluate(`new Promise((r) => {
-        const o = indexedDB.open('cw-doc-cache');
-        o.onsuccess = () => {
-          const d = o.result;
-          if (!d.objectStoreNames.contains('docs')) return r(false);
-          const g = d.transaction('docs').objectStore('docs').get(${JSON.stringify(docId)});
-          g.onsuccess = () => r(!!g.result);
-          g.onerror = () => r(false);
-        };
-        o.onerror = () => r(false);
-      })`))
-        ? true
-        : null,
-    );
+    await until('the copy kept', async () => ((await copySavedAt()) > 0 ? true : null));
     // The worker keeps the page's files in the background after it is told.
     await until('the doc bundle kept', async () =>
       Number(
@@ -239,9 +240,16 @@ async function main(): Promise<void> {
       s.removeAllRanges();
       s.addRange(r);
     })()`);
+    const copyBeforeTyping = await copySavedAt();
     await cdp.send('Input.insertText', { text: TYPED });
     await until('the typed words on screen', async () =>
       (await text()).includes(TYPED.trim()) ? true : null,
+    );
+    // The copy is written on a debounce after the edit (doc-cache.ts). A
+    // reload before that write lands loses the words, and on a loaded runner
+    // the reload won every time, so wait for the copy the reload reads.
+    await until('the typed words in the copy', async () =>
+      (await copySavedAt()) > copyBeforeTyping ? true : null,
     );
     const fileWhileOffline = readFileSync(file, 'utf8');
     await load(() => cdp.send('Page.reload', {}));
