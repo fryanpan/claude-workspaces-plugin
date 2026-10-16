@@ -45,10 +45,7 @@ class HTMLRewriterProbe {
 describe('the whiteboard shell', () => {
   it('names the doc and board for the bundle, and escapes the title', async () => {
     const page = await parse(
-      renderWhiteboardShell(
-        { workspaceId: 'w-1', docId: 'd-ferry', title: 'Ferry <flow>' },
-        null,
-      ),
+      renderWhiteboardShell({ workspaceId: 'w-1', docId: 'd-ferry', title: 'Ferry <flow>' }, null),
     ).read();
     expect(page.body['data-workspace-id']).toBe('w-1');
     expect(page.body['data-doc-id']).toBe('d-ferry');
