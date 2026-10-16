@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { dataDirFromArgs } from './data-dir.ts';
+import { parseFrameOrigin } from './frame-host.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -513,6 +514,25 @@ export function resolveServerConfig(opts: {
         'app — would reach the whole product. They will answer 403 unknown_host.',
     );
   }
+  /**
+   * The frame-only hostname (`frame-host.ts`): `CW_FRAME_ORIGIN` names it,
+   * `CW_FRAME_BOARD_HOSTS` the board hostnames whose frames move there
+   * (default: the operator's proxied hostnames). A value that is not a bare
+   * origin is refused loudly and leaves every frame opaque.
+   */
+  const frameOriginRaw = env.CW_FRAME_ORIGIN?.trim() ?? '';
+  const frameOrigin = parseFrameOrigin(frameOriginRaw);
+  if (frameOriginRaw !== '' && frameOrigin === null) {
+    console.error(
+      `[feedback] IGNORING CW_FRAME_ORIGIN (${frameOriginRaw}): not a bare http(s) origin. ` +
+        'Mocks and app doors stay in opaque frames on the board hostname.',
+    );
+  }
+  const frameBoardHostsRaw = (env.CW_FRAME_BOARD_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter((h) => h !== '');
+  const frameBoardHosts = frameBoardHostsRaw.length > 0 ? frameBoardHostsRaw : undefined;
   const alsoCollab = proxiedTrustedHosts.filter((h) =>
     accessTunnelHosts.some((c) => c.toLowerCase() === h.toLowerCase()),
   );
@@ -638,6 +658,8 @@ export function resolveServerConfig(opts: {
     recallCallbackHost,
     proxiedTrustedEmails,
     proxiedTrustedReady,
+    frameOrigin,
+    frameBoardHosts,
     shareConfig,
     authGlobalStartsPerHour,
     authPeerStartsPerHour,

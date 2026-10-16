@@ -37,6 +37,7 @@ describe('a relayed write is named as sent from inside the mock', () => {
     const reply = (via?: string) => ({
       docId: 'price-board',
       threadId: 't1',
+      commentTrust: 'owner',
       comment: { author: { name: 'Reviewer' }, text: 'too small', ts: 1, ...(via ? { via } : {}) },
     });
     expect(await render('thread.replied', reply('mock-frame'))).toBe(
@@ -53,6 +54,7 @@ describe('a relayed write is named as sent from inside the mock', () => {
     const created = (via?: string) => ({
       docId: 'price-board',
       threadId: 't2',
+      commentTrust: 'owner',
       thread: {
         comments: [{ author: { name: 'Reviewer' }, text: 'move it up', ...(via ? { via } : {}) }],
       },

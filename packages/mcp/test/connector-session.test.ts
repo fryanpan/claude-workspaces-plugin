@@ -38,6 +38,7 @@ function commentFrame(eid: string): string {
     docId: 'plan',
     watchKey: 'plan',
     threadId: 't1',
+    commentTrust: 'owner',
     comment: { author: { name: 'Saltmarsh Reviewer' }, text: 'tighten this' },
     thread: { anchor: { snippet: { text: 'the second paragraph' } } },
   };

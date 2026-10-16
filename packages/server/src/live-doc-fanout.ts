@@ -39,6 +39,7 @@ import {
 } from '@claude-workspaces/core';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import { type CommentTrust, commentTrustOf } from './actor-identity.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import type { FeedbackWs, LiveDoc, ShareAuthorizedSocket } from './doc-store.ts';
 import { type EditSessionTracker, editAuthorOf, noteEditTransaction } from './edit-sessions.ts';
@@ -67,7 +68,7 @@ export const IN_REPLY_TO_MAX = 280;
 export function commentRepliedTo(
   thread: Thread,
   reply: { id: string } | undefined,
-): { author: string; text: string } | undefined {
+): { author: string; authorId: string; trust: CommentTrust; text: string } | undefined {
   if (!reply) return undefined;
   const at = thread.comments.findIndex((c) => c.id === reply.id);
   const parent = at > 0 ? thread.comments[at - 1] : undefined;
@@ -76,7 +77,12 @@ export function commentRepliedTo(
     parent.text.length > IN_REPLY_TO_MAX
       ? `${parent.text.slice(0, IN_REPLY_TO_MAX - 1)}…`
       : parent.text;
-  return { author: parent.author.name, text };
+  return {
+    author: parent.author.name,
+    authorId: parent.author.id,
+    trust: commentTrustOf(parent.author),
+    text,
+  };
 }
 
 /**
@@ -519,6 +525,11 @@ export class LiveDocFanout {
     const decorate = (m: DocMeta) => this.host.decorate(m);
     const docTitle = this.host.titleOf(doc);
     const inReplyTo = event === 'thread.replied' ? commentRepliedTo(thread, comment) : undefined;
+    // Whether an agent may read the words as the owner's. Stamped on the
+    // comment the channel line quotes — this one, or the thread's last when a
+    // created / undo frame carries none — so the reader never has to guess.
+    const spoken = comment ?? thread.comments.at(-1);
+    const speech = event === 'thread.created' || event === 'thread.replied';
     this.broadcastToDoc(doc, {
       event,
       docId: doc.docId,
@@ -541,6 +552,7 @@ export class LiveDocFanout {
       // "Go ahead" knows what it is being told to go ahead with.
       ...(docTitle ? { docTitle } : {}),
       ...(inReplyTo ? { inReplyTo } : {}),
+      ...(speech && spoken ? { commentTrust: commentTrustOf(spoken.author) } : {}),
       seq: doc.seq,
     });
   }

@@ -303,3 +303,22 @@ export function isOwnerActor(author: unknown): boolean {
   // — the link widens who is known, never how loosely a name is matched.
   return OWNER_IDS.has(resolveIdentityId(id)) || OWNER_NAMES.has(name);
 }
+
+/**
+ * How far an agent may trust a comment's words: `owner` when the author IS
+ * the owner's identity, `untrusted` for everyone else.
+ *
+ * By ID ALONE, and that is the difference from `isOwnerActor`. That check
+ * also accepts the owner's display name, which is right for counting the
+ * owner's activity and wrong here: a share visitor types whatever name they
+ * like, so a name match would let an outsider's comment reach an agent
+ * labelled as the owner's instruction. An id is what the server assigned —
+ * a signed-in identity, `known-bryan`, or an `anon-*` id somebody linked on
+ * purpose (see `resolveIdentityId`).
+ */
+export type CommentTrust = 'owner' | 'untrusted';
+
+export function commentTrustOf(author: unknown): CommentTrust {
+  const { id } = authorFields(author);
+  return id && OWNER_IDS.has(resolveIdentityId(id)) ? 'owner' : 'untrusted';
+}

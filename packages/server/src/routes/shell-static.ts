@@ -40,6 +40,7 @@ import { assetHref } from '@claude-workspaces/core/asset-manifest';
 import type { BrowserSentryConfig, PageType } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';
+import type { FrameHost } from '../frame-host.ts';
 import type { LandingReview } from '../landing-review.ts';
 import { buildLandingModel } from '../landing.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -126,6 +127,8 @@ export interface ShellStaticContext {
   /** The browser Sentry config, injected into every shell on the way out.
    *  Null leaves the built bytes exactly as they are. */
   browserSentry: BrowserSentryConfig | null;
+  /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
+  frameHost: FrameHost | null;
   /** Whether the code sign-in page exists on this deployment. Under
    *  access-only it does not, and `/signin` is a 404 rather than a redirect. */
   emailCodeSignIn: boolean;
@@ -187,6 +190,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     docStore,
     taskStore,
     browserSentry,
+    frameHost,
     emailCodeSignIn,
     j,
     isValidDocId,
@@ -303,6 +307,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
   const serveMockup = (
     docId: string,
     workspaceId: string,
+    req: Request,
     url: URL,
     visitor: ShareTarget | null,
   ): Response => {
@@ -387,6 +392,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           items: linked.map((i) => ({ taskId: i.taskId, reviewItemId: i.reviewItemId })),
           visitor: Boolean(visitor),
           coachHref: assetHref(readAppAssetManifest(markdownAppDist), 'coach.js'),
+          frameOrigin: frameHost?.frameOriginFor(req, Boolean(visitor)) ?? null,
         }),
         browserSentry,
         'mockup',
@@ -414,7 +420,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       headers: {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-cache',
-        'content-security-policy': MOCK_FRAME_CSP,
+        'content-security-policy': frameHost?.isFrameHost(req)
+          ? frameHost.frameCsp
+          : MOCK_FRAME_CSP,
         // Content-derived like serveStatic's, and for the same reason: a
         // reload of an unchanged mock should cost a 304, and a deploy that
         // changed nothing should not throw the cache away. Hashed from the
@@ -621,7 +629,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       }
       if (!isValidDocId(id)) return j(400, { error: 'bad docId' });
       const canonical = docStore.get(id)?.docId ?? id;
-      if (kind === 'mockups') return serveMockup(canonical, wsSeg, url, visitor);
+      if (kind === 'mockups') return serveMockup(canonical, wsSeg, req, url, visitor);
       const whiteboard = docStore.peekMeta(canonical);
       if (kind === 'whiteboards' || whiteboard?.type === 'whiteboard') {
         if (whiteboard?.type !== 'whiteboard' || !docStore.get(canonical)) {

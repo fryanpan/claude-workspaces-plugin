@@ -15,6 +15,7 @@ describe('a page edit on the channel', () => {
   it('carries each edit whole and says how to apply them', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'mock',
       threadId: 't1',
       thread: {
@@ -39,6 +40,7 @@ describe('a page edit on the channel', () => {
   it('leaves an ordinary comment exactly as it was', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'mock',
       threadId: 't2',
       thread: { comments: [{ author: { name: 'Alice' }, text: 'tighten this' }] },

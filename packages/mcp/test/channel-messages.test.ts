@@ -21,6 +21,7 @@ describe('a doc-shaped frame becomes one readable line', () => {
   it('renders a comment with its author, its text and its anchor', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't1',
       comment: { author: { name: 'Bryan' }, text: 'tighten this', ts: FIXED_MS },
@@ -42,6 +43,7 @@ describe('a doc-shaped frame becomes one readable line', () => {
   it('falls back to the outdated anchor when the live snippet is gone', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't2',
       thread: {
@@ -61,6 +63,7 @@ describe('a doc-shaped frame becomes one readable line', () => {
   it('names the review item a comment landed on', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't5',
       reviewItemId: 'ri-9',
@@ -74,6 +77,7 @@ describe('a doc-shaped frame becomes one readable line', () => {
   it('says which questions a partial answer on a thread left open', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't8',
       comment: { author: { name: 'Reader' }, text: 'Run it at 04:00.' },
@@ -87,6 +91,7 @@ describe('a doc-shaped frame becomes one readable line', () => {
   it('reads the review item off the anchor on an older server', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't6',
       comment: { author: { name: 'Bryan' }, text: 'ok' },
@@ -99,6 +104,7 @@ describe('a doc-shaped frame becomes one readable line', () => {
     const { frames, messages } = harness();
     const long = 'x'.repeat(200);
     await messages.emitChannelMessage('thread.created', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't7',
       thread: { anchor: { snippet: { text: long } }, comments: [] },
@@ -145,6 +151,7 @@ describe('a session never hears its own act come back', () => {
   it('drops a comment this session authored', async () => {
     const { frames, messages } = harness();
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't8',
       comment: { author: { id: SELF, name: 'Workspaces' }, text: 'mine' },
@@ -155,6 +162,7 @@ describe('a session never hears its own act come back', () => {
   it('delivers the same frame to a different session', async () => {
     const { frames, messages } = harness({ authorId: 'agent-somebody-else' });
     await messages.emitChannelMessage('thread.replied', {
+      commentTrust: 'owner',
       docId: 'plan',
       threadId: 't8',
       comment: { author: { id: SELF, name: 'Workspaces' }, text: 'mine' },

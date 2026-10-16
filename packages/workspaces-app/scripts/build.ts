@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ASSET_MANIFEST_FILE,
@@ -17,8 +17,23 @@ import { injectModulePreloads, staticChunkClosure } from './module-preload.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
-const dist = join(pkgRoot, 'dist');
 const isWatch = process.argv.includes('--watch');
+/**
+ * Where the bundle goes: `dist/`, or `--outdir <dir>`.
+ *
+ * Every pass starts by deleting this folder. Two test drivers building into
+ * the shared `dist/` at once therefore delete each other's output, and the
+ * slower one finds no app.js: CI's client shard 3 ran the doc-offline and
+ * agent-focus browser tests side by side and failed every time. A driver
+ * passes a folder of its own.
+ */
+const outdirAt = process.argv.indexOf('--outdir');
+const outdirArg = outdirAt === -1 ? undefined : process.argv[outdirAt + 1];
+if (outdirAt !== -1 && (outdirArg === undefined || outdirArg.startsWith('--'))) {
+  console.error('--outdir needs a folder');
+  process.exit(2);
+}
+const dist = outdirArg === undefined ? join(pkgRoot, 'dist') : resolve(outdirArg);
 
 /**
  * Assets whose bytes decide the build id — everything a browser loads.
