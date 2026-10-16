@@ -11,6 +11,12 @@
  * A mock's script can use this bridge exactly as the widget does, which is why
  * the host allows only this mock's own calls and stamps every one.
  *
+ * On the frame-only hostname (`server/src/frame-host.ts`) the frame has a
+ * real origin of its own instead, never the board's. The calls still go
+ * through the host, so the frame needs the host's origin to post to, which
+ * the host names in the seed below, and every call names a path, not this
+ * hostname.
+ *
  * Three smaller jobs sit here because they are the frame's too:
  *
  * - Storage. An opaque origin throws on `localStorage`; the widget reads it at
@@ -21,7 +27,9 @@
  *   exception is the reader's unsent drafts (`draft-store.ts`): keys under
  *   `cfw:draft:` in the `sessionStorage` stand-in go to the host, which keeps
  *   them for this doc alone, and come back when the frame loads again, so a
- *   reload of the frame does not take a half-typed comment with it.
+ *   reload of the frame does not take a half-typed comment with it. On the
+ *   frame-only hostname storage is real, that hostname's own, and the seed is
+ *   written into it.
  * - Links. A tap on a link to another board page opens it at the top, rather
  *   than as a sandboxed page inside the mock.
  * - A direct visit to the frame's address, with nothing holding it, goes to
@@ -35,6 +43,28 @@
  * frame's window so a test can hand it a stand-in.
  */
 
+/** The seed key the host names its own origin under (`mock-host.ts`). */
+const BOARD_ORIGIN = 'cw:board-origin';
+
+/** An http(s) origin, or null. */
+function originOf(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the host is asked to call: the path and query alone, which the host
+ * resolves against the board's own hostname (`mock-relay-policy.ts`). This
+ * frame may be on the frame-only hostname, whose name the board's calls never
+ * carry.
+ */
+const pathOf = (u: URL): string => u.pathname + u.search;
+
 export function installBridge(window: Window & typeof globalThis): void {
   const { location, document, EventTarget } = window;
   const here = new URL(location.href);
@@ -45,7 +75,20 @@ export function installBridge(window: Window & typeof globalThis): void {
     }
     return;
   }
-  const boardOrigin = here.origin;
+  // --- Storage seed, and where the board is ---
+  const seed: Record<string, string> = {};
+  if (window.name.startsWith('cw-mock:')) {
+    try {
+      const got = JSON.parse(window.name.slice(8)) as Record<string, unknown>;
+      for (const [k, v] of Object.entries(got)) if (typeof v === 'string') seed[k] = v;
+    } catch {}
+    window.name = '';
+  }
+  // The page holding this frame. On the board's hostname that is this
+  // address's own origin; on the frame-only hostname (`server/src/
+  // frame-host.ts`) it is another one, which the host names in the seed.
+  const boardOrigin = originOf(seed[BOARD_ORIGIN]) ?? here.origin;
+  delete seed[BOARD_ORIGIN];
 
   /** A URL on this board, or null for anywhere else. */
   const onBoard = (raw: string | URL): URL | null => {
@@ -65,14 +108,6 @@ export function installBridge(window: Window & typeof globalThis): void {
   };
 
   // --- Storage ---
-  const seed: Record<string, string> = {};
-  if (window.name.startsWith('cw-mock:')) {
-    try {
-      const got = JSON.parse(window.name.slice(8)) as Record<string, unknown>;
-      for (const [k, v] of Object.entries(got)) if (typeof v === 'string') seed[k] = v;
-    } catch {}
-    window.name = '';
-  }
   /** `told` hears every write, so the drafts can go to the host. */
   const memory = (
     m: Map<string, string>,
@@ -107,6 +142,11 @@ export function installBridge(window: Window & typeof globalThis): void {
   for (const k of ['localStorage', 'sessionStorage'] as const) {
     try {
       void window[k].length;
+      // Real storage — the frame-only hostname's own. The reader's name
+      // still comes from the board, so the widget does not ask again.
+      if (k === 'localStorage') {
+        for (const [sk, sv] of Object.entries(seed)) window.localStorage.setItem(sk, sv);
+      }
     } catch {
       Object.defineProperty(window, k, {
         value:
@@ -143,7 +183,7 @@ export function installBridge(window: Window & typeof globalThis): void {
     const body = req.method === 'GET' || req.method === 'HEAD' ? null : await req.arrayBuffer();
     return new Promise((resolve, reject) => {
       const port = open(
-        { kind: 'fetch', url: u.href, method: req.method, headers: [...req.headers], body },
+        { kind: 'fetch', url: pathOf(u), method: req.method, headers: [...req.headers], body },
         body ? [body] : [],
       );
       port.onmessage = (e) => {
@@ -189,7 +229,7 @@ export function installBridge(window: Window & typeof globalThis): void {
       // biome-ignore lint/correctness/noConstructorReturn: a socket to anywhere else is the real one
       if (!u) return new NativeWS(url, protocols) as unknown as RelayWS;
       this.url = String(url);
-      const port = open({ kind: 'ws', url: u.href });
+      const port = open({ kind: 'ws', url: pathOf(u) });
       this.port = port;
       port.onmessage = (e) => {
         const d = e.data as { t: string; data?: unknown; code?: number; reason?: string };
@@ -269,7 +309,7 @@ export function installBridge(window: Window & typeof globalThis): void {
       // biome-ignore lint/correctness/noConstructorReturn: a stream from anywhere else is the real one
       if (!u) return new NativeES(url, opts) as unknown as RelayES;
       this.url = u.href;
-      const port = open({ kind: 'sse', url: u.href });
+      const port = open({ kind: 'sse', url: pathOf(u) });
       this.port = port;
       port.onmessage = (e) => {
         const d = e.data as { t: string; type?: string; data?: string; lastEventId?: string };
@@ -362,6 +402,8 @@ export function installBridge(window: Window & typeof globalThis): void {
         a.href = u.href;
         return;
       }
+      // Opened at the top on the board's hostname, which is where its page is.
+      if (boardOrigin !== here.origin) a.href = `${boardOrigin}${u.pathname}${u.search}${u.hash}`;
       a.target = '_top';
     },
     true,
