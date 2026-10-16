@@ -209,6 +209,9 @@ export type SpokenServerMessage =
       navigate?: string;
       /** A review decision for the page to write, or take back. */
       decide?: SpokenDecide;
+      /** The planning voice's question, still open while `spoken` talks it
+       *  over rather than asking it: the page keeps showing the question. */
+      question?: string;
     }
   /** Point `point`'s note, sent just before that point's audio — the page
    *  shows it as the point starts to play. */

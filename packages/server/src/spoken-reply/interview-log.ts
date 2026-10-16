@@ -6,14 +6,18 @@
  * what the planning voice did after it, in two places:
  *
  *  - a log line, `[interview] doc=… section=N kind=… outcome=filled ms=…`,
- *    `[interview] doc=… section=N after-answer=edit|follow-up|quiet` per
- *    answer, and one more when the interview ends with the minutes per
+ *    `[interview] doc=… section=N after-answer=edit|follow-up|discuss|quiet`
+ *    per answer, and one more when the interview ends with the minutes per
  *    filled section;
  *  - `<dataDir>/interview-timings.jsonl`, one JSON row per gap and one per
  *    interview's end, so the numbers survive a restart.
  *
  * `ms` runs from the moment the question was asked (the reply carrying it
- * left the server) to the moment the answer was written into the doc. A row
+ * left the server) to the moment the answer was written into the doc. When
+ * the question was talked over first (`after-answer=discuss`), it runs from
+ * the last discussion reply instead, and the discussion's own time is the end
+ * row's `discussMs`, so minutes per filled section still measure answering
+ * and a long conversation about a question does not read as a slow answer. A row
  * carries the doc's id, the section's place among its headings and counts —
  * never a heading, a question or an answer, so the file holds no doc content.
  */
@@ -50,12 +54,16 @@ export interface InterviewEndRow {
   ms: number;
   /** Mean over filled sections; absent when none was filled. */
   minutesPerFilled?: number;
+  /** Discussion replies, and their time; absent when there were none. */
+  discussed?: number;
+  discussMs?: number;
   at: number;
 }
 
 /** What the planning voice did after an answer: wrote it into the doc,
- *  asked for more, or said nothing and waited for its next question. */
-export type AfterAnswer = 'edit' | 'follow-up' | 'quiet';
+ *  asked for more, talked the question over and kept it open, or said
+ *  nothing and waited for its next question. */
+export type AfterAnswer = 'edit' | 'follow-up' | 'discuss' | 'quiet';
 
 export interface InterviewAnswerRow {
   type: 'answer';
@@ -90,7 +98,8 @@ export class InterviewLog {
           `skipped=${row.skipped} ms=${row.ms}` +
           (row.minutesPerFilled !== undefined
             ? ` minutesPerFilled=${row.minutesPerFilled.toFixed(2)}`
-            : ''),
+            : '') +
+          (row.discussed ? ` discussed=${row.discussed} discussMs=${row.discussMs ?? 0}` : ''),
       );
     }
     if (!this.file) return;

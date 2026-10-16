@@ -41,11 +41,15 @@ function mount() {
   const handle = createEditor({ parent, ydoc, awareness: page });
   const scope = new MountScope();
   open.push({ handle, parent, scope });
-  const scrolled: string[] = [];
-  Element.prototype.scrollIntoView = function (this: Element) {
-    scrolled.push(this.textContent ?? '');
+  const scrolled: number[] = [];
+  // The doc's own scroller moves, and nothing else does.
+  Element.prototype.scrollIntoView = () => {
+    throw new Error('scrollIntoView moves every ancestor scroller');
   };
-  wireAgentFocus({ editor: handle, presence: page, scope });
+  parent.scrollTo = ((o: ScrollToOptions) => {
+    scrolled.push(o.top ?? -1);
+  }) as typeof parent.scrollTo;
+  wireAgentFocus({ editor: handle, presence: page, scroller: parent, scope });
   // The server: its own awareness, no `user`, relayed to the page.
   const server = new Awareness(new Y.Doc());
   const relay = () =>

@@ -816,10 +816,13 @@ plan's gaps off the doc's outline (`interview-gaps.ts`: empty, placeholder,
 open-question and short sections, ranked by heading), holds them as slots in
 `interview-state.ts` (each asked once, then placed, skipped, deferred, gone or
 ended; a silence after a question offers once to skip it), and after each
-answer does one of three things: writes it under its heading with
+answer does one of four things: writes it under its heading with
 `applyBlockEdits` (`interview-docs.ts`, so threads keep their anchors), asks
-once for more after a bare "maybe", or says nothing after "I don't know yet"
-and asks its next question at the next pause. While it asks, its cursor is on
+once for more after a bare "maybe", answers talk about the question (a
+question back, a disagreement) with one sentence and keeps the same question
+open (`interview-discuss.ts`, decided by the same judge call that picks the
+answer), or says nothing after "I don't know yet" and asks its next question
+at the next pause. While it asks, its cursor is on
 the words it means: the server sets an `agentFocus` field on its own
 awareness state for the doc, and `doc/agent-focus.ts` on every open page
 scrolls there and highlights them in the agent's colour. "skip", "come back

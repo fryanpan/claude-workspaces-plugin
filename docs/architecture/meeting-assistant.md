@@ -2880,6 +2880,15 @@ meeting path transcribes and writes notes but never speaks.
   is written. The notes hold now drops only the turns the written words
   contain (`MeetingEars.placed`), so a remark the plan was not given still
   reaches the notes.
+- **Talk about the question is talked over, not skipped**
+  (`interview-discuss.ts`). On 15 Oct the owner answered three questions on a
+  design doc and then talked about the next ones instead: every one of those
+  turns went `after-answer=quiet`, was deferred, and the voice asked about
+  another section. The judge's call now also says whether words that answer
+  nothing are about the question; when they are, one more call gives one
+  sentence back from the plan, the slot stays open with its cursor, and a
+  later answer still goes under the same heading. The time spent talking it
+  over is the end row's `discussMs`, kept out of minutes per filled section.
 - **It never talks over the meeting** (`cut-in.ts`). In the same meeting
   the question started about a second after the pause, while Bryan had
   already gone on ("I noticed that there's—"). Inferred from the log and the

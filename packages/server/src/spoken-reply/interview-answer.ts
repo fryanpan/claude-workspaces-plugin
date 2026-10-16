@@ -14,6 +14,11 @@
  * the question, by number, so what is written is always the speaker's own
  * words and never a paraphrase. None of them: nothing is written. A model
  * that fails or answers off-format keeps every sentence but the false starts.
+ *
+ * The same call says whether words that answer nothing are still ABOUT the
+ * question — a question back, a disagreement, thinking it through aloud — so
+ * the planning voice can talk it over rather than move on
+ * (`interview-discuss.ts`). That costs no second call to decide.
  */
 import type { PlanComplete } from './interview-reader.ts';
 
@@ -48,8 +53,11 @@ export const JUDGE_SYSTEM = [
   'A person is answering a question about their plan out loud, in a meeting.',
   'Some of what they said answers the question. Some may not: a remark about the tool, the voice,',
   'the screen or the meeting itself, an aside to someone else, or talk about something else.',
-  'Reply with JSON only: {"answer": [<the numbers of the sentences that answer the question>]},',
-  'or {"answer": []} when none of them does.',
+  'Reply with JSON only: {"answer": [<the numbers of the sentences that answer the question>], "discuss": <true or false>}.',
+  '"answer" is [] when none of them does.',
+  '"discuss" is true only when none answers it but they are talking about the question itself:',
+  'asking what it means or asking you something back, disagreeing with it, or thinking it through aloud.',
+  'It is false when they are unsure, or talking about something else.',
 ].join('\n');
 
 export function judgePrompt(
@@ -62,8 +70,9 @@ export function judgePrompt(
   };
 }
 
-/** The model's picks as indexes into `n` sentences, or null off-format. */
-export function parseJudge(raw: string, n: number): number[] | null {
+/** The judge's reply: the picked sentences as indexes into `n`, and whether
+ *  the words are about the question when they pick none. Null off-format. */
+export function parseVerdict(raw: string, n: number): { picks: number[]; discuss: boolean } | null {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start < 0 || end <= start) return null;
@@ -73,29 +82,43 @@ export function parseJudge(raw: string, n: number): number[] | null {
   } catch {
     return null;
   }
-  const answer = (parsed as { answer?: unknown } | null)?.answer;
-  if (!Array.isArray(answer)) return null;
-  const picked = answer.filter(
+  const m = parsed as { answer?: unknown; discuss?: unknown } | null;
+  if (!Array.isArray(m?.answer)) return null;
+  const picked = m.answer.filter(
     (x): x is number => typeof x === 'number' && Number.isInteger(x) && x >= 1 && x <= n,
   );
-  return [...new Set(picked)].sort((a, b) => a - b).map((x) => x - 1);
+  const picks = [...new Set(picked)].sort((a, b) => a - b).map((x) => x - 1);
+  return { picks, discuss: picks.length === 0 && m.discuss === true };
 }
 
-/** The words of `heard` that answer `question`, or '' when none do. */
-export async function answerPart(
+/** The model's picks as indexes into `n` sentences, or null off-format. */
+export function parseJudge(raw: string, n: number): number[] | null {
+  return parseVerdict(raw, n)?.picks ?? null;
+}
+
+/** What answers the question, and when nothing does, whether what was said
+ *  is about it. With no model there is no judge, so never `discuss`. */
+export interface Heard {
+  answer: string;
+  discuss: boolean;
+}
+
+/** The words of `heard` that answer `question` ('' when none do), and
+ *  whether the rest is talk about the question. */
+export async function judgeHeard(
   complete: PlanComplete | undefined,
   question: string,
   heard: string,
-): Promise<string> {
+): Promise<Heard> {
   const kept = clauses(heard)
     .filter((c) => !c.cut)
     .map((c) => c.text);
-  if (kept.length === 0 || !complete) return kept.join(' ');
+  if (kept.length === 0 || !complete) return { answer: kept.join(' '), discuss: false };
   try {
-    const picks = parseJudge(await complete(judgePrompt(question, kept)), kept.length);
-    if (picks) return picks.map((i) => kept[i]).join(' ');
+    const v = parseVerdict(await complete(judgePrompt(question, kept)), kept.length);
+    if (v) return { answer: v.picks.map((i) => kept[i]).join(' '), discuss: v.discuss };
   } catch {
     // A model that fails loses the check, not the answer.
   }
-  return kept.join(' ');
+  return { answer: kept.join(' '), discuss: false };
 }

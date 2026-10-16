@@ -86,6 +86,14 @@ function flat(s: string): string {
   return s.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+/** A heading as compared with the model's copy of it: no leading number
+ *  ("3." or "3)") and no trailing punctuation. */
+function headingKey(s: string): string {
+  return flat(s.replace(/^#+\s*/, ''))
+    .replace(/^\d+(?:\.\d+)*[.)]?\s+/, '')
+    .replace(/[\s.:?!]+$/, '');
+}
+
 /** `quote` as `text` spells it, or the whole of `text` when the spacing
  *  differs: the cursor needs words that are really there. */
 function spelled(text: string, quote: string): string {
@@ -113,11 +121,19 @@ export function parseReading(
   const ask = typeof m.ask === 'string' ? m.ask.replace(/\s+/g, ' ').trim() : '';
   if (!ask) return { none: typeof m.why === 'string' ? m.why.replace(/\s+/g, ' ').trim() : '' };
   const headings = outline.filter((b) => b.kind === 'heading' && b.text.trim());
-  const want = typeof m.heading === 'string' ? flat(m.heading.replace(/^#+\s*/, '')) : '';
+  const want = typeof m.heading === 'string' ? headingKey(m.heading) : '';
+  const named = want ? headings.find((h) => headingKey(h.text) === want) : undefined;
   const quote = typeof m.quote === 'string' ? m.quote.trim() : '';
-  const quoted = quote ? outline.find((b) => flat(b.text).includes(flat(quote))) : undefined;
+  const has = (b: prose.OutlineEntry) => flat(b.text).includes(flat(quote));
+  // The words under the heading the question names, before the same words
+  // anywhere else: a phrase the plan's opening also uses is not what it asks.
+  const quoted = quote
+    ? (named &&
+        outline.find((b) => (b.id === named.id || b.underHeadingId === named.id) && has(b))) ||
+      outline.find(has)
+    : undefined;
   const heading =
-    headings.find((h) => flat(h.text) === want) ??
+    named ??
     (quoted?.kind === 'heading' ? quoted : headings.find((h) => h.id === quoted?.underHeadingId)) ??
     headings.find((h) => (h.level ?? 1) > 1) ??
     headings[0];
@@ -142,5 +158,50 @@ export async function readPlan(complete: PlanComplete, r: PlanReading): Promise<
     return parseReading(await complete(readingPrompt(r)), r.outline) ?? { none: '' };
   } catch {
     return { none: '' };
+  }
+}
+
+/** The most of what was said since the last question a reading is given. */
+const HEARD_KEPT = 2_000;
+
+/**
+ * What a reading needs to remember per doc, on one socket: the questions
+ * already asked there, so it never repeats one, and what was said at pauses
+ * since the last question, so it hears all of it and not only the last turn.
+ */
+export class ReadingMemory {
+  private readonly asked = new Map<string, string[]>();
+  private readonly since = new Map<string, string>();
+  /** What `since` held when the latest question was asked. */
+  private sinceAsked = '';
+
+  /** The questions asked on `docId`. */
+  askedOn(docId: string): string[] {
+    return this.asked.get(docId) ?? [];
+  }
+
+  /** `heard` added to what a reading hears since the last question. */
+  keep(docId: string, heard: string): string {
+    const all = `${this.since.get(docId) ?? ''} ${heard}`.trim().slice(-HEARD_KEPT);
+    this.since.set(docId, all);
+    return all;
+  }
+
+  /** `question` was just asked on `docId`: what was said before it is spent. */
+  ask(docId: string, question: string): void {
+    this.sinceAsked = this.since.get(docId) ?? '';
+    this.since.delete(docId);
+    const before = this.askedOn(docId);
+    if (!before.includes(question)) this.asked.set(docId, [...before, question]);
+  }
+
+  /** `question` was never heard: as if it had not been asked, with what was
+   *  said before it heard again by the next reading. */
+  unask(docId: string, question: string): void {
+    this.asked.set(
+      docId,
+      this.askedOn(docId).filter((q) => q !== question),
+    );
+    if (this.sinceAsked) this.since.set(docId, this.sinceAsked);
   }
 }

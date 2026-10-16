@@ -51,4 +51,7 @@ export interface InterviewReply {
   detail: string[];
   asking: boolean;
   route: string;
+  /** The question still open when `spoken` is not it — a discussion reply
+   *  (`interview-discuss.ts`) — so the page keeps showing the question. */
+  question?: string;
 }

@@ -30,7 +30,7 @@ export function mountDocVoices(opts: {
   } | null;
 }): void {
   const { docId, user, editor, editorMount, scope } = opts;
-  wireAgentFocus({ editor, presence: opts.presence, scope });
+  wireAgentFocus({ editor, presence: opts.presence, scroller: editorMount, scope });
   const board = opts.canWrite ? currentWorkspaceId() : null;
   if (!board) return;
   mountDocVoice({ docId, user, editor, editorMount, scope });

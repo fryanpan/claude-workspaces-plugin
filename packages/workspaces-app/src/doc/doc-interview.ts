@@ -328,8 +328,9 @@ export function mountDocInterview(opts: DocInterviewOpts): DocInterviewView {
         asking = m.asking;
         const planning = m.route === 'interview';
         frame.interviewing = planning && m.asking;
-        frame.question = m.spoken || frame.question;
-        frame.detail = m.detail;
+        // A reply talking the open question over keeps it on the card.
+        frame.question = m.question ?? (m.spoken || frame.question);
+        frame.detail = m.question && m.spoken ? [m.spoken, ...m.detail] : m.detail;
         if (m.spoken) {
           frame.note = null;
           frame.phase = 'asking';
