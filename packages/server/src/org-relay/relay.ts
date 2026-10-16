@@ -8,7 +8,10 @@
  * `to: <seat id>` and whose remaining lines are the message. The relay reads
  * each outbox with that server's credentials, so the SENDER is the seat that
  * owns the outbox the thread was found on and whose agent id opened it,
- * never a name the message carries.
+ * never a name the message carries. A lead posts with its own board-scoped
+ * token (`at2`), and the server records the token's agent as the author
+ * whatever the body claims, so another agent on the board cannot open a
+ * thread on a lead's outbox as that lead.
  *
  * Each message ends in exactly one of three verdicts, every one logged
  * without its body (`relay-log.ts`):

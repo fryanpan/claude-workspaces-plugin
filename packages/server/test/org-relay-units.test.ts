@@ -28,9 +28,13 @@ const config = (over: { servers?: object; seats?: object } = {}) => ({
       organization: 'harborlight',
       baseUrl: 'https://workspaces.harborlight.test',
       serviceToken,
-      bearer: fake(),
+      bearers: { 'w-harbor': fake() },
     },
-    river: { organization: 'riverbend', baseUrl: 'http://127.0.0.1:9', bearer: fake() },
+    river: {
+      organization: 'riverbend',
+      baseUrl: 'http://127.0.0.1:9',
+      bearers: { 'w-river': fake() },
+    },
     ...over.servers,
   },
   seats: {
@@ -93,22 +97,34 @@ describe('the relay config', () => {
         harbor: {
           organization: 'harborlight',
           baseUrl: 'https://h.harborlight.test',
-          bearer: fake(),
+          bearers: { 'w-harbor': fake() },
         },
       },
     });
-    expect('error' in parseRelayConfig(JSON.stringify(noToken))).toBe(true);
+    expect(parseRelayConfig(JSON.stringify(noToken))).toEqual({
+      error: 'server harbor is remote and carries no service token',
+    });
     const plain = config({
       servers: {
         harbor: {
           organization: 'harborlight',
           baseUrl: 'http://h.harborlight.test',
           serviceToken,
-          bearer: fake(),
+          bearers: { 'w-harbor': fake() },
         },
       },
     });
-    expect('error' in parseRelayConfig(JSON.stringify(plain))).toBe(true);
+    expect(parseRelayConfig(JSON.stringify(plain))).toEqual({
+      error: 'server harbor baseUrl must be https unless it is loopback',
+    });
+  });
+
+  it('refuses a seat on a board its server holds no bearer for', () => {
+    const raw = config();
+    (raw.seats['harbor-lead'] as Record<string, unknown>).board = 'w-elsewhere';
+    expect(parseRelayConfig(JSON.stringify(raw))).toEqual({
+      error: 'seat harbor-lead is on a board its server holds no bearer for',
+    });
   });
 
   it('refuses two seats on one outbox', () => {
@@ -259,7 +275,7 @@ describe('a call to a project server', () => {
     expect(seen[0]?.url).toBe(
       'https://workspaces.harborlight.test/workspaces/w-harbor/docs/task%3At-out-1/threads?status=open',
     );
-    expect(seen[0]?.headers.get('authorization')).toBe(`Bearer ${harbor.bearer}`);
+    expect(seen[0]?.headers.get('authorization')).toBe(`Bearer ${harbor.bearers.get('w-harbor')}`);
     expect(seen[0]?.headers.get('cf-access-client-id')).toBe(serviceToken.clientId);
     expect(seen[0]?.headers.get('cf-access-client-secret')).toBe(serviceToken.clientSecret);
   });

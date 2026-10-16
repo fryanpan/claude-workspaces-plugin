@@ -8,7 +8,9 @@
  * nothing a message carries can move it.
  *
  * **The file holds credentials**: each server's Access service-token pair
- * and the relay's board-scoped bearer for that server. So it must be mode
+ * and, for each board the relay reaches there, the relay's own board-scoped
+ * agent token (`at2`, `auth/board-agent-token.ts`), which opens that one
+ * board and nothing else on the server. So it must be mode
  * 600, and any group or world bit refuses the start. Fails closed: one bad
  * part refuses the whole file.
  *
@@ -17,7 +19,7 @@
  *    "organization": "<org id>",
  *    "baseUrl": "https://<the one address>",
  *    "serviceToken": {"clientId": "…", "clientSecret": "…"},
- *    "bearer": "<that server's board-scoped agent token for the relay>"}},
+ *    "bearers": {"<board id>": "<the relay's at2 for that board>"}}},
  *  "seats": {"<seat id>": {
  *    "server": "<server id>", "board": "<board id>", "agentId": "<agent id>",
  *    "outboxDoc": "<doc the seat posts messages on>",
@@ -41,8 +43,9 @@ export interface RelayServer {
   /** A bare origin, no trailing slash. */
   baseUrl: string;
   serviceToken: RelayServiceToken | null;
-  /** Opaque to the relay: presented as `Authorization: Bearer <value>`. */
-  bearer: string;
+  /** Board id → the relay's board-scoped token there, presented as
+   *  `Authorization: Bearer <value>`. Opaque to the relay. */
+  bearers: Map<string, string>;
 }
 
 export interface RelaySeat {
@@ -109,10 +112,15 @@ function parseServer(id: string, raw: unknown): RelayServer | string {
     serviceToken = { clientId: t.clientId, clientSecret: t.clientSecret };
   }
   if (!loopback && !serviceToken) return `server ${id} is remote and carries no service token`;
-  if (typeof raw.bearer !== 'string' || !TOKEN_PART.test(raw.bearer)) {
-    return `server ${id} bearer is missing or malformed`;
+  if (!isObject(raw.bearers)) return `server ${id} bearers must be an object`;
+  const bearers = new Map<string, string>();
+  for (const [board, value] of Object.entries(raw.bearers)) {
+    if (!ID.test(board) || typeof value !== 'string' || !TOKEN_PART.test(value)) {
+      return `server ${id} bearer for board "${board}" is malformed`;
+    }
+    bearers.set(board, value);
   }
-  return { id, organization, baseUrl: url.origin, serviceToken, bearer: raw.bearer };
+  return { id, organization, baseUrl: url.origin, serviceToken, bearers };
 }
 
 function parseSeat(
@@ -137,6 +145,9 @@ function parseSeat(
     }
   }
   if (raw.outboxDoc === raw.inboxDoc) return `seat ${id} outboxDoc and inboxDoc must differ`;
+  if (!server.bearers.has(raw.board as string)) {
+    return `seat ${id} is on a board its server holds no bearer for`;
+  }
   for (const k of ['crossOrganization', 'untrusted'] as const) {
     if (raw[k] !== undefined && typeof raw[k] !== 'boolean')
       return `seat ${id} ${k} is not a boolean`;

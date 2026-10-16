@@ -7,15 +7,21 @@
  *   POST /workspaces/<board>/docs/<doc>/threads/<t>/comments tell the sender the verdict
  *
  * Every call carries the server's Access service-token pair (when the config
- * gives one) and the relay's bearer for that server. The bearer is opaque
- * here; the server's own door decides what it opens (the board-scoped agent
- * token admits exactly the routes a member of its one board may reach).
+ * gives one) and the relay's board-scoped agent token for the board it names.
+ * The token is opaque here; the server's own door decides what it opens (an
+ * `at2` admits exactly the routes a member of its one board may reach) and
+ * attributes every write to the token's agent, whatever author the body
+ * names.
  */
 import type { RelayServer } from './relay-config.ts';
 
 export type RelayFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-/** Who the relay's own writes are attributed to on every board. */
+/**
+ * The author the relay's writes name in their body. Behind an `at2` the
+ * server ignores it and records the token's agent; it is what a co-located
+ * server reached from loopback without a token records.
+ */
 export const RELAY_AUTHOR = { id: 'agent-relay', name: 'Relay', kind: 'agent' } as const;
 
 export interface OutboxComment {
@@ -34,9 +40,9 @@ const REQUEST_TIMEOUT_MS = 10_000;
 /** The most bytes one outbox read may be. */
 const MAX_OUTBOX_BYTES = 2_000_000;
 
-function headers(server: RelayServer, json: boolean): Record<string, string> {
+function headers(server: RelayServer, board: string, json: boolean): Record<string, string> {
   return {
-    authorization: `Bearer ${server.bearer}`,
+    authorization: `Bearer ${server.bearers.get(board) ?? ''}`,
     ...(server.serviceToken
       ? {
           'cf-access-client-id': server.serviceToken.clientId,
@@ -47,19 +53,24 @@ function headers(server: RelayServer, json: boolean): Record<string, string> {
   };
 }
 
-function docPath(board: string, doc: string): string {
-  return `/workspaces/${encodeURIComponent(board)}/docs/${encodeURIComponent(doc)}`;
+function docPathPrefix(board: string): string {
+  return `/workspaces/${encodeURIComponent(board)}`;
+}
+
+function docPath(doc: string): string {
+  return `/docs/${encodeURIComponent(doc)}`;
 }
 
 async function call(
   fetchFn: RelayFetch,
   server: RelayServer,
+  board: string,
   path: string,
   init: { method: 'GET' | 'POST'; body?: unknown },
 ): Promise<Response> {
-  return fetchFn(`${server.baseUrl}${path}`, {
+  return fetchFn(`${server.baseUrl}${docPathPrefix(board)}${path}`, {
     method: init.method,
-    headers: headers(server, init.body !== undefined),
+    headers: headers(server, board, init.body !== undefined),
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     redirect: 'manual',
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -75,7 +86,7 @@ export async function readOutbox(
 ): Promise<OutboxThread[] | null> {
   let res: Response;
   try {
-    res = await call(fetchFn, server, `${docPath(board, doc)}/threads?status=open`, {
+    res = await call(fetchFn, server, board, `${docPath(doc)}/threads?status=open`, {
       method: 'GET',
     });
   } catch {
@@ -127,7 +138,7 @@ export async function deliverToInbox(
   requestId: string,
 ): Promise<boolean> {
   try {
-    const res = await call(fetchFn, server, `${docPath(board, doc)}/threads`, {
+    const res = await call(fetchFn, server, board, `${docPath(doc)}/threads`, {
       method: 'POST',
       // requestId makes a retry after a lost answer land once, not twice.
       body: { author: RELAY_AUTHOR, text, anchor: { kind: 'subject' }, requestId },
@@ -151,7 +162,8 @@ export async function replyOnOutbox(
     const res = await call(
       fetchFn,
       server,
-      `${docPath(board, doc)}/threads/${encodeURIComponent(threadId)}/comments`,
+      board,
+      `${docPath(doc)}/threads/${encodeURIComponent(threadId)}/comments`,
       { method: 'POST', body: { author: RELAY_AUTHOR, text } },
     );
     return res.ok;
