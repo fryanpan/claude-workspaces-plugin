@@ -2725,7 +2725,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   };
 
   /** A review's own files — thread roll-up, grouped diff, tree, lazy opens. */
-  const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson };
+  const reviewFileRoutesCtx: ReviewFileRoutesContext = { docStore, j, safeJson, boardIsShared };
 
   /** The chat-audit counters — one store, read and written by two routes. */
   const chatAuditRoutesCtx: ChatAuditRoutesContext = { chatAudit, j, safeJson };
@@ -2878,6 +2878,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardsForDocIndexed,
     homeForDocIndexed,
     fileUnderBoardWorkspace,
+    boardIsShared,
     unlinkFromEveryBoardWorkspace,
     threadUrl,
     fileReviewRequest,
@@ -3136,6 +3137,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     resolveWorkspaceForDoc,
     boardsForDoc,
     fileUnderBoardWorkspace,
+    boardIsShared,
     unfileFromDefault,
     workspacesOfDoc: shareWorkspacesOf,
     watchKeyExists,

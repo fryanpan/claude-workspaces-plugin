@@ -25,6 +25,7 @@ import {
   redactWorkspaceGroupedForVisitor,
   redactWorkspaceTreeForVisitor,
 } from '../share/redact-meta.ts';
+import { hasScratchSegment, scratchBindRefusal } from '../share/scratch-gate.ts';
 import type { BoardWorkspace } from '../tasks.ts';
 
 /**
@@ -74,6 +75,9 @@ export interface ReviewFileRoutesContext {
   j: (status: number, body: unknown) => Response;
   /** Parse a request body, answering null rather than throwing. */
   safeJson: (req: Request) => Promise<Record<string, unknown> | null>;
+  /** Whether a board has ever been shared. A file under `scratch/` is not
+   *  opened through a shared board (share/scratch-gate.ts). */
+  boardIsShared: (workspaceId: string) => boolean;
 }
 
 /** What only this request knows. */
@@ -107,8 +111,17 @@ export async function handleReviewFileRoutes(
   ctx: ReviewFileRoutesContext,
   rq: ReviewFileRouteRequest,
 ): Promise<Response | undefined> {
-  const { docStore, j, safeJson } = ctx;
+  const { docStore, j, safeJson, boardIsShared } = ctx;
   const { req, url, scope, visitor, metaFor, withTaskChips } = rq;
+  /** A folder's files open lazily, so a scratch/ file created after the bind
+   *  is first met here. Through a shared board it is refused, by name. */
+  const scratchOpenRefusal = (setId: string, relPath: string): Response | null =>
+    scope !== undefined && boardIsShared(scope.workspaceId) && hasScratchSegment(relPath)
+      ? j(
+          403,
+          scratchBindRefusal(scope.workspaceId, { docId: `${setId}:${relPath}`, path: relPath }),
+        )
+      : null;
 
   // File-tree view for a bound workspace: nested directory tree with
   // per-file unresolved-comment counts + folder roll-ups. Files are
@@ -193,6 +206,8 @@ export async function handleReviewFileRoutes(
     const body = await safeJson(req);
     const relPath = body?.relPath as string | undefined;
     if (!relPath) return j(400, { error: 'relPath required' });
+    const scratch = scratchOpenRefusal(setId, relPath);
+    if (scratch) return scratch;
     const res = await docStore.openContextFile(setId, relPath);
     // `not-listed` is a 404 on purpose: the tree does not show the
     // file, and whether it exists is exactly what must not be told.
@@ -211,6 +226,8 @@ export async function handleReviewFileRoutes(
     const body = await safeJson(req);
     const relPath = body?.relPath as string | undefined;
     if (!relPath) return j(400, { error: 'relPath required' });
+    const scratch = scratchOpenRefusal(setId, relPath);
+    if (scratch) return scratch;
     const res = await docStore.openEditableFile(setId, relPath);
     if (!res.ok) {
       const status =

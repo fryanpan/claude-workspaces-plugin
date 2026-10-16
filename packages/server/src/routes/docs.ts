@@ -60,6 +60,7 @@ import {
 import { type BoardApp, mockupLinkWarning, rootRelativePageLinks } from '../mockup-page-links.ts';
 import { recordMockupVersion } from '../mockup-versions.ts';
 import { OUT_OF_SHARE_SCOPE, firstRefOutOfScope } from '../share/ref-scope.ts';
+import { hasScratchSegment, scratchBindRefusal } from '../share/scratch-gate.ts';
 import {
   BAD_OPTIONS_ERROR,
   BAD_REF_ERROR,
@@ -119,6 +120,7 @@ export async function handleDocCreateListRoutes(
     boardsForDocIndexed,
     homeForDocIndexed,
     fileUnderBoardWorkspace,
+    boardIsShared,
   } = ctx;
   const { req, url, scope } = rq;
 
@@ -227,6 +229,25 @@ export async function handleDocCreateListRoutes(
         error: 'sourceUrl required',
         hint: 'Markdown and code attachments are backed by a file on disk. Pass sourceUrl: "/abs/path/to/file" in the POST body.',
       });
+    }
+    // Never a scratch/ file onto a shared board (share/scratch-gate.ts).
+    // Before anything is created, so a refused bind leaves nothing behind.
+    const relPath = typeof body?.relPath === 'string' ? body.relPath : undefined;
+    const scratchPath = hasScratchSegment(sourceUrl)
+      ? sourceUrl
+      : hasScratchSegment(relPath)
+        ? relPath
+        : undefined;
+    if (scope && scratchPath && boardIsShared(scope.workspaceId)) {
+      const title = typeof body?.title === 'string' ? body.title : undefined;
+      return j(
+        403,
+        scratchBindRefusal(scope.workspaceId, {
+          docId,
+          ...(title ? { title } : {}),
+          path: scratchPath,
+        }),
+      );
     }
     // A mockup binds to a file OUTSIDE the repo, so this route was the
     // one bind that took a path on faith: an unreachable one bound

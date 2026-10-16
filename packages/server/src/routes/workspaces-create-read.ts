@@ -4,18 +4,21 @@
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
+import { resolve as resolvePath } from 'node:path';
 import { classifyActor } from '../actor-identity.ts';
 import {
   ATTACHMENT_PRIVACY_ERROR,
   parseAttachmentPrivacy,
   privacyNote,
 } from '../attachment-privacy.ts';
+import { scanFolderPaths } from '../fs-scan.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
   redactBoardWorkspaceForVisitor,
   redactCapChangeForVisitor,
 } from '../share/redact-workspace.ts';
+import { scratchBindRefusal, scratchInFolder } from '../share/scratch-gate.ts';
 import { summarizeGoals } from '../task-queue.ts';
 import { isRetired, retiredNotice } from '../tasks.ts';
 import { wantsJson } from '../workspace-path.ts';
@@ -36,6 +39,7 @@ export async function handleWorkspaceCreateRead(
     withReviewUrl,
     parallelismCapView,
     fileUnderBoardWorkspace,
+    boardIsShared,
     attachmentPrivacy,
   } = ctx;
   const { req, pathname, url, scope, visitor, authorFor } = rq;
@@ -97,6 +101,16 @@ export async function handleWorkspaceCreateRead(
         detail: attachmentPrivacy.loadError,
         hint: 'attachment-privacy.json in the data directory cannot be read, so every attachment set is served as local-only and none can be changed until it is fixed.',
       });
+    }
+    // Never a scratch/ folder or file onto a shared board
+    // (share/scratch-gate.ts). Scanned before the bind: its files open
+    // lazily, so the bind's own result names only the entry doc.
+    const hub = typeof body?.hubWorkspaceId === 'string' ? body.hubWorkspaceId : undefined;
+    if (hub !== undefined && boardIsShared(hub)) {
+      const scratch = scratchInFolder(resolvePath(folderPath), scanFolderPaths);
+      if (scratch !== null) {
+        return j(403, scratchBindRefusal(hub, { docId: folderPath, path: scratch }));
+      }
     }
     const res = await docStore.bindFolder({
       folderPath,
@@ -191,6 +205,18 @@ export async function handleWorkspaceCreateRead(
     const reviewId = body?.reviewId as string | undefined;
     if (reviewId !== undefined && !isValidDocId(reviewId)) {
       return j(400, { error: 'bad reviewId' });
+    }
+    // Never a scratch/ folder or file onto a shared board
+    // (share/scratch-gate.ts). The whole root is scanned, not only the diff:
+    // the review's file tree opens every listed file.
+    if (scope !== undefined && boardIsShared(scope.workspaceId)) {
+      const scratch = scratchInFolder(resolvePath(repoPath), scanFolderPaths);
+      if (scratch !== null) {
+        return j(
+          403,
+          scratchBindRefusal(scope.workspaceId, { docId: reviewId ?? repoPath, path: scratch }),
+        );
+      }
     }
     const res = await docStore.bindDiff({
       repoPath,

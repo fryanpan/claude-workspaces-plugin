@@ -176,6 +176,9 @@ export interface DocRoutesContext {
   homeForDocIndexed: (index: Map<string, string[]>, meta: DocMeta) => string | null;
   /** File a loose attachment under a board, minting Unfiled if needed. */
   fileUnderBoardWorkspace: (attachmentId: string, requested?: string) => string | undefined;
+  /** Has this board a live share, link or member — the scratch gate's test
+   *  for refusing a `scratch/` bind (`share/scratch-gate.ts`). */
+  boardIsShared: (workspaceId: string) => boolean;
   /** Drop an attachment from every board that holds it. */
   unlinkFromEveryBoardWorkspace: (attachmentId: string) => void;
   /** The doc-thread URL a webhook or an SSE payload carries. */

@@ -8,6 +8,7 @@ import { attachmentIdOf } from '@claude-workspaces/core';
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
 import { docKeyForPath } from '../doc-key.ts';
+import { scanFolderPaths } from '../fs-scan.ts';
 import {
   huddleAlias,
   huddleFilePath,
@@ -20,6 +21,7 @@ import { type MeetingKind, meetingFileName, recordMeetingFiling } from '../meeti
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import { redactMetaForVisitor, relativeReviewUrl } from '../share/redact-meta.ts';
+import { scratchBindRefusal, scratchDocOn } from '../share/scratch-gate.ts';
 import { boundFiles } from '../slow-fs.ts';
 import {
   applyImport,
@@ -50,6 +52,7 @@ export async function handleWorkspaceContent(
     externalBaseUrl,
     withReviewUrl,
     fileUnderBoardWorkspace,
+    boardIsShared,
     unfileFromDefault,
     workspacesOfDoc,
     meetingHomeFor,
@@ -127,6 +130,12 @@ export async function handleWorkspaceContent(
     const exists =
       attachDoc !== undefined || docStore.list().some((m) => attachmentIdOf(m) === docId);
     if (!exists) return j(404, { error: 'doc not found', docId });
+    // Never a scratch/ doc, or a set holding one, onto a shared board
+    // (share/scratch-gate.ts).
+    if (boardIsShared(workspaceId)) {
+      const scratch = scratchDocOn([docId], docStore.list(), scanFolderPaths);
+      if (scratch) return j(403, scratchBindRefusal(workspaceId, scratch));
+    }
     const res = taskStore.attachDoc(workspaceId, docId);
     if (!res.ok) return j(404, res);
     // A doc filed here is no longer unfiled.

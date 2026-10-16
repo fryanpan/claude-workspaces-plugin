@@ -131,6 +131,9 @@ export interface WorkspaceRoutesContext {
   /** File a doc under a board — the requested one, else the default — and
    *  answer which board it landed on. */
   fileUnderBoardWorkspace: (attachmentId: string, requested?: string) => string;
+  /** Has this board a live share, link or member — the scratch gate's test
+   *  for refusing a `scratch/` bind (`share/scratch-gate.ts`). */
+  boardIsShared: (workspaceId: string) => boolean;
   /** Take a doc back off the default holding board once a real one has it. */
   unfileFromDefault: (attachmentId: string, keptBoardWorkspaceId: string) => void;
   /**

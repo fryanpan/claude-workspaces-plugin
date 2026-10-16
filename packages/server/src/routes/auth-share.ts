@@ -31,6 +31,7 @@ import {
 } from '../auth/session.ts';
 import { mintBoardWidgetToken, mintWidgetToken } from '../auth/widget-token.ts';
 import type { DocStore } from '../doc-store.ts';
+import { scanFolderPaths } from '../fs-scan.ts';
 import type { Identities, IdentityRecord } from '../identities.ts';
 import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
@@ -40,6 +41,7 @@ import { boardLockedRefusal, lockedBoardNamedBy } from '../share/board-lock.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
 import { readCookie } from '../share/link-session.ts';
+import { scratchDocOn, scratchShareRefusal } from '../share/scratch-gate.ts';
 import { landingLookupsFor, landingOnBoard, parseShareLanding } from '../share/share-landing.ts';
 import { type ShareLinks, shareMemberKey } from '../share/share-links.ts';
 import { ACCESS_NOT_CONFIGURED, type Shares } from '../share/shares.ts';
@@ -748,6 +750,9 @@ export async function handleAuthShareRoutes(
     if (sharingGate.isBoardLocked(workspaceId)) {
       return j(403, boardLockedRefusal(workspaceId));
     }
+    // Never a board holding a scratch/ doc (share/scratch-gate.ts).
+    const linkScratch = scratchDocOn(linkBoard.docIds, docStore.list(), scanFolderPaths);
+    if (linkScratch) return j(403, scratchShareRefusal(workspaceId, linkScratch));
     // A board share opens the board. There is no entry doc to choose,
     // and an older bundle sharing a board sends this key undefined,
     // which JSON.stringify drops.
@@ -971,6 +976,10 @@ export async function handleAuthShareRoutes(
     if (sharingGate.isBoardLocked(workspaceId)) {
       return j(403, boardLockedRefusal(workspaceId));
     }
+    // Never a board holding a scratch/ doc (share/scratch-gate.ts): the
+    // refusal names the doc, so the caller knows what to move off it.
+    const scratch = scratchDocOn(board.docIds, docStore.list(), scanFolderPaths);
+    if (scratch) return j(403, scratchShareRefusal(workspaceId, scratch));
     // BELOW the board lookup, in the order the retired mint used: an older
     // bundle sends `entryDocId: undefined` on every board share, and a
     // grouping id with a member doc must still answer "a grouping cannot be
