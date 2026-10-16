@@ -11,7 +11,11 @@
  * never a name the message carries. A lead posts with its own board-scoped
  * token (`at2`), and the server records the token's agent as the author
  * whatever the body claims, so another agent on the board cannot open a
- * thread on a lead's outbox as that lead.
+ * thread on a lead's outbox as that lead. A caller on the server's machine
+ * that presents no token is trusted-local and its claimed author stands, so
+ * the author id is not enough: the relay also needs the server's record that
+ * the seat's own token, for the seat's board, opened the thread (`openerProof`,
+ * `thread-opener-proofs.ts`).
  *
  * Each message ends in exactly one of three verdicts, every one logged
  * without its body (`relay-log.ts`):
@@ -226,9 +230,13 @@ export function createRelay(opts: RelayOptions): Relay {
     const id = `${seat.id}:${thread.id}`;
     if (handled.has(id)) return;
     const opener = thread.comments[0];
-    // Only the seat's own agent sends from its outbox. A thread somebody
-    // else opened there is left alone, unlogged, since it is not a message.
+    // Only the seat's own agent sends from its outbox, and only with its own
+    // board token for the seat's board: the server's opener proof, not the
+    // author id, which a loopback caller without a token can claim. A thread
+    // anybody else opened there is left alone, unlogged; it is not a message.
+    const proof = thread.openerProof;
     if (!opener || thread.createdById !== seat.agentId || opener.authorId !== seat.agentId) return;
+    if (proof?.agentId !== seat.agentId || proof.boardId !== seat.board) return;
     const parsed = parseOutboxText(opener.text);
     if (!parsed) return;
     const server = config.servers.get(seat.server);
