@@ -41,7 +41,7 @@ The full rule ships fleet-wide in the `claude-workspaces:working-in-a-workspace`
 
 ## How
 
-**Markdown docs** — bind via `mcp__plugin_claude-workspaces_claude-workspaces__create_review_doc(docId, path, title?)`. Post the review URL (`http://<host>:8787/review/<docId>`) on the task or thread the doc belongs to (see above); a chat message carries at most a pointer.
+**Markdown docs** — bind via `mcp__plugin_claude-workspaces_claude-workspaces__create_review_doc(docId, path, title?)`. Post the doc's URL (`https://<host>/workspaces/<workspaceId>/docs/<docId>`; the old `/review/<docId>` form is gone and answers 404) on the task or thread the doc belongs to (see above); a chat message carries at most a pointer.
 
 **Dev servers / HTML mockups** — use the `claude-workspaces:embedding-widget` skill (it covers the `<script>` tags + `setContext` calls).
 
