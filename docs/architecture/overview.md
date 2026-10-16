@@ -2221,9 +2221,10 @@ paragraph he writes when he pauses, to `/coach/here`
 (`workspaces-app/src/coach-card.ts`); `coach/stream.ts` turns that and his
 own comment, reply and open rows (through `onActivity` in `activity.ts`)
 into one event per thing he does, dropping repeats. `coach/exclusion.ts`
-drops everything from a board that is local-only, sharing-locked, reachable
-by anyone besides him, or that he turned off from the card ("Coach off for
-this board", `POST /coach/boards`); a check that throws counts as off.
+drops everything from a board that is local-only, sharing-locked, or that he
+turned off from the card ("Coach off for this board", `POST /coach/boards`);
+a check that throws counts as off. A board others can reach still counts:
+what reaches the coach from it is only his own actions there.
 (C) *Intervene*: `coach/moment.ts` sends every event, his answers and his
 how-readily setting to the coach's Claude Code session, the Coach board's
 lead, as addressed frames (`coach/session-feed.ts`). Events are held: the
@@ -2234,11 +2235,18 @@ plan board's goals in board order with the day the list was last set, marked
 possibly stale past eight days, or says there is no current week plan
 (`coach/week-plan.ts`). It also lists his Claude Code time per attached session, the repo and its
 active minutes, counted from each prompt he typed (the plugin's
-UserPromptSubmit hook posts typed-or-not, never the text, to
-`routes/prompt-marks.ts`) through the Stop hook's turn notes after it, never
-for the coach (`coach/session-minutes.ts`). A typed prompt opens a window as
+UserPromptSubmit hook posts typed-or-not, and a typed prompt's reduced text,
+to `routes/prompt-marks.ts`) through the Stop hook's turn notes after it, never
+for the coach (`coach/session-minutes.ts`). One Haiku call per digest says
+each prompt and turn in a line (`coach/summary.ts`); the text stays on the
+server. A hook in a session launched with no board posts to the one board
+where that session holds a stream (`plugin/hooks/lib/joined-board.ts`), and a
+`claude -p` or SDK run counts as nobody typing. A typed prompt opens a window as
 a board event does; a turn end never does. A quiet stretch sends nothing,
-and answers and the setting go at once. Past 400 turns in a day it sends
+and answers and the setting go at once. With no session holding a stream
+the windows wait in `coach/backlog.json` (`coach/backlog.ts`, bounded to 96
+windows and 48 hours, across a restart) and go as one digest when its stream
+comes back. Past 400 turns in a day it sends
 nothing and the front page says the coach is paused for today. The session raises a moment on `POST /coach/moments`, and
 `coach/judge.ts` refuses one that does not copy three words in order from the
 goal it names, or arrives while another is open. A moment goes to his pages over
@@ -2252,8 +2260,8 @@ board that is off for the coach shows it too, marked so, and tells the
 session nothing. He answers with a thumbs up, or a thumbs down with a few
 words of why that reach the session in `coach.answer`. In the session, `mcp/src/coach-line.ts` renders each frame and
 `coach_moment` raises a moment; the persona is the plugin's `coaching` skill.
-With no session holding a stream nothing is sent and the front page says it
-is offline. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
+With no session holding a stream the front page says it is offline, and
+only the digests wait for it. `coach/store.ts` keeps it all in `coach/state.json`, mode 600;
 `coach/wiring.ts` composes it for `server.ts`. `scripts/coach-eval.ts` plays
 the fixture days to a real coach session and scores it.
 

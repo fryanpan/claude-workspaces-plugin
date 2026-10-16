@@ -20,6 +20,7 @@ import type { AnswerCoverage } from './answer-coverage.ts';
  */
 import type { CallerAgent, PeerSocket } from './auth/agent-caller.ts';
 import type { CodeSender } from './auth/code-sender.ts';
+import type { CoachSummarizer } from './coach/summary.ts';
 import type { Deployer } from './deploy.ts';
 import type { WatchFactory } from './dispatch-registry.ts';
 import type { EffortEstimator } from './effort-estimator.ts';
@@ -398,6 +399,16 @@ export interface ServerOptions {
    * (`haikuEffortEstimator`); tests pass a stub.
    */
   effortEstimator?: EffortEstimator;
+  /**
+   * Says each prompt and turn in the coach's digest in a few words
+   * (`coach/summary.ts`). **No default**, the same seam rule: omitted, each
+   * line is the mark's own first words. `bin.ts` constructs the real one
+   * (`haikuCoachSummarizer`); tests pass a stub.
+   */
+  coachSummarizer?: CoachSummarizer;
+  /** How long a coach digest window stays open (default 15 minutes). A test
+   *  seam, like `stallNudgeQuietMs`. */
+  coachDigestWindowMs?: number;
   /**
    * How long a held review item may stand before the stall loop complains
    * (default `HELD_ITEM_DEFAULT_MS`, five minutes; `CW_HELD_ITEM_MINUTES`

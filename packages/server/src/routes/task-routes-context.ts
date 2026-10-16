@@ -70,12 +70,12 @@ export interface TaskRoutesContext {
    *  never nudged to file one (`coach/wiring.ts`). */
   isCoachSession: (workspaceId: string, agentName: string) => boolean;
   /** A turn note counted as the owner's Claude Code time in the coach's
-   *  digest (`coach/session-minutes.ts`); the note's text is never read. */
+   *  digest (`coach/session-minutes.ts`), its text summarised there. */
   coachSessionTurn: (workspaceId: string, note: AgentNoteInput, cwd: unknown) => void;
-  /** A prompt mark (typed or injected, never its text) for the same digest. */
+  /** A prompt mark (typed or injected; a typed one's text) for the same digest. */
   coachSessionPrompt: (
     workspaceId: string,
-    mark: { agent: string; typed: boolean; at: number; sessionId?: string },
+    mark: { agent: string; typed: boolean; at: number; sessionId?: string; text?: string },
     cwd: unknown,
   ) => void;
   /** Wakes the lead when a row it owns becomes ready. */

@@ -1,11 +1,16 @@
 /**
  * The coach session's feed: a frame is addressed on the Coach board to its
- * lead, and only while that lead holds a stream, so a session that is gone
- * returns to no backlog. What he does arrives as one digest per window, at
+ * lead, and only while that lead holds a stream. What he does while it is
+ * away waits, on disk across a restart, and goes as one digest when it is
+ * back. What he does arrives as one digest per window, at
  * most every 15 minutes and only when the window holds something; his
  * answers and his setting arrive as they happen.
  */
 import { describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CoachBacklog } from '../src/coach/backlog.ts';
 import { DIGEST_WINDOW_MS, SessionFeed, type SessionFrame } from '../src/coach/session-feed.ts';
 
 /** A clock and a timer the test moves by hand. */
@@ -192,17 +197,17 @@ describe('the digest', () => {
     expect(sent.map(([, , fr]) => fr.event)).toEqual(['coach.preference']);
   });
 
-  it('holds nothing for a session that is not there, and drops a window it left during', () => {
+  it('holds what he does while the session is away, and sends every waiting window as one digest when it is back', () => {
     const away = feed({ connected: false });
-    expect(away.f.send(viewNews('d-post'), away.time.now())).toBe(false);
-    expect(away.time.pending()).toBe(0);
+    expect(away.f.send(viewNews('d-post'), away.time.now())).toBe(true);
     let connected = true;
     const time = fakeTime();
     const sent: SessionFrame[] = [];
+    const turns: number[] = [];
     const f = new SessionFeed({
       now: time.now,
       schedule: time.schedule,
-      countTurn: () => {},
+      countTurn: (at) => turns.push(at),
       lead: () => ({ workspaceId: 'w-coach', agentId: 'agent-coach' }),
       connected: () => connected,
       send: (_w, _a, fr) => {
@@ -213,10 +218,128 @@ describe('the digest', () => {
       planBoard: () => undefined,
       timeZone: () => 'UTC',
     });
+    const start = time.now();
     f.send(viewNews('d-post'), time.now());
     connected = false;
     time.advance(DIGEST_WINDOW_MS);
+    f.send(viewNews('d-hover'), time.now());
+    time.advance(DIGEST_WINDOW_MS);
     expect(sent).toEqual([]);
+    connected = true;
+    f.reconnected();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      event: 'coach.digest',
+      from: start,
+      to: start + 2 * DIGEST_WINDOW_MS,
+      windows: 2,
+    });
+    const items = sent[0]?.event === 'coach.digest' ? sent[0].items : [];
+    expect(items.map((i) => i.docId)).toEqual(['d-post', 'd-hover']);
+    expect(turns).toHaveLength(1);
+    f.reconnected();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('keeps a held window across a restart, open or closed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coach-backlog-'));
+    try {
+      const time = fakeTime();
+      let connected = false;
+      const sent: SessionFrame[] = [];
+      const make = (clock = time) =>
+        new SessionFeed({
+          now: clock.now,
+          schedule: clock.schedule,
+          countTurn: () => {},
+          lead: () => ({ workspaceId: 'w-coach', agentId: 'agent-coach' }),
+          connected: () => connected,
+          send: (_w, _a, fr) => {
+            sent.push(fr);
+            return 1;
+          },
+          eventsOn: () => 0,
+          planBoard: () => undefined,
+          timeZone: () => 'UTC',
+          backlog: new CoachBacklog(dir, time.now()),
+        });
+      const first = make();
+      first.send(viewNews('d-post'), time.now());
+      first.stop();
+      const second = make();
+      connected = true;
+      second.reconnected();
+      expect(sent).toHaveLength(1);
+      const items = sent[0]?.event === 'coach.digest' ? sent[0].items : [];
+      expect(items.map((i) => i.docId)).toEqual(['d-post']);
+      second.stop();
+      const third = make();
+      third.reconnected();
+      expect(sent).toHaveLength(1);
+      third.stop();
+      // A crash: the open window was written as it filled, and the next
+      // feed closes it when it would have closed.
+      const crashed = make(fakeTime(time.now()));
+      crashed.send(viewNews('d-hover'), time.now());
+      const after = make();
+      time.advance(DIGEST_WINDOW_MS);
+      expect(sent).toHaveLength(2);
+      const resumed = sent[1]?.event === 'coach.digest' ? sent[1].items : [];
+      expect(resumed.map((i) => i.docId)).toEqual(['d-hover']);
+      after.stop();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('says each prompt in a few words through the summariser, and falls back to its own words', async () => {
+    for (const reply of [['Asked for a berth chart'], null]) {
+      const time = fakeTime();
+      const sent: SessionFrame[] = [];
+      const asked: string[][] = [];
+      const f = new SessionFeed({
+        now: time.now,
+        schedule: time.schedule,
+        countTurn: () => {},
+        lead: () => ({ workspaceId: 'w-coach', agentId: 'agent-coach' }),
+        connected: () => true,
+        send: (_w, _a, fr) => {
+          sent.push(fr);
+          return 1;
+        },
+        eventsOn: () => 0,
+        planBoard: () => undefined,
+        timeZone: () => 'UTC',
+        summarizer: async (marks) => {
+          asked.push(marks.map((m) => m.text));
+          return reply;
+        },
+      });
+      const text = 'Draw the Harborlight berth chart for the spring tides';
+      f.prompt(
+        {
+          boardId: 'w-harbor',
+          board: 'Harborlight',
+          session: 's1',
+          repo: 'harborlight',
+          at: time.now(),
+          text,
+        },
+        true,
+      );
+      time.advance(DIGEST_WINDOW_MS);
+      await f.idle();
+      expect(asked).toEqual([[text]]);
+      const sessions = sent[0]?.event === 'coach.digest' ? sent[0].sessions : [];
+      expect(sessions).toMatchObject([
+        {
+          boardId: 'w-harbor',
+          repo: 'harborlight',
+          activity: [{ kind: 'prompt', summary: reply?.[0] ?? text }],
+        },
+      ]);
+      expect(JSON.stringify(sent)).toContain(reply?.[0] ?? text);
+    }
   });
 
   it('stop cancels a window still open', () => {

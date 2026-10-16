@@ -17,6 +17,7 @@ import { haikuAnswerCoverage } from './answer-coverage.ts';
  */
 import { resolvePostmarkCodeSender } from './auth/postmark-code-sender.ts';
 import { describeClaudeKey } from './claude-key-source.ts';
+import { haikuCoachSummarizer } from './coach/summary.ts';
 import { createDeployer } from './deploy.ts';
 import { effortEstimateEnabled, haikuEffortEstimator } from './effort-estimator.ts';
 import {
@@ -336,6 +337,11 @@ export function createServerDeps(
   // meeting keeps the title it was created with until somebody renames it.
   const titleNamer = haikuMeetingNamer();
 
+  // The ONLY place the real coach summariser is constructed. What it sends is
+  // what the coach session already reads; absent key or CW_COACH_SUMMARIES=0
+  // → null → each digest line is the prompt's own first words.
+  const coachSummarizer = haikuCoachSummarizer();
+
   // The ONLY place a real plugin refresher is constructed — same seam rule as
   // the summarizer above, and here it also means no test run and no `bun run
   // staging` can mutate this machine's plugin cache. A deploy has to be asked
@@ -394,6 +400,7 @@ export function createServerDeps(
     calendarBot,
     notesComposer,
     titleNamer,
+    coachSummarizer,
     pluginRefresher,
     deployer,
   };

@@ -14244,15 +14244,19 @@ function planLines(plan) {
     ...goals.map((g, i) => `${i + 1}. ${g.title}${g.id ? ` (${g.id})` : ""}`)
   ];
 }
-function sessionLines(p) {
+function sessionLines(p, timeZone) {
   if (p.sessions === undefined)
     return [];
   const lines = p.sessions.flatMap((s) => {
     if (!s.repo || !s.boardId)
       return [];
     const n = (count, one) => `${count ?? 0} ${one}${count === 1 ? "" : "s"}`;
+    const said = (s.activity ?? []).flatMap((a) => a.summary ? [
+      `  -${clock2(a.at, timeZone)} ${a.kind === "turn" ? "session" : "he asked"}: ${a.summary}`
+    ] : []);
     return [
-      `- ${s.repo}, on board "${s.board ?? s.boardId}": ${s.minutes ?? 0} min, ${n(s.prompts, "typed prompt")}, ${n(s.turns, "turn end")}`
+      `- ${s.repo}, on board "${s.board ?? s.boardId}": ${s.minutes ?? 0} min, ${n(s.prompts, "typed prompt")}, ${n(s.turns, "turn end")}`,
+      ...said
     ];
   });
   const head = lines.length > 0 ? ["Claude Code sessions (active minutes):", ...lines] : ["Claude Code sessions: none counted."];
@@ -14260,12 +14264,13 @@ function sessionLines(p) {
 }
 function digestLine(p, timeZone) {
   const lines = (p.items ?? []).flatMap((i) => digestItemLine(i, timeZone) ?? []);
-  const sessions = sessionLines(p);
+  const sessions = sessionLines(p, timeZone);
   if (lines.length === 0 && !(p.sessions ?? []).some((s) => s.repo && s.boardId))
     return null;
   const span = `${clock2(p.from, timeZone)}–${clock2(p.to, timeZone).trim()}`;
+  const away = (p.windows ?? 0) > 1 || (p.dropped ?? 0) > 0 ? ` (held while you were away: ${p.windows ?? 1} windows${p.dropped ? `, ${p.dropped} older ones dropped` : ""})` : "";
   return [
-    `[coach.digest${span}] What the owner did:`,
+    `[coach.digest${span}] What the owner did${away}:`,
     ...lines,
     ...sessions,
     ...planLines(p.plan)
@@ -21536,7 +21541,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.313";
+var PLUGIN_VERSION = "0.1.314";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

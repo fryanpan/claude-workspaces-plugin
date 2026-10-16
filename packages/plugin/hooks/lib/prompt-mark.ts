@@ -4,9 +4,24 @@
  * The coach counts the owner's Claude Code time from the prompts he types,
  * and a turn note cannot say whether a person or a channel woke the turn. So
  * every prompt posts one mark to `POST /workspaces/{id}/agents/{name}/prompts`
- * saying only whether it was typed, with the session id and working
- * directory the turn notes already carry. The prompt's text never leaves
- * this machine: it is read here, classified, and dropped.
+ * saying whether it was typed, with the session id and working directory the
+ * turn notes already carry. A typed prompt also carries its text, reduced the
+ * way a turn note is (`note-redact.ts`) and capped at `PROMPT_TEXT_CAP`, so
+ * the coach's digest can say what he asked (the owner, 2026-10-16). An
+ * injected prompt carries no text.
+ *
+ * Headless runs are not typed. `claude -p` and the Agent SDK set
+ * `CLAUDE_CODE_ENTRYPOINT` to `sdk-cli`, `sdk-ts` or `sdk-py` (read off the
+ * Claude Code 2.1.302 binary: the CLI rewrites `cli` to `sdk-cli` when it
+ * runs non-interactively), so a prompt there marks the run as injected
+ * and nothing in it reaches the digest. A Remote Control session is
+ * excepted: its process can run the same non-interactive way while a person
+ * types on the phone, and Claude Code names its bridge in
+ * `CLAUDE_CODE_BRIDGE_SESSION_ID`.
+ *
+ * The name comes from the launch env. The board does too, or, for a session
+ * launched without one, it is the board the session joined with
+ * `attach_agent` (`joined-board.ts`).
  *
  * A prompt is typed unless it starts with a wrapper the harness puts around
  * what it injects. The wrappers are the ones a lead session's transcript
@@ -26,6 +41,8 @@ import {
   readWorkspaceId,
   resolveBaseUrl,
 } from './agent-notes.ts';
+import { findJoinedBoard } from './joined-board.ts';
+import { fullNote } from './note-redact.ts';
 
 /** How an injected prompt begins, after leading whitespace. */
 export const INJECTED_PREFIXES: readonly string[] = [
@@ -40,14 +57,26 @@ export const INJECTED_PREFIXES: readonly string[] = [
 ];
 
 const SHORT_STRING_MAX = 200;
+/** The most of a typed prompt sent; the route refuses past 4,000. */
+export const PROMPT_TEXT_CAP = 2_000;
+/** What `CLAUDE_CODE_ENTRYPOINT` reads in a run nobody is typing into. */
+export const HEADLESS_ENTRYPOINTS: readonly string[] = ['sdk-cli', 'sdk-ts', 'sdk-py'];
 
-/** The wire body the prompts route accepts. No prompt text, ever. */
+/** The wire body the prompts route accepts. Text only on a typed prompt. */
 export interface PromptMark {
   agent: string;
   typed: boolean;
   cwd?: string;
   sessionId?: string;
+  text?: string;
   at: number;
+}
+
+/** A `claude -p` or SDK run with nobody at it. */
+export function isHeadless(env: EnvLike): boolean {
+  const entry = env.CLAUDE_CODE_ENTRYPOINT?.trim() ?? '';
+  if (!HEADLESS_ENTRYPOINTS.includes(entry)) return false;
+  return (env.CLAUDE_CODE_BRIDGE_SESSION_ID?.trim() ?? '') === '';
 }
 
 /** True when a person typed it, false when the harness injected it, and
@@ -64,23 +93,26 @@ const shortString = (v: unknown): string | undefined =>
 
 export function decidePromptMark(
   payload: unknown,
-  ctx: { agent?: string; now: number },
+  ctx: { agent?: string; now: number; headless?: boolean },
 ): { post: PromptMark } | { skip: string } {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     return { skip: 'malformed payload' };
   }
   if (!ctx.agent) return { skip: 'no agent name' };
   const p = payload as Record<string, unknown>;
-  const typed = isTypedPrompt(p.prompt);
-  if (typed === undefined) return { skip: 'no prompt' };
+  const classified = isTypedPrompt(p.prompt);
+  if (classified === undefined) return { skip: 'no prompt' };
+  const typed = classified && !ctx.headless;
   const cwd = shortString(p.cwd);
   const sessionId = shortString(p.session_id);
+  const text = typed ? fullNote(p.prompt, PROMPT_TEXT_CAP) : '';
   return {
     post: {
       agent: ctx.agent,
       typed,
       ...(cwd !== undefined ? { cwd } : {}),
       ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(text !== '' ? { text } : {}),
       at: ctx.now,
     },
   };
@@ -91,6 +123,9 @@ export interface PromptHookDeps {
   fetch?: typeof fetch;
   now?: () => number;
   discoveryPort?: () => number | undefined;
+  /** With no board in the env, ask the server which board the session
+   *  joined (`joined-board.ts`). */
+  joinedBoard?: boolean;
 }
 
 /** Read stdin, decide, post. Answers whether a mark was delivered; never throws. */
@@ -99,13 +134,20 @@ export async function runPromptHook(stdin: string, deps: PromptHookDeps): Promis
     const decision = decidePromptMark(JSON.parse(stdin), {
       agent: readAgentName(deps.env),
       now: deps.now ? deps.now() : Date.now(),
+      headless: isHeadless(deps.env),
     });
     if ('skip' in decision) return false;
-    const workspaceId = readWorkspaceId(deps.env);
     const baseUrl = resolveBaseUrl(deps.env, deps.discoveryPort);
-    if (!workspaceId || !baseUrl) return false;
+    if (!baseUrl) return false;
+    const fetchImpl = deps.fetch ?? fetch;
+    const workspaceId =
+      readWorkspaceId(deps.env) ??
+      (deps.joinedBoard
+        ? await findJoinedBoard(baseUrl, decision.post.agent, fetchImpl)
+        : undefined);
+    if (!workspaceId) return false;
     const path = `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(decision.post.agent)}/prompts`;
-    const res = await (deps.fetch ?? fetch)(`${baseUrl}${path}`, {
+    const res = await fetchImpl(`${baseUrl}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(decision.post),

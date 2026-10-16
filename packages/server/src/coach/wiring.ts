@@ -10,12 +10,15 @@
  *  - the Coach board's lead, and an addressed frame to it: the coach's
  *    Claude Code session, which hears every event (`session-feed.ts`);
  *  - each attached session's prompt marks and turn notes, for his Claude
- *    Code time (`session-minutes.ts`);
+ *    Code time and what he asked (`session-minutes.ts`, `summary.ts`);
+ *  - a backlog file, where windows wait while the session is away
+ *    (`backlog.ts`);
  *  - a timer to the next morning in his zone, for the session's one wake-up
  *    a day (`morning.ts`).
  */
 import { agentIdForName } from '@claude-workspaces/core';
 import { type Event, onActivity } from '../activity.ts';
+import { CoachBacklog } from './backlog.ts';
 import { type BoardPrivacy, placeIsOff } from './exclusion.ts';
 import { type GoalsDocReading, readGoalsDoc } from './goals-doc.ts';
 import { CoachHub } from './hub.ts';
@@ -27,6 +30,7 @@ import { repoOfCwd } from './session-minutes.ts';
 import { type CoachSetupDeps, ensureMemoryDoc } from './setup.ts';
 import { CoachStore } from './store.ts';
 import { CoachStream } from './stream.ts';
+import type { CoachSummarizer } from './summary.ts';
 import type { PlanBoardReading } from './week-plan.ts';
 
 export interface CoachWiringDeps {
@@ -58,6 +62,10 @@ export interface CoachWiringDeps {
   now?: () => number;
   /** The digest window's timer (`SessionFeedDeps.schedule`). */
   schedule?: (fn: () => void, ms: number) => () => void;
+  /** The digest window's length; `DIGEST_WINDOW_MS` by default. */
+  digestWindowMs?: number;
+  /** Says each prompt and turn in a few words (`coach/summary.ts`). */
+  summarizer?: CoachSummarizer | null;
   /** The morning wake-up's timer and hour (`coach/morning.ts`); default an
    *  unref'd timer and `MORNING_HOUR`. */
   morningSchedule?: (fn: () => void, ms: number) => () => void;
@@ -82,30 +90,43 @@ export interface CoachWiring {
   sessionTurn: (workspaceId: string, note: SessionNote, cwd?: unknown) => boolean;
   /** A session's prompt mark, from the prompts route: typed or injected. */
   sessionPrompt: (workspaceId: string, mark: PromptMark, cwd?: unknown) => boolean;
+  /** An agent's stream on `workspaceId` came or went: a waiting digest may
+   *  go now. */
+  agentStreamsChanged: (workspaceId: string) => void;
   stop: () => void;
 }
 
-/** What the prompts route hands on. The prompt's text never reaches the server. */
+/** What the prompts route hands on. A typed prompt's text, as the hook
+ *  reduced it, is summarised for the digest and never sent whole. */
 export interface PromptMark {
   agent: string;
   typed: boolean;
   at: number;
   sessionId?: string;
+  text?: string;
 }
 
-/** What `sessionTurn` reads off a note. Its text is never read. */
+/** What `sessionTurn` reads off a note: its closing message is summarised
+ *  for the digest the same way. */
 export interface SessionNote {
   agent: string;
   kind: string;
   at: number;
   sessionId?: string;
+  text?: string;
 }
+
+/** The most of a prompt or closing message held for its summary. */
+const MARK_TEXT_CHARS = 2_000;
 
 export function wireCoach(deps: CoachWiringDeps): CoachWiring {
   const store = new CoachStore(deps.dataDir);
   // An unreadable state file means the boards he turned off are unknown.
+  // A board shared with someone else still counts: what reaches the coach
+  // from it is his own doing (the owner, 2026-10-16: "full visibility into
+  // everything I'm doing"), and nothing here reads anyone else's rows.
   const isOff = (place: { workspaceId: string; docId?: string }) =>
-    store.readFailed || placeIsOff(place, deps.privacy, store.offBoards);
+    store.readFailed || placeIsOff(place, deps.privacy, store.offBoards, { allowShared: true });
   const hub = new CoachHub({ offAt: isOff });
   const readGoals = (): GoalsDocReading | null => {
     const doc = store.goalsDoc;
@@ -124,6 +145,9 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     countTurn: (at) => store.countEvent(at),
     planBoard: deps.planBoard,
     timeZone: () => store.timeZone,
+    backlog: new CoachBacklog(deps.dataDir),
+    summarizer: deps.summarizer ?? null,
+    ...(deps.digestWindowMs === undefined ? {} : { windowMs: deps.digestWindowMs }),
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.schedule ? { schedule: deps.schedule } : {}),
   });
@@ -188,25 +212,32 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     at: number,
     sessionId?: string,
     cwd?: unknown,
+    text?: string,
   ) => {
     if (isOff({ workspaceId }) || isCoachSession(workspaceId, agent)) return null;
     const board = deps.boardName(workspaceId);
+    const said = text?.trim();
     return {
       at,
       boardId: workspaceId,
       ...(board ? { board } : {}),
       session: sessionId ?? agent,
       repo: repoOfCwd(cwd) ?? 'unknown repo',
+      ...(said ? { text: said.slice(0, MARK_TEXT_CHARS) } : {}),
     };
   };
   const sessionTurn = (workspaceId: string, note: SessionNote, cwd?: unknown): boolean => {
     if (note.kind !== 'turn') return false;
-    const news = sessionOf(workspaceId, note.agent, note.at, note.sessionId, cwd);
+    const news = sessionOf(workspaceId, note.agent, note.at, note.sessionId, cwd, note.text);
     return news !== null && feed.turn(news);
   };
   const sessionPrompt = (workspaceId: string, mark: PromptMark, cwd?: unknown): boolean => {
-    const news = sessionOf(workspaceId, mark.agent, mark.at, mark.sessionId, cwd);
+    const text = mark.typed ? mark.text : undefined;
+    const news = sessionOf(workspaceId, mark.agent, mark.at, mark.sessionId, cwd, text);
     return news !== null && feed.prompt(news, mark.typed);
+  };
+  const agentStreamsChanged = (workspaceId: string): void => {
+    if (store.goalsDoc?.workspaceId === workspaceId) void feed.reconnected();
   };
   return {
     store,
@@ -227,6 +258,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     isCoachSession,
     sessionTurn,
     sessionPrompt,
+    agentStreamsChanged,
     stop: () => {
       unsubscribe();
       morning.stop();

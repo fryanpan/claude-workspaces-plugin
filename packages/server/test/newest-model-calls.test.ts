@@ -14,6 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { isPricedModel } from '@claude-workspaces/core';
 import { haikuAnswerCoverage } from '../src/answer-coverage.ts';
+import { haikuCoachSummarizer } from '../src/coach/summary.ts';
 import { haikuEffortEstimator } from '../src/effort-estimator.ts';
 import { haikuMeetingNamer } from '../src/meeting-namer.ts';
 import { createHaikuNotesComposer } from '../src/meeting-notes-composer.ts';
@@ -148,6 +149,14 @@ describe('a reply that opens with a thinking block still yields the answer', () 
     const namer = haikuMeetingNamer({ apiKey: 'k-test', fetchImpl: f.impl });
     const out = await namer?.({ notes: '- the launch slips a week\n- Alice owns the checklist' });
     expect(out).toBe('Harborlight launch review');
+    expectAcceptedRequest(f.sent[0]);
+  });
+
+  it('coach digest summary', async () => {
+    const f = thinkingFirst([text('["Asked for the Riverbend tide table"]')]);
+    const summarise = haikuCoachSummarizer({ apiKey: 'k-test', fetchImpl: f.impl });
+    const out = await summarise?.([{ kind: 'prompt', text: 'make the Riverbend tide table' }]);
+    expect(out).toEqual(['Asked for the Riverbend tide table']);
     expectAcceptedRequest(f.sent[0]);
   });
 
