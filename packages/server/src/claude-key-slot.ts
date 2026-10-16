@@ -108,6 +108,7 @@ export const CLAUDE_CALL_PATHS = [
   'voice-feedback-tidy',
   'effort-estimate',
   'review-gate',
+  'relay-filter',
   'answer-coverage',
   'notes-eval',
   'cost-script',

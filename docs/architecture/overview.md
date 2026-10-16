@@ -56,7 +56,7 @@ flowchart TB
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts"]
   end
@@ -2151,6 +2151,24 @@ holds. `landing-remote.ts` draws the rows as escaped text inside
 `#landing-review`, so the page's existing swap redraws them. The feed route
 answers above request admission, with its own gate, because a service token's
 stamp names nobody (security.md).
+
+**The relay between organizations.** `org-relay/` carries agent messages
+between project servers, and runs as a process of its own, not inside the
+server: it holds every project's token so that no lead has to. A seat sends by
+opening a thread on its outbox doc on its own board, first line `to: <seat>`.
+The relay reads each outbox with that server's credentials, so the sender is
+the outbox's seat, never a name the message gives. `relay-config.ts` reads a
+mode-600 file naming the servers, their organizations and the seats on them;
+a seat's organization is its server's. `relay-rule.ts` delivers inside an
+organization, refuses across one unless the sender holds cross-organization
+access, and runs the fixed checks. `relay-filter.ts` is the Haiku classifier,
+on the review judge's model and key path, which every cross-organization or
+untrusted message passes; a flag, an error or a timeout holds the message.
+`relay.ts` delivers onto the recipient's inbox doc as a quoted subject thread
+marked with its source, and `relay-log.ts` keeps the append-only log (no
+bodies) and the hold queue that `relay-bin.ts release <id>` empties. Every
+call is an existing thread verb (`relay-client.ts`). Tests:
+`org-relay-two-servers.test.ts` (two real servers), `org-relay-units.test.ts`.
 
 **Incoming Messages** is a section on the landing page that lists the
 message threads an inbox reader agent judged worth Bryan's time. It is not a
