@@ -259,8 +259,11 @@ export class RestoreRefused extends Error {}
  * untrusted input.
  */
 function checkMembers(tarPath: string): void {
-  const names = spawnSync('tar', ['-tzf', tarPath], { encoding: 'utf8' });
-  const long = spawnSync('tar', ['-tvzf', tarPath], { encoding: 'utf8' });
+  // spawnSync's default 1 MB buffer would cut a listing of a few thousand
+  // docs short and read as a broken tar.
+  const opts = { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 } as const;
+  const names = spawnSync('tar', ['-tzf', tarPath], opts);
+  const long = spawnSync('tar', ['-tvzf', tarPath], opts);
   if (names.status !== 0 || long.status !== 0) throw new RestoreRefused('snapshot is not a tar');
   for (const name of names.stdout.split('\n').filter(Boolean)) {
     if (name.startsWith('/') || name.split('/').includes('..')) {
