@@ -40,8 +40,10 @@
  */
 import { normalizeEmail } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
+import { type BoardAgentClaims, boardAgentBearerOf } from './auth/board-agent-token.ts';
 import { type FrameHost, frameGate, frameGateRefusal } from './frame-host.ts';
 import { memberBoards, memberHomeResponse, notAMemberResponse, wantsPage } from './member-home.ts';
+import { admitBoardAgent } from './middleware/board-agent-door.ts';
 import { LOOPBACK_HOSTS, type OriginPolicy, corsHeadersFor } from './middleware/browser-origin.ts';
 import type { CfAccessVerifier } from './middleware/cf-access.ts';
 import {
@@ -261,6 +263,8 @@ export interface RequestAdmissionContext {
   requestAddress: (req: Request) => string | undefined;
   /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
   frameHost: FrameHost | null;
+  /** What a board agent token still grants (`auth/board-agent-token.ts`). */
+  boardAgentGrantFor: (bearer: string) => BoardAgentClaims | null;
 }
 
 /** Doc metadata as one caller may see it — the full record on the tailnet,
@@ -305,6 +309,13 @@ export type Admission =
        * pair on it, so the sweep can hang up once the token stops verifying.
        */
       widgetDoorGrant: { token: string; origin: string } | null;
+      /**
+       * The agent and board an `at2` bearer proved, or null. Set together
+       * with `visitor` (that board), so every visitor rule applies; read by
+       * attribution, which writes as that agent, and by the watch-set route,
+       * which serves it that board's watches only.
+       */
+      boardAgent: BoardAgentClaims | null;
       /** Doc metadata as this caller may see it. */
       metaFor: MetaForVisitor;
       /**
@@ -368,6 +379,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     boardWidgetGrantFor,
     docTypeOf,
     frameHost,
+    boardAgentGrantFor,
   } = ctx;
 
   const admit = async (req: Request, addressed: { pathname: string }): Promise<Admission> => {
@@ -399,6 +411,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     let accessEmail: string | null = null;
     /** Set by the widget-door branch below; see the admitted field. */
     let widgetDoorGrant: { token: string; origin: string } | null = null;
+    /** Set by the board agent door below; see the admitted field. */
+    let boardAgent: BoardAgentClaims | null = null;
     /** Set by `memberDoor` below; see the admitted field. */
     let visitorHome: { signedInAs: string } | null = null;
     /** Where a refused visitor's page links for their list, or null on a door
@@ -601,7 +615,26 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       ) {
         return j(403, { error: 'sharing_disabled' });
       }
-      if (decision.kind === 'share') {
+      // A board agent token is judged by itself and nothing else, whatever
+      // the host would otherwise grant (middleware/board-agent-door.ts).
+      const boardBearer = boardAgentBearerOf(req.headers);
+      if (boardBearer !== null) {
+        const door = await admitBoardAgent({
+          req,
+          pathname,
+          hostKind: decision.kind,
+          bearer: boardBearer,
+          address: requestAddress(req),
+          proxiedVerifier: proxiedTrustedVerifier,
+          grantFor: boardAgentGrantFor,
+          workspacesOf: shareWorkspacesOf,
+          j,
+        });
+        if (!door.ok) return door.response;
+        visitor = door.target;
+        visitorMemberKey = door.memberKey;
+        boardAgent = door.grant;
+      } else if (decision.kind === 'share') {
         if (!cfAccessVerifier) {
           // A share exists but we cannot verify Access tokens — refuse
           // rather than serve the doc to an unauthenticated visitor.
@@ -907,6 +940,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       accessEmail,
       visitorHome,
       widgetDoorGrant,
+      boardAgent,
       metaFor,
       roleFor,
       requireOwner,

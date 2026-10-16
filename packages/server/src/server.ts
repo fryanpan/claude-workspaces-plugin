@@ -38,6 +38,7 @@ import {
   mintAgentToken,
   refuseNonLocalAgentCaller,
 } from './auth/agent-token.ts';
+import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/board-agent-token.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
 import { createBoardSummaries } from './board-summary.ts';
@@ -138,6 +139,7 @@ import {
 import { type AppRoutesContext, handleAppRoutes } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext, handleAuthShareRoutes } from './routes/auth-share.ts';
+import { type BoardTokenRoutesContext, handleBoardTokenRoutes } from './routes/board-tokens.ts';
 import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './routes/chat-audit-routes.ts';
 import { type CoachRoutesContext, handleCoachRoutes } from './routes/coach.ts';
 import { type DocMoveRoutesContext, handleDocMoveRoute } from './routes/doc-move.ts';
@@ -2260,6 +2262,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * above, and that setup takes `policyFor` as an input: the two halves of
    * this one subject sit on either side of it.
    */
+  /** Board agent tokens (`at2`) and their revocation record. */
+  const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
+    boardAgentTokenKey(cookieKey()),
+  );
+
   const { admit } = createRequestAdmission({
     opts,
     j,
@@ -2296,6 +2303,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // reason, as the identity setup's own `requestAddress` above.
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
+    boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
   });
 
   /**
@@ -2816,11 +2824,34 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     watchKeyExists,
     watchCoverageFor,
     canonicalDocId,
+    watchKeyOnBoard: (key, boardId) => {
+      if (key === `ws:${boardId}`) return true;
+      if (key.startsWith('task:')) {
+        return taskStore.getTask(key.slice('task:'.length))?.workspaceId === boardId;
+      }
+      return shareWorkspacesOf(key).includes(boardId);
+    },
     agentTokenKey: agentTokenKeyFor,
     requireAgentToken,
     warnLegacyAgentCaller,
     identifyAgentCaller,
     warnRefusedMint,
+  };
+
+  /** The board agent token's mint, list and revoke (routes/board-tokens.ts). */
+  const boardTokenRoutesCtx: BoardTokenRoutesContext = {
+    tokens: boardAgentTokens,
+    boardExists: (boardId) => taskStore.getWorkspace(boardId) !== undefined,
+    ensureAgent: (agentId) => {
+      const rec = identities.get(agentId) ?? identities.upsertAgent(agentId);
+      return rec !== null && rec.kind === 'agent';
+    },
+    closeConnections: (memberKey) =>
+      docStore.closeSocketsForShareMembers((k) => k === memberKey) +
+      sse.closeForShareMembers((k) => k === memberKey),
+    j,
+    safeJson,
+    requestAddress: (req) => server.requestIP(req)?.address,
   };
 
   /**
@@ -3322,6 +3353,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         visitorMemberKey,
         visitorHome,
         widgetDoorGrant,
+        boardAgent,
         metaFor,
         roleFor,
         requireOwner,
@@ -3683,6 +3715,17 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           pathname,
           visitor,
           authorFor,
+          boardAgent,
+        });
+        if (handled) return handled;
+      }
+      // --- REST: board agent tokens --- see ./routes/board-tokens.ts. One
+      // exact family of paths, so its position changes nothing.
+      {
+        const handled = await handleBoardTokenRoutes(boardTokenRoutesCtx, {
+          req,
+          pathname,
+          visitor,
         });
         if (handled) return handled;
       }

@@ -210,8 +210,19 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/agent-identity.ts', [
     ['loopback-only', '/api/agents/:agentId/token', 'GET'],
     ['loopback-only', '/api/agent-token', 'GET'],
-    ['loopback-only', '/api/agents/:agentId/watches', 'GET POST'],
+    [
+      'loopback-only',
+      '/api/agents/:agentId/watches',
+      'GET POST',
+      'Also served to a board agent token (`at2`) for its own agent id, cut to its one board (`middleware/board-agent-door.ts`).',
+    ],
     ['loopback-only', '/api/agents/:agentId/merge', 'POST'],
+  ]),
+  // Mint, list and revoke `at2`: refused through the edge, from off this
+  // machine, from a page, and to every visitor, `at2` holders included.
+  ...family('routes/board-tokens.ts', [
+    ['loopback-only', '/api/board-tokens', 'GET POST'],
+    ['loopback-only', '/api/board-tokens/:id/revoke', 'POST'],
   ]),
 
   ...family('routes/workspaces-create-read.ts', [
