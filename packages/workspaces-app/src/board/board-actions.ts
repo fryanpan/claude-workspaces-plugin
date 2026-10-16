@@ -511,7 +511,7 @@ export function createBoardActions(deps: BoardActionDeps) {
       return;
     }
     const ref =
-      parsed?.kind === 'doc' || parsed?.kind === 'mockup'
+      parsed?.kind === 'doc' || parsed?.kind === 'mockup' || parsed?.kind === 'whiteboard'
         ? { kind: 'doc', docId: parsed.docId }
         : { kind: 'url', url };
     const res = await send(api(`tasks/${encodeURIComponent(task.id)}/links`), 'POST', {

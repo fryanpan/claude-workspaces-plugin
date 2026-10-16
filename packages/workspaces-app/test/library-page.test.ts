@@ -249,6 +249,30 @@ describe('the Library front page', () => {
     expect(navigated).toEqual([`/workspaces/${WS}/docs/library-x`]);
   });
 
+  it('makes a whiteboard on this board in one tap and goes to its page', async () => {
+    const { page, root, sent, navigated } = drive({
+      openAnswer: { ok: true, status: 200, data: { url: `/workspaces/${WS}/whiteboards/wb-1` } },
+    });
+    await page.open();
+    await click(root.querySelector('.library-new-whiteboard') as HTMLElement);
+    expect(sent).toEqual([
+      { path: `/workspaces/${WS}/whiteboards`, method: 'POST', body: { title: 'Whiteboard' } },
+    ]);
+    expect(navigated).toEqual([`/workspaces/${WS}/whiteboards/wb-1`]);
+  });
+
+  it('says so when the whiteboard cannot be made, and goes nowhere', async () => {
+    const { page, root, navigated } = drive({
+      openAnswer: { ok: false, status: 500, data: null },
+    });
+    await page.open();
+    await click(root.querySelector('.library-new-whiteboard') as HTMLElement);
+    expect(navigated).toEqual([]);
+    expect(root.querySelector('.library-error')?.textContent).toBe(
+      'The whiteboard could not be made.',
+    );
+  });
+
   it('says so when the file cannot be opened, and goes nowhere', async () => {
     const { page, root, navigated } = drive({
       openAnswer: { ok: false, status: 404, data: { error: 'not-listed' } },

@@ -4687,6 +4687,22 @@ html:has(.board-walk-cred-form) {
   flex: 1 1 auto;
   min-width: 0;
 }
+/* Right-aligned whether or not the path beside it shows. */
+.library-new-whiteboard {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
+  min-height: 32px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
 .library-search {
   margin-top: 8px;
   display: block;
@@ -5007,7 +5023,8 @@ html:has(.board-walk-cred-form) {
     min-height: 44px;
   }
   .library-more,
-  .library-back {
+  .library-back,
+  .library-new-whiteboard {
     min-height: 44px;
   }
   .library-repo {

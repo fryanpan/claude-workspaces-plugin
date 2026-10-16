@@ -1,0 +1,82 @@
+/* ===== THE WHITEBOARD PAGE'S OWN STYLESHEET =====
+   Everything /workspaces/<ws>/whiteboards/<id> paints, and nothing any other
+   page does. Loaded AFTER styles.css, whose tokens every rule reads, and
+   after Excalidraw's own stylesheet. Nothing here redefines a token.
+
+   Put a rule under the `===== ` banner it belongs to. */
+
+/* ===== WHITEBOARD ===== */
+/* The page is one screen: a thin bar over a canvas that takes the rest. No
+   page scroll and no page zoom, so a pen on the canvas only ever draws. */
+html:has(body.whiteboard-body) {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body.whiteboard-body {
+  margin: 0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-family: var(--sans);
+  color: var(--fg);
+  background: var(--bg);
+}
+.wb-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.wb-bar .back-link {
+  min-width: 36px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Sized for a long line so a name arriving does not move the title. */
+.wb-presence {
+  flex: none;
+  width: 16em;
+  max-width: 45%;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  touch-action: none;
+}
+.wb-canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+.wb-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}

@@ -12,6 +12,7 @@ import {
 } from '@claude-workspaces/core/asset-manifest';
 import { computeBuildId } from '../src/build-id.ts';
 import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
+import { buildWhiteboard, copyWhiteboardAssets } from './build-whiteboard.ts';
 import { injectModulePreloads, staticChunkClosure } from './module-preload.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,7 @@ const HASHED = [
   'voice-page.js',
   'landing.js',
   'coach.js',
+  'whiteboard.js',
   'sentry.js',
   'sw.js',
   'styles.css',
@@ -42,6 +44,7 @@ const HASHED = [
   'board.css',
   'signin.css',
   'settings.css',
+  'whiteboard.css',
   'tokens.css',
   'index.html',
 ];
@@ -258,6 +261,20 @@ async function emit(buildId: string): Promise<boolean> {
     return false;
   }
 
+  // The whiteboard page: its own entry, React and Excalidraw split behind it.
+  const whiteboardErrors = await buildWhiteboard({
+    pkgRoot,
+    dist,
+    define,
+    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
+  });
+  if (whiteboardErrors.length > 0) {
+    console.error('whiteboard build failed:');
+    for (const m of whiteboardErrors) console.error(m);
+    if (!isWatch) process.exit(1);
+    return false;
+  }
+
   // Sentry: its own entry, loaded by a <script type="module"> that a shell
   // emits only when the box has a DSN configured — see
   // packages/server/src/browser-sentry.ts for why it is not an import inside
@@ -352,6 +369,8 @@ async function emit(buildId: string): Promise<boolean> {
     recursive: true,
     filter: (src) => !/\.(woff|ttf)$/.test(src),
   });
+
+  copyWhiteboardAssets(pkgRoot, dist);
 
   cpSync(join(pkgRoot, 'src', 'styles.css'), join(dist, 'styles.css'));
   // The review editor's own rules, loaded by index.html AFTER styles.css.
