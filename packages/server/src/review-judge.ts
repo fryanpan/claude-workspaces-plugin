@@ -53,7 +53,9 @@ export interface ReviewJudgeInput {
  */
 export type ReviewJudge = (input: ReviewJudgeInput) => Promise<ReviewJudgeVerdict | null>;
 
-const MODEL = 'claude-haiku-5-5';
+/** Also the relay filter's model (`org-relay/relay-filter.ts`), which is
+ *  modelled on this judge. */
+export const REVIEW_JUDGE_MODEL = 'claude-haiku-5-5';
 const API_URL = 'https://api.anthropic.com/v1/messages';
 /**
  * Room for a maximal verdict, with margin.
@@ -122,7 +124,7 @@ export function haikuReviewJudge(opts: HaikuReviewJudgeOpts = {}): ReviewJudge |
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: REVIEW_JUDGE_MODEL,
           max_tokens: MAX_TOKENS,
           thinking: HAIKU_NO_THINKING,
           system,
