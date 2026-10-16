@@ -25,9 +25,12 @@
  * one: it joins a window already open, so agents working alone overnight
  * wake nobody.
  *
- * A day has a budget of turns (`DAILY_EVENT_LIMIT`): past it nothing is
- * sent until his next local day, and the front page says the coach is
- * paused.
+ * Once a local day the session also gets a morning wake-up
+ * (`coach.morning`, `coach/morning.ts`), so it can check what has not moved.
+ *
+ * A day has a budget of turns (`DAILY_EVENT_LIMIT`): a digest and the
+ * morning wake-up each spend one. Past it nothing is sent until his next
+ * local day, and the front page says the coach is paused.
  *
  * With no lead, or a lead holding no stream, nothing is sent: an addressed
  * frame is replayed to a stream that comes back, so a session that is gone
@@ -35,6 +38,7 @@
  */
 import { HeldWindow } from '../held-window.ts';
 import { type DigestEvent, type DigestItem, digestOf } from './digest.ts';
+import type { MorningNews } from './morning.ts';
 import {
   SESSIONS_NOT_COUNTED,
   type SessionMinutes,
@@ -76,6 +80,13 @@ export type SessionFrame = Addressed &
       }
     | { event: 'coach.preference'; readiness: CoachReadiness }
     | {
+        event: 'coach.morning';
+        /** His local day, `YYYY-MM-DD`, and its weekday. No board: there is
+         *  nothing in it for `coach/exclusion.ts` to exclude. */
+        day: string;
+        weekday: string;
+      }
+    | {
         event: 'coach.digest';
         from: number;
         to: number;
@@ -106,7 +117,7 @@ export interface SessionFeedDeps {
   eventsOn: (at: number) => number;
   /** Turns a day; defaults to `DAILY_EVENT_LIMIT`. */
   dailyLimit?: number;
-  /** A digest reached the session: one turn spent. */
+  /** A digest or the morning wake-up reached the session: one turn spent. */
   countTurn: (at: number) => void;
   /** Team Lead's plan board (`review-plan.ts`), read as each digest goes. */
   planBoard: () => PlanBoardReading | undefined;
@@ -157,6 +168,14 @@ export class SessionFeed {
     if (this.paused(at) || !this.reachable()) return false;
     const { event: _event, ...e } = news;
     this.window.hold({ event: { ...e, at } });
+    return true;
+  }
+
+  /** The morning wake-up: one turn of the budget, counted like a digest.
+   *  Never held: with no session there it is dropped. */
+  wake(news: MorningNews, at: number): boolean {
+    if (!this.deliver(news, at)) return false;
+    this.deps.countTurn(at);
     return true;
   }
 

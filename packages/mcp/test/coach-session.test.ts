@@ -4,6 +4,7 @@
  * refusal as an answer the session can read.
  */
 import { describe, expect, it } from 'vitest';
+import { type ChannelNotification, createChannelMessages } from '../src/channel-messages.ts';
 import { coachLine } from '../src/coach-line.ts';
 import { handleWorkspaceTool } from '../src/tools/workspace.ts';
 
@@ -171,6 +172,25 @@ describe('coachLine', () => {
       'The owner answered thumbs down: it did not help. They wrote: "Harborlight asked for it". Your moment',
     );
     expect(coachLine('coach.preference', { readiness: 'less' })).toContain('less readily');
+  });
+
+  it('reads the morning wake-up as the day, and where to look', async () => {
+    const morning = { day: '2026-10-12', weekday: 'Monday' };
+    const line =
+      '[coach.morning Monday 2026-10-12] It is morning for the owner. Check "This week\'s nudges" in your memory doc.';
+    expect(coachLine('coach.morning', morning)).toBe(line);
+    expect(coachLine('coach.morning', { day: '2026-10-12' })).toBeNull();
+    const frames: ChannelNotification['params'][] = [];
+    const messages = createChannelMessages({
+      notify: async (n) => {
+        frames.push(n.params);
+      },
+      http: async () => ({}),
+      authorId: 'agent-coach',
+      now: () => Date.UTC(2026, 9, 12, 15),
+    });
+    await messages.emitBoardChannelMessage('coach.morning', { ...morning, workspaceId: 'w-coach' });
+    expect(frames.map((f) => f.content)).toEqual([line]);
   });
 
   it('says nothing for a frame it cannot read', () => {

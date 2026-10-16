@@ -4,10 +4,12 @@
  * The server sends the Coach board's lead what the owner read, wrote and
  * commented as one digest per 15-minute window (`coach.digest`; a single
  * `coach.event` still reads, for a server from before digests), how they
- * answered a moment (`coach.answer`), and how readily they want the coach to
- * speak up (`coach.preference`). The session stays quiet unless an event
- * plainly matches a goal, and speaks through `coach_moment`; what to do with
- * each line is the `claude-workspaces:coaching` skill. A digest then lists
+ * answered a moment (`coach.answer`), how readily they want the coach to
+ * speak up (`coach.preference`), and once a day that it is morning
+ * (`coach.morning`), the one line not caused by something they did. The
+ * session stays quiet unless an event plainly matches a goal, and speaks
+ * through `coach_moment`; what to do with each line is the
+ * `claude-workspaces:coaching` skill. A digest then lists
  * the owner's Claude Code sessions, repo and active minutes, and ends with
  * this week's plan goals in plan order, or says there is no current plan.
  *
@@ -36,6 +38,9 @@ export interface CoachPayload {
   items?: CoachDigestItem[];
   /** This week's plan goals, or the server's words for there being none. */
   plan?: { set?: string; stale?: boolean; goals?: { id?: string; title?: string }[] } | string;
+  /** The morning wake-up's local day, `YYYY-MM-DD`, and its weekday. */
+  day?: string;
+  weekday?: string;
   /** His Claude Code time in the window, per attached session. */
   sessions?: CoachSessionMinutes[];
   /** The server's words for what the sessions list cannot see. */
@@ -185,6 +190,10 @@ export function coachLine(event: string, p: CoachPayload, timeZone?: string): st
     if (!how || !p.momentId) return null;
     const wrote = p.answer === 'down' && p.text ? ` They wrote: "${p.text}".` : '';
     return `[coach.answer${clock(p.at, timeZone)}] The owner ${how}.${wrote} Your moment ${p.momentId} (goal: ${p.goal ?? '?'}) said: "${p.line ?? ''}". Write what it teaches you in your memory doc.`;
+  }
+  if (event === 'coach.morning') {
+    if (!p.day || !p.weekday) return null;
+    return `[coach.morning ${p.weekday} ${p.day}] It is morning for the owner. Check "This week's nudges" in your memory doc.`;
   }
   if (event === 'coach.preference') {
     const how = p.readiness ? READINESS[p.readiness] : undefined;
