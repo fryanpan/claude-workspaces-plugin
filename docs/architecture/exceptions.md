@@ -199,6 +199,11 @@ blocks over one set of fixtures is one harness, however long the file gets.
 | `packages/workspaces-app/src/meeting-advanced.ts` | 581 | Exception | One panel. The `AdvancedControl` descriptors exist only to drive `buildAdvancedSection`, and the canonical specs already live in core's `meeting-tuning.ts`. |
 | `packages/workspaces-app/src/code/code-editor.ts` | 550 | Exception | One CodeMirror surface: `createCodeEditor` returning `CodeSurface`, with the gutter and decoration internals that only that editor instantiates. |
 | `packages/workspaces-app/src/suggest-input.ts` | 539 | Exception | One ProseMirror plugin. `SuggestInput` and the handlers it installs all mutate the same `suggestInputKey` state. |
+| `packages/workspaces-app/src/board/task-detail-island.tsx` | 1682 | Exception | The task panel as one Preact island, keyed on `task.id` so a repaint of the same task keeps its DOM — tab, review position, folded capture and half-typed drafts survive without the `keepFields` snapshots the vanilla renderer needed. The components (`ReviewCard`, `ReviewRegion`, `ActivityTab`, `NoteRow`, `RelatedLinkAdd`) render inside `TaskDetailPanel` and read the one `taskDetailData` signal and its `DetailHandlers`; `ReviewCard` and `ActivityTab` are the two largest and the candidates if it grows, but each closes over the panel's per-paint handlers, so moving one means passing that bundle across a file boundary for no reader's benefit today. First counted when `loc:audit` started reading `.tsx`. |
+| `packages/workspaces-app/src/board/board-island.tsx` | 1555 | Exception | The goal bands and their rows as one island, keyed on task id and goal id so an unchanged row is the same DOM node across a repaint — the property every fix in it reduces to. `TaskRow`, `GoalBand`, `GoalEffort`, the dependency layer and the reorder preview all read `boardData` and the mount-bound `BoardHandlers`, and the drag preview writes marks onto rows `GoalBand` renders. The seam if it grows is `TaskRow` with its controls (`TitleWords`, `StatusControl`, `OwnerControl`, `TaskBadges`), about 500 lines. First counted when `loc:audit` started reading `.tsx`. |
+| `packages/workspaces-app/src/board/walkthrough-island.tsx` | 1228 | Exception | One card at a time from the review queue, keyed on `ReviewItem.key` so expansions and drafts are component state rather than DOM snapshots. `WalkCard` (about 300 lines) composes the head, body, options, question box and ask-thread parts beside it, and every part takes the per-paint `WalkthroughHandlers` that ride the signal because they close over this item and the next. The parts are small and have no other caller. First counted when `loc:audit` started reading `.tsx`. |
+| `packages/workspaces-app/src/board/goal-detail-island.tsx` | 672 | Exception | The goal panel as one island: `GoalDetailPanel` (about 450 lines) plus the archive-confirm wording and the view signal. It is one component because it is one panel, keyed on the goal id; the title `<h2>` and the description slot are deliberately left out of Preact's children so the in-place rename and the Tiptap editor keep their nodes, and that arrangement is easier to check in one function. First counted when `loc:audit` started reading `.tsx`. |
+| `packages/workspaces-app/src/board/schedule-editor.tsx` | 588 | Exception | The task panel's schedule section: the phrase and the chips are two views of one rule, so `ScheduleEditor` (the phrase) and `ScheduleChips` (the chips) both edit the same `SchedulePhrase` and rewrite each other. Splitting them would put the rule's two views in two files. First counted when `loc:audit` started reading `.tsx`. |
 
 Every workspaces-app seam above moves symbols within one entry's import graph, so
 the shipped bundle is unchanged.
@@ -218,6 +223,7 @@ the shipped bundle is unchanged.
 | `packages/core/src/speaker-tags.ts` | 619 | Exception | One tag format end to end: `speakerTagHref` and `parseSpeakerTagHref` define it, and `findSpeakerTags` / `normalizeSpeakerTags` / `reattributeSpeakerTags` are the operations on it over a shared `SpeakerTagMatch`. |
 | `packages/core/src/suggest-ops.ts` | 572 | Exception | One registry and its mutations over a Y.Doc: `scanSuggestions` builds the read model that `acceptSuggestion` / `rejectSuggestion` / `resolveAllSuggestions` then act on, all through the shared `resolveOne`. |
 | `packages/core/src/types.ts` | 558 | Exception | One cohesive type registry — `DocType`, `DocMeta`, the `Anchor` union, `Thread` / `Comment`, `WebhookPayload` — with a single function, `contentKind`, which is the table the rest branch on. |
+| `packages/core/src/plot-spec.mjs` | 1993 | Keep | The `<PlotChart>` spec turned into an Observable Plot chart without evaluating anything. Other repos copy this file verbatim and compare the version line and the sha256 its first line records (`scripts/plot-spec-stamp.ts` writes and checks it), so a split would change what they copy and the hash they check; plain JavaScript importing nothing, by the same contract. Most of the length is the two presets (`stackedArea`, `lines`) and the inside-label layout they share. First counted when `loc:audit` started reading `.mjs`. |
 
 ## packages/mcp
 
@@ -246,8 +252,9 @@ plumbing at 241.
 
 ## Test files
 
-97 test files exceed 500 lines. Two hold two unrelated harnesses; the other 95
-are exceptions, listed after them. The recurring shape across the exceptions is
+113 test files exceed 500 lines (measured 17 Oct 2026, now that `.tsx` counts).
+The first is listed with a verdict because its row records a split; the rest
+are exceptions, listed after it. The recurring shape across the exceptions is
 one feature tested at two or three *layers* — pure predicate, then store, then
 real HTTP route — sharing the same fixture builders. That is one harness.
 
@@ -255,7 +262,7 @@ real HTTP route — sharing the same fixture builders. That is one harness.
 |---|---|---|---|
 | `packages/workspaces-app/test/board-render.test.ts` | 3882 | Exception | Twelve describes over one harness: the module-scope `task()` factory and the `root` beforeEach, asserting rendered DOM. The six that `readFileSync` `styles.css` and board source and assert on text moved to `board-source-contract.test.ts` in B1 — they were the second harness this row named. |
 
-The remaining 95 are exceptions. Each row names the one harness its cases share.
+The remaining 112 are exceptions. Each row names the one harness its cases share.
 
 | File | Lines | Reason |
 |---|---|---|
@@ -367,6 +374,12 @@ The remaining 95 are exceptions. Each row names the one harness its cases share.
 | `packages/workspaces-app/test/write-gate.test.ts` | 503 | Every describe uses the module-scope `beforeEach` DOM reset with `docShell()` / `boardShell()`. |
 | `packages/server/test/notes-method-switch.test.ts` | 522 | The five describes are the five places one switch is decided — the socket frame, the at-rest route, the live refusal and its bot exception, the trace line, and the composer dispatch — and each stage is asserted against the state the previous one left. Splitting them would duplicate the `session()` notes fixture and the `put()` route driver into files that only make sense read in order. |
 | `packages/server/test/dispatch-routes.test.ts` | 502 | One describe over the shared `listenFrames` / `waitForFrames` fake-watcher server harness. |
+| `packages/workspaces-app/test/board-island.test.tsx` | 2069 | Ten describes over one harness: the module-scope `task()` / `handlers()` factories, the `beforeEach` that mounts the island, and `repaint()` writing `boardData`. The contract, rename, caret, reorder and assignee cases all assert on the same mounted rows. |
+| `packages/workspaces-app/test/goal-effort.test.tsx` | 1076 | The effort model at its layers — `boardEffort` / `goalEffortLabel` as pure functions, then the rendered board and ticket — all built from the module-scope `task()` / `closed()` factories and pinned `NOW`. |
+| `packages/workspaces-app/test/home-activity-island.test.tsx` | 1027 | Every describe mounts the island through the one `mount()` (and `pane()` over it at a viewport) on the `task()` / `note()` fixtures, with the stylesheets installed in the module-level `beforeEach`. |
+| `packages/workspaces-app/test/review-item-comments.test.tsx` | 986 | Model and walkthrough describes share the `ticketRow()` / `revisedRow()` / `decisionTask()` fixtures and the module-level DOM reset; the card cases mount through `mountWalk()` / `mountHome()`. |
+| `packages/workspaces-app/test/task-detail-island.test.tsx` | 815 | Every describe drives the island through `mount()` and the `taskDetailData` signal (`repaint()` / `openActivity()`) over the `task()` / `handlers()` fixtures. |
+| `packages/workspaces-app/test/scheduled-section.test.tsx` | 710 | One feature at two layers — where `boardSections` puts a scheduled row, then the row on screen through `paint()` — over the `task()` / `weekdays9()` fixtures and pinned `NOW`. |
 
 ---
 

@@ -30,8 +30,13 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_ROOT = 'packages';
 const EXCEPTIONS_DOC = join('docs', 'architecture', 'exceptions.md');
 
-/** Extensions the bar applies to. Markdown and JSON are data, not code. */
-const EXTENSIONS = ['.ts', '.css'];
+/**
+ * Extensions the bar applies to. Markdown and JSON are data, not code. `.tsx`
+ * and `.mjs` were missing until 17 Oct 2026, which left twelve files of 500+
+ * lines (four board islands, the schedule editor, `plot-spec.mjs` and six
+ * `.tsx` tests) with no row and nobody told.
+ */
+export const EXTENSIONS = ['.ts', '.tsx', '.mjs', '.css'];
 
 /**
  * Directories never worth counting, and the one generated artifact that lives
@@ -65,7 +70,9 @@ export function isScannable(repoRelPath: string): boolean {
  */
 export function listedPaths(markdown: string): Set<string> {
   const found = new Set<string>();
-  const re = /packages\/[A-Za-z0-9._/-]+\.(?:ts|css)/g;
+  // `tsx` before `ts`: the alternation takes the first that fits, and `ts`
+  // would stop a `.tsx` path one letter short of the file it names.
+  const re = /packages\/[A-Za-z0-9._/-]+\.(?:tsx|ts|mjs|css)/g;
   for (const m of markdown.matchAll(re)) found.add(m[0]);
   return found;
 }

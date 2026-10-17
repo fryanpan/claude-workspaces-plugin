@@ -37,8 +37,10 @@ describe('countLines', () => {
 });
 
 describe('isScannable', () => {
-  it('takes .ts and .css under packages', () => {
+  it('takes .ts, .tsx, .mjs and .css under packages', () => {
     expect(isScannable('packages/demo/src/a.ts')).toBe(true);
+    expect(isScannable('packages/demo/src/a.tsx')).toBe(true);
+    expect(isScannable('packages/demo/src/a.mjs')).toBe(true);
     expect(isScannable('packages/demo/src/a.css')).toBe(true);
   });
 
@@ -60,6 +62,13 @@ describe('listedPaths', () => {
       '| `packages/a/src/one.ts` | 900 | Split | move it to `two.ts` |\nsee packages/b/src/style.css too\n',
     );
     expect([...found].sort()).toEqual(['packages/a/src/one.ts', 'packages/b/src/style.css']);
+  });
+
+  it('reads a .tsx path whole rather than stopping at .ts', () => {
+    const found = listedPaths(
+      '| `packages/a/src/island.tsx` | 600 | Keep | x |\npackages/b/plot.mjs',
+    );
+    expect([...found].sort()).toEqual(['packages/a/src/island.tsx', 'packages/b/plot.mjs']);
   });
 
   it('does not count a proposed new filename as a listed file', () => {
@@ -103,6 +112,19 @@ describe('audit', () => {
     const unlisted = audit(root).unlisted.map((o) => o.path);
     expect(unlisted).toContain('packages/demo/src/committed.ts');
     expect(unlisted).toContain('packages/demo/src/never-staged.ts');
+  });
+
+  it('reports oversized .tsx and .mjs files with no row', () => {
+    const root = fixture();
+    writeLines(root, 'packages/demo/src/island.tsx', 700);
+    writeLines(root, 'packages/demo/src/plot.mjs', 600);
+    // A row for the .ts twin must not satisfy the .tsx file.
+    writeDoc(root, '| `packages/demo/src/island.ts` | 700 | Keep | wrong file |');
+
+    expect(audit(root).unlisted.map((o) => o.path)).toEqual([
+      'packages/demo/src/island.tsx',
+      'packages/demo/src/plot.mjs',
+    ]);
   });
 
   it('reports an oversized file with no row', () => {
