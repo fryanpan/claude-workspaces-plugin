@@ -43,6 +43,7 @@ import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 import { type ResidencyEntry, pastWindow } from './doc-residency.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
+import { DocSuggestOps, type DocSuggestPersistence } from './doc-suggest-ops.ts';
 import { type DocThreadPersistence, DocThreads } from './doc-threads.ts';
 import {
   type AttachOpts,
@@ -648,6 +649,17 @@ export class DocStore {
       doc: (docId) => this.resolveDoc(docId),
       thread: (docId, threadId) => this.getThread(docId, threadId),
       staleWrite: (docId, reader) => this.staleWriteCheck(docId, reader),
+    };
+  }
+
+  /** The suggestion verbs, resolving docs through `docEdits` so a dry run's
+   *  copy is the doc they see. */
+  private readonly docSuggests = new DocSuggestOps(this.docSuggestPersistence());
+
+  private docSuggestPersistence(): DocSuggestPersistence {
+    return {
+      live: (docId) => this.docEdits.live(docId),
+      thread: (docId, threadId) => this.getThread(docId, threadId),
       announceSuggestion: (doc, event, sid, summary) =>
         this.fanout.fireSuggestionEvent(doc, event, sid, summary),
     };
@@ -3740,8 +3752,9 @@ export class DocStore {
 
   // ── Editing the words ────────────────────────────────────────────────────
   //
-  // The verbs live in `doc-edit-ops.ts`; what follows is the store's public
-  // surface forwarding onto them, signatures unchanged.
+  // The verbs live in `doc-edit-ops.ts` and `doc-suggest-ops.ts`; what
+  // follows is the store's public surface forwarding onto them, signatures
+  // unchanged.
 
   setDocContent(
     docId: string,
@@ -3801,7 +3814,7 @@ export class DocStore {
   }
 
   listSuggestions(docId: string): suggestOps.SuggestionSummary[] {
-    return this.docEdits.listSuggestions(docId);
+    return this.docSuggests.listSuggestions(docId);
   }
 
   createSuggestion(
@@ -3825,7 +3838,7 @@ export class DocStore {
         error: 'not-found' | 'no-match' | 'ambiguous' | 'match-in-pending-suggestion';
         candidates?: Array<{ docOffset: number; preview: string }>;
       } {
-    return this.docEdits.createSuggestion(docId, opts);
+    return this.docSuggests.createSuggestion(docId, opts);
   }
 
   createSuggestionForThread(
@@ -3840,19 +3853,19 @@ export class DocStore {
   ):
     | { ok: true; suggestionId: string }
     | { ok: false; error: 'anchor-not-found' | 'anchor-orphaned' | 'cross-block' } {
-    return this.docEdits.createSuggestionForThread(docId, threadId, opts);
+    return this.docSuggests.createSuggestionForThread(docId, threadId, opts);
   }
 
   acceptSuggestion(docId: string, sid: string): suggestOps.SuggestionOpResult {
-    return this.docEdits.acceptSuggestion(docId, sid);
+    return this.docSuggests.acceptSuggestion(docId, sid);
   }
 
   rejectSuggestion(docId: string, sid: string): suggestOps.SuggestionOpResult {
-    return this.docEdits.rejectSuggestion(docId, sid);
+    return this.docSuggests.rejectSuggestion(docId, sid);
   }
 
   /**
-   * Async because it YIELDS between proposals — see `DocEditOps` for the
+   * Async because it YIELDS between proposals — see `DocSuggestOps` for the
    * 114,650 ms outage that made an unyielded pass unacceptable.
    *
    * `slice` is a seam, not a knob: production passes nothing and gets the
@@ -3866,7 +3879,7 @@ export class DocStore {
     opts: { action: 'accept' | 'reject'; authorId?: string },
     slice?: TimeSlice,
   ): Promise<{ ok: true; resolved: number; sids: string[] } | { ok: false; error: 'not-found' }> {
-    return this.docEdits.resolveAllSuggestions(docId, opts, slice ?? timeSlice());
+    return this.docSuggests.resolveAllSuggestions(docId, opts, slice ?? timeSlice());
   }
 
   /** The doc's addressable blocks and their ids. `null` for an unknown doc. */

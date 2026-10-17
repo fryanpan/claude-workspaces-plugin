@@ -1522,7 +1522,7 @@ helper, importing nothing from the subsystems it watches: a lag monitor that
 reports a turn which held the single JS thread past a threshold and names the
 requests in flight at the time, and `timeSlice`, the budget a long pass uses to
 hand the loop back. `server.ts` registers each request at the front door and
-arms the monitor beside the other running-board timers; `doc-edit-ops.ts` is
+arms the monitor beside the other running-board timers; `doc-suggest-ops.ts` is
 its first `timeSlice` caller. The reason it exists is that the 2026-09-16
 outages were legible only as a 404 that took 56 seconds — the block itself was
 recorded nowhere, and whether a stall was a synchronous pass or the OS
@@ -2024,6 +2024,10 @@ and refuses rather than carry a line a person owns. Server-side they are reached
 `doc-outline-ops.ts`, which sits beside `doc-edit-ops.ts` in the services tier
 for the reason that module already gives: `doc-edit-ops.ts` was at the
 500-line bar, and the outline verbs are a family of their own.
+`doc-suggest-ops.ts` joins them on the same terms: the suggestion verbs
+(list, propose, accept, reject, resolve-all) moved out of `doc-edit-ops.ts`
+because they are the only ones that announce and the only async one, and they
+resolve docs through `DocEditOps.live` so a dry run's copy is what they see.
 
 The scoped edit verbs — find_and_replace, rewrite_thread_region, the anchor
 inserts and the block deletes — run through `DocEditOps.guardScopedEdit`, the
