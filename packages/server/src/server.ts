@@ -7,7 +7,6 @@ import {
   agentIdForName,
   attachmentIdOf,
   contentKind,
-  hashToColor,
   isReviewPayloadGated,
   parseThreadReviewItemId,
   pendingDeclaration,
@@ -23,12 +22,7 @@ import { AppOutages } from './app-outage.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
-import {
-  AttachmentPrivacyStore,
-  LOCAL_ONLY_REFUSAL,
-  addressesLocalOnlySet,
-  isOnBox,
-} from './attachment-privacy.ts';
+import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
 import { identifyCallerAgent } from './auth/agent-caller.ts';
 import {
   authorizeAgentCaller,
@@ -47,14 +41,12 @@ import { ChatAudit } from './chat-audit.ts';
 import { boardPrivacyFrom, placeIsOff } from './coach/exclusion.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
-import { maybeCompress, maybeNotModified } from './compress.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
 import { createCrossReview } from './cross-review.ts';
 import { DispatchRegistry } from './dispatch-registry.ts';
 import { DispatchReportStore } from './dispatch-reports.ts';
-import { parseDocKey } from './doc-key.ts';
 import { DocStore } from './doc-store.ts';
 import { createEffortScoring } from './effort-scoring.ts';
 import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
@@ -65,41 +57,21 @@ import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { createHomeRemotes } from './home-remotes.ts';
-import { spokenReviewComment } from './huddle.ts';
 import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
-import { InboxBodies } from './inbox/bodies.ts';
-import { inboxConfigReader } from './inbox/config.ts';
-import { inboxSectionFor } from './inbox/landing.ts';
-import { watchInbox } from './inbox/live.ts';
-import { InboxReplies } from './inbox/reply.ts';
-import { systemTransport } from './inbox/send-transport.ts';
-import { InboxSends } from './inbox/sends.ts';
-import { InboxStore } from './inbox/store.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
 import { renderRemoteReview } from './landing-remote.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
-import { createMeetingClaude } from './meeting-claude.ts';
-import { meetingFilingFor } from './meeting-home.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
-import { withServerNotesSinks } from './meeting-notes-doc.ts';
-import { createServerNotesDocMint } from './meeting-notes-target.ts';
-import { MeetingRelay } from './meeting-protocol.ts';
-import { MEETING_CAPTURE_ACTOR } from './meeting-task-capture.ts';
 import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
-import { MeetingStore } from './meetings.ts';
-import { isAllowedBrowserOrigin } from './middleware/browser-origin.ts';
+import { wireMeetings } from './meeting-wiring.ts';
 import { isLoopbackAddress } from './middleware/host-guard.ts';
-import { type WorkspaceScope, resolveWorkspaceScope } from './middleware/workspace-scope.ts';
-import { isBrowserRequest, isGatedWrite, signInRequiredBody } from './middleware/write-gate.ts';
+import { isBrowserRequest } from './middleware/write-gate.ts';
 import { boardLinkedItems } from './mockup-linked-items.ts';
 import { MountStore } from './mount-store.ts';
 import { parseMuxCursor } from './mux-cursor.ts';
-import { spokenLinkRef } from './notes-link-intent.ts';
-import { writeNotesMethod } from './notes-method-store.ts';
-import { fileOnMeetingDoc } from './notes-quality-review.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import { PROMPTS_CHANNEL, VOICE_CHANNEL, createPageNudger, wirePageNudges } from './page-nudges.ts';
@@ -109,16 +81,12 @@ import {
   migrateParkedRows,
 } from './park-migration.ts';
 import { parkNoteText } from './park-note.ts';
-import { malformedPathSegment } from './path-params.ts';
 import { PermissionGrants, wirePermissionGrantRelease } from './permission-grants.ts';
 import { readReleasedPluginVersion } from './plugin-release.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { publicBaseUrl, tailnetHostname } from './public-host.ts';
 import { createPushAnnounce } from './push-announce.ts';
 import type { NudgeTally } from './ready-nudge.ts';
-import { CalendarConnectionStore, CalendarSyncConsumer } from './recall-calendar.ts';
-import { RecallMeetingRelay } from './recall-meeting.ts';
-import { unreachableCallbackReason } from './recall.ts';
 import { scanSettledDocRefs } from './refs-backfill.ts';
 import { createOriginPolicy, createRequestAdmission } from './request-admission.ts';
 import { createRequestAttribution } from './request-attribution.ts';
@@ -135,82 +103,38 @@ import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import { createStaleAskNotifier } from './review-stale-notify.ts';
-import {
-  type AgentIdentityRoutesContext,
-  handleAgentIdentityRoutes,
-} from './routes/agent-identity.ts';
-import { type AppRoutesContext, handleAppRoutes } from './routes/apps.ts';
+import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
+import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
-import { type AuthShareRoutesContext, handleAuthShareRoutes } from './routes/auth-share.ts';
-import { type BoardTokenRoutesContext, handleBoardTokenRoutes } from './routes/board-tokens.ts';
-import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './routes/chat-audit-routes.ts';
-import { type CoachRoutesContext, handleCoachRoutes } from './routes/coach.ts';
-import { type DocMoveRoutesContext, handleDocMoveRoute } from './routes/doc-move.ts';
+import { type AuthShareRoutesContext } from './routes/auth-share.ts';
+import { type BoardTokenRoutesContext } from './routes/board-tokens.ts';
+import { type ChatAuditRoutesContext } from './routes/chat-audit-routes.ts';
+import { type CoachRoutesContext } from './routes/coach.ts';
+import { type DocMoveRoutesContext } from './routes/doc-move.ts';
 import type { DocRoutesContext } from './routes/docs-routes-context.ts';
-import {
-  handleDocCreateListRoutes,
-  handleDocPromoteRoute,
-  handleDocResourceRoutes,
-} from './routes/docs.ts';
-import { type HomeFeedRoutesContext, handleHomeFeedRoute } from './routes/home-feed.ts';
-import { type InboxRoutesContext, handleInboxRoutes } from './routes/inbox.ts';
-import { handleLandingStreamRoute } from './routes/landing-stream.ts';
-import { handleMcpConnectorRoute } from './routes/mcp-connector.ts';
-import {
-  type MeetingCalendarRoutesContext,
-  handleMeetingCalendarRoutes,
-} from './routes/meetings-calendar.ts';
-import { type MountRoutesContext, handleMountRoutes } from './routes/mounts.ts';
-import {
-  type OpsRoutesContext,
-  handleOpsMetricsRoute,
-  handleOpsRoutes,
-  handleSummaryBackfillRoute,
-  handleWebhookLogRoute,
-} from './routes/ops.ts';
-import { type PromptRoutesContext, handlePromptRoutes } from './routes/prompts.ts';
-import {
-  type RecallWebhookRoutesContext,
-  handleRecallWebhookRoute,
-} from './routes/recall-webhook.ts';
-import { type RepoRoutesContext, handleRepoRoutes } from './routes/repos.ts';
-import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './routes/review-files.ts';
-import { type ReviewQueueRoutesContext, handleReviewQueueRoutes } from './routes/review-queue.ts';
+import { startServerFeatures } from './routes/features.ts';
+import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
+import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
+import { type MountRoutesContext } from './routes/mounts.ts';
+import { type OpsRoutesContext } from './routes/ops.ts';
+import { type PromptRoutesContext } from './routes/prompts.ts';
+import { type RecallWebhookRoutesContext } from './routes/recall-webhook.ts';
+import { type RepoRoutesContext } from './routes/repos.ts';
+import { createRequestChain } from './routes/request-chain.ts';
+import { type ReviewFileRoutesContext } from './routes/review-files.ts';
+import { type ReviewQueueRoutesContext } from './routes/review-queue.ts';
 import { ROUTE_TABLE } from './routes/route-table-rows.ts';
 import { mountRouteTable } from './routes/route-table.ts';
 import { applyMasterFlip } from './routes/share-switch.ts';
 import { createShellStatic } from './routes/shell-static.ts';
-import { handleStaleClient } from './routes/stale-client.ts';
-import { handleTaskPageRoutes } from './routes/task-page.ts';
-import {
-  type TaskRoutesContext,
-  handleDispatchAndNoteRoutes,
-  handleTaskRoutes,
-} from './routes/tasks.ts';
+import { type TaskRoutesContext } from './routes/tasks.ts';
 import { createUpgradeStream } from './routes/upgrade-stream.ts';
-import {
-  type VoiceAgentLlmRoutesContext,
-  handleVoiceAgentLlmRoute,
-} from './routes/voice-agent-llm.ts';
-import { type VoiceApiRoutesContext, handleVoiceApiRoutes } from './routes/voice-api.ts';
-import { type VoicePageRoutesContext, handleVoicePageRoutes } from './routes/voice-page.ts';
-import { handleWhiteboardCreateRoute } from './routes/whiteboard-routes.ts';
-import {
-  type LibraryRoutesContext,
-  handleLibraryRoutes,
-  libraryRunOutputSource,
-} from './routes/workspace-library.ts';
-import { handleWorkspaceNotFound } from './routes/workspace-not-found.ts';
-import {
-  type MeetingHomeResolution,
-  type WorkspaceRoutesContext,
-  handleWorkspaceAttachmentRoutes,
-  handleWorkspaceDeleteRoute,
-  handleWorkspaceGoalRoutes,
-  handleWorkspaceRoutes,
-} from './routes/workspaces.ts';
-import { handleWrongPrefix } from './routes/wrong-prefix.ts';
-import { captureServerError, routePatternForSpan, withRouteSpan } from './sentry.ts';
+import { type VoiceAgentLlmRoutesContext } from './routes/voice-agent-llm.ts';
+import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
+import { type VoicePageRoutesContext } from './routes/voice-page.ts';
+import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
+import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
+import { captureServerError } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
 import { Shares } from './share/shares.ts';
@@ -223,8 +147,6 @@ import { AgentCallbacks } from './spoken-reply/agent-llm.ts';
 import type { SpokenBoard } from './spoken-reply/answer.ts';
 import { interviewDocs } from './spoken-reply/interview-docs.ts';
 import { INTERVIEW_TIMINGS_FILE, InterviewLog } from './spoken-reply/interview-log.ts';
-import { LeadAnswers } from './spoken-reply/lead-answer.ts';
-import { MeetingEars } from './spoken-reply/meeting-ears.ts';
 import { PlanMinutes } from './spoken-reply/plan-minutes.ts';
 import { SpokenReplyRelay } from './spoken-reply/relay.ts';
 import { SPOKEN_TIMINGS_FILE, SpokenTimings } from './spoken-reply/timings.ts';
@@ -244,7 +166,6 @@ import {
 import { DEFAULT_SPAWNER_AGENT_ID, observeScheduledWake } from './task-scheduled-wake.ts';
 import { type FiredOccurrence, SCHEDULER_ACTOR, createTaskScheduler } from './task-scheduler.ts';
 import {
-  type BoardWorkspace,
   DEFAULT_PARALLELISM_CAP,
   type ParallelismCapChange,
   type Task,
@@ -252,14 +173,12 @@ import {
 } from './tasks.ts';
 import { ThreadOpenerProofs, threadOpenerProofsPath } from './thread-opener-proofs.ts';
 import { ThreadRequestDedup } from './thread-request-dedup.ts';
-import type { TranscriptionEngine } from './transcribe.ts';
 import { UptimeMonitor } from './uptime.ts';
 import { voiceAgentList } from './voice-agent-list.ts';
 import { workspacesVoiceAgents } from './voice-api/backend.ts';
 import { VoiceChat } from './voice-api/chat.ts';
 import { VoiceApiTokens, voiceApiTokenKey, voiceTokensPath } from './voice-api/tokens.ts';
 import { routerClassifier } from './voice-choice.ts';
-import { VoiceFeedbackRelay } from './voice-feedback-relay.ts';
 import { meetingContext } from './voice-meeting-context.ts';
 import { VoiceRouter, parseVoiceContext } from './voice.ts';
 import { type WebhookLogEntry, createWebhookDispatcher } from './webhooks.ts';
@@ -284,8 +203,6 @@ import {
   appCacheControl,
   boardLastActivity,
   readAppAssetManifest,
-  renderBoardMemberNotFound,
-  renderBoardNotFound,
   renderBoardShell,
   renderReviewsShell,
   renderSigninShell,
@@ -539,294 +456,44 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    */
   const readDiscoveryEntry =
     opts.discoveryEntry ?? ((): { port: number; pid: number } | null => null);
-  // Same opt-in seam: no engine here means no socket can start a billed
-  // streaming session. See ServerOptions.transcription.
-  const meetingStore: MeetingStore = new MeetingStore(dataDir, {
-    // The raw companion's tie back to the doc: bound path and title as they
-    // are at meeting start and stop. A thunk over `docStore`, which is
-    // constructed below; a meeting can only start long after it exists.
-    docInfo: (docId) => {
-      const path = docStore.boundPathOf(docId);
-      const title = docStore.peekMeta(docId)?.title;
-      return { ...(path ? { path } : {}), ...(title ? { title } : {}) };
-    },
-    /**
-     * What the doc's project keeps, asked once as each meeting starts.
-     *
-     * The PROJECT's answer, found two ways because a meeting reaches its
-     * project by two roads: the filing record names it for a meeting this
-     * server opened, and the doc's own identity key names it for a recording
-     * made over an ordinary bound project file. Neither, and the meeting
-     * keeps everything — the default a project that has never been asked has
-     * always had.
-     *
-     * The project's CURRENT choice rather than the one stamped on the filing:
-     * a project that turned transcripts off means the meeting starting now,
-     * and a snapshot taken the day the doc was created would keep writing
-     * words it has since said it does not want.
-     */
-    retention: (docId) => {
-      const filed = meetingFilingFor(dataDir, docId)?.repoKey;
-      const own = docStore.repos.primaryKeyFor(docId);
-      const repoKey = filed ?? (own ? parseDocKey(own)?.repoKey : undefined);
-      return (
-        (repoKey ? mountStore.meetingsOf(repoKey)?.retention : undefined) ?? 'transcripts-and-audio'
-      );
-    },
-  });
-  /**
-   * Voice feedback on a page: the same engines a meeting opens, and a tidier
-   * that turns what was said into comments. Both seams default to nothing,
-   * for the reason `transcription` does — see server-options.ts.
-   */
-  const voiceRelay = new VoiceFeedbackRelay({
-    engines: Array.isArray(opts.transcription)
-      ? opts.transcription
-      : opts.transcription
-        ? [opts.transcription as TranscriptionEngine]
-        : [],
-    tidy: opts.voiceFeedbackTidy ?? null,
-    // A clarifying question is said in the board reply's setup-1 voice.
-    voice: opts.spokenReply?.voices[1] ?? null,
+  // The meetings: the store, voice feedback, the planning ears, the
+  // microphone and bot relays, and calendar join — see meeting-wiring.ts.
+  // HERE, before the doc store, because the doc store asks the meeting store
+  // whether a doc is recording; everything built later is read through
+  // `late`, only once a meeting is live.
+  const meetings = wireMeetings({
     dataDir,
-    // Read when a page has gone, long after `docStore` below exists.
-    keep: {
-      listThreads: (docId) => docStore.listThreads(docId),
-      postComment: (docId, threadId, author, text, anchor, o) =>
-        docStore.postComment(docId, threadId, author, text, anchor, o),
-      editCommentText: (docId, threadId, commentId, text, o) =>
-        docStore.editCommentText(docId, threadId, commentId, text, o),
+    opts,
+    sse,
+    notifyLanding: (part) => landingChanges.notify(part),
+    recallCallbackHost,
+    proxiedTrustedHosts,
+    anonymousColor: ANONYMOUS_ACTOR.color,
+    late: {
+      docStore: () => docStore,
+      taskStore: () => taskStore,
+      taskProjection: () => taskProjection,
+      mountStore: () => mountStore,
+      readyNudger: () => readyNudger,
+      spokenBoard: () => spokenBoard,
+      planMinutes: () => planMinutes,
+      fileUnderBoardWorkspace: (docId, requested) => fileUnderBoardWorkspace(docId, requested),
+      backTargetFor: (docId) => backTargetFor(docId),
+      fileReviewRequest: (docId, author, text) => fileReviewRequest(docId, author, text),
+      lookupDocs: (workspaceId, exceptDocId) => lookupDocs(workspaceId, exceptDocId),
     },
-    ...(opts.voiceKeepGraceMs !== undefined ? { keepGraceMs: opts.voiceKeepGraceMs } : {}),
-    log: (line) => console.log(line),
   });
-  // A planning meeting's transcript, lent to the planning voice on its doc.
-  const meetingEars = new MeetingEars();
-  const meetingRelay = new MeetingRelay({
-    store: meetingStore,
-    engines: Array.isArray(opts.transcription)
-      ? opts.transcription
-      : opts.transcription
-        ? [opts.transcription as TranscriptionEngine]
-        : [],
-    // The server supplies the notes sink — the write into the meeting doc —
-    // and the context resolver (doc title, board task titles). Thunks, not
-    // references: the doc store and the task store are constructed below, and both
-    // exist long before any meeting can start.
-    notes: opts.meetingNotes
-      ? withServerNotesSinks(opts.meetingNotes, {
-          docStore: () => docStore,
-          tasks: () => taskStore,
-          // The meeting namer's reads and its guarded title write.
-          titleStore: () => docStore,
-          // A meeting on a person's own doc writes its notes into a doc of
-          // its own, linked from the original in one line
-          // (`meeting-notes-target.ts`). Thunks for the reason above.
-          mintNotesDoc: createServerNotesDocMint(
-            {
-              createForCaller: (requested, init) => docStore.createForCaller(requested, init),
-              attachFile: (docId, file) => docStore.attachFile(docId, file),
-              fileUnderBoard: (docId, requested) => fileUnderBoardWorkspace(docId, requested),
-              boardOf: (docId) => backTargetFor(docId)?.id,
-            },
-            dataDir,
-          ),
-          // One reader: the legacy-transcript removal, which must not take a
-          // `Raw transcript` heading out of a doc bound into somebody's
-          // working tree, where the old note-taker never wrote one.
-          dataDir,
-          // The capture pipeline's board writes, and the "go do it" wake —
-          // the same immediate addressed delivery an answered review item
-          // gets. Both close over consts declared below; a meeting can only
-          // start long after createServer has returned.
-          captureBoard: () => taskStore,
-          // Where a meeting whose notes came out badly is reported: a review
-          // item on the row the meeting's doc is linked to, or on the doc
-          // itself when no row links it. Same stores, same thunk reason as
-          // `captureBoard`.
-          qualityBoard: () => ({
-            backlinksFor: (ref) => taskStore.backlinksFor(ref),
-            addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
-            fileOnDoc: (docId, review, actor) => fileOnMeetingDoc(docStore, docId, review, actor),
-            // A meeting that crosses another bar after its item exists
-            // rewrites those words rather than raising a second ask. The
-            // same two revise paths every other server-filed item uses.
-            reviseReviewItem: (taskId, itemId, patch, o) =>
-              taskStore.reviseReviewItem(taskId, itemId, patch, o),
-            reviseOnDoc: (docId, threadId, commentId, patch, actor) =>
-              docStore.reviseCommentReview(docId, threadId, commentId, patch, {
-                // Only the NAME reaches the revision stamp; the rest is the
-                // `User` shape the doc side takes.
-                actor: {
-                  id: actor.id,
-                  name: actor.name,
-                  kind: 'known',
-                  color: hashToColor(actor.name),
-                },
-              }),
-            // And a meeting that ends past no bar takes its item back, so a
-            // reading one recording leg produced cannot stand as a claim
-            // about a meeting that went on to read clean. The asker's own
-            // exit on both surfaces — soft, reversible, and the words a
-            // person replied with are untouched.
-            withdrawReviewItem: (taskId, itemId, o) =>
-              taskStore.withdrawReviewItem(taskId, itemId, o),
-            withdrawOnDoc: (docId, threadId, commentId, reason, actor) =>
-              docStore.withdrawCommentReview(docId, threadId, commentId, {
-                actor: {
-                  id: actor.id,
-                  name: actor.name,
-                  kind: 'known',
-                  color: hashToColor(actor.name),
-                },
-                reason,
-              }),
-          }),
-          // Where "pull up last week's notes" looks. Board docs and when
-          // each last carried a meeting; the meeting's own doc is dropped
-          // by the caller, since "the last meeting" means the one before.
-          lookup: { docs: (workspaceId, exceptDocId) => lookupDocs(workspaceId, exceptDocId) },
-          onTaskReady: (wake) =>
-            readyNudger.taskReady({
-              workspaceId: wake.workspaceId,
-              taskId: wake.taskId,
-              taskTitle: wake.title,
-            }),
-          // "Link that to the existing task", heard: the row gains the same
-          // ref `link_refs` writes, so the meeting is findable from the row
-          // and unlinking has something to remove. Link changes emit no store
-          // event, so the projection is refreshed by hand — the same pattern
-          // the link-refs route uses.
-          linkTaskToDoc: (taskId, docId) => {
-            const linked = taskStore.linkRef(taskId, spokenLinkRef(docId));
-            if (!linked.ok) {
-              console.error(`[meeting-tasks] spoken link refused for ${taskId}: ${linked.error}`);
-              return;
-            }
-            if (linked.changed) taskProjection.refreshTask(linked.task);
-          },
-          // A huddle doc is HELD by a board workspace rather than owned by one
-          // (no `setId`), which is where "create a task" said aloud used to
-          // go quiet: the capture had no board. The doc's back-target is the
-          // same answer the doc page's back arrow gives.
-          boardOf: (docId) => backTargetFor(docId)?.id,
-          // "Ask the team whether…" — filed exactly as the Review float's
-          // press is, with the question attached, by the meeting assistant.
-          onReviewAsk: async ({ docId, question, requester }) => {
-            const filed = await fileReviewRequest(
-              docId,
-              {
-                id: MEETING_CAPTURE_ACTOR.id,
-                name: MEETING_CAPTURE_ACTOR.name,
-                kind: 'known',
-                color: ANONYMOUS_ACTOR.color,
-              },
-              spokenReviewComment(question, requester),
-            );
-            if (!filed) console.error(`[meeting-tasks] review ask on ${docId}: doc not found`);
-          },
-        })
-      : null,
-    // Lifecycle only. The words never touch this bus — see meeting-protocol.
-    broadcast: (docId, payload) => sse.broadcast(docId, payload),
-    // Which note-taker this doc uses, changed while it is recording. The
-    // same write the at-rest route makes, so the two halves of one choice
-    // cannot disagree about where the answer is kept.
-    setNotesMethod: (change) => {
-      try {
-        writeNotesMethod(dataDir, change.docId, {
-          method: change.method,
-          at: Date.now(),
-          ...(change.by ? { by: change.by } : {}),
-          ...(change.meetingId ? { meetingId: change.meetingId } : {}),
-        });
-        return true;
-      } catch (err) {
-        // The method is a preference, never a dependency of taking notes: a
-        // record that cannot be written leaves the doc on the method it had
-        // and the meeting composing. Answering `false` is what keeps the
-        // notes from claiming the switch anyway.
-        console.error(`[meeting-notes] notes method not recorded for ${change.docId}:`, err);
-        return false;
-      }
-    },
-    ears: meetingEars,
-  });
-  /**
-   * The bot path into the SAME pipeline. It gets the relay's own notes deps
-   * rather than a second set built from the same options: two sets would be
-   * two ownership ledgers over one doc's notes section, and the ledger is
-   * what stops a tick from eating what a person typed.
-   */
-  /**
-   * Is the address we would hand Recall one this server itself refuses?
-   *
-   * Computed here rather than in bin.ts because the effective host lists are
-   * here — `proxiedTrustedHosts` above is already the post-verifier one — and
-   * because a server spun up any other way (staging, a test) deserves the
-   * same answer. Null means nothing known says the callbacks are unreachable.
-   */
-  const recallUnreachable = unreachableCallbackReason({
-    wsBase: opts.meetingBot?.config.publicWsBase ?? null,
-    callbackHost: recallCallbackHost,
-    accessGatedHosts: [...proxiedTrustedHosts, ...(opts.accessTunnelHosts ?? [])],
-  });
-  if (recallUnreachable) console.error(`[meetings] bots are OFF: ${recallUnreachable}`);
-  // Who waits for which lead answer: a spoken-reply socket or a bot meeting.
-  const leadAnswers = new LeadAnswers();
-  const recallRelay = new RecallMeetingRelay({
-    store: meetingStore,
-    notes: meetingRelay.notesDeps,
-    client: opts.meetingBot ?? null,
-    unreachable: recallUnreachable,
-    broadcast: (docId, payload) => sse.broadcast(docId, payload),
-    // The bot's words DO touch this bus — unlike the microphone's — because a
-    // bot has no socket to any browser. Transient: live fan-out, no buffer,
-    // no id, so the replay window stays the doc's (see SseBus).
-    broadcastTransient: (docId, payload) => sse.broadcastTransient(docId, payload),
-    // "Claude, …" from the owner in a bot meeting. The board it answers from
-    // is the spoken reply's, built further down, so it is read when asked.
-    claude: createMeetingClaude({
-      enabled: opts.meetingClaude === true,
-      ownerEmail: opts.ownerEmail,
-      client: opts.meetingBot ?? null,
-      voice: opts.spokenReply?.meetingVoice ?? null,
-      board: () => spokenBoard,
-      boardOf: (docId) => backTargetFor(docId)?.id,
-      ownerId: () => ownerIdentityIds()[0] ?? 'owner',
-      notesOf: (docId) => docStore.readMarkdownBody(docId),
-      leads: leadAnswers,
-      planMinute: (docId, markdown, about) => planMinutes.place(docId, markdown, about),
-    }),
-  });
-  /**
-   * Calendar meeting-join, beside the relay whose invite path a join click
-   * takes. The store survives restarts because the webhook consumer must
-   * recognise the connected calendar after one, and a join that lasted only
-   * until the next deploy would orphan the doc it opened.
-   */
-  const calendarStore = opts.calendarBot ? new CalendarConnectionStore(dataDir) : null;
-  const calendarSync =
-    opts.calendarBot && calendarStore
-      ? new CalendarSyncConsumer({
-          client: opts.calendarBot.client,
-          store: calendarStore,
-          // A cancelled meeting somebody joined: the bot goes home through
-          // the same leave the doc's own button uses.
-          onCancelledJoin: async (_eventId, docId) => {
-            await recallRelay.leave(docId);
-          },
-          onSynced: () => landingChanges.notify('meeting'),
-        })
-      : null;
-  // A meeting joined or left, from any device: the banner on `/` re-reads.
-  if (calendarStore) calendarStore.onChange = () => landingChanges.notify('meeting');
-  /**
-   * CSRF states for the Google connect flow, minted at /connect and spent at
-   * /callback. In memory on purpose: a state that did not survive a restart
-   * only costs the person one more click on Connect.
-   */
-  const calendarOauthStates = new Map<string, number>();
+  const {
+    meetingStore,
+    voiceRelay,
+    meetingEars,
+    meetingRelay,
+    leadAnswers,
+    recallRelay,
+    calendarStore,
+    calendarSync,
+    calendarOauthStates,
+  } = meetings;
   // Late-bound because DocStore is constructed before the task store and the
   // projection it needs. Nothing can fire through it until a doc exists,
   // which is after both.
@@ -1492,22 +1159,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     taskStore,
     docStore,
     summarizer,
-  });
-  /** Incoming Messages: the owner's rows, their bodies in a file of their
-   *  own, and the config naming the reader, re-read when its file changes
-   *  (inbox/config.ts). Bryan's Send goes through `inboxReplies` alone. */
-  const inboxConfig = inboxConfigReader(dataDir);
-  const inboxStore = new InboxStore(dataDir);
-  const unwatchInbox = watchInbox({
-    store: inboxStore,
-    notify: () => landingChanges.notify('inbox'),
-  });
-  const inboxBodies = new InboxBodies(dataDir);
-  const inboxReplies = new InboxReplies({
-    store: inboxStore,
-    sends: new InboxSends(dataDir),
-    config: inboxConfig,
-    transport: opts.inboxTransport ?? systemTransport(),
   });
   // What keeps a board off the coach. Two of the stores it reads are built
   // further down; these run only for a page's or a row's event, and a
@@ -2393,8 +2044,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       };
     },
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
-    landingInbox: (rankOf) =>
-      inboxSectionFor({ store: inboxStore, config: inboxConfig(), taskStore, rankOf }),
+    // Started further down, with the other registered features; the page
+    // reads it at request time.
+    landingInbox: (rankOf) => features.inbox.landingSection(rankOf),
     landingCoach: () => coachWiring.landing(),
     landingRemote: () => (homeRemotes ? renderRemoteReview(homeRemotes.boards()) : ''),
   });
@@ -2603,31 +2255,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     j,
   };
 
-  /**
-   * Incoming Messages — the reader's post and Bryan's taps. The reader is
-   * held to its token always, whatever `requireAgentToken` says: the post
-   * is the only write path for text from outside the trust zone.
-   */
-  const inboxRoutesCtx: InboxRoutesContext = {
-    store: inboxStore,
-    bodies: inboxBodies,
-    replies: inboxReplies,
-    config: inboxConfig,
-    goalIsLive: (ws, goal) => taskStore.getWorkspace(ws)?.goals.some((g) => g.id === goal) ?? false,
-    runs: taskStore,
-    agentName: (agentId) => identities.displayNameFor(agentId) ?? agentId,
-    refuseNonLocal: (req) => refuseNonLocalAgentCaller(req, server.requestIP(req)?.address),
-    authorizeAgent: (req, agentId) =>
-      authorizeAgentCaller({
-        agentId,
-        req,
-        address: server.requestIP(req)?.address,
-        key: agentTokenKeyFor(),
-        requireToken: true,
-      }),
+  // The registered features (routes/features.ts): each family's stores, its
+  // routes at the position Incoming Messages held in the chain, and its stop.
+  // Started HERE, where the inbox's route context was built — the first
+  // family moved behind them, and the last of its readers to exist.
+  const features = startServerFeatures({
+    dataDir,
+    opts,
+    taskStore,
+    identities,
+    notifyLanding: (part) => landingChanges.notify(part),
+    requestAddress: (req) => server.requestIP(req)?.address,
+    agentTokenKey: agentTokenKeyFor,
     j,
     safeJson,
-  };
+  });
 
   /** The coach's pages, stream and the session's moments (routes/coach.ts). */
   const coachRoutesCtx: CoachRoutesContext = {
@@ -3253,851 +2895,55 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     return withEventOrigin(origin, () => handleRequest(req)).finally(settled);
   }
 
-  async function handleRequest(req: Request): Promise<Response | undefined> {
-    const startedAt = performance.now();
-    const pathname = new URL(req.url).pathname;
-    // Counted before any gate, so the memory line names refused traffic too.
-    docStore.noteRequest(req.method, pathname);
-    // A stray `%` anywhere in the path is a caller's typo, and it has to
-    // be answered before anything decodes it: `decodeURIComponent` throws a
-    // `URIError` inside whichever matcher pulls the id out of the path, and
-    // that surfaces as a 500 naming nothing. Front door rather than per
-    // route — a check each route must remember covers only the routes
-    // somebody remembered to change, and there are 95 direct decode calls.
-    const badSegment = malformedPathSegment(pathname);
-    if (badSegment !== undefined) {
-      return applyCors(
-        req,
-        new Response(
-          JSON.stringify({
-            error: 'bad-path',
-            message: 'a path segment is not valid percent-encoding',
-          }),
-          { status: 400, headers: { 'content-type': 'application/json' } },
-        ),
-      );
-    }
-    // A docId-addressed request may HYDRATE that doc, and hydration reads
-    // the doc's bound file. That read used to run on the main thread, where
-    // a cloud-sync folder that had stopped answering parked the whole
-    // server — every route, not just this one (see slow-fs.ts). Doing it
-    // here, on the thread pool and under a deadline, means the synchronous
-    // hydrate inside the route either finds the bytes already in hand or
-    // finds the path quarantined and parks the doc without touching it.
-    const prewarmUrl = new URL(req.url);
-    const prewarmIds = docIdsAddressedBy(prewarmUrl);
-    if (prewarmIds.length > 0) {
-      await Promise.all(prewarmIds.map((id) => docStore.prewarmHydration(id)));
-    }
-    // Server-side Sentry (a no-op passthrough when unconfigured — see
-    // sentry.ts): one span per request, named by route PATTERN never raw
-    // path, continuing the browser's trace when it sent one so a page load
-    // reads end to end. A throw inside `route()` is reported with the same
-    // route-pattern context, then rethrown unchanged — this wrapper only
-    // observes, it does not change what a request returns.
-    let routed: Response | undefined;
-    try {
-      routed = await withRouteSpan(req, pathname, () => route(req));
-    } catch (err) {
-      captureServerError(err, { route: routePatternForSpan(pathname), method: req.method });
-      throw err;
-    }
-    // Compress BEFORE the CORS merge so the encoding headers ride out on the
-    // same response the wrapper copies; `maybeCompress` skips anything whose
-    // content-type isn't on its allowlist (see compress.ts for why that gate
-    // is narrow — a live stream must never be buffered to compress it).
-    //
-    // `maybeNotModified` runs first: when the client already holds the body,
-    // gzipping it is the one case where the CPU buys nothing, and a 304 has
-    // no body for `maybeCompress` to act on anyway.
-    // `undefined` means the request became a websocket — nothing to decorate.
-    if (routed === undefined) return undefined;
-    const response = applyCors(
-      req,
-      refreshSession(req, await maybeCompress(req, maybeNotModified(req, routed))),
-    );
-    const elapsedMs = performance.now() - startedAt;
-    if (elapsedMs >= slowRequestMs) {
-      // Path only — the query can carry a person's name (`?user=`), and
-      // the line is for a grep over durations, not a record of who asked.
-      console.error(
-        `[timing] ${req.method} ${pathname} ${Math.round(elapsedMs)}ms ` +
-          `status=${response.status} bytes=${response.headers.get('content-length') ?? '?'}`,
-      );
-    }
-    return response;
-
-    // Hoisted, so the wrapper above can call it first. The whole route
-    // table lives in here unchanged.
-    async function route(req: Request): Promise<Response | undefined> {
-      const url = new URL(req.url);
-      const { pathname } = url;
-
-      // --- CORS preflight ---
-      // The canonical embed loads the widget bundle from this server but
-      // runs on a different origin (e.g. an Astro dev server on :4321).
-      // Every REST call from the widget is therefore cross-origin and
-      // browsers preflight non-simple requests (POST + JSON body) with an
-      // OPTIONS. Reply once here so we don't have to thread the response
-      // through every route handler.
-      // The wrapper above attaches the CORS headers when the origin is
-      // allowed. A disallowed origin gets a bare 204 with no
-      // Access-Control-Allow-* — which is exactly how the browser learns no.
-      if (req.method === 'OPTIONS') {
-        return new Response(null, { status: 204 });
-      }
-
-      // --- Cross-origin WRITE gate ---
-      // Withholding CORS headers only hides the RESPONSE. A "simple request"
-      // — POST with content-type text/plain — is never preflighted, so the
-      // browser sends it and the write lands; the page just can't read the
-      // reply. safeJson() parses the body whatever the content-type says, so
-      // that was a working CSRF write: post comments as someone else, or
-      // create a doc bound to any file on the machine.
-      //
-      // GET stays open on purpose. Its response is already withheld by CORS,
-      // and refusing it would break <script>/<img>-style loads of the widget
-      // bundle from arbitrary dev sites (those send no Origin at all).
-      if (
-        req.method !== 'GET' &&
-        req.method !== 'HEAD' &&
-        !isAllowedBrowserOrigin(req.headers.get('origin'), policyFor(req))
-      ) {
-        return j(403, { error: 'origin_not_allowed' });
-      }
-
-      // ── The home feed ── see routes/home-feed.ts. ABOVE admission, with a
-      // gate of its own: its one remote caller is a service token, which
-      // names nobody, and admission refuses a stamp that names nobody.
-      const homeFeed = await handleHomeFeedRoute(homeFeedCtx, req, pathname);
-      if (homeFeed) return homeFeed;
-
-      // ── Request admission ── see request-admission.ts.
-      // The gate ANSWERS this request or hands back what it proved. A
-      // refused answer carries no per-request value with it, so nothing
-      // below can read a visitor off a request that never got in — the
-      // union is what makes that a compile error rather than a review note.
-      const gate = await admit(req, { pathname });
-      if (!gate.admitted) return gate.response;
-      // A local-only attachment set's files stay on this machine. Here,
-      // below admission and ABOVE the upgrades, because a socket is
-      // authorized once at open and a gate below it would never see one.
-      if (
-        !isOnBox(req.headers, server.requestIP(req)?.address ?? undefined) &&
-        addressesLocalOnlySet(pathname, localOnlyGate)
-      ) {
-        return j(403, LOCAL_ONLY_REFUSAL);
-      }
-      const {
-        visitor,
-        visitorShareId,
-        visitorMemberKey,
-        visitorHome,
-        widgetDoorGrant,
-        boardAgent,
-        metaFor,
-        roleFor,
-        requireOwner,
-      } = gate;
-
-      // --- REST: email login ---
-      // Reachability (the host gate, Access, a share session) and identity
-      // (who you are) stay orthogonal: a local host still bypasses the host
-      // guard — it may REACH the server — and still has to say who it is.
-      // These routes are what "saying who you are" means.
-      //
-      // They sit AFTER the host decision on purpose, so a share visitor
-      // reaches them only if `shareScopeAllows` lets them, and it does not:
-      // a share visitor is already proven by Cloudflare Access, and this is
-      // not a second way to claim an identity on a share host.
-      // ── Request attribution ── see request-attribution.ts.
-      // Chained after admission rather than composed beside it, because its
-      // input is what the gate just proved. Called from the position the
-      // widget-token gate held — that gate lives inside, and its 401 has to
-      // land exactly here. `attributed: false` carries no helpers at all, so
-      // no route can name an author on a request whose token was refused.
-      const attribution = attributeRequest(req, gate);
-      if (!attribution.attributed) return attribution.response;
-      const {
-        widgetIdentity,
-        provenIdentityFor,
-        accessIdentityFor,
-        authorFor,
-        refuseCategoryAuthor,
-        withTaskChips,
-        browserProvedNobody,
-        provenAuthor,
-      } = attribution;
-      /** A person proof naming the owner — never a body, a widget token or
-       *  an agent token. Incoming Messages is shown to and moved by this
-       *  alone (routes/inbox.ts). */
-      const ownerProven = (): boolean => {
-        if (visitor) return false;
-        const proven = provenIdentityFor();
-        return proven !== null && isOwnerActor({ id: proven.id });
-      };
-
-      // --- Sign-in write gate ---
-      // Every ordinary write — a comment, a task edit, a review answer, a
-      // doc bind — passes through here, because every one of them is a
-      // non-GET and every route on this server lives below this line. The
-      // predicate is method-keyed rather than a route list on purpose: a
-      // list is a thing that silently stops being complete.
-      //
-      // Reads are untouched, agents are untouched (see write-gate.ts for
-      // what tells them apart and what that boundary is worth), and the
-      // refusal carries the URL that fixes it — a bare 401 is
-      // indistinguishable from a bug, and the client turns this body into
-      // a sign-in prompt.
-      //
-      // Order: below the widget-token gate so a valid token counts as
-      // proof, and below the host/Access gates so an Access visitor's
-      // verified email is already in hand.
-      if (requireSignInToWrite && isGatedWrite(req.method, pathname) && browserProvedNobody()) {
-        return j(401, signInRequiredBody());
-      }
-
-      // --- Sign-in, session and share links (routes/auth-share.ts) ---
-      // Extracted whole and called from the position the block occupied, so
-      // nothing above or below it overtakes anything. See that file's header
-      // for the two places the order inside it is load-bearing.
-      {
-        const handled = await handleAuthShareRoutes(authShareRoutesCtx, {
-          req,
-          url,
-          pathname,
-          widgetIdentity,
-          browserProvedNobody,
-          provenIdentityFor,
-          accessIdentityFor,
-        });
-        if (handled) return handled;
-      }
-
-      // --- ElevenLabs' agent asking for setup 4's reply --- see
-      // ./routes/voice-agent-llm.ts. It answers one exact path, so where it
-      // sits changes nothing; it is beside Recall's webhook because both are
-      // a vendor's backend calling in on the callback hostname.
-      {
-        const handled = await handleVoiceAgentLlmRoute(voiceAgentLlmRoutesCtx, {
-          req,
-          pathname,
-          shareVisitor: visitor !== null,
-        });
-        if (handled) return handled;
-      }
-
-      // --- Recall's bot status-change webhook --- see
-      // ./routes/recall-webhook.ts. Called from the position the block
-      // held: it must stay IMMEDIATELY above the `/recall/` websocket
-      // upgrade below, because that upgrade's own test is
-      // `startsWith('/recall/')` and would answer a status POST with the
-      // token lookup's 404. That adjacency is behaviour — keep these two
-      // adjacent.
-      {
-        const handled = await handleRecallWebhookRoute(recallWebhookRoutesCtx, {
-          req,
-          pathname,
-        });
-        if (handled) return handled;
-      }
-
-      // ── Upgrade and stream ── see routes/upgrade-stream.ts.
-      // Six blocks that end in a long-lived connection rather than a body:
-      // the three websocket upgrades and the three SSE openers. Called from
-      // the position the run held, so the `/recall/` upgrade still sits
-      // IMMEDIATELY below the status webhook above it — that adjacency is
-      // load-bearing and the comment on the webhook says why. Null means no
-      // block there claimed this address, which is the same fall-through the
-      // run did in place; `upgraded` is the one outcome that must reach Bun
-      // as `undefined`, and this is the only place that spells it.
-      const streamed = serveUpgradeAndStreamRoutes({
-        req,
-        url,
-        pathname,
-        visitor,
-        visitorShareId,
-        visitorMemberKey,
-        browserProvedNobody,
-        provenAuthor,
-        ownerProven,
-        widgetDoorGrant,
-      });
-      if (streamed) {
-        if (streamed.kind === 'upgraded') return undefined;
-        return streamed.response;
-      }
-
-      // ── The workspace scope ── see middleware/workspace-scope.ts.
-      //
-      // ONE resolver for every canonical `/workspaces/<id>/…` request, run
-      // once here rather than at the top of each handler. It answers two
-      // questions and refuses on either: does this board exist, and does the
-      // row named under it belong to it. That second question only became
-      // askable when the board went into the path — `/api/goals/<id>` named
-      // a row and left the server to find its board, so "a goal on somebody
-      // else's board" was not a shape a request could have.
-      //
-      // Placed BELOW the stream block, because a websocket upgrade and an
-      // SSE open are taken over rather than answered, and ABOVE every REST
-      // handler, because the whole point is that no handler resolves a board
-      // for itself. Whether the CALLER may reach the board is not asked here
-      // — `shareScopeAllows` in the host guard has already answered it, and
-      // a second copy of that rule is the thing this file exists to remove.
-      //
-      // `pass` means the path is not its business: not under `/workspaces/`,
-      // or one of the board's HTML pages, which the shell at the tail of the
-      // chain serves with its own not-found.
-      //
-      // What it hands DOWN is the other half. `scope` travels on every
-      // resource route's request and is what those routes match against —
-      // see `matchRest`. A handler with no scope has no remainder to match,
-      // so "the workspace was resolved" stops being something each route
-      // remembers to check and becomes the condition of it answering at
-      // all.
-      let scope: WorkspaceScope<BoardWorkspace> | undefined;
-      {
-        const scoped = resolveWorkspaceScope(
-          {
-            workspaceRecord: (id: string) => taskStore.getWorkspace(id),
-            workspacesOfMember,
-            j,
-            // A browser asked for a page; answer it with one — naming the
-            // board it can go back to, which is the whole difference between
-            // a dead end and a wrong turn. Unless the BOARD is what is
-            // missing, in which case there is nowhere on it to go and the
-            // board's own not-found page is the honest answer: offering to
-            // open a board that does not exist is a second dead end.
-            notFoundPage: (address) =>
-              new Response(
-                address.boardExists
-                  ? renderBoardMemberNotFound(address.workspaceId, address.rest)
-                  : renderBoardNotFound(address.workspaceId),
-                { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } },
-              ),
-          },
-          { pathname, method: req.method, url, accept: req.headers.get('accept') },
-        );
-        if (scoped.kind === 'refused') return scoped.response;
-        if (scoped.kind === 'scope') scope = scoped.scope;
-      }
-
-      // --- REST: run the summary backfill on request --- see
-      // ./routes/ops.ts. Same chain position as before the split: above the
-      // metrics route, which is the next call below.
-      {
-        const handled = await handleSummaryBackfillRoute(opsRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          authorFor,
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: what this process currently costs ---
-      //
-      // The 2026-08-29 jetsam kill left nothing to read: the server was at
-      // 2.6 GB and the only evidence of how it got there was the absence of
-      // the process. `DocStore.stats()` is also written to the log every five
-      // minutes; this route is the same numbers on demand, so the NEXT
-      // incident can be sampled over time instead of reconstructed.
-      //
-      // Counts only — no doc ids, no paths, no titles. That is what makes
-      // it safe to leave un-gated for anyone already past the front door,
-      // and it still refuses a share visitor: an external reviewer invited
-      // to one document has no business reading how many others exist.
-      {
-        const handled = handleOpsMetricsRoute(opsRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          authorFor,
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: docs, created and listed — ./routes/docs.ts ---
-      // A whiteboard is created beside them (./routes/whiteboard-routes.ts):
-      // `whiteboards` is an exact remainder no other route here answers.
-      {
-        const docRq = {
-          scope,
-          req,
-          url,
-          pathname,
-          visitor,
-          authorFor,
-          refuseCategoryAuthor,
-          roleFor,
-          requireOwner,
-          metaFor,
-          withTaskChips,
-        };
-        const handled =
-          (await handleDocCreateListRoutes(docRoutesCtx, docRq)) ??
-          (await handleWhiteboardCreateRoute(docRoutesCtx, docRq));
-        if (handled) return handled;
-      }
-
-      // --- An attached dev server — ./routes/apps.ts ---
-      // Its attach sits beside the doc create it mirrors, and its reads claim
-      // only `apps/<id>/…`, which no route below answers.
-      {
-        const handled = await handleAppRoutes(appRoutesCtx, {
-          req,
-          url,
-          scope,
-          visitor: Boolean(visitor),
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: workspaces (the board's own routes) — ./routes/ ---
-      // A board is created here, read here, and every field on it is
-      // written here: its Home queue, its next-work answer, its settings,
-      // its lead, and the docs and huddles filed onto it. They run HERE, in
-      // the position they were written in: the chain's order is behaviour,
-      // and `routes/workspaces.ts` keeps it.
-      {
-        const handled = await handleWorkspaceRoutes(workspaceRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          url,
-          visitor,
-          authorFor,
-          accessEmail: gate.accessEmail,
-          roleFor,
-          requireOwner,
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: tasks (plan §3.10) — ./routes/ ---
-      // Every handler over there hand-copies body fields into the store
-      // call. A field that isn't copied is silently discarded while the
-      // request still returns 200 — so every param has an HTTP-level test
-      // in task-routes.test.ts (the `groups` lesson). They run HERE, in the
-      // position they were written in: the chain's order is behaviour, and
-      // `routes/tasks.ts` keeps it.
-      {
-        const handled = await handleTaskRoutes(taskRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          url,
-          visitor,
-          authorFor,
-          refuseCategoryAuthor,
-          roleFor,
-          requireOwner,
-          provenIdentityFor,
-          requestOriginFor: () => policyFor(req).requestOrigin,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: goal bands and the ordered goal list --- see
-      // ./routes/workspace-goals.ts. Same chain position as before the
-      // split: below the task routes, above the thread promote.
-      {
-        const handled = await handleWorkspaceGoalRoutes(workspaceRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          url,
-          visitor,
-          authorFor,
-          accessEmail: gate.accessEmail,
-          roleFor,
-          requireOwner,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: promote a thread to a task — ./routes/docs.ts ---
-      {
-        const handled = await handleDocPromoteRoute(docRoutesCtx, {
-          scope,
-          req,
-          url,
-          pathname,
-          visitor,
-          authorFor,
-          refuseCategoryAuthor,
-          roleFor,
-          requireOwner,
-          metaFor,
-          withTaskChips,
-        });
-        if (handled) return handled;
-      }
-      // --- MCP: the hosted connector, loopback agents only --- see
-      // ./routes/mcp-connector.ts. One exact path nothing else answers, so
-      // its position shadows nothing; it sits beside the agent-id routes
-      // because it is the door those agents come through.
-      {
-        const handled = await handleMcpConnectorRoute(
-          {
-            host: connectorHost,
-            j,
-            requestAddress: (r) => server.requestIP(r)?.address,
-            agentTokenKey: agentTokenKeyFor,
-          },
-          { req, pathname, visitor },
-        );
-        if (handled) return handled;
-      }
-      // --- REST: durable agent watches, and the agent merge --- see
-      // ./routes/agent-identity.ts. Same chain position as before the
-      // split: after the promote route, before the builder dispatches.
-      {
-        const handled = await handleAgentIdentityRoutes(agentIdentityRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          authorFor,
-          boardAgent,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: board agent tokens --- see ./routes/board-tokens.ts. One
-      // exact family of paths, so its position changes nothing.
-      {
-        const handled = await handleBoardTokenRoutes(boardTokenRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: builder dispatches, and a session's notes on the row it
-      // holds --- see ./routes/dispatch-and-notes.ts. Same chain position
-      // as before the split: after the agent merge route, before chat-audit.
-      {
-        const handled = await handleDispatchAndNoteRoutes(taskRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          url,
-          visitor,
-          authorFor,
-          refuseCategoryAuthor,
-          roleFor,
-          requireOwner,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: chat-audit counters --- see ./routes/chat-audit-routes.ts.
-      // Same chain position as before the split: after the builder
-      // dispatches, before the operator routes.
-      {
-        const handled = await handleChatAuditRoutes(chatAuditRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          visitor,
-        });
-        if (handled) return handled;
-      }
-      // --- Operator routes: plugin refresh, push and deploy — ./routes/ops.ts ---
-      // Same chain position as before the split: after the chat-audit
-      // routes, before the agent attachments.
-      {
-        const handled = await handleOpsRoutes(opsRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          authorFor,
-        });
-        if (handled) return handled;
-      }
-      // --- The repo registry: checkouts, and which copy is live ---
-      // ./routes/repos.ts. Placed beside the operator routes because it
-      // shares their gate: loopback only, no edge, no visitor. Order is not
-      // load-bearing — no other family claims `/api/repos`.
-      {
-        const handled = await handleRepoRoutes(repoRoutesCtx, {
-          req,
-          pathname,
-          url,
-          visitor,
-        });
-        if (handled) return handled;
-      }
-      // --- Mounted project folders: the mount table, and a file's address ---
-      // ./routes/mounts.ts. Two gates in one family — `/api/mounts` shares the
-      // loopback-only gate above, and `/mounts/<fileId>` is the member-facing
-      // address. Order is not load-bearing: no other family claims either
-      // prefix.
-      {
-        const handled = await handleMountRoutes(mountRoutesCtx, {
-          req,
-          pathname,
-          url,
-          visitor,
-        });
-        if (handled) return handled;
-      }
-      // --- The board's Library --- ./routes/workspace-library.ts. Both of its
-      // paths sit under `library/`, which no other family claims, so the
-      // position is not load-bearing.
-      {
-        const handled = await handleLibraryRoutes(libraryRoutesCtx, { scope, req, visitor });
-        if (handled) return handled;
-      }
-      // --- Moving a doc into its project --- ./routes/doc-move.ts. Its one
-      // path, `docs/<id>/move`, is a subroute the doc resource block below
-      // does not answer, so the position is not load-bearing.
-      {
-        const handled = await handleDocMoveRoute(docMoveRoutesCtx, { scope, req, visitor });
-        if (handled) return handled;
-      }
-      // --- REST: agent attachments (§4) --- see
-      // ./routes/workspace-attachments.ts. Same chain position as before
-      // the split: after the deploy routes, before the archive pair.
-      {
-        const handled = await handleWorkspaceAttachmentRoutes(workspaceRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          url,
-          visitor,
-          authorFor,
-          accessEmail: gate.accessEmail,
-          roleFor,
-          requireOwner,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: archive and unarchive, for a review and for one doc ---
-      // see ./routes/archive.ts. Same chain position as before the split:
-      // after the agent attachments, before the board delete.
-      {
-        const handled = await handleArchiveRoutes({ req, pathname, url, visitor, scope });
-        if (handled) return handled;
-      }
-      // --- REST: the board delete --- see ./routes/workspace-delete.ts.
-      // It stays BELOW the archive family, which serves `DELETE
-      // /workspaces/<ws>/attachments/<setId>`. The order used to be load-bearing
-      // because one path meant either store; now the two verbs have two
-      // addresses and cannot be confused, and the order is kept because
-      // nothing is gained by moving it.
-      {
-        const handled = await handleWorkspaceDeleteRoute(workspaceRoutesCtx, {
-          scope,
-          req,
-          pathname,
-          url,
-          visitor,
-          authorFor,
-          accessEmail: gate.accessEmail,
-          roleFor,
-          requireOwner,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: a review's own files --- see ./routes/review-files.ts.
-      // Same chain position as before the split: after the board delete,
-      // before the meeting and calendar routes.
-      {
-        const handled = await handleReviewFileRoutes(reviewFileRoutesCtx, {
-          scope,
-          req,
-          url,
-          pathname,
-          visitor,
-          metaFor,
-          withTaskChips,
-        });
-        if (handled) return handled;
-      }
-      // --- Meetings, transcripts and the calendar — ./routes/meetings-calendar.ts ---
-      // Called from the position the block occupied: every
-      // `/api/docs/<id>/meetings...` pattern has to be tried before the
-      // doc catch-all below, which would otherwise swallow all of them.
-      {
-        const handled = await handleMeetingCalendarRoutes(meetingCalendarRoutesCtx, {
-          scope,
-          req,
-          url,
-          pathname,
-          visitor,
-        });
-        if (handled) return handled;
-      }
-      // --- REST: one doc and its threads — ./routes/docs.ts ---
-      {
-        const handled = await handleDocResourceRoutes(docRoutesCtx, {
-          scope,
-          req,
-          url,
-          pathname,
-          visitor,
-          boardAgent: gate.boardAgent,
-          authorFor,
-          refuseCategoryAuthor,
-          roleFor,
-          requireOwner,
-          metaFor,
-          withTaskChips,
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: the prompt settings --- see ./routes/prompts.ts.
-      // Top-level rather than under a board: `/settings/prompts` is a page
-      // outside any board, and five of the seven prompts belong to the
-      // server rather than to one of them.
-      {
-        const handled = await handlePromptRoutes(promptRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          authorFor,
-        });
-        if (handled) return handled;
-      }
-
-      // --- SSE: the workspaces list's change feed --- see
-      // ./routes/landing-stream.ts. Top-level, like `/` it serves.
-      {
-        const handled = handleLandingStreamRoute({ sse, j }, { req, pathname, visitor });
-        if (handled) return handled;
-      }
-
-      // --- REST + page: the cross-board review queue --- see
-      // ./routes/review-queue.ts. Top-level for the prompts' reason: it is
-      // about every board, not one.
-      {
-        const handled = await handleReviewQueueRoutes(reviewQueueRoutesCtx, {
-          req,
-          pathname,
-          url,
-          visitor,
-        });
-        if (handled) return handled;
-      }
-
-      // --- Page + REST: the voice page --- see ./routes/voice-page.ts.
-      // Top-level for the review queue's reason; claims `/voice` and
-      // `/api/voice/agents` alone, which nothing above answers.
-      {
-        const handled = handleVoicePageRoutes(voicePageRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          ownerProven: () => ownerProven(),
-          anyoneProven: () => provenIdentityFor() !== null,
-          mustSignIn: () => requireSignInToWrite && browserProvedNobody(),
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: the voice conversation API --- see ./routes/voice-api.ts.
-      // Claims `/v1/models`, `/v1/chat/completions` and `/api/voice/tokens`
-      // alone; nothing above answers them.
-      {
-        const handled = await handleVoiceApiRoutes(voiceApiRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          ownerProven: () => ownerProven(),
-          anyoneProven: () => provenIdentityFor() !== null,
-          mustSignIn: () => requireSignInToWrite && browserProvedNobody(),
-          requestOrigin: () => policyFor(req).requestOrigin,
-          viaTunnel: () => req.headers.has('cf-ray'),
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: Incoming Messages --- see ./routes/inbox.ts. Top-level
-      // for the review queue's reason: messages are the owner's, not a
-      // board's. Claims `/inbox/` alone, which nothing above answers.
-      {
-        const handled = await handleInboxRoutes(inboxRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          ownerProven: () => ownerProven(),
-          requestOrigin: () => policyFor(req).requestOrigin,
-        });
-        if (handled) return handled;
-      }
-
-      // --- REST: the goal coach --- see ./routes/coach.ts. Top-level for
-      // the inbox's reason: the goals are the owner's, not a board's.
-      // Claims `/coach/` alone, which nothing above answers.
-      {
-        const handled = await handleCoachRoutes(coachRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          ownerProven: () => ownerProven(),
-          requestOrigin: () => policyFor(req).requestOrigin,
-        });
-        if (handled) return handled;
-      }
-
-      // --- Web log --- see ./routes/ops.ts. Same chain position as before
-      // the split: under the doc resource routes, above the shell tail.
-      {
-        const handled = handleWebhookLogRoute(opsRoutesCtx, {
-          req,
-          pathname,
-          visitor,
-          authorFor,
-        });
-        if (handled) return handled;
-      }
-
-      // ── Shell and static serving ── see routes/shell-static.ts.
-      // The tail of the router: an HTML shell, a built asset, a mockup's
-      // own file, or a redirect to the address that has one. Null means no
-      // block there claimed this address, which is the same fall-through
-      // the run did in place, and it lands on the 404 below.
-      const shell = await serveShellRoutes({
-        req,
-        url,
-        pathname,
-        visitor,
-        visitorHome,
-        ownerProven: ownerProven(),
-      });
-      if (shell) return shell;
-
-      // ── The task address ── see routes/task-page.ts. Below the shell
-      // because it answers no page of its own, and below every task route so
-      // it shadows none of them: what reaches here is the BARE
-      // `/workspaces/<ws>/tasks/<taskId>`, which is the API prefix rather
-      // than an address, and it redirects to the board with that task open.
-      const taskPage = handleTaskPageRoutes({ method: req.method, pathname, url });
-      if (taskPage) return taskPage;
-
-      // ── Stale-client 410 ── see routes/stale-client.ts. Above the
-      // wrong-prefix hint and below everything that exists: an address the
-      // pre-cutover client used is told the client is behind, rather than
-      // getting the bare 404 a deleted board also answers.
-      const stale = handleStaleClient(pathname);
-      if (stale) return stale;
-
-      // ── Wrong-prefix 404 ── see routes/wrong-prefix.ts. Below everything
-      // that exists, so it shadows nothing: a guess at a board route with
-      // `/api` in front is told the address without it.
-      const wrongPrefix = handleWrongPrefix(pathname);
-      if (wrongPrefix) return wrongPrefix;
-
-      // ── The board's own not-found page ── see routes/workspace-not-found.ts.
-      // The last thing tried, so it shadows nothing: a browser that asked for
-      // an address under a board nothing serves gets a PAGE saying the link is
-      // wrong and linking back to the board, rather than the bodyless 404
-      // below — which Chrome paints as ERR_INVALID_RESPONSE, indistinguishable
-      // from the server being down.
-      const wsNotFound = handleWorkspaceNotFound({ pathname, method: req.method, url });
-      if (wsNotFound) return wsNotFound;
-
-      return new Response('not found', { status: 404 });
-    }
-  }
+  // The ordered chain every request runs — see routes/request-chain.ts. Built
+  // last, from every route family's context above; it reads nothing per
+  // request but the request.
+  const handleRequest = createRequestChain({
+    docStore,
+    applyCors,
+    refreshSession,
+    slowRequestMs,
+    policyFor,
+    isValidDocId,
+    j,
+    requestAddress: (req) => server.requestIP(req)?.address,
+    homeFeedCtx,
+    admit,
+    localOnlyGate,
+    attributeRequest,
+    requireSignInToWrite,
+    authShareRoutesCtx,
+    voiceAgentLlmRoutesCtx,
+    recallWebhookRoutesCtx,
+    serveUpgradeAndStreamRoutes,
+    taskStore,
+    workspacesOfMember,
+    opsRoutesCtx,
+    docRoutesCtx,
+    appRoutesCtx,
+    workspaceRoutesCtx,
+    taskRoutesCtx,
+    connectorHost,
+    agentTokenKeyFor,
+    agentIdentityRoutesCtx,
+    boardTokenRoutesCtx,
+    chatAuditRoutesCtx,
+    repoRoutesCtx,
+    mountRoutesCtx,
+    libraryRoutesCtx,
+    docMoveRoutesCtx,
+    handleArchiveRoutes,
+    reviewFileRoutesCtx,
+    meetingCalendarRoutesCtx,
+    promptRoutesCtx,
+    sse,
+    reviewQueueRoutesCtx,
+    voicePageRoutesCtx,
+    voiceApiRoutesCtx,
+    featureRoutes: features.routes,
+    coachRoutesCtx,
+    serveShellRoutes,
+  });
 
   const server = Bun.serve<UpgradeData>({
     port,
@@ -4473,7 +3319,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // output for the rest of the run.
       loopLag.stop();
       taskScheduler.stop();
-      unwatchInbox();
+      features.stop();
       landingChanges.dispose();
       homeRemotes?.dispose();
       pageNudges.dispose();
@@ -4525,11 +3371,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       offStaleComment();
       offStaleOrphan();
       leadRanks.stop();
-      await meetingRelay.dispose();
-      await voiceRelay.dispose();
-      // And the bots. A bot left in a call after this process is gone bills
-      // two vendors and delivers nothing — see RecallMeetingRelay.dispose.
-      await recallRelay.dispose();
+      // The microphone relay, voice feedback and the bots, in that order —
+      // see meeting-wiring.ts.
+      await meetings.dispose();
       // Flush pending body snapshots into the store BEFORE the store's own
       // flush, so the last keystrokes in a task body reach the sidecar.
       taskProjection.stop();
@@ -4551,54 +3395,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       saveReplayMarks(dataDir, sse.marks());
     },
   };
-}
-
-/**
- * Every docId a request might address, from anywhere in its URL.
- *
- * This used to be a list of five path prefixes, and the list was the bug: it
- * covered `/events/`, `/y/`, `/review/`, `/audio/` and `/mockup/` while the
- * canonical `/workspaces/<ws>/docs/<docId>` address and every `/api` route
- * that names a doc in its path went the unprewarmed way and hydrated on the
- * main thread. A prefix list also has to be maintained: a route added later
- * is silently uncovered, and nothing fails until a bound file stops
- * answering.
- *
- * So this walks the path instead of matching the front of it. Every segment
- * that could be a docId is offered to the prewarm, which looks each one up in
- * the doc index and does nothing for the ones it does not know — so a
- * workspace slug or a verb like `archive` costs a Map lookup and no syscall.
- * Being liberal here is safe in exactly the way being conservative was not:
- * an extra candidate reads a file the request was likely to read anyway, a
- * missing one puts a blocking read back on the main thread.
- *
- * There is no body-reading companion to this, and there was briefly: a
- * function that pulled `docId` out of a JSON body for the routes that address
- * a doc there rather than in the URL. It could never run. `isValidDocId`
- * accepts any ordinary URL-safe word, so `api` and `docs` are candidates and
- * the list this returns is empty only for `/` itself. Those body-addressed
- * routes are the bind and attach pair, and they are covered where it
- * actually holds — they call `attachFileAsync`, which does its own pooled
- * read before it touches the doc.
- */
-function docIdsAddressedBy(url: URL): string[] {
-  const found: string[] = [];
-  const add = (raw: string | null | undefined): void => {
-    if (!raw) return;
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(raw);
-    } catch {
-      return;
-    }
-    // `/mockup/<docId>.html` is the one address that carries an extension.
-    const bare = decoded.replace(/\.html?$/i, '');
-    if (!isValidDocId(bare) || found.includes(bare)) return;
-    found.push(bare);
-  };
-  for (const segment of url.pathname.split('/')) add(segment);
-  add(url.searchParams.get('docId'));
-  return found;
 }
 
 function isValidDocId(s: string): boolean {
