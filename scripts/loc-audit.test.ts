@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LINE_LIMIT, audit, countLines, isScannable, listedPaths } from './loc-audit';
+import {
+  DRIFT_LIMIT,
+  LINE_LIMIT,
+  audit,
+  countLines,
+  isScannable,
+  listedPaths,
+  rowCounts,
+} from './loc-audit';
 
 const dirs: string[] = [];
 
@@ -37,8 +45,10 @@ describe('countLines', () => {
 });
 
 describe('isScannable', () => {
-  it('takes .ts and .css under packages', () => {
+  it('takes .ts, .tsx, .mjs and .css under packages', () => {
     expect(isScannable('packages/demo/src/a.ts')).toBe(true);
+    expect(isScannable('packages/demo/src/a.tsx')).toBe(true);
+    expect(isScannable('packages/demo/src/a.mjs')).toBe(true);
     expect(isScannable('packages/demo/src/a.css')).toBe(true);
   });
 
@@ -60,6 +70,13 @@ describe('listedPaths', () => {
       '| `packages/a/src/one.ts` | 900 | Split | move it to `two.ts` |\nsee packages/b/src/style.css too\n',
     );
     expect([...found].sort()).toEqual(['packages/a/src/one.ts', 'packages/b/src/style.css']);
+  });
+
+  it('reads a .tsx path whole rather than stopping at .ts', () => {
+    const found = listedPaths(
+      '| `packages/a/src/island.tsx` | 600 | Keep | x |\npackages/b/plot.mjs',
+    );
+    expect([...found].sort()).toEqual(['packages/a/src/island.tsx', 'packages/b/plot.mjs']);
   });
 
   it('does not count a proposed new filename as a listed file', () => {
@@ -105,6 +122,19 @@ describe('audit', () => {
     expect(unlisted).toContain('packages/demo/src/never-staged.ts');
   });
 
+  it('reports oversized .tsx and .mjs files with no row', () => {
+    const root = fixture();
+    writeLines(root, 'packages/demo/src/island.tsx', 700);
+    writeLines(root, 'packages/demo/src/plot.mjs', 600);
+    // A row for the .ts twin must not satisfy the .tsx file.
+    writeDoc(root, '| `packages/demo/src/island.ts` | 700 | Keep | wrong file |');
+
+    expect(audit(root).unlisted.map((o) => o.path)).toEqual([
+      'packages/demo/src/island.tsx',
+      'packages/demo/src/plot.mjs',
+    ]);
+  });
+
   it('reports an oversized file with no row', () => {
     const root = fixture();
     writeLines(root, 'packages/demo/src/big.ts', 900);
@@ -129,6 +159,33 @@ describe('audit', () => {
     const result = audit(root);
     expect(result.unlisted).toEqual([]);
     expect(result.stale).toEqual(['packages/demo/src/shrunk.ts']);
+  });
+
+  it('reads each row’s Lines cell, commas and all, and ignores prose', () => {
+    const counts = rowCounts(
+      '| `packages/a/src/one.ts` | 1,200 | Keep | x |\n| `packages/a/src/two.tsx` | 600 | Exception | y |\nsee `packages/a/src/three.ts` | 9 |',
+    );
+    expect([...counts]).toEqual([
+      ['packages/a/src/one.ts', 1200],
+      ['packages/a/src/two.tsx', 600],
+    ]);
+  });
+
+  it('fails a row whose count is more than the drift limit off, and only that row', () => {
+    const root = fixture();
+    const listed = 1000;
+    const over = Math.floor(listed * (1 + DRIFT_LIMIT)) + 1;
+    const within = Math.floor(listed * (1 + DRIFT_LIMIT));
+    writeLines(root, 'packages/demo/src/grown.ts', over);
+    writeLines(root, 'packages/demo/src/close.ts', within);
+    writeDoc(
+      root,
+      `| \`packages/demo/src/grown.ts\` | ${listed} | Keep | x |\n| \`packages/demo/src/close.ts\` | ${listed} | Keep | y |`,
+    );
+
+    const result = audit(root);
+    expect(result.unlisted).toEqual([]);
+    expect(result.drifted).toEqual([{ path: 'packages/demo/src/grown.ts', lines: over, listed }]);
   });
 
   it('refuses to pass when the exceptions doc is missing', () => {
