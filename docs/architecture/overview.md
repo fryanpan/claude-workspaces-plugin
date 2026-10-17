@@ -51,7 +51,7 @@ flowchart TB
   plug["plugin<br/>skills · hooks · bundled mcp"]
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
-    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options<br/>connector/ (hosted MCP at /mcp)"]
+    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options · feature-module<br/>connector/ (hosted MCP at /mcp)"]
     docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
@@ -238,12 +238,29 @@ guard would say otherwise. What the table still cannot see is whether an
 `owner-in-handler` route really carries its refusal — that one is the
 reviewer's, and the routes that have it carry their own tests.
 
-Dispatch stays with the ordered chain in `server.ts` on purpose. Bun matches
-by specificity; this router's order is behaviour in eight documented places,
-among them the Recall status webhook immediately above the `/recall/` upgrade
-and every `…/docs/:docId/meetings…` pattern above the doc resource catch-all.
-So every mounted entry's handler is the same front door an unmatched address
-reaches through `fetch`, and the table is the registry rather than the router.
+Dispatch stays with the ordered chain on purpose, and the chain is
+`routes/request-chain.ts` with its two lower thirds, `request-chain-board.ts`
+and `request-chain-tail.ts` (shared shapes in `request-chain-context.ts`).
+`createServer` builds its context once and matches no route itself. Bun
+matches by specificity; this router's order is behaviour in eight documented
+places, among them the Recall status webhook immediately above the
+`/recall/` upgrade and every `…/docs/:docId/meetings…` pattern above the doc
+resource catch-all. So every mounted entry's handler is the same front door an
+unmatched address reaches through `fetch`, and the table is the registry
+rather than the router.
+
+**How a family wires itself in.** `feature-module.ts` is the shape: a family's
+`start` takes the long-lived values it reads and returns its routes, its
+`stop` and any values other families read. A family whose routes claim a
+prefix nothing else answers is registered in `routes/features.ts`: the chain
+tries every registered family at one position (where Incoming Messages sat,
+below the voice API and above the coach) and shutdown stops them at one
+position, so adding one is a module plus a line in that list, with no edit to
+`server.ts`. `routes/inbox-feature.ts` is the first; what a registered family
+may read is `routes/feature-routes-context.ts`. A family whose construction
+others read, or whose teardown has a fixed place, is started by hand from
+where its block sat: `meeting-wiring.ts` (in the Meetings group) builds every
+meeting relay before the doc store and is disposed after the sockets close.
 
 **What runs on a clock.** Three loops in the server tick rather than answer a
 request, and all three take an injected `now` so a test moves the clock
