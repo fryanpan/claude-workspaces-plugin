@@ -17,7 +17,11 @@ import type { LiveDoc } from '../src/doc-store.ts';
 import { DocSuggestOps, type DocSuggestPersistence } from '../src/doc-suggest-ops.ts';
 import { timeSlice } from '../src/event-loop.ts';
 
-const AUTHOR: suggestOps.SuggestionAuthor = { id: 'agent:riverbend', name: 'Riverbend', color: '#3366cc' };
+const AUTHOR: suggestOps.SuggestionAuthor = {
+  id: 'agent:riverbend',
+  name: 'Riverbend',
+  color: '#3366cc',
+};
 
 function liveDoc(markdown: string): LiveDoc {
   const ydoc = new Y.Doc();
