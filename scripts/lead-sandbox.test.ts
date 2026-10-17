@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -125,6 +126,24 @@ describe('buildProfile', () => {
     ]);
   });
 
+  it('refuses writes to what runs outside the sandbox, after every grant', () => {
+    const claude = at(`(allow file-read* file-write* (subpath "${TWIN}/.claude"))`);
+    for (const needle of [
+      `(deny file-write* (literal "${TWIN}/.claude"))`,
+      `(deny file-write* (subpath "${TWIN}/.claude/hooks"))`,
+      `(deny file-write* (subpath "${HOME}/.claude/plugins"))`,
+      `(deny file-write* (literal "${TWIN}/.claude/CLAUDE.md"))`,
+      `(deny file-write* (regex #"^${TWIN}/\\.claude/settings[^/]*$"))`,
+      `(deny file-write* (regex #"^${HOME}/\\.claude\\.json[^/]*$"))`,
+    ])
+      expect(at(needle)).toBeGreaterThan(claude);
+    expect(
+      lines.some(
+        (l) => l.startsWith('(allow file-read* file-write* (regex') && l.includes('.claude\\.json'),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps the prod root shut when a lead is allowed the folder above it', () => {
     const wide = parseConfig(
       { leads: [{ name: 'harborlight-lead', projects: ['/a'], allow: [`${HOME}/Library`] }] },
@@ -155,10 +174,22 @@ describe.skipIf(!HAVE_SANDBOX)('the profile under the real sandbox-exec', () => 
   const harborlight = join(home, 'dev', 'harborlight');
   const riverbend = join(twin, 'dev', 'riverbend');
   const configFile = join(root, 'lead-sandbox.json');
-  for (const d of [harborlight, riverbend, join(home, 'Library'), join(twin, 'secrets')])
+  const claudeDir = join(home, '.claude');
+  for (const d of [
+    harborlight,
+    riverbend,
+    join(home, 'Library'),
+    join(twin, 'secrets'),
+    join(twin, '.claude', 'hooks'),
+  ])
     mkdirSync(d, { recursive: true });
   // The owner's home links onto the data volume, as `~/.claude` does.
   symlinkSync(join(twin, 'secrets'), join(home, 'secrets'));
+  symlinkSync(join(twin, '.claude'), claudeDir);
+  const settings = join(claudeDir, 'settings.json');
+  const claudeJson = join(home, '.claude.json');
+  writeFileSync(settings, '{}\n');
+  writeFileSync(claudeJson, '{}\n');
   // A link planted inside the lead's own project, pointing at another lead's.
   symlinkSync(riverbend, join(harborlight, 'riverbend-link'));
   writeFileSync(join(harborlight, 'README.md'), 'harborlight\n');
@@ -219,6 +250,48 @@ describe.skipIf(!HAVE_SANDBOX)('the profile under the real sandbox-exec', () => 
     expect(sh(`cat '${home}/secrets/key'`).status).not.toBe(0);
     expect(sh(`cat '${twin}/secrets/key'`).status).not.toBe(0);
     expect(sh(`ls '${home}'`).status).not.toBe(0);
+  });
+
+  it('cannot add a hook to the settings or an MCP server to ~/.claude.json', () => {
+    const hook =
+      '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"touch /tmp/x"}]}]}}';
+    const mcp = '{"mcpServers":{"planted":{"command":"/bin/sh"}}}';
+    expect(sh(`cat '${settings}' '${claudeJson}'`).stdout).toBe('{}\n{}\n'); // the control
+    expect(sh(`echo '${hook}' > '${settings}'`).status).not.toBe(0);
+    expect(sh(`echo '${hook}' > '${claudeDir}/settings.local.json'`).status).not.toBe(0);
+    expect(sh(`echo '${mcp}' > '${claudeJson}'`).status).not.toBe(0);
+    // Claude Code's own way of writing it: a temporary file renamed over it.
+    expect(
+      sh(`echo '${mcp}' > '${harborlight}/c.json' && mv '${harborlight}/c.json' '${claudeJson}'`)
+        .status,
+    ).not.toBe(0);
+    expect(readFileSync(settings, 'utf8')).toBe('{}\n');
+    expect(readFileSync(claudeJson, 'utf8')).toBe('{}\n');
+    expect(existsSync(join(claudeDir, 'settings.local.json'))).toBe(false);
+  });
+
+  it('cannot plant code in ~/.claude by any other path, and still writes its transcript', () => {
+    for (const plant of [
+      `echo x > '${claudeDir}/hooks/run.sh'`,
+      `mkdir -p '${claudeDir}/plugins/planted'`,
+      `mkdir -p '${claudeDir}/skills/planted'`,
+      `echo x > '${claudeDir}/CLAUDE.md'`,
+      `echo x > '${twin}/.claude/CLAUDE.md'`,
+      // Renamed away, edited and put back.
+      `mv '${twin}/.claude' '${harborlight}/stash'`,
+      `rm '${claudeDir}'`,
+      // A second name for the settings file, inside the lead's own project.
+      `ln '${settings}' '${harborlight}/settings.json'`,
+    ])
+      expect(sh(plant).status, plant).not.toBe(0);
+    for (const p of ['hooks/run.sh', 'plugins/planted', 'skills/planted', 'CLAUDE.md'])
+      expect(existsSync(join(twin, '.claude', p)), p).toBe(false);
+    expect(existsSync(join(harborlight, 'settings.json'))).toBe(false);
+    const own = join(claudeDir, 'projects', transcriptSlug(harborlight));
+    expect(
+      sh(`mkdir -p '${own}' && echo t > '${own}/s.jsonl' && echo h >> '${claudeDir}/history.jsonl'`)
+        .status,
+    ).toBe(0);
   });
 
   it('cannot read or rewrite the config or its own profile', () => {
