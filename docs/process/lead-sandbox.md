@@ -19,7 +19,7 @@ profile per lead. A profile allows everything, then:
   (`~/Library/Application Support/claude-workspaces`, data folder included),
   every folder in `protect`, and every other lead's projects;
 - **reopens, inside those**, the lead's own projects (worktrees included),
-  and what Claude Code needs: `~/.claude` and `~/.claude.json`, its install
+  and what Claude Code needs: `~/.claude`, `~/.claude.json` (read only), its install
   under `~/.local`, `~/.bun` for plugin servers, and `~/Library/Keychains`
   to sign in. Without the keychain folder `claude -p` answers "Not logged
   in";
