@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LINE_LIMIT, audit, countLines, isScannable, listedPaths } from './loc-audit';
+import {
+  DRIFT_LIMIT,
+  LINE_LIMIT,
+  audit,
+  countLines,
+  isScannable,
+  listedPaths,
+  rowCounts,
+} from './loc-audit';
 
 const dirs: string[] = [];
 
@@ -151,6 +159,33 @@ describe('audit', () => {
     const result = audit(root);
     expect(result.unlisted).toEqual([]);
     expect(result.stale).toEqual(['packages/demo/src/shrunk.ts']);
+  });
+
+  it('reads each row’s Lines cell, commas and all, and ignores prose', () => {
+    const counts = rowCounts(
+      '| `packages/a/src/one.ts` | 1,200 | Keep | x |\n| `packages/a/src/two.tsx` | 600 | Exception | y |\nsee `packages/a/src/three.ts` | 9 |',
+    );
+    expect([...counts]).toEqual([
+      ['packages/a/src/one.ts', 1200],
+      ['packages/a/src/two.tsx', 600],
+    ]);
+  });
+
+  it('fails a row whose count is more than the drift limit off, and only that row', () => {
+    const root = fixture();
+    const listed = 1000;
+    const over = Math.floor(listed * (1 + DRIFT_LIMIT)) + 1;
+    const within = Math.floor(listed * (1 + DRIFT_LIMIT));
+    writeLines(root, 'packages/demo/src/grown.ts', over);
+    writeLines(root, 'packages/demo/src/close.ts', within);
+    writeDoc(
+      root,
+      `| \`packages/demo/src/grown.ts\` | ${listed} | Keep | x |\n| \`packages/demo/src/close.ts\` | ${listed} | Keep | y |`,
+    );
+
+    const result = audit(root);
+    expect(result.unlisted).toEqual([]);
+    expect(result.drifted).toEqual([{ path: 'packages/demo/src/grown.ts', lines: over, listed }]);
   });
 
   it('refuses to pass when the exceptions doc is missing', () => {
