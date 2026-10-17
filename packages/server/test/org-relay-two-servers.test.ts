@@ -10,8 +10,8 @@
  * the machine.
  *
  * What this proves: a lead-to-lead message across organizations is refused,
- * one inside an organization is delivered, a cross-organization message from
- * a seat holding that access is delivered marked with its source, a planted
+ * one inside an organization is delivered, a cross-organization message
+ * between two seats holding that access is delivered marked with its source, a planted
  * injection is held by the filter and never reaches the recipient, a filter
  * that throws or never answers holds too, a release delivers a held message,
  * and the log records every verdict without a message body.
@@ -159,11 +159,13 @@ describe('the relay between two organizations', () => {
           },
         },
         seats: {
+          // Both ends of a cross-organization message hold the access.
           'harborlight-lead': await seat(
             harbor,
             'harborlight-server',
             harborBoard,
             'harborlight-lead',
+            { crossOrganization: true },
           ),
           'harborlight-writer': await seat(
             harbor,

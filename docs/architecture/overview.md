@@ -2159,8 +2159,8 @@ The relay reads each outbox with that server's credentials, so the sender is
 the outbox's seat, never a name the message gives. `relay-config.ts` reads a
 mode-600 file naming the servers, their organizations and the seats on them;
 a seat's organization is its server's. `relay-rule.ts` delivers inside an
-organization, refuses across one unless the sender holds cross-organization
-access, and runs the fixed checks. `relay-filter.ts` is the Haiku classifier,
+organization, refuses across one unless the sender and the recipient both
+hold cross-organization access, and runs the fixed checks. `relay-filter.ts` is the Haiku classifier,
 on the review judge's model and key path, which every cross-organization or
 untrusted message passes; a flag, an error or a timeout holds the message.
 `relay.ts` delivers onto the recipient's inbox doc as a quoted subject thread
