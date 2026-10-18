@@ -62,6 +62,7 @@ function toSameOriginPath(url: string): string {
 function resetSurfaceChrome(): void {
   document.body.classList.remove(
     'code-mode',
+    'media-mode',
     'diff-mode',
     'redline-mode',
     'view-mode',

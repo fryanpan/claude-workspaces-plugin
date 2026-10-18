@@ -400,6 +400,18 @@ flag copied onto each one could be missed. `server.ts` asks it once per
 request, right after admission and before the websocket upgrades, so no
 file route has to remember to.
 
+**A folder says what it left out, and plays what it holds.** `fs-scan.ts`
+lists a set's folder with `git ls-files -z` (a name with a byte above 0x7f is
+otherwise C-quoted and names no file), and `scanFolderReport` adds every file
+the listing left out and why, for a bind's `skipped`; a bind's `include`
+admits ignored files by name (`admitIncluded`), and its answer's `listed`
+names every file it listed. `folder-file-types.ts`
+names the binaries no surface can show, which the listing leaves out. A video
+or raster image (`core/src/media-types.ts`, read by server and page alike)
+becomes a member with no binding; `routes/review-raw.ts` streams its bytes
+with range requests, and `workspaces-app/src/media/` mounts the player in
+place of the code view.
+
 Three more modules put the documents that already exist onto that identity,
 and none of them runs on the server's own clock. `doc-identity-plan.ts` is a
 pure planner — it takes the corpus as an io parameter and says which key each

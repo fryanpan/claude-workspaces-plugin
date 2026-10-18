@@ -3012,6 +3012,15 @@ export class DocStore {
     return this.workspaces.listRepoFiles(setId);
   }
 
+  /** A set's file, checked as a lazy open checks it. See the workspace surface. */
+  resolveSetFile(
+    setId: string,
+    relPath: string,
+    opts?: { media?: boolean },
+  ): ReturnType<DocStoreWorkspaces['resolveSetFile']> {
+    return this.workspaces.resolveSetFile(setId, relPath, opts);
+  }
+
   openContextFile(
     setId: string,
     relPath: string,

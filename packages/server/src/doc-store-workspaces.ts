@@ -22,6 +22,7 @@ import {
   type Thread,
   attachmentIdOf,
   isAttachmentMember,
+  mediaTypeOf,
 } from '@claude-workspaces/core';
 import {
   type Event,
@@ -84,7 +85,8 @@ export interface DocStoreWorkspacePersistence {
     docId: string,
     init: {
       type: DocType;
-      sourceUrl: string;
+      /** Absent for a member that is never bound: a video or image. */
+      sourceUrl?: string;
       setId: string;
       owner?: string;
       workspaceId: string;
@@ -258,7 +260,9 @@ export class DocStoreWorkspaces {
     }
     const MAX_FILES = 10_000;
     const excluded = workspaceExcludes(members);
-    const scanned = scanFolderPaths(root).filter((rel) => !isExcludedPath(rel, excluded));
+    const scanned = scanFolderPaths(root, workspaceIncludes(members)).filter(
+      (rel) => !isExcludedPath(rel, excluded),
+    );
     const truncated = scanned.length > MAX_FILES;
     const files = scanned.slice(0, MAX_FILES).map((relPath) => {
       const member = byRel.get(relPath);
@@ -280,20 +284,19 @@ export class DocStoreWorkspaces {
   }
 
   /**
-   * Open an UNCHANGED repo file for context from the all-files view: bind it
-   * lazily as a read-only code doc in the same workspace (deterministic
-   * docId, so repeat opens reuse the doc and any comments on it survive).
-   * relPath is validated against the workspace root — no traversal.
+   * The file `relPath` names in set `setId`, checked by every rule a lazy open
+   * answers to: inside the root by path and by where a symlink lands, not
+   * excluded, and listed by the scan. `openContextFile` and the raw media
+   * route (`routes/review-raw.ts`) both come through here, so a file the tree
+   * hides cannot be streamed any more than it can be opened.
    */
-  async openContextFile(
+  async resolveSetFile(
     setId: string,
     relPath: string,
+    opts: { media?: boolean } = {},
   ): Promise<
-    | { ok: true; docId: string; meta: DocMeta }
-    | {
-        ok: false;
-        error: 'not-found' | 'bad-path' | 'not-listed' | 'attach-failed' | 'unavailable';
-      }
+    | { ok: true; root: string; clean: string; abs: string; members: DocMeta[]; size: number }
+    | { ok: false; error: 'not-found' | 'bad-path' | 'not-listed' | 'unavailable' }
   > {
     const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
     const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
@@ -318,7 +321,9 @@ export class DocStoreWorkspaces {
     // only question asked. Answered `not-listed` rather than `bad-path` so the
     // route can say 404: whether the hidden file exists is itself the leak.
     // (Urgent-fixes ticket, 2026-09-02.)
-    if (!isListedFile(root, clean)) return { ok: false, error: 'not-listed' };
+    if (!isListedFile(root, clean, workspaceIncludes(members))) {
+      return { ok: false, error: 'not-listed' };
+    }
     // Existence and content in one pool call, off the main thread. This
     // endpoint is a click in the all-files sidebar, so `abs` is whatever the
     // caller's tree holds — `existsSync` on a path whose provider has stopped
@@ -327,25 +332,55 @@ export class DocStoreWorkspaces {
     // of such paths. A file that will not answer is refused as 'unavailable'
     // rather than reported missing: it is there, it is quarantined for the
     // backoff, and the next click after that tries again.
-    const read = await boundFiles.read(abs, { keep: false });
-    if (read.status !== 'ok') return { ok: false, error: 'unavailable' };
-    if (!read.exists) return { ok: false, error: 'not-found' };
+    // A media file is stat'ed rather than read: its bytes never enter a doc,
+    // and a recording is too large to pull through the pool for a yes or no.
+    const found = opts.media
+      ? await boundFiles.statMtime(abs)
+      : await boundFiles.read(abs, { keep: false });
+    if (found.status !== 'ok') return { ok: false, error: 'unavailable' };
+    if (!found.exists) return { ok: false, error: 'not-found' };
     // The guard above is lexical, so a symlink INSIDE the root that points
     // outside it passes: `join` never touches the filesystem. Resolve what
     // the path really points at before reading it — this endpoint is
     // reachable by a share visitor, and a diff review's root is a whole repo.
     // Ordered after the read so a missing file still reads 'not-found'.
     if (!isWithinRoot(root, abs)) return { ok: false, error: 'bad-path' };
+    return { ok: true, root, clean, abs, members, size: found.size };
+  }
+
+  /**
+   * Open an UNCHANGED repo file for context from the all-files view: bind it
+   * lazily as a read-only code doc in the same workspace (deterministic
+   * docId, so repeat opens reuse the doc and any comments on it survive).
+   * relPath is validated against the workspace root — no traversal.
+   */
+  async openContextFile(
+    setId: string,
+    relPath: string,
+  ): Promise<
+    | { ok: true; docId: string; meta: DocMeta }
+    | {
+        ok: false;
+        error: 'not-found' | 'bad-path' | 'not-listed' | 'attach-failed' | 'unavailable';
+      }
+  > {
+    const media = mediaTypeOf(relPath) !== undefined;
+    const resolved = await this.resolveSetFile(setId, relPath, { media });
+    if (!resolved.ok) return resolved;
+    const { root, clean, abs, members } = resolved;
     const existing = members.find((m) => m.relPath === clean);
     if (existing) return { ok: true, docId: existing.docId, meta: existing };
     const owner = members.find((m) => m.owner)?.owner;
     const docId = memberDocId(setId, clean);
     // Markdown opens as the full WYSIWYG editable doc (same as bind_folder
-    // always did); everything else is read-only highlighted source.
+    // always did); everything else is read-only highlighted source. A video or
+    // image is a `code` doc with NO sourceUrl and no binding: the page plays
+    // it from the raw route, and a bound file would be read into the doc as
+    // text on every hydrate.
     const isMd = clean.toLowerCase().endsWith('.md');
     const doc = this.p.getOrCreate(docId, {
       type: isMd ? 'markdown' : 'code',
-      sourceUrl: abs,
+      ...(media ? {} : { sourceUrl: abs }),
       setId,
       owner,
       // The persisted DocMeta field keeps its name: it is on disk in every
@@ -355,6 +390,7 @@ export class DocStoreWorkspaces {
       relPath: clean,
       title: clean,
     });
+    if (media) return { ok: true, docId: doc.docId, meta: doc.meta };
     const attached = isMd
       ? await this.p.attachFileAsync(docId, abs)
       : await this.p.attachReadonlyFileAsync(docId, abs);
@@ -405,7 +441,9 @@ export class DocStoreWorkspaces {
     // the delegation below: a member's relPath is git-derived, but the tree
     // is the one source of "may this open", and two doors with one lock is
     // the shape that drifts. (Urgent-fixes ticket, 2026-09-02.)
-    if (!isListedFile(root, clean)) return { ok: false, error: 'not-listed' };
+    if (!isListedFile(root, clean, workspaceIncludes(members))) {
+      return { ok: false, error: 'not-listed' };
+    }
     const member = members.find((m) => m.relPath === clean);
     if (!member) return await this.openContextFile(setId, clean);
     if (member.type !== 'diff') return { ok: true, docId: member.docId, meta: member };
@@ -1062,6 +1100,11 @@ function normalizeRel(relPath: string): string {
 function workspaceExcludes(members: DocMeta[]): string[] {
   const raw = members.find((m) => m.workspaceExclude)?.workspaceExclude ?? [];
   return raw.map((p) => p.replace(/^\/+/, '').replace(/\/+$/, '')).filter(Boolean);
+}
+
+/** The files the set was told to list although ignored (`admitIncluded`). */
+function workspaceIncludes(members: DocMeta[]): string[] {
+  return members.find((m) => m.workspaceInclude)?.workspaceInclude ?? [];
 }
 
 function isExcludedPath(relPath: string, excludes: string[]): boolean {
