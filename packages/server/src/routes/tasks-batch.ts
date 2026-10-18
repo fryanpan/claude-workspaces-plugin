@@ -15,7 +15,11 @@ import { indexBatchKeys, resolveRowRefs } from '../task-batch-refs.ts';
 import { createdVisibility, parseTaskCreate } from '../task-create.ts';
 import { placeableGoals } from '../task-queue.ts';
 import { LEGACY_REVIEW_ITEM_ID, type Task, isRetired, retiredRefusal } from '../tasks.ts';
-import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
+import {
+  type TaskRouteRequest,
+  type TaskRoutesContext,
+  taskUrlFor,
+} from './task-routes-context.ts';
 
 /** Rows one `POST /tasks/batch` will take. A burst out of a conversation is
  *  single digits; a hundred is a tracker, and that has its own import path. */
@@ -363,7 +367,14 @@ export async function handleTaskBatch(
     if (attachedReview) taskProjection.ensureWorkspace(workspaceId);
     // Board order comes from the board, not from a second sort of our
     // own that happens to agree with it today.
-    const tasks = taskStore.listTasks(workspaceId).filter((t) => createdIds.has(t.id));
+    // Each row carries `url`, the link that opens it — see taskUrlFor.
+    const tasks = taskStore
+      .listTasks(workspaceId)
+      .filter((t) => createdIds.has(t.id))
+      .map((t) => {
+        const url = taskUrlFor(ctx, workspaceId, t.id, Boolean(visitor));
+        return url === undefined ? t : { ...t, url };
+      });
     return j(200, {
       workspaceId,
       tasks,

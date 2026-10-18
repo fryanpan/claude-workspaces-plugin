@@ -37,7 +37,7 @@ export const WHITEBOARD_TOOLS: ListToolsResult['tools'] = [
   {
     name: 'create_whiteboard',
     description:
-      'Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you.',
+      'Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you. Returns `url`, the absolute link to the whiteboard. Give that link to a person.',
     inputSchema: {
       type: 'object',
       properties: { workspaceId: WORKSPACE_ID, title: { type: 'string' } },

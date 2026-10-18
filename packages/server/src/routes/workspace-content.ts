@@ -133,7 +133,19 @@ export async function handleWorkspaceContent(
     unfileFromDefault(docId, workspaceId);
     // attachDoc emits no store event; refresh the projection's docIds.
     taskProjection.ensureWorkspace(workspaceId);
-    return j(200, { ok: true, workspace: taskStore.getWorkspace(workspaceId) });
+    // Where the attached thing now opens on THIS board: a doc's page, or a
+    // review's own address. Owner only, like a thread's `threadUrl`.
+    const attachedMeta = attachDoc ? docStore.peekMeta(docId) : undefined;
+    const url = visitor
+      ? undefined
+      : attachedMeta
+        ? withReviewUrl(attachedMeta, workspaceId).reviewUrl
+        : `${externalBaseUrl()}/workspaces/${encodeURIComponent(workspaceId)}/attachments/${encodeURIComponent(docId)}`;
+    return j(200, {
+      ok: true,
+      workspace: taskStore.getWorkspace(workspaceId),
+      ...(url ? { url } : {}),
+    });
   }
   // import_tasks_markdown (§3.10 / §3.12 commit 10): ingest a
   // hand-maintained tracker (group headings + status tables). The
@@ -232,6 +244,7 @@ export async function handleWorkspaceContent(
       ok: true,
       workspaceId,
       boardUrl,
+      url: boardUrl,
       stamped: true,
       goalsCreated: res.goalsCreated,
       tasksCreated: res.tasksCreated,
