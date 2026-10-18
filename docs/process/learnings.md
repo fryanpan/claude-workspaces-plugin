@@ -3756,6 +3756,7 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   type before it reads the body. `range-content-length.test.ts` reads the
   framing off a socket. `fetch` hides it, which is why the older range tests
   passed throughout.
-- Its positive control needs a stream that yields across a tick. A stream
-  that is already closed when the Response is built is sent sized, so a
-  control built that way cannot see chunking.
+- Its positive control needs a stream pulled across a macrotask
+  (`setImmediate`; a microtask is not enough). A stream whose end Bun can
+  reach in the same tick is sent sized, so a control built that way cannot
+  see chunking.

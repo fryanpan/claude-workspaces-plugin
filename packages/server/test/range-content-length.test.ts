@@ -76,7 +76,7 @@ const REFRESHED_COOKIE_ATTRS = ['Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=3
 const one = (w: Wire, k: string) => w.headers.get(k)?.join(', ') ?? null;
 
 /** The framing a player needs: an exact length, and no chunking. */
-function expectSized(w: Wire, bytes: Uint8Array) {
+function expectSized(w: Wire, bytes: Uint8Array<ArrayBuffer>) {
   expect(one(w, 'transfer-encoding')).toBeNull();
   expect(one(w, 'content-length')).toBe(String(bytes.length));
   expect(new Uint8Array(w.body)).toEqual(bytes);
@@ -84,16 +84,21 @@ function expectSized(w: Wire, bytes: Uint8Array) {
 
 describe('the framing check itself', () => {
   it('sees chunked encoding when a response is sent chunked (positive control)', async () => {
+    let pulls = 0;
     const s = Bun.serve({
       port: 0,
       fetch: () =>
-        // Yields across a tick: a body Bun can see the end of when the
-        // response is built is sent sized, and would prove nothing.
-        new Response(async function* () {
-          yield new Uint8Array([1]);
-          await Bun.sleep(1);
-          yield new Uint8Array([2]);
-        }),
+        // Pulled across a macrotask: a stream whose end Bun can reach in
+        // the same tick is sent sized, and would prove nothing.
+        new Response(
+          new ReadableStream({
+            async pull(c) {
+              await new Promise((r) => setImmediate(r));
+              if (pulls++ < 2) c.enqueue(new Uint8Array([1, 2]));
+              else c.close();
+            },
+          }),
+        ),
     });
     try {
       const w = await onTheWire(s.port as number, '/', {});
