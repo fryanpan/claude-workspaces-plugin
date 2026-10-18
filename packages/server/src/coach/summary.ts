@@ -6,7 +6,9 @@
  * it to say what he did (2026-10-16), so each typed prompt and each turn end
  * in a run carries its text this far, and one small Haiku call per digest
  * turns every one of them into a line of twelve words or fewer. The text
- * never goes into the digest itself: only the line does.
+ * goes into the digest too, beside the line, since Bryan asked for the
+ * detail on 2026-10-18; the digest's budget for it is `DIGEST_TEXT_CHARS`
+ * (`coach/session-minutes.ts`).
  *
  * A call per 40 marks, not per prompt: a digest is already one session turn,
  * and a call per prompt would put a model call on every keystroke's worth of
