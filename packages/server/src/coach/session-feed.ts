@@ -45,6 +45,9 @@
  *
  * Each prompt and turn end that carried text is said in a few words before
  * the digest goes (`coach/summary.ts`); that call never holds a digest back.
+ * The text goes too, beside its line, until the digest's budget for it is
+ * spent (`DIGEST_TEXT_CHARS`); past it the oldest marks go as their line
+ * alone, and the digest says how many (`textDropped`).
  */
 import { HeldWindow } from '../held-window.ts';
 import type { CoachBacklog, HeldDigest, HeldMark } from './backlog.ts';
@@ -57,6 +60,7 @@ import {
   type SessionMinutes,
   SessionRuns,
   type SessionTurn,
+  fitActivityText,
   sessionMinutesOf,
 } from './session-minutes.ts';
 import type { CoachEventKind } from './stream.ts';
@@ -117,6 +121,9 @@ export type SessionFrame = Addressed &
         windows?: number;
         /** Windows dropped while it was away, past the backlog's bounds. */
         dropped?: number;
+        /** Marks sent with their summary only, the oldest first, because
+         *  the digest's full text ran past `DIGEST_TEXT_CHARS`. */
+        textDropped?: number;
       }
   );
 
@@ -344,16 +351,20 @@ export class SessionFeed {
   ): boolean {
     if (this.stopped) return false;
     const at = this.now();
+    const { sessions, textDropped } = fitActivityText(
+      sessionMinutesOf(turns, (i) => summaryAt.get(i)),
+    );
     const digest: SessionNews = {
       event: 'coach.digest',
       from: digests[0]?.from ?? at,
       to: digests[digests.length - 1]?.to ?? at,
       items: digests.flatMap((d) => d.items.map(withoutSource)),
       plan: weekPlanOf(this.deps.planBoard(), at, this.deps.timeZone()),
-      sessions: sessionMinutesOf(turns, (i) => summaryAt.get(i)),
+      sessions,
       sessionsNote: SESSIONS_NOT_COUNTED,
       ...(digests.length > 1 ? { windows: digests.length } : {}),
       ...(dropped > 0 ? { dropped } : {}),
+      ...(textDropped > 0 ? { textDropped } : {}),
     };
     if (!this.deliver(digest, at)) return false;
     this.deps.countTurn(at);
