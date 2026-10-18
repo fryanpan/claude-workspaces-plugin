@@ -245,6 +245,16 @@ describe('what the harness delivers into a turn', () => {
         '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>',
       ),
     ).toBe(false);
+    expect(
+      typedOf(
+        '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n\n<task-notification>\n<task-id>b1</task-id>\n</task-notification>',
+      ),
+    ).toBe(false);
+    expect(
+      typedOf(
+        '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]\nCheck the Riverbend board.',
+      ),
+    ).toBe(false);
   });
 
   it('reads a typed prompt as typed, even one that names a wrapper mid-text', () => {

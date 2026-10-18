@@ -31,8 +31,9 @@
  * opening is the only signal. The wrappers are the ones that binary queues
  * as a prompt: channel events, a subagent's hand-back (`<agent-message`),
  * teammate and cross-session messages, task notifications, system reminders,
- * and the plain lead-ins it writes for a peer message, an observer report
- * and a resumed session, plus the fleet's self-wake. A wrapper missing from
+ * the banners it puts above a task notification and a scheduled firing, and
+ * the plain lead-ins it writes for a peer message, an observer report and a
+ * resumed session, plus the fleet's self-wake. A wrapper missing from
  * this list reads as typed, which overstates his time; it never hides it.
  *
  * Never blocks the prompt and never prints: a UserPromptSubmit hook's stdout
@@ -60,6 +61,8 @@ export const INJECTED_PREFIXES: readonly string[] = [
   'A peer session sent a message',
   'Activity was observed in the bound conversation',
   'Your background observer (',
+  '[SYSTEM NOTIFICATION - NOT USER INPUT]',
+  '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]',
   'This session is being continued from a previous conversation',
   'Self-wake',
 ];
