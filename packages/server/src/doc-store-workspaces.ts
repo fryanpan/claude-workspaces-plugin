@@ -56,7 +56,7 @@ import {
   writeArchiveManifest,
   writeDocArchiveManifest,
 } from './review-archive.ts';
-import { isWithinRoot } from './safe-path.ts';
+import { realPathUnder } from './safe-path.ts';
 import { boundFiles } from './slow-fs.ts';
 
 /**
@@ -344,7 +344,8 @@ export class DocStoreWorkspaces {
     // the path really points at before reading it — this endpoint is
     // reachable by a share visitor, and a diff review's root is a whole repo.
     // Ordered after the read so a missing file still reads 'not-found'.
-    if (!isWithinRoot(root, abs)) return { ok: false, error: 'bad-path' };
+    const landed = landsOnListed(root, clean, abs, members);
+    if (landed !== 'ok') return { ok: false, error: landed };
     return { ok: true, root, clean, abs, members, size: found.size };
   }
 
@@ -492,7 +493,8 @@ export class DocStoreWorkspaces {
     // Same symlink escape as openContextFile — see the note there. A member's
     // relPath is git-derived rather than caller-supplied, but git tracks
     // symlinks, so the member path is not self-evidently safe either.
-    if (!isWithinRoot(root, abs)) return { ok: false, error: 'bad-path' };
+    const landed = landsOnListed(root, clean, abs, members);
+    if (landed !== 'ok') return { ok: false, error: landed };
     const owner = members.find((m) => m.owner)?.owner;
     const companionId = memberDocId(`${setId}:edit`, clean);
     const doc = this.p.getOrCreate(companionId, {
@@ -1144,6 +1146,29 @@ function workspaceIncludes(members: DocMeta[]): string[] {
 
 function isExcludedPath(relPath: string, excludes: string[]): boolean {
   return excludes.some((p) => relPath === p || relPath.startsWith(`${p}/`));
+}
+
+/**
+ * Whether the file `clean` really serves is one the set shows. Git lists a
+ * symlink under its own name, so the listing, the exclude and the credential
+ * floor had judged only the link: `clip.mp4 -> .env`, with `.env` ignored,
+ * passed every check and streamed `.env` (security review, 2026-10-18). The
+ * file it lands on must be inside the root AND pass the same rules itself.
+ * A link to a listed file stays allowed — it reaches nothing the tree does
+ * not already show. Refused as `not-listed` so a hidden target's existence
+ * is not told.
+ */
+function landsOnListed(
+  root: string,
+  clean: string,
+  abs: string,
+  members: DocMeta[],
+): 'ok' | 'bad-path' | 'not-listed' {
+  const target = realPathUnder(root, abs);
+  if (target === null) return 'bad-path';
+  if (target === clean) return 'ok';
+  if (isExcludedPath(target, workspaceExcludes(members))) return 'not-listed';
+  return isListedFile(root, target, workspaceIncludes(members)) ? 'ok' : 'not-listed';
 }
 
 /**
