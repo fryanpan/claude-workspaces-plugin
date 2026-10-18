@@ -8,7 +8,8 @@
  *  - **received**: each owner signal as it arrives, by source and kind. A
  *    page's `view`, `wrote` and `left` (`POST /coach/here`); a comment,
  *    reply or doc open from the activity record; a typed or injected prompt
- *    and a turn end from an attached session.
+ *    and a turn end from any attached session, his run or not (`dropped`
+ *    says which fell outside one).
  *  - **dropped**: each one the coach let go, by why (`DropReason`).
  *  - **carried**: what a delivered digest held, by source and kind, with
  *    the minutes of page stays and session time. A mark is counted in the
