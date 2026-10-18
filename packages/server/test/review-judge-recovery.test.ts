@@ -103,6 +103,36 @@ describe('the review-item gate when the judge is unreliable', () => {
       expect(home.items.map((r) => r.reviewItemId)).toContain(itemId);
     });
 
+    it('keeps an item held once held when the judge fails, and promises nothing', async () => {
+      const { workspaceId, taskId } = await board();
+      h.judge = contradictoryJudge();
+      const filed = await jj<Held>(
+        await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+          author: FILER,
+          review: COSTS_IN_OPTIONS,
+        }),
+      );
+      const itemId = filed.item?.id as string;
+      h.judge = async () => null;
+      const out = await jj<Held>(
+        await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${itemId}/revise`, {
+          author: FILER,
+          detail: 'A second blurb, revised while the judge is down.',
+        }),
+      );
+      expect(out.held).toBe(true);
+      expect(out.item?.judge?.verdict).toBe('held');
+      expect(out.item?.judge?.heldFor).toHaveLength(1);
+      expect(out.item?.judge?.admitted).toBeUndefined();
+      // One hold of two: the next revision is judged, so no admission is promised.
+      expect(out.message).not.toContain('last hold');
+      expect(out.message).toContain('judged again');
+      const home = await jj<{ items: Array<{ reviewItemId: string }> }>(
+        fetch(`${h.base}/workspaces/${workspaceId}/review-items`),
+      );
+      expect(home.items.map((r) => r.reviewItemId)).not.toContain(itemId);
+    });
+
     it('still passes an item nobody has held — the fail-open rule is intact', async () => {
       const { workspaceId, taskId } = await board();
       h.judge = async () => null;
