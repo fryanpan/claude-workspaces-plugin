@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emailIdentityId } from '@claude-workspaces/core';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
+import { clearListingCache } from '../src/fs-scan.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { CfApi } from '../src/share/cf-api.ts';
 import type { CfAccessApp, CfAccessPolicy } from '../src/share/cf-api.ts';
@@ -902,6 +903,11 @@ describe('workspace share over HTTP', () => {
     // file is still listed is not gone: its link opens it again, exactly as
     // the set's tree would (`folder-member-links.test.ts`).
     renameSync(join(folder, 'README.md'), join(folder, 'README-renamed.md'));
+    // The listing is cached for seconds and admission reads no disk, so drop
+    // the cache: this asks about a file the listing no longer holds. Inside
+    // that window the id opens nothing and answers 404
+    // (`folder-member-links.test.ts`).
+    clearListingCache();
 
     let r: Response;
     try {
