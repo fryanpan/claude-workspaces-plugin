@@ -9,7 +9,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
-import { type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
+import { type DocMeta, type DocType, attachmentIdOf, mediaTypeOf } from '@claude-workspaces/core';
 import {
   type BindHost,
   DEFAULT_MAX_FILES,
@@ -233,9 +233,11 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       const docId = memberDocId(reviewId, entryRel);
       const abs = join(root, entryRel);
       const isMd = entryRel.toLowerCase().endsWith('.md');
+      // A video or image entry is never bound: `openContextFile` says why.
+      const media = mediaTypeOf(entryRel) !== undefined;
       host.getOrCreate(docId, {
         type: isMd ? 'markdown' : 'code',
-        sourceUrl: abs,
+        ...(media ? {} : { sourceUrl: abs }),
         setId: reviewId,
         owner: opts.owner,
         workspaceId: reviewId,
@@ -245,7 +247,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
         producedBy: opts.producedBy,
       });
       if (isMd) await host.attachFileAsync(docId, abs);
-      else await host.attachReadonlyFileAsync(docId, abs);
+      else if (!media) await host.attachReadonlyFileAsync(docId, abs);
     }
     const entryDocId = memberDocId(reviewId, entryRel);
     // The workspace has no registry — its members ARE the record, so the
