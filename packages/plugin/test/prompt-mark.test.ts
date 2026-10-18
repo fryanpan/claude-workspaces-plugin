@@ -28,6 +28,8 @@ describe('isTypedPrompt', () => {
       '<system-reminder>Tools loaded.</system-reminder>',
       '<cross-session-message from="Riverbend">hi</cross-session-message>',
       'Another Claude session sent a message: hello',
+      'Activity was observed in the bound conversation:\nan edit',
+      'Your background observer (o-1) sent a report:\nbuild is green',
       'This session is being continued from a previous conversation that ran out of context.',
       'Self-wake (keep-moving protocol): check the board.',
     ]) {
@@ -182,5 +184,82 @@ describe('isHeadless', () => {
     }
     expect(isHeadless({ CLAUDE_CODE_ENTRYPOINT: 'cli' })).toBe(false);
     expect(isHeadless({})).toBe(false);
+  });
+});
+
+/**
+ * The whole payload a UserPromptSubmit hook reads, as Claude Code 2.1.302
+ * builds it. It names no origin: past the common fields there is only
+ * `prompt` and `session_title`, so the prompt's opening is the one signal.
+ * Each prompt below is the text the harness writes for that kind of
+ * delivery, read off the same binary.
+ */
+const payload = (prompt: string) => ({
+  session_id: 's-harbor',
+  transcript_path: '/work/harborlight/.transcripts/s-harbor.jsonl',
+  cwd: '/work/harborlight',
+  permission_mode: 'auto',
+  agent_type: 'main',
+  hook_event_name: 'UserPromptSubmit',
+  prompt,
+  session_title: 'Harborlight berths',
+});
+const typedOf = (prompt: string) => {
+  const d = decidePromptMark(payload(prompt), { agent: 'Harborlight lead', now: 5 });
+  return 'post' in d ? d.post.typed : d.skip;
+};
+
+describe('what the harness delivers into a turn', () => {
+  it('reads a subagent’s hand-back to its parent as not typed', () => {
+    expect(
+      typedOf(
+        '<agent-message from="riverbend-builder">\nPR 12 is open; verify 61 of 63.\n</agent-message>',
+      ),
+    ).toBe(false);
+  });
+
+  it('reads a teammate’s or another session’s message as not typed', () => {
+    expect(
+      typedOf(
+        '<teammate-message teammate_id="team-lead" summary="brief">\nRead the brief.\n</teammate-message>',
+      ),
+    ).toBe(false);
+    expect(
+      typedOf(
+        '<cross-session-message from="u-1" from-name="Saltmarsh">\nCan you rebase?\n</cross-session-message>',
+      ),
+    ).toBe(false);
+    expect(
+      typedOf(
+        'A peer session sent a message while you were working:\n<cross-session-message from="u-1">\nhi\n</cross-session-message>',
+      ),
+    ).toBe(false);
+  });
+
+  it('reads a channel event and a task notification as not typed', () => {
+    expect(
+      typedOf('<channel source="claude-hive" from_id="p-1">Harborlight is idle.</channel>'),
+    ).toBe(false);
+    expect(
+      typedOf(
+        '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>',
+      ),
+    ).toBe(false);
+    expect(
+      typedOf(
+        '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n\n<task-notification>\n<task-id>b1</task-id>\n</task-notification>',
+      ),
+    ).toBe(false);
+    expect(
+      typedOf(
+        '[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]\nCheck the Riverbend board.',
+      ),
+    ).toBe(false);
+  });
+
+  it('reads a typed prompt as typed, even one that names a wrapper mid-text', () => {
+    expect(typedOf(SECRET)).toBe(true);
+    expect(typedOf('Why did the <agent-message from="x"> count as typed?')).toBe(true);
+    expect(typedOf('Quote <teammate-message> and <channel> in the doc')).toBe(true);
   });
 });
