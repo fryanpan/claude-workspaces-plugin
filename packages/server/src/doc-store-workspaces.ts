@@ -416,9 +416,13 @@ export class DocStoreWorkspaces {
   }
 
   /** The set and file a member id names, when the set's listing holds that
-   *  file and it is still on disk; `null` for any other id. Reads no doc. The
-   *  disk check is because a listing may be seconds old: a file removed since
-   *  is gone, not listed. */
+   *  file; `null` for any other id. Reads no doc and touches no disk: it runs
+   *  inside admission, on the only JS thread, and a stat on a cloud-sync
+   *  path that stopped answering parks that thread. A listing may be seconds
+   *  old, so a file removed since still answers here; the open after it
+   *  (`resolveSetFile`, off the main thread) finds it gone and opens
+   *  nothing, and the set it names is one the caller's scope already
+   *  covers. */
   listedMember(docId: string): { setId: string; relPath: string } | null {
     const cut = docId.indexOf(':');
     if (cut <= 0) return null;
@@ -429,7 +433,7 @@ export class DocStoreWorkspaces {
     const excludes = workspaceExcludes(members);
     for (const rel of listedFiles(root, workspaceIncludes(members))) {
       if (memberDocId(setId, rel) !== docId || isExcludedPath(rel, excludes)) continue;
-      return existsSync(join(root, rel)) ? { setId, relPath: rel } : null;
+      return { setId, relPath: rel };
     }
     return null;
   }
