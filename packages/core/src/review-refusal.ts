@@ -8,7 +8,9 @@
  * the consent, a naming or test-strategy pick. Holding such an item for its
  * wording is the wrong remedy: a better-worded ask is still an ask nobody
  * needed. So the gate REFUSES these kinds, and a refusal is not a hold —
- * the two-hold cap and the one-hour release do not admit it.
+ * the one-hour release does not admit it, and the two-hold cap admits it only
+ * after the last hold, because that hold promised the next revision would
+ * reach the reader.
  *
  * The rules live in the team-lead-fleet plugin, which the server cannot read
  * at runtime, so their substance is copied into the judge's prompt here. Each

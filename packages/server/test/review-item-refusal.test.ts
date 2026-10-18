@@ -1,9 +1,10 @@
 /**
  * The gate REFUSES an ask a fleet rule already answers, through the real
  * routes: the five kinds never reach the board's Home rows or the cross-board
- * queue, a refusal is not admitted by the two-hold cap or the one-hour
- * release, an appeal is judged again, and an ask reporting a permission
- * denial is never refused.
+ * queue, a refusal is not admitted by the one-hour release nor counted toward
+ * the two-hold cap, a refusal AFTER the last hold still reaches the reader, an
+ * appeal is judged again, and an ask reporting a permission denial is never
+ * refused.
  *
  * The judge is a STUB — no live call. It refuses only when the system turn
  * it is handed names the rule, so a prompt that lost a rule turns a refusal
@@ -262,7 +263,7 @@ describe('an ask a fleet rule answers is refused', () => {
     expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).not.toContain(itemId);
   });
 
-  it('is not admitted when it follows two wording holds that used up the cap', async () => {
+  it('reaches the reader when it follows two wording holds, as the last hold promised', async () => {
     boot();
     const { workspaceId, taskId } = await board();
     // Two rounds held for wording, which is what the cap counts…
@@ -276,13 +277,19 @@ describe('an ask a fleet rule answers is refused', () => {
           ...question(REFUSABLE.spend.headline, detail),
         }),
       );
-    expect((await revise('Second wording.')).item?.judge?.heldFor).toHaveLength(2);
-    // …and then the judge sees the rule. The cap would admit a third hold.
+    const second = await revise('Second wording.');
+    expect(second.item?.judge?.heldFor).toHaveLength(2);
+    // …and the hold said so: the next revision goes to the reader whatever it says.
+    expect(second.message).toContain('This is the last hold');
+    // Then the judge sees the rule. A refusal is not a third hold, but the
+    // promise covers it: the revision reaches the reader, unjudged.
     judge = defaultJudge;
     const res = await revise('Third wording.');
-    expect(res.held).toBe(true);
-    expect(res.refused).toBe('spend');
-    expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).not.toContain(itemId);
+    expect(res.held).not.toBe(true);
+    expect(res.refused).toBeUndefined();
+    expect(res.item?.judge?.refused).toBeUndefined();
+    expect(res.message).toContain('UNJUDGED');
+    expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).toContain(itemId);
   });
 
   it('an appeal is judged again, told which rule refused it, and lands when it passes', async () => {

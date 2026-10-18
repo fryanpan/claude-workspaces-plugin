@@ -853,13 +853,17 @@ export function createReviewGate(ctx: ReviewGateContext) {
       gapKey !== undefined &&
       carriedAdmission.lessSpecificFor !== undefined &&
       gapKey === carriedAdmission.lessSpecificFor;
-    // Never a refusal: the cap ends a hold the filer keeps rewording, and a
-    // refused ask is not a wording problem. Its way out is the appeal.
+    // After the last hold, a refusal too. The hold that used up the cap told
+    // the filer the next revision reaches the reader whatever it says, and a
+    // refusal there broke that promise for good: a refusal is not a hold, so
+    // the cap never fired and the item could never reach the reader
+    // (2026-10-17). Before the cap, a refusal is still not admitted — it is
+    // not a round of the count, and its way out is the appeal. The
+    // less-specific note answers a hold's gap, so it never admits a refusal.
     const admitAfterHolds =
-      refusal === undefined &&
       verdict !== null &&
       !verdict.ok &&
-      (heldFor.length >= REVIEW_GATE_MAX_HOLDS || answeredAgain);
+      (heldFor.length >= REVIEW_GATE_MAX_HOLDS || (refusal === undefined && answeredAgain));
     const judgement: ReviewItemJudgement =
       restoredHold !== undefined
         ? { ...restoredHold }
