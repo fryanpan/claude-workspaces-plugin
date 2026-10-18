@@ -23,6 +23,7 @@ import { type ReviewItem, advanceWalk } from '../board/board-review-model.ts';
 import { NAV_COLLAPSE_HTML, navRailItemsHtml, wireNavCollapse } from '../board/board-shell.ts';
 import { mountWalkthroughIsland, walkthroughData } from '../board/walkthrough-island.tsx';
 import { browserStorage } from '../boot-env.ts';
+import { mountCoachCard } from '../coach-card.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
 import { chooseDifficultyOn, createSizeChoice, httpSizePref } from '../review-sizes.ts';
 import { fetchWriteAccess, installWriteGateNotice } from '../signin/write-gate.ts';
@@ -60,6 +61,8 @@ async function boot(): Promise<void> {
   const wsName = document.getElementById('board-ws-name-text');
   if (!host) return;
   installWriteGateNotice();
+  // The coach hears that he is walking his reviews; it stops itself for anyone else.
+  mountCoachCard({ page: 'review' });
   const writeAccess = await fetchWriteAccess();
   const user = await ensureUserIdentity(
     new URLSearchParams(location.search).get('as'),

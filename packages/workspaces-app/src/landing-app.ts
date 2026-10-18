@@ -20,7 +20,7 @@ import { startInbox } from './landing-inbox.ts';
 import { startLandingLive } from './landing-live.ts';
 import './meeting-banner.ts';
 
-if (document.querySelector('#coach')) mountCoachCard({});
+if (document.querySelector('#coach')) mountCoachCard({ page: 'home' });
 startCoach();
 startInbox();
 startLandingLive();

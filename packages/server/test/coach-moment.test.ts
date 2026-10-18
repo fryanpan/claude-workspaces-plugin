@@ -17,7 +17,7 @@ import { readGoalsDoc } from '../src/coach/goals-doc.ts';
 import { type CoachFrame, createCoach } from '../src/coach/moment.ts';
 import type { SessionNews } from '../src/coach/session-feed.ts';
 import { CoachStore } from '../src/coach/store.ts';
-import { CoachStream } from '../src/coach/stream.ts';
+import { CoachStream, PAGE_PLACES } from '../src/coach/stream.ts';
 import {
   DRIFTING_DAY,
   GOALS_DOC,
@@ -119,6 +119,7 @@ describe('every event reaches the session', () => {
       doc: 'Harborlight launch post draft',
       heading: 'Why we built it',
       text: 'The paper books get wet, and a berth is sold twice.',
+      source: 'other',
     });
     expect(sent.find((e) => e.kind === 'comment')).toMatchObject({
       docId: 'd-hover',
@@ -133,6 +134,35 @@ describe('every event reaches the session', () => {
     h.coach.here({ ...here, heading: 'Why', text: 'one' });
     h.coach.here({ ...here, heading: 'Why', text: 'two' });
     expect(events(h.told).map((e) => e.text)).toEqual(['one', 'two']);
+  });
+});
+
+describe('a page with no board', () => {
+  it('reaches the session as the front page or the review walk, by name, with the device it came from', () => {
+    const h = harness();
+    h.setClock(at(21, 10));
+    h.coach.here({
+      kind: 'view',
+      workspaceId: PAGE_PLACES.review.id,
+      visible: true,
+      source: 'phone',
+    });
+    h.setClock(at(21, 30));
+    h.coach.here({
+      kind: 'view',
+      workspaceId: PAGE_PLACES.home.id,
+      visible: true,
+      source: 'phone',
+    });
+    expect(events(h.told)).toEqual([
+      expect.objectContaining({
+        kind: 'view',
+        boardId: 'page:review',
+        board: 'Review walk',
+        source: 'phone',
+      }),
+      expect.objectContaining({ kind: 'view', boardId: 'page:home', board: 'Home' }),
+    ]);
   });
 });
 

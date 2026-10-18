@@ -147,6 +147,31 @@ describe('the mark', () => {
   });
 });
 
+describe('Remote Control', () => {
+  it('marks every prompt from a bridged session as remote, and none from a terminal', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return new Response(null, { status: 202 });
+    }) as unknown as typeof fetch;
+    const hook = (env: Record<string, string>, prompt: string) =>
+      runPromptHook(JSON.stringify({ prompt, session_id: 's-1' }), {
+        env: { ...ENV, ...env },
+        now: () => 9,
+        discoveryPort: () => 8799,
+        fetch: fetchImpl,
+      });
+    await hook({ CLAUDE_CODE_BRIDGE_SESSION_ID: 'b-1', CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, 'hi');
+    await hook({ CLAUDE_CODE_BRIDGE_SESSION_ID: 'b-1' }, '<channel source="x">ping</channel>');
+    await hook({}, 'hi');
+    expect(bodies.map((b) => [b.typed, b.remote])).toEqual([
+      [true, true],
+      [false, true],
+      [true, undefined],
+    ]);
+  });
+});
+
 describe('isHeadless', () => {
   it('reads claude -p and the SDK as headless, unless Remote Control is driving it', () => {
     for (const entry of ['sdk-cli', 'sdk-ts', 'sdk-py']) {

@@ -14,11 +14,14 @@
  *  - a backlog file, where windows wait while the session is away
  *    (`backlog.ts`);
  *  - a timer to the next morning in his zone, for the session's one wake-up
- *    a day (`morning.ts`).
+ *    a day (`morning.ts`);
+ *  - a counts file of what he did and what reached the coach, per hour
+ *    (`coverage.ts`).
  */
 import { agentIdForName } from '@claude-workspaces/core';
 import { type Event, onActivity } from '../activity.ts';
 import { CoachBacklog } from './backlog.ts';
+import { CoachCoverage, sessionSource } from './coverage.ts';
 import { type BoardPrivacy, placeIsOff } from './exclusion.ts';
 import { type GoalsDocReading, readGoalsDoc } from './goals-doc.ts';
 import { CoachHub } from './hub.ts';
@@ -77,6 +80,7 @@ export interface CoachWiringDeps {
 
 export interface CoachWiring {
   store: CoachStore;
+  coverage: CoachCoverage;
   coach: Coach;
   hub: CoachHub;
   feed: SessionFeed;
@@ -107,6 +111,8 @@ export interface PromptMark {
   at: number;
   sessionId?: string;
   text?: string;
+  /** The hook ran under Remote Control. */
+  remote?: boolean;
 }
 
 /** What `sessionTurn` reads off a note: its closing message is summarised
@@ -131,6 +137,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
   const isOff = (place: { workspaceId: string; docId?: string }) =>
     store.readFailed || placeIsOff(place, deps.privacy, store.offBoards);
   const hub = new CoachHub({ offAt: isOff });
+  const coverage = new CoachCoverage(deps.dataDir);
   const readGoals = (): GoalsDocReading | null => {
     const doc = store.goalsDoc;
     const md = doc ? deps.docStore.readMarkdownBody(doc.docId) : null;
@@ -150,6 +157,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     timeZone: () => store.timeZone,
     backlog: new CoachBacklog(deps.dataDir),
     summarizer: deps.summarizer ?? null,
+    coverage,
     ...(deps.digestWindowMs === undefined ? {} : { windowMs: deps.digestWindowMs }),
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.schedule ? { schedule: deps.schedule } : {}),
@@ -172,6 +180,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
     boardName: deps.boardName,
     workspaceOf: deps.workspaceOf,
     isOff,
+    coverage,
     tell: (news, at) => feed.send(news, at),
     publish: (frame) => hub.publish(frame),
     reshow: (frame) => hub.reshow(frame),
@@ -211,33 +220,41 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
   /** Where a mark came from, or null when it must not reach the coach. */
   const sessionOf = (
     workspaceId: string,
-    agent: string,
-    at: number,
-    sessionId?: string,
-    cwd?: unknown,
-    text?: string,
+    mark: { agent: string; at: number; sessionId?: string; text?: string },
+    cwd: unknown,
   ) => {
-    if (isOff({ workspaceId }) || isCoachSession(workspaceId, agent)) return null;
+    if (isOff({ workspaceId })) {
+      coverage.dropped(mark.at, 'off-board');
+      return null;
+    }
+    if (isCoachSession(workspaceId, mark.agent)) {
+      coverage.dropped(mark.at, 'coach-session');
+      return null;
+    }
     const board = deps.boardName(workspaceId);
-    const said = text?.trim();
+    const said = mark.text?.trim();
     return {
-      at,
+      at: mark.at,
       boardId: workspaceId,
       ...(board ? { board } : {}),
-      session: sessionId ?? agent,
+      session: mark.sessionId ?? mark.agent,
       repo: repoOfCwd(cwd) ?? 'unknown repo',
       ...(said ? { text: said.slice(0, MARK_TEXT_CHARS) } : {}),
     };
   };
   const sessionTurn = (workspaceId: string, note: SessionNote, cwd?: unknown): boolean => {
     if (note.kind !== 'turn') return false;
-    const news = sessionOf(workspaceId, note.agent, note.at, note.sessionId, cwd, note.text);
+    const session = note.sessionId ?? note.agent;
+    coverage.received(note.at, feed.sessionSource(session) ?? 'other', 'turn-end');
+    const news = sessionOf(workspaceId, note, cwd);
     return news !== null && feed.turn(news);
   };
   const sessionPrompt = (workspaceId: string, mark: PromptMark, cwd?: unknown): boolean => {
-    const text = mark.typed ? mark.text : undefined;
-    const news = sessionOf(workspaceId, mark.agent, mark.at, mark.sessionId, cwd, text);
-    return news !== null && feed.prompt(news, mark.typed);
+    const source = sessionSource(mark.remote);
+    coverage.received(mark.at, source, mark.typed ? 'typed-prompt' : 'injected-prompt');
+    const { text, ...rest } = mark;
+    const news = sessionOf(workspaceId, mark.typed && text ? { ...rest, text } : rest, cwd);
+    return news !== null && feed.prompt({ ...news, source }, mark.typed);
   };
   // One line per change in whether the coach lead holds a stream, with the
   // time and nothing else, so a gap in the digests can be told apart from a
@@ -259,6 +276,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
   };
   return {
     store,
+    coverage,
     coach,
     hub,
     feed,
@@ -282,6 +300,7 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
       morning.stop();
       feed.stop();
       store.flush();
+      coverage.flush();
       hub.close();
     },
   };
