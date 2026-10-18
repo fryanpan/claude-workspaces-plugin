@@ -45,9 +45,11 @@ import {
 } from '@claude-workspaces/core/review-hold';
 import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import {
+  DESTRUCTIVE_STEP_PASS_REASON,
   REFUSAL_DENIAL_PASS_REASON,
   REVIEW_REFUSAL_RULES,
   type ReviewRefusalKind,
+  namesDestructiveGitStep,
 } from '@claude-workspaces/core/review-refusal';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -761,6 +763,14 @@ export function createReviewGate(ctx: ReviewGateContext) {
      * Never on an item that reports a permission denial either: a denial is
      * final, the reader is the one person left to ask, and a refusal there
      * would push the agent to get past it.
+     *
+     * Never on an item that asks about a destructive git step (a force-push,
+     * a history rewrite, a branch or tag deletion, a hard reset), for every
+     * rule but "self-check": no consent covers one, and a refusal tells the
+     * agent to go ahead. On 2026-10-17 the judge refused an ask to approve a
+     * force-push under "ship" although its prompt named the exception, so
+     * this does not rely on the judge. "self-check" stays: it tells the
+     * agent to read a fact, never to take the step.
      */
     let refusal: ReviewRefusalKind | undefined;
     if (verdict !== null && !verdict.ok && !target.ownerCheck) {
@@ -768,6 +778,13 @@ export function createReviewGate(ctx: ReviewGateContext) {
       if (refusal !== undefined && namesPermissionRefusal(judgedText(words))) {
         refusal = undefined;
         verdict = { ok: true, reason: REFUSAL_DENIAL_PASS_REASON };
+      } else if (
+        refusal !== undefined &&
+        refusal !== 'self-check' &&
+        namesDestructiveGitStep(judgedText(words))
+      ) {
+        refusal = undefined;
+        verdict = { ok: true, reason: DESTRUCTIVE_STEP_PASS_REASON };
       }
     } else if (verdict !== null && !verdict.ok && verdict.refuse !== undefined) {
       // The owner line's hold. The judge is told a refusal needs no reason,
@@ -836,13 +853,17 @@ export function createReviewGate(ctx: ReviewGateContext) {
       gapKey !== undefined &&
       carriedAdmission.lessSpecificFor !== undefined &&
       gapKey === carriedAdmission.lessSpecificFor;
-    // Never a refusal: the cap ends a hold the filer keeps rewording, and a
-    // refused ask is not a wording problem. Its way out is the appeal.
+    // After the last hold, a refusal too. The hold that used up the cap told
+    // the filer the next revision reaches the reader whatever it says, and a
+    // refusal there broke that promise for good: a refusal is not a hold, so
+    // the cap never fired and the item could never reach the reader
+    // (2026-10-17). Before the cap, a refusal is still not admitted — it is
+    // not a round of the count, and its way out is the appeal. The
+    // less-specific note answers a hold's gap, so it never admits a refusal.
     const admitAfterHolds =
-      refusal === undefined &&
       verdict !== null &&
       !verdict.ok &&
-      (heldFor.length >= REVIEW_GATE_MAX_HOLDS || answeredAgain);
+      (heldFor.length >= REVIEW_GATE_MAX_HOLDS || (refusal === undefined && answeredAgain));
     const judgement: ReviewItemJudgement =
       restoredHold !== undefined
         ? { ...restoredHold }
