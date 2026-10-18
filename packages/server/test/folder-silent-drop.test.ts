@@ -1,7 +1,7 @@
 /**
  * A folder of recordings and screenshots, attached the way a peer lead
  * attached one: two mp4s and two pngs, inside a repository that ignores
- * `*.mp4`. Before this suite the bind answered `fileCount: 2, skipped: []`,
+ * `*.mp4`. Before this suite the bind left all three out and answered `skipped: []`,
  * and the reader could open neither recording nor the screenshot.
  *
  * The screenshot's name is the one macOS writes, with U+202F NARROW NO-BREAK
@@ -12,7 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
@@ -51,6 +51,8 @@ describe('attaching a folder of recordings and screenshots', () => {
   });
 
   afterEach(() => {
+    docStore.flush();
+    docStore.stop();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   });
@@ -82,5 +84,58 @@ describe('attaching a folder of recordings and screenshots', () => {
     );
     // `.gitignore` itself is listed; the two pngs are listed; nothing else.
     expect(res.fileCount).toBe(3);
+  });
+});
+
+describe('a plain folder names every file it leaves out', () => {
+  let dataDir: string;
+  let folder: string;
+  let docStore: DocStore;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'skip-data-'));
+    folder = mkdtempSync(join(tmpdir(), 'skip-src-'));
+    writeFileSync(join(folder, 'README.md'), '# Saltmarsh\n');
+    writeFileSync(join(folder, 'bundle.zip'), new Uint8Array([0x50, 0x4b, 3, 4]));
+    writeFileSync(join(folder, '.env'), 'MARKER=not-a-credential\n');
+    writeFileSync(join(folder, '.prettierrc'), '{}\n');
+    mkdirSync(join(folder, 'node_modules'));
+    writeFileSync(join(folder, 'node_modules', 'x.js'), '');
+    mkdirSync(join(folder, 'drafts'));
+    writeFileSync(join(folder, 'drafts', 'a.md'), '# a\n');
+    symlinkSync(join(folder, 'README.md'), join(folder, 'linked.md'));
+    docStore = makeDocStore(dataDir);
+  });
+
+  afterEach(() => {
+    docStore.flush();
+    docStore.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it('gives each one a reason, and lists only what opens', async () => {
+    const res = await docStore.bindFolder({ folderPath: folder, exclude: ['drafts'] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.fileCount).toBe(1);
+    expect(res.skipped).toEqual([
+      { path: '.env', reason: 'credential-name' },
+      { path: '.prettierrc', reason: 'hidden' },
+      { path: 'bundle.zip', reason: 'unsupported-type' },
+      { path: 'linked.md', reason: 'not-a-regular-file' },
+      { path: 'node_modules/', reason: 'skipped-directory' },
+      { path: 'drafts/a.md', reason: 'excluded' },
+    ]);
+  });
+
+  it('says why when it leaves out every file', async () => {
+    rmSync(join(folder, 'README.md'));
+    rmSync(join(folder, 'linked.md'));
+    const res = await docStore.bindFolder({ folderPath: folder, exclude: ['drafts'] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.fileCount).toBe(0);
+    expect(res.skipped.map((s) => s.path)).toContain('bundle.zip');
   });
 });

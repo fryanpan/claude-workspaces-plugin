@@ -31,7 +31,7 @@ import {
 } from './diff-groups.ts';
 import { isReservedDocId } from './doc-ids.ts';
 import { canonicalRepoRoot, findWorktreeRoot } from './doc-origin-repo.ts';
-import { scanFolder } from './fs-scan.ts';
+import { MAX_SKIPPED, scanFolderReport } from './fs-scan.ts';
 import {
   type DiffFileEntry,
   diffFilesAsync,
@@ -77,7 +77,10 @@ export type BindDiffResult =
       /** True when this is a browse-mode workspace (no diff members). */
       browse?: boolean;
       fileCount: number;
+      /** Every file the bind left out, with why. Browse mode names at most
+       *  `MAX_SKIPPED`; `skippedTotal` is present when it named fewer. */
       skipped: Array<{ path: string; reason: string }>;
+      skippedTotal?: number;
       files: Array<{
         docId: string;
         relPath: string;
@@ -103,6 +106,8 @@ export type BindDiffResult =
         | 'review-exists-different-range';
       detail?: string;
       fileCount?: number;
+      /** Browse mode's left-out files, on an `empty-diff` answer. */
+      skipped?: Array<{ path: string; reason: string }>;
     };
 
 /**
@@ -201,11 +206,21 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
   if (opts.base === undefined) {
     const reviewId = opts.reviewId ?? deriveWorkspaceId(setIdRootFor(root));
     const excludes = normalizeExcludes(opts.exclude);
-    const scanned = scanFolder(root)
-      .map((abs) => relative(root, abs).split(sep).join('/'))
-      .filter((rel) => !isExcluded(rel, excludes))
-      .sort();
-    if (scanned.length === 0) return { ok: false, error: 'empty-diff' };
+    const report = scanFolderReport(root);
+    const skipped: Array<{ path: string; reason: string }> = [...report.skipped];
+    let skippedTotal = report.skippedTotal;
+    const scanned: string[] = [];
+    for (const rel of report.files.map((abs) => relative(root, abs).split(sep).join('/'))) {
+      if (!isExcluded(rel, excludes)) {
+        scanned.push(rel);
+        continue;
+      }
+      skippedTotal++;
+      if (skipped.length < MAX_SKIPPED) skipped.push({ path: rel, reason: 'excluded' });
+    }
+    scanned.sort();
+    // A folder whose every file was left out still says which, and why.
+    if (scanned.length === 0) return { ok: false, error: 'empty-diff', skipped };
     const entryRel =
       scanned.find((r) => r.toLowerCase() === 'readme.md') ??
       scanned.find((r) => r.toLowerCase().endsWith('.md')) ??
@@ -244,7 +259,8 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       target: null,
       browse: true,
       fileCount: scanned.length,
-      skipped: [],
+      skipped,
+      ...(skippedTotal > skipped.length ? { skippedTotal } : {}),
       files: [
         {
           docId: entryDocId,

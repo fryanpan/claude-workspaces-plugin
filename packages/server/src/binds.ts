@@ -63,6 +63,8 @@ export type BindFolderResult =
       root: string;
       fileCount: number;
       skipped: Array<{ path: string; reason: string }>;
+      /** Present when `skipped` names fewer rows than were left out. */
+      skippedTotal?: number;
       files: Array<{ docId: string; relPath: string; type: DocType; title: string }>;
     }
   | { ok: false; error: 'not-found' | 'too-many-files' | 'reserved-namespace'; fileCount?: number };
@@ -96,7 +98,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
         workspaceId: emptySetId,
         root,
         fileCount: 0,
-        skipped: [],
+        skipped: res.skipped ?? [],
         files: [],
       };
     }
@@ -113,6 +115,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
     root: res.root,
     fileCount: res.fileCount,
     skipped: res.skipped,
+    ...(res.skippedTotal !== undefined ? { skippedTotal: res.skippedTotal } : {}),
     files: res.files.map((f) => ({
       docId: f.docId,
       relPath: f.relPath,

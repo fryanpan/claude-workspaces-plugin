@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { isUnsupportedType } from './folder-file-types.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
 
@@ -29,27 +30,101 @@ import { join, relative, sep } from 'node:path';
  * anything.
  */
 export function scanFolder(root: string): string[] {
+  return listFolder(root, null);
+}
+
+/** A file the scan left out, and the word for why. */
+export interface SkippedFile {
+  path: string;
+  reason: SkipReason;
+}
+
+/**
+ * Why a scan left a file out. `gitignored` is the repository's own ignore
+ * rules; `credential-name` and `hidden` are the floors described above;
+ * `skipped-directory` is the fallback's build-output set; `not-a-regular-file`
+ * is a symlink, socket or device the fallback does not follow; and
+ * `unsupported-type` is a binary nothing in the review can show
+ * (`folder-file-types.ts`). A directory left out whole carries a trailing `/`.
+ */
+export type SkipReason =
+  | 'gitignored'
+  | 'credential-name'
+  | 'hidden'
+  | 'skipped-directory'
+  | 'not-a-regular-file'
+  | 'unsupported-type';
+
+/** At most this many skipped rows are named; `skippedTotal` counts them all. */
+export const MAX_SKIPPED = 200;
+
+/**
+ * `scanFolder`, plus every file it left out and why, as repo-relative paths.
+ *
+ * A bind used to answer `skipped: []` whatever the scan dropped, so a folder
+ * whose recordings were gitignored reported two files and nothing missing.
+ * The ignored half costs a second `git ls-files`, which is why the listing
+ * the share rule reads (`isListedFile`) does not ask for it.
+ */
+export function scanFolderReport(root: string): {
+  files: string[];
+  skipped: SkippedFile[];
+  skippedTotal: number;
+} {
+  const skipped: SkippedFile[] = [];
+  const files = listFolder(root, skipped);
+  skipped.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, skipped: skipped.slice(0, MAX_SKIPPED), skippedTotal: skipped.length };
+}
+
+/**
+ * The listing. `-z` is load-bearing: without it git C-quotes every path
+ * holding a byte above 0x7f, so a macOS screenshot (U+202F before "PM") was
+ * listed as `"Screenshot … 3.04.12\342\200\257PM.png"`, quotes included —
+ * counted, shown, and naming no file on disk.
+ */
+function listFolder(root: string, skipped: SkippedFile[] | null): string[] {
   try {
-    const res = spawnSync(
-      'git',
-      ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard'],
-      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-    );
-    if (res.status === 0 && typeof res.stdout === 'string') {
+    const res = gitLsFiles(root, ['--cached', '--others', '--exclude-standard']);
+    if (res !== null) {
       const out: string[] = [];
-      for (const line of res.stdout.split('\n')) {
-        const rel = line.trim();
-        if (!rel) continue;
+      for (const rel of res) {
         const name = rel.split('/').pop() ?? rel;
-        if (isCredentialShapedName(name)) continue;
-        out.push(join(root, rel));
+        const reason = isCredentialShapedName(name)
+          ? 'credential-name'
+          : isUnsupportedType(name)
+            ? 'unsupported-type'
+            : null;
+        if (reason) skipped?.push({ path: rel, reason });
+        else out.push(join(root, rel));
+      }
+      if (skipped) {
+        // `--directory` names an ignored directory once rather than every
+        // file under it, so a repo's node_modules is one row, not thousands.
+        const ignored = gitLsFiles(root, [
+          '--others',
+          '--ignored',
+          '--exclude-standard',
+          '--directory',
+        ]);
+        for (const rel of ignored ?? []) skipped.push({ path: rel, reason: 'gitignored' });
       }
       return out;
     }
   } catch {
     // git missing or threw — fall through to readdir.
   }
-  return readdirRecursive(root);
+  return readdirRecursive(root, root, skipped);
+}
+
+/** `git ls-files -z <args>` under `root`, or null when git cannot answer. */
+function gitLsFiles(root: string, args: string[]): string[] | null {
+  const res = spawnSync('git', ['-C', root, 'ls-files', '-z', ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (res.status !== 0 || typeof res.stdout !== 'string') return null;
+  return res.stdout.split('\0').filter((rel) => rel !== '');
 }
 
 /** Repo-relative POSIX paths for every scanned file, sorted. */
@@ -117,7 +192,7 @@ export function isSecretShapedName(name: string): boolean {
   return isCredentialShapedName(name);
 }
 
-function readdirRecursive(dir: string): string[] {
+function readdirRecursive(root: string, dir: string, skipped: SkippedFile[] | null): string[] {
   const out: string[] = [];
   let entries: import('node:fs').Dirent[];
   try {
@@ -128,13 +203,30 @@ function readdirRecursive(dir: string): string[] {
   for (const entry of entries) {
     const name = entry.name;
     const abs = join(dir, name);
+    const rel = (): string => relative(root, abs).split(sep).join('/');
     if (entry.isDirectory()) {
       // Skip .git, any dotdir, and the hardcoded heavy dirs.
-      if (name.startsWith('.') || SKIP_DIRS.has(name)) continue;
-      out.push(...readdirRecursive(abs));
+      if (name.startsWith('.') || SKIP_DIRS.has(name)) {
+        // `.git` is the repository's own store, not a file anybody left out.
+        if (name !== '.git') {
+          const reason = name.startsWith('.') ? 'hidden' : 'skipped-directory';
+          skipped?.push({ path: `${rel()}/`, reason });
+        }
+        continue;
+      }
+      out.push(...readdirRecursive(root, abs, skipped));
     } else if (entry.isFile()) {
-      if (isSecretShapedName(name)) continue;
-      out.push(abs);
+      const reason = isCredentialShapedName(name)
+        ? 'credential-name'
+        : isSecretShapedName(name)
+          ? 'hidden'
+          : isUnsupportedType(name)
+            ? 'unsupported-type'
+            : null;
+      if (reason) skipped?.push({ path: rel(), reason });
+      else out.push(abs);
+    } else {
+      skipped?.push({ path: rel(), reason: 'not-a-regular-file' });
     }
   }
   return out;
