@@ -16,14 +16,33 @@
  * closes it. Showing it there tells the session nothing about that board.
  */
 import type { Event } from '../activity.ts';
+import {
+  type CoachCoverage,
+  type CoverageSource,
+  type ReceivedKind,
+  sourceOfDevice,
+} from './coverage.ts';
 import { type GoalsDocReading, goalTitle } from './goals-doc.ts';
 import { checkMoment } from './judge.ts';
 import type { SessionNews } from './session-feed.ts';
 import type { CoachStore } from './store.ts';
-import type { CoachEvent, CoachStream, HereSignal, StreamStep } from './stream.ts';
+import {
+  type CoachEvent,
+  type CoachStream,
+  type HereSignal,
+  type StreamStep,
+  pagePlaceName,
+} from './stream.ts';
 import type { CoachMoment, CoachReadiness, MomentAnswer } from './types.ts';
 
 export const DEFAULT_COACH_NAME = 'Your coach';
+
+/** The activity rows the coach reads, as the coverage report counts them. */
+const ROW_KINDS: Partial<Record<Event['type'], ReceivedKind>> = {
+  comment: 'comment',
+  reply: 'reply',
+  doc_open: 'open',
+};
 
 export interface DocLabel {
   title?: string;
@@ -57,6 +76,8 @@ export interface CoachDeps {
   workspaceOf: (docId: string) => string | undefined;
   /** Nothing about this place may reach the session (`coach/exclusion.ts`). */
   isOff: (place: { workspaceId: string; docId?: string }) => boolean;
+  /** Where each signal he sends, and each the coach lets go, is counted. */
+  coverage?: Pick<CoachCoverage, 'received' | 'dropped'>;
   /** To the coach session; true when it took the frame. */
   tell: (news: SessionNews, at: number) => boolean;
   publish: (frame: CoachFrame) => void;
@@ -107,9 +128,9 @@ export function createCoach(deps: CoachDeps): Coach {
     return true;
   };
 
-  const forward = (e: CoachEvent) => {
+  const forward = (e: CoachEvent, source: CoverageSource) => {
     const label = e.docId ? deps.label(e.docId) : {};
-    const board = deps.boardName(e.workspaceId);
+    const board = pagePlaceName(e.workspaceId) ?? deps.boardName(e.workspaceId);
     deps.tell(
       {
         event: 'coach.event',
@@ -120,6 +141,7 @@ export function createCoach(deps: CoachDeps): Coach {
         ...(label.title ? { doc: label.title } : {}),
         ...(e.heading ? { heading: e.heading } : {}),
         ...(e.text ? { text: e.text } : {}),
+        source,
       },
       e.at,
     );
@@ -127,8 +149,8 @@ export function createCoach(deps: CoachDeps): Coach {
 
   /** The events go to the session. A move closes nothing: the open moment
    *  goes with him. */
-  const take = (step: StreamStep) => {
-    for (const e of step.events) forward(e);
+  const take = (step: StreamStep, source: CoverageSource) => {
+    for (const e of step.events) forward(e, source);
   };
 
   const reshow = () => {
@@ -139,16 +161,21 @@ export function createCoach(deps: CoachDeps): Coach {
   return {
     here(signal) {
       const t = now();
+      const source = signal.source ?? 'other';
+      deps.coverage?.received(t, source, signal.visible ? signal.kind : 'left');
       if (deps.isOff(signal)) {
+        deps.coverage?.dropped(t, 'off-board');
         // A hidden page off the coach's boards tells it nothing at all.
         // It may have become off while the moment was showing there.
         if (signal.visible) {
-          take(deps.stream.elsewhere(t));
+          take(deps.stream.elsewhere(t), source);
           reshow();
         }
         return;
       }
-      take(deps.stream.here({ ...signal, at: t }));
+      const step = deps.stream.here({ ...signal, at: t });
+      if (step.events.length === 0) deps.coverage?.dropped(t, 'repeat');
+      take(step, source);
     },
     activity(row) {
       if (!row.isOwner) return;
@@ -157,13 +184,20 @@ export function createCoach(deps: CoachDeps): Coach {
       if (goalsDoc && row.type === 'edit_session' && row.doc?.docId === goalsDoc.docId) {
         deps.store.noteGoalsChanged(t);
       }
+      const source = sourceOfDevice(row.device?.kind);
+      const kind = ROW_KINDS[row.type];
+      const counted = kind !== undefined;
+      if (kind) deps.coverage?.received(t, source, kind);
       const docId = row.doc?.docId;
       const workspaceId = docId ? deps.workspaceOf(docId) : undefined;
       if (docId && workspaceId && deps.isOff({ workspaceId, docId })) {
-        if (row.type === 'doc_open') take(deps.stream.elsewhere(t));
+        if (counted) deps.coverage?.dropped(t, 'off-board');
+        if (row.type === 'doc_open') take(deps.stream.elsewhere(t), source);
         return;
       }
-      take(deps.stream.activity(row, t, deps.workspaceOf));
+      const step = deps.stream.activity(row, t, deps.workspaceOf);
+      if (counted && step.events.length === 0) deps.coverage?.dropped(t, 'repeat');
+      take(step, source);
     },
     raise(body) {
       const t = now();
@@ -207,7 +241,7 @@ export function createCoach(deps: CoachDeps): Coach {
     setBoardOff(workspaceId, off) {
       deps.store.setBoardOff(workspaceId, off);
       const place = deps.stream.current;
-      if (off && place && deps.isOff(place)) take(deps.stream.elsewhere(now()));
+      if (off && place && deps.isOff(place)) take(deps.stream.elsewhere(now()), 'other');
       reshow();
     },
     openFrame() {

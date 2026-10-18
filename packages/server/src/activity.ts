@@ -317,15 +317,17 @@ export function activityLogPath(dataDir: string): string {
  * break the action it's recording (a comment post, a read session).
  */
 export function appendActivity(dataDir: string, event: Event): void {
+  // Listeners get the row as it was written, with the browser that caused it.
+  const stamped = stampEventOrigin(event);
   try {
     if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-    appendFileSync(activityLogPath(dataDir), `${JSON.stringify(stampEventOrigin(event))}\n`);
+    appendFileSync(activityLogPath(dataDir), `${JSON.stringify(stamped)}\n`);
   } catch (err) {
     console.error('[activity] append failed:', err);
   }
   for (const fn of listeners) {
     try {
-      fn(dataDir, event);
+      fn(dataDir, stamped);
     } catch (err) {
       console.error('[activity] listener failed:', err);
     }

@@ -49,7 +49,7 @@ describe('POST /workspaces/:ws/agents/:name/prompts', () => {
     expect(((await notes.json()) as { notes: unknown[] }).notes).toEqual([]);
   });
 
-  it('refuses a missing or non-boolean typed, a bad session id or text, a shared name and a GET', async () => {
+  it('refuses a missing or non-boolean typed, a bad session id, text or remote flag, a shared name and a GET', async () => {
     expect((await post('Harborlight lead', {})).status).toBe(400);
     expect((await post('Harborlight lead', { typed: 'yes' })).status).toBe(400);
     expect((await post('Harborlight lead', 'not json')).status).toBe(400);
@@ -59,6 +59,8 @@ describe('POST /workspaces/:ws/agents/:name/prompts', () => {
     ).toBe(400);
     expect((await post('agent', { typed: true })).status).toBe(400);
     expect((await post('Harborlight lead', { typed: true, text: 7 })).status).toBe(400);
+    expect((await post('Harborlight lead', { typed: true, remote: 'yes' })).status).toBe(400);
+    expect((await post('Harborlight lead', { typed: true, remote: true })).status).toBe(202);
     expect((await post('Harborlight lead', { typed: true, text: 'x'.repeat(4_001) })).status).toBe(
       400,
     );

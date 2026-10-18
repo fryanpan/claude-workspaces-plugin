@@ -1,3 +1,4 @@
+import { isKnownTimezone } from '@claude-workspaces/core/schedule-timezone';
 /**
  * ── The coach: the owner's learning goals, where he is, and his answers ──
  *
@@ -8,7 +9,9 @@
  *                                    for this board", or back on
  *   POST /coach/here                 where he is or what he wrote: `{ kind?:
  *                                    'view' | 'wrote', workspaceId, docId?,
- *                                    visible, heading?, text?, timeZone? }`
+ *                                    visible, heading?, text?, timeZone? }`,
+ *                                    or from a page with no board `{ page:
+ *                                    'home' | 'review', visible, timeZone? }`
  *   GET  /coach/stream               the moments, as server-sent events;
  *                                    `?workspaceId=&docId=` says where the
  *                                    page is, and neither is the front page
@@ -18,6 +21,10 @@
  *   POST /coach/moments              the coach session raises a moment, from
  *                                    this machine only: `{ goal, matched,
  *                                    observed, line }`
+ *   GET  /coach/coverage             from this machine only: `?date=YYYY-MM-DD
+ *                                    &timeZone=` one local day, hour by hour,
+ *                                    of what he did by source and what the
+ *                                    digests carried; counts only
  *
  * Owner-level, not under a board: everything here is the owner's, so nothing is
  * on a share or member allowlist and a visitor is refused before anything
@@ -31,6 +38,8 @@
  *    family reaches into the other.
  *  - `/coach/here` answers anyone but the owner with an empty 204, which
  *    the page reads as "stop": every board and doc page sends it.
+ *  - The coverage report is for this machine too (`refuseNonLocal`): it is
+ *    counts per hour (`coach/coverage.ts`), never text, titles or ids.
  *  - Raising a moment is for the coach session, a process on this machine
  *    (`refuseNonLocal`). What it sends is checked before it reaches a page:
  *    a goal to act on, no other moment open, and words quoted from that
@@ -40,9 +49,10 @@
  * (`coach/session-feed.ts`).
  */
 import type { AgentCallerVerdict } from '../auth/agent-token.ts';
+import { sourceOfDevice } from '../coach/coverage.ts';
 import type { CoachPagePlace } from '../coach/hub.ts';
 import { ensureGoalsDoc } from '../coach/setup.ts';
-import type { HereSignal } from '../coach/stream.ts';
+import { type HereSignal, PAGE_PLACES } from '../coach/stream.ts';
 import {
   ANSWER_TEXT_CHARS,
   COACH_READINESS,
@@ -51,6 +61,7 @@ import {
   type MomentAnswer,
 } from '../coach/types.ts';
 import type { CoachWiring } from '../coach/wiring.ts';
+import { currentEventOrigin } from '../event-origin.ts';
 
 export interface CoachRoutesContext {
   wiring: CoachWiring;
@@ -74,6 +85,16 @@ export interface CoachRouteRequest {
 const MAX_BODY_BYTES = 8_000;
 const ANSWER_PATH = /^\/coach\/moments\/(cm-[A-Za-z0-9_-]{12})\/answer$/;
 const ID = /^[A-Za-z0-9_:.-]{1,128}$/;
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** A real calendar day, `YYYY-MM-DD`. */
+function isDay(s: string | null): s is string {
+  const m = s === null ? null : DATE.exec(s);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
 
 /** The owner's own pages, and nobody else's. */
 function refuseNonOwner(ctx: CoachRoutesContext, rq: CoachRouteRequest): Response | null {
@@ -110,6 +131,13 @@ function parseHere(
 ): Omit<HereSignal, 'at'> | string {
   const kind = body?.kind ?? 'view';
   if (kind !== 'view' && kind !== 'wrote') return 'kind is view or wrote';
+  const page = body?.page;
+  if (page !== undefined) {
+    if (page !== 'home' && page !== 'review') return 'page is home or review';
+    if (kind !== 'view') return 'a page with no board sends views only';
+    if (typeof body?.visible !== 'boolean') return 'visible must be true or false';
+    return { kind, workspaceId: PAGE_PLACES[page].id, visible: body.visible };
+  }
   const ws = body?.workspaceId;
   if (typeof ws !== 'string' || !ID.test(ws) || !ctx.boardExists(ws)) return 'unknown board';
   const doc = body?.docId;
@@ -179,6 +207,18 @@ export async function handleCoachRoutes(
   const { store, coach, hub, setup } = ctx.wiring;
   const now = ctx.now ?? Date.now;
 
+  if (pathname === '/coach/coverage') {
+    if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
+    if (rq.visitor) return j(403, { error: 'not available to share visitors' });
+    const notLocal = ctx.refuseNonLocal(req);
+    if (notLocal) return j(notLocal.status, notLocal.body);
+    const q = new URL(req.url).searchParams;
+    const date = q.get('date');
+    if (!isDay(date)) return j(400, { error: 'bad-date', message: 'date is YYYY-MM-DD' });
+    const zone = q.get('timeZone') ?? store.timeZone;
+    if (!isKnownTimezone(zone)) return j(400, { error: 'bad-zone', message: 'unknown timeZone' });
+    return j(200, ctx.wiring.coverage.report(date, zone));
+  }
   if (pathname === '/coach/stream') {
     if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
     const denied = refuseNonOwner(ctx, rq);
@@ -209,7 +249,11 @@ export async function handleCoachRoutes(
     return new Response(null, { status: 204 });
   }
   const denied = refuseNonOwner(ctx, rq);
-  if (denied) return denied;
+  if (denied) {
+    // He proved himself and the page was refused all the same.
+    if (pathname === '/coach/here') ctx.wiring.coverage.dropped(now(), 'refused');
+    return denied;
+  }
   if (tooLarge(req)) return j(413, { error: 'too-large' });
   const body = await ctx.safeJson(req);
 
@@ -251,9 +295,12 @@ export async function handleCoachRoutes(
   }
   if (pathname === '/coach/here') {
     const here = parseHere(ctx, body);
-    if (typeof here === 'string') return j(400, { error: 'bad-here', message: here });
+    if (typeof here === 'string') {
+      ctx.wiring.coverage.dropped(now(), 'refused');
+      return j(400, { error: 'bad-here', message: here });
+    }
     store.noteTimeZone(body?.timeZone);
-    coach.here(here);
+    coach.here({ ...here, source: sourceOfDevice(currentEventOrigin().device?.kind) });
     return j(200, { ok: true });
   }
 

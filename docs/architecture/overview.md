@@ -2238,7 +2238,8 @@ page's section (`coach/section.ts`, `coach/landing.ts`) lists the goals, offers 
 how-readily setting, and says how many events the session read today.
 (B) *Observe*: board and doc pages send what he is looking at, and each
 paragraph he writes when he pauses, to `/coach/here`
-(`workspaces-app/src/coach-card.ts`); `coach/stream.ts` turns that and his
+(`workspaces-app/src/coach-card.ts`); the front page and the review walk,
+which name no board, send which page they are (`PAGE_PLACES`); `coach/stream.ts` turns that and his
 own comment, reply and open rows (through `onActivity` in `activity.ts`)
 into one event per thing he does, dropping repeats. `coach/exclusion.ts`
 drops everything from a board that is local-only, sharing-locked, or that he
@@ -2256,13 +2257,17 @@ possibly stale past eight days, or says there is no current week plan
 (`coach/week-plan.ts`). It also lists his Claude Code time per attached session, the repo and its
 active minutes, counted from each prompt he typed (the plugin's
 UserPromptSubmit hook posts typed-or-not, and a typed prompt's reduced text,
-to `routes/prompt-marks.ts`) through the Stop hook's turn notes after it, never
-for the coach (`coach/session-minutes.ts`). One Haiku call per digest says
-each prompt and turn in a line (`coach/summary.ts`); the text stays on the
+to `routes/prompt-marks.ts`) through the turn notes and injected prompts after
+it, each crediting the gap since the session's previous mark, capped, never
+for the coach (`coach/session-minutes.ts`). Haiku says each prompt and turn
+in a line, 40 marks a call (`coach/summary.ts`); the text stays on the
 server. A hook in a session launched with no board posts to the one board
 where that session holds a stream (`plugin/hooks/lib/joined-board.ts`), and a
 `claude -p` or SDK run counts as nobody typing. A typed prompt opens a window as
-a board event does; a turn end never does. A quiet stretch sends nothing,
+a board event does, and so does any mark in his run after it; a mark outside a
+run never does. `coach/coverage.ts` counts, per hour, what he sent by source
+(desktop, iPad, phone, Remote Control, terminal), what the coach let go and
+why, and what the digests carried, for the loopback `GET /coach/coverage`. A quiet stretch sends nothing,
 and answers and the setting go at once. With no session holding a stream
 the windows wait in `coach/backlog.json` (`coach/backlog.ts`, bounded to 96
 windows and 48 hours, across a restart) and go as one digest when its stream
