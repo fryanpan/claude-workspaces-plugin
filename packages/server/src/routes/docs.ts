@@ -405,10 +405,13 @@ export async function handleDocCreateListRoutes(
     // naming the board's app when it already serves the site whole.
     const pageLinks = mockupHtml === null ? [] : rootRelativePageLinks(mockupHtml);
     const warning = mockupLinkWarning(pageLinks, pageLinks.length ? boardApp() : undefined);
+    const decorated = withReviewUrl(doc.meta);
     return j(200, {
       ...(warning ? { warning: warning.message, linkWarning: warning } : {}),
       docId: doc.docId,
-      meta: withReviewUrl(doc.meta),
+      // The page to hand a person: every make-or-attach answer says `url`.
+      ...(decorated.reviewUrl ? { url: decorated.reviewUrl } : {}),
+      meta: decorated,
       // Where the doc landed, in the same call that created it — a
       // caller who supplied no workspace still learns which one it got.
       hubWorkspaceId: boardWorkspaceId,
@@ -494,7 +497,7 @@ export async function handleDocPromoteRoute(
   ctx: DocRoutesContext,
   rq: DocRouteRequest,
 ): Promise<Response | undefined> {
-  const { docStore, taskStore, j, safeJson, canonicalDocId, workspacesOfDoc } = ctx;
+  const { docStore, taskStore, j, safeJson, canonicalDocId, workspacesOfDoc, threadUrl } = ctx;
   const { req, scope, authorFor, visitor } = rq;
   // promote_to_task (§3.10): thread → task. Captures the origin ref,
   // the latest HUMAN comment as the verbatim quote (an agent's closing
@@ -611,8 +614,11 @@ export async function handleDocPromoteRoute(
       false,
       res.task.planHold !== undefined,
     );
+    // The new task's link: a task's thread URL is the task's own page.
+    const url = threadUrl(`task:${res.task.id}`, Boolean(visitor));
     return j(200, {
       task: res.task,
+      ...(url !== undefined ? { url } : {}),
       ...(promoteVisibility !== undefined ? { visibility: promoteVisibility } : {}),
       // Third create path, same report. Promoting a thread has exactly
       // the same goal semantics as a create, so an agent that learns to

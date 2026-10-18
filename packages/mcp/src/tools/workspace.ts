@@ -129,6 +129,7 @@ export async function handleWorkspaceTool(
         leadAgentId: leadAgentId ?? AUTHOR.id,
       })) as {
         workspace: { id: string; name: string; leadAgentId?: string };
+        url?: string;
       };
       if (subscribe !== false && res.workspace?.id) {
         await watchWorkspace(res.workspace.id);
@@ -137,6 +138,7 @@ export async function handleWorkspaceTool(
         workspaceId: res.workspace.id,
         name: res.workspace.name,
         leadAgentId: res.workspace.leadAgentId,
+        ...(res.url !== undefined ? { url: res.url } : {}),
       });
     }
     case 'rename_workspace': {
@@ -245,8 +247,13 @@ export async function handleWorkspaceTool(
         {
           docId,
         },
-      )) as { workspace?: { docIds?: string[] } };
-      return ok({ ok: true, workspaceId, docIds: res.workspace?.docIds ?? [] });
+      )) as { workspace?: { docIds?: string[] }; url?: string };
+      return ok({
+        ok: true,
+        workspaceId,
+        docIds: res.workspace?.docIds ?? [],
+        ...(res.url !== undefined ? { url: res.url } : {}),
+      });
     }
     case 'get_workspace': {
       const { workspaceId } = a as { workspaceId: string };

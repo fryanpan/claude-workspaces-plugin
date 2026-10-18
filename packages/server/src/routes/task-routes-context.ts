@@ -7,6 +7,7 @@ import type { ChatAudit } from '../chat-audit.ts';
 import type { DispatchRegistry } from '../dispatch-registry.ts';
 import type { DispatchReportStore } from '../dispatch-reports.ts';
 import type { DocStore } from '../doc-store.ts';
+import { taskDeepLink } from '../home-brief.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
@@ -297,4 +298,19 @@ export function markPersonRelease(
       before,
       ...(except !== undefined ? { except } : {}),
     });
+}
+
+/**
+ * The absolute link that opens a task, for a make-or-attach answer's `url`.
+ * Undefined for a share visitor, as a thread's `threadUrl` is, and for a
+ * context built without a base (a test's).
+ */
+export function taskUrlFor(
+  ctx: Pick<TaskRoutesContext, 'externalBaseUrl'>,
+  workspaceId: string,
+  taskId: string,
+  isVisitor: boolean,
+): string | undefined {
+  const base = isVisitor ? undefined : ctx.externalBaseUrl?.();
+  return base === undefined ? undefined : `${base}${taskDeepLink(workspaceId, taskId)}`;
 }

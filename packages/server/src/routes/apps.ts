@@ -194,6 +194,7 @@ async function attachApp(
     origin: origin.origin,
     reachable: root.reachable,
     reviewUrl: meta.reviewUrl,
+    url: meta.reviewUrl,
     meta,
   });
 }

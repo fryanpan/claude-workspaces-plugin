@@ -424,7 +424,7 @@ export async function handleDocThreadRoutes(
         ? j(200, {
             thread: replied,
             ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-            ...(handoff ? { threadUrl: handoff } : {}),
+            ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
             ...(declaredItemId(docId, replied) !== undefined
               ? { reviewItemId: declaredItemId(docId, replied) }
               : {}),
@@ -898,7 +898,7 @@ export async function handleDocThreadRoutes(
         ? j(200, {
             thread: settledPrior,
             ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-            ...(handoff ? { threadUrl: handoff } : {}),
+            ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
             ...(declaredItemId(docId, settledPrior) !== undefined
               ? { reviewItemId: declaredItemId(docId, settledPrior) }
               : {}),
@@ -1025,7 +1025,7 @@ export async function handleDocThreadRoutes(
       ? j(200, {
           thread: settled,
           ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-          ...(handoff ? { threadUrl: handoff } : {}),
+          ...(handoff ? { threadUrl: handoff, url: handoff } : {}),
           ...(declaredItemId(docId, settled) !== undefined
             ? { reviewItemId: declaredItemId(docId, settled) }
             : {}),
@@ -1106,7 +1106,7 @@ export async function handleDocThreadRoutes(
       ? j(200, {
           thread: found,
           ...(declared.advice ? { reviewAdvice: declared.advice } : {}),
-          ...(findHandoff ? { threadUrl: findHandoff } : {}),
+          ...(findHandoff ? { threadUrl: findHandoff, url: findHandoff } : {}),
           ...(declaredItemId(docId, found) !== undefined
             ? { reviewItemId: declaredItemId(docId, found) }
             : {}),
