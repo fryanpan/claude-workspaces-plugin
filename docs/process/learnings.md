@@ -3739,3 +3739,23 @@ write-once in practice, and the repair verb for a moved file cannot repair it.
   the file on disk. Treat `EDEADLK` from a bound read as "not on disk", log it
   once, and do not quarantine the path for it (a quarantine is for a read
   that did not answer, which is the download or the dialog).
+
+## A sized body stays sized only if nothing re-wraps it or reads `.body` (Bun 1.3.10)
+
+- On 2026-10-18 a phone showed a black video player with a spinner. The raw
+  media route's 206 for `bytes=0-1` reached the socket with
+  `Transfer-Encoding: chunked`, no Content-Length, and no final chunk. Safari
+  will not play from that.
+- Two separate Bun behaviours caused it, measured over a raw socket.
+  `new Response(res.body, …)` turns a file or file slice into a stream,
+  which is sent chunked. And reading `.body` of a Response built on
+  `Bun.file(p).slice(a, b)` makes Bun send the WHOLE file under its full
+  length. A check as small as `res.body === null` is enough to trigger it.
+- So a wrapper that adds headers sets them on the route's Response in place
+  (`applyCors`, `refreshSession`), and `maybeCompress` checks the content
+  type before it reads the body. `range-content-length.test.ts` reads the
+  framing off a socket. `fetch` hides it, which is why the older range tests
+  passed throughout.
+- Its positive control needs a stream that yields across a tick. A stream
+  that is already closed when the Response is built is sent sized, so a
+  control built that way cannot see chunking.
