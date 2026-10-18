@@ -173,6 +173,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/attachments/:setId/files` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/grouped` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/groups` | POST | `routes/review-files.ts` | trusted-local |  |
+| `/workspaces/:ws/attachments/:setId/raw` | GET, HEAD | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/refresh` | POST | `routes/review-files.ts` | trusted-local |  |
 | `/workspaces/:ws/attachments/:setId/threads` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/tree` | GET | `routes/review-files.ts` | share-scope |  |

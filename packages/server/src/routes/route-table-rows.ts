@@ -448,6 +448,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/attachments/:setId/context-file', 'POST'],
     ['share-scope', '/workspaces/:ws/attachments/:setId/editable-file', 'POST'],
     ['share-scope', '/workspaces/:ws/attachments/:setId/tree', 'GET'],
+    ['share-scope', '/workspaces/:ws/attachments/:setId/raw', 'GET HEAD'],
   ]),
 
   ...family('routes/meetings-calendar.ts', [
