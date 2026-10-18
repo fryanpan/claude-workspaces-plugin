@@ -12,8 +12,10 @@
  * summary of each: what he asked, and what the session answered (the owner,
  * 2026-10-16: the digest shows what he did, not just minutes). The summary
  * is made from the prompt's text and the turn's closing message
- * (`coach/summary.ts`); the text itself, the session id and the rest of the
- * path stay here.
+ * (`coach/summary.ts`). Since 2026-10-18 the text goes too, whole up to the
+ * wiring's per-mark cap, beside its summary: Bryan found the summaries cut
+ * off and asked for the detail. The session id and the rest of the path
+ * stay here.
  *
  * Who counts: any attached session he types into. A typed prompt starts a
  * run, and every mark after it counts while the run lasts: the turn ends,
@@ -70,7 +72,7 @@ export interface SessionTurn {
   /** Where he typed, for the coverage report (`coach/coverage.ts`); never sent. */
   source?: CoverageSource;
   /** The prompt he typed, or the turn's closing message, as the hook
-   *  reduced it. Summarised before a digest goes; never sent whole. */
+   *  reduced it. Sent beside its summary, within the digest's budget. */
   text?: string;
 }
 
@@ -79,6 +81,8 @@ export interface SessionActivity {
   at: number;
   kind: 'prompt' | 'turn';
   summary: string;
+  /** The mark's text in full, as the session's hook sent it. */
+  text?: string;
 }
 
 /** One session's line in a digest. */
@@ -181,7 +185,8 @@ export function sessionMinutesOf(
     const kind = t.kind;
     const summary = kind === 'injected' ? undefined : summaryOf(i);
     if (summary && kind !== 'injected') {
-      line.activity = [...(line.activity ?? []), { at: t.at, kind, summary }];
+      const text = t.text ? { text: t.text } : {};
+      line.activity = [...(line.activity ?? []), { at: t.at, kind, summary, ...text }];
     }
     bySession.set(key, line);
   }
