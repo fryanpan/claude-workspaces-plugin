@@ -28,6 +28,8 @@ describe('isTypedPrompt', () => {
       '<system-reminder>Tools loaded.</system-reminder>',
       '<cross-session-message from="Riverbend">hi</cross-session-message>',
       'Another Claude session sent a message: hello',
+      'Activity was observed in the bound conversation:\nan edit',
+      'Your background observer (o-1) sent a report:\nbuild is green',
       'This session is being continued from a previous conversation that ran out of context.',
       'Self-wake (keep-moving protocol): check the board.',
     ]) {

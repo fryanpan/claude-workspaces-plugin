@@ -26,12 +26,14 @@
  * `attach_agent` (`joined-board.ts`).
  *
  * A prompt is typed unless it starts with a wrapper the harness puts around
- * what it injects. The wrappers are the ones a lead session's transcript
- * holds on user turns: channel events, teammate messages, background task
- * notifications, system reminders, cross-session messages, and the plain
- * lead-ins the harness writes for a cross-session message, a resumed session
- * and a self-wake. A wrapper missing from this list reads as typed, which
- * overstates his time; it never hides it.
+ * what it injects. The payload names no origin — past the common fields it
+ * carries only `prompt` and `session_title` (Claude Code 2.1.302) — so the
+ * opening is the only signal. The wrappers are the ones that binary queues
+ * as a prompt: channel events, a subagent's hand-back (`<agent-message`),
+ * teammate and cross-session messages, task notifications, system reminders,
+ * and the plain lead-ins it writes for a peer message, an observer report
+ * and a resumed session, plus the fleet's self-wake. A wrapper missing from
+ * this list reads as typed, which overstates his time; it never hides it.
  *
  * Never blocks the prompt and never prints: a UserPromptSubmit hook's stdout
  * is added to the model's context, so every path here is silent and exits 0.
@@ -49,11 +51,15 @@ import { fullNote } from './note-redact.ts';
 /** How an injected prompt begins, after leading whitespace. */
 export const INJECTED_PREFIXES: readonly string[] = [
   '<channel',
+  '<agent-message',
   '<teammate-message',
   '<task-notification',
   '<system-reminder',
   '<cross-session-message',
   'Another Claude session sent a message',
+  'A peer session sent a message',
+  'Activity was observed in the bound conversation',
+  'Your background observer (',
   'This session is being continued from a previous conversation',
   'Self-wake',
 ];
