@@ -68,6 +68,41 @@ describe('the review-item gate when the judge is unreliable', () => {
       expect(out.item?.judge?.heldFor).toHaveLength(1);
     });
 
+    it('admits an item held twice, as the last hold promised, when the judge then fails', async () => {
+      const { workspaceId, taskId } = await board();
+      h.judge = contradictoryJudge();
+      const filed = await jj<Held>(
+        await post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items`, {
+          author: FILER,
+          review: COSTS_IN_OPTIONS,
+        }),
+      );
+      const itemId = filed.item?.id as string;
+      const revise = (detail: string) =>
+        jj<Held>(
+          post(`/workspaces/${workspaceId}/tasks/${taskId}/review-items/${itemId}/revise`, {
+            author: FILER,
+            detail,
+          }),
+        );
+      const second = await revise('A second blurb that does not close the gap either.');
+      expect(second.item?.judge?.heldFor).toHaveLength(2);
+      expect(second.message).toContain('This is the last hold');
+      // The promise was made, so a failed call cannot take it back: the cap
+      // is used up, and a third hold would have been admitted.
+      h.judge = async () => null;
+      const out = await revise('A third blurb, revised while the judge is down.');
+      expect(out.held ?? false).toBe(false);
+      expect(out.item?.judge?.verdict).toBe('ok');
+      expect(out.item?.judge?.admitted).toBe('holds');
+      expect(out.item?.judge?.heldFor).toHaveLength(2);
+      expect(out.message).toContain('UNJUDGED');
+      const home = await jj<{ items: Array<{ reviewItemId: string }> }>(
+        fetch(`${h.base}/workspaces/${workspaceId}/review-items`),
+      );
+      expect(home.items.map((r) => r.reviewItemId)).toContain(itemId);
+    });
+
     it('still passes an item nobody has held — the fail-open rule is intact', async () => {
       const { workspaceId, taskId } = await board();
       h.judge = async () => null;
