@@ -252,7 +252,15 @@ describe('POST /coach/here', () => {
     expect(wrote.status).toBe(200);
     const board = await postJson('/coach/here', { workspaceId, visible: false }, h, OWNER_HOST);
     expect(board.status).toBe(200);
+    // The front page and the review walk name no board, and say which page.
+    for (const page of ['home', 'review']) {
+      const res = await postJson('/coach/here', { page, visible: true }, h, OWNER_HOST);
+      expect(res.status).toBe(200);
+    }
     const cases: unknown[] = [
+      { page: 'board', visible: true },
+      { page: 'home', kind: 'wrote', visible: true, text: 'no doc' },
+      { page: 'home' },
       { workspaceId: 'w-nowhere', visible: true },
       { workspaceId, docId: 'd-not-on-it', visible: true },
       { workspaceId, docId, visible: 'yes' },
@@ -275,6 +283,45 @@ describe('POST /coach/here', () => {
       OWNER_HOST,
     );
     expect(cross.status).toBe(403);
+  });
+});
+
+describe('GET /coach/coverage — this machine only, counts only', () => {
+  const day = () => new Date().toISOString().slice(0, 10);
+
+  it('answers one local day hour by hour on loopback, with the refused page signals counted', async () => {
+    const bad = await postJson('/coach/here', { page: 'board' }, await ownerHeaders(), OWNER_HOST);
+    expect(bad.status).toBe(400);
+    const res = await req(`/coach/coverage?date=${day()}&timeZone=UTC`, local());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      date: string;
+      timeZone: string;
+      hours: { dropped: Record<string, number> }[];
+    };
+    expect(body).toMatchObject({ date: day(), timeZone: 'UTC' });
+    expect(body.hours).toHaveLength(24);
+    expect(body.hours.reduce((n, h) => n + (h.dropped.refused ?? 0), 0)).toBeGreaterThan(0);
+  });
+
+  it('refuses a bad day or zone, another method, the edge and a share visitor', async () => {
+    for (const q of ['', 'date=2026-02-30', 'date=yesterday', `date=${day()}&timeZone=Mars/Base`]) {
+      expect((await req(`/coach/coverage?${q}`, local())).status).toBe(400);
+    }
+    expect((await req(`/coach/coverage?date=${day()}`, local(), { method: 'POST' })).status).toBe(
+      405,
+    );
+    const edge = await req(`/coach/coverage?date=${day()}`, OWNER_HOST, {
+      headers: await ownerHeaders(),
+    });
+    expect(edge.status).toBe(403);
+    const visitor = await req(`/coach/coverage?date=${day()}`, SHARE_HOST, {
+      headers: {
+        ...CF_RAY,
+        'cf-access-jwt-assertion': await signJwt(SHARE_AUD, OWNER_EMAIL),
+      },
+    });
+    expect(visitor.status).toBeGreaterThanOrEqual(400);
   });
 });
 

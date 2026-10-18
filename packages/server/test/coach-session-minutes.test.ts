@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { agentIdForName } from '@claude-workspaces/core';
 import type { BoardPrivacy } from '../src/coach/exclusion.ts';
 import {
+  READ_CAP_MS,
+  RUN_IDLE_MS,
   SESSIONS_NOT_COUNTED,
   SessionRuns,
   TURN_CAP_MS,
@@ -139,7 +141,7 @@ describe('the digest’s Claude Code section', () => {
     w.stop();
   });
 
-  it('never opens a window on a turn end, and stops counting at an injected prompt', () => {
+  it('never opens a window on a turn end outside a run, and keeps counting past an injected prompt', () => {
     const { w, sent, closeWindows } = wire();
     for (const minute of [0, 20, 40]) {
       expect(w.sessionTurn('w-harbor', turnNote(HARBOR_LEAD, minute), HARBOR_CWD)).toBe(false);
@@ -148,12 +150,25 @@ describe('the digest’s Claude Code section', () => {
     expect(sent).toEqual([]);
     w.sessionPrompt('w-harbor', typed('Bob', 50), HARBOR_CWD);
     w.sessionPrompt('w-harbor', typed('Bob', 51, 'sess-1', false), HARBOR_CWD);
-    expect(w.sessionTurn('w-harbor', turnNote('Bob', 52), HARBOR_CWD)).toBe(false);
+    expect(w.sessionTurn('w-harbor', turnNote('Bob', 52), HARBOR_CWD)).toBe(true);
     closeWindows();
     expect(sent).toHaveLength(1);
+    // 10 minutes reading since the turn end at :40, then 1 and 1.
     expect(sent[0]).toMatchObject({
-      sessions: [{ repo: 'harborlight-app', prompts: 1, turns: 0 }],
+      sessions: [{ repo: 'harborlight-app', prompts: 1, turns: 1, minutes: 12 }],
     });
+    w.stop();
+  });
+
+  it('opens a window on a turn end in his run, after the window his prompt opened has gone', () => {
+    const { w, sent, closeWindows } = wire();
+    w.sessionPrompt('w-harbor', typed('Bob', 0), HARBOR_CWD);
+    closeWindows();
+    expect(sent).toHaveLength(1);
+    expect(w.sessionTurn('w-harbor', turnNote('Bob', 4), HARBOR_CWD)).toBe(true);
+    closeWindows();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ sessions: [{ prompts: 0, turns: 1, minutes: 4 }] });
     w.stop();
   });
 
@@ -173,6 +188,103 @@ describe('the digest’s Claude Code section', () => {
     w.store.setBoardOff('w-harbor', true);
     expect(w.sessionPrompt('w-harbor', typed('Bob', 3), HARBOR_CWD)).toBe(false);
     w.stop();
+  });
+});
+
+/** A seeded random number in [0, 1), so the replayed day is the same every run. */
+function seeded(seed: number): () => number {
+  let x = seed;
+  return () => {
+    x = (x + 0x6d2b79f5) | 0;
+    let t = Math.imul(x ^ (x >>> 15), 1 | x);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/**
+ * A replayed day of steady work in one session: three stretches at the
+ * keyboard, split by lunch and a break. Each typed prompt sets the agent
+ * working for 1 to 9 minutes; a third of its turn ends draw a channel event
+ * the harness injects, and a short turn after it; then he reads for 1 to 7
+ * minutes and types again. The time he spent is each stretch from when he
+ * sat down (reading before his first prompt) to the end of his last read.
+ */
+function replayDay(seed: number) {
+  const rand = seeded(seed);
+  const between = (lo: number, hi: number) => lo + rand() * (hi - lo);
+  const marks: { at: number; kind: 'typed' | 'injected' | 'turn' }[] = [];
+  let spentMs = 0;
+  const stretches: [number, number][] = [
+    [at(9), at(12)],
+    [at(12, 45), at(15)],
+    [at(15, 20), at(17, 30)],
+  ];
+  for (const [i, [start, end]] of stretches.entries()) {
+    let t = start;
+    const satDown = i === 0 ? t : t - between(1, 7) * MIN;
+    let lastRead = t;
+    while (t < end) {
+      marks.push({ at: t, kind: 'typed' });
+      t += between(1, 9) * MIN;
+      marks.push({ at: t, kind: 'turn' });
+      if (rand() < 1 / 3) {
+        t += 0.5 * MIN;
+        marks.push({ at: t, kind: 'injected' });
+        t += between(1, 3) * MIN;
+        marks.push({ at: t, kind: 'turn' });
+      }
+      t += between(1, 7) * MIN;
+      lastRead = t;
+    }
+    spentMs += lastRead - satDown;
+  }
+  return { marks, spentMinutes: spentMs / MIN };
+}
+
+describe('a replayed day of steady work', () => {
+  it('counts active minutes within 20% of the time he spent, reading included', () => {
+    for (const seed of [1, 2, 3]) {
+      let clock = at(8);
+      const timers: { due: number; fn: () => void }[] = [];
+      const runDue = () => {
+        for (;;) {
+          timers.sort((a, b) => a.due - b.due);
+          const next = timers[0];
+          if (!next || next.due > clock) return;
+          timers.shift();
+          next.fn();
+        }
+      };
+      const { w, sent } = wire(
+        {},
+        {
+          now: () => clock,
+          schedule: (fn, ms) => {
+            timers.push({ due: clock + ms, fn });
+            return () => {};
+          },
+        },
+      );
+      const { marks, spentMinutes } = replayDay(seed);
+      for (const m of marks) {
+        clock = m.at;
+        runDue();
+        if (m.kind === 'turn') {
+          w.sessionTurn('w-harbor', { ...turnNote('Bob', 0, 'sess-day'), at: m.at }, HARBOR_CWD);
+        } else {
+          const mark = { ...typed('Bob', 0, 'sess-day', m.kind === 'typed'), at: m.at };
+          w.sessionPrompt('w-harbor', mark, HARBOR_CWD);
+        }
+      }
+      clock = at(23);
+      runDue();
+      const counted = (sent as { sessions?: { minutes: number }[] }[])
+        .flatMap((d) => d.sessions ?? [])
+        .reduce((sum, line) => sum + line.minutes, 0);
+      expect(Math.abs(counted - spentMinutes) / spentMinutes).toBeLessThanOrEqual(0.2);
+      w.stop();
+    }
   });
 });
 
@@ -206,16 +318,23 @@ describe('the coach lead’s stream', () => {
 });
 
 describe('SessionRuns', () => {
-  it('counts turn ends from a typed prompt on, each gap capped, until an injected prompt', () => {
+  it('credits the gap since the previous mark, capped by kind, while a typed prompt is recent', () => {
     const runs = new SessionRuns();
-    expect(runs.turnEnd('a', 0)).toBeNull();
-    runs.prompt('a', 0, true);
-    expect(runs.turnEnd('a', 2 * MIN)).toBe(2 * MIN);
-    expect(runs.turnEnd('a', 60 * MIN)).toBe(TURN_CAP_MS);
-    expect(runs.turnEnd('a', 59 * MIN)).toBe(0);
-    expect(runs.turnEnd('b', 61 * MIN)).toBeNull();
-    runs.prompt('a', 62 * MIN, false);
-    expect(runs.turnEnd('a', 63 * MIN)).toBeNull();
+    expect(runs.mark('a', 0, 'turn')).toBeNull();
+    // Reading since the agent's turn end at 0.
+    expect(runs.mark('a', 3 * MIN, 'typed')).toBe(3 * MIN);
+    expect(runs.mark('a', 5 * MIN, 'turn')).toBe(2 * MIN);
+    expect(runs.mark('a', 20 * MIN, 'turn')).toBe(TURN_CAP_MS);
+    expect(runs.mark('a', 19 * MIN, 'turn')).toBe(0);
+    // An injected prompt counts and does not end the run.
+    expect(runs.mark('a', 21 * MIN, 'injected')).toBe(MIN);
+    expect(runs.mark('a', 22 * MIN, 'turn')).toBe(MIN);
+    expect(runs.mark('b', 61 * MIN, 'turn')).toBeNull();
+    // Past RUN_IDLE_MS since his prompt at 3, nothing counts.
+    expect(runs.mark('a', 3 * MIN + RUN_IDLE_MS + 1, 'turn')).toBeNull();
+    // The next morning's prompt adds no more than READ_CAP_MS.
+    expect(runs.mark('a', 600 * MIN, 'typed')).toBe(READ_CAP_MS);
+    expect(runs.mark('c', 0, 'typed')).toBe(0);
   });
 });
 

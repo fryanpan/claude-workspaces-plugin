@@ -47,6 +47,11 @@ const HEADLESS_PROMPT = 'Summarise the Saltmarsh logs overnight';
 const SUMMARY = 'Asked for a spring tide table';
 const WINDOW_MS = 300;
 
+interface CoverageHourBody {
+  received: Record<string, Record<string, number>>;
+  carried: Record<string, Record<string, number>>;
+}
+
 let handle: ServerHandle;
 let root: string;
 let base: string;
@@ -175,7 +180,14 @@ describe('the coach digest covers his day', () => {
     });
     const taskId = ((await created.json()) as { task: { id: string } }).task.id;
 
-    // From his phone, while no coach session is there.
+    const startedAt = Date.now();
+    // From his phone, while no coach session is there: the board, then a comment.
+    const here = await fetch(`${base}/coach/here`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await phone()) },
+      body: JSON.stringify({ kind: 'view', workspaceId: board, visible: true }),
+    });
+    expect(here.status, await here.clone().text()).toBe(200);
     const comment = await fetch(`${base}/workspaces/${board}/docs/task:${taskId}/threads`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(await phone()) },
@@ -258,6 +270,39 @@ describe('the coach digest covers his day', () => {
       expect(JSON.stringify(digest)).not.toContain(HEADLESS_PROMPT);
       expect(asked.flat().map((m) => m.text)).toEqual([PROMPT]);
       await waitFor(() => waiting() === 0);
+
+      // The coverage report, from this machine: what he sent by source, and
+      // what the digest carried, as counts and nothing else.
+      const days = [
+        ...new Set([startedAt, Date.now()].map((t) => new Date(t).toISOString().slice(0, 10))),
+      ];
+      const reports = await Promise.all(
+        days.map(async (day) => {
+          const res = await fetch(`${base}/coach/coverage?date=${day}&timeZone=UTC`);
+          expect(res.status).toBe(200);
+          return res.text();
+        }),
+      );
+      const hours = reports.flatMap((r) => (JSON.parse(r) as { hours: CoverageHourBody[] }).hours);
+      const total = (table: 'received' | 'carried', source: string, kind: string) =>
+        hours.reduce((n, h) => n + (h[table][source]?.[kind] ?? 0), 0);
+      expect(total('received', 'phone', 'view')).toBe(1);
+      expect(total('received', 'phone', 'comment')).toBe(1);
+      expect(total('received', 'remote-control', 'typed-prompt')).toBe(1);
+      // The headless run reads as injected, from a terminal.
+      expect(total('received', 'terminal', 'injected-prompt')).toBe(1);
+      expect(total('carried', 'phone', 'view')).toBe(1);
+      expect(total('carried', 'phone', 'comment')).toBe(1);
+      expect(total('carried', 'remote-control', 'prompt')).toBe(1);
+      const body = reports.join('');
+      for (const word of [COMMENT, PROMPT, board, 'iverbend', taskId, SESSION_NAME]) {
+        expect(body).not.toContain(word);
+      }
+      // Through the edge it is refused.
+      const edge = await fetch(`${base}/coach/coverage?date=${days[0]}`, {
+        headers: { 'cf-ray': '8a1b2c3d4e5f-SJC' },
+      });
+      expect(edge.status).toBe(403);
     } finally {
       stream.close();
       await sessionStream.close();

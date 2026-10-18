@@ -1,9 +1,11 @@
 /**
  * `POST /workspaces/{id}/agents/{name}/prompts` — the plugin's
  * UserPromptSubmit hook says a session got a prompt, and whether a person
- * typed it. The body is `{ typed, sessionId?, cwd?, at?, text? }`; `text`
- * is a typed prompt as the hook reduced it (`note-redact.ts`), and an
- * injected one carries none.
+ * typed it. The body is `{ typed, sessionId?, cwd?, at?, text?, remote? }`;
+ * `text` is a typed prompt as the hook reduced it (`note-redact.ts`), and an
+ * injected one carries none. `remote: true` says the session runs under
+ * Remote Control, which the coverage report counts apart from a terminal
+ * (`coach/coverage.ts`).
  *
  * Nothing is stored. The mark goes to the coach (`coach/session-minutes.ts`),
  * which counts the owner's Claude Code time from his typed prompts and says
@@ -51,6 +53,9 @@ export async function handlePromptMarkRoute(
   if (text !== undefined && (typeof text !== 'string' || text.length > TEXT_MAX)) {
     return j(400, { error: 'bad-text' });
   }
+  if (raw.remote !== undefined && typeof raw.remote !== 'boolean') {
+    return j(400, { error: 'bad-remote' });
+  }
   // The hook's clock inside the window the notes route trusts, else ours.
   const now = Date.now();
   const at =
@@ -66,6 +71,7 @@ export async function handlePromptMarkRoute(
         at,
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(text !== undefined && raw.typed ? { text } : {}),
+        ...(raw.remote === true ? { remote: true } : {}),
       },
       raw.cwd,
     );

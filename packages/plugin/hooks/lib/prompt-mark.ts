@@ -17,7 +17,9 @@
  * and nothing in it reaches the digest. A Remote Control session is
  * excepted: its process can run the same non-interactive way while a person
  * types on the phone, and Claude Code names its bridge in
- * `CLAUDE_CODE_BRIDGE_SESSION_ID`.
+ * `CLAUDE_CODE_BRIDGE_SESSION_ID`. Every mark from such a session says
+ * `remote: true`, so the coach's coverage report counts the phone's prompts
+ * apart from a terminal's.
  *
  * The name comes from the launch env. The board does too, or, for a session
  * launched without one, it is the board the session joined with
@@ -69,14 +71,21 @@ export interface PromptMark {
   cwd?: string;
   sessionId?: string;
   text?: string;
+  /** The session runs under Remote Control. */
+  remote?: true;
   at: number;
+}
+
+/** A session Claude Code bridges to Remote Control. */
+export function isRemoteControl(env: EnvLike): boolean {
+  return (env.CLAUDE_CODE_BRIDGE_SESSION_ID?.trim() ?? '') !== '';
 }
 
 /** A `claude -p` or SDK run with nobody at it. */
 export function isHeadless(env: EnvLike): boolean {
   const entry = env.CLAUDE_CODE_ENTRYPOINT?.trim() ?? '';
   if (!HEADLESS_ENTRYPOINTS.includes(entry)) return false;
-  return (env.CLAUDE_CODE_BRIDGE_SESSION_ID?.trim() ?? '') === '';
+  return !isRemoteControl(env);
 }
 
 /** True when a person typed it, false when the harness injected it, and
@@ -93,7 +102,7 @@ const shortString = (v: unknown): string | undefined =>
 
 export function decidePromptMark(
   payload: unknown,
-  ctx: { agent?: string; now: number; headless?: boolean },
+  ctx: { agent?: string; now: number; headless?: boolean; remote?: boolean },
 ): { post: PromptMark } | { skip: string } {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     return { skip: 'malformed payload' };
@@ -113,6 +122,7 @@ export function decidePromptMark(
       ...(cwd !== undefined ? { cwd } : {}),
       ...(sessionId !== undefined ? { sessionId } : {}),
       ...(text !== '' ? { text } : {}),
+      ...(ctx.remote ? { remote: true as const } : {}),
       at: ctx.now,
     },
   };
@@ -135,6 +145,7 @@ export async function runPromptHook(stdin: string, deps: PromptHookDeps): Promis
       agent: readAgentName(deps.env),
       now: deps.now ? deps.now() : Date.now(),
       headless: isHeadless(deps.env),
+      remote: isRemoteControl(deps.env),
     });
     if ('skip' in decision) return false;
     const baseUrl = resolveBaseUrl(deps.env, deps.discoveryPort);

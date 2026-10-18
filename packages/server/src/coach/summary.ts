@@ -8,9 +8,13 @@
  * turns every one of them into a line of twelve words or fewer. The text
  * never goes into the digest itself: only the line does.
  *
- * One call per digest, not per prompt: a digest is already one session turn,
+ * A call per 40 marks, not per prompt: a digest is already one session turn,
  * and a call per prompt would put a model call on every keystroke's worth of
- * work. About 4k tokens in and 600 out at the most marks one call takes.
+ * work. About 4k tokens in and 600 out at the most marks one call takes. A
+ * digest that carries a whole stretch the session was away for holds far
+ * more than 40, and every mark past the first 40 used to go as its own first
+ * 120 characters, so the lines he asked late in a busy day read as cut-off
+ * replies. Now it takes up to `SUMMARY_MAX_CALLS` calls, one after another.
  *
  * **The key is the dedicated summary key**, through `resolveKeySlotFrom`,
  * like every other Haiku call here. The digest goes to the coach session,
@@ -38,8 +42,10 @@ export interface SummaryMark {
 export type CoachSummarizer = (marks: readonly SummaryMark[]) => Promise<(string | null)[] | null>;
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
-/** The most marks one call summarises; the rest fall back to their words. */
+/** The most marks one call summarises. */
 export const SUMMARY_MAX_MARKS = 40;
+/** The most calls one digest makes; marks past them fall back to their words. */
+export const SUMMARY_MAX_CALLS = 5;
 /** The most of one mark sent. What he asked is in its first lines. */
 export const SUMMARY_MARK_CHARS = 800;
 /** A line the digest keeps, at most. */
@@ -50,8 +56,9 @@ const TIMEOUT_MS = 20_000;
 export const COACH_SUMMARY_SYSTEM =
   'You summarise Claude Code activity for a coach. You are given numbered items. ' +
   'A "prompt" is what a person typed to a coding agent; a "turn" is the agent’s ' +
-  'closing message. For each item write one plain line of twelve words or fewer ' +
-  'saying what was asked or done. No names of people, no secrets, no quotes. ' +
+  'closing message. For each item write one plain line of twelve words or fewer: ' +
+  'for a prompt, what the person asked for; for a turn, what the agent did. ' +
+  'No names of people, no secrets, no quotes. ' +
   'Reply with only a JSON array of strings, one per item, in order.';
 
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -99,14 +106,19 @@ export async function summariseMarks(
 ): Promise<string[]> {
   const fallback = marks.map((m) => fallbackSummary(m.text));
   if (!summarizer || marks.length === 0) return fallback;
-  const asked = marks.slice(0, SUMMARY_MAX_MARKS);
-  let lines: (string | null)[] | null = null;
-  try {
-    lines = await summarizer(asked);
-  } catch {
-    lines = null;
+  const lines: (string | null)[] = [];
+  const asked = Math.min(marks.length, SUMMARY_MAX_MARKS * SUMMARY_MAX_CALLS);
+  for (let start = 0; start < asked; start += SUMMARY_MAX_MARKS) {
+    const batch = marks.slice(start, Math.min(asked, start + SUMMARY_MAX_MARKS));
+    let got: (string | null)[] | null = null;
+    try {
+      got = await summarizer(batch);
+    } catch {
+      got = null;
+    }
+    for (let i = 0; i < batch.length; i++) lines.push(got?.[i] ?? null);
   }
-  return fallback.map((f, i) => lines?.[i] ?? f);
+  return fallback.map((f, i) => lines[i] ?? f);
 }
 
 /** `CW_COACH_SUMMARIES=0` is the kill switch. */

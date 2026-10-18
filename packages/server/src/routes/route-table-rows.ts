@@ -187,12 +187,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/voice/tokens/:id/revoke', 'POST'],
   ]),
 
-  // The coach session's moment is refused through the edge, from off this
-  // machine and from a page (`refuseNonLocalAgentCaller`); it carries no
-  // token. The page routes are trusted-local and then refuse every caller but
+  // The coach session's moment and the coverage report are refused through
+  // the edge, from off this machine and from a page
+  // (`refuseNonLocalAgentCaller`); neither carries a token. The page routes are trusted-local and then refuse every caller but
   // the owner's own signed-in pages.
   ...family('routes/coach.ts', [
     ['loopback-only', '/coach/moments', 'POST'],
+    ['loopback-only', '/coach/coverage', 'GET'],
     ['trusted-local', '/coach/setup', 'POST'],
     ['trusted-local', '/coach/review', 'POST'],
     ['trusted-local', '/coach/prefs', 'POST'],

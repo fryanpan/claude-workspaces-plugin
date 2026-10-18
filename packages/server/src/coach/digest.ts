@@ -11,6 +11,7 @@
  *
  * Pure: the caller hands in the events and when the window closed.
  */
+import type { CoverageSource } from './coverage.ts';
 import type { CoachEventKind } from './stream.ts';
 
 /** An event as the feed was told it. */
@@ -23,6 +24,8 @@ export interface DigestEvent {
   doc?: string;
   heading?: string;
   text?: string;
+  /** Where he was (`coach/coverage.ts`); kept on the item until it is sent. */
+  source?: CoverageSource;
 }
 
 interface Place {
@@ -30,6 +33,7 @@ interface Place {
   board?: string;
   docId?: string;
   doc?: string;
+  source?: CoverageSource;
 }
 
 export type DigestItem = Place &
@@ -52,7 +56,15 @@ const placeOf = (e: DigestEvent): Place => ({
   ...(e.board ? { board: e.board } : {}),
   ...(e.docId ? { docId: e.docId } : {}),
   ...(e.doc ? { doc: e.doc } : {}),
+  ...(e.source ? { source: e.source } : {}),
 });
+
+/** An item as the coach session reads it: the source is the coverage
+ *  report's, not the session's. */
+export function withoutSource(item: DigestItem): DigestItem {
+  const { source: _source, ...rest } = item;
+  return rest as DigestItem;
+}
 
 const samePlace = (a: Place, b: Place) => a.boardId === b.boardId && a.docId === b.docId;
 

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   SUMMARY_LINE_CHARS,
   SUMMARY_MARK_CHARS,
+  SUMMARY_MAX_CALLS,
   SUMMARY_MAX_MARKS,
   buildCoachSummaryPrompt,
   coachSummariesEnabled,
@@ -56,15 +57,31 @@ describe('the coach summary', () => {
     ]);
   });
 
-  it('asks the model about at most 40 marks', async () => {
+  it('asks the model about 40 marks a call, so a long digest has a line for every prompt', async () => {
     const asked: number[] = [];
     const marks = Array.from({ length: SUMMARY_MAX_MARKS + 5 }, (_, i) => prompt(`p${i}`));
     const lines = await summariseMarks(marks, async (m) => {
       asked.push(m.length);
       return m.map(() => 'said');
     });
-    expect(asked).toEqual([SUMMARY_MAX_MARKS]);
-    expect(lines.at(-1)).toBe(`p${SUMMARY_MAX_MARKS + 4}`);
+    expect(asked).toEqual([SUMMARY_MAX_MARKS, 5]);
+    expect(lines.every((l) => l === 'said')).toBe(true);
+  });
+
+  it('stops at SUMMARY_MAX_CALLS calls, and a failed call costs only its own marks', async () => {
+    const total = SUMMARY_MAX_MARKS * SUMMARY_MAX_CALLS + 2;
+    const marks = Array.from({ length: total }, (_, i) => prompt(`p${i}`));
+    let calls = 0;
+    const lines = await summariseMarks(marks, async (m) => {
+      calls += 1;
+      if (calls === 2) throw new Error('429');
+      return m.map(() => 'said');
+    });
+    expect(calls).toBe(SUMMARY_MAX_CALLS);
+    expect(lines[0]).toBe('said');
+    expect(lines[SUMMARY_MAX_MARKS]).toBe(`p${SUMMARY_MAX_MARKS}`);
+    expect(lines[SUMMARY_MAX_MARKS * 2]).toBe('said');
+    expect(lines.at(-1)).toBe(`p${total - 1}`);
   });
 
   it('has no summariser without a key, and none when switched off', () => {

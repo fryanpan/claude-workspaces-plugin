@@ -108,6 +108,47 @@ describe('what he is looking at and writing', () => {
     c.destroy();
   });
 
+  it('the front page and the review walk say which page he is on, and when it hides, but not each scroll', async () => {
+    const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    for (const page of ['home', 'review'] as const) {
+      posted = [];
+      const c = mount({ workspaceId: undefined, page });
+      await flush();
+      expect(posted).toEqual([
+        {
+          url: '/coach/here',
+          body: expect.objectContaining({ kind: 'view', page, visible: true }),
+        },
+      ]);
+      expect(posted[0]?.body).not.toHaveProperty('workspaceId');
+      document.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(SCROLL_SETTLE_MS * 2);
+      expect(posted).toHaveLength(1);
+      vis.mockReturnValue('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(posted[1]?.body).toMatchObject({ kind: 'view', page, visible: false });
+      vis.mockReturnValue('visible');
+      c.destroy();
+    }
+    vis.mockRestore();
+  });
+
+  it('posts with keepalive, so the view a hiding phone sends outlives the page', async () => {
+    const calls: RequestInit[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      calls.push(init ?? {});
+      return new Response(null, { status: 200 });
+    });
+    const c = mountCoachCard({
+      workspaceId: 'w-harbor',
+      openStream: (url) => new FakeStream(url) as unknown as EventSource,
+    });
+    mounted.push(c);
+    await flush();
+    expect(calls[0]).toMatchObject({ method: 'POST', keepalive: true });
+    fetchSpy.mockRestore();
+  });
+
   it('a background tab sends no view when it scrolls', async () => {
     const vis = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     const c = mount({ docId: 'd-tokens' });
