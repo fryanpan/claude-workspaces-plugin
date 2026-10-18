@@ -260,7 +260,9 @@ export class DocStoreWorkspaces {
     }
     const MAX_FILES = 10_000;
     const excluded = workspaceExcludes(members);
-    const scanned = scanFolderPaths(root).filter((rel) => !isExcludedPath(rel, excluded));
+    const scanned = scanFolderPaths(root, workspaceIncludes(members)).filter(
+      (rel) => !isExcludedPath(rel, excluded),
+    );
     const truncated = scanned.length > MAX_FILES;
     const files = scanned.slice(0, MAX_FILES).map((relPath) => {
       const member = byRel.get(relPath);
@@ -319,7 +321,9 @@ export class DocStoreWorkspaces {
     // only question asked. Answered `not-listed` rather than `bad-path` so the
     // route can say 404: whether the hidden file exists is itself the leak.
     // (Urgent-fixes ticket, 2026-09-02.)
-    if (!isListedFile(root, clean)) return { ok: false, error: 'not-listed' };
+    if (!isListedFile(root, clean, workspaceIncludes(members))) {
+      return { ok: false, error: 'not-listed' };
+    }
     // Existence and content in one pool call, off the main thread. This
     // endpoint is a click in the all-files sidebar, so `abs` is whatever the
     // caller's tree holds — `existsSync` on a path whose provider has stopped
@@ -437,7 +441,9 @@ export class DocStoreWorkspaces {
     // the delegation below: a member's relPath is git-derived, but the tree
     // is the one source of "may this open", and two doors with one lock is
     // the shape that drifts. (Urgent-fixes ticket, 2026-09-02.)
-    if (!isListedFile(root, clean)) return { ok: false, error: 'not-listed' };
+    if (!isListedFile(root, clean, workspaceIncludes(members))) {
+      return { ok: false, error: 'not-listed' };
+    }
     const member = members.find((m) => m.relPath === clean);
     if (!member) return await this.openContextFile(setId, clean);
     if (member.type !== 'diff') return { ok: true, docId: member.docId, meta: member };
@@ -1094,6 +1100,11 @@ function normalizeRel(relPath: string): string {
 function workspaceExcludes(members: DocMeta[]): string[] {
   const raw = members.find((m) => m.workspaceExclude)?.workspaceExclude ?? [];
   return raw.map((p) => p.replace(/^\/+/, '').replace(/\/+$/, '')).filter(Boolean);
+}
+
+/** The files the set was told to list although ignored (`admitIncluded`). */
+function workspaceIncludes(members: DocMeta[]): string[] {
+  return members.find((m) => m.workspaceInclude)?.workspaceInclude ?? [];
 }
 
 function isExcludedPath(relPath: string, excludes: string[]): boolean {

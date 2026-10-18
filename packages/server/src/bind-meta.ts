@@ -137,10 +137,16 @@ export function refreshDiffMeta(
 export function rememberWorkspaceConfig(
   host: BindHost,
   setId: string,
-  opts: { exclude?: string[]; groups?: BindDiffOpts['groups']; maxFiles?: number },
+  opts: {
+    exclude?: string[];
+    include?: string[];
+    groups?: BindDiffOpts['groups'];
+    maxFiles?: number;
+  },
 ): void {
   const next: Array<[keyof DocMeta, unknown]> = [];
   if (opts.exclude !== undefined) next.push(['workspaceExclude', normalizeExcludes(opts.exclude)]);
+  if (opts.include !== undefined) next.push(['workspaceInclude', [...opts.include]]);
   if (opts.groups !== undefined) next.push(['workspaceGroups', opts.groups]);
   if (opts.maxFiles !== undefined) next.push(['workspaceMaxFiles', opts.maxFiles]);
   if (next.length === 0) return;

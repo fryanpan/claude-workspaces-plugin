@@ -43,7 +43,8 @@ export interface BindFolderOpts {
   /** Reuse an existing review's id instead of deriving one from the path. */
   setId?: string;
   title?: string;
-  /** Accepted for back-compat; lazy opening made the allowlist obsolete. */
+  /** Files to list although the repository ignores them, by name. Not an
+   *  allowlist: every other listed file stays listed. */
   include?: string[];
   exclude?: string[];
   /** Accepted for back-compat; browse mode binds lazily so no cap applies. */
@@ -65,6 +66,9 @@ export type BindFolderResult =
       skipped: Array<{ path: string; reason: string }>;
       /** Present when `skipped` names fewer rows than were left out. */
       skippedTotal?: number;
+      /** Every file listed, sorted, at most `MAX_LISTED`; `fileCount` is the
+       *  total. `files` names only the entry doc. */
+      listed: string[];
       files: Array<{ docId: string; relPath: string; type: DocType; title: string }>;
     }
   | { ok: false; error: 'not-found' | 'too-many-files' | 'reserved-namespace'; fileCount?: number };
@@ -83,6 +87,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
     reviewId: opts.setId,
     title: opts.title,
     exclude: opts.exclude,
+    ...(opts.include !== undefined ? { include: opts.include } : {}),
     owner: opts.owner,
     producedBy: opts.producedBy,
   });
@@ -99,6 +104,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
         root,
         fileCount: 0,
         skipped: res.skipped ?? [],
+        listed: [],
         files: [],
       };
     }
@@ -116,6 +122,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
     fileCount: res.fileCount,
     skipped: res.skipped,
     ...(res.skippedTotal !== undefined ? { skippedTotal: res.skippedTotal } : {}),
+    listed: res.listed ?? [],
     files: res.files.map((f) => ({
       docId: f.docId,
       relPath: f.relPath,

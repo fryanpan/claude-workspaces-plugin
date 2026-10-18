@@ -61,9 +61,15 @@ export interface BindDiffOpts {
    *  intro. */
   groups?: Array<{ title: string; paths: string[]; details?: string }>;
   maxFiles?: number;
+  /** Browse mode only: files to list although the repository ignores them,
+   *  by name (`admitIncluded`). Each one it cannot admit is in `skipped`. */
+  include?: string[];
   owner?: string;
   producedBy?: { agentId?: string; sessionId?: string };
 }
+
+/** At most this many paths are named in a browse answer's `listed`. */
+export const MAX_LISTED = 500;
 
 export type BindDiffResult =
   | {
@@ -81,6 +87,10 @@ export type BindDiffResult =
        *  `MAX_SKIPPED`; `skippedTotal` is present when it named fewer. */
       skipped: Array<{ path: string; reason: string }>;
       skippedTotal?: number;
+      /** Browse mode: every file the bind listed, sorted, at most
+       *  `MAX_LISTED` (`fileCount` is the total). `files` names only the
+       *  entry doc, the one doc a browse bind opens. */
+      listed?: string[];
       files: Array<{
         docId: string;
         relPath: string;
@@ -206,7 +216,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
   if (opts.base === undefined) {
     const reviewId = opts.reviewId ?? deriveWorkspaceId(setIdRootFor(root));
     const excludes = normalizeExcludes(opts.exclude);
-    const report = scanFolderReport(root);
+    const report = scanFolderReport(root, opts.include ?? []);
     const skipped: Array<{ path: string; reason: string }> = [...report.skipped];
     let skippedTotal = report.skippedTotal;
     const scanned: string[] = [];
@@ -263,6 +273,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       fileCount: scanned.length,
       skipped,
       ...(skippedTotal > skipped.length ? { skippedTotal } : {}),
+      listed: scanned.slice(0, MAX_LISTED),
       files: [
         {
           docId: entryDocId,
