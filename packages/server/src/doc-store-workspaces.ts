@@ -42,7 +42,7 @@ import {
   readDocIndex,
 } from './doc-index.ts';
 import type { LiveDoc, WorkspaceDirNode, WorkspaceFileNode, WorkspaceTree } from './doc-store.ts';
-import { isListedFile, scanFolderPaths } from './fs-scan.ts';
+import { isListedFile, listedFiles, scanFolderPaths } from './fs-scan.ts';
 import { privateMetaPath } from './private-meta.ts';
 import {
   type ArchivedDoc,
@@ -396,6 +396,41 @@ export class DocStoreWorkspaces {
       : await this.p.attachReadonlyFileAsync(docId, abs);
     if (!attached.ok) return { ok: false, error: 'attach-failed' };
     return { ok: true, docId: doc.docId, meta: doc.meta };
+  }
+
+  /**
+   * Open the member a link names when nobody has opened it yet.
+   *
+   * A browse bind opens one doc, its entry, and every other file becomes a
+   * doc on its first open. The bind's answer hands out a link for every
+   * listed file, so a link can arrive before its doc exists: this turns
+   * `<setId>:<relPath>` back into the file through the set's own listing,
+   * never by parsing the id (`memberDocId` hashes a long path and spells `/`
+   * as `~`), and opens it the way the tree would. A file the listing does not
+   * hold opens nothing, so this reaches exactly what `openContextFile` does.
+   */
+  async openListedMember(docId: string): Promise<boolean> {
+    const member = this.listedMember(docId);
+    return member ? (await this.openContextFile(member.setId, member.relPath)).ok : false;
+  }
+
+  /** The set and file a member id names, when the set's listing holds that
+   *  file and it is still on disk; `null` for any other id. Reads no doc. The
+   *  disk check is because a listing may be seconds old: a file removed since
+   *  is gone, not listed. */
+  listedMember(docId: string): { setId: string; relPath: string } | null {
+    const cut = docId.indexOf(':');
+    if (cut <= 0) return null;
+    const setId = docId.slice(0, cut);
+    const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
+    const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
+    if (!root) return null;
+    const excludes = workspaceExcludes(members);
+    for (const rel of listedFiles(root, workspaceIncludes(members))) {
+      if (memberDocId(setId, rel) !== docId || isExcludedPath(rel, excludes)) continue;
+      return existsSync(join(root, rel)) ? { setId, relPath: rel } : null;
+    }
+    return null;
   }
 
   /**

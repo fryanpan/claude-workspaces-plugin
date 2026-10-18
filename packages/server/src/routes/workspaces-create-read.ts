@@ -60,6 +60,21 @@ export async function handleWorkspaceCreateRead(
       `${externalBaseUrl()}/workspaces/${encodeURIComponent(boardWorkspaceId)}/attachments/${encodeURIComponent(setId)}`
     );
   };
+  /**
+   * A folder bind's `links` with each file's page link as `url`. Most are not
+   * docs yet, so there is no doc for `withReviewUrl` to place: the link is
+   * minted under the board the set was just filed on, the address an opened
+   * member has, and the first request to it opens the doc
+   * (`openListedMember`).
+   */
+  const withLinkUrls = (
+    boardWorkspaceId: string,
+    links: ReadonlyArray<{ relPath: string; docId: string }>,
+  ) =>
+    links.map((l) => ({
+      ...l,
+      url: `${externalBaseUrl()}/workspaces/${encodeURIComponent(boardWorkspaceId)}/docs/${encodeURIComponent(l.docId)}`,
+    }));
   const { req, pathname, url, scope, visitor, authorFor } = rq;
   // --- REST: workspaces (board create OR folder bind) ---
   // One resource, two shapes: `folderPath` binds a folder of files
@@ -181,6 +196,7 @@ export async function handleWorkspaceCreateRead(
       privacy,
       privacyNote: privacyNote(privacy),
       files,
+      links: withLinkUrls(boardWorkspaceId, res.links),
       entryUrl,
       url: entryUrl,
     });
@@ -274,6 +290,7 @@ export async function handleWorkspaceCreateRead(
       setId: res.reviewId,
       hubWorkspaceId: boardWorkspaceId,
       files,
+      ...(res.links ? { links: withLinkUrls(boardWorkspaceId, res.links) } : {}),
       entryUrl,
       url: entryUrl,
     });

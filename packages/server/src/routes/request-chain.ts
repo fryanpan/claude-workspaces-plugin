@@ -27,12 +27,17 @@ import { isOwnerActor } from '../actor-identity.ts';
 import { LOCAL_ONLY_REFUSAL, addressesLocalOnlySet, isOnBox } from '../attachment-privacy.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
 import { isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
-import { type WorkspaceScope, resolveWorkspaceScope } from '../middleware/workspace-scope.ts';
+import {
+  type WorkspaceScope,
+  memberAddressed,
+  resolveWorkspaceScope,
+} from '../middleware/workspace-scope.ts';
 import { isGatedWrite, signInRequiredBody } from '../middleware/write-gate.ts';
 import { malformedPathSegment } from '../path-params.ts';
 import { captureServerError, routePatternForSpan, withRouteSpan } from '../sentry.ts';
 import { renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
+import { matchWorkspaceRoute } from '../workspace-path.ts';
 import { handleAuthShareRoutes } from './auth-share.ts';
 import { handleHomeFeedRoute } from './home-feed.ts';
 import { handleRecallWebhookRoute } from './recall-webhook.ts';
@@ -70,6 +75,30 @@ export function createRequestChain(
     taskStore,
     workspacesOfMember,
   } = ctx;
+
+  /**
+   * A folder member a link names before anybody opened it becomes its doc.
+   * Only for a set filed on the board in the path; `openListedMember` opens
+   * only what the set's listing holds, so this reaches what `context-file`
+   * does and nothing more. A local-only set's member is not opened for a
+   * caller off the box, whom the gate below refuses anyway.
+   */
+  async function openUnopenedMember(req: Request, pathname: string): Promise<void> {
+    const match = matchWorkspaceRoute(pathname);
+    const member = match ? memberAddressed(match.rest) : undefined;
+    if (!match || member?.collection !== 'docs') return;
+    const id = member.memberId;
+    const cut = id.indexOf(':');
+    if (cut <= 0 || docStore.docExists(id)) return;
+    const setId = id.slice(0, cut);
+    if (!workspacesOfMember('attachments', setId).includes(match.workspaceId)) return;
+    if (
+      localOnlyGate.isLocalOnlySet(setId) &&
+      !isOnBox(req.headers, requestAddress(req) ?? undefined)
+    )
+      return;
+    await docStore.openListedMember(id);
+  }
 
   return async function handleRequest(req: Request): Promise<Response | undefined> {
     const startedAt = performance.now();
@@ -195,6 +224,10 @@ export function createRequestChain(
       // union is what makes that a compile error rather than a review note.
       const gate = await admit(req, { pathname });
       if (!gate.admitted) return gate.response;
+      // Below admission, so only a caller the set is open to reaches it, and
+      // ABOVE the local-only gate and the upgrades, which then judge the doc
+      // the member became rather than an id nothing holds.
+      await openUnopenedMember(req, pathname);
       // A local-only attachment set's files stay on this machine. Here,
       // below admission and ABOVE the upgrades, because a socket is
       // authorized once at open and a gate below it would never see one.

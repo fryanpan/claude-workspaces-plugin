@@ -24,7 +24,7 @@
  * grouping-share-removed.test.ts).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emailIdentityId } from '@claude-workspaces/core';
@@ -898,10 +898,19 @@ describe('workspace share over HTTP', () => {
       method: 'DELETE',
       headers: { host: `localhost:${handle.port}` },
     });
+    // The entry FILE is renamed too, as in the story above. A member whose
+    // file is still listed is not gone: its link opens it again, exactly as
+    // the set's tree would (`folder-member-links.test.ts`).
+    renameSync(join(folder, 'README.md'), join(folder, 'README-renamed.md'));
 
-    const r = await asVisitor(`/workspaces/${boardId}/docs/${encodeURIComponent(entryDocId)}`, {
-      redirect: 'manual',
-    });
+    let r: Response;
+    try {
+      r = await asVisitor(`/workspaces/${boardId}/docs/${encodeURIComponent(entryDocId)}`, {
+        redirect: 'manual',
+      });
+    } finally {
+      renameSync(join(folder, 'README-renamed.md'), join(folder, 'README.md'));
+    }
     expect(r.status).toBe(403);
     expect(await r.json()).toEqual({ error: 'out_of_share_scope' });
     // Positive control: the surviving member is still reachable, so the 403
