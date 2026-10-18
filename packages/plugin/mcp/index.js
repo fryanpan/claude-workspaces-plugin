@@ -14254,7 +14254,9 @@ function sessionLines(p, timeZone) {
       return [];
     const n = (count, one) => `${count ?? 0} ${one}${count === 1 ? "" : "s"}`;
     const said = (s.activity ?? []).flatMap((a) => a.summary ? [
-      `  -${clock2(a.at, timeZone)} ${a.kind === "turn" ? "session" : "he asked"}: ${a.summary}`
+      `  -${clock2(a.at, timeZone)} ${a.kind === "turn" ? "session" : "he asked"}: ${a.summary}`,
+      ...a.text && a.text !== a.summary ? [`    ${a.text.replace(/\n/g, `
+    `)}`] : []
     ] : []);
     return [
       `- ${s.repo}, on board "${s.board ?? s.boardId}": ${s.minutes ?? 0} min, ${n(s.prompts, "typed prompt")}, ${n(s.turns, "turn end")}`,
@@ -14262,7 +14264,10 @@ function sessionLines(p, timeZone) {
     ];
   });
   const head = lines.length > 0 ? ["Claude Code sessions (active minutes):", ...lines] : ["Claude Code sessions: none counted."];
-  return [...head, ...p.sessionsNote ? [p.sessionsNote] : []];
+  const cut = p.textDropped ? [
+    `The ${p.textDropped} oldest line${p.textDropped === 1 ? "" : "s"} came without ${p.textDropped === 1 ? "its" : "their"} words in full: the digest had no room.`
+  ] : [];
+  return [...head, ...cut, ...p.sessionsNote ? [p.sessionsNote] : []];
 }
 function digestLine(p, timeZone) {
   const lines = (p.items ?? []).flatMap((i) => digestItemLine(i, timeZone) ?? []);
@@ -21551,7 +21556,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.317";
+var PLUGIN_VERSION = "0.1.318";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
