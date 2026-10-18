@@ -381,8 +381,9 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     if (res.headers.get('set-cookie')?.includes(`${SESSION_COOKIE}=`)) return res;
     const rec = sessionIdentityFor(req);
     if (!rec) return res;
-    const headers = new Headers(res.headers);
-    headers.append(
+    // Appended to the route's own Response rather than a rebuilt one, so a
+    // sized body keeps its Content-Length (see `applyCors`).
+    res.headers.append(
       'set-cookie',
       // NOT a fresh mint: the refresh keeps the session id, so a later
       // logout on this device revokes the session it has had all along.
@@ -391,7 +392,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
         secure: isSecureRequest(req),
       }),
     );
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    return res;
   };
 
   return {
