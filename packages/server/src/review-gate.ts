@@ -953,7 +953,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
                   target.address,
                   reason,
                   standing?.quote,
-                  standing?.heldFor?.length ?? 0,
+                  countedHolds(standing?.heldFor ?? []).length,
                 ),
         };
       }
@@ -1044,7 +1044,11 @@ export function createReviewGate(ctx: ReviewGateContext) {
               address,
               judgement.reason,
               judgement.quote,
-              judgement.heldFor?.length ?? 0,
+              // The count the cap will read on the next revision, not the
+              // stored history: a refused check's history keeps holds the cap
+              // no longer counts, and a hold quoting that total would promise
+              // an admission the next revision does not get.
+              countedHolds(judgement.heldFor ?? []).length,
             )),
     };
   }

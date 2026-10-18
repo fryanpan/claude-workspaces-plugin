@@ -50,6 +50,8 @@ let dataDir = '';
 let base = '';
 let ws = '';
 let verdict: ReviewJudgeVerdict = { ok: true, reason: 'fine' };
+/** The judge cannot answer: a timeout, a truncated reply, a non-2xx. */
+let judgeDown = false;
 let judged: ReviewJudgeInput[] = [];
 
 afterEach(async () => {
@@ -68,6 +70,7 @@ const post = (path: string, body: unknown) =>
 async function fresh(heldReleaseMs?: number): Promise<void> {
   dataDir = mkdtempSync(join(tmpdir(), 'refused-check-'));
   verdict = { ok: true, reason: 'fine' };
+  judgeDown = false;
   judged = [];
   handle = createServer({
     port: 0,
@@ -77,7 +80,7 @@ async function fresh(heldReleaseMs?: number): Promise<void> {
     ...(heldReleaseMs !== undefined ? { heldReleaseMs } : {}),
     reviewJudge: async (input) => {
       judged.push(input);
-      return verdict;
+      return judgeDown ? null : verdict;
     },
   });
   base = `http://127.0.0.1:${handle.port}`;
@@ -194,6 +197,31 @@ describe('a check the agent was refused permission to run', () => {
     expect(judge?.reason).toContain('refused permission');
     expect(judge?.heldFor ?? []).toEqual([]);
     expect(judged.at(-1)?.item.priorHolds).toBeUndefined();
+  });
+
+  it('promises no admission off holds the refusal stopped counting, when the judge is down', async () => {
+    await fresh();
+    const { taskId, lineId } = await lineTask();
+    // Two holds whose reasons named a figure the line never states, so each
+    // is stored as the gate's unusable-words sentence: holds a refused check
+    // drops from the count its cap reads.
+    for (const words of ['the run log', 'the run log, and what I was unable to read']) {
+      verdict = {
+        ok: false,
+        reason: 'The run took 45 minutes, so the line understates what waits.',
+      };
+      const round = await report(taskId, lineId, [{ text: words, url: LOG }]);
+      expect(round.body.held).toHaveLength(1);
+    }
+    // The refusal is reported while the judge cannot answer. The count the
+    // cap reads is now zero, so the item stays held, and the hold must not
+    // say the next revision reaches the reader whatever it says.
+    judgeDown = true;
+    const { body } = await report(taskId, lineId, [{ text: DENIED, refused: true }]);
+    expect(body.held).toHaveLength(1);
+    expect(body.held?.[0]?.message).toContain('could not answer');
+    expect(body.held?.[0]?.message).not.toContain('last hold');
+    expect(body.held?.[0]?.message).not.toContain('UNJUDGED');
   });
 
   it('tells the judge the refusal is terminal, and the reader why it is theirs', async () => {
