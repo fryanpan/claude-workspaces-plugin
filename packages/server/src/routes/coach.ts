@@ -1,4 +1,3 @@
-import { isKnownTimezone } from '@claude-workspaces/core/schedule-timezone';
 /**
  * ── The coach: the owner's learning goals, where he is, and his answers ──
  *
@@ -48,6 +47,7 @@ import { isKnownTimezone } from '@claude-workspaces/core/schedule-timezone';
  * What he does reaches one agent stream, the coach session's
  * (`coach/session-feed.ts`).
  */
+import { isKnownTimezone } from '@claude-workspaces/core/schedule-timezone';
 import type { AgentCallerVerdict } from '../auth/agent-token.ts';
 import { sourceOfDevice } from '../coach/coverage.ts';
 import type { CoachPagePlace } from '../coach/hub.ts';

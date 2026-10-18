@@ -177,9 +177,11 @@ export function sessionMinutesOf(
     if (t.kind === 'prompt') line.prompts += 1;
     else if (t.kind === 'turn') line.turns += 1;
     line.ms += t.creditMs;
-    const summary = t.kind === 'injected' ? undefined : summaryOf(i);
-    if (summary && t.kind !== 'injected') {
-      line.activity = [...(line.activity ?? []), { at: t.at, kind: t.kind, summary }];
+    // An injected prompt adds time, never a line: he did not write it.
+    const kind = t.kind;
+    const summary = kind === 'injected' ? undefined : summaryOf(i);
+    if (summary && kind !== 'injected') {
+      line.activity = [...(line.activity ?? []), { at: t.at, kind, summary }];
     }
     bySession.set(key, line);
   }
