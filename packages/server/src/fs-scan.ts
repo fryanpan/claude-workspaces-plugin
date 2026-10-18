@@ -371,15 +371,39 @@ export function isListedFile(
   include: readonly string[] = [],
 ): boolean {
   if (relPath.split('/').includes('.git')) return false;
-  // A set's include is part of its listing, so it is part of the cache key:
-  // two sets on one root with different includes list different files.
-  const key = include.length === 0 ? root : `${root}\0${include.join('\0')}`;
   const now = Date.now();
-  let entry = listingCache.get(key);
-  if (!entry || now - entry.at > LISTING_TTL_MS) entry = refreshListing(key, root, include, now);
+  const key = listingKey(root, include);
+  let entry = cachedListing(key, root, include, now);
   if (entry.paths.has(relPath)) return true;
   if (now - entry.at >= MISS_RESCAN_MS) entry = refreshListing(key, root, include, now);
   return entry.paths.has(relPath);
+}
+
+/**
+ * The paths `isListedFile` admits for `root`, from the same cache: a hit is
+ * up to `LISTING_TTL_MS` old. For a caller that has to search the listing
+ * rather than ask about one path, such as turning a member's docId back into
+ * the file it names.
+ */
+export function listedFiles(root: string, include: readonly string[] = []): ReadonlySet<string> {
+  return cachedListing(listingKey(root, include), root, include, Date.now()).paths;
+}
+
+/** A set's include is part of its listing, so it is part of the cache key:
+ *  two sets on one root with different includes list different files. */
+function listingKey(root: string, include: readonly string[]): string {
+  return include.length === 0 ? root : `${root}\0${include.join('\0')}`;
+}
+
+function cachedListing(
+  key: string,
+  root: string,
+  include: readonly string[],
+  now: number,
+): { at: number; paths: Set<string> } {
+  const entry = listingCache.get(key);
+  if (!entry || now - entry.at > LISTING_TTL_MS) return refreshListing(key, root, include, now);
+  return entry;
 }
 
 /** Forget every cached listing. Tests only. */

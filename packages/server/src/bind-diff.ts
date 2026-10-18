@@ -89,8 +89,13 @@ export type BindDiffResult =
       skippedTotal?: number;
       /** Browse mode: every file the bind listed, sorted, at most
        *  `MAX_LISTED` (`fileCount` is the total). `files` names only the
-       *  entry doc, the one doc a browse bind opens. */
+       *  entry doc, the one doc a browse bind opens; it is what the bind
+       *  opened, and callers count it as such. */
       listed?: string[];
+      /** Browse mode: one row per `listed` file, same order, with the docId
+       *  its doc has or will have. A file nobody opened is not a doc yet;
+       *  the first request to its id opens it (`openListedMember`). */
+      links?: Array<{ relPath: string; docId: string }>;
       files: Array<{
         docId: string;
         relPath: string;
@@ -274,6 +279,10 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       skipped,
       ...(skippedTotal > skipped.length ? { skippedTotal } : {}),
       listed: scanned.slice(0, MAX_LISTED),
+      links: scanned.slice(0, MAX_LISTED).map((relPath) => ({
+        relPath,
+        docId: relPath === entryRel ? entryDocId : memberDocId(reviewId, relPath),
+      })),
       files: [
         {
           docId: entryDocId,

@@ -284,12 +284,34 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     // fix belongs here and not in each of them.
     const id = docStore.resolveDocId(rawId);
     const out = new Set<string>();
-    const attachmentId = attachmentIdOf(docStore.peekMeta(id) ?? {});
+    const meta = docStore.peekMeta(id);
+    const attachmentId = meta ? attachmentIdOf(meta) : unopenedMemberSet(id);
     if (attachmentId) out.add(attachmentId);
     for (const board of boardWorkspacesHolding(id)) out.add(board);
     if (attachmentId) for (const board of boardWorkspacesHolding(attachmentId)) out.add(board);
     return Array.from(out);
   };
+
+  /**
+   * The set a folder member's id names, when that member has not been opened.
+   *
+   * A browse bind hands out a link for every file it lists, and each becomes
+   * a doc only on its first open (`openListedMember`). Until then the id
+   * belongs to the set it is spelled under, `<setId>:<relPath>`, exactly as
+   * the opened doc will, so a visitor whose share covers the set reaches the
+   * link. That reaches nothing new: the set's `context-file` verb already
+   * opens any file its listing holds for that visitor. An id the listing
+   * does not hold — a deleted doc, a file the scan leaves out — stays in no
+   * workspace, so a visitor gets the scope refusal, not a 404. An id that
+   * exists as a doc keeps its own answer, so a doc a caller named
+   * `<setId>:…` is never read as the set's.
+   */
+  function unopenedMemberSet(id: string): string {
+    const cut = id.indexOf(':');
+    if (cut <= 0 || docStore.docExists(id)) return '';
+    if (boardWorkspacesHolding(id.slice(0, cut)).length === 0) return '';
+    return docStore.listedMember(id)?.setId ?? '';
+  }
 
   /**
    * EVERY board an attachment is linked to — not the first one.

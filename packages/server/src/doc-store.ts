@@ -3034,6 +3034,16 @@ export class DocStore {
     return this.workspaces.openContextFile(setId, relPath);
   }
 
+  /** Open a folder member a link names before anybody opened it. */
+  openListedMember(docId: string): Promise<boolean> {
+    return this.workspaces.openListedMember(docId);
+  }
+
+  /** The set and file an unopened folder member's id names, or `null`. */
+  listedMember(docId: string): { setId: string; relPath: string } | null {
+    return this.workspaces.listedMember(docId);
+  }
+
   openEditableFile(
     setId: string,
     relPath: string,

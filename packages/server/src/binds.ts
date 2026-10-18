@@ -69,6 +69,8 @@ export type BindFolderResult =
       /** Every file listed, sorted, at most `MAX_LISTED`; `fileCount` is the
        *  total. `files` names only the entry doc. */
       listed: string[];
+      /** One row per `listed` file, same order: its docId, opened or not. */
+      links: Array<{ relPath: string; docId: string }>;
       files: Array<{ docId: string; relPath: string; type: DocType; title: string }>;
     }
   | { ok: false; error: 'not-found' | 'too-many-files' | 'reserved-namespace'; fileCount?: number };
@@ -105,6 +107,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
         fileCount: 0,
         skipped: res.skipped ?? [],
         listed: [],
+        links: [],
         files: [],
       };
     }
@@ -123,6 +126,7 @@ export async function bindFolder(host: BindHost, opts: BindFolderOpts): Promise<
     skipped: res.skipped,
     ...(res.skippedTotal !== undefined ? { skippedTotal: res.skippedTotal } : {}),
     listed: res.listed ?? [],
+    links: res.links ?? [],
     files: res.files.map((f) => ({
       docId: f.docId,
       relPath: f.relPath,
