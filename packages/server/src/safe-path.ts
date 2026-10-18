@@ -44,3 +44,29 @@ export function isWithinRoot(root: string, abs: string): boolean {
   // startsWith.
   return target === base || target.startsWith(`${base}${sep}`);
 }
+
+/**
+ * Where `abs` really lands, as a `/`-separated path under `root`: `''` for
+ * the root itself, `null` when it resolves outside the root or not at all.
+ *
+ * For a caller whose rule is about NAMES — a listing, an exclude, a
+ * credential floor — rather than containment alone. A symlink is listed
+ * under its own name, so asking the rule about that name judges the link
+ * and not the file it serves; ask it about this answer as well.
+ */
+export function realPathUnder(root: string, abs: string): string | null {
+  let base: string;
+  let target: string;
+  try {
+    base = realpathSync(root);
+    target = realpathSync(abs);
+  } catch {
+    return null;
+  }
+  if (target === base) return '';
+  if (!target.startsWith(`${base}${sep}`)) return null;
+  return target
+    .slice(base.length + 1)
+    .split(sep)
+    .join('/');
+}

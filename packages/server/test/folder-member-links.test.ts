@@ -213,6 +213,19 @@ describe('a link to a folder member nobody has opened', () => {
     expect((await getLocal(`${pathOf(f.url)}?format=json`)).status).toBe(200);
   });
 
+  it('opens nothing for a listed file removed since the listing', async () => {
+    const gone = await bind(repo('removed-recordings'), { include: [MP4_A, MP4_B] });
+    const f = docOf(gone, PNG_B);
+    rmSync(join(fixtures, 'removed-recordings', 'recordings', PNG_B));
+    // The listing is still cached and holds the file; the open finds it gone.
+    expect((await getLocal(`${pathOf(f.url)}?format=json`)).status).toBe(404);
+    expect(handle.docStore.docExists(f.docId)).toBe(false);
+    // CONTROL: an unopened file still there opens from the same set.
+    const kept = docOf(gone, MP4_A);
+    expect(handle.docStore.docExists(kept.docId)).toBe(false);
+    expect((await getLocal(`${pathOf(kept.url)}?format=json`)).status).toBe(200);
+  });
+
   it('opens every file the answer lists', async () => {
     for (const f of set.links) {
       const r = await getLocal(`${pathOf(f.url)}?format=json`);
