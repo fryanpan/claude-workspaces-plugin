@@ -224,6 +224,23 @@ describe('coachLine', () => {
     ]);
   });
 
+  it('says how many of the oldest lines came without their words', () => {
+    const digest = (textDropped?: number) =>
+      coachLine(
+        'coach.digest',
+        {
+          items: [],
+          sessions: [{ boardId: 'w-1', repo: 'riverbend', minutes: 1 }],
+          ...(textDropped === undefined ? {} : { textDropped }),
+        },
+        'UTC',
+      );
+    expect(digest(3)).toContain(
+      'The 3 oldest lines came without their words in full: the digest had no room.',
+    );
+    expect(digest()).not.toContain('without');
+  });
+
   it('reads an answer, with what a thumbs down wrote, and a preference as things to remember', () => {
     const moment = {
       momentId: 'cm-aaaaaaaaaaaa',

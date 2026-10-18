@@ -55,6 +55,16 @@ export const RUN_IDLE_MS = 30 * 60_000;
 const SESSIONS_CAP = 500;
 const REPO_MAX = 100;
 
+/**
+ * The most full text one digest carries, summed over every mark in it. A
+ * digest is one turn of a session that runs all week, so this is about its
+ * context, not the transport: about 10k tokens, under the 25k Claude Code
+ * allows one MCP tool result by default, with room for the rest of the
+ * digest. Twenty marks at the 2,000-character cap fit; a digest held over a
+ * long absence does not, and its oldest marks keep only their summary.
+ */
+export const DIGEST_TEXT_CHARS = 40_000;
+
 export const SESSIONS_NOT_COUNTED =
   'Claude Code sessions that never joined a board are not counted, nor are headless runs (claude -p, the SDK), nor turns only a channel or another agent started.';
 
@@ -194,4 +204,32 @@ export function sessionMinutesOf(
     ...line,
     minutes: Math.max(1, Math.round(ms / 60_000)),
   }));
+}
+
+/** The sessions with full text dropped from the oldest marks until the rest
+ *  fit `budget`, and how many marks lost it. Every summary stays. */
+export function fitActivityText(
+  sessions: readonly SessionMinutes[],
+  budget: number = DIGEST_TEXT_CHARS,
+): { sessions: SessionMinutes[]; textDropped: number } {
+  const oldestFirst = sessions
+    .flatMap((s) => s.activity ?? [])
+    .filter((a) => a.text !== undefined)
+    .sort((a, b) => a.at - b.at);
+  let total = oldestFirst.reduce((n, a) => n + (a.text?.length ?? 0), 0);
+  const cut = new Set<SessionActivity>();
+  for (const a of oldestFirst) {
+    if (total <= budget) break;
+    total -= a.text?.length ?? 0;
+    cut.add(a);
+  }
+  if (cut.size === 0) return { sessions: [...sessions], textDropped: 0 };
+  const fitted = sessions.map((s) =>
+    s.activity ? { ...s, activity: s.activity.map((a) => (cut.has(a) ? withoutText(a) : a)) } : s,
+  );
+  return { sessions: fitted, textDropped: cut.size };
+}
+
+function withoutText({ text: _text, ...a }: SessionActivity): SessionActivity {
+  return a;
 }

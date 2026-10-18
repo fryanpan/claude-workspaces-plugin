@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { DIGEST_WINDOW_MS, SessionFeed, type SessionFrame } from '../src/coach/session-feed.ts';
-import type { SessionActivity } from '../src/coach/session-minutes.ts';
+import { DIGEST_TEXT_CHARS, type SessionActivity } from '../src/coach/session-minutes.ts';
 
 function harness(summarizer?: (n: number) => (string | null)[] | null) {
   let now = 1_000_000;
@@ -73,5 +73,40 @@ describe('coach digest full text', () => {
       expect(activity.map((a) => a.text)).toEqual([prompt, turn]);
       for (const a of activity) expect(a.summary.length).toBeLessThanOrEqual(120);
     }
+  });
+
+  it('drops full text from the oldest marks first past the budget, and says how many', async () => {
+    const { f, sent, advance, mark, now } = harness((n) => Array(n).fill('A short line'));
+    // 25 marks at the 2,000-character cap, across two sessions, ten seconds apart.
+    const texts: string[] = [];
+    for (let i = 0; i < 25; i++) {
+      const text = words(`m${String(i).padStart(2, '0')}`, 2_000);
+      texts.push(text);
+      const m = { ...mark, session: i % 2 === 0 ? 's1' : 's2', at: now(), text };
+      if (i < 2) f.prompt(m, true);
+      else f.turn(m);
+      advance(10_000);
+    }
+    advance(DIGEST_WINDOW_MS);
+    await f.idle();
+    const digest = sent[0];
+    if (digest?.event !== 'coach.digest') throw new Error('no digest');
+    const fit = Math.floor(DIGEST_TEXT_CHARS / 2_000);
+    expect(digest.textDropped).toBe(25 - fit);
+    const activity = activityOf(sent).sort((a, b) => a.at - b.at);
+    expect(activity).toHaveLength(25);
+    expect(activity.every((a) => a.summary === 'A short line')).toBe(true);
+    expect(activity.map((a) => a.text)).toEqual([
+      ...Array(25 - fit).fill(undefined),
+      ...texts.slice(25 - fit),
+    ]);
+  });
+
+  it('says nothing was dropped when the text fits', async () => {
+    const { f, sent, advance, mark, now } = harness((n) => Array(n).fill('A short line'));
+    f.prompt({ ...mark, at: now(), text: words('tide', 2_000) }, true);
+    advance(DIGEST_WINDOW_MS);
+    await f.idle();
+    expect(sent[0]).not.toHaveProperty('textDropped');
   });
 });

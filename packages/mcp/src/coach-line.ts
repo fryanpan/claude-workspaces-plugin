@@ -52,6 +52,8 @@ export interface CoachPayload {
   windows?: number;
   /** Windows dropped while it was away. */
   dropped?: number;
+  /** The oldest marks sent with their summary only, past the server's room. */
+  textDropped?: number;
 }
 
 /** One Claude Code session's line in a digest. */
@@ -175,7 +177,12 @@ function sessionLines(p: CoachPayload, timeZone?: string): string[] {
     lines.length > 0
       ? ['Claude Code sessions (active minutes):', ...lines]
       : ['Claude Code sessions: none counted.'];
-  return [...head, ...(p.sessionsNote ? [p.sessionsNote] : [])];
+  const cut = p.textDropped
+    ? [
+        `The ${p.textDropped} oldest line${p.textDropped === 1 ? '' : 's'} came without ${p.textDropped === 1 ? 'its' : 'their'} words in full: the digest had no room.`,
+      ]
+    : [];
+  return [...head, ...cut, ...(p.sessionsNote ? [p.sessionsNote] : [])];
 }
 
 function digestLine(p: CoachPayload, timeZone?: string): string | null {
