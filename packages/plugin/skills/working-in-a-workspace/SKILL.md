@@ -32,9 +32,22 @@ DO NOT use regular chat messages in Claude Code to share progress or ask for hel
 
 ### Asking for Help from Humans
 
-- DO NOT use `AskUserQuestion`. Create a review item instead.
-- DO NOT ask for help in chat.  Create a review item instead.The only exception to this rule is if the human is using chat, then it's okay to reply in chat
-- DO NOT share status updates in chat.End of turn updates are automatically shared to the workspace with a Stop hook.And for any significant milestones (e.g. done build, test, deploy) use `post_status(text, taskId?)`
+<!-- session-start -->
+#### File every ask as a review item
+
+- If you need an answer from a person, file a review item. Do not use `AskUserQuestion`. Do not ask in chat or in a doc body.
+- If the person writes to you in chat, you can answer in chat.
+- Do not add a question to a doc that a person already reviewed. File a review item.
+- Also file a review item for each of these:
+  - A file, link or video that you send to a person outside the queue.
+  - A message from another person that waits for a reply from your user. Include the link and a draft reply.
+  - Content that you publish in the name of a person, or to their collaborators. Examples are a doc, a wiki page, a chat post and a comment on the PR of another person. File the item before the content goes out. The approval of your ship method covers only code in your repo.
+- If the quality gate holds an item, revise the item in the same turn. Do not ask in chat.
+- Do not write status in chat. The Stop hook adds each end-of-turn message to the task activity. For a milestone, use `post_status(text, taskId?)`.
+
+Why: A question that is not on a queue gets no answer.
+<!-- /session-start -->
+
 - Review item types
   - `review_type: "decision"` offers 2–6 named options to pick between. The option label is what they answer.
   - `review_type: "question"` asks them to look at something and answer in their own words.
@@ -55,10 +68,6 @@ DO NOT use regular chat messages in Claude Code to share progress or ask for hel
   - The item has to be actionable on its own. 
     - The review item details should briefly present all information that's essential for making the decision
     - Every link the reviewer needs to see should be in the payload `detail` as an inline markdown link 
-- Keep one place to work together
-  - When a person asks for changes on a doc or mockup, change that same doc or mockup. For a mockup, edit the file it is served from; a reload shows the change.
-  - Answer on their thread there, and update the existing review item with `revise_review_item`.
-  - Do not create a new doc, link or review item for each round. The person should never have to look for where the work moved.
 
 ## Picking Up Work
 
@@ -77,6 +86,21 @@ DO NOT use regular chat messages in Claude Code to share progress or ask for hel
 - **A UI change an agent filed waits for an answer before you build it.** If the task changes what somebody sees on screen and an agent filed it, file a review item naming the options and what each costs, take another task, and build only against the answer. A task a person filed already carries their answer.
 - File a batch of tasks in one `create_tasks` call; a bad task comes back in `failures` by index instead of rejecting the batch.
 - Your session needs `CW_AGENT_NAME` before it can write to the board (an `author-required` refusal means it is missing) and `CW_WORKSPACE_ID` to name the board your end-of-turn notes land on. When you hand a task to somebody by name, pass `assigneeKind`: the board cannot tell a person from an agent of the same name.
+
+<!-- session-start -->
+#### Put the task id on dispatched work
+
+When you send the work of a task to another agent, write the task id in three places:
+
+1. The first line of the dispatch prompt: `Board task: t-…`.
+2. The PR body. Also link the PR URL to the task with `link_refs`.
+3. The worktree name: `.claude/worktrees/t-…`.
+
+- Write the id, not the title. A title changes when someone edits the task.
+- Do not invent an id for work that has no task.
+
+Why: The id connects the prompt, the PR and the worktree to one task.
+<!-- /session-start -->
 
 ## Writing Clear Tasks
 
@@ -148,6 +172,16 @@ Write each entry so a reader can check it alone:
   2. The task's link (`?task=<taskId>` on the board URL).
   3. Any blocker, in one line.
 
+<!-- session-start -->
+#### Put evidence on a task before it goes to done
+
+- Before a task goes to done, put the evidence on the task. Write what you did and what you found, and link the result. Put it in a `report_done_when` proof or in the transition `note`. A `post_status` does not replace it.
+- If the deliverable is a doc or a comment, do not report its line `met` yourself. Post the deliverable. Report the line `owner` with the link, and start the next task.
+- A resolved thread does not show that a doc is ready. Read the file before you report its state.
+
+Why: A reader of the task must see the result without a question to you.
+<!-- /session-start -->
+
 ### Keep building while a person checks
 
 Bias toward building. Waiting on a person holds only the line that asks them, never the next task.
@@ -189,6 +223,15 @@ When you have no more work on a board, call `leave_workspace(workspaceId)`. It t
 - When you have done everything that you can on a task, and you need to wait on another taskUse `block_task` tool to indicate this happened.
 - Every time a task is unblocked, you will receive an event and be woken up to continue working
 
+<!-- session-start -->
+#### Give each deferral a date
+
+- When an answer defers a task ("next Tuesday", "in a week"), set a schedule on the task in the same turn. Use `set_task_schedule` with a `once` rule.
+- If the answer gives no date, write on the task that it gave no date. Choose a date. Record the date as your choice, not as the date of the person.
+
+Why: A deferred task with no date comes back to nobody.
+<!-- /session-start -->
+
 ## Reading Comments Is Cheap — Audit Them
 
 Do not let a doc's questions age because reading felt risky. It is not, and the two reads are different:
@@ -197,6 +240,52 @@ Do not let a doc's questions age because reading felt risky. It is not, and the 
 - **`get_doc` and every edit tool DO bind.** They reach for content, so they read the file and arm the binding. That is right for a doc you are about to work on, and it is the read the caution about bound docs is actually about.
 
 **Bounded, not free — so read with a reason, never by enumeration.** A threads read on a doc that is not already in memory loads its whole CRDT and holds it resident for half an hour (a doc a person opens stays up to a week). Walking one board's docs, or one task's threads, costs that and nothing else: do it without asking. Sweeping every doc on the server is a different animal and stays banned — one such sweep took a server from 2,246 resident docs to 7,114 and 281MB, with ~95s spent not answering.
+
+<!-- session-start -->
+#### Find the questions that a status check does not show
+
+A check that reads only task status does not show these questions:
+
+1. A question on a task that has a schedule.
+2. A question on a done task. People comment on done tasks.
+3. A question in a doc body.
+4. A question on a doc that has no task.
+
+- Check the docs separately from the tasks. Read the author of the last comment on each thread. If a person wrote it, the thread waits for you.
+- When you audit, check two lists: what you wait for from people, and what people asked you that you did not close.
+- If a check names docs, read those docs first. Then read the other docs on your board.
+
+Why: These questions wait, and no reminder goes to anyone.
+<!-- /session-start -->
+
+## Answering Comments
+
+<!-- session-start -->
+#### Reply on the thread before you fix
+
+- Make `post_reply` your first action in the turn. Reply on each thread separately.
+- Keep your turns short while comments arrive.
+- If you do not act on a comment, reply and say why.
+
+Why: Comment events arrive only between turns. A long turn holds every new comment until it ends.
+
+#### Let one agent answer each thread
+
+- The lead of the doc answers. If the doc has no lead, the agent that owns the repo answers. Other agents do not reply.
+- Read the thread before you reply. If a peer answered, do not reply. If a peer stated a wrong fact, reply in one paragraph.
+- Do not discuss the reasoning of another agent on the thread. Send that agent a direct message.
+- When a person asks for options, put the options in the doc body. On the thread, write one line that tells where the options are. Give the number of options that the person asked for.
+
+Why: Two answers on one thread make the person read twice and choose between agents.
+
+#### Keep one place to work together
+
+- When a person asks for changes on a doc or a mockup, change that same doc or mockup. For a mockup, edit the file that serves it. A reload shows the change.
+- Answer on the thread of the person there. Update the review item that exists with `revise_review_item`.
+- Do not make a new doc, link or review item for each round.
+
+Why: The person must never look for the place where the work moved.
+<!-- /session-start -->
 
 ## When Someone Comments on Your Review Item
 

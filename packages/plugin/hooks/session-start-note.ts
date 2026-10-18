@@ -8,17 +8,35 @@
  * nobody noticed, because a hook that exits 0 with nothing to post is
  * indistinguishable from a quiet turn.
  *
+ * Also sends the board rules: the marked regions of the
+ * `working-in-a-workspace` skill (`lib/board-rules.ts`), so every session reads
+ * them before its first turn. A skill reaches only a session that opens it.
+ *
  * Reads no stdin and makes no network call: the instance this exists for is
  * the one with no board, so anything that needed a board would inherit the
- * bug. Writes one line of JSON on stdout when there is something to say and
- * NOTHING when the session is configured. Always exits 0 — the reasoning is
+ * bug. Writes one line of JSON on stdout. Always exits 0 — the reasoning is
  * `lib/session-report.ts`.
  */
+import { readFileSync } from 'node:fs';
+import { boardRulesText } from './lib/board-rules.ts';
 import { sessionStartOutput, sessionStartReport } from './lib/session-report.ts';
+
+const SKILL = new URL('../skills/working-in-a-workspace/SKILL.md', import.meta.url);
+
+function rules(): string {
+  try {
+    const text = boardRulesText(readFileSync(SKILL, 'utf8'));
+    if (text) return text;
+    return '[claude-workspaces] The board rules are missing: the working-in-a-workspace skill marks no region.';
+  } catch (err) {
+    return `[claude-workspaces] The board rules could not be read (${String(err)}). Read the claude-workspaces:working-in-a-workspace skill.`;
+  }
+}
 
 try {
   const report = sessionStartReport(process.env);
-  if (report) process.stdout.write(`${sessionStartOutput(report.text)}\n`);
+  const parts = report ? [report.text, rules()] : [rules()];
+  process.stdout.write(`${sessionStartOutput(parts.join('\n\n'))}\n`);
 } catch {
   // fail open
 }
