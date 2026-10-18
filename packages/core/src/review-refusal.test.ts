@@ -7,9 +7,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildReviewJudgePrompt, parseReviewJudgeResponse } from './review-judge-prompt.ts';
 import {
+  DESTRUCTIVE_GIT_STEP_RULE,
   REVIEW_REFUSAL_KINDS,
   REVIEW_REFUSAL_RULES,
   namesDestructiveGitStep,
+  refusalSystemLines,
 } from './review-refusal.ts';
 
 const ITEM = { headline: 'Spend about $9 re-running the Harborlight eval?' };
@@ -130,5 +132,46 @@ describe('an ask about a destructive git step is recognised', () => {
     ]) {
       expect({ text, named: namesDestructiveGitStep(text) }).toEqual({ text, named: false });
     }
+  });
+});
+
+describe('no rule text says consent covers a destructive git step', () => {
+  const STEPS = ['a force-push', 'a history rewrite', 'a branch or tag deletion', 'a hard reset'];
+  // Every text the judge or a refused filer reads: the system turn, with and
+  // without an appeal, and each rule's fixed sentence.
+  const texts = [
+    ...refusalSystemLines(),
+    ...REVIEW_REFUSAL_KINDS.flatMap((k) => refusalSystemLines(k)),
+    ...Object.values(REVIEW_REFUSAL_RULES),
+  ];
+
+  it('tells the judge no consent covers any of the four steps', () => {
+    const { system } = buildReviewJudgePrompt('Criteria text.', ITEM);
+    expect(system).toContain(DESTRUCTIVE_GIT_STEP_RULE);
+    for (const step of STEPS) expect(DESTRUCTIVE_GIT_STEP_RULE).toContain(step);
+    expect(DESTRUCTIVE_GIT_STEP_RULE).toContain('is never covered by ship, push or merge consent');
+  });
+
+  it('carries the exception in the sentence a ship-refused filer acts on', () => {
+    const ship = REVIEW_REFUSAL_RULES.ship;
+    const never = ship.indexOf('never covers');
+    expect(never).toBeGreaterThan(-1);
+    for (const step of STEPS) expect(ship.indexOf(step)).toBeGreaterThan(never);
+  });
+
+  it('names a destructive step only in a clause that denies consent covers it', () => {
+    let checked = 0;
+    for (const text of texts) {
+      for (const clause of text.split(/[.;:](?:\s|$)/)) {
+        if (!namesDestructiveGitStep(clause)) continue;
+        checked++;
+        expect({ clause, denies: /\b(?:never|not|NOT|nor)\b/.test(clause) }).toEqual({
+          clause,
+          denies: true,
+        });
+      }
+    }
+    // The positive control: the clauses that name a step were found at all.
+    expect(checked).toBeGreaterThan(0);
   });
 });
