@@ -35,6 +35,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { ADDITIONAL_CONTEXT_CAP } from '../hooks/lib/board-rules.ts';
 
 const REPO = resolve(__dirname, '../../..');
 const PLUGIN_ROOT = resolve(REPO, 'packages/plugin');
@@ -44,6 +45,19 @@ const HOOKS_JSON = resolve(PLUGIN_ROOT, 'hooks/hooks.json');
 /** A PATH with the usual system dirs and no bun — what launchd hands a process. */
 const BUNLESS_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
 const CASE_TIMEOUT = 30_000;
+
+/** The heading of each rule the skill marks for session start. */
+const BOARD_RULES = [
+  'File every ask as a review item',
+  'Put the task id on dispatched work',
+  'Put evidence on a task before it goes to done',
+  'Give each deferral a date',
+  'Find the questions that a status check does not show',
+  'Reply on the thread before you fix',
+  'Let one agent answer each thread',
+  'Keep one place to work together',
+];
+const LAST_RULE_END = 'Why: The person must never look for the place where the work moved.';
 
 interface Run {
   code: number | null;
@@ -239,7 +253,7 @@ describe('the SessionStart report', () => {
   );
 
   it(
-    'says nothing to a session that has one',
+    'gives a session that has one the board rules and no warning',
     async () => {
       // The discriminator. Without this case the one above would pass against a
       // hook that printed the same warning unconditionally, which is a
@@ -249,7 +263,30 @@ describe('the SessionStart report', () => {
         bunlessEnv({ CW_AGENT_NAME: 'Harborlight', CW_WORKSPACE_ID: 'w-board' }),
       );
       expect(code).toBe(0);
-      expect(stdout.trim()).toBe('');
+      const context = JSON.parse(stdout.trim()).hookSpecificOutput.additionalContext as string;
+      expect(context).not.toContain('CW_WORKSPACE_ID');
+      expect(context).not.toContain('NOWHERE');
+      for (const rule of BOARD_RULES) expect(context, rule).toContain(rule);
+    },
+    CASE_TIMEOUT,
+  );
+
+  it(
+    'sends every board rule whole, under the additionalContext cap',
+    async () => {
+      // Past the cap Claude Code swaps the text for a 2,000-character preview
+      // and a file path nobody is told to read, so a rule past that point
+      // never reaches the session. The worst case is the longest output: both
+      // settings missing, so the warning rides in front of the rules.
+      const { code, stdout } = await sh(sessionStart().command, bunlessEnv());
+      expect(code).toBe(0);
+      const context = JSON.parse(stdout.trim()).hookSpecificOutput.additionalContext as string;
+      expect(context).toContain('CW_WORKSPACE_ID');
+      expect(context.length).toBeLessThan(ADDITIONAL_CONTEXT_CAP);
+      for (const rule of BOARD_RULES) expect(context, rule).toContain(rule);
+      // The last rule ends whole: its closing line is the end of the output.
+      expect(context.trimEnd().endsWith(LAST_RULE_END)).toBe(true);
+      expect(context).not.toContain('<!--');
     },
     CASE_TIMEOUT,
   );

@@ -25,10 +25,14 @@ doc editor + injectable widget) as a single install.
   for hostnames you explicitly trust. Zero defaults ship.
 - **SessionStart hook** — says, in the session's own context, when the
   note hooks are installed but have nothing to post to: no
-  `CW_WORKSPACE_ID`, no `CW_AGENT_NAME`, or no resolvable `bun`. It says
-  nothing at all when the session is configured. Four fleet agents ran
-  inert for weeks because a hook that exits 0 with nothing to post reads
-  exactly like a session that had quiet turns.
+  `CW_WORKSPACE_ID`, no `CW_AGENT_NAME`, or no resolvable `bun`. Four
+  fleet agents ran inert for weeks because a hook that exits 0 with
+  nothing to post reads exactly like a session that had quiet turns. It
+  also sends the board rules: the regions of the
+  `working-in-a-workspace` skill between `<!-- session-start -->`
+  markers, so a session reads them before its first turn without opening
+  the skill. A test holds that text under Claude Code's 10,000-character
+  hook-output cap.
 
 ## Requirements
 
