@@ -155,10 +155,6 @@ export async function handleWorkspaceCreateRead(
     // flag must not quietly widen a local-only set back to shareable.
     if (requestedPrivacy !== null) attachmentPrivacy.set(res.workspaceId, requestedPrivacy);
     const privacy = attachmentPrivacy.privacyOf(res.workspaceId);
-    const files = res.files.map((f) => ({
-      ...f,
-      reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,
-    }));
     // The GROUPING goes on the board, not its members: `res.workspaceId`
     // is the review id, and one row for the whole bind is the unit a
     // reader thinks in. See the vocabulary note above `fileUnderBoardWorkspace`.
@@ -166,6 +162,11 @@ export async function handleWorkspaceCreateRead(
       res.workspaceId,
       body?.hubWorkspaceId as string | undefined,
     );
+    // Minted AFTER the filing: a doc no board holds has no address.
+    const files = res.files.map((f) => ({
+      ...f,
+      reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,
+    }));
     const entryUrl = reviewEntryUrl(boardWorkspaceId, res.workspaceId, files);
     return j(200, {
       ...res,
