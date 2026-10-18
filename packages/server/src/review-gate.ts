@@ -45,9 +45,11 @@ import {
 } from '@claude-workspaces/core/review-hold';
 import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import {
+  DESTRUCTIVE_STEP_PASS_REASON,
   REFUSAL_DENIAL_PASS_REASON,
   REVIEW_REFUSAL_RULES,
   type ReviewRefusalKind,
+  namesDestructiveGitStep,
 } from '@claude-workspaces/core/review-refusal';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -761,6 +763,14 @@ export function createReviewGate(ctx: ReviewGateContext) {
      * Never on an item that reports a permission denial either: a denial is
      * final, the reader is the one person left to ask, and a refusal there
      * would push the agent to get past it.
+     *
+     * Never on an item that asks about a destructive git step (a force-push,
+     * a history rewrite, a branch or tag deletion, a hard reset), for every
+     * rule but "self-check": no consent covers one, and a refusal tells the
+     * agent to go ahead. On 2026-10-17 the judge refused an ask to approve a
+     * force-push under "ship" although its prompt named the exception, so
+     * this does not rely on the judge. "self-check" stays: it tells the
+     * agent to read a fact, never to take the step.
      */
     let refusal: ReviewRefusalKind | undefined;
     if (verdict !== null && !verdict.ok && !target.ownerCheck) {
@@ -768,6 +778,13 @@ export function createReviewGate(ctx: ReviewGateContext) {
       if (refusal !== undefined && namesPermissionRefusal(judgedText(words))) {
         refusal = undefined;
         verdict = { ok: true, reason: REFUSAL_DENIAL_PASS_REASON };
+      } else if (
+        refusal !== undefined &&
+        refusal !== 'self-check' &&
+        namesDestructiveGitStep(judgedText(words))
+      ) {
+        refusal = undefined;
+        verdict = { ok: true, reason: DESTRUCTIVE_STEP_PASS_REASON };
       }
     } else if (verdict !== null && !verdict.ok && verdict.refuse !== undefined) {
       // The owner line's hold. The judge is told a refusal needs no reason,

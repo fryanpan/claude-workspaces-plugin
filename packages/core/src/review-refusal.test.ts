@@ -6,7 +6,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildReviewJudgePrompt, parseReviewJudgeResponse } from './review-judge-prompt.ts';
-import { REVIEW_REFUSAL_KINDS, REVIEW_REFUSAL_RULES } from './review-refusal.ts';
+import {
+  REVIEW_REFUSAL_KINDS,
+  REVIEW_REFUSAL_RULES,
+  namesDestructiveGitStep,
+} from './review-refusal.ts';
 
 const ITEM = { headline: 'Spend about $9 re-running the Harborlight eval?' };
 
@@ -90,6 +94,41 @@ describe('what a refused filer is told', () => {
       const rule = REVIEW_REFUSAL_RULES[kind];
       expect(rule.split(/[.!?](\s|$)/).filter((s) => s.trim() !== '').length).toBe(1);
       expect(rule).not.toMatch(/another|separate|second|work\s?around|session/i);
+    }
+  });
+});
+
+describe('an ask about a destructive git step is recognised', () => {
+  it('names each step, in words and as the command', () => {
+    for (const text of [
+      'Approve a force-push of the rebased Riverbend branch?',
+      'Force push the branch?',
+      'Run git push --force-with-lease on the PR branch?',
+      'Can I git push -f origin fix/riverbend?',
+      'Rewrite the history of the Harborlight branch?',
+      'A history rewrite drops the fixture from every commit.',
+      'Run filter-repo over the Saltmarsh branch?',
+      'Delete the stale Saltmarsh release branch?',
+      'Delete the v2.3.0 tag and push it again?',
+      'The tag deletion cannot be undone for clones.',
+      'Run git branch -D release/saltmarsh?',
+      'git push origin --delete release/saltmarsh',
+      'Hard reset the shared branch to main?',
+      'git reset --hard origin/main drops two commits.',
+    ]) {
+      expect({ text, named: namesDestructiveGitStep(text) }).toEqual({ text, named: true });
+    }
+  });
+
+  it('leaves an ordinary ship ask alone', () => {
+    for (const text of [
+      'Open the pull request for the Riverbend export fix now?',
+      'Push the fix and merge it once CI is green?',
+      'Merge the Harborlight branch into main?',
+      'Delete the old cache file. The branch is merged.',
+      'Reset the tide counter to zero?',
+    ]) {
+      expect({ text, named: namesDestructiveGitStep(text) }).toEqual({ text, named: false });
     }
   });
 });

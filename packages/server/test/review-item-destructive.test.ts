@@ -144,7 +144,7 @@ describe('an ask about a destructive git step', () => {
     const res = await fileItem(workspaceId, taskId, FORCE_PUSH);
     expect(res.held).toBeUndefined();
     expect(res.item?.judge?.refused).toBeUndefined();
-    expect(JSON.stringify(res)).not.toContain('already carries consent');
+    expect(JSON.stringify(res.item)).not.toContain('already carries consent');
     const home = await homeIds(workspaceId);
     expect(home).toContain(res.item?.id);
     expect(home).not.toContain(control.item?.id);

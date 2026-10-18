@@ -47,7 +47,9 @@ export const REVIEW_REFUSAL_RULES: Record<ReviewRefusalKind, string> = {
   // team-lead-fleet skills ship-auto / ship-guarded, and this repo's ship-it:
   // the ship method is the consent, except for push-only repos, D-class
   // actions and ship-guarded's risk pause.
-  ship: 'Your ship method already carries consent to push, merge and open the pull request, so go ahead without asking.',
+  // A destructive git step is named as outside that consent in the same
+  // sentence, because this is the sentence a refused filer acts on.
+  ship: 'Your ship method already carries consent to push, merge and open the pull request, so go ahead without asking; that consent never covers a force-push, a history rewrite, a branch or tag deletion or a hard reset.',
   // team-lead-fleet rules/workflow-conventions.md, "Decision Framework",
   // the Reversible list.
   reversible:
@@ -65,6 +67,57 @@ export const REVIEW_REFUSAL_RULES: Record<ReviewRefusalKind, string> = {
 };
 
 /**
+ * The steps no consent covers. A ship method's consent is to push, merge and
+ * open the pull request; these replace or remove work other people may
+ * already have, and are hard to undo, so the reader always decides them.
+ */
+export const DESTRUCTIVE_GIT_STEP_RULE =
+  'A destructive git step — a force-push, a history rewrite, a branch or tag deletion, or a hard reset — is never covered by ship, push or merge consent, nor by any other rule here: never refuse an item that asks about one.';
+
+/**
+ * Does this ask name a destructive git step?
+ *
+ * The deterministic half of `DESTRUCTIVE_GIT_STEP_RULE`: the judge is told the
+ * rule, and the gate drops a refusal on an item this matches whether or not
+ * the judge took it. Wide on purpose. A false positive sends one ask to the
+ * reader that a rule might have answered, which is the direction the gate
+ * errs in; a false negative tells an agent its consent covers a force-push.
+ * A window between two words stops at a sentence end, and steps over a dot
+ * inside a word (a version, a file name).
+ */
+const DESTRUCTIVE_GIT_STEP = [
+  // A force-push, in words or as the flag.
+  /\bforce[\s-]?push/i,
+  /\bpush\b(?:[^.\n]|\.(?=\S)){0,60}(?:--force\b|--force-with-lease\b|\s-f\b)/i,
+  /--force-with-lease\b/i,
+  // A history rewrite.
+  /\brewr(?:ite|ites|ote|itten|iting)\b(?:[^.\n]|\.(?=\S)){0,40}\bhistory\b/i,
+  /\bhistory\s+rewrit/i,
+  /\bfilter-(?:branch|repo)\b/,
+  // A branch or tag deletion.
+  /\bdelet(?:e|es|ed|ing|ion)\b(?:[^.\n]|\.(?=\S)){0,40}\b(?:branch(?:es)?|tags?)\b/i,
+  /\b(?:branch(?:es)?|tags?)\b(?:[^.\n]|\.(?=\S)){0,20}\bdelet(?:e|es|ed|ing|ion)\b/i,
+  /\bbranch\s+-D\b/,
+  /\btag\s+-d\b/,
+  /\bpush\b(?:[^.\n]|\.(?=\S)){0,60}--delete\b/i,
+  // A hard reset.
+  /\breset\s+--hard\b/i,
+  /\bhard[\s-]reset/i,
+];
+
+export function namesDestructiveGitStep(text: string | undefined): boolean {
+  if (!text) return false;
+  return DESTRUCTIVE_GIT_STEP.some((re) => re.test(text));
+}
+
+/**
+ * What the gate records when a refusal is dropped because the item asks about
+ * a destructive git step. Fixed words for the reason `REVIEW_REFUSAL_RULES` are.
+ */
+export const DESTRUCTIVE_STEP_PASS_REASON =
+  'The item asks about a destructive git step, which no ship, push or merge consent covers, so the reader is the one to ask.';
+
+/**
  * The block of the judge's system turn that teaches it the five rules.
  *
  * Each exception is the half of its rule that keeps an ask legitimate, and
@@ -80,7 +133,11 @@ export function refusalSystemLines(priorRefusal?: ReviewRefusalKind): string[] {
     // approval first".
     '- "spend": it asks approval to spend money on API calls, evals or model runs, and the spend it names is $50 or less. NOT refused when the spend is over $50, or when the item cannot say what it will cost.',
     // ship-auto's D-class list, ship-push-only, and ship-guarded's risk pause.
-    '- "ship": it asks whether to push, merge or open a pull request. NOT refused when the item says why consent is not already given: the repo ships push-only so a person merges, or the action is a breaking change on the default branch, a public deploy of a breaking change, an external send, an irreversible delete or a force-push, or it touches a named risk surface (user-facing flows, a removed feature, a schema, a performance-sensitive path) under a guarded ship method.',
+    '- "ship": it asks whether to push, merge or open a pull request. NOT refused when the item says why consent is not already given: the repo ships push-only so a person merges, or the action is a breaking change on the default branch, a public deploy of a breaking change, an external send, an irreversible delete or a destructive git step, or it touches a named risk surface (user-facing flows, a removed feature, a schema, a performance-sensitive path) under a guarded ship method.',
+    // The refusal the gate gave on 2026-10-17, to an ask to approve a
+    // force-push of a rebased PR branch. Spelled out as its own line because
+    // "a force-push" buried in the exception list above did not stop it.
+    `- ${DESTRUCTIVE_GIT_STEP_RULE}`,
     // workflow-conventions.md, "Decision Framework": the Reversible list, and
     // the hard-to-reverse list as its exception.
     '- "reversible": it asks the reader to pick a reversible method or implementation detail — a library or dependency, an approach, naming, file structure, code organization, test strategy, error handling, or the shape of a non-public API. NOT refused when the choice is how something looks, reads or feels to a person, is a product or taste judgement only the reader can make, deletes or loses data, spans several systems, or is an external integration with billing or security stakes.',
