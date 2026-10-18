@@ -163,6 +163,14 @@ Write each entry so a reader can check it alone:
   - `done` means **merged AND deployed**: the PR is in `main`, the production deploy that carries it reports a healthy verification, and every acceptance criterion is met on the deployed build. Not "CI green", not "merged, deploy pending", not "verified on staging".
   - Work in an unmerged PR stays `in-progress`, and so does a merged PR until its deploy reads healthy.
   - Every transition `note` says what you did: the PR, what you verified, what you could not. A `done` note names the merge commit and the deploy that carried it. The note is all the trail keeps.
+- Waiting on **another task** is `block_task(taskId, blockedBy)`. The task reads as Blocked, leaves the queue and the stall check, and returns to `todo` by itself when the last blocker closes.
+  - **Waiting on a person is not blocked.** Leave the task `in-progress` and file the ask as a review item so it sits on their queue.
+  - A task you have not started is not blocked either. Do not invent an edge to quiet the ready-work nudge.
+- Share progress with `post_status` at each milestone, shaped as handover notes (below). A status moves the stall clock; a comment is something a person has to read.
+- **Your final message is a pointer, not the report.** Post the report with `post_status` first, because the harness drops final messages, then point at the task in 50 words or less:
+  1. The outcome, in one line.
+  2. The task's link (`?task=<taskId>` on the board URL).
+  3. Any blocker, in one line.
 
 <!-- session-start -->
 #### Put evidence on a task before it goes to done
@@ -173,15 +181,6 @@ Write each entry so a reader can check it alone:
 
 Why: A reader of the task must see the result without a question to you.
 <!-- /session-start -->
-
-- Waiting on **another task** is `block_task(taskId, blockedBy)`. The task reads as Blocked, leaves the queue and the stall check, and returns to `todo` by itself when the last blocker closes.
-  - **Waiting on a person is not blocked.** Leave the task `in-progress` and file the ask as a review item so it sits on their queue.
-  - A task you have not started is not blocked either. Do not invent an edge to quiet the ready-work nudge.
-- Share progress with `post_status` at each milestone, shaped as handover notes (below). A status moves the stall clock; a comment is something a person has to read.
-- **Your final message is a pointer, not the report.** Post the report with `post_status` first, because the harness drops final messages, then point at the task in 50 words or less:
-  1. The outcome, in one line.
-  2. The task's link (`?task=<taskId>` on the board URL).
-  3. Any blocker, in one line.
 
 ### Keep building while a person checks
 
