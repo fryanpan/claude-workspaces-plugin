@@ -2,6 +2,8 @@ import { mediaTypeOf } from '@claude-workspaces/core';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';
 import { api } from '../doc-path.ts';
 import type { MountContext } from '../mount-context.ts';
+import { mobileLabel } from '../review-chrome.ts';
+import { setTabTitle, tabName } from '../tab-title.ts';
 import { renderWorkspaceTree, wireWorkspaceTreeRefresh } from '../workspace-tree.ts';
 
 /**
@@ -75,4 +77,14 @@ export function mountMedia(ctx: MountContext): void {
     frame.append(img);
   }
   editor.replaceChildren(frame);
+  // The topbar names the file, as the code view's chrome would: a phone gets
+  // the file name, a wider screen the path inside the set.
+  const title = document.getElementById('doc-title');
+  if (title) {
+    title.textContent = window.matchMedia('(max-width: 720px)').matches
+      ? mobileLabel(relPath)
+      : relPath;
+    title.title = relPath;
+  }
+  setTabTitle(document, tabName(relPath));
 }

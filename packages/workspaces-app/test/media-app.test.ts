@@ -36,7 +36,8 @@ function ctxFor(relPath: string, scope: MountScope): MountContext {
 beforeEach(() => {
   history.replaceState(null, '', '/workspaces/w-1/docs/set-1%3Aclips%2Fwalk.mp4');
   document.body.className = '';
-  document.body.innerHTML = '<div id="set-pane-list"></div><div id="editor"></div>';
+  document.body.innerHTML =
+    '<span id="doc-title"></span><div id="set-pane-list"></div><div id="editor"></div>';
   // The sidebar's fetches have nothing to answer here; the player does not wait on them.
   vi.stubGlobal(
     'fetch',
@@ -77,6 +78,7 @@ describe('mountMedia', () => {
       '/workspaces/w-1/attachments/set-1/raw?path=clips%2Fwalk.mp4',
     );
     expect(document.body.classList.contains('media-mode')).toBe(true);
+    expect(document.getElementById('doc-title')?.title).toBe('clips/walk.mp4');
     scope.dispose();
     expect(video?.querySelector('source')).toBeNull();
   });
