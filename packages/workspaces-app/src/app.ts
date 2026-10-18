@@ -28,6 +28,7 @@ import { type EditorHandle, createEditor } from './editor.ts';
 import { wantsHuddleStart } from './huddle-entry.ts';
 import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
+import { isMediaDoc, mountMedia } from './media/media-app.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
@@ -137,6 +138,8 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) {
         return mountRedline(ctx);
       }
+      // A folder's video or image plays or shows on its own page.
+      if (isMediaDoc(ctx)) return mountMedia(ctx);
       if (ctx.docType === 'code' || ctx.docType === 'diff') return mountCode(ctx);
       return mountMarkdown(ctx);
     },
