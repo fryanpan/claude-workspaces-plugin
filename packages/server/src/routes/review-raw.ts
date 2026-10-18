@@ -69,10 +69,11 @@ export async function serveReviewRaw(
   }
   headers['content-range'] = `bytes ${range.start}-${range.end}/${size}`;
   headers['content-length'] = String(range.end - range.start + 1);
-  // `.stream()`, not the slice itself: a Response built on a sliced BunFile
-  // keeps its start but loses its end once the request chain re-wraps
-  // `res.body`, and sends the rest of the file (Bun 1.3.10).
-  const body = req.method === 'HEAD' ? null : file.slice(range.start, range.end + 1).stream();
+  // The slice itself, not `.stream()`: a stream is sent chunked once the
+  // request chain has touched it, and Safari will not play a chunked 206. The
+  // chain sets its headers on this Response in place, so the slice reaches
+  // the socket as a sized body (`range-content-length.test.ts`).
+  const body = req.method === 'HEAD' ? null : file.slice(range.start, range.end + 1);
   return new Response(body, { status: 206, headers });
 }
 

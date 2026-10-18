@@ -177,13 +177,13 @@ export function createOriginPolicy(ctx: OriginPolicyContext): {
   const applyCors = (req: Request, res: Response): Response => {
     const headers = corsHeadersFor(req.headers.get('origin'), policyFor(req));
     if (!headers) return res;
-    const merged = new Headers(res.headers);
-    for (const [k, v] of Object.entries(headers)) merged.set(k, v);
-    return new Response(res.body, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: merged,
-    });
+    // Set on the route's own Response, never re-wrapped: `new Response(res.body)`
+    // turns a sized body (a file, a file slice) into a stream, which Bun sends
+    // chunked, and for a sliced file sends past the slice's end. Safari will
+    // not play a 206 that arrives chunked. Bun's Response headers are
+    // mutable, even on a `fetch` result.
+    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+    return res;
   };
 
   return { policyFor, applyCors };

@@ -63,9 +63,11 @@ export async function handleDocVoiceFeedbackRoute(
   if (start >= size || start > end) {
     return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } });
   }
-  // Read, not handed over as a file slice: the server re-wraps every response
-  // as `new Response(res.body, …)`, and Bun streams the WHOLE file behind a
-  // sliced BunFile's body — a 206 claiming 100 bytes then sent all of them.
+  // Read, not handed over as a file slice: anything that reads `.body` of a
+  // Response built on a sliced BunFile makes Bun send the WHOLE file — a 206
+  // claiming 100 bytes then sent all of them. The request chain no longer
+  // does (`review-raw.ts` relies on that), but a recording is small enough
+  // that this answer need not depend on it.
   return new Response(await file.slice(start, end + 1).arrayBuffer(), {
     status: 206,
     headers: { ...headers, 'content-range': `bytes ${start}-${end}/${size}` },
