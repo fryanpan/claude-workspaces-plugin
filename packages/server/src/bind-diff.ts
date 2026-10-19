@@ -31,7 +31,7 @@ import {
 } from './diff-groups.ts';
 import { isReservedDocId } from './doc-ids.ts';
 import { canonicalRepoRoot, findWorktreeRoot } from './doc-origin-repo.ts';
-import { MAX_SKIPPED, scanFolderReport } from './fs-scan.ts';
+import { MAX_SKIPPED, browseEntry, landsOnListed, scanFolderReport } from './fs-scan.ts';
 import {
   type DiffFileEntry,
   diffFilesAsync,
@@ -224,7 +224,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
     const report = scanFolderReport(root, opts.include ?? []);
     const skipped: Array<{ path: string; reason: string }> = [...report.skipped];
     let skippedTotal = report.skippedTotal;
-    const scanned: string[] = [];
+    let scanned: string[] = [];
     for (const rel of report.files.map((abs) => relative(root, abs).split(sep).join('/'))) {
       if (!isExcluded(rel, excludes)) {
         scanned.push(rel);
@@ -234,13 +234,18 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       if (skipped.length < MAX_SKIPPED) skipped.push({ path: rel, reason: 'excluded' });
     }
     scanned.sort();
+    // The entry binds before any request reaches `resolveSetFile`, so it takes
+    // the same symlink rule there: `README.md -> .env` bound `.env` for every
+    // share visitor (security review, 2026-10-19). A refused one is left out.
+    const { entry: entryRel, refused } = browseEntry(root, scanned, excludes, opts.include);
+    for (const rel of refused) {
+      skippedTotal++;
+      if (skipped.length < MAX_SKIPPED) skipped.push({ path: rel, reason: 'symlink-target' });
+    }
+    const dropped = new Set(refused);
+    if (dropped.size > 0) scanned = scanned.filter((r) => !dropped.has(r));
     // A folder whose every file was left out still says which, and why.
-    if (scanned.length === 0) return { ok: false, error: 'empty-diff', skipped };
-    const entryRel =
-      scanned.find((r) => r.toLowerCase() === 'readme.md') ??
-      scanned.find((r) => r.toLowerCase().endsWith('.md')) ??
-      scanned[0];
-    if (!entryRel) return { ok: false, error: 'empty-diff' };
+    if (!entryRel) return { ok: false, error: 'empty-diff', skipped };
     const opened = await host.openContextFile(reviewId, entryRel);
     // First open must create workspace meta from nothing — openContextFile
     // derives root from members, so seed the entry doc directly here.
@@ -349,9 +354,17 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
         // to do it. A file that will not answer is skipped like an unreadable
         // one and the review is built from the rest; `keep: false` because
         // these bytes are this loop's, not a later hydrate's.
-        const read = await boundFiles.read(join(root, entry.relPath), { keep: false });
+        const abs = join(root, entry.relPath);
+        const read = await boundFiles.read(abs, { keep: false });
         if (read.status !== 'ok' || !read.exists) {
           skipped.push({ path: entry.relPath, reason: 'read-failed' });
+          continue;
+        }
+        // The read followed any symlink, so judge the file it landed on
+        // (security review, 2026-10-19). After the read, so a folder that has
+        // stopped answering is never touched on the main thread.
+        if (landsOnListed(root, entry.relPath, abs, excludes) !== 'ok') {
+          skipped.push({ path: entry.relPath, reason: 'symlink-target' });
           continue;
         }
         text = read.text;
