@@ -24,9 +24,9 @@ import { NAV_COLLAPSE_HTML, navRailItemsHtml, wireNavCollapse } from '../board/b
 import { mountWalkthroughIsland, walkthroughData } from '../board/walkthrough-island.tsx';
 import { browserStorage } from '../boot-env.ts';
 import { mountCoachCard } from '../coach-card.ts';
-import { ensureUserIdentity } from '../identity-prompt.ts';
+import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { chooseDifficultyOn, createSizeChoice, httpSizePref } from '../review-sizes.ts';
-import { fetchWriteAccess, installWriteGateNotice } from '../signin/write-gate.ts';
+import { fetchWriteAccess, installWriteGateNotice, readSessionBody } from '../signin/write-gate.ts';
 import {
   type CrossEntry,
   type CrossReviewRow,
@@ -60,21 +60,29 @@ async function boot(): Promise<void> {
   const host = document.getElementById('board-walkthrough');
   const wsName = document.getElementById('board-ws-name-text');
   if (!host) return;
+  // The queue and the session are read at once, not one after another: the
+  // first card waits on the slower of the two rather than on their sum. One
+  // session read serves the write gate and the identity both.
+  const queued = fetchQueue();
+  const session = readSessionBody();
   installWriteGateNotice();
   // The coach hears that he is walking his reviews; it stops itself for anyone else.
   mountCoachCard({ page: 'review' });
-  const writeAccess = await fetchWriteAccess();
+  const writeAccess = await fetchWriteAccess(session);
   const user = await ensureUserIdentity(
     new URLSearchParams(location.search).get('as'),
     {
       get: (k) => localStorage.getItem(k),
       set: (k, v) => localStorage.setItem(k, v),
     },
-    writeAccess.canWrite ? {} : { suppressNamePrompt: true },
+    {
+      fetchSession: () => sessionAnswerOf(session),
+      ...(writeAccess.canWrite ? {} : { suppressNamePrompt: true }),
+    },
   );
   const author = { id: user.id, name: user.name, kind: user.kind, color: user.color };
 
-  let entries: CrossEntry[] = (await fetchQueue()) ?? [];
+  let entries: CrossEntry[] = (await queued) ?? [];
   // Choose-difficulty is off unless this browser turned it on; off, the walk
   // shows everything and never asks the account for a size. On, the account's
   // choice arrives after the cache has painted and re-aims the walk exactly as
