@@ -19,6 +19,7 @@ import { createCoach } from '../src/coach/moment.ts';
 import type { SessionNews } from '../src/coach/session-feed.ts';
 import { CoachStore } from '../src/coach/store.ts';
 import { CoachStream } from '../src/coach/stream.ts';
+import { makeDocKey } from '../src/doc-key.ts';
 import { GOALS_DOC, WS, ZONE, at } from './coach-fixtures.ts';
 
 const OPEN: BoardPrivacy = {
@@ -73,6 +74,30 @@ describe('placeIsOff', () => {
   });
 });
 
+describe('boardPrivacyFrom', () => {
+  it("asks the project's privacy by the repo half of the doc's key", () => {
+    const asked: string[] = [];
+    const privacy = boardPrivacyFrom({
+      isLocalOnlySet: () => false,
+      setOfDoc: () => undefined,
+      docKeyOf: (d) =>
+        d === 'd-letters' ? makeDocKey('saltmarsh-clinic', 'letters.md') : undefined,
+      projectIsLocalOnly: (repoKey) => {
+        asked.push(repoKey);
+        return repoKey === 'saltmarsh-clinic';
+      },
+      docIdsOf: (ws) => (ws === 'w-records' ? ['d-letters'] : ['d-post']),
+      isBoardLocked: () => false,
+      boardsOfDoc: () => [],
+    });
+    expect(privacy.localOnlyDoc('d-letters')).toBe(true);
+    expect(privacy.localOnlyBoard('w-records')).toBe(true);
+    expect(privacy.localOnlyDoc('d-post')).toBe(false);
+    expect(privacy.localOnlyBoard('w-launch')).toBe(false);
+    expect(new Set(asked)).toEqual(new Set(['saltmarsh-clinic']));
+  });
+});
+
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'coach-exclusion-'));
@@ -94,7 +119,7 @@ function coachWithRecords() {
   const privacy = boardPrivacyFrom({
     isLocalOnlySet: (id) => attachmentPrivacy.isLocalOnly(id),
     setOfDoc: () => undefined,
-    repoKeyOf: () => undefined,
+    docKeyOf: () => undefined,
     projectIsLocalOnly: () => false,
     docIdsOf: (ws) => Object.keys(docBoard).filter((d) => docBoard[d] === ws),
     isBoardLocked: () => false,
