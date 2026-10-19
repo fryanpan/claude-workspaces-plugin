@@ -95,13 +95,14 @@ export class RepoRegistry {
   /** Suppresses the write while a batch (the migration) is mid-flight. */
   private deferred = false;
   private dirty = false;
+  /** docId → the keys holding it, in `docKeys` order. Dropped on any write. */
+  private keysByDoc: Map<string, string[]> | null = null;
 
   constructor(dataDir: string) {
     this.path = join(dataDir, REPO_REGISTRY_FILE);
     this.data = readRegistryFile(this.path);
   }
 
-  /** Persist unless a batch is holding writes. */
   /**
    * Write the file, unless a batch is holding writes.
    *
@@ -115,6 +116,7 @@ export class RepoRegistry {
    * opposite case and throws — see there.
    */
   private persist(): void {
+    this.keysByDoc = null;
     if (this.deferred) {
       this.dirty = true;
       return;
@@ -160,6 +162,7 @@ export class RepoRegistry {
    */
   restore(snapshot: RepoRegistryFile): void {
     this.data = JSON.parse(JSON.stringify(snapshot)) as RepoRegistryFile;
+    this.keysByDoc = null;
     this.dirty = false;
     this.deferred = false;
   }
@@ -277,19 +280,26 @@ export class RepoRegistry {
    * keys there and nowhere else. Reading through this is what lets a
    * migrated doc resolve its copies without the migration having to rewrite
    * six thousand documents to say what one table already knows.
+   *
+   * A lookup, not a scan: the coach's privacy check asks it of every doc on
+   * a board for every ranked review item, and walking six thousand keys each
+   * time was 98% of `GET /api/review-queue` (2.2s on the PR's fixture).
    */
   primaryKeyFor(docId: string): string | undefined {
-    let aliased: string | undefined;
-    for (const [key, held] of Object.entries(this.data.docKeys)) {
-      if (held !== docId) continue;
-      // A doc holds both spellings after a re-key. The CURRENT one is the key
-      // that is not itself aliased away; the old one is kept only as a
-      // fallback, so this never answers `undefined` for a doc that holds a
-      // key nobody has re-keyed forward yet.
-      if (this.resolveKey(key) === key) return key;
-      aliased ??= key;
+    if (!this.keysByDoc) {
+      this.keysByDoc = new Map();
+      for (const [key, held] of Object.entries(this.data.docKeys)) {
+        const keys = this.keysByDoc.get(held);
+        if (keys) keys.push(key);
+        else this.keysByDoc.set(held, [key]);
+      }
     }
-    return aliased;
+    const keys = this.keysByDoc.get(docId) ?? [];
+    // A doc holds both spellings after a re-key. The CURRENT one is the key
+    // that is not itself aliased away; the old one is kept only as a
+    // fallback, so this never answers `undefined` for a doc that holds a
+    // key nobody has re-keyed forward yet.
+    return keys.find((key) => this.resolveKey(key) === key) ?? keys[0];
   }
 
   /** Drop a key claim — the migration's `--revert`, and nothing else. Never
