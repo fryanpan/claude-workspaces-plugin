@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
+import { realPathUnder } from './safe-path.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
 
@@ -387,6 +388,36 @@ export function isListedFile(
  */
 export function listedFiles(root: string, include: readonly string[] = []): ReadonlySet<string> {
   return cachedListing(listingKey(root, include), root, include, Date.now()).paths;
+}
+
+/**
+ * Whether the file `clean` really serves is one the set shows. Git lists a
+ * symlink under its own name, so the listing, the exclude and the credential
+ * floor had judged only the link: `clip.mp4 -> .env`, with `.env` ignored,
+ * passed every check and streamed `.env` (security review, 2026-10-18). The
+ * file it lands on must be inside the root AND pass the same rules itself.
+ * A link to a listed file stays allowed — it reaches nothing the tree does
+ * not already show. `not-listed` rather than a reason naming the target, so
+ * a hidden target's existence is not told.
+ *
+ * One rule for every path that reads a set's file: the request paths in
+ * `doc-store-workspaces.ts`, and the two that read at bind time — a browse
+ * bind's entry and a working-tree diff's members (`bind-diff.ts`), which
+ * read through the link before any request asked (security review,
+ * 2026-10-19). `excludes` are normalized, as `normalizeExcludes` gives them.
+ */
+export function landsOnListed(
+  root: string,
+  clean: string,
+  abs: string,
+  excludes: readonly string[],
+  include: readonly string[] = [],
+): 'ok' | 'bad-path' | 'not-listed' {
+  const target = realPathUnder(root, abs);
+  if (target === null) return 'bad-path';
+  if (target === clean) return 'ok';
+  if (excludes.some((p) => target === p || target.startsWith(`${p}/`))) return 'not-listed';
+  return isListedFile(root, target, include) ? 'ok' : 'not-listed';
 }
 
 /** A set's include is part of its listing, so it is part of the cache key:
