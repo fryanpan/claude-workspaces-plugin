@@ -25,7 +25,9 @@ import { mountWalkthroughIsland, walkthroughData } from '../board/walkthrough-is
 import { browserStorage } from '../boot-env.ts';
 import { mountCoachCard } from '../coach-card.ts';
 import { ensureUserIdentity } from '../identity-prompt.ts';
+import { startPageLoadReport } from '../page-load-report.ts';
 import { chooseDifficultyOn, createSizeChoice, httpSizePref } from '../review-sizes.ts';
+import { pageSentry } from '../sentry-page.ts';
 import { fetchWriteAccess, installWriteGateNotice } from '../signin/write-gate.ts';
 import {
   type CrossEntry,
@@ -60,6 +62,13 @@ async function boot(): Promise<void> {
   const host = document.getElementById('board-walkthrough');
   const wsName = document.getElementById('board-ws-name-text');
   if (!host) return;
+  // One report per load: its content is the first card, painted from the
+  // first queue read. A queue that never came reports at the deadline.
+  const loadReport = startPageLoadReport({
+    page: 'review',
+    workspaceId: null,
+    sentry: pageSentry(),
+  });
   installWriteGateNotice();
   // The coach hears that he is walking his reviews; it stops itself for anyone else.
   mountCoachCard({ page: 'review' });
@@ -74,7 +83,8 @@ async function boot(): Promise<void> {
   );
   const author = { id: user.id, name: user.name, kind: user.kind, color: user.color };
 
-  let entries: CrossEntry[] = (await fetchQueue()) ?? [];
+  const firstQueue = await fetchQueue();
+  let entries: CrossEntry[] = firstQueue ?? [];
   // Choose-difficulty is off unless this browser turned it on; off, the walk
   // shows everything and never asks the account for a size. On, the account's
   // choice arrives after the cache has painted and re-aims the walk exactly as
@@ -285,6 +295,7 @@ async function boot(): Promise<void> {
 
   mountWalkthroughIsland(host);
   render();
+  if (firstQueue !== null) loadReport.contentShown();
   startReviewLive(liveReread);
 }
 

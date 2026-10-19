@@ -257,8 +257,46 @@ export function hostMock(env: HostEnv): void {
   });
 }
 
+/** How long the frame may take to load before the report says it never did:
+ *  the app's `PAGE_LOAD_DEADLINE_MS`, so "never arrived" means the same. */
+const LOAD_DEADLINE_MS = 15_000;
+
+/**
+ * The mock page's load report: one per page load, its content stamp the
+ * frame's `load` event. The shape is the app's (`page-load-report.ts` in
+ * workspaces-app), written out here because this bundle cannot import the
+ * app; the server judges it like every other page's (`slow-load-alarm.ts`).
+ */
+export function reportMockLoad(
+  frame: HTMLIFrameElement | null,
+  workspaceId: string,
+  post: (path: string, init: RequestInit) => Promise<Response>,
+): void {
+  if (!frame || !workspaceId) return;
+  const msToBoot = Math.round(performance.now());
+  let sent = false;
+  const send = (msToContent: number | null): void => {
+    if (sent) return;
+    sent = true;
+    clearTimeout(deadline);
+    post(`/workspaces/${encodeURIComponent(workspaceId)}/load-reports`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        page: 'mock',
+        msToBoot,
+        ...(msToContent === null ? {} : { msToContent }),
+      }),
+    }).catch(() => {});
+  };
+  const deadline = setTimeout(() => send(null), LOAD_DEADLINE_MS);
+  frame.addEventListener('load', () => send(Math.round(performance.now())), { once: true });
+}
+
+const hostScript = document.currentScript as HTMLScriptElement | null;
 hostMock({
-  script: document.currentScript as HTMLScriptElement | null,
+  script: hostScript,
   placeholder: document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
   location: window.location,
   storage: () => window.localStorage,
@@ -270,3 +308,8 @@ hostMock({
   activated: () => tapConfirmed(navigator),
   startCapture: startPcmCapture,
 });
+reportMockLoad(
+  document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
+  hostScript?.dataset.workspaceId ?? '',
+  (path, init) => window.fetch(path, init),
+);

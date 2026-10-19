@@ -12,6 +12,7 @@ import { type CommentPillHandle, mountCommentPill } from './doc/doc-comment-pill
 import { mountDocFloats } from './doc/doc-floats.ts';
 import { wireDocGates } from './doc/doc-gates.ts';
 import { mountMeetingHeading } from './doc/doc-heading.ts';
+import { startDocLoadReport } from './doc/doc-load-report.ts';
 import { mountDocMargin } from './doc/doc-margin.ts';
 import { type DocMeetingMount, mountDocMeeting } from './doc/doc-meeting-mount.ts';
 import { mountPointerPillLayer } from './doc/doc-pointer-pill.ts';
@@ -119,6 +120,7 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
     },
   );
   registerMarkdownMount(mountMarkdown);
+  const reportLoad = startDocLoadReport(workspaceIdFromPath(location.pathname));
   return startRouter({
     user,
     // The answer is already in hand — every mount gets it as a value rather
@@ -131,19 +133,22 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       installStaleClientNotice(client);
       return client;
     },
-    mountFor: (ctx) => {
+    mountFor: async (ctx) => {
       mountDocCoach(ctx);
-      // A `.md` diff member → redline (code when the base is unavailable);
-      // other code/diff docs → CodeMirror; everything else → Tiptap.
-      if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) {
-        return mountRedline(ctx);
-      }
-      // A folder's video or image plays or shows on its own page.
-      if (isMediaDoc(ctx)) return mountMedia(ctx);
-      if (ctx.docType === 'code' || ctx.docType === 'diff') return mountCode(ctx);
-      return mountMarkdown(ctx);
+      await mountSurface(ctx);
+      reportLoad(ctx);
     },
   });
+}
+
+/** A `.md` diff member → redline (code when the base is unavailable); other
+ *  code/diff docs → CodeMirror; a folder's video or image → its own page;
+ *  everything else → Tiptap. */
+function mountSurface(ctx: MountContext): Promise<void> | void {
+  if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) return mountRedline(ctx);
+  if (isMediaDoc(ctx)) return mountMedia(ctx);
+  if (ctx.docType === 'code' || ctx.docType === 'diff') return mountCode(ctx);
+  return mountMarkdown(ctx);
 }
 
 /** Per-document mount for the markdown (Tiptap) surface.
