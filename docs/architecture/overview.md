@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -1047,9 +1047,20 @@ CLOSED task out in slim form: `task-row-slim.ts` drops the six fields only the
 open panel renders, and `routes/task-detail.ts` hands the whole task back to the
 one reader who opens it. `board-doc-compaction.ts` sheds the doc's delete set
 at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
-is the record and the projection is reasserted after load. `slow-load-alarm.ts`
-reports a board load that crossed its budget. Measured together on the live
-board: 1.53 MB on the wire before, 0.22 MB after.
+is the record and the projection is reasserted after load. Measured together
+on the live board: 1.53 MB on the wire before, 0.22 MB after.
+**Every page reports its own load, and a slow one raises.** The board, Home,
+the review page, a doc, a mock, a diff and a folder each post one report per
+page load naming the page type and the ms to its main content
+(`workspaces-app/src/page-load-report.ts`; the doc bundle's three page types
+are told apart in `doc/doc-load-report.ts`, and the mock's host page reports
+from `widget/src/mock-host.ts`). A page on a board posts to that board's
+`/workspaces/:ws/load-reports`; Home and `/review` post to `/api/load-reports`
+(`routes/load-reports.ts`). `slow-load-alarm.ts` judges every report against
+2,000 ms, raises through Sentry once per page type per board per five minutes,
+and `page-loads.ts` keeps one server-wide log that
+`GET /api/load-reports/slowest` reads back as the slowest load per page type
+over 24 h for the daily health check.
 **An edit re-projects the rows it names, not the board.** The projection runs on
 the server's one thread, so a whole-board pass per store event taxed every
 request on a busy board. `board-row-sync.ts` writes only the rows an event or a
