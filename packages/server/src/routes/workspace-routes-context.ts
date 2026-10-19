@@ -10,6 +10,7 @@ import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
+import type { PageLoadLog } from '../page-loads.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ShareLinks } from '../share/share-links.ts';
@@ -105,6 +106,9 @@ export interface WorkspaceRoutesContext {
    * shape that makes a cooldown pass alone and fail in a suite.
    */
   slowLoadAlarm: SlowLoadAlarm;
+  /** Every page's judged loads, server-wide, for the daily health check's
+   *  slowest-per-page read (`page-loads.ts`). */
+  pageLoads: PageLoadLog;
   /** Told when a board's own prompt words change, so an open prompts
    *  settings page re-reads (`page-nudges.ts`). */
   onBoardPromptsChanged?: (workspaceId: string) => void;

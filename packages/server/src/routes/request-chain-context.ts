@@ -32,6 +32,7 @@ import type { CoachRoutesContext } from './coach.ts';
 import type { DocMoveRoutesContext } from './doc-move.ts';
 import type { DocRoutesContext } from './docs-routes-context.ts';
 import type { HomeFeedRoutesContext } from './home-feed.ts';
+import type { LoadReportRoutesContext } from './load-reports.ts';
 import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
 import type { MountRoutesContext } from './mounts.ts';
 import type { OpsRoutesContext } from './ops.ts';
@@ -89,6 +90,7 @@ export interface RequestChainContext {
   boardTokenRoutesCtx: BoardTokenRoutesContext;
   chatAuditRoutesCtx: ChatAuditRoutesContext;
   repoRoutesCtx: RepoRoutesContext;
+  loadReportRoutesCtx: LoadReportRoutesContext;
   mountRoutesCtx: MountRoutesContext;
   libraryRoutesCtx: LibraryRoutesContext;
   docMoveRoutesCtx: DocMoveRoutesContext;

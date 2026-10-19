@@ -246,11 +246,24 @@ describe('the page bundles stay out of the SDK', async () => {
     expect(appSrc).not.toContain('@sentry/browser');
   });
 
-  it('the board still feeds its load phases into the pageload trace', () => {
+  it('the board still feeds its load phases into the pageload trace', async () => {
     // The built-in load recorder and Sentry have to tell one story: the same
     // msToBoot / msToFirstProjection the report posts land as measurements.
-    expect(boardSrc).toMatch(/setMeasurement\('ms_to_boot'/);
-    expect(boardSrc).toMatch(/setMeasurement\('ms_to_first_projection'/);
+    const { postLoadReport } = await import('../src/board/board-load-report.ts');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{}'))),
+    );
+    const setMeasurement = vi.fn();
+    postLoadReport({
+      workspaceId: 'w-1',
+      msToBoot: 120,
+      msToFirstProjection: 480,
+      sentry: { setMeasurement },
+    });
+    vi.unstubAllGlobals();
+    expect(setMeasurement).toHaveBeenCalledWith('ms_to_boot', 120, 'millisecond');
+    expect(setMeasurement).toHaveBeenCalledWith('ms_to_first_projection', 480, 'millisecond');
     expect(boardSrc).toContain('pageSentry()');
   });
 });

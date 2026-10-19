@@ -212,6 +212,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/inbox/rows/:id/reply', 'POST'],
   ]),
 
+  // Home's and the review page's load reports take those pages' own gate; the
+  // slowest-load read is the daily health check's, on the box.
+  ...family('routes/load-reports.ts', [
+    ['trusted-local', '/api/load-reports', 'POST'],
+    ['loopback-only', '/api/load-reports/slowest', 'GET'],
+  ]),
+
   ...family('routes/mcp-connector.ts', [['loopback-only', '/mcp', 'GET POST DELETE']]),
 
   ...family('routes/agent-identity.ts', [
