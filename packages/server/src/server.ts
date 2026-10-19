@@ -74,6 +74,7 @@ import { MountStore } from './mount-store.ts';
 import { parseMuxCursor } from './mux-cursor.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
+import { PageLoadLog } from './page-loads.ts';
 import { PROMPTS_CHANNEL, VOICE_CHANNEL, createPageNudger, wirePageNudges } from './page-nudges.ts';
 import {
   PARK_MIGRATION_ACTOR,
@@ -114,6 +115,7 @@ import { type DocMoveRoutesContext } from './routes/doc-move.ts';
 import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
+import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
 import { type MountRoutesContext } from './routes/mounts.ts';
 import { type OpsRoutesContext } from './routes/ops.ts';
@@ -2811,6 +2813,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const slowLoadAlarm = new SlowLoadAlarm((message, extra) =>
     captureServerError(new Error(message), extra),
   );
+  // Every page's judged loads, one server-wide log, so the daily health
+  // check can read the slowest per page type (`routes/load-reports.ts`).
+  const pageLoads = new PageLoadLog(dataDir);
+  const loadReportRoutesCtx: LoadReportRoutesContext = {
+    pageLoads,
+    slowLoadAlarm,
+    j,
+    safeJson,
+    requestAddress: (req) => server.requestIP(req)?.address,
+  };
   // The loop watchdog and the register it reads.
   //
   // `SlowLoadAlarm` above judges how long a BOARD took to load, as the browser
@@ -2855,6 +2867,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     reviewItemsFor,
     parallelismCapView,
     slowLoadAlarm,
+    pageLoads,
     resolveWorkspaceForDoc,
     boardsForDoc,
     fileUnderBoardWorkspace,
@@ -2929,6 +2942,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardTokenRoutesCtx,
     chatAuditRoutesCtx,
     repoRoutesCtx,
+    loadReportRoutesCtx,
     mountRoutesCtx,
     libraryRoutesCtx,
     docMoveRoutesCtx,

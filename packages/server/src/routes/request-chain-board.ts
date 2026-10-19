@@ -21,6 +21,7 @@ import {
   handleDocPromoteRoute,
   handleDocResourceRoutes,
 } from './docs.ts';
+import { handleLoadReportRoutes } from './load-reports.ts';
 import { handleMcpConnectorRoute } from './mcp-connector.ts';
 import { handleMeetingCalendarRoutes } from './meetings-calendar.ts';
 import { handleMountRoutes } from './mounts.ts';
@@ -57,6 +58,7 @@ export async function serveBoardRoutes(
     boardTokenRoutesCtx,
     chatAuditRoutesCtx,
     repoRoutesCtx,
+    loadReportRoutesCtx,
     mountRoutesCtx,
     libraryRoutesCtx,
     docMoveRoutesCtx,
@@ -308,6 +310,13 @@ export async function serveBoardRoutes(
       url,
       visitor,
     });
+    if (handled) return handled;
+  }
+  // --- Load reports from pages on no board, and the slowest-load read ---
+  // ./routes/load-reports.ts. Order is not load-bearing: no other family
+  // claims `/api/load-reports`.
+  {
+    const handled = await handleLoadReportRoutes(loadReportRoutesCtx, { req, pathname, visitor });
     if (handled) return handled;
   }
   // --- Mounted project folders: the mount table, and a file's address ---
