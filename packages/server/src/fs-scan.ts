@@ -420,6 +420,33 @@ export function landsOnListed(
   return isListedFile(root, target, include) ? 'ok' : 'not-listed';
 }
 
+/**
+ * A browse bind's entry doc: the root README, else the first markdown, else
+ * the first file of `sorted`, skipping each one `landsOnListed` refuses. The
+ * entry binds before any request could ask, so it needs the check itself.
+ * `entry` is undefined when every file was refused.
+ */
+export function browseEntry(
+  root: string,
+  sorted: readonly string[],
+  excludes: readonly string[],
+  include: readonly string[] = [],
+): { entry: string | undefined; refused: string[] } {
+  const candidates = new Set([
+    ...sorted.filter((r) => r.toLowerCase() === 'readme.md'),
+    ...sorted.filter((r) => r.toLowerCase().endsWith('.md')),
+    ...sorted,
+  ]);
+  const refused: string[] = [];
+  for (const rel of candidates) {
+    if (landsOnListed(root, rel, join(root, rel), excludes, include) === 'ok') {
+      return { entry: rel, refused };
+    }
+    refused.push(rel);
+  }
+  return { entry: undefined, refused };
+}
+
 /** A set's include is part of its listing, so it is part of the cache key:
  *  two sets on one root with different includes list different files. */
 function listingKey(root: string, include: readonly string[]): string {
