@@ -1166,7 +1166,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const boardPrivacy = boardPrivacyFrom({
     isLocalOnlySet: (setId) => attachmentPrivacy.isLocalOnly(setId),
     setOfDoc: (docId) => setOfDoc(docId),
-    repoKeyOf: (docId) => docStore.repos.primaryKeyFor(docStore.resolveDocId(docId)),
+    docKeyOf: (docId) => docStore.repos.primaryKeyFor(docStore.resolveDocId(docId)),
     projectIsLocalOnly: (repoKey) => mountStore.privacyOf(repoKey) === 'local-only',
     docIdsOf: (id) => taskStore.getWorkspace(id)?.docIds ?? [],
     isBoardLocked: (id) => sharingGate.isBoardLocked(id),
