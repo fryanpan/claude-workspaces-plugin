@@ -196,8 +196,9 @@ export class PageLoadLog {
           const row = JSON.parse(line) as PageLoadRow;
           // A torn tail line, or a row from a page type this server no longer
           // knows, must not take the whole read down.
-          if (typeof row.ts !== 'number' || pageTypeOf(row.page) === null) return [];
-          return [row];
+          const page = pageTypeOf(row.page);
+          if (typeof row.ts !== 'number' || page === null) return [];
+          return [{ ...row, page }];
         } catch {
           return [];
         }

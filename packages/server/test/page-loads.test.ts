@@ -8,7 +8,7 @@
  * the read refuses the edge and a browser.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PAGE_LOAD_WINDOW_MS, PageLoadLog, type SlowestByPage } from '../src/page-loads.ts';
@@ -25,6 +25,11 @@ const freshLog = () => {
   const d = mkdtempSync(join(tmpdir(), 'page-loads-'));
   dirs.push(d);
   return new PageLoadLog(d);
+};
+const freshDir = () => {
+  const d = mkdtempSync(join(tmpdir(), 'page-loads-'));
+  dirs.push(d);
+  return d;
 };
 
 describe('the slowest load per page type', () => {
@@ -49,6 +54,16 @@ describe('the slowest load per page type', () => {
     // A page type nobody loaded reads as zero loads, not as absent: zero in a
     // day is itself the finding that its reporting is broken.
     expect(read.pages.mock).toMatchObject({ loads: 0, slowestMs: null });
+  });
+
+  it('survives a torn line and a row with no page, which reads as the board', () => {
+    const d = freshDir();
+    const log = new PageLoadLog(d);
+    log.record('w-1', { page: 'doc', msToBoot: 1, msToContent: 300 }, T0);
+    appendFileSync(join(d, 'page-loads.jsonl'), `{"ts":${T0 + 1},"ms":2600}\n{"ts":${T0 + 2},"pa`);
+    const read = log.slowestByPage(T0 + 10);
+    expect(read.pages.doc).toMatchObject({ loads: 1, slowestMs: 300 });
+    expect(read.pages.board).toMatchObject({ loads: 1, slowestMs: 2_600 });
   });
 
   it('reads only the last 24 hours', () => {
