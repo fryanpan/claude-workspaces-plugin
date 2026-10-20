@@ -1060,7 +1060,11 @@ from `widget/src/mock-host.ts`). A page on a board posts to that board's
 2,000 ms, raises through Sentry once per page type per board per five minutes,
 and `page-loads.ts` keeps one server-wide log that
 `GET /api/load-reports/slowest` reads back as the slowest load per page type
-over 24 h for the daily health check.
+over 24 h for the daily health check. These reports are the only record of
+load time: the browser's Sentry bundle (`sentry-boot.ts`) reports errors and
+console logs, with no tracing, so `sentry-page.ts` and the measurements it fed
+onto a pageload span are gone. That bundle loads `async`, and an inline buffer
+in each shell (`server/src/browser-sentry.ts`) holds boot errors until it runs.
 **An edit re-projects the rows it names, not the board.** The projection runs on
 the server's one thread, so a whole-board pass per store event taxed every
 request on a busy board. `board-row-sync.ts` writes only the rows an event or a
