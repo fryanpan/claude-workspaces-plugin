@@ -12,6 +12,12 @@
  * the doc's file exactly once. Repeated `SAVE_RACE_TRIES` times (default 5),
  * because it is a race.
  *
+ * A try whose reload went out after the window tested nothing: the full save
+ * may have run first. So a slow runner is not failed for being slow. The try
+ * is kept, marked outside the window, and run again with the CPU slowed less
+ * (`SAVE_RACE_CPU` is where it starts), until it lands inside or the
+ * slowdown reaches its floor.
+ *
  * Then, at the same slowed CPU, it times single typed characters, and checks
  * that a session answering as somebody else clears what the old identity
  * left in the copy, the appended edits included.
@@ -36,15 +42,20 @@ import {
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
+import { PERSIST_DELAY_MS } from '../src/doc-cache.ts';
 import type { SaveRaceRun, SaveRaceTry } from './doc-save-race-browser-reading.ts';
 
 const DOC = '# Saltmarsh field notes\n\nThe tide table for Harborlight.\n';
 const TEXT = `document.querySelector('#editor .ProseMirror')?.textContent ?? ''`;
 const PROBE = `fetch('/api/auth/session', { cache: 'no-store' }).then(() => 'reached', () => 'failed')`;
-const SLOW_CPU = 25;
+const SLOW_CPU = Math.max(2, Number(process.env.SAVE_RACE_CPU ?? 25) || 25);
+/** The least a retry slows the CPU: below it the race is barely a race. */
+const MIN_CPU = 4;
 const TRIES = Math.max(1, Number(process.env.SAVE_RACE_TRIES ?? 5) || 5);
 const WORDS = ['slipway', 'jetty', 'mooring', 'breakwater', 'boathouse', 'lighthouse', 'buoy'];
 const KEYSTROKES = 20;
+/** Setup and the closing steps, plus room for every try to be retried once. */
+const WATCHDOG_MS = 150_000 + TRIES * 2 * 30_000;
 
 const step = (what: string): void => {
   process.stderr.write(`[doc-save-race-driver] ${what}\n`);
@@ -223,9 +234,9 @@ async function main(): Promise<void> {
       );
     };
     /** Type at the slowed CPU and reload at once, still offline. */
-    const typeAndReload = async (words: string) => {
+    const typeAndReload = async (words: string, rate = SLOW_CPU) => {
       await caretAtEnd();
-      await cpu(SLOW_CPU);
+      await cpu(rate);
       const t0 = Date.now();
       await cdp.send('Input.insertText', { text: words });
       const onScreenBeforeReload = (await text()).includes(words.trim());
@@ -256,11 +267,14 @@ async function main(): Promise<void> {
     );
 
     const tries: SaveRaceTry[] = [];
-    for (let i = 0; i < TRIES; i++) {
-      const words = ` Riverbend ${WORDS[i % WORDS.length]} ${i + 1} typed offline.`;
-      step(`try ${i + 1}: cut, type at ${SLOW_CPU}x CPU, reload at once`);
+    let rate = SLOW_CPU;
+    let attempt = 0;
+    for (let i = 0; i < TRIES; ) {
+      attempt++;
+      const words = ` Riverbend ${WORDS[i % WORDS.length]} ${attempt} typed offline.`;
+      step(`try ${i + 1} (attempt ${attempt}): cut, type at ${rate}x CPU, reload at once`);
       await goOffline();
-      const r = await typeAndReload(words);
+      const r = await typeAndReload(words, rate);
       const inFileWhileOffline = count(readFileSync(file, 'utf8'), words.trim());
       step(`try ${i + 1}: back online, reload`);
       await goOnline();
@@ -276,13 +290,18 @@ async function main(): Promise<void> {
       ).catch(() => 0);
       // A second copy would land on a later write-back: give it one.
       await sleep(landed > 0 ? 2_500 : 0);
+      const inWindow = r.typedToReloadMs < PERSIST_DELAY_MS;
       tries.push({
         words: words.trim(),
         ...r,
+        cpuSlowdown: rate,
+        inWindow,
         inFileWhileOffline,
         inFileAfterOnline: count(readFileSync(file, 'utf8'), words.trim()),
       });
       step(`try ${i + 1}: ${JSON.stringify(tries[tries.length - 1])}`);
+      if (inWindow || rate <= MIN_CPU) i++;
+      else rate = Math.max(MIN_CPU, Math.floor(rate * 0.6));
     }
 
     step(`time ${KEYSTROKES} typed characters at ${SLOW_CPU}x CPU`);
@@ -363,9 +382,9 @@ async function main(): Promise<void> {
 }
 
 setTimeout(() => {
-  step('gave up after 290s');
+  step(`gave up after ${WATCHDOG_MS / 1000}s`);
   const b = browser;
   void (b ? stopBrowser(b.proc, b.profile) : Promise.resolve()).finally(() => process.exit(3));
-}, 290_000).unref();
+}, WATCHDOG_MS).unref();
 await main();
 process.exit(0);

@@ -6,6 +6,11 @@ export interface SaveRaceTry {
   onScreenBeforeReload: boolean;
   /** Milliseconds from sending the typing to sending the reload. */
   typedToReloadMs: number;
+  /** The CPU slowdown this try typed and reloaded at. */
+  cpuSlowdown: number;
+  /** Whether the reload went out inside the full save's debounce. A try
+   *  outside it tested nothing and was run again, slowed less. */
+  inWindow: boolean;
   /** Whether the offline page after the reload showed the words. */
   shownAfterReload: boolean;
   /** Times the words appear in the doc's file while the server was down. */
@@ -20,7 +25,7 @@ export interface SaveRaceRun {
   probeOnline: string;
   /** The same probe after every cut: each must read "failed". */
   probesOffline: string[];
-  /** The CPU slowdown every try typed and reloaded at. */
+  /** The CPU slowdown the first try started at, and keystrokes were timed at. */
   cpuSlowdown: number;
   tries: SaveRaceTry[];
   /** Round trips of one typed character at the slowed CPU, in milliseconds. */
