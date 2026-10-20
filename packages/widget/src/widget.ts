@@ -344,7 +344,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const overlap = Math.max(0, innerHeight - vv.height - vv.offsetTop);
       this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap) + pageBarHeight(vv)}px`);
       // The screen's edges, for --cw-edge in styles.ts.
       this.style.setProperty('--cw-vv-left', `${vv.offsetLeft}px`);
@@ -444,8 +444,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       'color:#7a271a;font:13px/1.45 system-ui,sans-serif';
     box.textContent =
       `claude-workspaces widget: missing \`${attribute}\`. ` +
-      'Add it to the <claude-feedback-widget> tag (or the init() call) — a doc is ' +
-      'addressed under the board that owns it, and this embed names no board.';
+      'Add it to the <claude-feedback-widget> tag or the init() call: a doc is found by its board.';
     this.shadow.appendChild(box);
     console.error(`[claude-workspaces] widget embed is missing \`${attribute}\``);
   }

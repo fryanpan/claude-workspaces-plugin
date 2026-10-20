@@ -81,7 +81,7 @@ export function postingDraft(el: FeedbackWidgetEl, composer: HTMLElement, on: bo
  */
 const PHONE_MAX = 1100;
 export function isPhoneFace(): boolean {
-  return window.innerWidth <= PHONE_MAX;
+  return innerWidth <= PHONE_MAX;
 }
 
 /**
@@ -110,7 +110,7 @@ export function placeCards(w: FeedbackWidgetEl): void {
   const vv = window.visualViewport;
   const screenTop = (vv?.offsetTop ?? 0) + 8;
   const screenBot = (vv ? vv.offsetTop + vv.height : innerHeight) - 8;
-  const x = (vv ? vv.offsetLeft + vv.width : window.innerWidth) - 16 - CARD_W;
+  const x = (vv ? vv.offsetLeft + vv.width : innerWidth) - 16 - CARD_W;
   let top = screenTop;
   let bot = screenBot;
   // The mode's own buttons in the card's column — Done, the FAB's X, the list,
