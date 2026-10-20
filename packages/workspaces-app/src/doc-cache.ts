@@ -40,14 +40,29 @@ export interface CachedDoc {
 }
 
 export interface DocCacheStore {
+  /** The copy, with every edit appended since its last full write folded in. */
   get(docId: string): Promise<CachedDoc | null>;
+  /** Write the copy in full, then drop the appended edits this store has
+   *  written or read for the doc: the full state covers them. */
   put(docId: string, doc: CachedDoc): Promise<void>;
+  /** Keep one edit at once, without waiting for the next full write. `who`
+   *  is the identity it was made under: a copy folds in only its own. */
+  append(docId: string, who: string, update: Uint8Array): void;
   delete(docId: string): Promise<void>;
   clear(): Promise<void>;
 }
 
 const DB_NAME = 'cw-doc-cache';
 const STORE = 'docs';
+/**
+ * The appended edits live in a database of their own, so adding them needed
+ * no version upgrade of `cw-doc-cache`: a tab still open on the old bundle
+ * holds that database open, and an upgrade would wait on it with no copy at
+ * all for the new page. Keys are `[docId, pageId, n]`, so one range covers a
+ * doc and each page drops only the edits it knows its full write holds.
+ */
+const UPDATES_DB_NAME = 'cw-doc-cache-updates';
+const UPDATES = 'updates';
 /** A reader opens a few dozen docs; past this the oldest copies go. */
 export const MAX_CACHED_DOCS = 60;
 
@@ -58,56 +73,183 @@ function done<T>(r: IDBRequest<T>): Promise<T> {
   });
 }
 
+/** Every appended key of one doc, whoever wrote it. */
+const docRange = (docId: string): IDBKeyRange => IDBKeyRange.bound([docId], [docId, []]);
+
+interface Entry {
+  key: IDBValidKey;
+  value: unknown;
+}
+
+/** One appended edit, as stored. */
+interface AppendedEdit {
+  who: string;
+  update: Uint8Array;
+}
+
+const editOf = (v: unknown, who: string): Uint8Array[] => {
+  const e = v as Partial<AppendedEdit> | null;
+  return e && e.who === who && e.update instanceof Uint8Array ? [e.update] : [];
+};
+
+type Run = <T>(
+  mode: IDBTransactionMode,
+  fn: (s: IDBObjectStore) => IDBRequest<T>,
+) => Promise<T | null>;
+
+/** One database with one store, opened lazily; every failure reads as null. */
+function openOne(
+  idb: IDBFactory,
+  name: string,
+  store: string,
+  upgrade: (db: IDBDatabase) => void,
+): { run: Run; now: () => IDBDatabase | null; entries: (range: IDBKeyRange) => Promise<Entry[]> } {
+  let ready: IDBDatabase | null = null;
+  let db: Promise<IDBDatabase | null>;
+  try {
+    const open = idb.open(name, 1);
+    open.onupgradeneeded = () => upgrade(open.result);
+    db = done(open).then(
+      (d) => {
+        // A database somebody created without the store reads as none.
+        ready = d.objectStoreNames.contains(store) ? d : null;
+        return ready;
+      },
+      () => null,
+    );
+  } catch {
+    db = Promise.resolve(null);
+  }
+  const run: Run = async (mode, fn) => {
+    try {
+      const d = await db;
+      if (!d) return null;
+      return await done(fn(d.transaction(store, mode).objectStore(store)));
+    } catch {
+      return null;
+    }
+  };
+  /** Every key and value in `range`, read in one transaction. */
+  const entries = async (range: IDBKeyRange): Promise<Entry[]> => {
+    try {
+      const d = await db;
+      if (!d) return [];
+      const cursor = d.transaction(store, 'readonly').objectStore(store).openCursor(range);
+      return await new Promise<Entry[]>((resolve, reject) => {
+        const out: Entry[] = [];
+        cursor.onsuccess = () => {
+          const c = cursor.result;
+          if (!c) return resolve(out);
+          out.push({ key: c.primaryKey, value: c.value });
+          c.continue();
+        };
+        cursor.onerror = () => reject(cursor.error);
+      });
+    } catch {
+      return [];
+    }
+  };
+  return { run, now: () => ready, entries };
+}
+
 /** The IndexedDB-backed store, or null where the browser has none. */
 export function openDocCacheStore(
   idb: IDBFactory | undefined = globalThis.indexedDB,
 ): DocCacheStore | null {
   if (!idb) return null;
-  let db: Promise<IDBDatabase | null>;
-  try {
-    const open = idb.open(DB_NAME, 1);
-    open.onupgradeneeded = () => {
-      const store = open.result.createObjectStore(STORE);
-      store.createIndex('savedAt', 'savedAt');
-    };
-    db = done(open).catch(() => null);
-  } catch {
-    return null;
-  }
-  const run = async <T>(
-    mode: IDBTransactionMode,
-    fn: (s: IDBObjectStore) => IDBRequest<T>,
-  ): Promise<T | null> => {
-    try {
-      const d = await db;
-      if (!d) return null;
-      return await done(fn(d.transaction(STORE, mode).objectStore(STORE)));
-    } catch {
-      return null;
-    }
+  const docs = openOne(idb, DB_NAME, STORE, (d) => {
+    d.createObjectStore(STORE).createIndex('savedAt', 'savedAt');
+  });
+  const updates = openOne(idb, UPDATES_DB_NAME, UPDATES, (d) => {
+    d.createObjectStore(UPDATES);
+  });
+  const run = docs.run;
+  /** Names this page's keys apart from another tab's on the same doc. */
+  const pageId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  let seq = 0;
+  /** Per doc, the appended keys this store wrote or read: what a full write
+   *  made from this page's doc covers. */
+  const known = new Map<string, IDBValidKey[]>();
+  const remember = (docId: string, keys: IDBValidKey[]): void => {
+    const list = known.get(docId);
+    if (list) list.push(...keys);
+    else known.set(docId, [...keys]);
   };
+  const dropAppended = (docId: string) =>
+    updates.run('readwrite', (s) => s.delete(docRange(docId)));
   const prune = async (): Promise<void> => {
     const n = await run('readonly', (s) => s.count());
     if (n === null || n <= MAX_CACHED_DOCS) return;
     const oldest = await run('readonly', (s) =>
       s.index('savedAt').getAllKeys(null, n - MAX_CACHED_DOCS),
     );
-    for (const key of oldest ?? []) await run('readwrite', (s) => s.delete(key));
+    for (const key of oldest ?? []) {
+      await run('readwrite', (s) => s.delete(key));
+      if (typeof key === 'string') await dropAppended(key);
+    }
   };
   return {
     async get(docId) {
+      // The edits before the copy: a full write that lands between the two
+      // reads covers whatever it dropped, so nothing falls in the gap.
+      const edits = await updates.entries(docRange(docId));
       const rec = await run('readonly', (s) => s.get(docId) as IDBRequest<CachedDoc | undefined>);
-      return rec ?? null;
+      if (!rec) return null;
+      remember(
+        docId,
+        edits.map((e) => e.key),
+      );
+      // An edit left by another identity (written after a sign-out cleared
+      // the store) is never folded into this one's copy.
+      const appended = edits.flatMap((e) => editOf(e.value, rec.who));
+      if (appended.length === 0) return rec;
+      try {
+        return { ...rec, state: Y.mergeUpdates([rec.state, ...appended]) };
+      } catch {
+        return rec;
+      }
     },
     async put(docId, doc) {
-      await run('readwrite', (s) => s.put(doc, docId));
+      const covered = known.get(docId) ?? [];
+      known.delete(docId);
+      if ((await run('readwrite', (s) => s.put(doc, docId))) === null) {
+        // Not written: the edits are still the only record of themselves.
+        remember(docId, covered);
+        return;
+      }
       await prune();
+      const last = covered.pop();
+      if (last === undefined) return;
+      await updates.run('readwrite', (s) => {
+        for (const key of covered) s.delete(key);
+        return s.delete(last);
+      });
+    },
+    append(docId, who, update) {
+      const key: IDBValidKey = [docId, pageId, seq++];
+      remember(docId, [key]);
+      const edit: AppendedEdit = { who, update };
+      const write = (s: IDBObjectStore) => s.put(edit, key);
+      // Opened in this task when the database is ready, so the write is
+      // queued before anything that runs after this edit, a reload included.
+      const d = updates.now();
+      if (d) {
+        try {
+          write(d.transaction(UPDATES, 'readwrite').objectStore(UPDATES));
+          return;
+        } catch {}
+      }
+      void updates.run('readwrite', write);
     },
     async delete(docId) {
+      known.delete(docId);
       await run('readwrite', (s) => s.delete(docId));
+      await dropAppended(docId);
     },
     async clear() {
+      known.clear();
       await run('readwrite', (s) => s.clear());
+      await updates.run('readwrite', (s) => s.clear());
     },
   };
 }
@@ -196,7 +338,8 @@ export interface DocPersistence {
   setMeta(meta: DocMeta): void;
 }
 
-/** Debounce for writing the copy after an edit. */
+/** Debounce for writing the copy in full after an edit. Each edit made here
+ *  is appended at once (`append`); the full write folds them in. */
 export const PERSIST_DELAY_MS = 800;
 
 /**
@@ -211,11 +354,14 @@ export function persistDoc(o: PersistOptions): DocPersistence {
   let confirmed: Uint8Array | null = o.seededFrom?.serverStateVector ?? null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let refused = false;
+  /** Whether a full copy exists for appended edits to land on. */
+  let written = o.seededFrom !== null;
 
   const write = (): void => {
     if (timer !== null) clearTimeout(timer);
     timer = null;
     if (confirmed === null || refused) return;
+    written = true;
     void store.put(docId, {
       who,
       state: Y.encodeStateAsUpdate(ydoc),
@@ -231,12 +377,25 @@ export function persistDoc(o: PersistOptions): DocPersistence {
   const onHide = (): void => {
     if (timer !== null) write();
   };
-  ydoc.on('update', schedule);
+  // An edit made on this page is kept at once: a reload inside the debounce
+  // used to lose it on a slow device, where the write on page hide did not
+  // land first. What the server sent is on the server, so it waits.
+  const onUpdate = (update: Uint8Array, _origin: unknown, _doc: Y.Doc, tr: Y.Transaction): void => {
+    if (tr.local && confirmed !== null && !refused) {
+      if (!written) {
+        write();
+        return;
+      }
+      store.append(docId, who, update);
+    }
+    schedule();
+  };
+  ydoc.on('update', onUpdate);
   page?.addEventListener('pagehide', onHide);
   page?.addEventListener('visibilitychange', onHide);
   ydoc.once('destroy', () => {
     onHide();
-    ydoc.off('update', schedule);
+    ydoc.off('update', onUpdate);
     page?.removeEventListener('pagehide', onHide);
     page?.removeEventListener('visibilitychange', onHide);
   });

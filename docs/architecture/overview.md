@@ -1762,7 +1762,10 @@ Four top-level modules keep a doc page readable with no network, and none of
 them changes a layer. `doc-cache.ts` is a store adapter: the browser's
 IndexedDB copy of each opened markdown doc, written only once a server sync
 has given it a state vector to check against, tagged with the session's
-identity and cleared when another identity answers. `doc-cache-boot.ts` is
+identity and cleared when another identity answers. Each edit made on the
+page is appended to a second database (`cw-doc-cache-updates`) as it happens,
+and the full copy written 800ms later drops the edits it covers, so a reload
+loses at most the keystroke in flight. `doc-cache-boot.ts` is
 the controller tier between the router's two hooks and that store: with a
 copy, the doc's meta comes from it and the socket's doc is seeded from it
 before the socket opens; core's `connect` takes an `acceptServerState` option

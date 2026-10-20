@@ -17,10 +17,16 @@ import {
 } from '../src/doc-cache.ts';
 import type { DocMeta } from '../src/mount-context.ts';
 
-function memoryStore(): DocCacheStore & { map: Map<string, CachedDoc> } {
+function memoryStore(): DocCacheStore & {
+  map: Map<string, CachedDoc>;
+  appended: Uint8Array[];
+} {
   const map = new Map<string, CachedDoc>();
+  const appended: Uint8Array[] = [];
   return {
     map,
+    appended,
+    append: (_id, _who, update) => void appended.push(update),
     get: async (id) => map.get(id) ?? null,
     put: async (id, doc) => {
       map.set(id, doc);
@@ -154,6 +160,52 @@ describe('persistDoc', () => {
     expect(p.acceptServerState(Y.encodeStateVector(rebuilt))).toBe(false);
     await vi.runAllTimersAsync();
     expect(store.map.has('d1')).toBe(false);
+  });
+
+  it('an edit made on this page is appended at once, before the full write', async () => {
+    const store = memoryStore();
+    const server = new Y.Doc();
+    server.getText('t').insert(0, 'saltmarsh');
+    const ydoc = new Y.Doc();
+    Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(server));
+    const p = persistDoc({ ydoc, docId: 'd1', who: 'anon', meta: META, store, seededFrom: null });
+    p.acceptServerState(Y.encodeStateVector(server));
+    await vi.runAllTimersAsync();
+    const full = store.map.get('d1') as CachedDoc;
+    ydoc.getText('t').insert(0, 'typed ');
+    // No timer has run: the edit is kept already.
+    expect(store.appended).toHaveLength(1);
+    expect(store.map.get('d1')).toBe(full);
+    const reread = new Y.Doc();
+    Y.applyUpdate(reread, Y.mergeUpdates([full.state, ...store.appended]));
+    expect(reread.getText('t').toString()).toBe('typed saltmarsh');
+  });
+
+  it('what the server sends is not appended, only written in full later', async () => {
+    const store = memoryStore();
+    const server = new Y.Doc();
+    const ydoc = new Y.Doc();
+    const p = persistDoc({ ydoc, docId: 'd1', who: 'anon', meta: META, store, seededFrom: null });
+    p.acceptServerState(Y.encodeStateVector(server));
+    server.getText('t').insert(0, 'riverbend');
+    Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(server), 'socket');
+    expect(store.appended).toHaveLength(0);
+    await vi.runAllTimersAsync();
+    const reread = new Y.Doc();
+    seedFromCopy(reread, store.map.get('d1') as CachedDoc);
+    expect(reread.getText('t').toString()).toBe('riverbend');
+  });
+
+  it('the first edit on a doc with no copy yet writes the copy in full at once', () => {
+    const store = memoryStore();
+    const ydoc = new Y.Doc();
+    const p = persistDoc({ ydoc, docId: 'd1', who: 'anon', meta: META, store, seededFrom: null });
+    p.acceptServerState(Y.encodeStateVector(new Y.Doc()));
+    ydoc.getText('t').insert(0, 'harborlight');
+    expect(store.appended).toHaveLength(0);
+    const reread = new Y.Doc();
+    seedFromCopy(reread, store.map.get('d1') as CachedDoc);
+    expect(reread.getText('t').toString()).toBe('harborlight');
   });
 
   it('a hidden page writes its pending edit at once', async () => {
