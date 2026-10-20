@@ -344,7 +344,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const overlap = Math.max(0, innerHeight - vv.height - vv.offsetTop);
       this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap) + pageBarHeight(vv)}px`);
       // The screen's edges, for --cw-edge in styles.ts.
       this.style.setProperty('--cw-vv-left', `${vv.offsetLeft}px`);

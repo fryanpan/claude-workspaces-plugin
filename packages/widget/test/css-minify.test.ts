@@ -76,6 +76,15 @@ describe('minifyCss', () => {
     expect(minifyCss('.a::before { content: "on "; }')).toBe('.a::before{content:"on "}');
   });
 
+  it('drops the leading zero of a fraction, and only of a fraction', () => {
+    expect(minifyCss('.a { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); opacity: 0.5; }')).toBe(
+      '.a{box-shadow:0 8px 24px rgba(0,0,0,.18);opacity:.5}',
+    );
+    expect(minifyCss('.a { width: 10.5px; transition: opacity 0.22s; }')).toBe(
+      '.a{width:10.5px;transition:opacity .22s}',
+    );
+  });
+
   it('is idempotent', () => {
     const once = minifyCss('/* c */\n.a {\n  color: red;\n}\n.b .c { width: calc(1px + 2px); }');
     expect(minifyCss(once)).toBe(once);
