@@ -20,6 +20,7 @@ import type { DocMeta } from '../src/mount-context.ts';
 function memoryStore(): DocCacheStore & {
   map: Map<string, CachedDoc>;
   appended: Uint8Array[];
+  flushes: number;
 } {
   const map = new Map<string, CachedDoc>();
   const appended: Uint8Array[] = [];
@@ -27,6 +28,10 @@ function memoryStore(): DocCacheStore & {
     map,
     appended,
     append: (_id, _who, update) => void appended.push(update),
+    flushes: 0,
+    flush() {
+      this.flushes++;
+    },
     get: async (id) => map.get(id) ?? null,
     put: async (id, doc) => {
       map.set(id, doc);
@@ -232,5 +237,37 @@ describe('persistDoc', () => {
     listeners.get('pagehide')?.();
     await Promise.resolve();
     expect(store.map.has('d1')).toBe(true);
+  });
+  it('a page going hidden sends its waiting edits and writes in full; a visible one does neither', async () => {
+    const store = memoryStore();
+    const listeners = new Map<string, () => void>();
+    const page = {
+      addEventListener: (t: string, fn: () => void) => void listeners.set(t, fn),
+      removeEventListener: () => {},
+    };
+    const ydoc = new Y.Doc();
+    const p = persistDoc({
+      ydoc,
+      docId: 'd1',
+      who: 'anon',
+      meta: META,
+      store,
+      seededFrom: null,
+      page,
+    });
+    p.acceptServerState(Y.encodeStateVector(new Y.Doc()));
+    await vi.runAllTimersAsync();
+    store.map.clear();
+    ydoc.getText('t').insert(0, 'harborlight');
+    const state = vi.spyOn(document, 'visibilityState', 'get');
+    state.mockReturnValue('visible');
+    listeners.get('visibilitychange')?.();
+    expect(store.flushes).toBe(0);
+    expect(store.map.has('d1')).toBe(false);
+    state.mockReturnValue('hidden');
+    listeners.get('visibilitychange')?.();
+    expect(store.flushes).toBe(1);
+    expect(store.map.has('d1')).toBe(true);
+    state.mockRestore();
   });
 });

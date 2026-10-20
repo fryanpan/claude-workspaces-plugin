@@ -48,6 +48,8 @@ export interface DocCacheStore {
   /** Keep one edit at once, without waiting for the next full write. `who`
    *  is the identity it was made under: a copy folds in only its own. */
   append(docId: string, who: string, update: Uint8Array): void;
+  /** Send every edit still waiting on the database, for a page about to go. */
+  flush(): void;
   delete(docId: string): Promise<void>;
   clear(): Promise<void>;
 }
@@ -103,7 +105,12 @@ function openOne(
   name: string,
   store: string,
   upgrade: (db: IDBDatabase) => void,
-): { run: Run; now: () => IDBDatabase | null; entries: (range: IDBKeyRange) => Promise<Entry[]> } {
+): {
+  run: Run;
+  now: () => IDBDatabase | null;
+  ready: Promise<unknown>;
+  entries: (range: IDBKeyRange) => Promise<Entry[]>;
+} {
   let ready: IDBDatabase | null = null;
   let db: Promise<IDBDatabase | null>;
   try {
@@ -149,7 +156,7 @@ function openOne(
       return [];
     }
   };
-  return { run, now: () => ready, entries };
+  return { run, now: () => ready, ready: db, entries };
 }
 
 /** The IndexedDB-backed store, or null where the browser has none. */
@@ -174,6 +181,28 @@ export function openDocCacheStore(
     const list = known.get(docId);
     if (list) list.push(...keys);
     else known.set(docId, [...keys]);
+  };
+  /** Edits not yet handed to a transaction: only while the database opens. */
+  const waiting: Array<{ key: IDBValidKey; edit: AppendedEdit }> = [];
+  /**
+   * Hand every waiting edit to one transaction, opened and committed in this
+   * task. `commit()` matters on a busy page: without it the transaction ends
+   * only once the page has run the put's success event, and a reload before
+   * that aborted it, so the edit was lost with its write already sent.
+   * False when the database is not open yet.
+   */
+  const send = (): boolean => {
+    const d = updates.now();
+    if (!d) return false;
+    if (waiting.length === 0) return true;
+    const batch = waiting.splice(0);
+    try {
+      const tx = d.transaction(UPDATES, 'readwrite');
+      const s = tx.objectStore(UPDATES);
+      for (const w of batch) s.put(w.edit, w.key);
+      tx.commit();
+    } catch {}
+    return true;
   };
   const dropAppended = (docId: string) =>
     updates.run('readwrite', (s) => s.delete(docRange(docId)));
@@ -228,18 +257,12 @@ export function openDocCacheStore(
     append(docId, who, update) {
       const key: IDBValidKey = [docId, pageId, seq++];
       remember(docId, [key]);
-      const edit: AppendedEdit = { who, update };
-      const write = (s: IDBObjectStore) => s.put(edit, key);
-      // Opened in this task when the database is ready, so the write is
-      // queued before anything that runs after this edit, a reload included.
-      const d = updates.now();
-      if (d) {
-        try {
-          write(d.transaction(UPDATES, 'readwrite').objectStore(UPDATES));
-          return;
-        } catch {}
-      }
-      void updates.run('readwrite', write);
+      waiting.push({ key, edit: { who, update } });
+      // A database that never opens keeps nothing: drop what waited on it.
+      if (!send()) void updates.ready.then(() => send() || waiting.splice(0));
+    },
+    flush() {
+      send();
     },
     async delete(docId) {
       known.delete(docId);
@@ -375,7 +398,11 @@ export function persistDoc(o: PersistOptions): DocPersistence {
     timer = setTimeout(write, delay);
   };
   const onHide = (): void => {
+    store.flush();
     if (timer !== null) write();
+  };
+  const onVisibility = (): void => {
+    if (globalThis.document?.visibilityState !== 'visible') onHide();
   };
   // An edit made on this page is kept at once: a reload inside the debounce
   // used to lose it on a slow device, where the write on page hide did not
@@ -392,12 +419,12 @@ export function persistDoc(o: PersistOptions): DocPersistence {
   };
   ydoc.on('update', onUpdate);
   page?.addEventListener('pagehide', onHide);
-  page?.addEventListener('visibilitychange', onHide);
+  page?.addEventListener('visibilitychange', onVisibility);
   ydoc.once('destroy', () => {
     onHide();
     ydoc.off('update', onUpdate);
     page?.removeEventListener('pagehide', onHide);
-    page?.removeEventListener('visibilitychange', onHide);
+    page?.removeEventListener('visibilitychange', onVisibility);
   });
 
   return {
