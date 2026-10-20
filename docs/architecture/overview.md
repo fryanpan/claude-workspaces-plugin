@@ -1065,6 +1065,17 @@ load time: the browser's Sentry bundle (`sentry-boot.ts`) reports errors and
 console logs, with no tracing, so `sentry-page.ts` and the measurements it fed
 onto a pageload span are gone. That bundle loads `async`, and an inline buffer
 in each shell (`server/src/browser-sentry.ts`) holds boot errors until it runs.
+**A doc's text paints before its editor loads.** The doc entry carries only
+the router, the socket and Yjs. When the doc syncs, `doc/prose-paint.ts` draws
+the prose fragment as plain DOM with the editor's own classes, and
+`doc/markdown-mount.ts` (the editor, the panels, the margin) loads behind it;
+the editor then takes the painted element over in place
+(`editor.ts`, Tiptap's `element: { mount }`), so nothing re-flows. The code,
+media, redline and coach surfaces are each an `import()` for the same reason:
+CodeMirror alone was ~720 KB of the doc entry, minified. `doc-image-path.ts` holds the
+image-path helpers the paint and the editor share. The build strips comments
+from the stylesheets it copies (`scripts/strip-css-comments.ts`), which took
+`board.css` from 81 KB gzipped to 16 KB.
 **An edit re-projects the rows it names, not the board.** The projection runs on
 the server's one thread, so a whole-board pass per store event taxed every
 request on a busy board. `board-row-sync.ts` writes only the rows an event or a
