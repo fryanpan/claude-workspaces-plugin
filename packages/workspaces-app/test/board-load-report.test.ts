@@ -25,7 +25,7 @@ afterEach(() => {
 describe('postLoadReport', () => {
   it('posts both phases to the board’s load-reports route', () => {
     const f = captureFetch();
-    postLoadReport({ workspaceId: 'w 1', msToBoot: 120, msToFirstProjection: 900, sentry: null });
+    postLoadReport({ workspaceId: 'w 1', msToBoot: 120, msToFirstProjection: 900 });
     expect(f.calls).toHaveLength(1);
     expect(f.calls[0]?.url).toBe('/workspaces/w%201/load-reports');
     expect(f.calls[0]?.body.msToBoot).toBe(120);
@@ -36,7 +36,7 @@ describe('postLoadReport', () => {
     // That slow load is the one most worth recording, so the fallback must
     // still produce a line — with the missing phase absent, not zero.
     const f = captureFetch();
-    postLoadReport({ workspaceId: 'w-1', msToBoot: 120, msToFirstProjection: null, sentry: null });
+    postLoadReport({ workspaceId: 'w-1', msToBoot: 120, msToFirstProjection: null });
     expect(f.calls[0]?.body.msToBoot).toBe(120);
     expect('msToFirstProjection' in (f.calls[0]?.body ?? {})).toBe(false);
   });
@@ -47,35 +47,16 @@ describe('postLoadReport', () => {
       { transferSize: 100, decodedBodySize: 400 },
       { transferSize: 25, decodedBodySize: 60 },
     ] as never);
-    postLoadReport({ workspaceId: 'w-1', msToBoot: 1, msToFirstProjection: 2, sentry: null });
+    postLoadReport({ workspaceId: 'w-1', msToBoot: 1, msToFirstProjection: 2 });
     expect(f.calls[0]?.body.resourceCount).toBe(2);
     expect(f.calls[0]?.body.transferBytes).toBe(125);
     expect(f.calls[0]?.body.decodedBytes).toBe(460);
   });
 
-  it('stamps the same numbers on the pageload trace', () => {
-    captureFetch();
-    const setMeasurement = vi.fn();
-    postLoadReport({
-      workspaceId: 'w-1',
-      msToBoot: 120,
-      msToFirstProjection: 900,
-      sentry: { setMeasurement },
-    });
-    expect(setMeasurement).toHaveBeenCalledWith('ms_to_boot', 120, 'millisecond');
-    expect(setMeasurement).toHaveBeenCalledWith('ms_to_first_projection', 900, 'millisecond');
-  });
-
   it('never breaks the page it measures', () => {
-    // Both halves are hostile here: the trace throws, and the POST rejects.
     vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
-    const sentry = {
-      setMeasurement: () => {
-        throw new Error('SDK gone');
-      },
-    };
     expect(() =>
-      postLoadReport({ workspaceId: 'w-1', msToBoot: 1, msToFirstProjection: 2, sentry }),
+      postLoadReport({ workspaceId: 'w-1', msToBoot: 1, msToFirstProjection: 2 }),
     ).not.toThrow();
   });
 });

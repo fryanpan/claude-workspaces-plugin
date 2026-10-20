@@ -15,9 +15,7 @@
  * phase ends is a fact about the boot sequence. What is here is what a report
  * contains.
  */
-import { type LoadTrace, postPageLoadReport } from '../page-load-report.ts';
-
-export type { LoadTrace } from '../page-load-report.ts';
+import { postPageLoadReport } from '../page-load-report.ts';
 
 /** The one report, as `bootBoard` has it at send time. */
 export interface LoadReportInput {
@@ -28,25 +26,16 @@ export interface LoadReportInput {
    *  fallback deadline reports boot-only rather than nothing, because that
    *  slow load is the one most worth recording. */
   msToFirstProjection: number | null;
-  sentry: LoadTrace | null;
 }
 
-/** POST the board's report, and stamp the projection on the pageload trace. */
+/** POST the board's report. */
 export function postLoadReport(input: LoadReportInput): void {
-  const { workspaceId, msToBoot, msToFirstProjection, sentry } = input;
+  const { workspaceId, msToBoot, msToFirstProjection } = input;
   postPageLoadReport({
     page: 'board',
     workspaceId,
     msToBoot,
     msToContent: msToFirstProjection,
     ...(msToFirstProjection !== null ? { fields: { msToFirstProjection } } : {}),
-    sentry,
   });
-  try {
-    if (msToFirstProjection !== null) {
-      sentry?.setMeasurement('ms_to_first_projection', msToFirstProjection, 'millisecond');
-    }
-  } catch {
-    // The recorder never breaks the page it measures.
-  }
 }
