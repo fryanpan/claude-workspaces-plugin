@@ -18,8 +18,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * is satisfied by a module that never ran at all.
  */
 const init = vi.fn();
-const browserTracingIntegration = vi.fn(() => ({ name: 'BrowserTracing' }));
-const browserProfilingIntegration = vi.fn(() => ({ name: 'BrowserProfiling' }));
 const consoleLoggingIntegration = vi.fn((opts: { levels: string[] }) => ({
   name: 'ConsoleLogs',
   levels: opts.levels,
@@ -27,25 +25,20 @@ const consoleLoggingIntegration = vi.fn((opts: { levels: string[] }) => ({
 
 vi.mock('@sentry/browser', () => ({
   init,
-  browserTracingIntegration,
-  browserProfilingIntegration,
   consoleLoggingIntegration,
-  setMeasurement: vi.fn(),
 }));
 
 type InitOptions = {
   dsn: string;
   release?: string;
-  tracesSampleRate: number;
-  profileSessionSampleRate: number;
-  profileLifecycle: string;
+  tracesSampleRate?: number;
+  profileSessionSampleRate?: number;
   enableLogs: boolean;
   enableMetrics: boolean;
   integrations: Array<{ name: string; levels?: string[] }>;
   sendDefaultPii: boolean;
   initialScope: { tags: Record<string, string> };
   beforeSend: (e: unknown) => unknown;
-  beforeSendTransaction: (e: unknown) => unknown;
   beforeSendLog: (e: unknown) => unknown;
   beforeSendMetric: (e: unknown) => unknown;
 };
@@ -84,7 +77,6 @@ describe('the page Sentry entry', () => {
     shell({ 'sentry-page-type': 'doc' });
     await boot();
     expect(init).not.toHaveBeenCalled();
-    expect((window as unknown as Record<string, unknown>).__cwSentry).toBeUndefined();
   });
 
   it('inits once when the shell names a DSN (the control for the case above)', async () => {
@@ -92,7 +84,6 @@ describe('the page Sentry entry', () => {
     await boot();
     expect(init).toHaveBeenCalledTimes(1);
     expect((init.mock.calls[0]?.[0] as InitOptions).dsn).toBe(DSN);
-    expect((window as unknown as Record<string, unknown>).__cwSentry).toBeDefined();
   });
 
   it.each(['board', 'doc', 'mockup', 'landing'])(
@@ -132,18 +123,16 @@ describe('the page Sentry entry', () => {
     expect((init.mock.calls[0]?.[0] as InitOptions).release).toBeUndefined();
   });
 
-  it('profiles every session while a trace is open, and forwards warn/error console lines as logs', async () => {
+  it('reports errors and warn/error console lines, and no traces or profiles', async () => {
     shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'board' });
     await boot();
     const opts = init.mock.calls[0]?.[0] as InitOptions;
-    const names = opts.integrations.map((i) => i.name);
-    expect(names).toContain('BrowserTracing');
-    expect(names).toContain('BrowserProfiling');
-    // Profiles ride the traces: a session is always sampled, and the
-    // profiler runs whenever a root span is open rather than on a manual
-    // start nobody calls.
-    expect(opts.profileSessionSampleRate).toBe(1);
-    expect(opts.profileLifecycle).toBe('trace');
+    // Nothing reads a browser span — page load times are the server's
+    // /load-reports — and tracing plus profiling were 24 KB gzipped of an
+    // SDK every page downloads. Unset rates are what keep them off.
+    expect(opts.integrations.map((i) => i.name)).toEqual(['ConsoleLogs']);
+    expect(opts.tracesSampleRate).toBeUndefined();
+    expect(opts.profileSessionSampleRate).toBeUndefined();
     // Logs and metrics stated on, not left to the SDK default.
     expect(opts.enableLogs).toBe(true);
     expect(opts.enableMetrics).toBe(true);
@@ -205,14 +194,13 @@ describe('the page Sentry entry', () => {
     expect(send(collision)).not.toBeNull();
   });
 
-  it('scrubs every event and every transaction on the way out', async () => {
+  it('scrubs every event on the way out', async () => {
     shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'doc' });
     await boot();
     const opts = init.mock.calls[0]?.[0] as InitOptions;
     expect(opts.sendDefaultPii).toBe(false);
-    expect(opts.tracesSampleRate).toBe(1);
     const needle = 'quarterly-comp-review.md';
-    for (const hook of [opts.beforeSend, opts.beforeSendTransaction]) {
+    for (const hook of [opts.beforeSend]) {
       const event = {
         transaction: `/workspaces/${WS_ID}/docs/${needle}`,
         request: { url: `https://example.test/review/${needle}` },

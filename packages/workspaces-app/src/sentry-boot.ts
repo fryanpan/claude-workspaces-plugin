@@ -10,13 +10,14 @@ import { scrubBrowserEvent, scrubTelemetryItem } from '@claude-workspaces/core/t
  * `import()` inside app.js / board.js / the widget, and why the page type is a
  * TAG rather than something read back off the URL.
  *
- * It is a side-effecting module on purpose. There is no export anything else
- * imports, and nothing waits for it: a module script runs in document order,
- * so this one — emitted in `<head>` — has already called `Sentry.init` by
- * the time the page's own bundle executes. That is also what puts the
- * pageload transaction's start as early as the browser can see it.
+ * NAMED IMPORTS ONLY. `import * as Sentry` with the namespace parked on
+ * `window` kept every export alive — replay, feedback, the lot — and was
+ * about 100 KB of the 157 KB. Tracing (19 KB) and profiling (5 KB) went too: nothing
+ * reads a browser span, because page load times are the server's
+ * `/load-reports` and its two-second alarm. Errors and console logs are what
+ * is left, and are what this file is for.
  */
-import * as Sentry from '@sentry/browser';
+import { consoleLoggingIntegration, init } from '@sentry/browser';
 import { BUILD_ID } from './stale-client.ts';
 
 /** The value a tag takes when the shell did not name one. Never omitted:
@@ -32,7 +33,7 @@ function meta(name: string): string {
 const dsn = meta('sentry-dsn');
 
 if (dsn) {
-  Sentry.init({
+  init({
     dsn,
     // The deploy, not the bundle — see browser-sentry.ts. Omitted rather
     // than guessed at when the shell names none (dev, staging).
@@ -41,24 +42,11 @@ if (dsn) {
     // Sentry projects.
     environment: meta('sentry-environment') || undefined,
     integrations: [
-      Sentry.browserTracingIntegration(),
-      // Profiles ride along with the traces above: the profiler runs while a
-      // sampled root span (pageload, navigation) is open, so a slow board
-      // boot shows WHICH function was slow. It needs the page's HTML to have
-      // arrived with `Document-Policy: js-profiling` — every shell does, see
-      // HTML_SHELL_HEADERS in packages/server/src/shells.ts.
-      Sentry.browserProfilingIntegration(),
-      // console.warn / console.error become Sentry log lines next to the
-      // trace they happened in. Not `log`/`info`: the app narrates too much
-      // there for the volume to be worth its bandwidth on an iPad.
-      Sentry.consoleLoggingIntegration({ levels: ['warn', 'error'] }),
+      // console.warn / console.error become Sentry log lines. Not
+      // `log`/`info`: the app narrates too much there for the volume to be
+      // worth its bandwidth on an iPad.
+      consoleLoggingIntegration({ levels: ['warn', 'error'] }),
     ],
-    // Low-traffic internal tool: sample everything rather than guess at a
-    // rate that would drop the one slow iPad load that matters.
-    tracesSampleRate: 1.0,
-    // Same reasoning for profiles: every session, whenever a trace is open.
-    profileSessionSampleRate: 1.0,
-    profileLifecycle: 'trace',
     // Sentry's defaults, stated so a future SDK cannot silently flip them.
     enableLogs: true,
     enableMetrics: true,
@@ -66,7 +54,7 @@ if (dsn) {
     sendDefaultPii: false,
     initialScope: {
       tags: {
-        // What makes "compare load times across page types" a GROUP BY.
+        // What makes "which page type is this error from" a GROUP BY.
         page_type: meta('sentry-page-type') || UNKNOWN,
         // Kept as a tag now that `release` names the deploy: the build id is
         // a content hash of the built assets, so it still answers "which
@@ -94,15 +82,11 @@ if (dsn) {
     // going through here.
     beforeSend: (event) =>
       isRecoveredMockCollision(event) ? null : (scrubBrowserEvent(event) as typeof event),
-    beforeSendTransaction: (event) => scrubBrowserEvent(event) as typeof event,
-    // Logs and metrics travel in their own envelopes and never pass the two
-    // hooks above; a console line or a metric attribute is exactly where a
+    // Logs and metrics travel in their own envelopes and never pass the
+    // hook above; a console line or a metric attribute is exactly where a
     // doc path would be pasted, mid-sentence, which is the one shape the
     // event floor cannot see. See scrubTelemetryItem.
     beforeSendLog: (log) => scrubTelemetryItem(log) as typeof log,
     beforeSendMetric: (metric) => scrubTelemetryItem(metric) as typeof metric,
   });
-  // How `board-app.ts` reaches the SDK for its own load-phase measurements
-  // without importing (and so bundling) it a second time. See sentry-page.ts.
-  (window as unknown as Record<string, unknown>).__cwSentry = Sentry;
 }
