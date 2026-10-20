@@ -19,8 +19,8 @@ import { scrubBrowserEvent, scrubTelemetryItem } from '@claude-workspaces/core/t
  *
  * NAMED IMPORTS ONLY. `import * as Sentry` with the namespace parked on
  * `window` kept every export alive — replay, feedback, the lot — and was
- * about 100 KB of the 157 KB. Tracing (19 KB) and profiling (5 KB) went too: nothing
- * reads a browser span, because page load times are the server's
+ * about 100 KB of the 157 KB. Tracing (19 KB) and profiling (5 KB) went too:
+ * nothing reads a browser span, because page load times are the server's
  * `/load-reports` and its two-second alarm. Errors and console logs are what
  * is left, and are what this file is for.
  */
