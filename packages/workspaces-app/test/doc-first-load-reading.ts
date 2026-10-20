@@ -6,6 +6,9 @@ export interface DocLoad {
   bytesBeforeText: number;
   /** ms from navigation start to the editor being mounted on that text. */
   editorMs: number;
+  /** ms from navigation start to the first request for the editor's chunk,
+   *  or null when the page never asked for it. */
+  editorChunkRequestedMs: number | null;
 }
 
 /** What the driver prints. */

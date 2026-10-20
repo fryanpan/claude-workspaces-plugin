@@ -1764,6 +1764,8 @@ IndexedDB copy of each opened markdown doc, written only once a server sync
 has given it a state vector to check against, tagged with the session's
 identity and cleared when another identity answers. Each edit made on the
 page is appended to a second database (`cw-doc-cache-updates`) as it happens,
+in a transaction committed at once (one left to auto-commit was measured
+lost to a reload on a slowed CPU),
 and the full copy written 800ms later drops the edits it covers, so a reload
 loses at most the keystroke in flight. `doc-cache-boot.ts` is
 the controller tier between the router's two hooks and that store: with a

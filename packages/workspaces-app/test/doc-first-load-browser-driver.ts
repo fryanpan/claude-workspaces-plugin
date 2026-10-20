@@ -9,7 +9,9 @@
  * 150 ms round trip) with the CPU slowed four times; the unthrottled one goes
  * straight to the server. A script installed before the page's own records
  * when the doc's text first appears in `#editor`, how many bytes the page had
- * transferred by then, and when the editor itself mounted.
+ * transferred by then, and when the editor itself mounted. Once the editor is
+ * up, the page's resource entries give when the editor's chunk
+ * (`markdown-mount-*.js`) was first requested, on the same clock.
  *
  * `DOC_FIRST_LOAD_DIST=<dir>` serves an already-built bundle instead of
  * building this tree's, which is how the PR measured the bundle before it.
@@ -54,6 +56,9 @@ const DOC = [
   NEEDLE,
   '',
 ].join('\n');
+
+/** The chunk that mounts the editor (`doc/markdown-mount.ts`, app.ts). */
+const EDITOR_CHUNK = String(/^\/app\/markdown-mount-[a-z0-9]+\.js$/);
 
 const step = (what: string): void => {
   process.stderr.write(`[doc-first-load-driver] ${what}\n`);
@@ -125,11 +130,22 @@ async function coldLoad(url: string, cpuSlowdown: number): Promise<DocLoad> {
       const v = (await cdp.evaluate('window.__cwEditor ?? null')) as { at: number } | null;
       return v;
     });
+    // Read after the editor mounted, so its chunk has finished and has an entry.
+    const editorChunkAt = (await cdp.evaluate(`(() => {
+      const starts = performance.getEntriesByType('resource')
+        .filter((r) => ${EDITOR_CHUNK}.test(new URL(r.name).pathname))
+        .map((r) => r.startTime);
+      return starts.length ? Math.min(...starts) : null;
+    })()`)) as number | null;
     cdp.close();
     return {
-      textMs: Math.round(text.at),
+      // Unrounded: the order case compares the text's stamp with the chunk's
+      // request, and the page makes that request in the microtask after it
+      // paints, so the two can sit inside one millisecond.
+      textMs: text.at,
       bytesBeforeText: text.bytes,
-      editorMs: Math.round(editor.at),
+      editorMs: editor.at,
+      editorChunkRequestedMs: editorChunkAt,
     };
   } finally {
     await stopBrowser(b.proc, b.profile);

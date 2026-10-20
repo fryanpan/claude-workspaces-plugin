@@ -17,10 +17,13 @@ import type { SaveRaceRun } from './doc-save-race-browser-reading.ts';
 const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'doc-save-race-browser-driver.ts');
-/** Two bundle builds, one launch, and per try a cut, a slowed reload and a
- *  server boot. */
-const SUITE_MS = 310_000;
-const SPAWN_MS = 300_000;
+/** Two bundle builds, one launch, and per attempt a cut, a slowed reload and
+ *  a server boot: above the driver's own watchdog for its capped attempts. */
+const SUITE_MS = 470_000;
+const SPAWN_MS = 460_000;
+/** The tries the driver needs inside the window by default. Fewer, once its
+ *  attempts are used up, fails the case below. */
+const TRIES = 5;
 
 let run: SaveRaceRun | null = null;
 const result = (): SaveRaceRun => {
@@ -42,26 +45,31 @@ describe.skipIf(CHROME === null)('an offline doc reloaded right after typing on 
     expect(probesOffline.every((p) => p === 'failed')).toBe(true);
   });
 
-  it('each reload came inside the save window, with the words already on screen', () => {
+  it('every try reloaded inside the save window at some slowdown, words on screen', () => {
+    // The precondition of the race, not a speed claim: a reload after the
+    // full save would pass with the bug still in place, so a try outside the
+    // window is run again slowed less, and only tries inside it count.
     const { tries, cpuSlowdown } = result();
     expect(cpuSlowdown).toBe(25);
-    for (const t of tries) {
+    const inside = tries.filter((t) => t.inWindow);
+    expect(inside).toHaveLength(TRIES);
+    for (const t of inside) {
       expect(t.onScreenBeforeReload, t.words).toBe(true);
-      // The precondition of the race, not a speed claim: a reload after the
-      // full save would pass with the bug still in place.
       expect(t.typedToReloadMs, t.words).toBeLessThan(PERSIST_DELAY_MS);
     }
   });
 
-  it('the words survive the offline reload, every try', () => {
-    const lost = result().tries.filter((t) => !t.shownAfterReload);
-    expect(lost.map((t) => t.words)).toEqual([]);
+  it('the words survive the offline reload, every try inside the window', () => {
+    const lost = result().tries.filter((t) => t.inWindow && !t.shownAfterReload);
+    expect(lost.map((t) => `${t.words} at ${t.cpuSlowdown}x`)).toEqual([]);
   });
 
   it('once online the words reach the file exactly once, and were not there while offline', () => {
     for (const t of result().tries) {
       expect(t.inFileWhileOffline, t.words).toBe(0);
-      expect(t.inFileAfterOnline, t.words).toBe(1);
+      // Never twice, inside the window or not; once, for every try that counts.
+      expect(t.inFileAfterOnline, t.words).toBeLessThanOrEqual(1);
+      if (t.inWindow) expect(t.inFileAfterOnline, t.words).toBe(1);
     }
   });
 
