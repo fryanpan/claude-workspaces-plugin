@@ -444,8 +444,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       'color:#7a271a;font:13px/1.45 system-ui,sans-serif';
     box.textContent =
       `claude-workspaces widget: missing \`${attribute}\`. ` +
-      'Add it to the <claude-feedback-widget> tag (or the init() call) — a doc is ' +
-      'addressed under the board that owns it, and this embed names no board.';
+      'Add it to the <claude-feedback-widget> tag or the init() call: a doc is found by its board.';
     this.shadow.appendChild(box);
     console.error(`[claude-workspaces] widget embed is missing \`${attribute}\``);
   }

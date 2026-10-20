@@ -275,15 +275,6 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
   // page is wider than a phone.
   const vv = window.visualViewport;
   pop.style.left = `${Math.min(cx + 6, (vv ? vv.offsetLeft + vv.width : innerWidth) - 340)}px`;
-  // Below the spot, unless that runs it past the bottom: then it ends 8px
-  // above the bottom edge, with its reply box and Reply button on screen. The
-  // comment list scrolls a thread's element to the middle, and one on a
-  // page's last lines stays near the bottom. Measured once, in the frame
-  // before the first paint, when the page's scripts have added any ask to it
-  // (`widget-ask.ts`), so it does not move after it is drawn.
-  requestAnimationFrame(() => {
-    pop.style.top = `${Math.min(cy + 6, innerHeight - pop.offsetHeight - 8)}px`;
-  });
   const snippet = threadSnippet(t.anchor);
   const status = t.anchor.kind === 'orphan' ? 'orphan' : t.status;
   pop.innerHTML =
@@ -316,6 +307,17 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
     cList.appendChild(row);
   }
   el.shadow.appendChild(pop);
+  // Below the spot, unless that runs it past the bottom: then it ends 8px
+  // above the bottom edge, with its reply box and Reply button on screen. The
+  // comment list scrolls a thread's element to the middle, and one on a
+  // page's last lines stays near the bottom. Measured once, in the microtask
+  // after the page's own observers have added an ask or a suggestion to it
+  // (`widget-ask.ts`, `edit/edit-suggest.ts`): theirs was queued by the
+  // append above, so it runs first. Nothing else sees the popover before it
+  // has its place, and it does not move after.
+  queueMicrotask(() => {
+    pop.style.top = `${Math.min(cy + 6, innerHeight - pop.offsetHeight - 8)}px`;
+  });
   pop.querySelector('.close')?.addEventListener('click', () => pop.remove());
   cList.addEventListener('click', (ev) => {
     const clip = (ev.target as Element).closest('[data-clip]')?.getAttribute('data-clip');
