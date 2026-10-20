@@ -119,5 +119,51 @@ if (gz.length > BUDGET_BYTES) {
 
 console.log('✅ within budget');
 
+/**
+ * The ceiling for `/app/sentry.js`, gzipped — every page with a DSN downloads
+ * it, so it is the other bundle a guest page and a phone pay for.
+ *
+ *   origin/main   157,190 gz   namespace import, tracing, profiling
+ *   20 Oct 2026    35,054 gz   named imports, errors and console logs only
+ *
+ * Both read off the built client's `dist/sentry.js`, level 9. This gate's
+ * own build carries no sourcemap comment and reads about 0.8 KB lower.
+ *
+ * `import * as Sentry` with the namespace parked on `window` kept the whole
+ * SDK; named imports alone took it to 57 KB, and dropping tracing and
+ * profiling, which nothing read, to 35 KB. A namespace import or a new
+ * integration is what puts it back over, and this is where that shows.
+ *
+ * Built here rather than read from `packages/workspaces-app/dist`, so the gate
+ * needs no client build first. The options are the Sentry entry's in
+ * `packages/workspaces-app/scripts/build.ts`.
+ */
+const SENTRY_BUDGET_BYTES = 40 * 1024;
+const sentry = await Bun.build({
+  entrypoints: [join(import.meta.dir, '..', 'packages', 'workspaces-app', 'src', 'sentry-boot.ts')],
+  target: 'browser',
+  format: 'esm',
+  splitting: false,
+  minify: true,
+  define: { __LF_BUILD_ID__: JSON.stringify('0000000000000000') },
+});
+const sentryText = sentry.success ? await sentry.outputs[0]?.text() : undefined;
+if (sentryText === undefined) {
+  console.error('sentry entry failed to build:');
+  for (const m of sentry.logs) console.error(m);
+  process.exit(2);
+}
+const sentryGz = gzipSync(sentryText, { level: 9 });
+console.log(
+  `sentry.js: ${(sentryText.length / 1024).toFixed(1)} KB raw, ${(sentryGz.length / 1024).toFixed(1)} KB gzipped (budget: ${SENTRY_BUDGET_BYTES / 1024} KB gz)`,
+);
+if (sentryGz.length > SENTRY_BUDGET_BYTES) {
+  console.error(
+    `❌ sentry.js OVER BUDGET by ${((sentryGz.length - SENTRY_BUDGET_BYTES) / 1024).toFixed(1)} KB gzipped`,
+  );
+  process.exit(1);
+}
+console.log('✅ sentry.js within budget');
+
 // side-effect: touch stat so any tooling picks up the build time
 statSync(WIDGET_IIFE);
