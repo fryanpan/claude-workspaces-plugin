@@ -115,8 +115,16 @@ function isOurs(node: Node): boolean {
   return false;
 }
 
-/** True for a head node that belongs to the mock rather than to the server. */
+/**
+ * True for a head node that belongs to the mock rather than to the server.
+ *
+ * Not the widget's pin stylesheet, which it puts in the head before this
+ * script starts. Claimed as round one's, the first swap took it away, and
+ * every pin after that was an unstyled box with no drop, so a comment left
+ * after a round showed no pin at all.
+ */
 function isMockHeadNode(node: Element): boolean {
+  if (isOurs(node)) return false;
   if (node.tagName === 'STYLE') return true;
   return node.tagName === 'LINK' && (node.getAttribute('rel') ?? '').toLowerCase() === 'stylesheet';
 }
