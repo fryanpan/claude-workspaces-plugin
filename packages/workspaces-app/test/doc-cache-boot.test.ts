@@ -32,6 +32,7 @@ function storeWith(entries: Record<string, CachedDoc>): DocCacheStore {
   return {
     get: async (id) => m.get(id) ?? null,
     put: async (id, d) => void m.set(id, d),
+    append: () => {},
     delete: async (id) => void m.delete(id),
     clear: async () => m.clear(),
   };
