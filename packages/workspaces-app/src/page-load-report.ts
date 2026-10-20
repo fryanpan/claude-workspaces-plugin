@@ -26,12 +26,6 @@ import { asBackgroundWrite } from './signin/write-gate.ts';
 
 export type PageType = 'board' | 'home' | 'review' | 'doc' | 'mock' | 'diff' | 'folder';
 
-/** The pageload trace to stamp alongside the POST, or null when the SDK
- *  never loaded — `pageSentry()`'s answer. */
-export interface LoadTrace {
-  setMeasurement(name: string, value: number, unit: string): void;
-}
-
 export interface PageLoadReportInput {
   page: PageType;
   /** The board the page is on, or null for Home and the review page. */
@@ -41,7 +35,6 @@ export interface PageLoadReportInput {
   msToContent: number | null;
   /** Page-specific numbers that ride along, flat. */
   fields?: Record<string, number>;
-  sentry?: LoadTrace | null;
 }
 
 /** Where a report goes: its board's route, or the one for pages on no board. */
@@ -52,14 +45,13 @@ export function loadReportUrl(workspaceId: string | null): string {
 }
 
 /**
- * POST the report, and stamp the content time on the pageload trace.
+ * POST the report.
  *
  * Fire-and-forget by construction: a recorder must never break the page it
- * measures, so the fetch swallows its own failure and the trace write is
- * wrapped.
+ * measures, so the fetch swallows its own failure.
  */
 export function postPageLoadReport(input: PageLoadReportInput): void {
-  const { page, workspaceId, msToBoot, msToContent, fields, sentry } = input;
+  const { page, workspaceId, msToBoot, msToContent, fields } = input;
   // What the network actually moved: "slow because big" and "slow because
   // far" need different fixes, and the report should tell them apart.
   const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
@@ -83,12 +75,6 @@ export function postPageLoadReport(input: PageLoadReportInput): void {
       }),
     }).catch(() => {});
   });
-  try {
-    sentry?.setMeasurement('ms_to_boot', msToBoot, 'millisecond');
-    if (msToContent !== null) sentry?.setMeasurement('ms_to_content', msToContent, 'millisecond');
-  } catch {
-    // The recorder never breaks the page it measures.
-  }
 }
 
 /** How long a page waits for its content before reporting that it never came.
@@ -112,7 +98,6 @@ export interface PageLoadClock {
 export function startPageLoadReport(opts: {
   page: PageType;
   workspaceId: string | null;
-  sentry?: LoadTrace | null;
   deadlineMs?: number;
 }): PageLoadClock {
   let page = opts.page;
@@ -127,7 +112,6 @@ export function startPageLoadReport(opts: {
       workspaceId: opts.workspaceId,
       msToBoot,
       msToContent,
-      sentry: opts.sentry ?? null,
     });
   };
   const deadline = setTimeout(() => send(null), opts.deadlineMs ?? PAGE_LOAD_DEADLINE_MS);

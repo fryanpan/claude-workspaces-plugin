@@ -17,7 +17,6 @@
  */
 import type { MountContext } from '../mount-context.ts';
 import { type PageType, startPageLoadReport } from '../page-load-report.ts';
-import { pageSentry } from '../sentry-page.ts';
 
 /** Which page type a mounted document is. */
 export function docPageType(ctx: Pick<MountContext, 'docType' | 'workspaceId'>): PageType {
@@ -36,7 +35,6 @@ export function startDocLoadReport(boardId: string | null): (ctx: MountContext) 
   let pending: ReturnType<typeof startPageLoadReport> | null = startPageLoadReport({
     page: 'doc',
     workspaceId: boardId,
-    sentry: pageSentry(),
   });
   return (ctx) => {
     const report = pending;
