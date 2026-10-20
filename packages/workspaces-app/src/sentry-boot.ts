@@ -3,12 +3,19 @@ import { scrubBrowserEvent, scrubTelemetryItem } from '@claude-workspaces/core/t
 /**
  * The browser's Sentry init — one entry, every page type.
  *
- * Built to `dist/sentry.js` and loaded by a `<script type="module"
- * src="/app/sentry.js">` that a shell emits ONLY when the box has a DSN
- * configured. `packages/server/src/browser-sentry.ts` is the other half and
- * carries the reasoning: why it is a separate script rather than an
- * `import()` inside app.js / board.js / the widget, and why the page type is a
- * TAG rather than something read back off the URL.
+ * Built to `dist/sentry.js` and loaded by an `async` module script that a
+ * shell emits ONLY when the box has a DSN configured.
+ * `packages/server/src/browser-sentry.ts` is the other half and carries the
+ * reasoning: why it is a separate script rather than an `import()` inside
+ * app.js / board.js / the widget, why it is `async`, and why the page type is
+ * a TAG rather than something read back off the URL.
+ *
+ * It is a side-effecting module on purpose, and NOTHING WAITS FOR IT. It used
+ * to be a plain module script ahead of the page's, which made every page's
+ * own script wait for this one to download: 157 KB gzipped, a Home load of
+ * 5.5 s on the owner's iPad (20 Oct 2026). Now it runs whenever it arrives,
+ * and the errors a page threw before then are held by the shell's inline
+ * buffer and filed here — see `drainEarlyErrors`.
  *
  * NAMED IMPORTS ONLY. `import * as Sentry` with the namespace parked on
  * `window` kept every export alive — replay, feedback, the lot — and was
@@ -17,7 +24,7 @@ import { scrubBrowserEvent, scrubTelemetryItem } from '@claude-workspaces/core/t
  * `/load-reports` and its two-second alarm. Errors and console logs are what
  * is left, and are what this file is for.
  */
-import { consoleLoggingIntegration, init } from '@sentry/browser';
+import { captureException, consoleLoggingIntegration, init } from '@sentry/browser';
 import { BUILD_ID } from './stale-client.ts';
 
 /** The value a tag takes when the shell did not name one. Never omitted:
@@ -89,4 +96,33 @@ if (dsn) {
     beforeSendLog: (log) => scrubTelemetryItem(log) as typeof log,
     beforeSendMetric: (metric) => scrubTelemetryItem(metric) as typeof metric,
   });
+  drainEarlyErrors();
+}
+
+/**
+ * File what the shell's inline buffer caught before this script ran.
+ *
+ * `init` has installed the SDK's own `error` / `unhandledrejection` handlers,
+ * so the buffer is closed first — from here an error is the SDK's, and one
+ * filed twice would be counted twice. The buffer and its global name are
+ * `EARLY_ERROR_BUFFER` in browser-sentry.ts. A mock round's recovered
+ * collision is judged against the swap window the buffer copied when it held
+ * the error, since that window has long closed by now.
+ */
+function drainEarlyErrors(): void {
+  const early = (window as unknown as { __cwSentryEarly?: unknown }).__cwSentryEarly as
+    | (Array<{ kind: string; error: unknown; scope?: Record<string, unknown> }> & {
+        done?: boolean;
+      })
+    | undefined;
+  if (!Array.isArray(early)) return;
+  early.done = true;
+  for (const { kind, error, scope } of early.splice(0)) {
+    const report =
+      error instanceof Error
+        ? { exception: { values: [{ type: error.name, value: error.message }] } }
+        : { message: String(error) };
+    if (isRecoveredMockCollision(report, scope ?? {})) continue;
+    captureException(error, { mechanism: { type: `auto.browser.early.${kind}`, handled: false } });
+  }
 }

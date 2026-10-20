@@ -74,6 +74,15 @@ const DEPTH_KEY = '__cwMockSwapRecoverableInsert';
  */
 const NAMES_KEY = '__cwMockSwapRecoverableNames';
 
+/**
+ * Both keys, for the one reader that cannot import this module: the inline
+ * error buffer a shell carries ahead of `/app/sentry.js`
+ * (`EARLY_ERROR_BUFFER` in `packages/server/src/browser-sentry.ts`). It copies
+ * them at the moment it holds an error, so an error held before the SDK
+ * arrived is judged against the window as it stood when it was raised.
+ */
+export const SWAP_SCOPE_KEYS = [DEPTH_KEY, NAMES_KEY] as const;
+
 /** Deeper than the swap ever nests; a stored value above it is not ours. */
 const MAX_DEPTH = 8;
 

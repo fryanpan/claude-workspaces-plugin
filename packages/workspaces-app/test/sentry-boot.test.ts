@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * is satisfied by a module that never ran at all.
  */
 const init = vi.fn();
+const captureException = vi.fn();
 const consoleLoggingIntegration = vi.fn((opts: { levels: string[] }) => ({
   name: 'ConsoleLogs',
   levels: opts.levels,
@@ -25,6 +26,7 @@ const consoleLoggingIntegration = vi.fn((opts: { levels: string[] }) => ({
 
 vi.mock('@sentry/browser', () => ({
   init,
+  captureException,
   consoleLoggingIntegration,
 }));
 
@@ -63,10 +65,11 @@ const WS_ID = 'w-abc123';
 describe('the page Sentry entry', () => {
   beforeEach(() => {
     init.mockClear();
+    captureException.mockClear();
     document.head.innerHTML = '';
-    // Removed, not set to undefined: the next test must see a page where the
-    // module never ran, which is the state an unconfigured box is in.
-    Reflect.deleteProperty(window, '__cwSentry');
+    // Removed, not set to undefined: the next test must see a page the
+    // shell's inline buffer never ran on.
+    Reflect.deleteProperty(window, '__cwSentryEarly');
   });
 
   afterEach(() => {
@@ -84,6 +87,47 @@ describe('the page Sentry entry', () => {
     await boot();
     expect(init).toHaveBeenCalledTimes(1);
     expect((init.mock.calls[0]?.[0] as InitOptions).dsn).toBe(DSN);
+  });
+
+  it('files the errors the inline buffer held before the SDK arrived, then closes it', async () => {
+    const thrown = new Error('Harborlight boot failure');
+    const held = Object.assign(
+      [
+        { kind: 'onerror', error: thrown },
+        { kind: 'onunhandledrejection', error: 'Riverbend rejected' },
+      ],
+      { done: false },
+    );
+    (window as unknown as Record<string, unknown>).__cwSentryEarly = held;
+    shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'doc' });
+    await boot();
+    expect(captureException).toHaveBeenCalledTimes(2);
+    expect(captureException.mock.calls[0]?.[0]).toBe(thrown);
+    expect(captureException.mock.calls[1]?.[0]).toBe('Riverbend rejected');
+    // Closed and emptied: from here the SDK's own handlers own every error,
+    // and one filed by both would be counted twice.
+    expect(held.done).toBe(true);
+    expect(held).toHaveLength(0);
+    // Filed after init, never before it — a capture with no client is lost.
+    expect(init.mock.invocationCallOrder[0]).toBeLessThan(
+      captureException.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it('drops a held collision a mock round recovered from, judged by the window the buffer copied', async () => {
+    const during: Record<string, unknown> = {};
+    enterRecoverableInsert('const params = [1];', during);
+    const collision = () => new SyntaxError("Identifier 'params' has already been declared");
+    const recovered = collision();
+    const unrecovered = collision();
+    (window as unknown as Record<string, unknown>).__cwSentryEarly = [
+      { kind: 'onerror', error: recovered, scope: { ...during } },
+      // The control: the same collision held outside any swap is filed.
+      { kind: 'onerror', error: unrecovered, scope: {} },
+    ];
+    shell({ 'sentry-dsn': DSN, 'sentry-page-type': 'mockup' });
+    await boot();
+    expect(captureException.mock.calls.map((c) => c[0])).toEqual([unrecovered]);
   });
 
   it.each(['board', 'doc', 'mockup', 'landing'])(
