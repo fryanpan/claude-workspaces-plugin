@@ -89,7 +89,7 @@ export function resolveWords(words: string, root: ParentNode): ElementResolution
 
 export function resolve(anchor: ElementAnchor, env: ElementResolveEnv): ElementResolution {
   const fp = anchor.fingerprint;
-  const root = env.root as ParentNode & Pick<Document, 'getElementById'>;
+  const root = env.root as ParentNode & Partial<Pick<Document, 'getElementById'>>;
   // A words anchor (`WORDS_TAG`). Before its resolver is installed it falls
   // through, and every element scores 0 against its tag.
   const words = fp.tag === '*' && window.cwWords?.(fp.text, root);
@@ -97,7 +97,7 @@ export function resolve(anchor: ElementAnchor, env: ElementResolveEnv): ElementR
 
   // fast path: id match
   if (fp.id) {
-    const byId = typeof root.getElementById === 'function' ? root.getElementById(fp.id) : null;
+    const byId = root.getElementById?.(fp.id);
     if (byId instanceof HTMLElement) {
       const score = scoreMatch(fp, byId);
       if (score >= SCORE_THRESHOLD) return { ok: true, element: byId, score };
@@ -116,7 +116,16 @@ export function resolve(anchor: ElementAnchor, env: ElementResolveEnv): ElementR
     // An element with no words — a chart's bar, a map's canvas — has little
     // else to be scored on, and a chart builds its bars afresh on each render.
     // Such an element is found by where it sits: the same path, exactly.
-    const at = !fp.text && fp.path && candidates.find((c) => computePath(c) === fp.path);
+    // One with words is found by them: an element of its tag that still says
+    // every one has had the page move round it. A mock revised in place gains
+    // a paragraph or a row above, and on its index alone a heading or a cell
+    // below scored under the bar. The first in the page wins, and a words
+    // anchor, having no path, is left to its own resolver.
+    const at =
+      fp.path &&
+      candidates.find((c) =>
+        !fp.text ? computePath(c) === fp.path : tokenOverlap(fp.text, extractText(c)) === 1,
+      );
     if (at) return { ok: true, element: at, score: SCORE_THRESHOLD };
     return { ok: false, reason: 'low-confidence', score: best.score };
   }
