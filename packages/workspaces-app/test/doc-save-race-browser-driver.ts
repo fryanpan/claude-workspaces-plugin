@@ -15,8 +15,9 @@
  * A try whose reload went out after the window tested nothing: the full save
  * may have run first. So a slow runner is not failed for being slow. The try
  * is kept, marked outside the window, and run again with the CPU slowed less
- * (`SAVE_RACE_CPU` is where it starts), until it lands inside or the
- * slowdown reaches its floor.
+ * (`SAVE_RACE_CPU` is where it starts, `MIN_CPU` the floor) until it lands
+ * inside. Attempts are capped at `MAX_ATTEMPTS`; a run that used them up
+ * with fewer than `SAVE_RACE_TRIES` inside the window fails the test.
  *
  * Then, at the same slowed CPU, it times single typed characters, and checks
  * that a session answering as somebody else clears what the old identity
@@ -54,8 +55,11 @@ const MIN_CPU = 4;
 const TRIES = Math.max(1, Number(process.env.SAVE_RACE_TRIES ?? 5) || 5);
 const WORDS = ['slipway', 'jetty', 'mooring', 'breakwater', 'boathouse', 'lighthouse', 'buoy'];
 const KEYSTROKES = 20;
-/** Setup and the closing steps, plus room for every try to be retried once. */
-const WATCHDOG_MS = 150_000 + TRIES * 2 * 30_000;
+/** Every try may be run twice more outside the window before the run stops. */
+const MAX_ATTEMPTS = TRIES * 3;
+/** Setup and the closing steps, plus room for every attempt (one takes ~6s
+ *  here). Under the test's spawn timeout, so the browser is always stopped. */
+const WATCHDOG_MS = 150_000 + MAX_ATTEMPTS * 20_000;
 
 const step = (what: string): void => {
   process.stderr.write(`[doc-save-race-driver] ${what}\n`);
@@ -269,7 +273,7 @@ async function main(): Promise<void> {
     const tries: SaveRaceTry[] = [];
     let rate = SLOW_CPU;
     let attempt = 0;
-    for (let i = 0; i < TRIES; ) {
+    for (let i = 0; i < TRIES && attempt < MAX_ATTEMPTS; ) {
       attempt++;
       const words = ` Riverbend ${WORDS[i % WORDS.length]} ${attempt} typed offline.`;
       step(`try ${i + 1} (attempt ${attempt}): cut, type at ${rate}x CPU, reload at once`);
@@ -300,7 +304,7 @@ async function main(): Promise<void> {
         inFileAfterOnline: count(readFileSync(file, 'utf8'), words.trim()),
       });
       step(`try ${i + 1}: ${JSON.stringify(tries[tries.length - 1])}`);
-      if (inWindow || rate <= MIN_CPU) i++;
+      if (inWindow) i++;
       else rate = Math.max(MIN_CPU, Math.floor(rate * 0.6));
     }
 

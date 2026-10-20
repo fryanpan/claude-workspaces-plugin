@@ -17,11 +17,12 @@ import type { SaveRaceRun } from './doc-save-race-browser-reading.ts';
 const CHROME = chromeForSuite();
 
 const DRIVER = join(import.meta.dirname, 'doc-save-race-browser-driver.ts');
-/** Two bundle builds, one launch, and per try a cut, a slowed reload and a
- *  server boot, with room for each try to be run again once. */
+/** Two bundle builds, one launch, and per attempt a cut, a slowed reload and
+ *  a server boot: above the driver's own watchdog for its capped attempts. */
 const SUITE_MS = 470_000;
 const SPAWN_MS = 460_000;
-/** The tries the driver runs by default, each until one lands in the window. */
+/** The tries the driver needs inside the window by default. Fewer, once its
+ *  attempts are used up, fails the case below. */
 const TRIES = 5;
 
 let run: SaveRaceRun | null = null;
