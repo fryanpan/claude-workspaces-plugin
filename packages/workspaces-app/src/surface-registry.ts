@@ -1,10 +1,11 @@
 import type { MountFn } from './mount-context.ts';
 
 /**
- * Late-bound handle to the full markdown surface (mountMarkdown, defined in
- * app.ts). redline-app mounts it for the editable File view of a `.md` diff
- * member — importing it directly would make app.ts ⇄ redline-app a module
- * cycle, so app.ts registers it at boot instead.
+ * Late-bound handle to the full markdown surface (mountMarkdown, in
+ * doc/markdown-mount.ts). redline-app mounts it for the editable File view of
+ * a `.md` diff member. app.ts registers a loader for it at boot, so the
+ * redline chunk neither imports the editor's chunk nor forms a cycle with the
+ * entry that lazy-loads both.
  */
 let markdownMount: MountFn | null = null;
 

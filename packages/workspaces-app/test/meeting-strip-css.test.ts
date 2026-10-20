@@ -30,7 +30,7 @@ import { IPAD, attach, installSheets, setViewport, styleOf } from './css-harness
  * speaker pill, the red wash while live, and the reduced-motion stand-down.
  */
 const SHELL = readFileSync(resolve(import.meta.dirname, '../index.html'), 'utf8');
-const APP = readFileSync(resolve(import.meta.dirname, '../src/app.ts'), 'utf8');
+const APP = readFileSync(resolve(import.meta.dirname, '../src/doc/markdown-mount.ts'), 'utf8');
 
 let cleanup = () => {};
 beforeEach(() => {
@@ -140,7 +140,7 @@ describe('the shell reserves a row for the strip', () => {
     // they claim no track — but only the markdown mount adds the strip at all.
     //
     // NOT CONVERTED, and left counted rather than marked: this is a claim
-    // about `app.ts`'s per-doc mount decision, which no harness in this repo
+    // about `doc/markdown-mount.ts`'s per-doc mount decision, which no harness in this repo
     // boots. See the PR that converted the rest of this file.
     expect(APP).toMatch(/docType === 'markdown'/);
   });

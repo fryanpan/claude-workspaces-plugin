@@ -148,13 +148,13 @@ describe('applyHuddleCrumb', () => {
  * the boot sequence app-boot.test.ts drives — `mountMarkdown` runs per doc,
  * not per page — so there is nothing here to call.
  *
- * Two files since the meeting surface moved out: app.ts still decides that a
- * huddle started here, and doc/doc-meeting-mount.ts is what acts on it. Read
- * separately rather than concatenated, so each assertion below still names
- * the file that has to keep its half of the bargain.
+ * Two files since the meeting surface moved out: doc/markdown-mount.ts
+ * decides that a huddle started here, and doc/doc-meeting-mount.ts is what
+ * acts on it. Read separately rather than concatenated, so each assertion
+ * below still names the file that has to keep its half of the bargain.
  */
 describe('the markdown mount honours the flag once', () => {
-  const APP = readFileSync(resolve(import.meta.dirname, '../src/app.ts'), 'utf8');
+  const APP = readFileSync(resolve(import.meta.dirname, '../src/doc/markdown-mount.ts'), 'utf8');
   const DIR = import.meta.dirname;
   const MOUNT = readFileSync(resolve(DIR, '../src/doc/doc-meeting-mount.ts'), 'utf8');
 

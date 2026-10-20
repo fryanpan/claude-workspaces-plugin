@@ -14,6 +14,7 @@ import { computeBuildId } from '../src/build-id.ts';
 import { OPEN_PROPS_FILES } from '../src/tokens-manifest.ts';
 import { buildWhiteboard, copyWhiteboardAssets } from './build-whiteboard.ts';
 import { injectModulePreloads, staticChunkClosure } from './module-preload.ts';
+import { stripCssComments } from './strip-css-comments.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
@@ -339,9 +340,9 @@ async function emit(buildId: string): Promise<boolean> {
   }
 
   // KaTeX: its own file, fetched by `math-katex.ts` the first time a doc
-  // shows an equation. Not an `import()` from the doc bundle — that bundle is
-  // built with splitting off, which inlines a dynamic import, so every page
-  // load would carry it. Its stylesheet and the woff2 fonts the stylesheet
+  // shows an equation. Not an `import()` from the doc bundle, so it stays out
+  // of that bundle's chunk graph and no change to the doc entry's imports can
+  // put it back on a page load. Its stylesheet and the woff2 fonts the stylesheet
   // names sit beside it; a browser picks woff2 from KaTeX's `src` list first,
   // so the woff and ttf copies would never be fetched.
   const katexResult = await Bun.build({
@@ -387,18 +388,14 @@ async function emit(buildId: string): Promise<boolean> {
 
   copyWhiteboardAssets(pkgRoot, dist);
 
-  cpSync(join(pkgRoot, 'src', 'styles.css'), join(dist, 'styles.css'));
-  // The review editor's own rules, loaded by index.html AFTER styles.css.
-  cpSync(join(pkgRoot, 'src', 'doc.css'), join(dist, 'doc.css'));
-  // The board's own rules, loaded by the board shell on top of styles.css.
-  // Copied rather than bundled for the same reason styles.css is: a
-  // stylesheet the shells name by URL has to exist under that name.
-  cpSync(join(pkgRoot, 'src', 'board.css'), join(dist, 'board.css'));
-  cpSync(join(pkgRoot, 'src', 'signin.css'), join(dist, 'signin.css'));
-  // The settings page's own rules, loaded by the settings shell on top of
-  // styles.css. Copied rather than bundled for the same reason the others
-  // are: a stylesheet the shells name by URL has to exist under that name.
-  cpSync(join(pkgRoot, 'src', 'settings.css'), join(dist, 'settings.css'));
+  // Every stylesheet a shell names by URL is copied under that name rather
+  // than bundled, with its comments stripped (strip-css-comments.ts): they
+  // were most of its bytes. index.html loads doc.css AFTER styles.css; the
+  // board, sign-in and settings shells load theirs on top of styles.css.
+  for (const name of ['styles.css', 'doc.css', 'board.css', 'signin.css', 'settings.css']) {
+    const css = readFileSync(join(pkgRoot, 'src', name), 'utf8');
+    writeFileSync(join(dist, name), stripCssComments(css));
+  }
   // The Open Props trial layer: the vendored subset (self-hosted — a strict
   // CSP and offline tailnet use forbid CDN hosts) concatenated with the
   // mapping in src/tokens.css, served as one file at /app/tokens.css so a

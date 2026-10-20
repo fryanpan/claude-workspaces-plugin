@@ -85,7 +85,7 @@ describe('cold-load deep links wait for the projection', () => {
 
 describe('the doc surface answers a stale ?thread=', () => {
   it('says the thread is gone instead of silently showing the doc top', () => {
-    const APP = readFileSync(resolve(import.meta.dirname, '../src/app.ts'), 'utf8');
+    const APP = readFileSync(resolve(import.meta.dirname, '../src/doc/markdown-mount.ts'), 'utf8');
     const reveal = APP.match(/function revealLinkedThread\(\)[\s\S]*?\n {2}\}\n/)?.[0] ?? '';
     expect(reveal, 'revealLinkedThread went missing').not.toBe('');
     expect(reveal).toContain('That comment thread is gone from this doc');
