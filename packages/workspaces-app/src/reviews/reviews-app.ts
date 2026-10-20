@@ -27,7 +27,6 @@ import { mountCoachCard } from '../coach-card.ts';
 import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { startPageLoadReport } from '../page-load-report.ts';
 import { chooseDifficultyOn, createSizeChoice, httpSizePref } from '../review-sizes.ts';
-import { pageSentry } from '../sentry-page.ts';
 import { fetchWriteAccess, installWriteGateNotice, readSessionBody } from '../signin/write-gate.ts';
 import {
   type CrossEntry,
@@ -67,7 +66,6 @@ async function boot(): Promise<void> {
   const loadReport = startPageLoadReport({
     page: 'review',
     workspaceId: null,
-    sentry: pageSentry(),
   });
   // The queue and the session are read at once, not one after another: the
   // first card waits on the slower of the two rather than on their sum. One

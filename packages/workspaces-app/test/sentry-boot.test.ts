@@ -256,9 +256,9 @@ describe('the page Sentry entry', () => {
 });
 
 /**
- * Two invariants a unit test cannot see, because they are about what ends up
- * in a BUNDLE rather than what a function returns. Source pins, deliberately
- * — and each names the failure it is standing in for.
+ * An invariant a unit test cannot see, because it is about what ends up in a
+ * BUNDLE rather than what a function returns. A source pin, deliberately —
+ * and it names the failure it is standing in for.
  */
 describe('the page bundles stay out of the SDK', async () => {
   const { readFileSync } = await import('node:fs');
@@ -276,26 +276,5 @@ describe('the page bundles stay out of the SDK', async () => {
     // but sentry.js references the SDK at all.
     expect(boardSrc).not.toContain('@sentry/browser');
     expect(appSrc).not.toContain('@sentry/browser');
-  });
-
-  it('the board still feeds its load phases into the pageload trace', async () => {
-    // The built-in load recorder and Sentry have to tell one story: the same
-    // msToBoot / msToFirstProjection the report posts land as measurements.
-    const { postLoadReport } = await import('../src/board/board-load-report.ts');
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => Promise.resolve(new Response('{}'))),
-    );
-    const setMeasurement = vi.fn();
-    postLoadReport({
-      workspaceId: 'w-1',
-      msToBoot: 120,
-      msToFirstProjection: 480,
-      sentry: { setMeasurement },
-    });
-    vi.unstubAllGlobals();
-    expect(setMeasurement).toHaveBeenCalledWith('ms_to_boot', 120, 'millisecond');
-    expect(setMeasurement).toHaveBeenCalledWith('ms_to_first_projection', 480, 'millisecond');
-    expect(boardSrc).toContain('pageSentry()');
   });
 });

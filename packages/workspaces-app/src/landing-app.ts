@@ -20,11 +20,10 @@ import { startInbox } from './landing-inbox.ts';
 import { startLandingLive } from './landing-live.ts';
 import './meeting-banner.ts';
 import { startPageLoadReport } from './page-load-report.ts';
-import { pageSentry } from './sentry-page.ts';
 
 // The list is server-rendered, so it is on screen by the time this module
 // runs; the report's content stamp is the next frame. One report per load.
-startPageLoadReport({ page: 'home', workspaceId: null, sentry: pageSentry() }).contentShown();
+startPageLoadReport({ page: 'home', workspaceId: null }).contentShown();
 
 if (document.querySelector('#coach')) mountCoachCard({ page: 'home' });
 startCoach();

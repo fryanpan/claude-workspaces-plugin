@@ -24,7 +24,6 @@ import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
-import { pageSentry } from '../sentry-page.ts';
 import { createPromptsApi } from '../settings/prompts-api.ts';
 import {
   fetchWriteAccess,
@@ -729,19 +728,13 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   // `board-load-report.ts`; what boot owns is when each phase ended — the two
   // stamps below, and the guard that makes the report fire once, when both
   // phases are in or at the fallback deadline if the ydoc never syncs.
-  //
-  // The board no longer inits its own Sentry client: `/app/sentry.js` does it
-  // for every page type — board, doc, mockup, landing — so all four are
-  // comparable and there is one place the release, the tags and the privacy
-  // scrub are decided. `pageSentry()` is the read side of that.
-  const sentry = pageSentry();
   let msToBoot = 0;
   let msToFirstProjection: number | null = null;
   let loadReportSent = false;
   const sendLoadReport = (): void => {
     if (loadReportSent) return;
     loadReportSent = true;
-    postLoadReport({ workspaceId, msToBoot, msToFirstProjection, sentry });
+    postLoadReport({ workspaceId, msToBoot, msToFirstProjection });
   };
   // ── Wiring ──────────────────────────────────────────────────────────────
   //
