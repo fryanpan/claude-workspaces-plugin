@@ -126,4 +126,7 @@ export interface ChainRequest {
   /** A person proof naming the owner — never a body, a widget token or an
    *  agent token. */
   ownerProven: () => boolean;
+  /** Whether a mock's or app's frame served on this request carries an app
+   *  voice token (`app-voice/gate.ts`). */
+  mayMintAppVoice: () => boolean;
 }

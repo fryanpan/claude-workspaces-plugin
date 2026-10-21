@@ -42,6 +42,7 @@
  * wrapper below.
  */
 import type { DocType, User } from '@claude-workspaces/core';
+import { APP_VOICE_TOKEN_PARAM, APP_VOICE_VERB } from '@claude-workspaces/core/app-voice';
 import {
   type AgentWatches,
   SHARED_AGENT_IDS,
@@ -49,6 +50,7 @@ import {
   SHARED_IDENTITY_MESSAGE,
   isValidAgentId,
 } from '../agent-watches.ts';
+import { refuseAppVoice } from '../app-voice/gate.ts';
 import { authorizeAgentCaller } from '../auth/agent-token.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { SocketEditor } from '../edit-sessions.ts';
@@ -142,6 +144,15 @@ export interface UpgradeStreamContext {
   requireAgentToken: boolean;
   /** Logs the deprecation-window warning, once per agent id per route. */
   warnLegacyAgentCaller: (agentId: string, route: string) => void;
+  /** Whether a token opens doc `docId`'s app voice socket on board
+   *  `workspaceId` (`app-voice/token.ts`). */
+  appVoiceToken: (
+    token: string | null,
+    workspaceId: string,
+    docId: string,
+  ) => { ok: true } | { ok: false; reason: string };
+  /** The frame-only hostname's origin, or null when it is not configured. */
+  frameOrigin: string | null;
 }
 
 /** The address this request is asking about, and what admission proved. */
@@ -169,6 +180,8 @@ export interface UpgradeStreamRequest {
    *  the owner. Stamped on a spoken-reply socket: "Claude, …" in a meeting
    *  answers only the owner (`spoken-reply/meeting-ask.ts`). */
   ownerProven: () => boolean;
+  /** Whether this request's person proof names anybody at all. */
+  anyoneProven: () => boolean;
   /** The board token and origin admission let this request in through the
    *  tailnet widget door with, or null. A door socket opens read-only and
    *  carries the pair, so the sweep can hang up once the token is dead. */
@@ -217,6 +230,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     agentTokenKey,
     requireAgentToken,
     warnLegacyAgentCaller,
+    appVoiceToken,
+    frameOrigin,
   } = ctx;
 
   /**
@@ -272,6 +287,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     browserProvedNobody,
     provenAuthor,
     ownerProven,
+    anyoneProven,
     widgetDoorGrant,
   }: UpgradeStreamRequest): StreamOutcome => {
     // The run itself, unchanged from the position it held in `route()`:
@@ -393,6 +409,43 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             // used, as a typed comment's body is (\`voice-feedback-relay.ts\`).
             author: provenAuthor(),
             ...(socketViaOf(url) ? { via: socketViaOf(url) } : {}),
+          },
+        });
+        if (!upgraded) return new Response('upgrade required', { status: 426 });
+        return undefined;
+      }
+
+      // `/workspaces/<ws>/docs/<docId>/app-voice` — a mock's or an app's own
+      // voice and ears (`app-voice/`). The page asking is an opaque frame
+      // whose Origin is `null` like every sandboxed page's, so the credential
+      // is the doc-scoped token the server wrote into that frame for the
+      // owner, never the Origin (`app-voice/gate.ts`). Trusted-local in the
+      // route table, so a share visitor is refused at the host guard as well.
+      const appVoice = docSocket(pathname, APP_VOICE_VERB);
+      if (appVoice) {
+        if ('refusal' in appVoice) return appVoice.refusal;
+        const origin = req.headers.get('origin');
+        const refused = refuseAppVoice({
+          visitor: visitor !== null,
+          ownerProven: ownerProven(),
+          anyoneProven: anyoneProven(),
+          origin,
+          originAllowed: origin !== null && isAllowedBrowserOrigin(origin, policyFor(req)),
+          frameOrigin,
+          token: appVoiceToken(
+            url.searchParams.get(APP_VOICE_TOKEN_PARAM),
+            appVoice.workspaceId,
+            appVoice.docId,
+          ),
+        });
+        if (refused) return j(refused.status, { error: refused.error });
+        if (!docStore.get(appVoice.docId)) return j(404, { error: 'doc not found' });
+        const upgraded = server.upgrade(req, {
+          data: {
+            docId: appVoice.docId,
+            workspaceId: appVoice.workspaceId,
+            kind: 'app-voice' as const,
+            ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });

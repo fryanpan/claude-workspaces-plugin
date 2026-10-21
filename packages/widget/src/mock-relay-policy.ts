@@ -76,7 +76,13 @@ export function relayTarget(
   // app prefix, which the server serves for an app doc and nothing else.
   const appBase = `/workspaces/${enc(scope.workspaceId)}/apps/${enc(scope.docId)}/`;
   if (kind === 'ws') {
-    if (p !== `${docBase}/y` && p !== `${docBase}/voice`) return null;
+    // `app-voice` is the mock's or app's own voice and ears
+    // (`server/src/app-voice/`). It opens only with the token the server
+    // wrote into this mock's frame, which names this doc; the host adds
+    // nothing to it but the mark.
+    if (p !== `${docBase}/y` && p !== `${docBase}/voice` && p !== `${docBase}/app-voice`) {
+      return null;
+    }
     u.searchParams.delete('sourceUrl');
     u.searchParams.set(VIA_PARAM, VIA_VALUE);
     return u;

@@ -873,6 +873,22 @@ one model per agent, a voice token of its own, and the same addressed row
 and `answer_voice` wait underneath. Its contract is
 [voice-conversation-api](voice-conversation-api.md).
 
+**A mock or app that talks.** A page served in a board's frame can speak,
+listen and post to its own dev server through
+`WS /workspaces/<ws>/docs/<docId>/app-voice`. Its wire is `core/app-voice.ts`
+(a new top-level core module). The client is `widget/src/app-voice/` (a new
+top-level widget directory), built as its own `/widget/app-voice.js` and kept
+out of `widget.iife.js`. The server half is `app-voice/` (a new top-level
+server directory). `token.ts` signs a token naming the doc and the board,
+`seed.ts` writes it into the frame for the owner when the frame's HTML names
+the client, and `gate.ts` decides who is handed one and who may open the
+socket. `session.ts` runs one socket on the spoken reply's engines, and
+`say.ts` makes the write to the app. `routes/upgrade-stream.ts` checks the
+token. `relay.ts` is called from `socket-handlers.ts`, the same way as the
+other socket kinds. Inside the opaque frame, the socket goes through the host
+page's relay, like the widget's own sockets. The design is
+[app-voice](app-voice.md).
+
 **The planning voice** rides the same socket, and is always on in a doc:
 nobody says "interview me" any more (it still works). The doc's Talk button
 (`doc/doc-interview.ts`, its markup in `doc-interview-view.ts`; mounted with
@@ -2383,6 +2399,7 @@ the client module is chrome-free measurement with no UI of its own.
   `stall-frame-news.ts`'s `withoutPersonBlocked` — a filter, not a module, so
   the picture is unchanged there.
 - [stall-detection.md](stall-detection.md) — gains three top-level modules and no new edge, all three answering ONE question: does this frame tell its reader anything it does not already have? A week of the fleet's transcripts put repeat or empty reminders at 11% of all model spend, and a wake is the reader's whole turn. `wake-sent-sets.ts` is the memory — per board, per session, the tokens of the last frame actually delivered, persisted beside the armed stamps so a deploy does not re-send what the previous process sent; both nudgers own one. `stall-frame-news.ts` is the three readings the stall wake takes of a built frame: the tokens the stamp does not already carry, whether every task the frame would name moved inside the moved-within window, and the person-blocked rows that come off the board before the lead is woken at all. `waiting-unfiled-routing.ts` is which rung of the unfiled-ask ladder a row belongs on, split out of `waiting-unfiled-escalation.ts` when the two buckets stopped sharing an addressee. All three are pure — no clock, no store, no socket — so they join the domain tier beside `stall-gate.ts`, and their callers are the two nudgers and the escalation that already sat in the keep-moving box.
+- [app-voice.md](app-voice.md) — how a sandboxed mock or app proves it is one doc on one board, and the socket that lets it speak, listen and write to its dev server. It adds `core/app-voice.ts`, `widget/src/app-voice/` and `server/src/app-voice/`, drawn beside the spoken reply above.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
 - [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.

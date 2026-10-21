@@ -198,6 +198,9 @@ await build('iife', 'edit.js', 'edit/edit-entry.ts');
 // Both only ever run on a mock, so neither is on the budgeted bundle.
 await build('iife', 'mock-bridge.js', 'mock-bridge.ts');
 await build('iife', 'mock-host.js', 'mock-host.ts');
+// The app voice client (`app-voice/`): loaded only by a mock or app that
+// speaks, so it is on none of the budgeted bundle's bytes either.
+await build('iife', 'app-voice.js', 'app-voice/app-voice-entry.ts');
 
 writeFileSync(join(dist, 'BUILD_INFO.txt'), `built ${new Date().toISOString()}\n`);
 
