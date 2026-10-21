@@ -68,7 +68,9 @@ function playerSpy() {
   return { player, played, finish: () => drain?.() };
 }
 
-async function open(opts: { player?: AppVoicePlayer | null; expiresAt?: number } = {}) {
+async function open(
+  opts: { player?: AppVoicePlayer | null; expiresAt?: number; voice?: string } = {},
+) {
   FakeSocket.all = [];
   const waits: (() => void)[] = [];
   const voice = connectAppVoice(
@@ -80,6 +82,7 @@ async function open(opts: { player?: AppVoicePlayer | null; expiresAt?: number }
       openMic: async () => ({ stop: () => {} }),
       wait: () => new Promise((r) => waits.push(r)),
     },
+    opts.voice ? { voice: opts.voice } : {},
   );
   const sock = FakeSocket.all[0] as FakeSocket;
   sock.ready();
@@ -114,6 +117,17 @@ describe('the app voice client', () => {
     expect(done).toBeUndefined();
     spy.finish();
     await expect.poll(() => done).toEqual({ stopped: false });
+  });
+
+  it('speaks in the voice it connected with unless a line names another', async () => {
+    const { voice, sock } = await open({ voice: 'Riverbend' });
+    void voice.speak('Welcome to Riverbend.', { tone: 'warm' });
+    expect(sock.lastSent()).toMatchObject({ type: 'speak', voice: 'Riverbend', tone: 'warm' });
+    void voice.speak('Saltmarsh is next.', { voice: 'Saltmarsh' });
+    expect(sock.lastSent()).toMatchObject({ type: 'speak', voice: 'Saltmarsh' });
+    const plain = await open();
+    void plain.voice.speak('Harborlight.');
+    expect(plain.sock.lastSent()).not.toHaveProperty('voice');
   });
 
   it('hears a turn and writes to the app', async () => {
