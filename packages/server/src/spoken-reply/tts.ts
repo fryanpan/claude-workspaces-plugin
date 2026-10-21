@@ -24,13 +24,30 @@
 import { SPOKEN_OUTPUT_RATE } from '@claude-workspaces/core/spoken-reply';
 import type { EngineSocket, EngineSocketFactory } from '../transcribe-assemblyai.ts';
 
+/**
+ * How one line is said, for the app voice (`app-voice/session.ts`), which
+ * has already checked both. Only the Soniox voice reads them: `voice` goes in
+ * the config frame and `tone` ahead of the text as a `[tone]` tag. The board's
+ * own spoken reply and the meeting voice pass neither, so they keep
+ * `SONIOX_TTS_VOICE`.
+ */
+export interface SpeakAs {
+  voice?: string;
+  tone?: string;
+}
+
 export interface SpokenVoice {
   readonly name: string;
   /**
    * Say `text`, streaming PCM16 chunks to `onAudio`. Resolves when the voice
    * has sent its last chunk, or when `signal` aborts (without error).
    */
-  speak(text: string, onAudio: (pcm: Uint8Array) => void, signal: AbortSignal): Promise<void>;
+  speak(
+    text: string,
+    onAudio: (pcm: Uint8Array) => void,
+    signal: AbortSignal,
+    as?: SpeakAs,
+  ): Promise<void>;
 }
 
 const SONIOX_TTS_URL = 'wss://tts-rt.soniox.com/tts-websocket';
@@ -64,12 +81,13 @@ export type SonioxAudio = 'pcm' | 'mp3';
 export function sonioxTtsConfig(
   streamId: string,
   audio: SonioxAudio = 'pcm',
+  voice: string = SONIOX_TTS_VOICE,
 ): Record<string, unknown> {
   return {
     stream_id: streamId,
     model: SONIOX_TTS_MODEL,
     language: 'en',
-    voice: SONIOX_TTS_VOICE,
+    voice,
     ...(audio === 'mp3'
       ? { audio_format: 'mp3', sample_rate: SPOKEN_OUTPUT_RATE, bitrate: 64_000 }
       : { audio_format: 'pcm_s16le', sample_rate: SPOKEN_OUTPUT_RATE }),
@@ -87,7 +105,8 @@ export function createSonioxVoice(opts: {
   let seq = 0;
   return {
     name: opts.audio === 'mp3' ? 'soniox-mp3' : 'soniox',
-    speak(text, onAudio, signal) {
+    speak(text, onAudio, signal, as) {
+      const said = as?.tone ? `[${as.tone}] ${text}` : text;
       return new Promise<void>((resolve, reject) => {
         if (signal.aborted) return resolve();
         const streamId = `s${++seq}`;
@@ -120,9 +139,12 @@ export function createSonioxVoice(opts: {
           headers: {},
           onOpen: () => {
             socket.send(
-              JSON.stringify({ api_key: opts.apiKey, ...sonioxTtsConfig(streamId, opts.audio) }),
+              JSON.stringify({
+                api_key: opts.apiKey,
+                ...sonioxTtsConfig(streamId, opts.audio, as?.voice),
+              }),
             );
-            socket.send(JSON.stringify({ stream_id: streamId, text, text_end: true }));
+            socket.send(JSON.stringify({ stream_id: streamId, text: said, text_end: true }));
           },
           onMessage: (raw) => {
             if (done) return;

@@ -20,6 +20,7 @@ import {
   APP_VOICE_TOKEN_PARAM,
   type AppVoiceSeed,
   type AppVoiceServerMessage,
+  type AppVoiceTone,
   parseAppVoiceSeed,
 } from '@claude-workspaces/core/app-voice';
 
@@ -58,9 +59,16 @@ export interface AppVoiceEnv {
 export type AppVoiceEvent = 'heard' | 'turn-end' | 'cut-in' | 'error' | 'audio' | 'close';
 
 export interface SpeakOptions {
-  /** Accepted and sent. No voice on the server takes a tone yet, so it
-   *  changes nothing about how the line sounds. */
-  tone?: string;
+  /** A Soniox voice name for this line; it overrides the one
+   *  `connect` was given. The server's own voice when neither names one. */
+  voice?: string;
+  /** One of Soniox's tags, said as `[tone]` ahead of the line. */
+  tone?: AppVoiceTone;
+}
+
+export interface ConnectOptions {
+  /** The voice every line speaks in unless it names another. */
+  voice?: string;
 }
 
 export interface ListenOptions {
@@ -108,7 +116,11 @@ const RECONNECTS = 5;
 
 type Pending<T> = { resolve: (v: T) => void; reject: (e: Error) => void };
 
-export async function connectAppVoice(seed: AppVoiceSeed, env: AppVoiceEnv): Promise<AppVoice> {
+export async function connectAppVoice(
+  seed: AppVoiceSeed,
+  env: AppVoiceEnv,
+  defaults: ConnectOptions = {},
+): Promise<AppVoice> {
   const listeners = new Map<AppVoiceEvent, Set<(v: never) => void>>();
   const emit = (event: AppVoiceEvent, v?: unknown): void => {
     for (const fn of listeners.get(event) ?? []) (fn as (x: unknown) => void)(v);
@@ -249,10 +261,17 @@ export async function connectAppVoice(seed: AppVoiceSeed, env: AppVoiceEnv): Pro
     },
     speak(text, opts) {
       const id = `s${++seq}`;
+      const voice = opts?.voice ?? defaults.voice;
       env.player?.stop();
       return new Promise((resolve, reject) => {
         speaking.set(id, { resolve, reject });
-        send({ type: 'speak', text, id, ...(opts?.tone ? { tone: opts.tone } : {}) });
+        send({
+          type: 'speak',
+          text,
+          id,
+          ...(voice ? { voice } : {}),
+          ...(opts?.tone ? { tone: opts.tone } : {}),
+        });
       });
     },
     stop() {

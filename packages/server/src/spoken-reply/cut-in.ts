@@ -24,6 +24,12 @@ function words(text: string): string[] {
   return text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
 }
 
+/** `saying` without the Soniox tags that lead it (`[warm] [calm] Hello`).
+ *  A tag is never said aloud, so a heard "calm" is not the line's echo. */
+export function untagged(saying: string): string {
+  return saying.replace(/^(?:\s*\[[A-Za-z]+\])+\s*/, '');
+}
+
 /** Whether `heard` carries any word at all, not only punctuation. */
 export function hasWords(heard: string): boolean {
   return words(heard).length > 0;
@@ -31,7 +37,7 @@ export function hasWords(heard: string): boolean {
 
 /** Whether `heard` is the room hearing `saying` played back. */
 export function echoOf(heard: string, saying: string): boolean {
-  const said = new Set(words(saying));
+  const said = new Set(words(untagged(saying)));
   const got = words(heard);
   if (said.size === 0 || got.length === 0) return false;
   return got.filter((w) => said.has(w)).length / got.length >= ECHO_SHARE;

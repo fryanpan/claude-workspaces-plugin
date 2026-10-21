@@ -39,6 +39,45 @@ export const APP_VOICE_SAY_MAX = 8_000;
 /** The largest audio frame the server reads; a larger one is dropped. */
 export const APP_VOICE_AUDIO_FRAME_MAX = 64 * 1024;
 
+/** A voice a line may name: a plain name, as Soniox spells its voices.
+ *  Soniox itself decides whether it has one. */
+export const APP_VOICE_VOICE_NAME = /^[A-Za-z][A-Za-z -]{0,31}$/;
+
+/** The tags Soniox documents for `tts-rt-v2`, emotions then tones. A line's
+ *  `tone` is one of these, and is said as `[tone] ` ahead of the text. */
+export const APP_VOICE_TONES = [
+  'happy',
+  'sad',
+  'angry',
+  'excited',
+  'nervous',
+  'fearful',
+  'surprised',
+  'annoyed',
+  'relieved',
+  'disappointed',
+  'curious',
+  'delighted',
+  'calm',
+  'warm',
+  'stern',
+  'serious',
+  'playful',
+  'sarcastic',
+  'flirty',
+  'deadpan',
+  'sincerely',
+  'reassuringly',
+  'dramatically',
+  'mockingly',
+] as const;
+
+export type AppVoiceTone = (typeof APP_VOICE_TONES)[number];
+
+export function isAppVoiceTone(v: string): v is AppVoiceTone {
+  return (APP_VOICE_TONES as readonly string[]).includes(v);
+}
+
 /** What the server writes into the frame for the client to read. */
 export interface AppVoiceSeed {
   /** The socket's path on the board: `/workspaces/<ws>/docs/<docId>/app-voice`. */
@@ -49,8 +88,13 @@ export interface AppVoiceSeed {
 }
 
 export type AppVoiceClientMessage =
-  /** Say `text` aloud. `tone` is accepted and passed to no voice yet. */
-  | { type: 'speak'; text: string; tone?: string; id?: string }
+  /**
+   * Say `text` aloud. `voice` names a Soniox voice for this line (the
+   * server's own when absent), and `tone` one of `APP_VOICE_TONES`. A value
+   * that is neither is refused with `bad_voice` or `bad_tone`. A server
+   * speaking with ElevenLabs ignores both.
+   */
+  | { type: 'speak'; text: string; voice?: string; tone?: string; id?: string }
   /** Stop speaking now. Audio not yet sent is never sent. */
   | { type: 'stop' }
   /** Start hearing the binary frames that follow. */
@@ -88,6 +132,8 @@ export type AppVoiceServerMessage =
 
 export type AppVoiceErrorCode =
   | 'bad_message'
+  | 'bad_voice'
+  | 'bad_tone'
   | 'too_long'
   | 'no_voice'
   | 'voice_failed'
@@ -118,6 +164,7 @@ export function parseAppVoiceClientMessage(raw: string): AppVoiceClientMessage |
       return {
         type: 'speak',
         text: o.text,
+        ...(typeof o.voice === 'string' ? { voice: o.voice.slice(0, 64) } : {}),
         ...(typeof o.tone === 'string' ? { tone: o.tone.slice(0, 64) } : {}),
         ...idOf(o.id),
       };

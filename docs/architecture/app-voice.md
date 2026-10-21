@@ -8,7 +8,7 @@ what they said to the prototype's backend.
 ```html
 <script src="/widget/app-voice.js"></script>
 <script>
-  const voice = await cwAppVoice.connect();
+  const voice = await cwAppVoice.connect({ voice: '<a Soniox voice name>' });
   await voice.speak('Which site should open first?', { tone: 'warm' });
   voice.on('turn-end', (text) => voice.say(text));
   await voice.listen();
@@ -81,7 +81,7 @@ with JSON, and sends speech as binary frames.
 | Page sends | Server answers |
 | --- | --- |
 | *(on open)* | `ready {voice, listen, say, outputRate: 24000, inputRate: 16000}` |
-| `speak {text, tone?, id?}` | `speaking {id}`, binary PCM16 at 24 kHz, `spoken {id, stopped}` |
+| `speak {text, voice?, tone?, id?}` | `speaking {id}`, binary PCM16 at 24 kHz, `spoken {id, stopped}` |
 | `stop` | the line in progress ends with `spoken {stopped: true}` |
 | `listen`, then binary PCM16 at 16 kHz | `listening`, then `heard {text}` each time the transcript grows, and `turn-end {text}` when the turn ends |
 | `unlisten` | nothing |
@@ -90,13 +90,32 @@ with JSON, and sends speech as binary frames.
 | *(anything refused)* | `error {code, message, id?}` |
 
 - **Speaking:** the voice is the spoken reply's (setup 1's Soniox voice,
-  else setup 2's). A new `speak` stops the line before it. `tone` is
-  accepted, but no voice uses it yet.
+  else setup 2's). A new `speak` stops the line before it.
+- **Voice and tone:** a line may name a `voice`, a Soniox voice name, and
+  a `tone`. The voice goes in the Soniox config frame; without one the line
+  speaks in `SONIOX_TTS_VOICE`, the board's own voice. The tone is said as a tag ahead of the
+  text: `tone: 'warm'` sends `[warm] Which site…`. A tone is one of the tags
+  Soniox documents (`APP_VOICE_TONES`): happy, sad, angry, excited, nervous,
+  fearful, surprised, annoyed, relieved, disappointed, curious, delighted
+  and calm, then warm, stern, serious, playful, sarcastic, flirty, deadpan,
+  sincerely, reassuringly, dramatically and mockingly. A page may also
+  write tags into the text itself, and they pass through unchanged.
+  - The socket refuses a voice that is not a plain name
+    (`^[A-Za-z][A-Za-z -]{0,31}$`) with `bad_voice`, and a tone not on the
+    list with `bad_tone`, before it asks the engine.
+  - We cannot check a name against Soniox's voice list without the key, so
+    Soniox decides. A voice it does not have ends the line with
+    `voice_failed` and `spoken {stopped: true}`.
+  - Only the Soniox voice reads either field (`SpeakAs`,
+    `spoken-reply/tts.ts`). A server speaking with ElevenLabs ignores both,
+    so it never says a tag aloud. The board's spoken reply and the meeting
+    voice pass neither, and keep `SONIOX_TTS_VOICE`.
 - **Listening:** the listener is the spoken reply's, with its tap tuning,
   so the listener's own end of speech ends a turn. It stays open for the
   next turn. If it hears words during a `speak` that are not that line's
   own echo, it stops the line and sends `cut-in {text, id}`
-  (`spoken-reply/cut-in.ts`).
+  (`spoken-reply/cut-in.ts`). The tags leading the line are not counted as
+  its words, because they are never said aloud.
 - **Writing:** `say` posts `{"text": …}` as JSON to `<app origin>/say`
   (`app-voice/say.ts`). It sends no credentials, follows no redirect and
   stops waiting after 10 seconds. A mock is not an app, so a mock's `say`
@@ -109,15 +128,16 @@ with JSON, and sends speech as binary frames.
 ## The client
 
 `/widget/app-voice.js` is a bundle of its own, not part of `widget.iife.js`
-(`widget/src/app-voice/`, about 7 KB). `cwAppVoice.connect({ seed?, play? })`
-reads the seed from the page, opens the socket and resolves after `ready`.
-With `play: false` it plays nothing, and the page takes the `audio` events
-itself.
+(`widget/src/app-voice/`, about 7 KB). `cwAppVoice.connect({ seed?, play?,
+voice? })` reads the seed from the page, opens the socket and resolves after
+`ready`. With `play: false` it plays nothing, and the page takes the `audio`
+events itself. `voice` is the voice every line speaks in unless the line
+names another.
 
 | Call | Does |
 | --- | --- |
 | `abilities` | `{voice, listen, say}` from `ready` |
-| `speak(text, {tone})` | resolves `{stopped}` once the line has played |
+| `speak(text, {voice, tone})` | resolves `{stopped}` once the line has played; `voice` overrides the one `connect` was given |
 | `stop()` | silences the line now |
 | `listen({mic})` | starts hearing; `mic: false` hears only `sendAudio` |
 | `unlisten()` | stops hearing and closes the microphone |
@@ -137,7 +157,8 @@ holds has expired, it stops trying and sends `close`.
   only in a page in its own tab, or on the frame-only hostname once that
   hostname is live. A sandboxed mock can still hear audio that it captures
   some other way and sends with `sendAudio`.
-- **Tone.** No voice on the server takes one.
+- **Voice and tone on ElevenLabs.** A server without the Soniox key speaks
+  every line in its one ElevenLabs voice, with no tone.
 - **An app's cross-origin reads.** The app proxy still drops
   `Access-Control-Allow-Origin`. `say` covers the write a talking app
   needs, and nothing else changed.
@@ -164,6 +185,9 @@ holds has expired, it stops trying and sends `close`.
   refusal of a share visitor and a non-owner at the upgrade.
 - `packages/server/test/app-voice-session.test.ts`: cut-in, a new line
   stopping the old one, the limits, and the token refresh.
+- `packages/server/test/app-voice-voice-tone.test.ts`: a line's voice and
+  tone reaching a fake Soniox socket, the refusals, Soniox refusing an
+  unknown voice, and a heard tag word counting as a cut-in.
 - `packages/widget/test/app-voice-client.test.ts`: the client against a
   scripted socket.
 - `packages/widget/test/app-voice-mock.test.ts`: a served mock in headless
