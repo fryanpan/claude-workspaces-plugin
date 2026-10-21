@@ -1,8 +1,8 @@
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import type { ReviewPayload, User } from '@claude-workspaces/core';
 import { createThread, postReply } from '@claude-workspaces/core';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
-import { setFlagsFromString } from 'node:v8';
-import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountAsks } from '../src/widget-ask.ts';
 import { mountPageList } from '../src/widget-page-list.ts';
