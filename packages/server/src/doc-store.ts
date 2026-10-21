@@ -10,12 +10,14 @@ import {
 import { join } from 'node:path';
 import {
   type Anchor,
+  type AnchorRefresh,
   type Comment,
   type DeliveryStamp,
   type DocMeta,
   type DocOriginRepo,
   type DocTitleSource,
   type DocType,
+  type ElementAnchor,
   type PageEdit,
   type PageSuggestion,
   type ReviewItemJudgement,
@@ -2721,6 +2723,10 @@ export class DocStore {
 
   reanchor(docId: string, threadId: string, anchor: Anchor): Thread | null {
     return this.docThreads.reanchor(docId, threadId, anchor);
+  }
+
+  refreshAnchor(docId: string, threadId: string, seen: ElementAnchor): AnchorRefresh {
+    return this.docThreads.refreshAnchor(docId, threadId, seen);
   }
 
   listThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {

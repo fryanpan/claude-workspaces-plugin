@@ -30,6 +30,7 @@
 import { mountEditLoader } from './edit/edit-button.ts';
 import { insertScript } from './mockup-live-scripts.ts';
 import { mountVoiceLoader } from './voice/voice-loader.ts';
+import { pauseAnchorRefresh } from './widget-anchor-refresh.ts';
 import { mountAsks } from './widget-ask.ts';
 import { mountPageList } from './widget-page-list.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
@@ -353,6 +354,13 @@ export function startMockupLive(cfg: Config): void {
   }
   /** Null means "pinned to nothing" — following the newest round. */
   let pinned: number | null = null;
+  // An earlier round says older words than the anchors hold, so a pin found
+  // on one is not reported (`widget-anchor-refresh.ts`).
+  const holdOnOlder = (): void =>
+    pauseAnchorRefresh(
+      state.version !== null && state.version !== state.versions[state.versions.length - 1],
+    );
+  holdOnOlder();
 
   const load = (v: number | null): void => {
     void fetch(mockupUrl(state, v), { credentials: 'same-origin' })
@@ -361,6 +369,7 @@ export function startMockupLive(cfg: Config): void {
         if (html === null) return;
         pinned = v;
         state.version = v ?? state.versions[state.versions.length - 1] ?? null;
+        holdOnOlder();
         swapDocument(html);
         renderControl(state, load);
       })
@@ -377,6 +386,7 @@ export function startMockupLive(cfg: Config): void {
     const next = applyUpdateFrame(state.versions, pinned, (ev as MessageEvent).data as string);
     if (next === null) return;
     state.versions = next.versions;
+    holdOnOlder();
     if (!next.reload) {
       renderControl(state, load);
       return;

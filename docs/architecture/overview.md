@@ -675,6 +675,22 @@ controls set gets a dimmed pin. Tapping it loads that address through
 render to show. `widget-thread-text.ts` holds the snippet and receipt markup
 that the popover and the list share. No new route and no new fetch.
 
+**A pin follows an element whose words change a little each round.** The
+resolver in core's `anchor/element.ts` takes the element of the anchor's tag
+that says most of its words, over half of them, and none when two are equally
+close. Over three rounds of a rewritten mock that is not enough, so the page
+reports what each pinned element says now: `widget-anchor-refresh.ts`, called
+from the page list's `listHook` in `mic.js` and `mockup-live.js`, posts the
+element's fresh description to the thread's existing `…/reanchor` route with
+`refresh: true`. It reports only an element that says over half of the
+anchor's words with no other element of its tag as close, on the page state
+the thread was made in, and not while a mock shows an older round. The server
+(`core/anchor/refresh.ts`) moves only the fingerprint and snippet, keeps the
+thread's context and tap spot, and stores the anchor as first made under
+`firstAnchor`, once. The write lands in the doc's Yjs map, so every open page
+redraws from it. A share visitor's report is refused unless the visitor is
+the board's owner.
+
 **A comment that never reached the server says so, on the comment.** Every
 composer on every surface already handed the words back when a post was
 refused; none of them left anything standing to say why, so a box holding your

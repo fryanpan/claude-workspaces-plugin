@@ -1,6 +1,7 @@
 import { contextMatches, samePage } from '@claude-workspaces/core/anchor/context';
 import type { AnchorContext, Thread } from '@claude-workspaces/core/types';
 import { escapeHtml as esc, formatTime } from '@claude-workspaces/core/ui-shared';
+import { refreshAnchors } from './widget-anchor-refresh.ts';
 import { goTo, takeGoTo } from './widget-goto.ts';
 import { receipt, threadSnippet } from './widget-thread-text.ts';
 import type { ThreadRow } from './widget-threads.ts';
@@ -112,6 +113,8 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     };
     take();
     renderList(el, rows, go);
+    // What each pinned element says now, for the next round of a rewritten mock.
+    refreshAnchors(el, rows);
     // Shown once it is listed and the widget's context has caught up with the
     // address; dropped if the reader is somewhere else by then.
     const cur = el.currentContext ?? {};
