@@ -124,6 +124,18 @@ with JSON, and sends speech as binary frames.
   answers only GET and HEAD.
 - **Limits:** a line is at most 2,000 characters, a `say` at most 8,000,
   and an audio frame at most 64 KB.
+- **How long a socket lives, and what it may spend** (`app-voice/limits.ts`).
+  The token is checked only at upgrade and refreshed every 4 minutes, so it
+  bounds nothing once a socket is open. A socket closes with code 4001
+  after 10 minutes with no `speak`, `say` or audio heard while listening,
+  and with 4002 two hours after it opened. A doc has at most 3 open; one
+  more is closed with 4003 as it opens. Across every socket, the server
+  listens at most `CW_APP_VOICE_DAILY_LISTEN_S` seconds (default 14,400)
+  and speaks at most `CW_APP_VOICE_DAILY_SPEAK_CHARS` characters (default
+  200,000) per UTC day. Past either, `speak` and `listen` answer the error
+  `daily_cap` and the engine is not called, and the server logs one warning
+  line the first time each day. The counts are held in memory, so a restart
+  starts the day's budget again.
 
 ## The client
 
@@ -148,7 +160,10 @@ names another.
 
 After a drop, the client reconnects up to five times with the newest token
 the server sent, and listens again if it was listening. When the token it
-holds has expired, it stops trying and sends `close`.
+holds has expired, it stops trying and sends `close`. A close for being idle
+(4001) or for one socket too many on the doc (4003) is final: the client
+sends `close` and does not reconnect. After the two-hour close (4002) it
+reconnects as after any drop.
 
 ## What does not work yet
 
@@ -172,6 +187,7 @@ holds has expired, it stops trying and sends `close`.
 | Who is handed one, and who may open the socket | `packages/server/src/app-voice/gate.ts` |
 | Writing it into the frame | `packages/server/src/app-voice/seed.ts` |
 | One socket: speak, listen, say, refresh | `packages/server/src/app-voice/session.ts`, `say.ts`, `relay.ts` |
+| Idle and lifetime closes, sockets per doc, the daily budget | `packages/server/src/app-voice/limits.ts`, `session.ts`, `relay.ts` |
 | Upgrade | `packages/server/src/routes/upgrade-stream.ts` |
 | Client | `packages/widget/src/app-voice/` |
 | Relay allowlist | `packages/widget/src/mock-relay-policy.ts` |
@@ -180,11 +196,15 @@ holds has expired, it stops trying and sends `close`.
 
 - `packages/server/test/app-voice-socket.test.ts`: a real server and an app
   frame. It covers speak, listen to `turn-end`, `say` reaching the app, and
-  refusal of a missing, expired or other-doc token and of a foreign origin.
+  refusal of a missing, expired or other-doc token and of a foreign origin,
+  and a fourth socket on one doc closed until one of three goes.
 - `packages/server/test/app-voice-gate.test.ts`: who is handed a token, and
   refusal of a share visitor and a non-owner at the upgrade.
 - `packages/server/test/app-voice-session.test.ts`: cut-in, a new line
   stopping the old one, the limits, and the token refresh.
+- `packages/server/test/app-voice-limits.test.ts`: on a scripted clock, the
+  idle and two-hour closes, the daily speak and listen caps refusing without
+  calling an engine, the env parse, and a busy socket under every limit.
 - `packages/server/test/app-voice-voice-tone.test.ts`: a line's voice and
   tone reaching a fake Soniox socket, the refusals, Soniox refusing an
   unknown voice, and a heard tag word counting as a cut-in.
