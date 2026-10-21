@@ -42,6 +42,7 @@ import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
+import { DocImageVersions } from './doc-image-versions.ts';
 import type { BlockEditsAuthor, BlockEditsResult, DocOutline } from './doc-outline-ops.ts';
 import { type ResidencyEntry, pastWindow } from './doc-residency.ts';
 import { type DocStoreWorkspacePersistence, DocStoreWorkspaces } from './doc-store-workspaces.ts';
@@ -595,6 +596,11 @@ export class DocStore {
   /** The `[doc-store] mem` sampler; see memory-log.ts. */
   private readonly memoryLog = new MemoryLog({ stats: () => this.stats() });
   private evictTicker: ReturnType<typeof setInterval> | null = null;
+  /** The `?v=` each open doc's relative images are asked for with. */
+  private readonly imageVersions = new DocImageVersions({
+    openDocs: () => [...this.docs.values()].filter((d) => d.conns.size > 0),
+    boundPathOf: (docId) => this.boundPathOf(docId),
+  });
   /** An idle sweep is part-way through, handing the loop back between docs. */
   private sweeping = false;
   /**
@@ -908,6 +914,11 @@ export class DocStore {
     if (doc) this.lastPersonAt.set(doc.docId, this.now());
   }
 
+  /** A page's websocket joined `doc` (socket-handlers.ts). */
+  notePageOpened(doc: LiveDoc): void {
+    this.imageVersions.noteOpened(doc);
+  }
+
   private startEvictionSweep(): void {
     if (this.evictTicker) return;
     const timer = setInterval(() => {
@@ -943,6 +954,7 @@ export class DocStore {
     this.memoryLog.stop();
     if (this.evictTicker) clearInterval(this.evictTicker);
     this.evictTicker = null;
+    this.imageVersions.stop();
     this.disarmParkRetry();
     this.bindings.stopPolling();
     this.fanout.stop();
@@ -1127,7 +1139,8 @@ export class DocStore {
         presence.timers +
         files.tickers +
         (this.memoryLog.running ? 1 : 0) +
-        (this.evictTicker ? 1 : 0),
+        (this.evictTicker ? 1 : 0) +
+        (this.imageVersions.running ? 1 : 0),
       activations: files.activations,
       activationsTotal: files.activationsTotal,
     };

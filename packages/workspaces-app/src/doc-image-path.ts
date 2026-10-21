@@ -3,6 +3,7 @@
  * `doc-image-src.ts` so the doc page's first paint (`doc/prose-paint.ts`) can
  * resolve an image without loading the editor.
  */
+import { imageSegments } from '@claude-workspaces/core/image-versions';
 import { api } from './doc-path.ts';
 
 /**
@@ -22,11 +23,6 @@ export function docAssetsBase(docId: string, workspaceId?: string | null): strin
   return `${api(`docs/${encodeURIComponent(docId)}/assets`, workspaceId)}/`;
 }
 
-/** A src with a scheme, a leading `/` or `#`, or none at all is left alone. */
-function isRelative(src: string): boolean {
-  return src !== '' && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !/^[/#?]/.test(src);
-}
-
 function decodeSafe(seg: string): string {
   try {
     return decodeURIComponent(seg);
@@ -35,17 +31,24 @@ function decodeSafe(seg: string): string {
   }
 }
 
-/** The address the browser fetches for `src`. */
-export function toDisplaySrc(src: string, base: string | undefined): string {
-  if (!base || !isRelative(src)) return src;
-  const path = src.split(/[?#]/)[0] ?? '';
-  const segs = path.split('/').filter((s) => s !== '' && s !== '.');
-  return base + segs.map((s) => encodeURIComponent(decodeSafe(s))).join('/');
+/**
+ * The address the browser fetches for `src`.
+ *
+ * `version` is the file's mtime from the doc's `imageVersions` map
+ * (`@claude-workspaces/core/image-versions`). It goes on as `?v=`, so a file
+ * that changed is a new address no cache has an answer for.
+ */
+export function toDisplaySrc(src: string, base: string | undefined, version?: number): string {
+  if (!base) return src;
+  const segs = imageSegments(src);
+  if (!segs) return src;
+  const path = base + segs.map((s) => encodeURIComponent(s)).join('/');
+  return version === undefined ? path : `${path}?v=${encodeURIComponent(String(version))}`;
 }
 
 /**
  * The reverse, for HTML the editor parses back in (a paste of its own image).
- * The query is dropped: the only one the DOM carries is a retry's `?r=<n>`.
+ * The query is dropped: the DOM carries only a version's `?v=` or a retry's `?r=<n>`.
  */
 export function fromDisplaySrc(src: string, base: string | undefined): string {
   if (!base || !src.startsWith(base)) return src;

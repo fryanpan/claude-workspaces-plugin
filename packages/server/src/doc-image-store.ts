@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, realpathSync, writeSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { closeSync, mkdirSync, openSync, realpathSync, statSync, writeSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 
 /**
  * Where a pasted, dropped or picked image is kept: `images/` beside the
@@ -96,4 +96,50 @@ export function storeImageBeside(
     return { ok: true, src: `${IMAGE_FOLDER}/${name}` };
   }
   return { ok: false, reason: 'no-free-name' };
+}
+
+/** What the assets route serves beside a doc, by extension. */
+export const IMAGE_TYPES: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+};
+
+/** Each segment decoded alone, or null when any of them could climb out. */
+export function decodeSegments(raw: string): string[] | null {
+  const parts = raw.split('/');
+  const out: string[] = [];
+  for (const part of parts) {
+    let seg: string;
+    try {
+      seg = decodeURIComponent(part);
+    } catch {
+      return null;
+    }
+    if (seg === '' || seg === '.' || seg === '..') return null;
+    if (seg.includes('/') || seg.includes('\\') || seg.includes('\0')) return null;
+    out.push(seg);
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** The real path of `segments` under `root`, or null when it is outside or not a file. */
+export function resolveInside(root: string, segments: string[]): string | null {
+  let realRoot: string;
+  let real: string;
+  try {
+    realRoot = realpathSync(root);
+    real = realpathSync(join(realRoot, ...segments));
+  } catch {
+    return null;
+  }
+  if (!real.startsWith(realRoot + sep)) return null;
+  try {
+    return statSync(real).isFile() ? real : null;
+  } catch {
+    return null;
+  }
 }

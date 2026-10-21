@@ -201,7 +201,7 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       // prose.ts) emits/consumes `image` nodes for `![alt](src)` lines; without
       // this extension the schema has no `image` node and sync would drop them.
       // A relative path is fetched from the doc's own folder (doc-image-src.ts).
-      docImageExtension(opts.imageDocId ? docAssetsBase(opts.imageDocId) : undefined),
+      docImageExtension(opts.imageDocId ? docAssetsBase(opts.imageDocId) : undefined, opts.ydoc),
       // A pasted or dropped image file is stored beside the doc first
       // (doc-image-upload.ts); there is nowhere to store it without a doc.
       ...(opts.imageDocId ? [docImagePaste(opts.imageDocId)] : []),

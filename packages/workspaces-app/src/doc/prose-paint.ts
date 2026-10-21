@@ -20,6 +20,11 @@
 import { getProseFragment } from '@claude-workspaces/core/prose';
 import * as Y from 'yjs';
 import { docAssetsBase, toDisplaySrc } from '../doc-image-path.ts';
+import {
+  applyImageVersions,
+  followImageVersions,
+  imageVersionLookup,
+} from '../doc-image-versions.ts';
 import { paintedLinkHref } from '../link-open.ts';
 import type { MountScope } from '../mount-scope.ts';
 
@@ -155,7 +160,9 @@ export function paintProse(opts: {
   const fragment = getProseFragment(opts.ydoc);
   const imageBase = docAssetsBase(opts.docId);
   const doc = parent.ownerDocument;
+  const versionOf = imageVersionLookup(opts.ydoc);
   const root = renderProse(fragment, doc, imageBase);
+  applyImageVersions(root, imageBase, versionOf);
   parent.append(root);
   const redraw = (): void => {
     if (!root.classList.contains(FIRST_PAINT_CLASS)) {
@@ -164,8 +171,14 @@ export function paintProse(opts: {
     }
     root.replaceChildren();
     appendChildren(root, fragment, doc, imageBase);
+    applyImageVersions(root, imageBase, versionOf);
   };
-  const stop = (): void => fragment.unobserveDeep(redraw);
+  // The editor takes the root over in place and follows the versions itself.
+  const unfollow = followImageVersions(root, imageBase, opts.ydoc);
+  const stop = (): void => {
+    fragment.unobserveDeep(redraw);
+    unfollow();
+  };
   fragment.observeDeep(redraw);
   scope.onCleanup(() => {
     stop();
