@@ -1,6 +1,8 @@
 import type { ReviewPayload, User } from '@claude-workspaces/core';
 import { createThread, postReply } from '@claude-workspaces/core';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountAsks } from '../src/widget-ask.ts';
 import { mountPageList } from '../src/widget-page-list.ts';
@@ -87,6 +89,18 @@ function seedAnsweredComment(
   });
   vi.setSystemTime(T0 + 60_000);
   postReply(doc, threadId, { id: `${threadId}-c2`, author: AGENT, text: 'Priced it.', review });
+}
+
+/**
+ * Run a full garbage collection now. happy-dom up to 20.11.1 held every
+ * MutationObserver callback through a WeakRef alone, so the first collection
+ * silently stopped `mountAsks` hearing its rows: CI failed this file on a
+ * loaded runner, where a collection happened to land mid-case. Forcing one
+ * makes that a failure on every run rather than an occasional one.
+ */
+function collectGarbage(): void {
+  setFlagsFromString('--expose-gc');
+  (runInNewContext('gc') as () => void)();
 }
 
 /** Let observers, the click handler's fetch and its await settle. */
@@ -288,6 +302,8 @@ describe('finding the threads that ask something', () => {
 
   it('marks the row and the pin of an open ask, and of nothing else', async () => {
     const { el } = await mountWidget('d-ask-7');
+    await settle();
+    collectGarbage();
     seedAnsweredComment(el, 'th-open', decision(), byId('a'));
     seedAnsweredComment(
       el,
