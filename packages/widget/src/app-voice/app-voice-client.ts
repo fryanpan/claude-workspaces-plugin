@@ -16,6 +16,8 @@
  * drive it without either (`app-voice-entry.ts` hands in the real ones).
  */
 import {
+  APP_VOICE_CLOSE_IDLE,
+  APP_VOICE_CLOSE_TOO_MANY,
   APP_VOICE_SEED_ATTR,
   APP_VOICE_TOKEN_PARAM,
   type AppVoiceSeed,
@@ -213,7 +215,7 @@ export async function connectAppVoice(
         env.player?.play(pcm);
         emit('audio', pcm);
       };
-      sock.onclose = () => {
+      sock.onclose = (ev: { code?: number }) => {
         for (const p of speaking.values()) p.resolve({ stopped: true });
         speaking.clear();
         for (const p of saying.values()) p.reject(new Error('The socket closed.'));
@@ -222,7 +224,10 @@ export async function connectAppVoice(
           reject(new Error('The app voice socket was refused.'));
           return;
         }
-        if (!closed) void reconnect();
+        // Closed for being idle, or for one socket too many on this doc:
+        // opening again would only be closed again, so this one is over.
+        if (ev?.code === APP_VOICE_CLOSE_IDLE || ev?.code === APP_VOICE_CLOSE_TOO_MANY) end();
+        else if (!closed) void reconnect();
       };
     });
 
@@ -235,13 +240,17 @@ export async function connectAppVoice(
         return;
       } catch {}
     }
-    if (!closed) {
-      closed = true;
-      mic?.stop();
-      mic = null;
-      emit('close');
-    }
+    end();
   };
+
+  /** Give up: the page is told once, and the microphone goes. */
+  function end(): void {
+    if (closed) return;
+    closed = true;
+    mic?.stop();
+    mic = null;
+    emit('close');
+  }
 
   await open();
 

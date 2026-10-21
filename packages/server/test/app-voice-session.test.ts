@@ -43,11 +43,13 @@ function session(opts: {
     sendJson: (m) => frames.push(m),
     sendAudio: (pcm) => audio.push(pcm.byteLength),
     freshToken: () => ({ token: `t${++minted}`, expiresAt: minted }),
+    // The token refresh's ticks; the limit checks are `app-voice-limits.test.ts`'s.
     every: (fn, ms) => {
-      expect(ms).toBe(APP_VOICE_TOKEN_REFRESH_MS);
+      if (ms !== APP_VOICE_TOKEN_REFRESH_MS) return () => {};
       ticks.push(fn);
       return () => ticks.splice(0);
     },
+    hangUp: () => {},
   });
   s.open();
   return { s, frames, audio, ticks, of: (t: string) => frames.filter((f) => f.type === t) };

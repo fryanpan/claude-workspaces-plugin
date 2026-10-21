@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  APP_VOICE_CLOSE_TOO_MANY,
   APP_VOICE_SEED_ATTR,
   type AppVoiceSeed,
   parseAppVoiceSeed,
@@ -165,6 +166,21 @@ describe('the app voice socket', () => {
     return { ws, frames, audio };
   }
 
+  /** Open a socket and say how it ended up: `ready`, or the code it was closed with. */
+  async function outcome(seed: AppVoiceSeed): Promise<{ ws: WebSocket; got: 'ready' | number }> {
+    const url = `${wsBase}${seed.socket}?token=${encodeURIComponent(seed.token)}`;
+    const ws = new WebSocket(url, { headers: { origin: 'null' } } as unknown as string[]);
+    const got = await new Promise<'ready' | number>((resolve) => {
+      ws.addEventListener('message', (ev) => {
+        if (typeof ev.data === 'string' && (JSON.parse(ev.data) as Frame).type === 'ready') {
+          resolve('ready');
+        }
+      });
+      ws.addEventListener('close', (ev) => resolve(ev.code));
+    });
+    return { ws, got };
+  }
+
   /** The socket's answer to an upgrade, as a status. */
   const upgradeStatus = (path: string, headers: Record<string, string> = {}) =>
     fetch(`${base}${path}`, { headers: { ...UPGRADE, ...headers } }).then((r) => r.status);
@@ -241,6 +257,39 @@ describe('the app voice socket', () => {
     const seed = await frameSeed();
     const relayed = `${seed.socket}?token=${encodeURIComponent(seed.token)}&cw-via=mock-frame`;
     expect(await upgradeStatus(relayed, { origin: base })).toBe(101);
+  });
+
+  it('opens three sockets on one doc and closes a fourth, until one of the three goes', async () => {
+    const r = await post(`/workspaces/${board}/apps`, {
+      docId: 'harborlight-pilot',
+      origin: app.origin,
+    });
+    expect(r.status).toBe(200);
+    const id = ((await r.json()) as { docId: string }).docId;
+    const seed = await frameSeed(id);
+    const open = [];
+    for (let i = 0; i < 3; i++) {
+      const o = await outcome(seed);
+      expect(o.got).toBe('ready');
+      open.push(o.ws);
+    }
+    expect((await outcome(seed)).got).toBe(APP_VOICE_CLOSE_TOO_MANY);
+    // Another doc is not counted against this one.
+    const elsewhere = await outcome(await frameSeed(otherDoc));
+    expect(elsewhere.got).toBe('ready');
+    elsewhere.ws.close();
+    // The positive control: once one of the three closes, a fourth opens.
+    open[0]?.close();
+    const again = await waitFor(
+      async () => {
+        const o = await outcome(seed);
+        if (o.got === 'ready') return o;
+        return false;
+      },
+      { describe: 'a socket opens once one of the three has closed' },
+    );
+    again.ws.close();
+    for (const ws of open) ws.close();
   });
 
   describe('refuses', () => {

@@ -19,6 +19,7 @@ import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
 import { AllowRuleProposals } from './allow-rules.ts';
 import { AppOutages } from './app-outage.ts';
+import { appVoiceLimitsFromEnv } from './app-voice/limits.ts';
 import { AppVoiceRelay } from './app-voice/relay.ts';
 import { appSayer } from './app-voice/say.ts';
 import { appVoiceSocketPath } from './app-voice/seed.ts';
@@ -2013,6 +2014,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     engines: spokenEngines,
     sayFor: appSayer(docStore),
     mint: (workspaceId, docId) => mintAppVoice(workspaceId, docId),
+    // CW_APP_VOICE_DAILY_LISTEN_S and CW_APP_VOICE_DAILY_SPEAK_CHARS (`limits.ts`).
+    limits: appVoiceLimitsFromEnv(process.env),
   });
 
   const socketHandlers = createSocketHandlers({
