@@ -90,6 +90,13 @@ describe('a hydrate while bound-file reads are backed up', () => {
     store = undefined;
     await releaseFifosIn(stallDir);
     await releaseFifosIn(scratch);
+    // A released pipe is closed before its read's promise settles, and only
+    // the settle gives `leaked` back. On a loaded runner the next case's
+    // `attachFile` ran inside that gap, found the pool still busy and was
+    // refused (CI, 20 Oct). Wait for the count the next case starts from.
+    await waitFor(() => !boundFiles.busy(), {
+      describe: "this case's stalled reads to give their pool threads back",
+    });
     boundFiles.reset();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(scratch, { recursive: true, force: true });
