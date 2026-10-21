@@ -20,7 +20,7 @@
 import { getProseFragment } from '@claude-workspaces/core/prose';
 import * as Y from 'yjs';
 import { docAssetsBase, toDisplaySrc } from '../doc-image-path.ts';
-import { safeLinkHref } from '../link-open.ts';
+import { paintedLinkHref } from '../link-open.ts';
 import type { MountScope } from '../mount-scope.ts';
 
 /** Marks the root while it is still the paint; the editor removes it. */
@@ -60,7 +60,7 @@ function renderText(text: Y.XmlText, doc: Document): DocumentFragment {
       const tag = MARK_TAGS[mark];
       let wrap: HTMLElement | null = tag ? doc.createElement(tag) : null;
       if (mark === 'link') {
-        const href = safeLinkHref((value as Attrs | null)?.href as string | undefined);
+        const href = paintedLinkHref((value as Attrs | null)?.href as string | undefined);
         wrap = doc.createElement(href ? 'a' : 'span');
         if (href) {
           wrap.setAttribute('href', href);

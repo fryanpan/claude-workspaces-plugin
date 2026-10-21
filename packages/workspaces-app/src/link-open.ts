@@ -36,6 +36,28 @@ export function safeLinkHref(href: string | null | undefined): string | null {
   return trimmed;
 }
 
+const ANY_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const PAINTED_SCHEME = /^(?:https?|mailto):/i;
+
+/**
+ * The href the doc page's first paint (`doc/prose-paint.ts`) draws a live
+ * link for, or null to draw the words as text. Narrower than `safeLinkHref`:
+ * the paint is on screen before the editor and its link filter have loaded,
+ * so only http, https and mailto targets, and targets with no scheme (a
+ * sibling doc, an anchor), are clickable there. A speaker tag stays text, as
+ * `safeLinkHref` already decides.
+ */
+export function paintedLinkHref(href: string | null | undefined): string | null {
+  const safe = safeLinkHref(href);
+  if (!safe) return null;
+  let forSchemeCheck = '';
+  for (const ch of safe) {
+    if (ch.charCodeAt(0) > 0x20) forSchemeCheck += ch;
+  }
+  if (ANY_SCHEME.test(forSchemeCheck) && !PAINTED_SCHEME.test(forSchemeCheck)) return null;
+  return safe;
+}
+
 /**
  * Map a RELATIVE link inside a workspace-bound doc to the sibling doc's
  * in-SPA review URL, so "main doc links to secondary research doc" navigates
