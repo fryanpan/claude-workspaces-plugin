@@ -54,6 +54,7 @@ function session(voice: SpokenVoice, listener: TranscriptionEngine | null = null
     sendAudio: () => {},
     freshToken: () => ({ token: 't', expiresAt: 0 }),
     every: () => () => {},
+    hangUp: () => {},
   });
   s.open();
   return { s, of: (t: string) => frames.filter((f) => f.type === t) };

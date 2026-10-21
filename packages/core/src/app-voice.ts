@@ -140,7 +140,16 @@ export type AppVoiceErrorCode =
   | 'no_listener'
   | 'listener_failed'
   | 'not_an_app'
-  | 'say_failed';
+  | 'say_failed'
+  /** The server's daily listen or speak budget is spent until 00:00 UTC. */
+  | 'daily_cap';
+
+/** The socket closed after ten minutes with no speak, say or heard audio. */
+export const APP_VOICE_CLOSE_IDLE = 4001;
+/** The socket closed two hours after it opened; a page may open another. */
+export const APP_VOICE_CLOSE_LIFETIME = 4002;
+/** The doc already has as many app voice sockets open as one doc may. */
+export const APP_VOICE_CLOSE_TOO_MANY = 4003;
 
 const ID = /^[\w.:-]{1,64}$/;
 

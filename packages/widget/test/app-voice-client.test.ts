@@ -4,7 +4,13 @@
  * hears turns, writes to the app, and opens again after a drop with the
  * newest token the server sent rather than the one it started with.
  */
-import { APP_VOICE_SEED_ATTR, appVoiceSeedJson } from '@claude-workspaces/core/app-voice';
+import {
+  APP_VOICE_CLOSE_IDLE,
+  APP_VOICE_CLOSE_LIFETIME,
+  APP_VOICE_CLOSE_TOO_MANY,
+  APP_VOICE_SEED_ATTR,
+  appVoiceSeedJson,
+} from '@claude-workspaces/core/app-voice';
 import { describe, expect, it } from 'vitest';
 import {
   type AppVoicePlayer,
@@ -26,16 +32,17 @@ class FakeSocket {
   binaryType = 'blob';
   sent: unknown[] = [];
   onmessage: ((ev: { data: unknown }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev: { code: number }) => void) | null = null;
   constructor(readonly url: string) {
     FakeSocket.all.push(this);
   }
   send(data: unknown): void {
     this.sent.push(typeof data === 'string' ? JSON.parse(data) : data);
   }
-  close(): void {
+  /** The socket closes; `code` is what the server closed it with. */
+  close(code = 1006): void {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
   /** The server says something. */
   frame(msg: Record<string, unknown>): void {
@@ -155,6 +162,27 @@ describe('the app voice client', () => {
     expect(new URL(again.url).searchParams.get('token')).toBe('second');
     again.ready();
     expect(again.lastSent()).toEqual({ type: 'listen' });
+    voice.close();
+  });
+
+  it.each([
+    ['idle', APP_VOICE_CLOSE_IDLE],
+    ['too many on this doc', APP_VOICE_CLOSE_TOO_MANY],
+  ])('stays closed, and says so, when the server closes it as %s', async (_why, code) => {
+    const { voice, sock, waits } = await open();
+    let closed = false;
+    voice.on('close', () => (closed = true));
+    sock.close(code);
+    waits.shift()?.();
+    await expect.poll(() => closed).toBe(true);
+    expect(FakeSocket.all.length).toBe(1);
+  });
+
+  it('opens again after the two-hour limit, like any drop', async () => {
+    const { voice, sock, waits } = await open();
+    sock.close(APP_VOICE_CLOSE_LIFETIME);
+    waits.shift()?.();
+    await expect.poll(() => FakeSocket.all.length).toBe(2);
     voice.close();
   });
 
