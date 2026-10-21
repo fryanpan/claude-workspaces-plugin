@@ -194,6 +194,7 @@ describe('spoken reply over the converse socket', () => {
       visitorShareId: 's1',
       visitorMemberKey: null,
       ownerProven: () => false,
+      anyoneProven: () => false,
       browserProvedNobody: () => true,
       provenAuthor: () => null,
       widgetDoorGrant: null,

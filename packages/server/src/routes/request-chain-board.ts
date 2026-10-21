@@ -137,6 +137,7 @@ export async function serveBoardRoutes(
       url,
       scope,
       visitor: Boolean(visitor),
+      mayMintAppVoice: rq.mayMintAppVoice(),
     });
     if (handled) return handled;
   }

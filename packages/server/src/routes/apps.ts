@@ -36,6 +36,7 @@
  * it is read once, to draw the host page's link back to the board.
  */
 import type { DocMeta, DocType } from '@claude-workspaces/core';
+import type { AppVoiceSeed } from '@claude-workspaces/core/app-voice';
 import { assetHref } from '@claude-workspaces/core/asset-manifest';
 import { EMBED_PARAM } from '@claude-workspaces/core/board-embeds';
 import type { AppOutages } from '../app-outage.ts';
@@ -47,6 +48,7 @@ import {
   upstreamRequestHeaders,
   upstreamUrl,
 } from '../app-proxy.ts';
+import { withAppVoiceSeed } from '../app-voice/seed.ts';
 import { APP_DOWN_HEADER, renderAppWaiting } from '../app-waiting-page.ts';
 import type { BrowserSentryConfig } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
@@ -87,6 +89,8 @@ export interface AppRoutesContext {
   agentName: (agentId: string) => string | undefined;
   /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
   frameHost: FrameHost | null;
+  /** The app voice socket's path and a fresh token for one doc (`app-voice/`). */
+  appVoiceSeed: (workspaceId: string, docId: string) => AppVoiceSeed;
 }
 
 export interface AppRouteRequest {
@@ -96,6 +100,9 @@ export interface AppRouteRequest {
   /** A share visitor, admitted above; read only to draw the host page's
    *  link back to the board, never to decide access. */
   visitor: boolean;
+  /** Whether the frame served to this reader carries an app voice token
+   *  (`app-voice/gate.ts`). */
+  mayMintAppVoice: boolean;
 }
 
 /** `apps/<id>` and whatever follows it, off the scope's remainder. */
@@ -344,7 +351,10 @@ async function serveApp(
     const dest = req.headers.get('sec-fetch-dest');
     const onFrameHost = ctx.frameHost?.isFrameHost(req) === true;
     if (isMockFrameRequest(url)) {
-      return frameResponse(ctx, page, url, workspaceId, meta, up.status, onFrameHost);
+      const voiced = withAppVoiceSeed(page, () =>
+        rq.mayMintAppVoice ? ctx.appVoiceSeed(workspaceId, meta.docId) : null,
+      );
+      return frameResponse(ctx, voiced, url, workspaceId, meta, up.status, onFrameHost);
     }
     // A person opening the address gets the host page. A fetch of HTML from
     // inside the app (a partial, relayed through the host) gets the bytes.

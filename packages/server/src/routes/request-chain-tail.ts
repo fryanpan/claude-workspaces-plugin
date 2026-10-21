@@ -171,6 +171,7 @@ export async function serveTopLevelRoutes(
     visitor,
     visitorHome,
     ownerProven: ownerProven(),
+    mayMintAppVoice: rq.mayMintAppVoice(),
   });
   if (shell) return shell;
 

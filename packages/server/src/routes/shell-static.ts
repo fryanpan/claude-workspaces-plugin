@@ -36,7 +36,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { attachmentIdOf } from '@claude-workspaces/core';
 import type { DocType } from '@claude-workspaces/core';
+import type { AppVoiceSeed } from '@claude-workspaces/core/app-voice';
 import { assetHref } from '@claude-workspaces/core/asset-manifest';
+import { withAppVoiceSeed } from '../app-voice/seed.ts';
 import type { BrowserSentryConfig, PageType } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
 import type { DocStore } from '../doc-store.ts';
@@ -156,6 +158,9 @@ export interface ShellStaticContext {
   landingCoach?: () => string;
   /** Review items on other servers, text only, or '' (landing-remote.ts). */
   landingRemote?: () => string;
+  /** The app voice socket's path and a fresh token for one doc
+   *  (`app-voice/`). Asked only for a frame whose reader may have one. */
+  appVoiceSeed: (workspaceId: string, docId: string) => AppVoiceSeed;
 }
 
 /** The address this request is asking about, and who is asking. */
@@ -175,6 +180,9 @@ export interface ShellStaticRequest {
   /** A person proof on this request names the owner. Read only to decide
    *  whether `/` carries Incoming Messages. */
   ownerProven?: boolean;
+  /** Whether a mock's frame served to this reader carries an app voice
+   *  token (`app-voice/gate.ts`). */
+  mayMintAppVoice?: boolean;
 }
 
 export interface ShellStatic {
@@ -203,6 +211,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     landingInbox,
     landingCoach,
     landingRemote,
+    appVoiceSeed,
   } = ctx;
 
   /**
@@ -313,6 +322,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     req: Request,
     url: URL,
     visitor: ShareTarget | null,
+    mayMintAppVoice: boolean,
   ): Response => {
     const notFound = () =>
       new Response(renderMockupNotFound(docId), {
@@ -418,7 +428,12 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       version: shownVersion,
       versions,
     });
-    const body = injectFrameScripts(withWidget, url, widgetDist, markdownAppDist);
+    // A mock that loads the app voice client gets its token here, written
+    // into the bytes the etag below is hashed from.
+    const withVoice = withAppVoiceSeed(withWidget, () =>
+      mayMintAppVoice ? appVoiceSeed(workspaceId, doc.meta.docId) : null,
+    );
+    const body = injectFrameScripts(withVoice, url, widgetDist, markdownAppDist);
     return new Response(body, {
       headers: {
         'content-type': 'text/html; charset=utf-8',
@@ -495,6 +510,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     visitor,
     visitorHome,
     ownerProven = false,
+    mayMintAppVoice = false,
   }: ShellStaticRequest): Response | null | Promise<Response> => {
     // --- Static: widget ---
     if (widgetDist && pathname.startsWith('/widget/')) {
@@ -633,7 +649,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       }
       if (!isValidDocId(id)) return j(400, { error: 'bad docId' });
       const canonical = docStore.get(id)?.docId ?? id;
-      if (kind === 'mockups') return serveMockup(canonical, wsSeg, req, url, visitor);
+      if (kind === 'mockups') {
+        return serveMockup(canonical, wsSeg, req, url, visitor, mayMintAppVoice);
+      }
       const whiteboard = docStore.peekMeta(canonical);
       if (kind === 'whiteboards' || whiteboard?.type === 'whiteboard') {
         if (whiteboard?.type !== 'whiteboard' || !docStore.get(canonical)) {

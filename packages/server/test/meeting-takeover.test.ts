@@ -240,6 +240,7 @@ describe('the audio upgrade', () => {
       visitorShareId: null,
       visitorMemberKey: null,
       ownerProven: () => false,
+      anyoneProven: () => false,
       browserProvedNobody: () => author === null,
       provenAuthor: () => author,
       widgetDoorGrant: null,

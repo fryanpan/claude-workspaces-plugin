@@ -24,6 +24,7 @@
  * because this module cannot hold `Bun.serve`'s return value.
  */
 import { isOwnerActor } from '../actor-identity.ts';
+import { mayMintAppVoice as mayMintAppVoiceFor } from '../app-voice/gate.ts';
 import { LOCAL_ONLY_REFUSAL, addressesLocalOnlySet, isOnBox } from '../attachment-privacy.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
 import { isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
@@ -357,6 +358,7 @@ export function createRequestChain(
         browserProvedNobody,
         provenAuthor,
         ownerProven,
+        anyoneProven: () => provenIdentityFor() !== null,
         widgetDoorGrant,
       });
       if (streamed) {
@@ -422,7 +424,14 @@ export function createRequestChain(
       // top-level families and the tail, in that order and in the order
       // each file lists them. `null` from the first means nothing there
       // claimed the address; the second always answers.
-      const rq = { req, url, pathname, scope, gate, attribution, ownerProven };
+      const mayMintAppVoice = (): boolean =>
+        mayMintAppVoiceFor({
+          visitor: visitor !== null,
+          ownerProven: ownerProven(),
+          anyoneProven: provenIdentityFor() !== null,
+          mustSignIn: requireSignInToWrite && browserProvedNobody(),
+        });
+      const rq = { req, url, pathname, scope, gate, attribution, ownerProven, mayMintAppVoice };
       return (await serveBoardRoutes(ctx, rq)) ?? (await serveTopLevelRoutes(ctx, rq));
     }
   };

@@ -173,6 +173,7 @@ describe('evicting an idle doc', () => {
       recallRelay: {} as never,
       voiceRelay: {} as never,
       spokenRelay: {} as never,
+      appVoiceRelay: {} as never,
     });
     const ws = {
       data: { docId, kind: 'yjs' },

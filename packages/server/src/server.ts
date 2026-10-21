@@ -19,6 +19,10 @@ import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
 import { AllowRuleProposals } from './allow-rules.ts';
 import { AppOutages } from './app-outage.ts';
+import { AppVoiceRelay } from './app-voice/relay.ts';
+import { appSayer } from './app-voice/say.ts';
+import { appVoiceSocketPath } from './app-voice/seed.ts';
+import { appVoiceTokenKey, checkAppVoiceToken, mintAppVoiceToken } from './app-voice/token.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
@@ -263,6 +267,11 @@ function parseRevisedRange(
 
 export interface ServerHandle {
   port: number;
+  /** The app voice socket's tokens (`app-voice/token.ts`). Exposed so a test
+   *  can mint one at a chosen time — an expired one, or one for another doc. */
+  appVoice: {
+    mint(workspaceId: string, docId: string, at?: number): { token: string; expiresAt: number };
+  };
   docStore: DocStore;
   /** The board task store — workspaces, tasks, the transition gate. */
   tasks: TaskStore;
@@ -1477,10 +1486,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sendToAgent: (workspaceId, agentId, frame) =>
       sse.sendToAgent(`ws~${workspaceId}`, agentId, frame),
   });
+  const spokenEngines = opts.spokenReply ?? {
+    listener: null,
+    voices: { 1: null, 2: null },
+    gemini: null,
+  };
   const spokenRelay = new SpokenReplyRelay({
     leads: leadAnswers,
     agentLine: voiceAgentLine,
-    engines: opts.spokenReply ?? { listener: null, voices: { 1: null, 2: null }, gemini: null },
+    engines: spokenEngines,
     board: spokenBoard,
     timings: spokenTimings,
     agentCallbacks,
@@ -1985,12 +1999,29 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * are passed, never anything read out of them, so every frame sees the
    * state as it is when the frame arrives.
    */
+  // A mock's or app's own voice and ears, on the spoken reply's engines
+  // (`app-voice/`). Its token's key is derived from the cookie key, so a
+  // restart keeps the tokens in open frames valid.
+  const appVoiceKey = () => appVoiceTokenKey(cookieKey());
+  const mintAppVoice = (workspaceId: string, docId: string, at?: number) =>
+    mintAppVoiceToken(appVoiceKey(), workspaceId, docId, at);
+  const appVoiceSeed = (workspaceId: string, docId: string) => ({
+    socket: appVoiceSocketPath(workspaceId, docId),
+    ...mintAppVoice(workspaceId, docId),
+  });
+  const appVoiceRelay = new AppVoiceRelay({
+    engines: spokenEngines,
+    sayFor: appSayer(docStore),
+    mint: (workspaceId, docId) => mintAppVoice(workspaceId, docId),
+  });
+
   const socketHandlers = createSocketHandlers({
     docStore,
     meetingRelay,
     recallRelay,
     voiceRelay,
     spokenRelay,
+    appVoiceRelay,
   });
 
   /**
@@ -2051,6 +2082,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     landingInbox: (rankOf) => features.inbox.landingSection(rankOf),
     landingCoach: () => coachWiring.landing(),
     landingRemote: () => (homeRemotes ? renderRemoteReview(homeRemotes.boards()) : ''),
+    appVoiceSeed,
   });
 
   /** This server's side of Home across servers — see routes/home-feed.ts. */
@@ -2117,6 +2149,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     agentTokenKey: agentTokenKeyFor,
     requireAgentToken,
     warnLegacyAgentCaller,
+    appVoiceToken: (token, workspaceId, docId) =>
+      checkAppVoiceToken(appVoiceKey(), token, workspaceId, docId),
+    frameOrigin: frameHost?.origin ?? null,
   });
   /**
    * What the operator routes read instead of this closure's scope. Built
@@ -2571,6 +2606,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     }),
     agentName: (agentId) => identities.displayNameFor(agentId) ?? undefined,
     frameHost,
+    appVoiceSeed,
   };
 
   /**
@@ -3297,6 +3333,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     folderWatches,
     shares,
     sweepDeadShares,
+    appVoice: { mint: mintAppVoice },
     // Exactly what the interval does, exposed for the same reason
     // `sweepDeadShares` is: a test drives the real thing rather than a
     // re-implementation of it.
