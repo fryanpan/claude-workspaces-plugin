@@ -3,7 +3,8 @@
  * the browser's speaker and microphone handed in.
  *
  *     <script src="/widget/app-voice.js"></script>
- *     const voice = await cwAppVoice.connect();
+ *     const voice = await cwAppVoice.connect({ voice: '<a Soniox voice name>' });
+ *     await voice.speak('Welcome.', { tone: 'warm' });
  *
  * Inside a served mock or app the server has already written the socket's
  * path and a token into the frame (`server/src/app-voice/seed.ts`). A
@@ -78,9 +79,12 @@ async function openMic(onFrame: (pcm: Int16Array) => void): Promise<AppVoiceMic>
 /**
  * Open the socket. With no argument it reads the token the server wrote into
  * this page; a page of its own passes the seed it was handed. `play: false`
- * plays nothing, for a page that takes the `audio` events itself.
+ * plays nothing, for a page that takes the `audio` events itself. `voice` is
+ * the Soniox voice every line speaks in unless `speak` names another.
  */
-function connect(opts: { seed?: AppVoiceSeed; play?: boolean } = {}): Promise<AppVoice> {
+function connect(
+  opts: { seed?: AppVoiceSeed; play?: boolean; voice?: string } = {},
+): Promise<AppVoice> {
   const seed = opts.seed ?? readSeed(document);
   if (!seed) {
     return Promise.reject(
@@ -89,12 +93,16 @@ function connect(opts: { seed?: AppVoiceSeed; play?: boolean } = {}): Promise<Ap
       ),
     );
   }
-  return connectAppVoice(seed, {
-    WebSocket: window.WebSocket,
-    location: window.location,
-    player: opts.play === false ? null : webPlayer(),
-    openMic,
-  });
+  return connectAppVoice(
+    seed,
+    {
+      WebSocket: window.WebSocket,
+      location: window.location,
+      player: opts.play === false ? null : webPlayer(),
+      openMic,
+    },
+    opts.voice ? { voice: opts.voice } : {},
+  );
 }
 
 (window as unknown as { cwAppVoice: { connect: typeof connect } }).cwAppVoice = { connect };

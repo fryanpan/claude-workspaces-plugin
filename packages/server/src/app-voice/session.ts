@@ -5,8 +5,9 @@
  *
  *  - `speak` says the text with the server's spoken-reply voice, setup 1's
  *    Soniox `tts-rt-v2` when this server has the key, else setup 2's. A new
- *    `speak` stops the one before it. `tone` is read and given to no voice:
- *    neither takes one.
+ *    `speak` stops the one before it. A line may name a Soniox `voice` and a
+ *    `tone` from Soniox's tag list; anything else is refused before the
+ *    engine is asked. The ElevenLabs voice ignores both.
  *  - `listen` opens the spoken reply's listener with its tap tuning, so the
  *    listener's own end of speech, at most 500 ms after the last word, ends
  *    each turn. Every frame is sent as `heard`, and a final one is followed
@@ -26,12 +27,14 @@ import {
   APP_VOICE_OUTPUT_RATE,
   APP_VOICE_SAY_MAX,
   APP_VOICE_SPEAK_MAX,
+  APP_VOICE_VOICE_NAME,
   type AppVoiceServerMessage,
+  isAppVoiceTone,
   parseAppVoiceClientMessage,
 } from '@claude-workspaces/core/app-voice';
 import { cutsIn, hasWords } from '../spoken-reply/cut-in.ts';
 import { SPOKEN_TAP_TUNING } from '../spoken-reply/session.ts';
-import type { SpokenVoice } from '../spoken-reply/tts.ts';
+import type { SpeakAs, SpokenVoice } from '../spoken-reply/tts.ts';
 import type { EngineTurn, TranscriptionEngine, TranscriptionSession } from '../transcribe.ts';
 import { APP_VOICE_TOKEN_REFRESH_MS } from './token.ts';
 
@@ -91,7 +94,7 @@ export class AppVoiceSession {
       this.deps.sendJson({ type: 'error', code: 'bad_message', message: 'Not a message.' });
       return;
     }
-    if (m.type === 'speak') void this.speak(m.text, m.id);
+    if (m.type === 'speak') void this.speak(m.text, m.id, { voice: m.voice, tone: m.tone });
     else if (m.type === 'stop') this.stopSpeaking();
     else if (m.type === 'listen') this.listen();
     else if (m.type === 'unlisten') this.unlisten();
@@ -111,7 +114,7 @@ export class AppVoiceSession {
     this.unlisten();
   }
 
-  private async speak(raw: string, asked?: string): Promise<void> {
+  private async speak(raw: string, asked: string | undefined, as: SpeakAs): Promise<void> {
     const id = asked ?? `s${++this.seq}`;
     const text = raw.trim();
     const voice = this.deps.voice;
@@ -119,6 +122,12 @@ export class AppVoiceSession {
     if (text === '') return this.fail('bad_message', 'Nothing to say.', id);
     if (text.length > APP_VOICE_SPEAK_MAX) {
       return this.fail('too_long', `A line is at most ${APP_VOICE_SPEAK_MAX} characters.`, id);
+    }
+    if (as.voice !== undefined && !APP_VOICE_VOICE_NAME.test(as.voice)) {
+      return this.fail('bad_voice', 'A voice is a plain name: letters, spaces and hyphens.', id);
+    }
+    if (as.tone !== undefined && !isAppVoiceTone(as.tone)) {
+      return this.fail('bad_tone', 'A tone is one of the tags Soniox documents, such as warm.', id);
     }
     this.stopSpeaking();
     const ctl = new AbortController();
@@ -132,10 +141,15 @@ export class AppVoiceSession {
           if (!ctl.signal.aborted) this.deps.sendAudio(pcm);
         },
         ctl.signal,
+        as,
       );
     } catch {
       failed = true;
-      if (!ctl.signal.aborted) this.fail('voice_failed', 'The voice did not answer.', id);
+      if (!ctl.signal.aborted) {
+        // A voice Soniox does not have is refused here, as an engine error.
+        const which = as.voice ? ` Check that ${as.voice} is a voice it has.` : '';
+        this.fail('voice_failed', `The voice did not answer.${which}`, id);
+      }
     }
     if (this.speaking?.ctl === ctl) this.speaking = null;
     this.deps.sendJson({ type: 'spoken', id, stopped: ctl.signal.aborted || failed });
