@@ -104,32 +104,44 @@ export function resolve(anchor: ElementAnchor, env: ElementResolveEnv): ElementR
     }
   }
 
-  // otherwise search all elements with matching tag
+  // otherwise search all elements with matching tag. None, or none scoring
+  // above 0, is the same miss as one under the bar: nobody reads the reason.
   const candidates = Array.from(root.querySelectorAll<HTMLElement>(fp.tag.toLowerCase()));
-  let best: { el: HTMLElement; score: number } | null = null;
+  let best: HTMLElement | undefined;
+  let score = 0;
   for (const c of candidates) {
     const s = scoreMatch(fp, c);
-    if (!best || s > best.score) best = { el: c, score: s };
+    if (s > score) {
+      best = c;
+      score = s;
+    }
   }
-  if (!best) return { ok: false, reason: 'not-found', score: 0 };
-  if (best.score < SCORE_THRESHOLD) {
-    // An element with no words — a chart's bar, a map's canvas — has little
-    // else to be scored on, and a chart builds its bars afresh on each render.
-    // Such an element is found by where it sits: the same path, exactly.
-    // One with words is found by them: an element of its tag that still says
-    // every one has had the page move round it. A mock revised in place gains
-    // a paragraph or a row above, and on its index alone a heading or a cell
-    // below scored under the bar. The first in the page wins, and a words
-    // anchor, having no path, is left to its own resolver.
-    const at =
-      fp.path &&
-      candidates.find((c) =>
-        !fp.text ? computePath(c) === fp.path : tokenOverlap(fp.text, extractText(c)) === 1,
-      );
-    if (at) return { ok: true, element: at, score: SCORE_THRESHOLD };
-    return { ok: false, reason: 'low-confidence', score: best.score };
-  }
-  return { ok: true, element: best.el, score: best.score };
+  if (best && score >= SCORE_THRESHOLD) return { ok: true, element: best, score };
+  // An element with no words — a chart's bar, a map's canvas — has little
+  // else to be scored on, and a chart builds its bars afresh on each render.
+  // Such an element is found by where it sits: the same path, exactly.
+  // One with words is found by them, wherever the page moved it: a mock
+  // revised in place gains a paragraph or a row above, and on its index
+  // alone a heading or a cell below scored under the bar. It is the
+  // element of its tag sharing most of its words, over half of them, and
+  // when two share as many the thread has no spot rather than a guessed
+  // one. One saying all of them is taken first in the page, as is the
+  // exact path. A words anchor, having no path, is left to its own resolver.
+  let at: HTMLElement | undefined;
+  let top = 0.5;
+  let ties = 0;
+  if (fp.path)
+    for (const c of candidates) {
+      const o = fp.text ? tokenOverlap(fp.text, extractText(c)) : +(computePath(c) === fp.path);
+      if (o > top) {
+        at = c;
+        top = o;
+        ties = 0;
+      } else if (o === top) ties++;
+    }
+  return at && (top === 1 || !ties)
+    ? { ok: true, element: at, score: SCORE_THRESHOLD }
+    : { ok: false, reason: 'low-confidence', score };
 }
 
 /**
@@ -213,7 +225,7 @@ function readDataAttrs(el: HTMLElement): Record<string, string> {
  * says its label: without it such a button with no id tops out at 35 and
  * never resolves, and the label is what tells it from the icon beside it.
  */
-function extractText(el: HTMLElement): string {
+export function extractText(el: HTMLElement): string {
   const raw = (
     el.textContent?.trim() ||
     el.getAttribute('aria-label') ||
@@ -256,7 +268,9 @@ function readRect(el: HTMLElement): ElementFingerprint['rect'] {
   };
 }
 
-function tokenOverlap(a: string, b: string): number {
+/** The share of the two texts' words that both say, 0..1: what they have in
+ *  common over everything either says. */
+export function tokenOverlap(a: string, b: string): number {
   if (!a || !b) return 0;
   const sa = new Set(a.toLowerCase().split(/\W+/).filter(Boolean));
   const sb = new Set(b.toLowerCase().split(/\W+/).filter(Boolean));

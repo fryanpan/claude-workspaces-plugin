@@ -180,4 +180,36 @@ describe('element anchor', () => {
     setDom('<main><h1>Saltmarsh tides</h1><p>New intro.</p><h3>Harborlight low water</h3></main>');
     expect(resolve(heading, { root: document }).ok).toBe(false);
   });
+
+  it('follows an element whose words changed a little as the page moved', () => {
+    const report = (before: string, heading: string, cell: string) =>
+      `<main><h1>Saltmarsh tides</h1>${before}<h3>${heading}</h3><p>Rises by noon.</p>` +
+      `<table><tbody><tr><td>June</td><td>${cell}</td></tr></tbody></table></main>`;
+    setDom(report('', 'Riverbend high water by month', '4.1 m at noon'));
+    const heading = createAnchor(document.querySelector('h3') as HTMLElement);
+    const cell = createAnchor(document.querySelectorAll('td')[1] as HTMLElement);
+    setDom(
+      report(
+        '<h3>Harborlight low water by month</h3>',
+        'Riverbend high water by calendar month',
+        '4.1 m at midday',
+      ),
+    );
+    const h = resolve(heading, { root: document });
+    expect(h.ok && h.element.textContent).toBe('Riverbend high water by calendar month');
+    const c = resolve(cell, { root: document });
+    expect(c.ok && c.element.textContent).toBe('4.1 m at midday');
+  });
+
+  it('orphans rather than choose between two elements whose words are as close', () => {
+    setDom('<main><ul><li>Riverbend gauge reads high</li></ul></main>');
+    const item = createAnchor(document.querySelector('li') as HTMLElement);
+    setDom(
+      '<main><p>Intro.</p><ul><li>Riverbend gauge reads low</li><li>Riverbend gauge reads level</li></ul></main>',
+    );
+    // CONTROL: each says three of the five words the two share between them.
+    const [a, b] = [...document.querySelectorAll('li')].map((e) => e.textContent);
+    expect([a, b]).toEqual(['Riverbend gauge reads low', 'Riverbend gauge reads level']);
+    expect(resolve(item, { root: document }).ok).toBe(false);
+  });
 });

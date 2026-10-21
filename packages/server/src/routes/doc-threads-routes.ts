@@ -776,6 +776,21 @@ export async function handleDocThreadRoutes(
       if (!mayTouchFrom(via, docStore.getThread(docId, threadId)?.comments[0])) {
         return j(403, { error: 'mock_frame_edit_refused' });
       }
+      // `refresh`: a page reporting what the thread's element says now, so
+      // the next round of a rewritten mock is matched against those words.
+      // Only the element's description moves, beside the first anchor kept
+      // (`core/anchor/refresh.ts`). The owner's pages are enough to keep
+      // anchors current, so a share visitor's page is not asked.
+      if (body?.refresh === true) {
+        if (visitor) {
+          const refused = rq.requireOwner(measurementBoard() ?? '');
+          if (refused) return refused;
+        }
+        if (anchor.kind !== 'element') return j(400, { error: 'refresh takes an element anchor' });
+        const r = docStore.refreshAnchor(docId, threadId, anchor);
+        if (!r.ok) return j(r.reason === 'not-found' ? 404 : 409, { error: r.reason });
+        return j(200, { thread: r.thread, changed: r.changed });
+      }
       const t = docStore.reanchor(docId, threadId, anchor);
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }

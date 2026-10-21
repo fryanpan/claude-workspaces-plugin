@@ -21,7 +21,8 @@ import { type VoiceNote, readVoiceNote } from './voice-feedback.ts';
  *   meta       Y.Map<string, DocMeta fields>         — docId, type, sourceUrl, title, createdAt
  *   content    Y.Text                                 — markdown content (surface 1)
  *   threads    Y.Map<threadId, Y.Map {
- *                anchor: frozen JSON Anchor (static — threads never move)
+ *                anchor: JSON Anchor (an element's is refreshed — anchor/refresh.ts)
+ *                firstAnchor?: the anchor as first made, once it was refreshed
  *                status: 'open' | 'resolved'
  *                createdBy: User
  *                createdAt: number

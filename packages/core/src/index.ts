@@ -1,5 +1,6 @@
 export * from './types.ts';
 export * from './schema.ts';
+export * from './anchor/refresh.ts';
 export * from './comment-receipt.ts';
 export * from './comment-delivery.ts';
 export * from './identity.ts';
