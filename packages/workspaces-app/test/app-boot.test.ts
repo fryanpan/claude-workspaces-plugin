@@ -14,7 +14,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { type AppBootEnv, bootApp } from '../src/app.ts';
 import { SIGN_IN_REQUIRED } from '../src/signin/write-gate.ts';
@@ -115,6 +115,23 @@ const EDITOR = '#editor > .ProseMirror[contenteditable]';
 async function editorMounted(): Promise<void> {
   await eventually(() => expect(document.querySelector(EDITOR)).not.toBeNull());
 }
+
+/**
+ * Load every surface `mountSurface` can `import()` before any case runs. The
+ * first case to mount one used to pay that module's transform inside its own
+ * 5s: the markdown editor's chunk is the whole Tiptap stack, 513ms on an idle
+ * Mac against ~40ms for every later mount, and on 21 Oct a loaded CI shard
+ * took "a markdown doc mounts the prose editor" past 5000ms. The load gets its
+ * own budget here, so each case's 5s covers only the boot it is about.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('../src/doc/markdown-mount.ts'),
+    import('../src/code/code-app.ts'),
+    import('../src/media/media-app.ts'),
+    import('../src/redline/redline-app.ts'),
+  ]);
+}, 60_000);
 
 beforeEach(() => {
   server.reset();
