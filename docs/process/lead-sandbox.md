@@ -19,13 +19,20 @@ profile per lead. A profile allows everything, then:
   (`~/Library/Application Support/claude-workspaces`, data folder included),
   every folder in `protect`, and every other lead's projects;
 - **reopens, inside those**, the lead's own projects (worktrees included),
-  and what Claude Code needs: `~/.claude` and `~/.claude.json`, its install
+  and what Claude Code needs: `~/.claude`, `~/.claude.json` (read only), its install
   under `~/.local`, `~/.bun` for plugin servers, and `~/Library/Keychains`
   to sign in. Without the keychain folder `claude -p` answers "Not logged
   in";
 - **denies other projects' transcripts again**: `~/.claude/projects` and the
   scratch folders under `/private/tmp/claude-<uid>`, reopening only the
   lead's own project's folders and its worktrees' folders;
+- **refuses writes, after every other rule, to what Claude Code runs or
+  obeys** in `~/.claude`: `settings*.json`, `hooks`, `plugins`, `skills`,
+  `agents`, `commands`, `rules`, `output-styles`, `CLAUDE.md`, the shell
+  snapshots and session env files each Bash call sources, the `~/.claude`
+  folder itself, and all of `~/.claude.json`. A lead can read them, so its
+  own session loads them, but it cannot plant a hook, an MCP server or plugin
+  code that runs outside the sandbox in Bryan's next session;
 - **denies the config, the profiles and the prod root again** after every
   other rule, so no `allow` reopens prod and a lead cannot widen its next
   launch.
@@ -205,11 +212,20 @@ present and skips, saying so, when it is not (Linux CI).
   ask the server, which runs as the owner, to bind and read a file it cannot
   read itself. The board-scoped agent token closes that. Until it ships,
   this wall covers files only.
-- **`~/.claude` is shared.** The lead reads and writes all of it except
-  other projects' transcripts. `history.jsonl` holds every project's
-  prompts, `file-history` holds file backups from every session, and
-  `~/.claude.json` lists every project. Splitting them needs a config folder
-  per lead, which means signing each lead in again.
+- **`~/.claude` is shared.** The lead reads all of it except other
+  projects' transcripts, and writes what is not code or settings.
+  `history.jsonl` holds every project's prompts, `file-history` holds file
+  backups from every session, and `~/.claude.json` lists every project.
+  Splitting them needs a config folder per lead, which means signing each
+  lead in again: on 17 October a `claude -p` with its own `CLAUDE_CONFIG_DIR`
+  answered "Not logged in".
+- **What a read-only `~/.claude.json` and settings cost.** Measured on 17
+  October with Claude Code 2.1.302: a `claude -p` with every write under
+  `~/.claude` and to `~/.claude.json` refused still signed in and ran a Bash
+  call. Not measured: an interactive session. Inside the wall a lead cannot
+  `claude mcp add`, install or update a plugin, accept a new project's trust
+  dialog for good, or keep its shell snapshot; do those from an unsandboxed
+  session.
 - **Names, not contents, of other scratch folders.** Claude Code opens
   `/private/tmp/claude-<uid>` itself at start, so a lead can list the names
   of the other projects' scratch folders there.

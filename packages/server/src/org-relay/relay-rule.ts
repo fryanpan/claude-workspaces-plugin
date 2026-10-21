@@ -3,7 +3,9 @@
  * decides about a message without a network call.
  *
  * Bryan's direction (15 Oct): agents chat freely inside an organization;
- * across organizations, only seats with cross-organization access may. Both
+ * across organizations, only seats with cross-organization access may. The
+ * access governs both directions (`RelaySeat.crossOrganization`), so a
+ * message crosses only when the sender and the recipient both hold it. Both
  * seats come from the config, so the organization of each is the config's
  * answer and never a name the message carries.
  */
@@ -31,7 +33,8 @@ export function applyOrganizationRule(
   if (text.trim() === '') return { kind: 'refuse', reason: 'empty' };
   if (text.length > RELAY_MAX_TEXT) return { kind: 'refuse', reason: 'too-long' };
   const crossOrganization = from.organization !== to.organization;
-  if (crossOrganization && !from.crossOrganization) {
+  // Both ends: a seat without the access neither sends nor receives across.
+  if (crossOrganization && !(from.crossOrganization && to.crossOrganization)) {
     return { kind: 'refuse', reason: 'cross-organization' };
   }
   return {
