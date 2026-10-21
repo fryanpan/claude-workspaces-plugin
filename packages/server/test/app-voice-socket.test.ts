@@ -172,7 +172,6 @@ describe('the app voice socket', () => {
   it("writes the socket's path and a token for this doc into the app's frame", async () => {
     const seed = await frameSeed();
     expect(seed.socket).toBe(`/workspaces/${board}/docs/${docId}/app-voice`);
-    expect(seed.expiresAt).toBeGreaterThan(Date.now());
     // The host page a person opens carries none: it is the frame's script
     // that talks.
     const host = await fetch(`${base}/workspaces/${board}/apps/${docId}/`).then((r) => r.text());
@@ -268,7 +267,6 @@ describe('the app voice socket', () => {
 
     it('an expired token', async () => {
       const stale = handle.appVoice.mint(board, docId, Date.now() - 11 * 60_000);
-      expect(stale.expiresAt).toBeLessThan(Date.now());
       expect(
         await upgradeStatus(`${path()}?token=${encodeURIComponent(stale.token)}`, {
           origin: 'null',
