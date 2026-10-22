@@ -17,9 +17,9 @@ import { backgroundPasses, readHeap } from './event-loop.ts';
  * - each printed line names the requests served since the previous one, by
  *   route family, and the busiest doc-store activator in that window;
  * - each printed line carries the JS heap (`heap=`), so heap growth can be
- *   told from native growth. On 2026-10-21 prod's footprint climbed
- *   0.35 GB/h with resident docs flat, and the only heap readings were on
- *   `[loop] blocked` lines, which stopped once the loop stopped blocking;
+ *   told from native growth. On 2026-10-21 prod's footprint climbed about
+ *   0.35 GB/h while RSS swung 1.2–2.0 GB between lines, and the only heap
+ *   readings were on `[loop] blocked` lines, which stop when the loop does;
  * - every `HEAP_TYPES_EVERY_MS` a printed line also carries the heap's five
  *   commonest object types and the three that grew most since the last
  *   census. `heapStats()` walks every live cell on the main thread: measured
