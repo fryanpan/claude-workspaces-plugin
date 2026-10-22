@@ -155,6 +155,23 @@ export function plan(cfg: ProjectConfig, obs: Observed): Action[] {
   return actions;
 }
 
+/**
+ * The committed fly.toml with this project's app, region and size written
+ * in. `fly deploy` lets the file's [[vm]] block win over its --vm-* flags,
+ * so the size has to be in the file the deploy reads.
+ */
+export function renderFlyToml(base: string, cfg: ProjectConfig): string {
+  const vm = base.indexOf('[[vm]]');
+  if (vm < 0) throw new Error('fly.toml has no [[vm]] block');
+  return `${base
+    .slice(0, vm)
+    .replace(/^app = .*$/m, `app = "${cfg.app}"`)
+    .replace(
+      /^primary_region = .*$/m,
+      `primary_region = "${cfg.region}"`,
+    )}[[vm]]\n  size = "${cfg.vmSize}"\n  memory = "${cfg.vmMemoryMb}mb"\n`;
+}
+
 /** The one policy the machine's bucket credential holds: put objects under the prefix. */
 export function writeOnlyPolicy(bucket: string, prefix: string): string {
   return JSON.stringify({

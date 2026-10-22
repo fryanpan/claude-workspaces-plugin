@@ -42,7 +42,9 @@ primary_region = "sjc"
 [[restart]]
   policy = "always"
 
-# The size comes from deploy.ts (`--memory`, 512 MB unless told otherwise):
-# a memory line here would override its --vm-memory flag.
+# deploy.ts rewrites everything from here down with the project's size
+# (`--memory`, 512 MB unless told otherwise), because `fly deploy` lets this
+# block win over its --vm-* flags. Keep [[vm]] the last block in the file.
 [[vm]]
   size = "shared-cpu-1x"
+  memory = "512mb"

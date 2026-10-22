@@ -22,7 +22,7 @@
  * Why Tigris: README.md.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -35,6 +35,7 @@ import {
   plan,
   projectConfig,
   quickTunnelUrl,
+  renderFlyToml,
   writeOnlyPolicy,
 } from './deploy-plan.ts';
 import {
@@ -152,6 +153,8 @@ function deploy(cfg: ProjectConfig): void {
     );
     if (archive.status !== 0) throw new Error('git archive failed');
     const dir = join(ctx, 'infra', 'project-machine');
+    const toml = join(dir, 'fly.toml');
+    writeFileSync(toml, renderFlyToml(readFileSync(toml, 'utf8'), cfg));
     flyLive([
       'deploy',
       ctx,
@@ -166,10 +169,6 @@ function deploy(cfg: ProjectConfig): void {
       '--no-public-ips',
       '--image-label',
       cfg.imageLabel,
-      '--vm-size',
-      cfg.vmSize,
-      '--vm-memory',
-      String(cfg.vmMemoryMb),
       '--yes',
     ]);
   } finally {
