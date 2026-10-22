@@ -1,6 +1,14 @@
-import { realpathSync, statSync } from 'node:fs';
-import { dirname, extname, join, sep } from 'node:path';
-import { MAX_IMAGE_BYTES, imageStem, sniffImage, storeImageBeside } from '../doc-image-store.ts';
+import { statSync } from 'node:fs';
+import { dirname, extname } from 'node:path';
+import {
+  IMAGE_TYPES,
+  MAX_IMAGE_BYTES,
+  decodeSegments,
+  imageStem,
+  resolveInside,
+  sniffImage,
+  storeImageBeside,
+} from '../doc-image-store.ts';
 import { fileSandboxHeaders } from '../mockup-frame.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
 
@@ -36,14 +44,8 @@ import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-co
  * so it is admitted exactly where the doc's live-editing socket is: on a
  * shared doc, and only for a browser the write gate lets edit.
  */
-export const IMAGE_TYPES: Readonly<Record<string, string>> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-};
+
+export { IMAGE_TYPES, decodeSegments, resolveInside };
 
 /** The route segment the editor addresses a doc's relative images under. */
 export const DOC_ASSETS_SEGMENT = 'assets';
@@ -74,10 +76,18 @@ export async function handleDocAssetsRoute(
   if (IMAGE_TYPES[extname(abs).toLowerCase()] !== type) {
     return j(415, { error: 'only images are served beside a doc' });
   }
-  const size = statSync(abs).size;
+  const st = statSync(abs, { bigint: true });
+  const size = Number(st.size);
+  // A validator, so a cache that revalidates can tell a changed file from an
+  // unchanged one. `no-cache` stays: the page's `?v=` (doc-image-versions.ts)
+  // is what makes a new file a new address, and an address with a stale
+  // version must still be answered with what is on disk now.
+  const etag = `W/"${st.size.toString(16)}-${st.mtimeNs.toString(16)}"`;
   const headers: Record<string, string> = {
     'content-type': type,
     'cache-control': 'no-cache',
+    etag,
+    'last-modified': new Date(Number(st.mtimeMs)).toUTCString(),
     'x-content-type-options': 'nosniff',
     // An `<img>` ignores both of these. A reader who opens the address on
     // its own gets an SVG as a download without scripts, never as a page on
@@ -85,6 +95,9 @@ export async function handleDocAssetsRoute(
     'content-disposition': type === 'image/svg+xml' ? 'attachment' : 'inline',
     ...fileSandboxHeaders(abs),
   };
+  if (req.headers.get('if-none-match') === etag) {
+    return new Response(null, { status: 304, headers });
+  }
   if (req.method === 'HEAD') {
     return new Response(null, { headers: { ...headers, 'content-length': String(size) } });
   }
@@ -131,40 +144,4 @@ async function readCapped(req: Request, cap: number): Promise<Uint8Array | null>
     at += c.byteLength;
   }
   return out;
-}
-
-/** Each segment decoded alone, or null when any of them could climb out. */
-export function decodeSegments(raw: string): string[] | null {
-  const parts = raw.split('/');
-  const out: string[] = [];
-  for (const part of parts) {
-    let seg: string;
-    try {
-      seg = decodeURIComponent(part);
-    } catch {
-      return null;
-    }
-    if (seg === '' || seg === '.' || seg === '..') return null;
-    if (seg.includes('/') || seg.includes('\\') || seg.includes('\0')) return null;
-    out.push(seg);
-  }
-  return out.length > 0 ? out : null;
-}
-
-/** The real path of `segments` under `root`, or null when it is outside or not a file. */
-export function resolveInside(root: string, segments: string[]): string | null {
-  let realRoot: string;
-  let real: string;
-  try {
-    realRoot = realpathSync(root);
-    real = realpathSync(join(realRoot, ...segments));
-  } catch {
-    return null;
-  }
-  if (!real.startsWith(realRoot + sep)) return null;
-  try {
-    return statSync(real).isFile() ? real : null;
-  } catch {
-    return null;
-  }
 }

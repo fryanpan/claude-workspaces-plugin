@@ -1873,7 +1873,14 @@ pasted, dropped or picked image file to that route's POST, which stores it in
 the `doc-*.ts` the diagram draws), then inserts the path it answers.
 `doc-image-retry.ts`, which that block image installs, asks again for an
 image whose file was not there yet, so it appears once the file lands without
-a reload; it changes the DOM's `src` only. `comment-delete-guard.ts` and
+a reload; it changes the DOM's `src` only. `doc-image-versions.ts`, which it
+also installs, points each such image at `?v=<mtime>` from the doc's
+`imageVersions` map, so an overwritten file is a new address no cache can
+answer with the old bytes, and an open page shows it without a reload. The
+server's `doc-image-versions.ts` (a `doc-*.ts` the diagram draws) writes that
+map from a sweep over docs with a page open, and core's `image-versions.ts`
+holds the map's name and key, so the two sides cannot disagree about either.
+`comment-delete-guard.ts` and
 `mass-delete-undo.ts` join the editor tier and change none of the picture:
 two extensions in `editor.ts`'s base list. The first refuses Delete over a
 selection spanning blocks right after a tap on a comment, which is how a

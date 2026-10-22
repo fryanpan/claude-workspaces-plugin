@@ -168,6 +168,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         return;
       }
       onOpen(doc, typed);
+      docStore.notePageOpened(doc);
     },
     message(ws, message) {
       if (ws.data.kind === 'recall') {
