@@ -1,4 +1,3 @@
-import { configuredHostFetch } from '../outbound-fetch.ts';
 /**
  * The relay: carries agent messages between project servers, applying the
  * organization rule and the filter on the way.
@@ -35,6 +34,7 @@ import { configuredHostFetch } from '../outbound-fetch.ts';
  * next pass, so a recipient server that is down loses nothing.
  */
 import { BOARD_AGENT_TOKEN_TTL_MS } from '../auth/board-agent-token.ts';
+import { configuredHostFetch } from '../outbound-fetch.ts';
 import { createBearerKeeper } from './relay-bearers.ts';
 import {
   type OutboxThread,
