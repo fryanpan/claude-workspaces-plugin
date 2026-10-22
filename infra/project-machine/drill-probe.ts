@@ -59,26 +59,32 @@ function ydocCount(): number {
 async function seed(): Promise<void> {
   const existing = await boards();
   const others = existing.filter((b) => b.name !== BOARD);
-  if (others.length > 0)
+  if (others.length > 0) {
     throw new Error(`refusing to seed: this server holds ${others.length} other board(s)`);
-  if (existing.length > 0) {
-    console.log(JSON.stringify({ seeded: false, board: existing[0]?.id }));
-    return;
   }
+  const id =
+    existing[0]?.id ?? ((await call('POST', '/workspaces', { name: BOARD })).workspace as Board).id;
+  const ws = (await call('GET', `/workspaces/${id}?format=json`)).workspace as {
+    docIds?: string[];
+  };
+  const have = ws.docIds?.length ?? 0;
   mkdirSync(FIXTURES, { recursive: true });
-  const ws = (await call('POST', '/workspaces', { name: BOARD })).workspace as { id: string };
-  for (const d of DOCS) {
-    const path = join(FIXTURES, d.file);
-    writeFileSync(path, d.markdown, { mode: 0o644 });
-    await call('POST', `/workspaces/${ws.id}/docs`, {
-      type: 'markdown',
-      sourceUrl: path,
-      title: d.file,
-    });
+  // A board that already holds its docs is left as it is, so seeding twice adds nothing.
+  if (have < DOCS.length) {
+    for (const d of DOCS) {
+      const path = join(FIXTURES, d.file);
+      writeFileSync(path, d.markdown, { mode: 0o644 });
+      await call('POST', `/workspaces/${id}/docs`, {
+        docId: d.file.replace(/\.md$/, ''),
+        type: 'markdown',
+        sourceUrl: path,
+        title: d.file,
+      });
+    }
   }
   // The board is only worth backing up once both docs are on disk as .ydoc.
   for (let i = 0; i < 100 && ydocCount() < DOCS.length; i++) await Bun.sleep(100);
-  console.log(JSON.stringify({ seeded: true, board: ws.id, ydocs: ydocCount() }));
+  console.log(JSON.stringify({ seeded: have < DOCS.length, board: id, ydocs: ydocCount() }));
 }
 
 async function print(): Promise<void> {
