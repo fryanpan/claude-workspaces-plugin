@@ -30,18 +30,32 @@ function argsFrom(pairs: Record<string, string>): ArgReader {
 function resolve(env: NodeJS.ProcessEnv, arg: ArgReader = noArgs()) {
   const repoRoot = mkdtempSync(join(tmpdir(), 'cw-config-'));
   try {
-    return resolveServerConfig({ env, repoRoot, arg });
+    // A data dir is required; every case here is about something else.
+    return resolveServerConfig({
+      env: { CW_DATA_DIR: join(repoRoot, 'data'), ...env },
+      repoRoot,
+      arg,
+    });
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 }
 
 describe('resolveServerConfig', () => {
-  it('falls back to the default port and resolves a data dir with nothing set', () => {
-    const cfg = resolve({});
+  it("reads prod's start as port 8787 and the CW_DATA_DIR corpus", () => {
+    // What scripts/serve.ts --no-watch hands bin.ts under launchd, where the
+    // plist sets CW_DATA_DIR and no port variable.
+    const prodDir = '/Users/x/Library/Application Support/claude-workspaces/data';
+    const cfg = resolve({ CW_DATA_DIR: prodDir }, argsFrom({ port: '8787', 'data-dir': prodDir }));
     expect(cfg.requestedPort).toBe(8787);
-    expect(typeof cfg.dataDir).toBe('string');
-    expect(cfg.dataDir.length).toBeGreaterThan(0);
+    expect(cfg.dataDir).toBe(prodDir);
+    expect(resolve({ CW_DATA_DIR: prodDir }).requestedPort).toBe(8787);
+  });
+
+  it('refuses a start that names no data dir', () => {
+    expect(() => resolveServerConfig({ env: {}, repoRoot: tmpdir(), arg: noArgs() })).toThrow(
+      /no data dir/,
+    );
   });
 
   describe('Sentry: one project per platform, one environment string for both', () => {
@@ -262,7 +276,7 @@ describe('a share audience equal to the owner audience is fatal', () => {
         [
           "const m = await import('./packages/server/src/server-config.ts');",
           'm.resolveServerConfig({',
-          '  env: JSON.parse(process.env.CW_TEST_ENV_JSON),',
+          "  env: { CW_DATA_DIR: '/tmp/cw-config-data', ...JSON.parse(process.env.CW_TEST_ENV_JSON) },",
           '  repoRoot: process.cwd(),',
           '  arg: (_n, f) => f,',
           '});',

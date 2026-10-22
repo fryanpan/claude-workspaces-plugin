@@ -24,6 +24,11 @@
         <string>{{HOME_DIR}}</string>
         <key>PATH</key>
         <string>{{BUN_DIR}}:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Where the corpus lives. Required: the server has no default data
+             dir and refuses to start without one. install.sh fills it from
+             CW_DATA_DIR, else <repo>/data. -->
+        <key>CW_DATA_DIR</key>
+        <string>{{DATA_DIR}}</string>
         <!-- The external origin this deployment is reached on, when something
              in front terminates TLS (`tailscale serve` → this process on
              loopback). The server cannot discover it: from in here the socket

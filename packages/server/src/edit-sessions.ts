@@ -288,7 +288,8 @@ export function editAuthorOf(doc: LiveDoc, origin: unknown): EditAuthor | null {
       source: 'editor',
       actor: 'person',
       ...(name ? { actorName: name } : {}),
-      isOwner: name ? isOwnerActor({ name }) : false,
+      // A name the page announced is not an account, so it is never the owner.
+      isOwner: false,
       ...(device ? { device } : {}),
       key: name ? `name:${name}` : connKey(ws),
     };

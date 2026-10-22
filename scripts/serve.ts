@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Starts the feedback server on a free port and prints URLs for every
+ * Starts the feedback server on its port and prints URLs for every
  * network surface the user might want:
  *
  *   http://localhost:<port>             — this machine only
@@ -12,7 +12,11 @@
  * same Tailscale network or local network as the host machine.
  *
  * Usage:
- *   bun run scripts/serve.ts [--port <n>] [--host <addr>] [--no-watch]
+ *   bun run scripts/serve.ts --data-dir <path> [--port <n>] [--host <addr>] [--no-watch]
+ *
+ * The data dir is required: `--data-dir`, or CW_DATA_DIR (what prod's plist
+ * sets). A busy port refuses a dev start and is waited for under --no-watch;
+ * no start moves to another port.
  *
  * Modes:
  *   default     — DEV: server runs under `bun --watch` (hot-reload on any
@@ -35,16 +39,15 @@
 // supervisor-install.test.ts boots this from a copy with no node_modules.
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PreparedClient } from '../packages/server/src/client-release.ts';
-import { resolveDataDir } from '../packages/server/src/data-dir.ts';
 import {
   installBeforeBoot,
   supervisorInstallGate,
 } from '../packages/server/src/dependency-install.ts';
 import { stamped } from '../packages/server/src/log-stamp.ts';
-import type { BindErrorKind } from '../packages/server/src/port-bind.ts';
+import { resolveStartContract } from '../packages/server/src/start-contract.ts';
 
 /**
  * A supervisor diagnostic, with the clock the log file does not provide.
@@ -84,10 +87,21 @@ const noWatch = args.includes('--no-watch');
 // server on this machine only.
 const host = arg('host');
 
-const requestedPort = Number(arg('port') ?? process.env.PORT ?? '8787');
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
-const dataDir = resolveDataDir(process.env, repoRoot);
+// The port, the data dir and whether a busy port is waited for — one pure
+// rule, so prod's own start is tested (start-contract.ts). No data dir is no
+// start: prod's plist sets CW_DATA_DIR and `bun run dev` passes `--data-dir
+// data`. Resolved here so a relative flag means the same directory to the
+// child.
+const start = resolveStartContract(args, process.env);
+if (!start.ok) {
+  note(`[supervisor] ${start.error}`);
+  process.exit(2);
+}
+const requestedPort = start.port;
+const waitsForPort = start.waitsForPort;
+const dataDir = resolve(start.dataDir);
 
 // PROD: dependencies first — the builds, the server and the rest of this
 // supervisor import them. A failed install boots only when bun.lock and the
@@ -106,7 +120,7 @@ const { clientReleaseRoot, prepareClientRelease } = await import(
   '../packages/server/src/client-release.ts'
 );
 const { readDeploySource } = await import('../packages/server/src/deploy-source.ts');
-const { acquirePort, probeLocalPort, shouldWalkPorts } = await import(
+const { acquirePort, portTakenMessage, probeLocalPort } = await import(
   '../packages/server/src/port-bind.ts'
 );
 const { createHealthWatchdog, probeHealth } = await import(
@@ -116,27 +130,6 @@ const { FIRST_BIND_GRACE_MS, fileRestartLedger, restartLedgerPath } = await impo
   '../packages/server/src/supervisor-restarts.ts'
 );
 const { reapChildren } = await import('../packages/server/src/supervisor-reap.ts');
-
-/**
- * DEV only. Walk to the next port when this one is occupied, so two agents on
- * one machine do not fight over 8787. Only `in-use` justifies a step: a host
- * that cannot open a socket at all will answer identically for all 50 ports,
- * and walking converts one host-level failure into a bogus "no free port".
- */
-async function pickFreePort(start: number): Promise<number> {
-  let last: BindErrorKind | null = null;
-  for (let p = start; p < start + 50; p++) {
-    const kind = await probeLocalPort(p);
-    if (kind === null) return p;
-    last = kind;
-    if (kind !== 'in-use') break;
-  }
-  throw new Error(
-    last === 'in-use'
-      ? `no free port near ${start}`
-      : `cannot open a socket on :${start} — this host is out of network resources, not out of ports`,
-  );
-}
 
 // What this deploy source is parked on, stamped into the release so the served
 // client can say what it was built from. `-dirty` is NOT `git describe
@@ -150,19 +143,27 @@ async function pickFreePort(start: number): Promise<number> {
 // with a timestamp alone rather than failing a deploy over a label.
 const deploySource = noWatch ? readDeploySource(repoRoot) : null;
 
-// DEV negotiates a port; PROD is GIVEN one. Under launchd the port is part
-// of the contract — the discovery file, peers' CW_BASE_URL, the Cloudflare
-// tunnel and this supervisor's own bind-health watchdog all name it — so a
-// prod server that quietly moved to 8788 is invisible to every one of them.
-// On 2026-08-29 that invisibility is precisely what let the watchdog kill and
-// relaunch nine healthy servers in a row while their predecessors stayed up.
+// No start moves to another port (port-bind.ts says why). Under launchd the
+// port is part of the contract — the discovery file, peers' CW_BASE_URL, the
+// Cloudflare tunnel and this supervisor's own bind-health watchdog all name
+// it — so a prod server that quietly moved to 8788 is invisible to every one
+// of them. On 2026-08-29 that invisibility is precisely what let the watchdog
+// kill and relaunch nine healthy servers in a row while their predecessors
+// stayed up.
 //
 // So prod WAITS for its port, in this process, with backoff. The wait happens
 // here, BEFORE the client builds and before the child hydrates 5,622
 // documents, so a busy port costs a log line rather than a full relaunch.
-const walkPorts = shouldWalkPorts(args);
+// Dev exits instead, naming the port.
 async function resolvePort(): Promise<number> {
-  if (walkPorts) return pickFreePort(requestedPort);
+  if (!waitsForPort) {
+    const kind = await probeLocalPort(requestedPort);
+    if (kind === 'in-use') {
+      note(`[supervisor] ${portTakenMessage(requestedPort)}`);
+      process.exit(2);
+    }
+    return requestedPort;
+  }
   await acquirePort({
     port: requestedPort,
     probe: probeLocalPort,
@@ -286,8 +287,7 @@ const serverArgs = [
   join(repoRoot, 'packages', 'server', 'src', 'bin.ts'),
   '--port',
   String(port),
-  // PROD only: the port is the contract, so the child may not walk off it
-  // either. Without this the supervisor waits politely for 8787, hands the
+  // PROD only: the port is the contract, so the child waits for it too. Without this the supervisor waits politely for 8787, hands the
   // child 8787, and the child binds 8788 the moment anything else is holding
   // it — which is invisible to the bind-health watchdog below (it polls the
   // port it ASKED for) and was the engine of the 2026-08-29 restart storm.
@@ -295,9 +295,8 @@ const serverArgs = [
   // Where the durable record lives. Passed explicitly — and in every mode —
   // because until now the child resolved it alone, which made prod's corpus
   // an unstated consequence of where the checkout sat: nothing the supervisor
-  // printed, and nothing a plist could move. `resolveDataDir` returns the old
-  // `<repoRoot>/data` unless CW_DATA_DIR says otherwise, so dev and staging
-  // are unchanged.
+  // printed, and nothing a plist could move. It is now always named: the flag
+  // or CW_DATA_DIR, and no default.
   '--data-dir',
   dataDir,
   ...(host ? ['--host', host] : []),
@@ -468,8 +467,8 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () =
 // budget.
 //
 // This polls the port we ASKED for, which is only the same as the port the
-// child BOUND because prod forbids walking on both sides (`shouldWalkPorts`
-// above, `--no-port-walk` in serverArgs). When that invariant did not hold,
+// child BOUND because no start moves off its port, and prod waits for it on
+// both sides (`waitsForPort` above, `--no-port-walk` in serverArgs). When that invariant did not hold,
 // this watchdog was the outage: the child bound 8788, the watchdog polled
 // 8787, declared a healthy server unbound, and restarted it — nine times,
 // leaking a fully-hydrated server on each pass. Do not re-enable walking in

@@ -30,6 +30,7 @@ import type { ReplyTransport } from './inbox/send-transport.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
 import type { PluginRefresher } from './plugin-refresh.ts';
+import type { FeaturesOff } from './project-profile.ts';
 import type { PromptStore } from './prompt-store.ts';
 import type { PushFetch } from './push-notify.ts';
 import type { RecallCalendarClient } from './recall-calendar.ts';
@@ -742,6 +743,12 @@ export interface ServerOptions {
    * offers no setup and the board keeps its plain mic.
    */
   spokenReply?: SpokenEngines;
+  /**
+   * The features this server's profile turned off, as the lines the pages
+   * show (`project-profile.ts`). Built by `server-deps.ts`; absent on the Mac
+   * and in tests, where nothing is off by profile.
+   */
+  featuresOff?: FeaturesOff;
   /** How long a planning meeting is heard before its voice asks anything
    *  unprompted (`MEETING_WARMUP_MS`). Tests pass 0. */
   planWarmupMs?: number;

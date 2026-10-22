@@ -27,7 +27,10 @@ import { isOwnerActor } from '../actor-identity.ts';
 import { mayMintAppVoice as mayMintAppVoiceFor } from '../app-voice/gate.ts';
 import { LOCAL_ONLY_REFUSAL, addressesLocalOnlySet, isOnBox } from '../attachment-privacy.ts';
 import { maybeCompress, maybeNotModified } from '../compress.ts';
-import { isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import {
+  crossOriginCredentialedWrite,
+  isAllowedBrowserOrigin,
+} from '../middleware/browser-origin.ts';
 import {
   type WorkspaceScope,
   memberAddressed,
@@ -211,6 +214,15 @@ export function createRequestChain(
       ) {
         return j(403, { error: 'origin_not_allowed' });
       }
+      // An allowed origin that is not this server's own may write only
+      // without the reader's credentials — `crossOriginCredentialedWrite`.
+      if (crossOriginCredentialedWrite(req.method, req.headers, policyFor(req))) {
+        return j(403, {
+          error: 'cross_origin_credentials',
+          message:
+            'A page on another origin may not write with your sign-in. Use this server’s own pages.',
+        });
+      }
 
       // ── The home feed ── see routes/home-feed.ts. ABOVE admission, with a
       // gate of its own: its one remote caller is a service token, which
@@ -360,6 +372,7 @@ export function createRequestChain(
         ownerProven,
         anyoneProven: () => provenIdentityFor() !== null,
         widgetDoorGrant,
+        widgetTokenProved: widgetIdentity !== null,
       });
       if (streamed) {
         if (streamed.kind === 'upgraded') return undefined;

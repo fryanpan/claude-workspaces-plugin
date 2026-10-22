@@ -173,8 +173,10 @@ function startGate(backend: number, refused: string[], passed: string[]) {
         };
         return server.upgrade(req, { data }) ? undefined : new Response(null, { status: 400 });
       }
+      // `Host` is forwarded as the browser sent it, as Cloudflare's tunnel and
+      // `tailscale serve` do, so the board compares a page's Origin with the
+      // origin the page was really served from.
       const headers = new Headers(req.headers);
-      headers.delete('host');
       headers.delete('accept-encoding');
       const res = await fetch(`http://127.0.0.1:${backend}${path}`, {
         method: req.method,

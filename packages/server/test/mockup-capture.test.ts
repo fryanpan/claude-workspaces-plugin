@@ -176,20 +176,19 @@ describe('mockup durability', () => {
       expect(await after.text()).toContain('Good body');
     });
 
-    it('re-binding to an empty file drops the old capture instead of keeping it', async () => {
+    it('re-binding a file emptied since drops the old capture instead of keeping it', async () => {
       // The serve-time refusal above protects a capture from ITS OWN source
-      // being caught mid-write. A rebind names a different file, so the same
-      // refusal would leave the link resolving to a mockup nobody pointed it
-      // at — the silent-wrong-content failure, arrived at from the other side.
+      // being caught mid-write. A rebind is the caller saying the file as it
+      // stands now is the mock, so holding the old capture would leave the
+      // link resolving to a mockup nobody pointed it at — the
+      // silent-wrong-content failure, arrived at from the other side.
       const first = join(scratch, 'rebind-empty-first.html');
-      const second = join(scratch, 'rebind-empty-second.html');
       writeFileSync(first, '<!doctype html><html><body><h1>Superseded body</h1></body></html>');
-      writeFileSync(second, '');
       await bindOk({ docId: 'mock-rebind-empty', type: 'mockup', sourceUrl: first });
-      await bindOk({ docId: 'mock-rebind-empty', type: 'mockup', sourceUrl: second });
+      writeFileSync(first, '');
+      await bindOk({ docId: 'mock-rebind-empty', type: 'mockup', sourceUrl: first });
 
       rmSync(first);
-      rmSync(second);
       const after = await fetch(`${base}/workspaces/${WS}/mockups/mock-rebind-empty?cw-frame=1`);
       expect(after.headers.get('x-mockup-source')).toBe('captured');
       expect(await after.text()).not.toContain('Superseded body');

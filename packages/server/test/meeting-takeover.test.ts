@@ -244,6 +244,7 @@ describe('the audio upgrade', () => {
       browserProvedNobody: () => author === null,
       provenAuthor: () => author,
       widgetDoorGrant: null,
+      widgetTokenProved: false,
     });
     expect(out?.kind).toBe('upgraded');
     return data;

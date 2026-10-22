@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
-import { dataDirFromArgs } from './data-dir.ts';
+import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin } from './frame-host.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
@@ -36,10 +36,11 @@ export function resolveServerConfig(opts: {
 }) {
   const { env, repoRoot, arg } = opts;
   const requestedPort = Number(arg('port', env.PORT ?? '8787'));
-  // Always a path: the flag wins, else the resolver's answer. It used to be
-  // `string | undefined`, which every later reader repeated the resolver call
-  // to work around.
-  const dataDir = dataDirFromArgs(env, repoRoot, arg);
+  // Always a path: the flag wins, else CW_DATA_DIR, else no start at all.
+  // bin.ts refuses a start with neither before it gets here, so the throw is
+  // for any other caller.
+  const dataDir = dataDirFromArgs(env, arg);
+  if (!dataDir) throw new Error(MISSING_DATA_DIR);
 
   // The bind address. Deliberately `undefined` unless a caller passes
   // `--host` — Bun's own default (the wildcard, every interface) is what

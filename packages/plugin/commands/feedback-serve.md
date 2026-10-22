@@ -31,7 +31,11 @@ works when the session's working directory is the root of such a clone.
 
 3. Otherwise run `bun run dev` (it is `bun run scripts/serve.ts`). If
    `node_modules/` is missing, run `bun install` first. The script:
-   - picks a free port, starting at 8787;
+   - listens on 8787, or the port `--port <n>` names. If that port is taken
+     it stops and says so; it never moves to another port, so pass a free
+     one;
+   - keeps its data in `data/` in the clone (`--data-dir <path>` names
+     another; the server will not start without one);
    - starts the server and the web-app bundler in watch mode;
    - writes the port to `~/.claude/claude-workspaces/server.json`, which is
      how the plugin's MCP server finds it (`CW_BASE_URL` overrides it);
