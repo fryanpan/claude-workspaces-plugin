@@ -1,8 +1,7 @@
 # One project machine: the board server and cloudflared.
 #
-# Build from the repo root, in a clean clone (see
-# docs/process/project-machine.md):
-#   fly deploy . --config infra/project-machine/fly.toml --dockerfile infra/project-machine/Dockerfile
+# Built by `bun run machine:deploy`, from a `git archive` of one commit on
+# Fly's remote builder (docs/process/project-machine.md).
 #
 # No secret is baked in. Every credential arrives at runtime as a Fly secret;
 # the list is in fly.toml.

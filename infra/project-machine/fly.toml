@@ -1,9 +1,11 @@
-# One project machine. The app name is per project: pass it as
-# `fly deploy -a <app>`; the value below is a placeholder.
+# One project machine. Deploy it with `bun run machine:deploy`, which writes
+# the project's app name, region and size into a copy of this file; the
+# values below are placeholders.
 #
-# Secrets (`fly secrets set`, never in this file):
-#   CLOUDFLARE_TUNNEL_TOKEN       the machine's own tunnel (required)
-#   BACKUP_S3_ACCESS_KEY_ID       create-only credential for the project's bucket
+# Secrets (set by deploy.ts with `fly secrets import`, never in this file):
+#   CLOUDFLARE_TUNNEL_TOKEN       the machine's own named tunnel, or
+#   CW_TUNNEL_MODE=quick          a trycloudflare.com quick tunnel, for a test machine
+#   BACKUP_S3_ACCESS_KEY_ID       write-only credential for the project's bucket
 #   BACKUP_S3_SECRET_ACCESS_KEY
 #   CW_SENTRY_SERVER_DSN          optional
 # Per-project settings, also set with `fly secrets set` so no project's values
