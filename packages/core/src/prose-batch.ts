@@ -26,6 +26,7 @@ import * as Y from 'yjs';
 import {
   holdsNoWords,
   insertionIndexBeforeBlanks,
+  isTextlessLeaf,
   restoreNestedNotes,
   takeNestedNotes,
 } from './prose-batch-structure.ts';
@@ -505,8 +506,10 @@ export function applyBlockEdits(
           }
           // A block with no words has nothing to protect and nothing a
           // proposal could strike, so it applies directly whoever owns it.
+          // So does an image or a rule, unless a proposal was asked for.
           const asked = edit.op === 'replace_block' && edit.propose === true;
-          if ((asked || readBlockAuthor(el) !== opts.author) && !holdsNoWords(el)) {
+          const direct = holdsNoWords(el) || (isTextlessLeaf(el) && !asked);
+          if ((asked || readBlockAuthor(el) !== opts.author) && !direct) {
             // Not ours (or no longer ours): propose it, in this transaction,
             // so a reader sees the batch land whole or not at all.
             const res = proposeEdit(fragment, el, replacement, opts);
