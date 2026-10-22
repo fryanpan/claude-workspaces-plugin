@@ -142,8 +142,8 @@ CW_REQUIRE_SIGNIN_TO_WRITE=0 bun run dev --host 127.0.0.1
 
 - `--host 127.0.0.1` keeps the server on this machine. Without it the server listens on every network interface.
 - `CW_REQUIRE_SIGNIN_TO_WRITE=0` lets your own browser comment and edit. By default a browser must sign in to write, and a server reached at `localhost` has no sign-in page, so the board opens read-only.
-- `--port <n>` picks the port. The default is 8787; if it is taken, the server moves to the next free port.
-- `CW_DATA_DIR=<path>` picks where data goes. The default is `data/` in the clone.
+- `--port <n>` picks the port. The default is 8787. If the port is taken, the server stops and says so; it never moves to another port.
+- `--data-dir <path>` picks where data goes. `bun run dev` uses `data/` in the clone. The server itself has no default and will not start without a data dir; the launchd service names it with `CW_DATA_DIR`.
 
 With `--host 127.0.0.1`, only a browser on the same machine can open the board; the Tailscale and LAN addresses the server prints do not answer. To review from a tablet or phone on your network, start it without `--host` and with the rule off:
 

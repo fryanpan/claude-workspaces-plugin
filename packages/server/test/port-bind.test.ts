@@ -19,7 +19,7 @@ import {
   classifyBindError,
   classifyConnectError,
   probeLocalPort,
-  shouldWalkPorts,
+  waitsForItsPort,
 } from '../src/port-bind';
 
 function errWithCode(code: string): NodeJS.ErrnoException {
@@ -98,19 +98,19 @@ describe('bindRetryDelayMs', () => {
   });
 });
 
-describe('shouldWalkPorts', () => {
-  test('dev walks: two agents on one machine must not fight over 8787', () => {
-    expect(shouldWalkPorts([])).toBe(true);
-    expect(shouldWalkPorts(['--port', '8787'])).toBe(true);
+describe('waitsForItsPort', () => {
+  test('a dev start does not wait: a busy port refuses the start', () => {
+    expect(waitsForItsPort([])).toBe(false);
+    expect(waitsForItsPort(['--port', '8787'])).toBe(false);
   });
 
-  test('--no-watch (what launchd runs) must NEVER walk', () => {
-    expect(shouldWalkPorts(['--no-watch'])).toBe(false);
-    expect(shouldWalkPorts(['--port', '8787', '--no-watch', '--deploy'])).toBe(false);
+  test('--no-watch (what launchd runs) waits for its port', () => {
+    expect(waitsForItsPort(['--no-watch'])).toBe(true);
+    expect(waitsForItsPort(['--port', '8787', '--no-watch', '--deploy'])).toBe(true);
   });
 
   test('--no-port-walk pins the port without implying prod mode', () => {
-    expect(shouldWalkPorts(['--no-port-walk'])).toBe(false);
+    expect(waitsForItsPort(['--no-port-walk'])).toBe(true);
   });
 });
 

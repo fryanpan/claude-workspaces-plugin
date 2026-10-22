@@ -3,13 +3,13 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readDiscovery } from '@claude-workspaces/core/discovery-file';
-import { dataDirFromArgs } from './data-dir.ts';
+import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
 import { homeRemotesFromEnv } from './home-remotes.ts';
 import { cacheDiscoveryReads } from './liveness.ts';
 import { installLogSquelch } from './log-squelch.ts';
-import { acquirePort, classifyBindError, probeLocalPort, shouldWalkPorts } from './port-bind.ts';
+import * as bind from './port-bind.ts';
 import { lanHostnames, tailscaleHost } from './public-host.ts';
 import { reservedPortError } from './reserved-ports.ts';
 import { storeSecret } from './secret-store.ts';
@@ -42,8 +42,13 @@ function arg(name: string, fallback?: string): string | undefined {
 // Every start leaves a record, so the daily health check can count the ones
 // no deploy, watchdog or reboot explains. Written first — before the config
 // resolves, before the port — because a boot that dies early is exactly the
-// one to count.
-const thisStart = recordThisServerStart(dataDirFromArgs(process.env, repoRoot, arg));
+// one to count. A start naming no data dir refuses first (data-dir.ts).
+const startDataDir = dataDirFromArgs(process.env, arg);
+if (!startDataDir) {
+  console.error(`[feedback] ${MISSING_DATA_DIR}`);
+  process.exit(2);
+}
+const thisStart = recordThisServerStart(startDataDir);
 
 const cfg = resolveServerConfig({ env: process.env, repoRoot, arg });
 // Home across servers: the remotes this Mac pulls from, and the service
@@ -173,31 +178,24 @@ const {
 // an occupied port cannot spend the log on its own backoff lines either.
 const logSquelch = installLogSquelch();
 
-// DEV: try the requested port, and if it's taken (another agent owns it),
-// walk up to the next 20. That convenience is what keeps `bun run dev`
-// working with several agents on one machine.
+// No start moves off its port (port-bind.ts says why). A busy port refuses a
+// dev or staging start. PROD (`--no-port-walk`, passed by scripts/serve.ts
+// under launchd) waits for it in place, with backoff: the port is the
+// contract peers, the discovery file, the tunnel and the watchdog all name,
+// and an exit would put launchd into a relaunch loop.
 //
-// PROD (`--no-port-walk`, passed by scripts/serve.ts under launchd): the port
-// is the contract. Peers' CW_BASE_URL, the discovery file, the Cloudflare
-// tunnel and the supervisor's bind-health watchdog all name it, and a server
-// that silently moved to 8788 is invisible to every one of them — the
-// watchdog then reads "8787 not listening", kills a healthy server and
-// relaunches, forever. So prod waits for its port in place, with backoff,
-// rather than moving or throwing.
-//
-// Either way, only EADDRINUSE is a statement about the PORT. A host that has
-// run out of network buffers (ENOBUFS) or lost its interface (EADDRNOTAVAIL)
-// answers the same for every port, so walking cannot help and must not run —
-// see packages/server/src/port-bind.ts for the whole story.
-const walkPorts = shouldWalkPorts(args);
+// Only EADDRINUSE is a statement about the PORT. A host that has run out of
+// network buffers (ENOBUFS) or lost its interface (EADDRNOTAVAIL) answers the
+// same for every port — see packages/server/src/port-bind.ts.
+const waitsForPort = bind.waitsForItsPort(args);
 
-// The reserved-port refusal applies exactly where `walkPorts` does: prod is
+// The reserved-port refusal applies wherever the start does not wait: prod is
 // the one caller that passes `--no-port-walk` (`scripts/serve.ts`, `--deploy`
 // mode), and prod is the one process actually entitled to 8787 — the same
 // flag that says "the port is a fixed contract, do not move off it" is what
 // tells this apart from a dev/staging start that landed on someone else's
 // port by accident. See reserved-ports.ts for the outage this prevents.
-if (walkPorts) {
+if (!waitsForPort) {
   const err = reservedPortError(requestedPort);
   if (err) {
     console.error(`[feedback] ${err}`);
@@ -207,7 +205,7 @@ if (walkPorts) {
 
 const permissionSettingsPath =
   process.env.CW_PERMISSION_SETTINGS_PATH?.trim() ||
-  (walkPorts ? undefined : defaultUserSettingsPath(process.env));
+  (waitsForPort ? defaultUserSettingsPath(process.env) : undefined);
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((r) => {
@@ -220,13 +218,23 @@ const sleep = (ms: number): Promise<void> =>
 // file watcher before it attempts its bind, so retrying `createServer`
 // against a busy port costs a full 5,622-document hydration (and leaks the
 // activity-writer lock) per attempt. Retrying the probe costs two syscalls.
-if (!walkPorts) {
-  await acquirePort({
+if (waitsForPort) {
+  await bind.acquirePort({
     port: requestedPort,
-    probe: probeLocalPort,
+    probe: bind.probeLocalPort,
     sleep,
     log: (m) => console.warn(m.replace('[supervisor]', '[feedback]')),
   });
+}
+
+// Dev and staging: refuse a busy port before `createServer` hydrates.
+if (
+  !waitsForPort &&
+  requestedPort !== 0 &&
+  (await bind.probeLocalPort(requestedPort)) === 'in-use'
+) {
+  console.error(`[feedback] ${bind.portTakenMessage(requestedPort)}`);
+  process.exit(2);
 }
 
 let port = requestedPort;
@@ -321,14 +329,13 @@ while (!handle) {
       ...(permissionSettingsPath ? { permissionSettingsPath } : {}),
     });
   } catch (err) {
-    const kind = classifyBindError(err);
+    const kind = bind.classifyBindError(err);
     if (kind === 'fatal') throw err;
-    if (walkPorts) {
-      // Dev only, and only for a genuinely occupied port.
-      if (kind !== 'in-use' || port >= requestedPort + 20) throw err;
-      console.warn(`[feedback] port ${port} busy, trying ${port + 1}`);
-      port++;
-      continue;
+    if (!waitsForPort) {
+      // Dev and staging: say which port, and stop. Never the next port.
+      if (kind !== 'in-use') throw err;
+      console.error(`[feedback] ${bind.portTakenMessage(port)}`);
+      process.exit(2);
     }
     // We probed and the port was free, so reaching here means we lost a race
     // for it in the moments since. Rare, and the answer is the same: wait for
@@ -339,9 +346,9 @@ while (!handle) {
         ? `[feedback] lost the race for :${port} — waiting for it, not walking`
         : `[feedback] cannot open a socket on :${port} (host resources, not the port) — waiting`,
     );
-    await acquirePort({
+    await bind.acquirePort({
       port,
-      probe: probeLocalPort,
+      probe: bind.probeLocalPort,
       sleep,
       log: (m) => console.warn(m.replace('[supervisor]', '[feedback]')),
     });

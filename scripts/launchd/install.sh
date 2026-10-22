@@ -75,6 +75,12 @@ BUN_DIR="$(dirname "${BUN_BIN}")"
 # working; the new name wins when both are set.
 PUBLIC_BASE_URL="${CW_PUBLIC_BASE_URL:-}"
 
+# Where the corpus lives. The server has no default data dir any more (it
+# refuses to start without one), so the plist must name it. CW_DATA_DIR wins;
+# otherwise `<repo>/data`, which is where a server started from this checkout
+# read and wrote before the default was removed, so a reinstall moves nothing.
+DATA_DIR="${CW_DATA_DIR:-${REPO_DIR}/data}"
+
 # Email sign-in and the operator's own address. Plain pass-throughs, same
 # contract as the base URL: baked into the plist because launchd inherits no
 # shell environment, empty by default, and reverted by a reinstall without
@@ -220,6 +226,7 @@ sed \
     -e "s|{{BUN_BIN}}|${BUN_BIN}|g" \
     -e "s|{{BUN_DIR}}|${BUN_DIR}|g" \
     -e "s|{{HOME_DIR}}|${HOME}|g" \
+    -e "s|{{DATA_DIR}}|${DATA_DIR}|g" \
     -e "s|{{LOG_DIR}}|${LOG_DIR}|g" \
     -e "s|{{PUBLIC_BASE_URL}}|${PUBLIC_BASE_URL}|g" \
     -e "s|{{REQUIRE_EMAIL_AUTH}}|${REQUIRE_EMAIL_AUTH}|g" \
