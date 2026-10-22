@@ -42,8 +42,10 @@ import {
   EXPLICIT_SLOT,
   claudeKeySlots,
   noteClaudeSlot,
+  slotForService,
 } from './claude-key-slot.ts';
 import { ACCESS_TOKEN_ENV, claudeKeyAddHint } from './claude-key-source.ts';
+import { ORG_KEY_ENV, isProjectServer } from './project-profile.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
 /** The Haiku model every small server call runs on. */
@@ -168,6 +170,13 @@ function lookupKeySlot(
   env: EnvLike,
 ): ResolvedClaudeKey | null {
   if (explicit !== undefined) return explicit ? { key: explicit, slot: EXPLICIT_SLOT } : null;
+  // A project server reads its org's key from its environment and nothing
+  // else: `read` is never called, so no Keychain item and no other key's
+  // override is consulted (`project-profile.ts`).
+  if (isProjectServer(env)) {
+    const key = env[ORG_KEY_ENV]?.trim();
+    return key ? { key, slot: slotForService(ORG_KEY_ENV) } : null;
+  }
   for (const slot of claudeKeySlots(env)) {
     try {
       const key = read(slot.name);
@@ -257,7 +266,7 @@ function lookupCredentialSlot(
   if (explicit !== undefined) {
     return explicit ? { credential: { kind: 'key', value: explicit }, slot: EXPLICIT_SLOT } : null;
   }
-  const token = env[ACCESS_TOKEN_ENV]?.trim();
+  const token = isProjectServer(env) ? undefined : env[ACCESS_TOKEN_ENV]?.trim();
   if (token) return { credential: { kind: 'token', value: token }, slot: ACCESS_TOKEN_SLOT };
   const resolved = lookupKeySlot(undefined, read, env);
   return resolved

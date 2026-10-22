@@ -27,18 +27,20 @@ import {
   KEYCHAIN_SERVICE_LEGACY,
   claudeKeyServices,
 } from './claude-key-source.ts';
+import { ORG_KEY_ENV } from './project-profile.ts';
 
 /**
  * What a slot is allowed to pay for.
  *
- * `prod` is the meeting bill; `eval` is development, CI and every harness.
+ * `prod` is the meeting bill; `eval` is development, CI and every harness;
+ * `org` is a project server's own org key, the only one it reads.
  * `ci-token` is the short-lived exchanged token a CI job mints from its own
  * OIDC identity, which bills whatever that identity bills and is therefore
  * its own role rather than a flavour of either key. `explicit` is a value a
  * person typed into the command that is running — the one case where the
  * process cannot name a configured slot, and says so instead of guessing.
  */
-export type ClaudeKeyRole = 'prod' | 'eval' | 'ci-token' | 'explicit';
+export type ClaudeKeyRole = 'prod' | 'eval' | 'org' | 'ci-token' | 'explicit';
 
 /** One configured place a Claude credential may come from. Names only. */
 export interface ClaudeKeySlot {
@@ -53,6 +55,9 @@ const ROLE_BY_SERVICE: Readonly<Record<string, ClaudeKeyRole>> = {
   [KEYCHAIN_SERVICE]: 'prod',
   [KEYCHAIN_SERVICE_LEGACY]: 'prod',
   [EVAL_KEYCHAIN_SERVICE]: 'eval',
+  // A project server's own org key — an environment variable, not a
+  // Keychain item (`project-profile.ts`).
+  [ORG_KEY_ENV]: 'org',
 };
 
 /**

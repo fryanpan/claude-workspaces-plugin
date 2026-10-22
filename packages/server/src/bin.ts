@@ -140,6 +140,7 @@ const deps = createServerDeps(cfg, {
   busyDocs: () => handle?.docStore.pendingFileWrites(repoRoot) ?? [],
 });
 const {
+  featuresOff,
   share,
   promptStore,
   summarizer,
@@ -296,6 +297,7 @@ while (!handle) {
       ...(voiceFeedbackTidy ? { voiceFeedbackTidy } : {}),
       ...(transcription ? { transcription } : {}),
       spokenReply,
+      featuresOff,
       ...(meetingBot ? { meetingBot } : {}),
       // On unless `CW_MEETING_CLAUDE=0` (Bryan, 2026-10-02: on by default).
       meetingClaude: process.env.CW_MEETING_CLAUDE?.trim() !== '0',

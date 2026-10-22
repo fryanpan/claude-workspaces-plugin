@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import type { EnvLike } from '@claude-workspaces/core/env-names';
+import { isProjectServer } from '../project-profile.ts';
 
 /**
  * Read a generic-password entry from macOS Keychain.
@@ -73,7 +75,21 @@ export function keychainLookups(serviceName: string, account: string | undefined
 /** The `security` invocation, injectable so a test never touches a real Keychain. */
 export type KeychainRunner = (args: string[]) => { status: number | null; stdout: string };
 
+/**
+ * `run`, unless this is a project server, which has no Keychain to read: the
+ * Mac's items belong to the Mac (`project-profile.ts`). There every lookup
+ * answers "absent" without running anything, so only an env override can
+ * supply a value.
+ */
+export function keychainRunnerFor(env: EnvLike, run: KeychainRunner): KeychainRunner {
+  return isProjectServer(env) ? () => ({ status: 1, stdout: '' }) : run;
+}
+
 function spawnKeychain(args: string[]): { status: number | null; stdout: string } {
+  return keychainRunnerFor(process.env, spawnSecurity)(args);
+}
+
+function spawnSecurity(args: string[]): { status: number | null; stdout: string } {
   const proc = spawnSync('security', args);
   return { status: proc.status, stdout: proc.stdout ? proc.stdout.toString('utf8') : '' };
 }

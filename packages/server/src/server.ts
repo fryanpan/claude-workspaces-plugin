@@ -2583,6 +2583,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     calendarStore,
     calendarSync,
     calendarBot: opts.calendarBot,
+    featuresOff: opts.featuresOff ?? {},
     calendarOauthStates,
     dataDir,
     j,
@@ -2886,6 +2887,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRouter,
     spokenRelay,
     spokenTimings,
+    featuresOff: opts.featuresOff ?? {},
     authorizeAgent: (req, agentId) =>
       authorizeAgentCaller({
         agentId,
