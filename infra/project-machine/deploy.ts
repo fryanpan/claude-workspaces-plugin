@@ -227,6 +227,11 @@ async function act(cfg: ProjectConfig, a: Action, org: string): Promise<void> {
     }
     case 'deploy':
       deploy(cfg);
+      // Fly leaves a machine that was stopped before the update stopped
+      // after it (a crash loop that hit the restart limit, say).
+      for (const m of machines(cfg.app)) {
+        if (m.state === 'stopped') flyOk(['machine', 'start', m.id, '--app', cfg.app]);
+      }
       return;
     case 'start-machine':
       flyOk(['machine', 'start', a.id, '--app', cfg.app]);
@@ -263,9 +268,14 @@ export async function deployProject(cfg: ProjectConfig, dryRun: boolean): Promis
   return actions;
 }
 
-/** The quick tunnel's address, read from the machine's recent logs. */
-export function tunnelAddress(app: string): string | null {
-  return quickTunnelUrl(fly(['logs', '--app', app, '--no-tail']).stdout);
+/** The quick tunnel's address, read from the machine's logs once cloudflared prints it. */
+export async function tunnelAddress(app: string): Promise<string | null> {
+  for (let i = 0; i < 15; i++) {
+    const url = quickTunnelUrl(fly(['logs', '--app', app, '--no-tail']).stdout);
+    if (url) return url;
+    await Bun.sleep(2000);
+  }
+  return null;
 }
 
 async function main(): Promise<void> {
@@ -288,7 +298,7 @@ async function main(): Promise<void> {
   const state = machines(cfg.app).map((m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)}`);
   console.log(`[deploy] machines: ${state.join('; ') || 'none'}`);
   if (done.length > 0 || state.length > 0)
-    console.log(`[deploy] tunnel: ${tunnelAddress(cfg.app) ?? 'not in the logs yet'}`);
+    console.log(`[deploy] tunnel: ${(await tunnelAddress(cfg.app)) ?? 'not in the logs yet'}`);
 }
 
 if (import.meta.main) {
