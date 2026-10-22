@@ -155,5 +155,5 @@ empty.
 By Fly's price list (October 2026, cheapest regions; `sjc` may cost a little
 more), a `shared-cpu-1x` machine with 512 MB is $3.69 a month running all
 the time and a volume $0.15 per GB-month, attached or not. Tigris bills
-storage at its own list price; the drill board's snapshot was 1.7 KB. The remote
+storage at its own list price; the drill board's snapshot, transcripts included, was 10 KB. The remote
 builder Fly creates on the first deploy stops itself when idle.
