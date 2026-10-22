@@ -161,6 +161,7 @@ describe('the upgrade, with a valid token', () => {
       browserProvedNobody: () => who.anyoneProven !== true,
       provenAuthor: () => null,
       widgetDoorGrant: null,
+      widgetTokenProved: false,
     });
     if (out?.kind === 'upgraded') return { status: 'upgraded', ...(data ? { data } : {}) };
     return { status: out?.kind === 'response' ? out.response.status : 0 };

@@ -372,6 +372,7 @@ export function createRequestChain(
         ownerProven,
         anyoneProven: () => provenIdentityFor() !== null,
         widgetDoorGrant,
+        widgetTokenProved: widgetIdentity !== null,
       });
       if (streamed) {
         if (streamed.kind === 'upgraded') return undefined;
