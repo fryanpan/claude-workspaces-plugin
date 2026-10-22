@@ -6,8 +6,12 @@
  */
 import { describe, expect, it } from 'bun:test';
 import {
+  type DrillPrint,
   type Observed,
+  drillLimits,
   fingerprint,
+  judgeDrill,
+  logFingerprint,
   newestSnapshot,
   parseStorageCreate,
   plan,
@@ -288,5 +292,50 @@ describe('what goes to Fly and Tigris', () => {
   it('derives the machine’s recipient from the stored identity alone', () => {
     const keys = generateSnapshotKeys();
     expect(recipientOf(keys.identity)).toBe(keys.recipient);
+  });
+});
+
+describe("the drill's log comparison", () => {
+  const events = { path: 'w-1.events.jsonl', text: '{"e":1}\n{"e":2}\n' };
+  const transcript = { path: '-data-riverbend/s.jsonl', text: '{"type":"user"}\n' };
+
+  it('hashes the prefix a backup held, so lines appended after it do not count', () => {
+    const before = logFingerprint([events, transcript]);
+    expect(before).toMatchObject({ files: 2, lines: 3 });
+    const grown = { ...events, text: `${events.text}{"e":3}\n` };
+    expect(logFingerprint([grown, transcript], before.linesByFile)).toEqual(before);
+    expect(logFingerprint([grown, transcript]).sha256).not.toBe(before.sha256);
+  });
+
+  it('notices a lost or changed log', () => {
+    const before = logFingerprint([events, transcript]);
+    expect(logFingerprint([events], before.linesByFile).sha256).not.toBe(before.sha256);
+    const edited = { ...transcript, text: '{"type":"assistant"}\n' };
+    expect(logFingerprint([events, edited], before.linesByFile).sha256).not.toBe(before.sha256);
+  });
+
+  function print(over: Partial<DrillPrint> = {}): DrillPrint {
+    const one = logFingerprint([events]);
+    return {
+      ...fingerprint([{ workspaceId: 'w-1', docId: 'd-1', text: 'Harborlight' }]),
+      ydocs: 1,
+      events: one,
+      notes: one,
+      transcripts: one,
+      ...over,
+    };
+  }
+
+  it('passes only when docs and all three logs came back the same', () => {
+    expect(judgeDrill(print(), print()).ok).toBe(true);
+    const lost = logFingerprint([], drillLimits(print()).transcripts);
+    const verdict = judgeDrill(print(), print({ transcripts: lost }));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.lines.find((l) => l.includes('transcripts'))).toStartWith('FAIL');
+  });
+
+  it('fails a log that was empty before the backup, since it proves nothing', () => {
+    const empty = logFingerprint([]);
+    expect(judgeDrill(print({ notes: empty }), print({ notes: empty })).ok).toBe(false);
   });
 });

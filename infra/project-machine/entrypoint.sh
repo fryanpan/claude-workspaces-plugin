@@ -13,9 +13,17 @@ export CW_DATA_DIR="${CW_DATA_DIR:-$DATA_ROOT/cw}"
 PORT=8787
 APP=/app
 
+TRANSCRIPTS="${BACKUP_TRANSCRIPTS_DIR:-$DATA_ROOT/claude-projects}"
+
 if [ "$(id -u)" = 0 ]; then
-  mkdir -p "$CW_DATA_DIR"
-  chown cw:cw "$DATA_ROOT" "$CW_DATA_DIR"
+  mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
+  # Claude Code writes session transcripts to ~/.claude/projects. The home
+  # directory is the image's and does not survive a restart, so that one
+  # folder is a link onto the volume, where backup.ts snapshots it. The
+  # rest of ~/.claude (credentials among it) stays off the volume and out
+  # of every backup.
+  ln -sfn "$TRANSCRIPTS" /home/cw/.claude/projects
+  chown cw:cw "$DATA_ROOT" "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
   exec setpriv --reuid=cw --regid=cw --init-groups -- "$0" "$@"
 fi
 

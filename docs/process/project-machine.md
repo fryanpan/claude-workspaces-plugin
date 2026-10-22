@@ -13,8 +13,16 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 | `Dockerfile` | The board server and both browser bundles, plus cloudflared. Runs as the `cw` user; root only hands the volume to `cw` at boot |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
 | `entrypoint.sh` | Starts the server on `127.0.0.1:8787`, the tunnel, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it |
-| `backup.ts` | Tars the data dir, encrypts it to the project's public key and PUTs it to the bucket. Every 6 hours, the first an hour after boot |
-| `restore.ts` | Decrypts a downloaded snapshot onto a data dir that is missing or empty. Refuses anything else |
+| `backup.ts` | Tars the data dir and the agents' session transcripts, encrypts them to the project's public key and PUTs them to the bucket. Every 6 hours, the first an hour after boot |
+| `restore.ts` | Decrypts a downloaded snapshot onto a data dir (and a transcripts dir) that is missing or empty. Refuses anything else |
+
+**What a snapshot holds.** The data dir, which carries every board's docs,
+tasks, analytics events (`workspaces/<board>.events.jsonl`) and agent notes
+(`workspaces/<board>.agent-notes.jsonl`); and Claude Code's session
+transcripts. The entrypoint points the `cw` user's `~/.claude/projects` at
+`/data/claude-projects` on the volume, so transcripts survive a restart and
+are snapshotted with the board. The rest of `~/.claude`, which holds Claude
+Code's own credentials, stays off the volume and out of every snapshot.
 
 **The machine holds only the public half of the backup key.** It can write
 snapshots but cannot read one back, and the bucket sees only ciphertext.
@@ -108,9 +116,9 @@ bun run machine:restore --project <project> [--snapshot <key>]
 It downloads the newest snapshot (or the named one) with the admin
 credential, decrypts it on the Mac, so the identity never goes near the
 machine, and copies the result up. On the machine it holds the services off
-with `/data/maintenance`, moves the current data dir to
-`/data/cw.before-restore-<time>` (never deletes it), unpacks the restore in
-its place and restarts.
+with `/data/maintenance`, moves the current data dir and transcripts dir to
+`<dir>.before-restore-<time>` (never deletes them), unpacks the restore in
+their place and restarts.
 
 The restored data is the newest snapshot, up to six hours old. Anything
 written after it is in `/data/cw.before-restore-<time>`.
@@ -124,10 +132,14 @@ bun run machine:drill --project <name>-test
 Run it once before any outsider gets a link, then after any change to
 `infra/project-machine/`. It refuses a project whose name does not end in
 `-test`, because it destroys the volume. It seeds a board named "Riverbend
-drill" with two fixture docs (refusing a server that holds any other board),
-fingerprints every doc's text, backs up with the machine's own credential,
-destroys the machine and the volume, deploys again, restores, and
-fingerprints again. It prints `PASS` only when the count and hash match.
+drill" (refusing a server that holds any other board) with two fixture docs,
+a task, which writes the board's event log, an agent note and a session
+transcript. It counts and hashes the docs, the events, the notes and the
+transcripts, backs up with the machine's own credential, destroys the
+machine and the volume, deploys again, restores, and counts and hashes again.
+The logs are compared on the lines the backup held, since a running server
+may append to them. It prints `PASS` only when all four match and none was
+empty.
 
 ## Cost
 

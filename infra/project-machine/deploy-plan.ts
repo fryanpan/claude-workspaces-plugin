@@ -244,3 +244,88 @@ export function fingerprint(docs: readonly DocFingerprint[]): { count: number; s
     sha256: createHash('sha256').update(lines.join('\n')).digest('hex'),
   };
 }
+
+export interface LogFingerprint {
+  files: number;
+  lines: number;
+  sha256: string;
+  /** Lines per file, so a later read can hash the same prefix. */
+  linesByFile: Record<string, number>;
+}
+
+/**
+ * One hash over append-only logs (events, agent notes, transcripts). A
+ * running server may append after a backup, so a restore is compared on the
+ * prefix the backup held: pass the earlier read's `linesByFile` as `limits`
+ * and each file is cut to that many lines first. A file in `limits` that is
+ * missing hashes as empty, so a lost log changes the hash.
+ */
+export function logFingerprint(
+  files: readonly { path: string; text: string }[],
+  limits?: Record<string, number>,
+): LogFingerprint {
+  const byPath = new Map(files.map((f) => [f.path, f.text]));
+  const paths = limits ? Object.keys(limits) : [...byPath.keys()];
+  const linesByFile: Record<string, number> = {};
+  const parts: string[] = [];
+  for (const path of paths.sort()) {
+    const all = (byPath.get(path) ?? '').split('\n').filter((l) => l.length > 0);
+    const kept = limits ? all.slice(0, limits[path]) : all;
+    linesByFile[path] = kept.length;
+    parts.push(`${path}\t${createHash('sha256').update(kept.join('\n')).digest('hex')}`);
+  }
+  return {
+    files: paths.length,
+    lines: Object.values(linesByFile).reduce((a, b) => a + b, 0),
+    sha256: createHash('sha256').update(parts.join('\n')).digest('hex'),
+    linesByFile,
+  };
+}
+
+export interface DrillPrint {
+  count: number;
+  sha256: string;
+  ydocs: number;
+  events: LogFingerprint;
+  notes: LogFingerprint;
+  transcripts: LogFingerprint;
+}
+
+export const DRILL_LOGS = ['events', 'notes', 'transcripts'] as const;
+
+/** The limits a fingerprint after the restore is cut to: what the backup held. */
+export function drillLimits(before: DrillPrint): Record<string, Record<string, number>> {
+  return Object.fromEntries(DRILL_LOGS.map((k) => [k, before[k].linesByFile]));
+}
+
+/**
+ * One line per thing the drill checks, and whether all of them held. Each
+ * must have been present before the backup: a drill over an empty log
+ * proves nothing about it.
+ */
+export function judgeDrill(
+  before: DrillPrint,
+  after: DrillPrint,
+): { ok: boolean; lines: string[] } {
+  const rows = [
+    {
+      what: 'docs',
+      b: before.count,
+      a: after.count,
+      same: before.sha256 === after.sha256,
+      sha: before.sha256,
+    },
+    ...DRILL_LOGS.map((k) => ({
+      what: k,
+      b: before[k].lines,
+      a: after[k].lines,
+      same: before[k].sha256 === after[k].sha256,
+      sha: before[k].sha256,
+    })),
+  ];
+  const lines = rows.map(
+    (r) =>
+      `${r.b > 0 && r.a === r.b && r.same ? 'PASS' : 'FAIL'} ${r.what}: ${r.b} -> ${r.a}, sha256 ${r.sha.slice(0, 12)} ${r.same ? 'matches' : 'DIFFERS'}`,
+  );
+  return { ok: rows.every((r) => r.b > 0 && r.a === r.b && r.same), lines };
+}

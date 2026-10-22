@@ -10,7 +10,7 @@ scripts that stand it up. How to run them is
 | `bun run machine:deploy --project <name>` | the Mac | Creates or updates the app, volume, backup keys, bucket, write-only credential, secrets and machine. A second run changes nothing |
 | `bun run machine:restore --project <name>` | the Mac | Puts the newest snapshot back onto the machine; the old data dir is moved aside |
 | `bun run machine:drill --project <name>-test` | the Mac | Backs up, destroys the machine and volume, redeploys, restores, and compares the docs |
-| `backup.ts`, `entrypoint.sh` | the machine | The backup loop and the process tree |
+| `backup.ts`, `entrypoint.sh` | the machine | The backup loop (data dir, with its events and agent notes, plus Claude Code transcripts) and the process tree |
 | `drill-probe.ts` | the machine | Seeds the drill board and fingerprints its docs, on loopback |
 
 ## Why Tigris for the bucket
@@ -46,7 +46,9 @@ overwrite case ever matters more than one bill.
 decisions: names, which steps a run plans for each state, the fly.toml it
 writes, and how it reads Fly's and Tigris's output. No test calls Fly.
 `project-machine-restore.test.ts` builds a data dir through a real server,
-snapshots it, restores it and reads it back from a second server;
-`project-machine-snapshot.test.ts` holds the refusals and the write-only
-upload. The image, the Fly deploy and the Tigris calls are proved by
+with a board's event log and agent-note log, and a transcripts dir beside
+it; snapshots them, restores them, checks the logs and transcripts byte for
+byte and reads the board back from a second server.
+`project-machine-snapshot.test.ts` holds the refusals, the first snapshot
+format and the write-only upload. The image, the Fly deploy and the Tigris calls are proved by
 `machine:drill`, not by a test.

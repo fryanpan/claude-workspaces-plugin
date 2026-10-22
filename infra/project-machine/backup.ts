@@ -8,7 +8,10 @@
  * Configuration is environment only, so no credential is ever an argument
  * that `ps` would show:
  *
- *   CW_DATA_DIR                   the data dir to snapshot
+ *   CW_DATA_DIR                   the data dir to snapshot (with every board's
+ *                                 events.jsonl and agent-notes.jsonl in it)
+ *   BACKUP_TRANSCRIPTS_DIR        optional; Claude Code's session transcripts
+ *                                 (~/.claude/projects), snapshotted beside it
  *   BACKUP_RECIPIENT              the public key snapshots are encrypted to
  *   BACKUP_S3_ENDPOINT            an S3-compatible endpoint, e.g. https://storage.googleapis.com
  *   BACKUP_S3_BUCKET              the project's own bucket
@@ -56,9 +59,10 @@ async function main(): Promise<void> {
   }
   const dataDir = resolve(need('CW_DATA_DIR'));
   const recipient = need('BACKUP_RECIPIENT');
+  const transcripts = process.env.BACKUP_TRANSCRIPTS_DIR?.trim() || undefined;
 
   if (outFile) {
-    await snapshotDataDir(dataDir, recipient, resolve(outFile));
+    await snapshotDataDir(dataDir, recipient, resolve(outFile), transcripts);
     console.log(`[backup] wrote ${resolve(outFile)} (${statSync(outFile).size} bytes)`);
     return;
   }
@@ -75,7 +79,7 @@ async function main(): Promise<void> {
   const work = mkdtempSync(join(dirname(dataDir), '.backup-'));
   try {
     const file = join(work, 'snapshot.cwsnap');
-    await snapshotDataDir(dataDir, recipient, file);
+    await snapshotDataDir(dataDir, recipient, file, transcripts);
     const key = snapshotKey(prefix, hostname(), new Date());
     const client = new Bun.S3Client({ endpoint, bucket, region, accessKeyId, secretAccessKey });
     await client.write(key, Bun.file(file), { type: 'application/octet-stream' });

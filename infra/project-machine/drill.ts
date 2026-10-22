@@ -4,16 +4,17 @@
  *
  *   bun run machine:drill --project <name>-test
  *
- * Seeds a drill board on the machine, fingerprints its docs, takes a backup
- * with the machine's own write-only credential, destroys the machine AND
- * its volume, recreates both with `machine:deploy`, restores the newest
- * snapshot with `machine:restore`, and fingerprints again. It passes only
- * when the two fingerprints match. Because it destroys the volume it refuses
+ * Seeds a drill board on the machine (two docs, a task, an agent note and a
+ * session transcript), counts and hashes its docs, events, notes and
+ * transcripts, takes a backup with the machine's own write-only credential,
+ * destroys the machine AND its volume, recreates both with `machine:deploy`,
+ * restores the newest snapshot with `machine:restore`, and counts and hashes
+ * again. It passes only when all four match (`judgeDrill`). Because it destroys the volume it refuses
  * any project whose name does not end in `-test`.
  */
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
-import { projectConfig } from './deploy-plan.ts';
+import { type DrillPrint, drillLimits, judgeDrill, projectConfig } from './deploy-plan.ts';
 import { deployProject, machines, tunnelAddress } from './deploy.ts';
 import { flyJson, flyOk, onMachine } from './mac-ops.ts';
 import { restoreMachine } from './restore-machine.ts';
@@ -21,8 +22,6 @@ import { restoreMachine } from './restore-machine.ts';
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PROBE = 'bun /app/infra/project-machine/drill-probe.ts';
 const AS_CW = 'setpriv --reuid=cw --regid=cw --init-groups env HOME=/home/cw';
-
-type Print = { count: number; sha256: string; ydocs: number };
 
 /** The last JSON line of a command's output; `fly ssh` prints its own lines first. */
 function lastJson<T>(out: string): T {
@@ -33,6 +32,11 @@ function lastJson<T>(out: string): T {
     .find((l) => l.trim().startsWith('{'));
   if (!line) throw new Error(`no JSON in: ${out.slice(-300)}`);
   return JSON.parse(line) as T;
+}
+
+function summary(p: DrillPrint): string {
+  const log = (l: DrillPrint['events']) => `${l.files} file(s) ${l.lines} line(s)`;
+  return `docs ${p.count} (${p.sha256.slice(0, 12)}), events ${log(p.events)}, notes ${log(p.notes)}, transcripts ${log(p.transcripts)}`;
 }
 
 async function waitForServer(app: string): Promise<void> {
@@ -64,8 +68,8 @@ async function main(): Promise<void> {
   await waitForServer(cfg.app);
   console.log(`[drill] tunnel: ${(await tunnelAddress(cfg.app)) ?? 'not in the logs'}`);
   console.log(`[drill] seed: ${onMachine(cfg.app, `${PROBE} seed`).trim().split('\n').at(-1)}`);
-  const before = lastJson<Print>(onMachine(cfg.app, `${PROBE} fingerprint`));
-  console.log(`[drill] before: ${JSON.stringify(before)}`);
+  const before = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint`));
+  console.log(`[drill] before: ${summary(before)}`);
   if (before.count === 0) throw new Error('nothing to back up');
   const backup = onMachine(cfg.app, `${AS_CW} bun run /app/infra/project-machine/backup.ts`);
   console.log(`[drill] ${backup.trim().split('\n').at(-1)}`);
@@ -82,15 +86,17 @@ async function main(): Promise<void> {
 
   await deployProject(cfg, false);
   await waitForServer(cfg.app);
-  const empty = lastJson<Print>(onMachine(cfg.app, `${PROBE} fingerprint`));
-  console.log(`[drill] fresh machine before restore: ${JSON.stringify(empty)}`);
+  const empty = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint`));
+  console.log(`[drill] fresh machine before restore: ${summary(empty)}`);
   const key = await restoreMachine(cfg);
   await waitForServer(cfg.app);
-  const after = lastJson<Print>(onMachine(cfg.app, `${PROBE} fingerprint`));
+  const limits = Buffer.from(JSON.stringify(drillLimits(before))).toString('base64');
+  const after = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint ${limits}`));
   console.log(`[drill] restored ${key}`);
-  console.log(`[drill] after: ${JSON.stringify(after)}`);
-  const ok = after.count === before.count && after.sha256 === before.sha256;
-  console.log(`[drill] ${ok ? 'PASS' : 'FAIL'}: docs ${before.count} -> ${after.count}`);
+  console.log(`[drill] after: ${summary(after)}`);
+  const { ok, lines } = judgeDrill(before, after);
+  for (const l of lines) console.log(`[drill] ${l}`);
+  console.log(`[drill] ${ok ? 'PASS' : 'FAIL'}`);
   if (!ok) process.exit(1);
 }
 
