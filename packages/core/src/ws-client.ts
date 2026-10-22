@@ -114,6 +114,12 @@ export function connect(
   let status: ConnectionStatus = 'connecting';
   let reconnectDelay = 500;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  // The subprotocol the next attempt must not offer. A server that refuses a
+  // token refuses the handshake, where no token would have opened a
+  // read-only socket, so an attempt that never opened is followed by one
+  // without its token. The attempt after that offers it again, so a token
+  // lost to a network failure is not lost for good.
+  let skip: string | undefined;
 
   const docUpdate = (update: Uint8Array, origin: unknown) => {
     if (origin === ws || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -146,7 +152,10 @@ export function connect(
   function open() {
     if (closed) return;
     setStatus('connecting');
-    ws = new WebSocket(url, protocol?.());
+    let offered = protocol?.();
+    if (offered === skip) offered = undefined;
+    skip = undefined;
+    ws = new WebSocket(url, offered);
     ws.binaryType = 'arraybuffer';
     const thisWs = ws;
 
@@ -254,6 +263,8 @@ export function connect(
     ws.addEventListener('close', () => {
       clearTimeout(connectTimer);
       if (syncTimer !== null) clearTimeout(syncTimer);
+      // `syncTimer` is set only once this attempt opened.
+      else skip = offered;
       setStatus('closed');
       if (closed) return;
       retryTimer = setTimeout(open, Math.min(reconnectDelay, 10000));

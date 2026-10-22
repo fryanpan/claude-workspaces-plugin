@@ -140,6 +140,18 @@ export function crossOriginCredentialedWrite(
   policy: OriginPolicy,
 ): boolean {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return false;
+  return crossOriginCredentials(headers, policy);
+}
+
+/**
+ * `true` when a request comes from a page that is not this server's own and
+ * carries a `Cookie` or an Access assertion. The test both the write gate
+ * above and the websocket upgrades apply. An upgrade is a GET, so the write
+ * gate never sees one, and a page cannot open a socket without the cookie:
+ * the browser attaches it to every handshake. So an upgrade is not refused
+ * for it. Its cookie and assertion are ignored instead (`routes/upgrade-stream.ts`).
+ */
+export function crossOriginCredentials(headers: Headers, policy: OriginPolicy): boolean {
   const origin = headers.get('origin');
   if (origin === null || originMatch(origin, policy) === 'same-origin') return false;
   return headers.has('cookie') || headers.has('cf-access-jwt-assertion');
