@@ -89,6 +89,7 @@ export interface ObservedMachine {
   state: string;
   /** The image tag the machine runs, or '' when Fly does not say. */
   imageTag: string;
+  memoryMb: number;
 }
 
 export interface Observed {
@@ -143,7 +144,7 @@ export function plan(cfg: ProjectConfig, obs: Observed): Action[] {
   if (
     current.length === 0 ||
     names.length > 0 ||
-    current.some((m) => m.imageTag !== cfg.imageLabel)
+    current.some((m) => m.imageTag !== cfg.imageLabel || m.memoryMb !== cfg.vmMemoryMb)
   ) {
     actions.push({ kind: 'deploy' });
   } else {

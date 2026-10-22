@@ -88,6 +88,7 @@ interface FlyMachine {
   id: string;
   state: string;
   image_ref?: { tag?: string };
+  config?: { guest?: { memory_mb?: number } };
   ImageRef?: { Tag?: string };
 }
 
@@ -96,6 +97,7 @@ export function machines(app: string): ObservedMachine[] {
     id: m.id,
     state: m.state,
     imageTag: m.image_ref?.tag ?? m.ImageRef?.Tag ?? '',
+    memoryMb: m.config?.guest?.memory_mb ?? 0,
   }));
 }
 
@@ -295,7 +297,9 @@ async function main(): Promise<void> {
   });
   const done = await deployProject(cfg, args.includes('--dry-run'));
   if (args.includes('--dry-run') || cfg.tunnel !== 'quick') return;
-  const state = machines(cfg.app).map((m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)}`);
+  const state = machines(cfg.app).map(
+    (m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)} ${m.memoryMb}MB`,
+  );
   console.log(`[deploy] machines: ${state.join('; ') || 'none'}`);
   if (done.length > 0 || state.length > 0)
     console.log(`[deploy] tunnel: ${(await tunnelAddress(cfg.app)) ?? 'not in the logs yet'}`);
