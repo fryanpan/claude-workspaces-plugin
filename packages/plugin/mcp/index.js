@@ -17125,7 +17125,7 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion. Markdown in each edit is parsed either way.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. Markdown in each edit is parsed either way.",
       inputSchema: {
         type: "object",
         properties: {
