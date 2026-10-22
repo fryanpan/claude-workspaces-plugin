@@ -162,13 +162,28 @@ async function attachApp(
   if (!ctx.isValidDocId(name)) return j(400, { error: 'bad docId' });
   const origin = parseLoopbackOrigin(body?.origin, ctx.ownPort());
   if (!origin.ok) return j(400, { error: 'origin_not_loopback', message: origin.error });
-  // A name already held by a doc of another kind stays that doc. Turning a
-  // markdown doc into an app would strand its content behind a proxy.
+  // A name already held by a doc stays that doc, as a create through the
+  // docs route does (`doc-create-conflict.ts`). Turning a markdown doc into
+  // an app would strand its content behind a proxy, and pointing an app at
+  // another port would put the doc's comments on a page somebody else
+  // serves. Attaching the same origin again is a no-op and passes.
   const held = docStore.peekMeta(name);
-  if (held && held.type !== 'app') {
+  const conflict = !held
+    ? null
+    : held.type !== 'app'
+      ? 'type'
+      : held.sourceUrl !== origin.origin
+        ? 'source'
+        : null;
+  if (held && conflict) {
     return j(409, {
-      error: 'name_held_by_other_kind',
-      message: `"${name}" is already a ${held.type} doc. Pick another name for the app.`,
+      error: 'doc_exists',
+      docId: held.docId,
+      conflict,
+      message:
+        conflict === 'type'
+          ? `"${name}" is already a ${held.type ?? 'doc'}. Pick another name for the app.`
+          : `"${name}" is already attached to ${held.sourceUrl ?? 'another origin'}. Pick another name for this origin.`,
     });
   }
   const producedBy = producedByOf(body?.producedBy);

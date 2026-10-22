@@ -127,6 +127,8 @@ describe('attaching and serving a dev server', () => {
         origin: dev.origin,
       });
       expect(r.status).toBe(409);
+      const body = (await r.json()) as { error: string; conflict: string };
+      expect(body).toMatchObject({ error: 'doc_exists', conflict: 'type' });
     });
 
     it('sends an app made through the generic docs route to the apps route', async () => {
@@ -139,23 +141,32 @@ describe('attaching and serving a dev server', () => {
       expect(await r.text()).toContain('/apps');
     });
 
-    it('re-attaching the same name repoints the same doc', async () => {
+    it('re-attaching the same name and origin answers the same doc', async () => {
+      // POSITIVE CONTROL for the refusal below: the same name is not refused
+      // for being in use, only for naming another origin.
+      const again = await send(`/workspaces/${ws}/apps`, {
+        docId: 'harborlight-site',
+        origin: dev.origin,
+      });
+      expect(again.status).toBe(200);
+      const body = (await again.json()) as { docId: string; origin: string };
+      expect(body.docId).toBe(app);
+      expect(body.origin).toBe(dev.origin);
+    });
+
+    it('refuses to point an existing app at another origin', async () => {
       const other = startDevServer();
       try {
-        const again = await send(`/workspaces/${ws}/apps`, {
+        const moved = await send(`/workspaces/${ws}/apps`, {
           docId: 'harborlight-site',
           origin: other.origin,
         });
-        expect(again.status).toBe(200);
-        const body = (await again.json()) as { docId: string; origin: string };
-        expect(body.docId).toBe(app);
-        expect(body.origin).toBe(other.origin);
+        expect(moved.status).toBe(409);
+        const body = (await moved.json()) as { error: string; conflict: string; docId: string };
+        expect(body).toMatchObject({ error: 'doc_exists', conflict: 'source', docId: app });
+        // Nothing changed: the doc still answers from the origin it had.
+        expect(handle.docStore.peekMeta(app)?.sourceUrl).toBe(dev.origin);
       } finally {
-        const back = await send(`/workspaces/${ws}/apps`, {
-          docId: 'harborlight-site',
-          origin: dev.origin,
-        });
-        expect(back.status).toBe(200);
         await other.stop();
       }
     });

@@ -714,7 +714,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_app',
       description:
-        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Reusing a docId repoints that app. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.',
+        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
