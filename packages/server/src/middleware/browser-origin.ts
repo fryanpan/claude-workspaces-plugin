@@ -118,6 +118,34 @@ function originMatch(origin: string | null, policy: OriginPolicy): MatchKind | n
 }
 
 /**
+ * `true` when a write comes from a page that is not this server's own and
+ * carries credentials the browser attached by itself.
+ *
+ * `isAllowedBrowserOrigin` admits a dev server on any port of this machine,
+ * because the widget on that page calls this server. A browser's site
+ * ignores the port, so `localhost:3000` is same-site with `localhost:8787`
+ * and a `fetch(…, { credentials: 'include' })` from it carries the reader's
+ * Lax session cookie: the page could not read the answer, but its write
+ * landed as the reader. The widget never asks for credentials across origins
+ * (every fetch it makes is `same-origin` or bearer-token), so a cross-origin
+ * write that carries a cookie, or an Access assertion the edge made from
+ * one, is never the widget, and is refused. Without credentials the same
+ * write passes on to the gates behind this one, as before.
+ *
+ * No Origin is a program, not a page, and is left to those gates too.
+ */
+export function crossOriginCredentialedWrite(
+  method: string,
+  headers: Headers,
+  policy: OriginPolicy,
+): boolean {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return false;
+  const origin = headers.get('origin');
+  if (origin === null || originMatch(origin, policy) === 'same-origin') return false;
+  return headers.has('cookie') || headers.has('cf-access-jwt-assertion');
+}
+
+/**
  * CORS headers for a request, or null when none should be sent.
  *
  * Never a wildcard, and never `Access-Control-Allow-Credentials`: the share

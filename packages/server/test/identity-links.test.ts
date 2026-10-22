@@ -2,8 +2,8 @@
  * Anonymous browser sessions self-name. Measured on the live stream: six
  * `anon-*` ids typed the owner's FULL name into the name box across 1,120
  * events, and every one was recorded `isOwner: false` — because
- * `isOwnerActor` matches the id `known-bryan` or the short name, exactly, and
- * the full name is neither.
+ * `isOwnerActor` matches owner ids only (it once matched the short name too),
+ * and a typed name is not an id.
  *
  * The fix is deliberately NOT a second name literal. A name is a claim the
  * browser makes about itself, so matching a looser one would start marking
@@ -39,10 +39,10 @@ afterEach(() => {
 });
 
 describe('a linked id is the owner; an unlinked name is not', () => {
-  test('positive control: the two built-in spellings still match', () => {
+  test('positive control: the built-in id matches, and the owner name alone does not', () => {
     expect(isOwnerActor({ id: 'known-bryan', name: 'whoever' })).toBe(true);
-    expect(isOwnerActor({ id: 'anon-1', name: 'Bryan' })).toBe(true);
-    expect(isOwnerActor('Bryan')).toBe(true);
+    expect(isOwnerActor({ id: 'anon-1', name: 'Bryan' })).toBe(false);
+    expect(isOwnerActor('Bryan')).toBe(false);
   });
 
   test('a linked anon id counts as the owner', () => {

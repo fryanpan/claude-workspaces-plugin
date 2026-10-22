@@ -184,6 +184,34 @@ describe('cross-origin access to the trusted host', () => {
       expect(r.status).toBe(200);
     });
 
+    it('refuses a write from another origin that carries the reader’s credentials', async () => {
+      // A dev server on another port is same-SITE, so a page there that asks
+      // for credentials sends the reader's Lax session cookie along.
+      const credentials: Record<string, string>[] = [
+        { cookie: 'cw_session=v2.riverbend' },
+        { 'cf-access-jwt-assertion': 'riverbend' },
+      ];
+      for (const credential of credentials) {
+        for (const origin of ['http://localhost:3000', 'https://mockups.example.com']) {
+          const r = await req('/workspaces', origin, {
+            method: 'POST',
+            headers: credential,
+            body: JSON.stringify({ name: 'made with somebody else’s sign-in' }),
+          });
+          expect(r.status, `${origin} ${Object.keys(credential)[0]}`).toBe(403);
+          expect(((await r.json()) as { error: string }).error).toBe('cross_origin_credentials');
+        }
+      }
+      // Positive control: the same write from the server's own origin, with
+      // the same cookie, is not refused by this gate.
+      const own = await req('/workspaces', `http://${host}`, {
+        method: 'POST',
+        headers: { cookie: 'cw_session=v2.riverbend' },
+        body: JSON.stringify({ name: 'made on this server’s own page' }),
+      });
+      expect(own.status).toBe(200);
+    });
+
     it('an allowed origin is still not allowed to BIND a file', async () => {
       // The origin gate admits this page; the binding gate behind it does
       // not. Pinned here so the two never get read as one rule.

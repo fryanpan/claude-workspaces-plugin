@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isOwnerActor } from '../src/actor-identity.ts';
 import type { SharingFlip } from '../src/share/sharing-flip.ts';
 import {
   SHARING_LEAVE_OFF_OPTION,
@@ -205,6 +206,33 @@ describe('SharingNotice', () => {
     });
     expect(s.flips).toHaveLength(0);
     expect(s.log.at(-1)).toContain('not the owner');
+  });
+
+  it('judges the owner by account id: a person who calls themselves Bryan cannot turn it back on', async () => {
+    // The server wires `isOwner` to `isOwnerActor`; this uses the real one.
+    const s = fakeStore('notice-by-id-');
+    s.deps.isOwner = (actor) => isOwnerActor(actor);
+    const notice = new SharingNotice(s.deps);
+    await notice.onFlip(flip(false));
+    notice.onAnswered({
+      taskId: 't-1',
+      reviewItemId: 'r-2',
+      optionId: SHARING_ON_OPTION,
+      answer: 'Turn back on',
+      actor: { id: 'anon-riverbend', name: 'Bryan', kind: 'person' },
+    });
+    expect(s.flips).toHaveLength(0);
+    expect(s.log.at(-1)).toContain('not the owner');
+    // Positive control: the owner's own id, under any name, does flip it.
+    await notice.onFlip(flip(false));
+    notice.onAnswered({
+      taskId: 't-1',
+      reviewItemId: notice.openItem()?.itemId ?? '',
+      optionId: SHARING_ON_OPTION,
+      answer: 'Turn back on',
+      actor: { id: 'known-bryan', name: 'Harborlight', kind: 'person' },
+    });
+    expect(s.flips).toHaveLength(1);
   });
 
   it('ignores an answer to any other item', async () => {

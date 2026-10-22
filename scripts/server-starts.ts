@@ -12,9 +12,7 @@
  *
  * The logic is `packages/server/src/server-starts.ts`; this only reads files.
  */
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { resolveDataDir } from '../packages/server/src/data-dir.ts';
+import { MISSING_DATA_DIR, dataDirFromArgs } from '../packages/server/src/data-dir.ts';
 import { deployLogPath, readDeployLogEntries } from '../packages/server/src/deploy-log.ts';
 import {
   formatStartsReport,
@@ -29,8 +27,12 @@ function arg(name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dataDir = arg('data-dir') ?? resolveDataDir(process.env, repoRoot);
+// The same rule as the server's: name the data dir, or there is nothing to read.
+const dataDir = dataDirFromArgs(process.env, arg);
+if (!dataDir) {
+  console.error(MISSING_DATA_DIR);
+  process.exit(2);
+}
 const hours = Number(arg('hours') ?? '24');
 if (!Number.isFinite(hours) || hours <= 0) {
   console.error('--hours must be a positive number');

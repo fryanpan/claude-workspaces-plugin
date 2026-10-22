@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "bash scripts/check-hooks.sh || true",
     "bootstrap": "bun run scripts/bootstrap.ts",
-    "dev": "bun run scripts/serve.ts",
+    "dev": "bun run scripts/serve.ts --data-dir data",
     "dev:bare": "bun run packages/server/src/bin.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "routes:table": "bun run scripts/routes-table.ts",

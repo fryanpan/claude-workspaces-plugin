@@ -1,6 +1,7 @@
 import { type Anchor, type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
-import { RESERVED_DOC_PREFIXES } from '../doc-ids.ts';
+import { createConflictWith } from '../doc-create-conflict.ts';
+import { RESERVED_DOC_PREFIXES, isReservedDocId } from '../doc-ids.ts';
 import { compactDocRow, matchesDocFilters, pageDocs, parseListDocsQuery } from '../doc-listing.ts';
 import { normalizeDocOriginRepo, resolveOriginRepoCheckout } from '../doc-origin-repo.ts';
 /**
@@ -269,6 +270,21 @@ export async function handleDocCreateListRoutes(
     // puts the bytes in hand (or quarantines the path) before the synchronous
     // create below can reach for the file.
     await docStore.prewarmHydration(docId);
+    // A name that is already a doc may re-attach that doc's own file and
+    // nothing else (finding H3) — see `createConflictWith`.
+    const existing = isReservedDocId(docId) ? undefined : docStore.get(docId);
+    const conflict = existing ? createConflictWith(existing.meta, { type, sourceUrl }) : null;
+    if (existing && conflict) {
+      return j(409, {
+        error: 'doc_exists',
+        docId: existing.docId,
+        conflict,
+        hint:
+          conflict === 'type'
+            ? `"${docId}" is already a ${existing.meta.type ?? 'doc'}, and a create cannot change a doc's type. Pick a name that is not in use.`
+            : `"${docId}" is already bound to another file, and a create cannot repoint it. Edit the file it serves from, or pick a name that is not in use.`,
+      });
+    }
     const created = docStore.createForCaller(docId, {
       type,
       sourceUrl,

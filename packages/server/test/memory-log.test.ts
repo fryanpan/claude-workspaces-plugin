@@ -287,7 +287,12 @@ describe('the heap', () => {
       now: () => 0,
       write: (l) => lines.push(l),
     });
+    // Which types lead the census depends on what else this process has
+    // loaded (strings and functions led it on one CI shard), so hold enough
+    // plain objects that `Object` is among the top five wherever it runs.
+    const held = Array.from({ length: 200_000 }, (_, i) => ({ i }));
     const line = log.sample() ?? '';
+    expect(held.length).toBe(200_000);
     expect(line).toMatch(/ heap=\d+MB heapTypes=(\w+:\d+,){4}\w+:\d+ heapStatsMs=\d+$/);
     expect(line).toContain('Object:');
   });

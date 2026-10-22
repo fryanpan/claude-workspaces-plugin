@@ -116,9 +116,8 @@ export function classifyActor(author: unknown): ActorKind {
 /**
  * Ids that mean the fleet owner.
  *
- * Seeded with the two spellings that predate email identity — the id is the
- * browser identity, the name is what a REST/MCP caller sends, and both are
- * load-bearing. `registerOwnerIdentity` adds the owner's `user-<hash>` once
+ * Seeded with `known-bryan`, the id that predates email identity.
+ * `registerOwnerIdentity` adds the owner's `user-<hash>` once
  * the server knows which address is theirs.
  *
  * WHY A MODULE-LEVEL REGISTRY AND NOT A PARAMETER. `isOwnerActor` is called
@@ -129,8 +128,8 @@ export function classifyActor(author: unknown): ActorKind {
  * construction.
  */
 const OWNER_IDS = new Set<string>(['known-bryan']);
-/** Matched EXACTLY, case included: widening it here would change who counts
- *  as the owner on the existing corpus, which is not what this fixes. */
+/** The owner's display name. No owner check reads it (`isOwnerActor` is by
+ *  id); the roster refuses an agent that would attach under it. */
 const OWNER_NAMES = new Set<string>(['Bryan']);
 
 /** The owner's display names, for the roster's rename refusal: an agent
@@ -291,28 +290,30 @@ export function resolveActor(row: { actorId?: string; actorName?: string }): {
   return { id: resolved, name: rec?.displayName ?? row.actorName ?? '' };
 }
 
-/** Bryan is the doc owner / known person on this single-user fleet. A person
- *  whose author id resolves to a known owner identity is the owner. */
+/**
+ * Whether an author is the owner: by ACCOUNT ID, never by name.
+ *
+ * It used to accept the display name "Bryan" as well. A share visitor, a
+ * guest page and any REST body can carry whatever name they like, so a name
+ * match let one of them answer the sharing notice's "Turn back on", be
+ * counted as the owner's activity, and have its words reach the coach as the
+ * owner's. An id is what the server assigned: a signed-in identity,
+ * `known-bryan`, or an `anon-*` id somebody linked on purpose (see
+ * `resolveIdentityId`). A legacy string author is a name, so it is not the
+ * owner.
+ */
 export function isOwnerActor(author: unknown): boolean {
-  // Same normalization as `classifyActor`, for the same reason: a legacy
-  // string author naming the owner IS the owner, and `author.id` on a null
-  // author throws.
-  const { id = '', name = '' } = authorFields(author);
-  // The id is resolved through the link map first, so a linked `anon-*`
-  // session is recognized by the SAME owner-id check as every other identity
-  // — the link widens who is known, never how loosely a name is matched.
-  return OWNER_IDS.has(resolveIdentityId(id)) || OWNER_NAMES.has(name);
+  const { id = '' } = authorFields(author);
+  return id !== '' && OWNER_IDS.has(resolveIdentityId(id));
 }
 
 /**
  * How far an agent may trust a comment's words: `owner` when the author IS
  * the owner's identity, `untrusted` for everyone else.
  *
- * By ID ALONE, and that is the difference from `isOwnerActor`. That check
- * also accepts the owner's display name, which is right for counting the
- * owner's activity and wrong here: a share visitor types whatever name they
- * like, so a name match would let an outsider's comment reach an agent
- * labelled as the owner's instruction. An id is what the server assigned —
+ * By ID ALONE, as `isOwnerActor` now is too: a share visitor types whatever
+ * name they like, so a name match would let an outsider's comment reach an
+ * agent labelled as the owner's instruction. An id is what the server assigned —
  * a signed-in identity, `known-bryan`, or an `anon-*` id somebody linked on
  * purpose (see `resolveIdentityId`).
  */
