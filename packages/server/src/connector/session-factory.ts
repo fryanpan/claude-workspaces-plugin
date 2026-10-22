@@ -23,6 +23,7 @@
  */
 import { createConnectorSession } from '../../../mcp/src/connector-session.ts';
 import type { ConnectorSession } from '../../../mcp/src/connector-session.ts';
+import { loopbackFetch } from '../outbound-fetch.ts';
 import type { HostedSessionSpec } from './host.ts';
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -87,7 +88,7 @@ export function hostedSessionFactory(
   deps: SessionFactoryDeps,
 ): (spec: HostedSessionSpec) => ConnectorSession {
   const eventsFetch = inProcessEventsFetch(deps.openAgentEvents);
-  const restFetch: Fetch = deps.fetch ?? ((url, init) => fetch(url, init));
+  const restFetch: Fetch = deps.fetch ?? loopbackFetch('own-server');
   return (spec) =>
     createConnectorSession({
       author: spec.author,

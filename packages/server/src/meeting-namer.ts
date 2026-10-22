@@ -23,6 +23,7 @@
  */
 
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, resolveKeySlotFrom } from './summarize.ts';
 
@@ -130,7 +131,7 @@ export function haikuMeetingNamer(opts: HaikuMeetingNamerOpts = {}): MeetingName
   const resolved = resolveKeySlotFrom('meeting-namer', opts.apiKey, readKeychainPassword);
   if (!resolved) return null;
   const key = resolved.key;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const timeoutMs = opts.timeoutMs ?? MEETING_NAMER_TIMEOUT_MS;
   return async ({ notes }) => {
     const { system, user } = buildMeetingNamerPrompt(notes);

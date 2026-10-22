@@ -40,6 +40,7 @@ import { type ReviewPayload, isReviewItemOpen } from '@claude-workspaces/core';
 import type { EnvLike } from '@claude-workspaces/core/env-names';
 import { type AnswerCoverage, threadOpenParts, ticketOpenParts } from './answer-coverage.ts';
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { compareSemver } from './plugin-release.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, resolveKeySlotFrom } from './summarize.ts';
@@ -1587,7 +1588,7 @@ export function haikuVoiceComplete(opts?: {
     opts?.env ?? process.env,
   );
   if (!resolved) return null;
-  const fetchImpl = opts?.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts?.fetchImpl ?? fixedHostFetch;
   const resolvedKey = resolved.key;
   return async ({ system, user }) => {
     const ctl = new AbortController();

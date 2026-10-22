@@ -92,6 +92,7 @@ import {
   resolveLookup,
 } from './meeting-lookup.ts';
 import type { NoteDocLink, NoteTaskLink, NotesTurn, SpokenCorrection } from './meeting-notes.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, resolveKeySlotFrom } from './summarize.ts';
 import { parseTaskCreate } from './task-create.ts';
@@ -818,7 +819,7 @@ export function createHaikuTaskCaptureExtractor(
   if (!resolved) return null;
   const key = resolved.key;
   const keySlot = resolved.slot;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const instructions = opts.instructions;
 
   return {

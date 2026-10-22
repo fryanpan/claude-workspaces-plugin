@@ -42,6 +42,7 @@
 
 import { normalizeHost } from './middleware/host-guard.ts';
 import { RECALL_STATUS_PATH } from './middleware/recall-callback-gate.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
 /** Keychain service holding the key. Env override: CLAUDE_WORKSPACES_RECALL_API_KEY. */
@@ -560,7 +561,7 @@ export function createRecallClient(opts: RecallClientOptions = {}): RecallClient
   // below on every TS version.
   const apiKey: string = key;
   const config = opts.config ?? recallConfigFromEnv(opts.env ?? process.env, opts.publicBaseUrl);
-  const doFetch = opts.fetch ?? ((url, init) => fetch(url, init));
+  const doFetch = opts.fetch ?? fixedHostFetch;
   const base = recallApiBase(config.region);
 
   /**
