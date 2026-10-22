@@ -275,10 +275,16 @@ export async function deployProject(cfg: ProjectConfig, dryRun: boolean): Promis
   return actions;
 }
 
-/** The quick tunnel's address, read from the machine's logs once cloudflared prints it. */
+/**
+ * The quick tunnel's address, read from the running machine's own logs once
+ * cloudflared prints it. The app's logs also hold the addresses of machines
+ * a drill destroyed, so they are filtered to the live one.
+ */
 export async function tunnelAddress(app: string): Promise<string | null> {
+  const id = machines(app).find((m) => m.state === 'started')?.id;
+  if (!id) return null;
   for (let i = 0; i < 15; i++) {
-    const url = quickTunnelUrl(fly(['logs', '--app', app, '--no-tail']).stdout);
+    const url = quickTunnelUrl(fly(['logs', '--app', app, '--machine', id, '--no-tail']).stdout);
     if (url) return url;
     await Bun.sleep(2000);
   }
