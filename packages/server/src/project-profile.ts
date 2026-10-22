@@ -2,9 +2,9 @@
  * What a PROJECT server may spend, and which features it runs.
  *
  * A project server is one org's board server on its own machine. Each holds
- * only its own credentials and its org's Anthropic key. The Mac's prod and every dev server on the
- * Mac are not project servers, and nothing in this module changes what they
- * do.
+ * only its own credentials and its org's Anthropic key. The Mac's prod and
+ * every dev server on the Mac are not project servers, and nothing in this
+ * module changes what they do.
  *
  * HOW ONE IS RECOGNISED. Fly sets `FLY_APP_NAME` in every machine it starts,
  * so a Fly machine is a project server with no setting of its own — the same
