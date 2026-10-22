@@ -382,7 +382,7 @@ describe('wireBoardVoice with the spoken reply', () => {
   });
 
   it('says on the plain mic that spoken replies are off by this server’s profile', async () => {
-    const off = 'Spoken replies with ElevenLabs voices and Gemini Live are off on this server.';
+    const off = 'Spoken replies are off on this server.';
     const m = mount([], {}, off);
     await vi.advanceTimersByTimeAsync(0);
     const mic = m.el('board-mic');
