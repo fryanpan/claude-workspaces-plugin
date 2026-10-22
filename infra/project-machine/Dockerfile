@@ -1,8 +1,7 @@
 # One project machine: the board server and cloudflared.
 #
-# Build from the repo root, in a clean clone (see
-# docs/process/project-machine.md):
-#   fly deploy . --config infra/project-machine/fly.toml --dockerfile infra/project-machine/Dockerfile
+# Built by `bun run machine:deploy`, from a `git archive` of one commit on
+# Fly's remote builder (docs/process/project-machine.md).
 #
 # No secret is baked in. Every credential arrives at runtime as a Fly secret;
 # the list is in fly.toml.
@@ -15,6 +14,8 @@ COPY package.json bun.lock bunfig.toml tsconfig.json tsconfig.base.json ./
 COPY packages ./packages
 COPY demos ./demos
 COPY infra/project-machine ./infra/project-machine
+# The server imports the board router's path parser from here.
+COPY infra/board-router-worker ./infra/board-router-worker
 RUN bun install --frozen-lockfile \
   && bun run packages/widget/scripts/build.ts \
   && bun run packages/workspaces-app/scripts/build.ts
@@ -33,4 +34,5 @@ ENV NODE_ENV=production \
   CW_DATA_DIR=/data/cw
 # The entrypoint starts as root only to hand the volume to `cw`, then drops
 # to it before starting anything (entrypoint.sh).
-ENTRYPOINT ["/usr/bin/tini", "--", "/app/infra/project-machine/entrypoint.sh"]
+# `-s`: Fly's own init is PID 1, so tini registers as a subreaper to reap.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/infra/project-machine/entrypoint.sh"]
