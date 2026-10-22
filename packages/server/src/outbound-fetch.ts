@@ -217,13 +217,21 @@ function namedRange(host: string): Exclude<AddressRange, 'public'> | null {
   return null;
 }
 
+/** A lookup cannot be cancelled, so the caller's signal and a deadline race it. */
 function withDeadline<T>(p: Promise<T>, signal: AbortSignal | null | undefined): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('DNS lookup timed out')), RESOLVE_TIMEOUT_MS);
-    signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    if (!signal) return;
+    if (signal.aborted) reject(signal.reason);
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
-  return Promise.race([p, deadline]).finally(() => clearTimeout(timer));
+  return Promise.race([p, deadline]).finally(() => {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  });
 }
 
 /**
@@ -318,8 +326,7 @@ export const publicFetch: GuardedFetch = createPublicFetch();
 /**
  * The vendors the server is built to call. An entry starting with a dot
  * admits that domain's subdomains: Recall's API host names its region
- * (`us-east-1.recall.ai`), and an Access team domain is the operator's own
- * name under `cloudflareaccess.com`.
+ * (`us-east-1.recall.ai`).
  */
 export const VENDOR_HOSTS: readonly string[] = [
   'api.anthropic.com',
