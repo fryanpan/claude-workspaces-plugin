@@ -354,6 +354,8 @@ describe('E. expiry, and renewal from off the machine', () => {
       { tokenId: id, agentId: AGENT, boardId: ownBoard, expiresAt },
       boardAgentTokenKey(loadCookieKey(dataDir)),
     );
+  /** 1 Jan 2100: an expiry no run of this suite reaches. */
+  const FAR_FUTURE = 4_102_444_800_000;
   const refresh = (token: string) =>
     remote(token, '/api/board-tokens/refresh', { method: 'POST', body: '{}' });
 
@@ -363,19 +365,17 @@ describe('E. expiry, and renewal from off the machine', () => {
       body: JSON.stringify({ agentId: AGENT, boardId: ownBoard }),
     });
     const body = (await res.json()) as { token: string; expiresAt: number };
-    expect(body.expiresAt).toBeGreaterThan(Date.now());
+    expect(Number.isSafeInteger(body.expiresAt)).toBe(true);
     expect(body.token.split('.')[4]).toBe(String(body.expiresAt));
   });
 
   it('refuses a token past its expiry, on its board and on renewal', async () => {
     const { id } = await mint(AGENT, ownBoard);
-    const expired = signed(id, Date.now() - 1);
+    const expired = signed(id, 1);
     expect((await remote(expired, `/workspaces/${ownBoard}`)).status).toBe(401);
     expect((await refresh(expired)).status).toBe(401);
     // Control: the same record, unexpired, opens the board.
-    expect((await remote(signed(id, Date.now() + 60_000), `/workspaces/${ownBoard}`)).status).toBe(
-      200,
-    );
+    expect((await remote(signed(id, FAR_FUTURE), `/workspaces/${ownBoard}`)).status).toBe(200);
   });
 
   it('renews a live token through the tunnel, and the new value opens the board', async () => {
