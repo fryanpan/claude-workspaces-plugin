@@ -11,6 +11,7 @@ import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { PageLoadLog } from '../page-loads.ts';
+import type { FeaturesOff } from '../project-profile.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ShareLinks } from '../share/share-links.ts';
@@ -55,6 +56,8 @@ export interface WorkspaceRoutesContext {
    *  made a person wait. */
   spokenRelay: SpokenReplyRelay;
   spokenTimings: SpokenTimings;
+  /** What the pages say about features this server's profile turned off. */
+  featuresOff: FeaturesOff;
   /** Whether this request speaks for `agentId`: on this machine, with its
    *  token (`auth/agent-token.ts`), the check the agent's own feed uses. */
   authorizeAgent(req: Request, agentId: string): AgentCallerVerdict;

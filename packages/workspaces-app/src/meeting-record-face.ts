@@ -47,6 +47,12 @@ export const RECORD_LABEL: { idle: string; live: string } = {
   live: 'Recording',
 };
 
+/**
+ * The line under the headline on a server whose profile turned transcription
+ * off: the press cannot record, and the button says so before it is pressed.
+ */
+export const RECORD_OFF_SETTING = 'Off on this server';
+
 /** The one line under the headline: source, then voices. */
 export function recordSetting(source: RecordSource, mode: CaptureMode): string {
   return `${SOURCE_WORD[source]} · ${VOICES_WORD[mode]}`;
@@ -106,6 +112,7 @@ export function everyRecordSetting(): string[] {
   for (const source of RECORD_SOURCES) {
     for (const mode of RECORD_MODES) out.push(recordSetting(source, mode));
   }
+  out.push(RECORD_OFF_SETTING);
   return out;
 }
 

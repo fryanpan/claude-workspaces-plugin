@@ -125,9 +125,17 @@ export function wireBoardVoice(deps: BoardVoiceDeps): void {
     setups?: SpokenSetup[];
     held?: SpokenHeldSetups;
     timings?: SpokenTimingSummary;
+    off?: string;
   }>(`${base}/timings`).then((r) => {
     const setups = r?.setups ?? [];
     const held = r?.held ?? {};
+    // This server's profile turned spoken replies off: the plain mic stays,
+    // and says on hover and to a screen reader that it will not speak back.
+    if (r?.off) {
+      const mic = el('board-mic');
+      mic.title = mic.title ? `${mic.title}. ${r.off}` : r.off;
+      mic.setAttribute('aria-description', r.off);
+    }
     if (setups.length === 0 && Object.keys(held).length === 0) return;
     // Space is a singleton: the plain capture goes before the spoken one mounts.
     capture.destroy();

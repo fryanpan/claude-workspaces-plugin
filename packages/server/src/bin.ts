@@ -135,9 +135,8 @@ if (sentryServerDsn) {
   });
 }
 
-// Declared before the deps because the deployer needs to ask this server's
-// DocStore which bound documents are mid-edit, and the server is constructed
-// below.
+// Declared before the deps: the deployer asks this server's DocStore which
+// bound documents are mid-edit, and the server is constructed below.
 let handle: ReturnType<typeof createServer> | null = null;
 
 const deps = createServerDeps(cfg, {
@@ -304,6 +303,7 @@ while (!handle) {
       ...(voiceFeedbackTidy ? { voiceFeedbackTidy } : {}),
       ...(transcription ? { transcription } : {}),
       spokenReply,
+      featuresOff: deps.featuresOff,
       ...(meetingBot ? { meetingBot } : {}),
       // On unless `CW_MEETING_CLAUDE=0` (Bryan, 2026-10-02: on by default).
       meetingClaude: process.env.CW_MEETING_CLAUDE?.trim() !== '0',

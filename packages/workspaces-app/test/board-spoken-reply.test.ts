@@ -325,14 +325,14 @@ describe('spoken-reply audio helpers', () => {
 });
 
 describe('wireBoardVoice with the spoken reply', () => {
-  function mount(setups: number[], held: Record<string, string> = {}) {
+  function mount(setups: number[], held: Record<string, string> = {}, off?: string) {
     const el = mountShell();
     const opened: FakeSocket[] = [];
     const fetched: string[] = [];
     vi.stubGlobal('fetch', (url: string) => {
       fetched.push(url);
       return Promise.resolve(
-        new Response(JSON.stringify({ setups, held, timings: {} }), {
+        new Response(JSON.stringify({ setups, held, timings: {}, ...(off ? { off } : {}) }), {
           headers: { 'content-type': 'application/json' },
         }),
       );
@@ -378,6 +378,18 @@ describe('wireBoardVoice with the spoken reply', () => {
     await vi.advanceTimersByTimeAsync(0);
     m.el('board-mic').dispatchEvent(new Event('pointerdown'));
     expect(document.querySelector('#vr-panel .vr-body')?.textContent).toBe(line);
+    expect(m.opened).toEqual([]);
+  });
+
+  it('says on the plain mic that spoken replies are off by this server’s profile', async () => {
+    const off = 'Spoken replies with ElevenLabs voices and Gemini Live are off on this server.';
+    const m = mount([], {}, off);
+    await vi.advanceTimersByTimeAsync(0);
+    const mic = m.el('board-mic');
+    expect(mic.title).toContain(off);
+    expect(mic.getAttribute('aria-description')).toBe(off);
+    mic.dispatchEvent(new Event('pointerdown'));
+    expect(document.getElementById('vr-panel')).toBeNull();
     expect(m.opened).toEqual([]);
   });
 
