@@ -161,7 +161,7 @@ export function plan(cfg: ProjectConfig, obs: Observed): Action[] {
  * so the size has to be in the file the deploy reads.
  */
 export function renderFlyToml(base: string, cfg: ProjectConfig): string {
-  const vm = base.indexOf('[[vm]]');
+  const vm = base.search(/^\[\[vm\]\]/m);
   if (vm < 0) throw new Error('fly.toml has no [[vm]] block');
   return `${base
     .slice(0, vm)
