@@ -1566,9 +1566,9 @@ absent rather than asking the note-taker to judge what is carried — the
 judgement that let the reason of an "X because Y" line go while its point
 stood.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `owner-ask.ts`, `stall-gate.ts`, `unanswered-thread.ts`, `waiting-unfiled.ts`, `waiting-unfiled-review.ts`, `waiting-unfiled-frame.ts`, `ui-review-gate.ts`, `blockage-lift.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-missed-words.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-dictation.ts`, `notes-reason-ask.ts`, `notes-inversions.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `owner-ask.ts`, `stall-gate.ts`, `unanswered-thread.ts`, `waiting-unfiled.ts`, `waiting-unfiled-review.ts`, `waiting-unfiled-frame.ts`, `ui-review-gate.ts`, `blockage-lift.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-missed-words.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-dictation.ts`, `notes-reason-ask.ts`, `notes-inversions.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts`, `project-profile.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `settings-allow-file.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
-| *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
+| *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts`, `start-contract.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. `start-contract.ts` is the supervisor's half: the port, the data dir (required, no default) and whether a busy port is waited for (prod) or refuses the start; no start moves to another port. |
 
 `answer-coverage.ts` (server) and `answer-coverage-prompt.ts` (core) join
 the Board group beside the review judge, split the same way and moving no
@@ -1623,7 +1623,9 @@ flight is that second thing, and the line says so.
 write the `[doc-store] mem` line: the footprint macOS counts, read every 30
 seconds through `bun:ffi`, printed on a 64 MB move or every five minutes, with
 the window's requests by route family and its busiest doc-store activator.
-`doc-store.ts` owns the sampler and `server.ts` counts each request at the
+Each line also carries the JS heap, and every ten minutes one carries the
+heap's commonest object types and biggest growers, so heap growth can be told
+from native growth. `doc-store.ts` owns the sampler and `server.ts` counts each request at the
 front door; neither module imports a subsystem.
 
 `doc-residency.ts` joins the doc-store group and moves no boundary. It is the
@@ -1642,6 +1644,11 @@ opening it — the listing rows, the alias table and the `.ydoc` mtimes a listin
 reports as activity — moved out of `doc-store.ts` whole, behind a host of
 thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
 and the rest as one-line forwarders, so no caller changed.
+
+`doc-create-conflict.ts` joins the doc-store group and moves no boundary; the
+`doc-*.ts` glob draws it. It decides whether a create naming an existing doc
+would repoint that doc to another file or type, which `POST
+/workspaces/<ws>/docs` then refuses with 409 `doc_exists`.
 
 `server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
 start of the process in `server-starts.json` beside the deploy log: once at
@@ -1668,6 +1675,14 @@ environment carries the prod launchd job's label in `XPC_SERVICE_NAME`, and
 the eval item everywhere else. `summarize.ts`'s `resolveKeyFrom`, which every
 Claude adapter already calls, asks it; `scripts/eval-credential.ts` asks it with
 the marker stripped. The environment and the Keychain reader are parameters.
+
+`project-profile.ts` joins the DOMAIN row and moves no boundary. It decides
+whether this process is a project server (a Fly machine, or one naming
+`CW_PROJECT_PROFILE`), which features its profile turns off, and which
+credential names it must not hold. On one, `summarize.ts`'s lookup reads only
+`CW_ORG_ANTHROPIC_API_KEY`, `share/keychain.ts` runs no `security`, and
+`server-deps.ts` strips the other names from the environment before building
+anything. On the Mac every answer is "nothing changes".
 
 `claude-key-slot.ts` joins the SERVICES row and moves no boundary, because
 it holds one piece of process state the domain row's purity bar would not

@@ -28,6 +28,7 @@
  * is tested without touching a real Keychain.
  */
 import type { EnvLike } from '@claude-workspaces/core/env-names';
+import { ORG_KEY_ENV, isProjectServer, projectProfile } from './project-profile.ts';
 
 /** The launchd job that IS prod. `deploy.ts` restarts it by this name. */
 export const PROD_SERVICE_LABEL = 'com.fryanpan.claude-workspaces';
@@ -63,9 +64,10 @@ export const EVAL_KEY_ENV = 'CLAUDE_WORKSPACES_EVAL_API_KEY';
  *  send a key or nothing. */
 export const ACCESS_TOKEN_ENV = 'CW_SUMMARY_ACCESS_TOKEN';
 
-/** Is this process the prod launchd service? */
+/** Is this process the prod launchd service? A project server never is,
+ *  whatever its environment says (`project-profile.ts`). */
 export function isProdService(env: EnvLike): boolean {
-  return env[LAUNCHD_JOB_ENV] === PROD_SERVICE_LABEL;
+  return !isProjectServer(env) && env[LAUNCHD_JOB_ENV] === PROD_SERVICE_LABEL;
 }
 
 /**
@@ -85,13 +87,18 @@ export function withoutProdMarker(env: EnvLike): EnvLike {
  * not its legacy name, and so not their env overrides either, because
  * `readKeychainPassword` only consults the override of an item it was asked
  * for.
+ *
+ * On a project server the answer is the org key's variable, read straight
+ * from the environment (`summarize.ts`'s lookup), never through a Keychain.
  */
 export function claudeKeyServices(env: EnvLike): readonly string[] {
+  if (isProjectServer(env)) return [ORG_KEY_ENV];
   return isProdService(env) ? [KEYCHAIN_SERVICE, KEYCHAIN_SERVICE_LEGACY] : [EVAL_KEYCHAIN_SERVICE];
 }
 
 /** The command that adds the key THIS process reads — the eval item, outside prod. */
 export function claudeKeyAddHint(env: EnvLike): string {
+  if (isProjectServer(env)) return `fly secrets set ${ORG_KEY_ENV}=<this org's key>`;
   return `security add-generic-password -a "$USER" -s ${claudeKeyServices(env)[0]} -w`;
 }
 
@@ -110,6 +117,17 @@ const KEY_ONLY_FEATURES =
  * line exists to end.
  */
 export function describeClaudeKey(env: EnvLike, read: (service: string) => string | null): string {
+  const profile = projectProfile(env);
+  if (profile) {
+    const who = `project server (profile "${profile.name}")`;
+    if (env[ORG_KEY_ENV]?.trim()) {
+      return `[claude] ${who}: Claude calls spend this org's key (${ORG_KEY_ENV}) and no other.`;
+    }
+    return (
+      `[claude] ${who} with no org key: every Claude call is refused — meeting notes, ${KEY_ONLY_FEATURES} are off. ` +
+      `No other key, Keychain item, access token or gh login is read in its place. Add the key with: ${claudeKeyAddHint(env)}`
+    );
+  }
   const prod = isProdService(env);
   const found = claudeKeyServices(env).some((service) => {
     try {

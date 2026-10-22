@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RECORD_MODES,
+  RECORD_OFF_SETTING,
   RECORD_SOURCES,
   SOURCE_GLYPH,
   VOICES_GLYPH,
@@ -56,7 +57,8 @@ describe('recordFace', () => {
 describe('the faces the sizer has to cover', () => {
   it('lists every combination of the two axes, so no state is unmeasured', () => {
     const every = everyRecordSetting();
-    expect(every).toHaveLength(RECORD_SOURCES.length * RECORD_MODES.length);
+    expect(every).toHaveLength(RECORD_SOURCES.length * RECORD_MODES.length + 1);
+    expect(every).toContain(RECORD_OFF_SETTING);
     for (const source of RECORD_SOURCES) {
       for (const mode of RECORD_MODES) {
         expect(every).toContain(recordSetting(source, mode));

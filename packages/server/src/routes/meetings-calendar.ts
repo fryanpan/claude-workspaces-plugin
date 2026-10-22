@@ -48,6 +48,7 @@ import {
 } from '../recall-calendar.ts';
 
 import type { DocStore } from '../doc-store.ts';
+import type { FeaturesOff } from '../project-profile.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
 import type { ServerOptions } from '../server-options.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
@@ -63,6 +64,8 @@ export interface MeetingCalendarRoutesContext {
   meetingStore: MeetingStore;
   /** The live meeting relay — which docs have a meeting running. */
   meetingRelay: MeetingRelay;
+  /** What the pages say about features this server's profile turned off. */
+  featuresOff: FeaturesOff;
   /** The vendor bot relay, or its no-bot form. */
   recallRelay: RecallMeetingRelay;
   /** The calendar connection record, or null when no calendar bot is wired. */
@@ -120,6 +123,7 @@ export async function handleMeetingCalendarRoutes(
     calendarStore,
     calendarSync,
     calendarBot,
+    featuresOff,
     calendarOauthStates,
     dataDir,
     j,
@@ -726,8 +730,14 @@ export async function handleMeetingCalendarRoutes(
     // hide an engine whose key is absent instead of offering a button
     // that answers `unavailable`. Names only; nothing about keys
     // beyond their existence leaves the machine.
+    // `off` is the sentence the Record button shows when this server's
+    // profile turned transcription off, so the page says so before a press.
     const engines = meetingRelay.engineNames();
-    return j(200, { engines, default: engines[0] ?? null });
+    return j(200, {
+      engines,
+      default: engines[0] ?? null,
+      ...(featuresOff.transcription ? { off: featuresOff.transcription } : {}),
+    });
   }
 
   const botMatch = matchRest(scope, /^docs\/([^/]+)\/meeting-bot$/);

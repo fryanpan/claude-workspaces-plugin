@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emailIdentityId } from '@claude-workspaces/core';
 import { MAX_ATTEMPTS, MAX_STARTS_PER_EMAIL } from '../src/auth/email-code.ts';
-import { SESSION_COOKIE } from '../src/auth/session.ts';
+import { HOST_SESSION_COOKIE, SESSION_COOKIE } from '../src/auth/session.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
 // The log sender masks the code unless this is set — see
@@ -369,6 +369,60 @@ describe('logout revokes the session server-side', () => {
     } finally {
       await fresh.stop();
     }
+  });
+
+  it('names the cookie __Host- over https, and moves a reader signed in before it across', async () => {
+    const https = { 'x-forwarded-proto': 'https' };
+    const email = 'host-prefix@example.com';
+    await fetch(`${base2}/api/auth/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...https },
+      body: JSON.stringify({ email }),
+    });
+    const signedIn = await fetch(`${base2}/api/auth/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...https },
+      body: JSON.stringify({ email, code: logged[logged.length - 1] }),
+    });
+    expect(signedIn.status).toBe(200);
+    const issued = signedIn.headers.get('set-cookie') ?? '';
+    expect(issued.startsWith(`${HOST_SESSION_COOKIE}=`)).toBe(true);
+    expect(issued).toContain('; Secure');
+    const hostPair = issued.split(';')[0] ?? '';
+    const read = await fetch(`${base2}/api/auth/session`, {
+      headers: { cookie: hostPair, ...https },
+    });
+    expect(((await read.json()) as { authenticated: boolean }).authenticated).toBe(true);
+
+    // A cookie under the old name, as a browser signed in before the deploy
+    // holds it: still signed in, and the answer moves it onto __Host-.
+    const plain = await signIn(email);
+    const moved = await fetch(`${base2}/api/auth/session`, {
+      headers: { cookie: plain, ...https },
+    });
+    expect(((await moved.json()) as { authenticated: boolean }).authenticated).toBe(true);
+    const set = moved.headers.getSetCookie();
+    expect(set.some((c) => c.startsWith(`${HOST_SESSION_COOKIE}=`) && c.includes('Secure'))).toBe(
+      true,
+    );
+    expect(set.some((c) => c.startsWith(`${SESSION_COOKIE}=;`) && c.includes('Max-Age=0'))).toBe(
+      true,
+    );
+    // Positive control: over http the plain name is the cookie, and nothing moves.
+    const httpRead = await fetch(`${base2}/api/auth/session`, { headers: { cookie: plain } });
+    expect(httpRead.headers.getSetCookie()).toEqual([]);
+
+    // Logout over https ends both and clears both names.
+    const out = await fetch(`${base2}/api/auth/logout`, {
+      method: 'POST',
+      headers: { cookie: `${plain}; ${hostPair}`, ...https },
+    });
+    expect(out.headers.getSetCookie().map((c) => c.split('=')[0])).toEqual([
+      HOST_SESSION_COOKIE,
+      SESSION_COOKIE,
+    ]);
+    expect(await authenticated(plain)).toBe(false);
+    expect(await authenticated(hostPair)).toBe(false);
   });
 
   it('still accepts a pre-revocation 90-day cookie, so signed-in devices are not stranded', async () => {

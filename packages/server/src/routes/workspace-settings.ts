@@ -40,6 +40,7 @@ export async function handleWorkspaceSettings(
     voiceRouter,
     spokenRelay,
     spokenTimings,
+    featuresOff,
     j,
     safeJson,
     parallelismCapView,
@@ -471,6 +472,7 @@ export async function handleWorkspaceSettings(
       setups: spokenRelay.setups(),
       held: spokenRelay.held(),
       timings: spokenTimings.summary(),
+      ...(featuresOff.spoken ? { off: featuresOff.spoken } : {}),
     });
   }
   return undefined;
