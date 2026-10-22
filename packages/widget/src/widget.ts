@@ -460,12 +460,14 @@ export class FeedbackWidgetEl extends HTMLElement {
       sourceUrl: location.href,
     });
     const url = `${this.opts.serverUrl}${this.docPath()}/y?${qs.toString()}`;
-    // Only a BOARD token rides the socket: the tailnet door needs it, and a
-    // localhost socket never asked for one — a session token that died there
-    // would turn a read-only socket into a refused one.
-    this.client = connect(url, () =>
-      this.authToken?.startsWith('wt2.') ? this.authToken : undefined,
-    );
+    // The token rides the socket as its one subprotocol. The tailnet door
+    // refuses a socket without a board token, and the server ignores the
+    // reader's cookie on any socket from another origin, so on a localhost
+    // dev server the session token is what lets the first socket create a
+    // new page's doc where sign-in is required. A dead token gets the
+    // handshake refused; `connect` then tries once without it, which opens
+    // read-only as a socket with no token always has.
+    this.client = connect(url, () => this.authToken ?? undefined);
     this.client.onStatus((s) => {
       if (this.statusEl) {
         this.statusEl.textContent =
