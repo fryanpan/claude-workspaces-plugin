@@ -49,8 +49,8 @@ describe('authorFields — legacy string authors carry a recoverable name', () =
 });
 
 describe('isOwnerActor over the same shapes', () => {
-  test('recovers ownership from a legacy string author naming the owner', () => {
-    expect(isOwnerActor('Bryan')).toBe(true);
+  test('a legacy string author is a name, so not the owner even when it says Bryan', () => {
+    expect(isOwnerActor('Bryan')).toBe(false);
   });
 
   test('a legacy string author naming an agent is not the owner', () => {
@@ -62,9 +62,10 @@ describe('isOwnerActor over the same shapes', () => {
     expect(isOwnerActor(undefined)).toBe(false);
   });
 
-  test('positive control: both well-formed owner spellings still match', () => {
+  test('the owner is matched by account id; the owner name on another id is not the owner', () => {
     expect(isOwnerActor({ id: 'known-bryan', name: 'someone else' })).toBe(true);
-    expect(isOwnerActor({ id: 'anon-1', name: 'Bryan' })).toBe(true);
+    // A share visitor or a REST body may carry any name it likes.
+    expect(isOwnerActor({ id: 'anon-1', name: 'Bryan' })).toBe(false);
     expect(isOwnerActor({ id: 'anon-1', name: 'Someone' })).toBe(false);
   });
 });
@@ -88,11 +89,11 @@ describe('owner recognition survives the email rename', () => {
     expect(isOwnerActor({ id, name: 'Owner' })).toBe(true);
   });
 
-  test('positive control: both pre-email spellings still match afterwards', () => {
+  test('positive control: the pre-email id still matches afterwards, and a name never does', () => {
     registerOwnerIdentity(emailIdentityId('owner@example.com'));
     expect(isOwnerActor({ id: 'known-bryan', name: 'whoever' })).toBe(true);
-    expect(isOwnerActor({ id: 'anon-1', name: 'Bryan' })).toBe(true);
-    expect(isOwnerActor('Bryan')).toBe(true);
+    expect(isOwnerActor({ id: 'anon-1', name: 'Bryan' })).toBe(false);
+    expect(isOwnerActor('Bryan')).toBe(false);
   });
 
   test('negative control: another email identity is not the owner', () => {
@@ -180,7 +181,7 @@ describe('eventsForDoc — a resolved thread whose createdBy is legacy-shaped', 
   const TS = Date.parse('2026-06-01T12:00:00Z');
   const meta = { docId: 'd2', title: 'README', kind: 'markdown' } as never;
 
-  test('the resolve event still names its actor', () => {
+  test('the resolve event still names its actor, and a bare name is not the owner', () => {
     const thread = {
       id: 't2',
       status: 'resolved',
@@ -190,7 +191,7 @@ describe('eventsForDoc — a resolved thread whose createdBy is legacy-shaped', 
     } as never;
     const resolve = eventsForDoc(meta, [thread]).find((e) => e.type === 'resolve');
     expect(resolve?.actorName).toBe('Bryan');
-    expect(resolve?.isOwner).toBe(true);
+    expect(resolve?.isOwner).toBe(false);
   });
 
   test('positive control: a well-formed createdBy is unchanged', () => {

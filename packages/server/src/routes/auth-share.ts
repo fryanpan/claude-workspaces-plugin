@@ -23,10 +23,12 @@ import type { CodeSender } from '../auth/code-sender.ts';
 import { CODE_TTL_MS, type EmailCodes } from '../auth/email-code.ts';
 import type { SessionRevocations } from '../auth/session-revocations.ts';
 import {
+  HOST_SESSION_COOKIE,
   SESSION_COOKIE,
-  clearedSessionCookieHeader,
+  clearedSessionCookieHeaders,
   sessionCookieHeader as emailSessionCookieHeader,
   mintSession,
+  readSessionCookie,
   verifySession as verifyEmailSession,
 } from '../auth/session.ts';
 import { mintBoardWidgetToken, mintWidgetToken } from '../auth/widget-token.ts';
@@ -346,7 +348,7 @@ export async function handleAuthShareRoutes(
       return j(403, { error: 'origin_not_allowed' });
     }
     const claims = verifyEmailSession(
-      readCookie(req.headers.get('cookie'), SESSION_COOKIE),
+      readSessionCookie(req.headers.get('cookie'))?.value,
       emailSessionKey(),
     );
     // Signed into the token: the gate will accept it from `target` alone.
@@ -535,18 +537,17 @@ export async function handleAuthShareRoutes(
     // copy of the value, which otherwise validates forever. Only an id
     // off a VERIFIED cookie reaches the store, so an attacker cannot
     // grow the file with junk.
-    const claims = verifyEmailSession(
-      readCookie(req.headers.get('cookie'), SESSION_COOKIE),
-      emailSessionKey(),
-    );
-    if (claims?.sessionId) sessionRevocations.revoke(claims.sessionId);
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'set-cookie': clearedSessionCookieHeader({ secure: isSecureRequest(req) }),
-      },
-    });
+    // Both names: a browser mid-way onto `__Host-` can hold the two.
+    const cookieHeader = req.headers.get('cookie');
+    for (const name of [HOST_SESSION_COOKIE, SESSION_COOKIE]) {
+      const claims = verifyEmailSession(readCookie(cookieHeader, name), emailSessionKey());
+      if (claims?.sessionId) sessionRevocations.revoke(claims.sessionId);
+    }
+    const headers = new Headers({ 'content-type': 'application/json' });
+    for (const c of clearedSessionCookieHeaders({ secure: isSecureRequest(req) })) {
+      headers.append('set-cookie', c);
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
   }
 
   if (pathname === '/api/auth/profile' && req.method === 'POST') {
