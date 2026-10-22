@@ -31,9 +31,16 @@ restores.
 it cannot list, read, overwrite or delete them. A steered agent on the
 machine can add junk snapshots but cannot destroy the good ones.
 
-**Claude features are off on the machine.** The server spends prod's Claude
-key only under the Mac's launchd label (`packages/server/src/claude-key-source.ts`).
-A key slot for project machines is separate work.
+**Claude calls spend the org's own key and no other.** The server reads
+`CW_ORG_ANTHROPIC_API_KEY` (a Fly secret) for every Claude call, and nothing
+else: no Mac Keychain item, no eval key, no `ANTHROPIC_API_KEY`, no access
+token. Without it every Claude call is refused, and the boot log names the
+secret to set. At boot the server also removes every other org's key and every
+gh token from its own environment, and logs an error if a gh login file is on
+disk. `CW_PROJECT_PROFILE` picks the features: `standard` (the default) runs
+each one whose key is set; `claude-only` turns off transcription, ElevenLabs and
+Gemini, and the doc and board pages say so
+(`packages/server/src/project-profile.ts`).
 
 ## Why Google Cloud Storage for the bucket
 
