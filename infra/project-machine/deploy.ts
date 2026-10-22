@@ -1,0 +1,299 @@
+#!/usr/bin/env bun
+/**
+ * Create or update one project's Fly machine and everything it needs.
+ *
+ *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
+ *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
+ *
+ * Each run reads what exists and does only what is missing, so a second run
+ * over a finished project changes nothing:
+ *
+ *   the app `cw-<name>`, on a private network of its own
+ *   its volume `cw_data`
+ *   the backup key pair (identity in the Keychain; the machine gets the public half)
+ *   the Tigris bucket `cw-<name>-backups` (admin credential in the Keychain)
+ *   a write-only credential for it (put objects under snapshots/, nothing else)
+ *   a rule that expires snapshots after 30 days, since the machine cannot delete
+ *   the machine's secrets, then the image built from <ref> by Fly's builder
+ *
+ * The image is built from `git archive <ref>`, never the working tree, so no
+ * local data dir, node_modules or uncommitted file reaches Fly. Every
+ * credential comes out of the Keychain into a child's environment or stdin.
+ * Why Tigris: README.md.
+ */
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import {
+  type Action,
+  type BucketCredential,
+  type ObservedMachine,
+  type ProjectConfig,
+  type TunnelMode,
+  parseStorageCreate,
+  plan,
+  projectConfig,
+  quickTunnelUrl,
+  writeOnlyPolicy,
+} from './deploy-plan.ts';
+import {
+  fly,
+  flyJson,
+  flyLive,
+  flyOk,
+  keychainCreate,
+  keychainHas,
+  keychainRead,
+} from './mac-ops.ts';
+import { generateSnapshotKeys, recipientOf } from './snapshot.ts';
+import {
+  attachPolicy,
+  createAccessKey,
+  ensurePolicy,
+  hasLifecycle,
+  setLifecycle,
+} from './tigris.ts';
+
+const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
+const PREFIX = 'snapshots/';
+const KEEP_DAYS = 30;
+
+function arg(args: string[], name: string): string | undefined {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+function num(v: string | undefined): number | undefined {
+  return v === undefined ? undefined : Number(v);
+}
+
+function resolveRef(ref: string): string {
+  const r = spawnSync('git', ['-C', REPO, 'rev-parse', '--verify', `${ref}^{commit}`], {
+    encoding: 'utf8',
+  });
+  if (r.status !== 0) throw new Error(`no commit ${ref}`);
+  return r.stdout.trim();
+}
+
+type Named = { Name?: string; name?: string };
+const nameOf = (x: Named) => x.Name ?? x.name ?? '';
+
+interface FlyVolume {
+  name: string;
+  region: string;
+  state: string;
+}
+interface FlyMachine {
+  id: string;
+  state: string;
+  image_ref?: { tag?: string };
+  ImageRef?: { Tag?: string };
+}
+
+export function machines(app: string): ObservedMachine[] {
+  return flyJson<FlyMachine[]>(['machines', 'list', '--app', app]).map((m) => ({
+    id: m.id,
+    state: m.state,
+    imageTag: m.image_ref?.tag ?? m.ImageRef?.Tag ?? '',
+  }));
+}
+
+export function bucketAdmin(cfg: ProjectConfig): BucketCredential {
+  return JSON.parse(keychainRead(cfg.keychain.bucketAdmin)) as BucketCredential;
+}
+
+async function observe(cfg: ProjectConfig) {
+  const app = flyJson<Named[]>(['apps', 'list']).some((a) => nameOf(a) === cfg.app);
+  const volumes = app
+    ? flyJson<FlyVolume[]>(['volumes', 'list', '--app', cfg.app]).filter(
+        (v) => v.name === cfg.volumeName && v.region === cfg.region && v.state !== 'destroyed',
+      ).length
+    : 0;
+  const keychain = new Set(Object.values(cfg.keychain).filter((n) => keychainHas(n)));
+  const lifecycle = keychain.has(cfg.keychain.bucketAdmin)
+    ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
+    : false;
+  const secrets = new Set(
+    app ? flyJson<Named[]>(['secrets', 'list', '--app', cfg.app]).map(nameOf) : [],
+  );
+  return { app, volumes, keychain, lifecycle, secrets, machines: app ? machines(cfg.app) : [] };
+}
+
+function secretValue(cfg: ProjectConfig, name: string): string {
+  switch (name) {
+    case 'BACKUP_RECIPIENT':
+      return recipientOf(keychainRead(cfg.keychain.identity));
+    case 'BACKUP_S3_ENDPOINT':
+      return bucketAdmin(cfg).endpoint;
+    case 'BACKUP_S3_BUCKET':
+      return cfg.bucket;
+    case 'BACKUP_S3_ACCESS_KEY_ID':
+      return (JSON.parse(keychainRead(cfg.keychain.writer)) as { accessKeyId: string }).accessKeyId;
+    case 'BACKUP_S3_SECRET_ACCESS_KEY':
+      return (JSON.parse(keychainRead(cfg.keychain.writer)) as { secretAccessKey: string })
+        .secretAccessKey;
+    case 'CW_TUNNEL_MODE':
+      return cfg.tunnel;
+    default:
+      throw new Error(`no source for secret ${name}`);
+  }
+}
+
+function deploy(cfg: ProjectConfig): void {
+  const ctx = mkdtempSync(join(tmpdir(), `${cfg.app}-build-`));
+  try {
+    const archive = spawnSync(
+      'sh',
+      ['-c', `git -C "$REPO" archive --format=tar "$REF" | tar -x -C "$CTX"`],
+      { stdio: 'inherit', env: { ...process.env, REPO, REF: cfg.imageLabel, CTX: ctx } },
+    );
+    if (archive.status !== 0) throw new Error('git archive failed');
+    const dir = join(ctx, 'infra', 'project-machine');
+    flyLive([
+      'deploy',
+      ctx,
+      '--app',
+      cfg.app,
+      '--config',
+      join(dir, 'fly.toml'),
+      '--dockerfile',
+      join(dir, 'Dockerfile'),
+      '--remote-only',
+      '--ha=false',
+      '--no-public-ips',
+      '--image-label',
+      cfg.imageLabel,
+      '--vm-size',
+      cfg.vmSize,
+      '--vm-memory',
+      String(cfg.vmMemoryMb),
+      '--yes',
+    ]);
+  } finally {
+    rmSync(ctx, { recursive: true, force: true });
+  }
+}
+
+async function act(cfg: ProjectConfig, a: Action, org: string): Promise<void> {
+  switch (a.kind) {
+    case 'create-app':
+      flyOk(['apps', 'create', cfg.app, '--org', org, '--network', cfg.network]);
+      return;
+    case 'create-volume':
+      flyOk([
+        'volumes',
+        'create',
+        cfg.volumeName,
+        '--app',
+        cfg.app,
+        '--region',
+        cfg.region,
+        '--size',
+        String(cfg.volumeGb),
+        '--yes',
+      ]);
+      return;
+    case 'make-backup-key':
+      keychainCreate(cfg.keychain.identity, generateSnapshotKeys().identity);
+      return;
+    case 'create-bucket': {
+      // Not flyOk: this command's output holds the admin credential, so
+      // on failure only its error stream is shown.
+      const r = fly(['storage', 'create', '--org', org, '--name', cfg.bucket, '--yes']);
+      if (r.status !== 0) throw new Error(`fly storage create failed: ${r.stderr.trim()}`);
+      keychainCreate(cfg.keychain.bucketAdmin, JSON.stringify(parseStorageCreate(r.stdout)));
+      return;
+    }
+    case 'make-writer-key': {
+      const admin = bucketAdmin(cfg);
+      const key = await createAccessKey(admin);
+      const arn = await ensurePolicy(
+        admin,
+        `${cfg.app}-backup-writer`,
+        writeOnlyPolicy(cfg.bucket, PREFIX),
+      );
+      await attachPolicy(admin, key.accessKeyId, arn);
+      keychainCreate(cfg.keychain.writer, JSON.stringify(key));
+      return;
+    }
+    case 'set-lifecycle':
+      await setLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS);
+      return;
+    case 'set-secrets': {
+      const input = a.names.map((n) => `${n}=${secretValue(cfg, n)}`).join('\n');
+      flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input: `${input}\n` });
+      return;
+    }
+    case 'deploy':
+      deploy(cfg);
+      return;
+    case 'start-machine':
+      flyOk(['machine', 'start', a.id, '--app', cfg.app]);
+      return;
+  }
+}
+
+function describe(a: Action): string {
+  return a.kind === 'set-secrets'
+    ? `set-secrets ${a.names.join(',')}`
+    : a.kind === 'start-machine'
+      ? `start-machine ${a.id}`
+      : a.kind;
+}
+
+export async function deployProject(cfg: ProjectConfig, dryRun: boolean): Promise<Action[]> {
+  if (cfg.tunnel === 'named') {
+    throw new Error(
+      'named tunnels are not scripted yet: they need the cloudflare-api-token Keychain entry. Use --tunnel quick',
+    );
+  }
+  const org = keychainRead('fly-org-slug').trim();
+  const actions = plan(cfg, await observe(cfg));
+  console.log(
+    actions.length === 0
+      ? `[deploy] ${cfg.app} is up to date at ${cfg.imageLabel.slice(0, 9)}: nothing to do`
+      : `[deploy] ${cfg.app}: ${actions.map(describe).join(', ')}`,
+  );
+  if (dryRun) return actions;
+  for (const a of actions) {
+    console.log(`[deploy] ${describe(a)}`);
+    await act(cfg, a, org);
+  }
+  return actions;
+}
+
+/** The quick tunnel's address, read from the machine's recent logs. */
+export function tunnelAddress(app: string): string | null {
+  return quickTunnelUrl(fly(['logs', '--app', app, '--no-tail']).stdout);
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const project = arg(args, 'project');
+  if (!project) {
+    console.error('[deploy] --project <name> is required');
+    process.exit(2);
+  }
+  const cfg = projectConfig({
+    project,
+    imageLabel: resolveRef(arg(args, 'ref') ?? 'HEAD'),
+    region: arg(args, 'region'),
+    volumeGb: num(arg(args, 'volume-gb')),
+    vmMemoryMb: num(arg(args, 'memory')),
+    tunnel: arg(args, 'tunnel') as TunnelMode | undefined,
+  });
+  const done = await deployProject(cfg, args.includes('--dry-run'));
+  if (args.includes('--dry-run') || cfg.tunnel !== 'quick') return;
+  const state = machines(cfg.app).map((m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)}`);
+  console.log(`[deploy] machines: ${state.join('; ') || 'none'}`);
+  if (done.length > 0 || state.length > 0)
+    console.log(`[deploy] tunnel: ${tunnelAddress(cfg.app) ?? 'not in the logs yet'}`);
+}
+
+if (import.meta.main) {
+  main().catch((err: unknown) => {
+    console.error(`[deploy] FAILED: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });
+}

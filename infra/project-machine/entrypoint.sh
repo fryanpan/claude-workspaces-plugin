@@ -32,7 +32,10 @@ if [ -e "$DATA_ROOT/maintenance" ]; then
   exec sleep infinity
 fi
 
-: "${CLOUDFLARE_TUNNEL_TOKEN:?set it with fly secrets set}"
+: "${CW_TUNNEL_MODE:=named}"
+if [ "$CW_TUNNEL_MODE" != quick ]; then
+  : "${CLOUDFLARE_TUNNEL_TOKEN:?set it with fly secrets set}"
+fi
 if [ -z "${BACKUP_RECIPIENT:-}" ] || [ -z "${BACKUP_S3_BUCKET:-}" ]; then
   log "BACKUP_RECIPIENT or BACKUP_S3_BUCKET unset: NO BACKUPS WILL RUN"
 fi
@@ -57,8 +60,17 @@ pids+=($!)
 
 # cloudflared reads TUNNEL_TOKEN from its environment; ingress (the one
 # address to http://localhost:8787) is set on the tunnel in Cloudflare.
-env -i PATH="$PATH" HOME="$HOME" TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN" \
-  cloudflared tunnel --no-autoupdate run &
+# A quick tunnel (CW_TUNNEL_MODE=quick) needs no Cloudflare account: it gets
+# a random trycloudflare.com address, printed in the machine's logs, and is
+# for a test machine only. Its visitors carry cf-ray and no Access identity,
+# so the server treats them as the internet and lets them reach nothing.
+if [ "$CW_TUNNEL_MODE" = quick ]; then
+  env -i PATH="$PATH" HOME="$HOME" \
+    cloudflared tunnel --no-autoupdate --url "http://localhost:$PORT" &
+else
+  env -i PATH="$PATH" HOME="$HOME" TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN" \
+    cloudflared tunnel --no-autoupdate run &
+fi
 pids+=($!)
 
 # The health check. Fly's own checks reach a machine over its private

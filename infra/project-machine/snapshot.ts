@@ -110,6 +110,11 @@ function privateKeyOf(identity: string): { key: KeyObject; raw: Buffer } {
   return { key, raw: raw32(createPublicKey(key), 'spki') };
 }
 
+/** The recipient an identity decrypts for, so only the identity needs storing. */
+export function recipientOf(identity: string): string {
+  return PUBLIC_PREFIX + privateKeyOf(identity).raw.toString('base64url');
+}
+
 function deriveKey(shared: Buffer, salt: Buffer, ephRaw: Buffer, recipientRaw: Buffer): Buffer {
   const info = Buffer.concat([Buffer.from('cwsnap v1 '), ephRaw, recipientRaw]);
   return Buffer.from(hkdfSync('sha256', shared, salt, info, 32));
