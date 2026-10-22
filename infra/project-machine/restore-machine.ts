@@ -56,7 +56,16 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
     const data = join(work, 'data');
     restoreSnapshot(snap, keychainRead(cfg.keychain.identity), data);
     const tgz = join(work, 'restored.tgz');
-    const tar = spawnSync('tar', ['-czf', tgz, '-C', data, '.'], { stdio: 'inherit' });
+    // macOS tar otherwise adds an AppleDouble `._<name>` file beside each
+    // file with extended attributes, and the server reads those as docs.
+    const tar = spawnSync(
+      'tar',
+      ['--no-mac-metadata', '--no-xattrs', '-czf', tgz, '-C', data, '.'],
+      {
+        stdio: 'inherit',
+        env: { ...process.env, COPYFILE_DISABLE: '1' },
+      },
+    );
     if (tar.status !== 0) throw new Error('tar failed');
 
     console.log(`[restore] ${key} -> ${machine.id}: holding services off`);
