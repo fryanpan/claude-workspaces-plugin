@@ -31,7 +31,7 @@ import {
   readSessionCookie,
   verifySession as verifyEmailSession,
 } from '../auth/session.ts';
-import { mintBoardWidgetToken, mintWidgetToken } from '../auth/widget-token.ts';
+import { mintBoardWidgetToken } from '../auth/widget-token.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { Identities, IdentityRecord } from '../identities.ts';
 import { userForIdentity } from '../identities.ts';
@@ -205,7 +205,7 @@ export interface AuthShareRoutesContext {
   clientKeyFor: (req: Request) => string;
   /** The HMAC key behind email-session cookies. */
   emailSessionKey: () => string;
-  /** The HMAC key behind widget popup tokens. */
+  /** The HMAC key behind widget tokens. */
   widgetTokenKey: () => string;
   /** The tailnet widget door's hostnames — the pages a BOARD token may be
    *  minted for (middleware/widget-door.ts). */
@@ -226,7 +226,7 @@ export interface AuthShareRouteRequest {
   req: Request;
   url: URL;
   pathname: string;
-  /** The identity a valid widget popup token named, or null. */
+  /** The identity a valid widget token named, or null. */
   widgetIdentity: IdentityRecord | null;
   /** Whether this is a browser that proved nobody at all. */
   browserProvedNobody: () => boolean;
@@ -284,7 +284,7 @@ export async function handleAuthShareRoutes(
     accessIdentityFor,
   } = rq;
 
-  // --- The widget popup-token handshake ---
+  // --- The widget sign-in popup ---
   // The popup page itself. The handshake is popup-only: framed, it
   // would mint with nothing visible on screen, so DENY.
   if (pathname === '/widget-auth' && req.method === 'GET') {
@@ -298,10 +298,11 @@ export async function handleAuthShareRoutes(
     });
   }
 
-  // Exchange the session cookie for a widget token. Same-origin only:
-  // this is the popup page's route, and the cookie could not arrive
-  // cross-site anyway (SameSite=Lax, and CORS here never grants
-  // credentials) — the Origin check is the second, independent wall.
+  // Exchange what the popup proved for a widget board token (`wt2`): one
+  // board, one page origin, one day. Same-origin only: this is the popup
+  // page's route, and the cookie could not arrive cross-site anyway
+  // (SameSite=Lax, and CORS here never grants credentials) — the Origin
+  // check is the second, independent wall.
   if (pathname === '/api/auth/widget-token' && req.method === 'POST') {
     const callerOrigin = req.headers.get('origin');
     if (callerOrigin !== null && callerOrigin !== policyFor(req).requestOrigin) {
@@ -309,17 +310,16 @@ export async function handleAuthShareRoutes(
     }
     const body = await safeJson(req);
     const target = typeof body?.origin === 'string' ? body.origin : '';
-    // A page on the tailnet widget door gets a BOARD token instead: one board,
-    // 24 hours, and no session behind it. Only Cloudflare Access may prove the
+    const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : '';
+    // A page on the tailnet widget door: only Cloudflare Access may prove the
     // person — it is how the popup on the public host is reached at all — and
-    // never a session cookie: a board token outlives a logout, so minting one
-    // from a cookie would undo the rule below that a token dies with its
-    // session. The allowlist is the door's own hostnames; the board must
-    // exist, because the token names it exactly.
+    // never a session cookie, because the door is how a page on this machine
+    // reaches a board from outside the session's own host. The allowlist is
+    // the door's own hostnames; the board must exist, because the token names
+    // it exactly.
     if (target !== '' && isWidgetDoorOrigin(target, widgetDoorHosts())) {
       const person = accessIdentityFor();
       if (!person) return j(401, { error: 'not_signed_in' });
-      const workspaceId = typeof body?.workspaceId === 'string' ? body.workspaceId : '';
       if (workspaceId === '') return j(400, { error: 'unknown_workspace' });
       // Access proves WHO, not what they may do here: its policy admits
       // collaborators too. Only the board's owner, or someone whose role on
@@ -337,6 +337,8 @@ export async function handleAuthShareRoutes(
       );
       return j(200, { ok: true, token, user: userForIdentity(person), origin: target });
     }
+    // Every other app page: the session cookie proves the person, and the
+    // token carries that session's id, so logging out ends it.
     const rec = sessionIdentityFor(req);
     if (!rec) return j(401, { error: 'not_signed_in' });
     // The origin the popup will postMessage the token TO. Validated
@@ -347,18 +349,23 @@ export async function handleAuthShareRoutes(
     if (target === '' || !isAllowedBrowserOrigin(target, policyFor(req))) {
       return j(403, { error: 'origin_not_allowed' });
     }
+    if (workspaceId === '' || !taskStore.getWorkspace(workspaceId)) {
+      return j(400, { error: 'unknown_workspace' });
+    }
     const claims = verifyEmailSession(
       readSessionCookie(req.headers.get('cookie'))?.value,
       emailSessionKey(),
     );
-    // Signed into the token: the gate will accept it from `target` alone.
-    const token = claims ? mintWidgetToken(claims, target, widgetTokenKey()) : null;
-    if (token === null) {
+    if (!claims || claims.sessionId === null) {
       // A surviving v1 cookie: no session id, so a token tied to it
       // could not die with a logout. The daily sliding refresh
       // upgrades it; until then the popup says to sign in again.
       return j(401, { error: 'session_needs_refresh' });
     }
+    const token = mintBoardWidgetToken(
+      { identityId: claims.identityId, workspaceId, origin: target, sessionId: claims.sessionId },
+      widgetTokenKey(),
+    );
     return j(200, { ok: true, token, user: userForIdentity(rec), origin: target });
   }
 

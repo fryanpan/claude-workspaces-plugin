@@ -1921,7 +1921,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     emailSessionKey,
     widgetTokenKey,
     widgetBearerOf,
-    widgetTokenIdentityFor,
+    widgetTokenGrantFor,
     boardWidgetGrantFor,
     clientKeyFor,
     isSecureRequest,
@@ -2040,7 +2040,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     taskStore,
     sessionIdentityFor,
     widgetBearerOf,
-    widgetTokenIdentityFor,
+    widgetTokenGrantFor,
     j,
   });
 

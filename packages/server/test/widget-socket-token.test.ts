@@ -4,7 +4,7 @@
  * from core) offering the token as the widget does, with a real session.
  *
  * The server ignores the reader's cookie on a socket from another origin, so
- * the session token (`wt1`) the widget holds is what lets its first socket
+ * the board token (`wt2`) the widget holds is what lets its first socket
  * create a page's doc. A token the server no longer accepts gets the
  * handshake refused, and the widget must then open without it, read-only,
  * rather than be left with no socket.
@@ -29,7 +29,7 @@ const NativeWebSocket = globalThis.WebSocket;
 const codes: string[] = [];
 const originalLog = console.log;
 
-describe('the widget socket offers its session token, and drops a dead one', () => {
+describe('the widget socket offers its board token, and drops a dead one', () => {
   let handle: ServerHandle;
   let dataDir: string;
   let base: string;
@@ -75,10 +75,14 @@ describe('the widget socket offers its session token, and drops a dead one', () 
     expect(verified.status).toBe(200);
     cookie = (verified.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     expect(cookie.startsWith(`${SESSION_COOKIE}=`)).toBe(true);
-    const minted = await post('/api/auth/widget-token', { origin: DEV_ORIGIN }, { cookie });
+    const minted = await post(
+      '/api/auth/widget-token',
+      { origin: DEV_ORIGIN, workspaceId: ws },
+      { cookie },
+    );
     expect(minted.status).toBe(200);
     token = ((await minted.json()) as { token: string }).token;
-    expect(token.startsWith('wt1.')).toBe(true);
+    expect(token.startsWith('wt2.')).toBe(true);
 
     class PageSocket extends NativeWebSocket {
       constructor(url: string | URL, protocols?: string | string[]) {
@@ -101,7 +105,7 @@ describe('the widget socket offers its session token, and drops a dead one', () 
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('a live session token creates a new page’s doc', async () => {
+  it('a live board token creates a new page’s doc', async () => {
     const client = widgetSocket('riverbend-page', token);
     await waitFor(() => client.status === 'open', { describe: 'the socket to open' });
     expect(offered.at(-1)).toBe(token);
@@ -109,13 +113,13 @@ describe('the widget socket offers its session token, and drops a dead one', () 
     client.close();
   });
 
-  it('a dead session token is dropped after one refusal and the socket opens read-only', async () => {
+  it('a dead board token is dropped after one refusal and the socket opens read-only', async () => {
     const from = offered.length;
-    const client = widgetSocket('riverbend-page', 'wt1.dead.token.value');
+    const client = widgetSocket('riverbend-page', 'wt2.dead.token.value');
     await waitFor(() => client.status === 'open', {
       describe: 'the socket to open without the dead token',
     });
-    expect(offered.slice(from)).toEqual(['wt1.dead.token.value', undefined]);
+    expect(offered.slice(from)).toEqual(['wt2.dead.token.value', undefined]);
     const conns = [...(handle.docStore.get('riverbend-page')?.conns ?? [])];
     expect(conns.length).toBe(1);
     expect(conns.every((c) => c.data.readOnly === true)).toBe(true);

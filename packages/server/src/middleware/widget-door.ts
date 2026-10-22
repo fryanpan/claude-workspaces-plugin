@@ -148,7 +148,9 @@ export function isWidgetDoorOrigin(origin: string, doorHosts: readonly string[])
  * A browser cannot set `Authorization` on a WebSocket, so the widget offers
  * its token as the one subprotocol it asks for. Only a value shaped like ours
  * (`wt1.` / `wt2.`) is read; any other protocol belongs to somebody else and
- * stays invisible, exactly as `widgetBearerOf` ignores a foreign bearer.
+ * stays invisible, exactly as `widgetBearerOf` ignores a foreign bearer. The
+ * retired `wt1` is still read so that it is refused, which is what makes a
+ * widget holding one sign in again, rather than passed over as nobody's.
  */
 export function widgetTokenFromProtocols(header: string | null): string | null {
   if (!header) return null;

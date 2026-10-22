@@ -35,7 +35,7 @@ import {
   verifyAgentToken,
 } from '../src/auth/agent-token.ts';
 import { mintToken, tokenKey } from '../src/auth/signed-token.ts';
-import { widgetToken } from '../src/auth/widget-token.ts';
+import { boardWidgetToken } from '../src/auth/widget-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
 /** Two invented agents. Neither name resolves to anything real. */
@@ -235,15 +235,16 @@ describe('the at1 token format', () => {
     // happen to line up.
     const base = 'a-test-base-key-that-is-not-a-real-one';
     const foreign = mintToken(
-      widgetToken,
+      boardWidgetToken,
       {
         identityId: MIRA,
         sessionId: 's1',
-        sessionIssuedAt: 1,
+        issuedAt: 1,
         expiresAt: Date.now() + 60_000,
+        workspaceId: 'w-harbor',
         origin: 'http://localhost:5173',
       },
-      tokenKey(base, widgetToken),
+      tokenKey(base, boardWidgetToken),
     );
     expect(verifyAgentToken(foreign, agentTokenKey(base))).toBeNull();
   });

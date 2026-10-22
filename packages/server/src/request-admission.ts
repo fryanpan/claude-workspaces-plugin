@@ -255,7 +255,7 @@ export interface RequestAdmissionContext {
   boardWidgetGrantFor: (
     raw: string,
     origin: string | null,
-  ) => { identity: { id: string }; workspaceId: string } | null;
+  ) => { identity: { id: string }; workspaceId: string; sessionBound: boolean } | null;
   /** A doc's type, or undefined for a doc this server does not hold. */
   docTypeOf: (docId: string) => string | undefined;
   /** The peer address of a request. A forward reference on purpose: the Bun
@@ -785,15 +785,18 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // The bundle is the one request with no token: the widget cannot ask
         // for one before it has run, and the bytes are the same for everyone.
         if (route.kind === 'bundle') return null;
-        // Every other route needs a live BOARD token presented from the page
-        // origin it was minted for. No token, a session token (`wt1`), a
+        // Every other route needs a live BOARD token that Access minted,
+        // presented from the page origin it was minted for. No token, a
+        // retired `wt1`, one a session cookie minted for another page, a
         // forged, expired or revoked one, or one from another origin all get
         // the same answer — the widget's cue to offer sign-in, and where —
         // because telling them apart would hand a caller a decision tree.
         const raw = widgetBearerOf(req);
         const origin = req.headers.get('origin');
         const grant = raw && origin ? boardWidgetGrantFor(raw, origin) : null;
-        if (!grant || !raw || !origin) return j(401, widgetDoorSignInBody(widgetSignInOrigin));
+        if (!grant || grant.sessionBound || !raw || !origin) {
+          return j(401, widgetDoorSignInBody(widgetSignInOrigin));
+        }
         if (route.kind === 'doc') {
           // One board: exactly the one the token names. The workspace scope
           // middleware then refuses a doc that board does not hold.

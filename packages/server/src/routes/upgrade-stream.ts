@@ -186,7 +186,7 @@ export interface UpgradeStreamRequest {
    *  tailnet widget door with, or null. A door socket opens read-only and
    *  carries the pair, so the sweep can hang up once the token is dead. */
   widgetDoorGrant: { token: string; origin: string } | null;
-  /** Whether a widget token (`wt1` or `wt2`) on this request proved a
+  /** Whether a widget board token (`wt2`) on this request proved a
    *  person. A token is bound to the page origin it was minted for, so it is
    *  the credential a widget on another origin brings, where a cookie is not. */
   widgetTokenProved: boolean;

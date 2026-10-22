@@ -22,10 +22,10 @@ import {
 } from '../src/auth/session.ts';
 import { verifyToken } from '../src/auth/signed-token.ts';
 import {
-  WIDGET_TOKEN_TTL_MS,
-  mintWidgetToken,
-  verifyWidgetToken,
-  widgetToken,
+  BOARD_WIDGET_TOKEN_TTL_MS,
+  boardWidgetToken,
+  mintBoardWidgetToken,
+  verifyBoardWidgetToken,
   widgetTokenKey,
 } from '../src/auth/widget-token.ts';
 import {
@@ -151,68 +151,78 @@ function oldWidgetTokenKey(cookieKey: string): string {
   return createHmac('sha256', cookieKey).update('cw-widget-token-v1').digest('hex');
 }
 
+/** The retired seven-day `wt1`, as the old code minted it. */
 function oldMintWidgetToken(
-  session: { identityId: string; sessionId: string | null; issuedAt: number },
+  session: { identityId: string; sessionId: string; issuedAt: number },
   origin: string,
   key: string,
   now: number,
-): string | null {
-  if (session.sessionId === null) return null;
+): string {
   const payload = [
     'wt1',
     session.identityId,
     session.sessionId,
     session.issuedAt,
-    now + WIDGET_TOKEN_TTL_MS,
+    now + 7 * 24 * 60 * 60 * 1000,
     Buffer.from(origin).toString('base64url'),
+  ].join('.');
+  return `${payload}.${oldMac(payload, key)}`;
+}
+
+/** A `wt2` minted by Access before it could carry a session: six fields. */
+function oldMintBoardWidgetToken(
+  grant: { identityId: string; workspaceId: string; origin: string },
+  key: string,
+  now: number,
+): string {
+  const payload = [
+    'wt2',
+    grant.identityId,
+    now,
+    now + BOARD_WIDGET_TOKEN_TTL_MS,
+    Buffer.from(grant.workspaceId).toString('base64url'),
+    Buffer.from(grant.origin).toString('base64url'),
   ].join('.');
   return `${payload}.${oldMac(payload, key)}`;
 }
 
 /** The dev-server origin a token is bound to — the only page that may use it. */
 const ORIGIN = 'http://127.0.0.1:5173';
+const BOARD = 'w-harbor';
 
-describe('widget tokens minted before the refactor', () => {
+describe('widget tokens minted before this release', () => {
   const key = oldWidgetTokenKey(COOKIE_KEY);
-  const session = { identityId: IDENTITY, sessionId: 'sid-abc123', issuedAt: NOW, expiresAt: null };
+  const grant = { identityId: IDENTITY, workspaceId: BOARD, origin: ORIGIN };
 
   it('derives the same widget-token key as the old code', () => {
     expect(widgetTokenKey(COOKIE_KEY)).toBe(key);
   });
 
-  it('verifies a token minted by the pre-refactor code, origin binding intact', () => {
-    const token = oldMintWidgetToken(session, ORIGIN, key, NOW);
-    expect(verifyWidgetToken(token, key, NOW)).toEqual({
-      identityId: IDENTITY,
-      sessionId: 'sid-abc123',
-      sessionIssuedAt: NOW,
-      expiresAt: NOW + WIDGET_TOKEN_TTL_MS,
-      origin: ORIGIN,
+  it('verifies a board token Access minted before, and mints the same bytes', () => {
+    const token = oldMintBoardWidgetToken(grant, key, NOW);
+    expect(verifyBoardWidgetToken(token, key, NOW)).toEqual({
+      ...grant,
+      issuedAt: NOW,
+      expiresAt: NOW + BOARD_WIDGET_TOKEN_TTL_MS,
+      sessionId: null,
     });
-  });
-
-  it('still expires an old token on the same seven-day clock', () => {
-    const token = oldMintWidgetToken(session, ORIGIN, key, NOW);
-    expect(verifyWidgetToken(token, key, NOW + WIDGET_TOKEN_TTL_MS)).toBeNull();
-    // Positive control: one millisecond earlier it is still good.
-    expect(verifyWidgetToken(token, key, NOW + WIDGET_TOKEN_TTL_MS - 1)).not.toBeNull();
-  });
-
-  it('mints the same bytes the old code minted', () => {
-    expect(mintWidgetToken(session, ORIGIN, key, NOW)).toBe(
-      oldMintWidgetToken(session, ORIGIN, key, NOW),
-    );
+    expect(mintBoardWidgetToken(grant, key, NOW)).toBe(token);
     // A second origin whose length is not a multiple of three, so plain
-    // base64 would pad it and base64url does not. The loopback origin above
-    // encodes identically under both, and on its own would let the encoding
-    // change without a test noticing.
-    const padded = 'https://app.example.test:5173';
-    expect(Buffer.from(padded).toString('base64')).not.toBe(
-      Buffer.from(padded).toString('base64url'),
+    // base64 would pad it and base64url does not.
+    const padded = { ...grant, origin: 'https://app.example.test:5173' };
+    expect(Buffer.from(padded.origin).toString('base64')).not.toBe(
+      Buffer.from(padded.origin).toString('base64url'),
     );
-    expect(mintWidgetToken(session, padded, key, NOW)).toBe(
-      oldMintWidgetToken(session, padded, key, NOW),
-    );
+    expect(mintBoardWidgetToken(padded, key, NOW)).toBe(oldMintBoardWidgetToken(padded, key, NOW));
+  });
+
+  it('refuses the retired seven-day wt1, genuine signature and all', () => {
+    const session = { identityId: IDENTITY, sessionId: 'sid-abc123', issuedAt: NOW };
+    const token = oldMintWidgetToken(session, ORIGIN, key, NOW);
+    expect(verifyToken(boardWidgetToken, token, key, NOW)).toEqual({
+      ok: false,
+      reason: 'wrong_purpose',
+    });
   });
 });
 
@@ -239,19 +249,26 @@ describe('purpose separation', () => {
     expect(verifyEmailSession(sessionCookie, emailKey, NOW)).not.toBeNull();
   });
 
+  const widget = () =>
+    mintBoardWidgetToken(
+      { identityId: IDENTITY, workspaceId: BOARD, origin: ORIGIN, sessionId: session.sessionId },
+      widgetKey,
+      NOW,
+    );
+
   it('refuses a widget token presented as a session cookie, and the reverse', () => {
-    const token = mintWidgetToken(session, ORIGIN, widgetKey, NOW) as string;
+    const token = widget();
     const sessionCookie = signEmailSession(session, emailKey);
     expect(verifyEmailSession(token, emailKey, NOW)).toBeNull();
-    expect(verifyWidgetToken(sessionCookie, widgetKey, NOW)).toBeNull();
-    expect(verifyWidgetToken(token, widgetKey, NOW)).not.toBeNull();
+    expect(verifyBoardWidgetToken(sessionCookie, widgetKey, NOW)).toBeNull();
+    expect(verifyBoardWidgetToken(token, widgetKey, NOW)).not.toBeNull();
   });
 
   it('refuses a widget token presented as a share cookie, and the reverse', () => {
-    const token = mintWidgetToken(session, ORIGIN, widgetKey, NOW) as string;
+    const token = widget();
     const shareCookie = signShareSession('sh-4d2f9a', shareKey);
     expect(verifyShareSession(token, shareKey)).toBeNull();
-    expect(verifyWidgetToken(shareCookie, widgetKey, NOW)).toBeNull();
+    expect(verifyBoardWidgetToken(shareCookie, widgetKey, NOW)).toBeNull();
   });
 
   it('refuses a value whose payload was re-signed under another purpose key', () => {
@@ -261,10 +278,10 @@ describe('purpose separation', () => {
     const emailPayload = signEmailSession(session, emailKey);
     const payload = emailPayload.slice(0, emailPayload.lastIndexOf('.'));
     const resigned = `${payload}.${createHmac('sha256', widgetKey).update(payload).digest('base64url')}`;
-    expect(verifyWidgetToken(resigned, widgetKey, NOW)).toBeNull();
+    expect(verifyBoardWidgetToken(resigned, widgetKey, NOW)).toBeNull();
     // And it is the version tag that refused it, not an accidental field
     // count: a null answer alone would not say which check did the work.
-    expect(verifyToken(widgetToken, resigned, widgetKey, NOW)).toEqual({
+    expect(verifyToken(boardWidgetToken, resigned, widgetKey, NOW)).toEqual({
       ok: false,
       reason: 'wrong_purpose',
     });

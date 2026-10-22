@@ -1,6 +1,7 @@
 /**
- * The widget popup-token routes: a dev-server embed borrows the identity a
- * browser proved to the workspace origin, and nothing more.
+ * The widget popup-token routes: an app-page embed borrows the identity a
+ * browser proved to the workspace origin, as a board token (`wt2`) for one
+ * board, one page origin and one day, and nothing more.
  *
  * The load-bearing security claims each get a test in BOTH directions:
  * a live session's token attributes comments (positive control), and the
@@ -9,6 +10,7 @@
  * presented from any origin but the one it was minted for.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
+import { createHmac } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +18,9 @@ import { type ElementAnchor, type User, emailIdentityId } from '@claude-workspac
 import { activityLogPath } from '../src/activity.ts';
 import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { SESSION_COOKIE } from '../src/auth/session.ts';
+import { widgetTokenKey } from '../src/auth/widget-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { loadCookieKey } from '../src/share/link-session.ts';
 import { waitFor } from './wait-for.ts';
 
 // The log sender masks the code unless this is set — see
@@ -111,6 +115,7 @@ async function signIn(base: string, email: string): Promise<string> {
 async function mintToken(
   base: string,
   cookie: string | null,
+  workspaceId: string,
   origin: string = DEV_ORIGIN,
   headers: Record<string, string> = {},
 ): Promise<Response> {
@@ -121,17 +126,18 @@ async function mintToken(
       ...(cookie ? { cookie } : {}),
       ...headers,
     },
-    body: JSON.stringify({ origin }),
+    body: JSON.stringify({ origin, workspaceId }),
   });
 }
 
-/** Sign in and exchange the session for a widget token. */
+/** Sign in and exchange the session for a widget board token. */
 async function signInAndMint(
   base: string,
   email: string,
+  workspaceId: string,
 ): Promise<{ cookie: string; token: string }> {
   const cookie = await signIn(base, email);
-  const res = await mintToken(base, cookie);
+  const res = await mintToken(base, cookie, workspaceId);
   expect(res.status).toBe(200);
   const body = (await res.json()) as { token: string };
   expect(typeof body.token).toBe('string');
@@ -188,16 +194,16 @@ function commentRows(dataDir: string): ActivityRow[] {
 
 describe('POST /api/auth/widget-token', () => {
   it('refuses without a signed-in session', async () => {
-    const { base } = boot();
-    const res = await mintToken(base, null);
+    const { base, ws } = boot();
+    const res = await mintToken(base, null, ws);
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'not_signed_in' });
   });
 
   it('mints for an allowed dev-server origin and names the user', async () => {
-    const { base } = boot();
+    const { base, ws } = boot();
     const cookie = await signIn(base, 'reviewer@example.com');
-    const res = await mintToken(base, cookie);
+    const res = await mintToken(base, cookie, ws);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       ok: boolean;
@@ -208,29 +214,41 @@ describe('POST /api/auth/widget-token', () => {
     expect(body.ok).toBe(true);
     expect(body.origin).toBe(DEV_ORIGIN);
     expect(body.user.id).toBe(emailIdentityId('reviewer@example.com'));
-    // The token is not the cookie — a captured token must never double as one.
-    expect(body.token.startsWith('wt1.')).toBe(true);
+    // A board token for this board, tied to the session — never the
+    // retired seven-day wt1, and never the cookie itself.
+    expect(body.token.startsWith('wt2.')).toBe(true);
+    expect(body.token.split('.')[4]).toBe(Buffer.from(ws).toString('base64url'));
     expect((cookie.split('=')[1] ?? '').includes(body.token)).toBe(false);
+  });
+
+  it('refuses a board this server does not hold, or none at all', async () => {
+    const { base } = boot();
+    const cookie = await signIn(base, 'reviewer@example.com');
+    for (const workspaceId of ['w-nosuch', '']) {
+      const res = await mintToken(base, cookie, workspaceId);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'unknown_workspace' });
+    }
   });
 
   it('refuses an origin the widget policy does not allow', async () => {
     // The popup would postMessage the token TO this origin; refusing here is
     // what keeps a malicious page from naming itself the recipient.
-    const { base } = boot();
+    const { base, ws } = boot();
     const cookie = await signIn(base, 'reviewer@example.com');
-    const res = await mintToken(base, cookie, 'https://evil.example.com');
+    const res = await mintToken(base, cookie, ws, 'https://evil.example.com');
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'origin_not_allowed' });
   });
 
   it('refuses a cross-origin caller — minting is the popup page’s alone', async () => {
-    const { base } = boot();
+    const { base, ws } = boot();
     const cookie = await signIn(base, 'reviewer@example.com');
     // A dev-server page calling the mint route directly: its Origin header
     // names the dev server, not us. (Its fetch could not carry the SameSite
     // cookie anyway.) Carrying the cookie, it now meets the chain's
     // cross-origin credential refusal before the route's own same-origin one.
-    const res = await mintToken(base, cookie, DEV_ORIGIN, { origin: DEV_ORIGIN });
+    const res = await mintToken(base, cookie, ws, DEV_ORIGIN, { origin: DEV_ORIGIN });
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toBe('cross_origin_credentials');
   });
@@ -245,8 +263,8 @@ describe('GET /api/auth/widget-session', () => {
   });
 
   it('names the user for a live token', async () => {
-    const { base } = boot();
-    const { token } = await signInAndMint(base, 'reviewer@example.com');
+    const { base, ws } = boot();
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
     const res = await fetch(`${base}/api/auth/widget-session`, {
       headers: bearer(token),
     });
@@ -282,7 +300,7 @@ describe('comment attribution', () => {
     // (which stays behind CW_REQUIRE_EMAIL_AUTH), a caller who volunteers a
     // verified token gets the verified attribution today.
     const { base, dataDir, ws } = boot();
-    const { token } = await signInAndMint(base, 'reviewer@example.com');
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
     const res = await postComment(base, dataDir, ws, 'token-doc', token);
     expect(res.status).toBe(200);
     const [row] = commentRows(dataDir);
@@ -292,7 +310,7 @@ describe('comment attribution', () => {
 
   it('control: the same comment with no token stays the claimed body', async () => {
     const { base, dataDir, ws } = boot();
-    await signInAndMint(base, 'reviewer@example.com');
+    await signInAndMint(base, 'reviewer@example.com', ws);
     const res = await postComment(base, dataDir, ws, 'anon-doc');
     expect(res.status).toBe(200);
     expect(commentRows(dataDir)[0]?.actorId).toBe('known-bryan');
@@ -307,10 +325,49 @@ describe('comment attribution', () => {
   });
 });
 
+describe('one board', () => {
+  it('attributes on its own board and refuses another board on the same server', async () => {
+    const { base, dataDir, handle, ws } = boot();
+    const other = handle.tasks.createWorkspace('Saltmarsh').id;
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
+    const elsewhere = await postComment(base, dataDir, other, 'other-board-doc', token);
+    expect(elsewhere.status).toBe(403);
+    expect(await elsewhere.json()).toEqual({ error: 'out_of_widget_scope' });
+    expect(commentRows(dataDir).length).toBe(0);
+    // Control: the same token on its own board.
+    expect((await postComment(base, dataDir, ws, 'own-board-doc', token)).status).toBe(200);
+  });
+});
+
+describe('the retired seven-day token', () => {
+  it('refuses a genuine wt1 that a browser still holds, so the widget signs in again', async () => {
+    const { base, dataDir, ws } = boot();
+    await signIn(base, 'reviewer@example.com');
+    // Signed with this server's own key, exactly as the old mint did.
+    const payload = [
+      'wt1',
+      emailIdentityId('reviewer@example.com'),
+      'sid-abc123',
+      Date.now(),
+      Date.now() + 60_000,
+      Buffer.from(DEV_ORIGIN).toString('base64url'),
+    ].join('.');
+    const mac = createHmac('sha256', widgetTokenKey(loadCookieKey(dataDir)))
+      .update(payload)
+      .digest('base64url');
+    const wt1 = `${payload}.${mac}`;
+    const probe = await fetch(`${base}/api/auth/widget-session`, { headers: bearer(wt1) });
+    expect(probe.status).toBe(401);
+    expect(await probe.json()).toEqual({ error: 'widget_token_invalid' });
+    expect((await postComment(base, dataDir, ws, 'wt1-doc', wt1)).status).toBe(401);
+    expect(commentRows(dataDir).length).toBe(0);
+  });
+});
+
 describe('revocation kills the token', () => {
   it('logout revokes the session, and the token dies with it', async () => {
     const { base, dataDir, ws } = boot();
-    const { cookie, token } = await signInAndMint(base, 'reviewer@example.com');
+    const { cookie, token } = await signInAndMint(base, 'reviewer@example.com', ws);
 
     // Positive control first: the token works while the session lives.
     const alive = await fetch(`${base}/api/auth/widget-session`, {
@@ -334,7 +391,7 @@ describe('revocation kills the token', () => {
   it('the roster watermark (denylist self-heal) refuses tokens minted before it', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'widget-token-watermark-'));
     const first = boot({ dataDir });
-    const { token } = await signInAndMint(first.base, 'reviewer@example.com');
+    const { token } = await signInAndMint(first.base, 'reviewer@example.com', first.ws);
     const mintedAt = Date.now();
     await first.handle.stop();
 
@@ -373,9 +430,9 @@ describe('the denylist failing closed at runtime', () => {
     // tell a live session from a logged-out one, so every token reads as
     // revoked. Load-bearing check: `isRevoked` itself answers true while
     // failed closed; the explicit `failedClosed()` guard ahead of it in
-    // widgetTokenIdentityFor is belt-and-braces (see its comment).
+    // boardWidgetGrantFor is belt-and-braces.
     const { base, dataDir, ws } = boot();
-    const { token } = await signInAndMint(base, 'reviewer@example.com');
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
     const alive = await fetch(`${base}/api/auth/widget-session`, { headers: bearer(token) });
     expect(alive.status).toBe(200);
 
@@ -398,7 +455,7 @@ describe('an archived identity', () => {
     // this token works again.
     const dataDir = mkdtempSync(join(tmpdir(), 'widget-token-archived-'));
     const first = boot({ dataDir });
-    const { token } = await signInAndMint(first.base, 'reviewer@example.com');
+    const { token } = await signInAndMint(first.base, 'reviewer@example.com', first.ws);
     const alive = await fetch(`${first.base}/api/auth/widget-session`, {
       headers: bearer(token),
     });
@@ -433,7 +490,7 @@ describe('the token is bound to the origin it was minted for', () => {
   // from another origin, or from an opaque (`null`) one.
   it('accepts the token from the origin it was minted for (positive control)', async () => {
     const { base, dataDir, ws } = boot();
-    const { token } = await signInAndMint(base, 'reviewer@example.com');
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
     const probe = await fetch(`${base}/api/auth/widget-session`, {
       headers: bearer(token, DEV_ORIGIN),
     });
@@ -450,7 +507,7 @@ describe('the token is bound to the origin it was minted for', () => {
     ['an opaque origin', 'null'],
   ])('refuses the token presented from %s', async (_label, origin) => {
     const { base, dataDir, ws } = boot();
-    const { token } = await signInAndMint(base, 'reviewer@example.com');
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
     const probe = await fetch(`${base}/api/auth/widget-session`, {
       headers: bearer(token, origin),
     });
@@ -466,8 +523,8 @@ describe('the token is bound to the origin it was minted for', () => {
 
 describe('the token is narrower than the session', () => {
   it('does not make /api/auth/session report signed-in', async () => {
-    const { base } = boot();
-    const { token } = await signInAndMint(base, 'reviewer@example.com');
+    const { base, ws } = boot();
+    const { token } = await signInAndMint(base, 'reviewer@example.com', ws);
     const res = await fetch(`${base}/api/auth/session`, {
       headers: bearer(token),
     });

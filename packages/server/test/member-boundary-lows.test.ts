@@ -562,7 +562,7 @@ describe('the member boundary, on the surfaces a path check cannot see', () => {
       const minted = await asOwner('/api/auth/widget-token', {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie },
-        body: JSON.stringify({ origin }),
+        body: JSON.stringify({ origin, workspaceId: board }),
       });
       expect(minted.status, await minted.clone().text()).toBe(200);
       return ((await minted.json()) as { token: string }).token;

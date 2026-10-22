@@ -463,7 +463,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     // The token rides the socket as its one subprotocol. The tailnet door
     // refuses a socket without a board token, and the server ignores the
     // reader's cookie on any socket from another origin, so on a localhost
-    // dev server the session token is what lets the first socket create a
+    // dev server the board token is what lets the first socket create a
     // new page's doc where sign-in is required. A dead token gets the
     // handshake refused; `connect` then tries once without it, which opens
     // read-only as a socket with no token always has.

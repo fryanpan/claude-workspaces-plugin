@@ -77,7 +77,11 @@ describe('a cross-origin socket does not sign in with the reader’s cookie', ()
     expect(verified.status).toBe(200);
     cookie = (verified.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     expect(cookie.startsWith(`${SESSION_COOKIE}=`)).toBe(true);
-    const minted = await post('/api/auth/widget-token', { origin: DEV_ORIGIN }, { cookie });
+    const minted = await post(
+      '/api/auth/widget-token',
+      { origin: DEV_ORIGIN, workspaceId: ws },
+      { cookie },
+    );
     expect(minted.status).toBe(200);
     token = ((await minted.json()) as { token: string }).token;
   });
