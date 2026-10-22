@@ -1,18 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-// bind_mock(docId, newPath) is documented as REPOINTING an existing mockup
-// doc, but POST /api/docs routes through DocStore.getOrCreate, whose
-// existing-doc branch used to update only webhookUrl and setId — the doc
-// kept serving the old file while the call reported success. These tests pin
-// the repoint: served content follows the new path, meta.sourceUrl follows,
-// and the private-meta sidecar (the durable record binding survives restarts
-// through) is rewritten too.
+// A create naming an existing doc used to REPOINT it: the same docId with
+// another sourceUrl moved the doc's comments and live content onto a file of
+// the caller's choosing (finding H3 of the 16 Oct security review). These
+// tests pin the refusal — the doc keeps serving its first file — and that a
+// re-post of the same file, or of none, still reuses the doc.
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
 
@@ -43,7 +40,7 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
     return (await res.json()) as { meta: { docId: string; sourceUrl?: string } };
   }
 
-  it('re-binding with a new sourceUrl serves the new file and persists the new path', async () => {
+  it('a create naming an existing doc with another file is refused and changes nothing', async () => {
     const docId = 'mock-rebind-1';
     const first = join(dataDir, 'rebind-first.html');
     const second = join(dataDir, 'rebind-second.html');
@@ -52,37 +49,43 @@ describe('bind_mock rebind (POST /workspaces/<ws>/docs on an existing mockup doc
 
     const created = await postDoc({ docId, type: 'mockup', sourceUrl: first });
     expect(created.meta.sourceUrl).toBe(first);
-    // `mock-rebind-1` is the NAME; the server minted the id it lives at, and
-    // the mockup URL below still addresses it by that name.
     const mintedId = created.meta.docId;
-    const servedFirst = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`).then(
-      (r) => r.text(),
-    );
-    expect(servedFirst).toContain('First mock body');
 
-    // Same docId, new path — the documented repoint.
-    const rebound = await postDoc({ docId, type: 'mockup', sourceUrl: second });
-    expect(rebound.meta.sourceUrl).toBe(second);
-    // …and it is the SAME doc: a repeated name resolves to the doc it already
-    // names rather than minting a second one beside it.
-    expect(rebound.meta.docId).toBe(mintedId);
-    const servedSecond = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`);
-    expect(servedSecond.status).toBe(200);
-    expect(await servedSecond.text()).toContain('Second mock body');
+    const refused = await fetch(`${base}/workspaces/${WS}/docs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ docId, type: 'mockup', sourceUrl: second }),
+    });
+    expect(refused.status).toBe(409);
+    const body = (await refused.json()) as { error: string; docId: string; conflict: string };
+    expect(body).toMatchObject({ error: 'doc_exists', docId: mintedId, conflict: 'source' });
 
-    // The sidecar is what a restart rehydrates sourceUrl from — a rebind that
-    // only touched memory would silently revert at the next supervisor
-    // restart. saveToDisk debounces ~200ms; give it doc.
-    const sidecar = await waitFor(
-      () => {
-        const file = join(dataDir, `${mintedId}.private.json`);
-        if (!existsSync(file)) return false;
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as { sourceUrl?: string };
-        return parsed.sourceUrl === second ? parsed : false;
-      },
-      { describe: 'the sidecar to record the rebound sourceUrl' },
-    );
-    expect(sidecar.sourceUrl).toBe(second);
+    // Nor may a create change what kind of doc the name is.
+    const retyped = await fetch(`${base}/workspaces/${WS}/docs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ docId, type: 'markdown', sourceUrl: second }),
+    });
+    expect(retyped.status).toBe(409);
+    expect(((await retyped.json()) as { conflict: string }).conflict).toBe('type');
+
+    const served = await fetch(`${base}/workspaces/${WS}/mockups/${docId}?cw-frame=1`);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toContain('First mock body');
+    const meta = (await fetch(`${base}/workspaces/${WS}/docs/${mintedId}?format=json`).then((r) =>
+      r.json(),
+    )) as { sourceUrl?: string; meta?: { sourceUrl?: string } };
+    expect(meta.meta?.sourceUrl ?? meta.sourceUrl).toBe(first);
+  });
+
+  it('re-posting the same file reuses the doc', async () => {
+    const docId = 'mock-rebind-3';
+    const file = join(dataDir, 'rebind-same.html');
+    writeFileSync(file, '<!doctype html><html><body><h1>Same mock body</h1></body></html>');
+    const created = await postDoc({ docId, type: 'mockup', sourceUrl: file });
+    const again = await postDoc({ docId, type: 'mockup', sourceUrl: file });
+    expect(again.meta.docId).toBe(created.meta.docId);
+    expect(again.meta.sourceUrl).toBe(file);
   });
 
   it('re-posting without a sourceUrl leaves the existing binding alone', async () => {

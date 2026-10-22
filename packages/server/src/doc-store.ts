@@ -1931,8 +1931,10 @@ export class DocStore {
         existing.ydoc.transact(() => m.set('setId', init.setId));
         existing.meta.setId = init.setId;
       }
-      // Re-binding: bind_mock(docId, newPath) is documented as repointing an
-      // existing doc, but this branch used to drop init.sourceUrl — the doc
+      // Re-binding. The docs create route no longer reaches this with a new
+      // path (it refuses a repoint, `doc-create-conflict.ts`); the app attach
+      // and the server's own creates still do. This branch used to drop
+      // init.sourceUrl — the doc
       // kept serving the old file while the call reported success. sourceUrl
       // is private-sidecar meta (never CRDT), so the whole repoint is the
       // in-memory field plus the same debounced persist creation uses. Board

@@ -1643,6 +1643,11 @@ reports as activity — moved out of `doc-store.ts` whole, behind a host of
 thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
 and the rest as one-line forwarders, so no caller changed.
 
+`doc-create-conflict.ts` joins the doc-store group and moves no boundary; the
+`doc-*.ts` glob draws it. It decides whether a create naming an existing doc
+would repoint that doc to another file or type, which `POST
+/workspaces/<ws>/docs` then refuses with 409 `doc_exists`.
+
 `server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
 start of the process in `server-starts.json` beside the deploy log: once at
 start, and again once serving, with the deploy it confirmed. It reads the
