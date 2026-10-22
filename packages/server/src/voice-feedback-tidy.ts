@@ -16,6 +16,7 @@
  * — the eval key anywhere but prod (`claude-key-source.ts`).
  */
 import { type TokenUsage, type VoiceTarget, dollars } from '@claude-workspaces/core';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, authHeader, resolveCredentialSlotFrom } from './summarize.ts';
 import { type AskProposal, readAskProposal } from './voice-feedback-ask.ts';
@@ -179,7 +180,7 @@ export function createHaikuTidy(opts?: {
   );
   if (!resolved) return null;
   const cred = resolved.credential;
-  const fetchImpl = opts?.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts?.fetchImpl ?? fixedHostFetch;
   return async ({ system, user }) => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);

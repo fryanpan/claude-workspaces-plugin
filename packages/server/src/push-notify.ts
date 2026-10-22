@@ -15,6 +15,7 @@
  */
 
 import { BLOCKS_LINE_PREFIX } from '@claude-workspaces/core/review-blocks';
+import { publicFetch } from './outbound-fetch.ts';
 import { b64urlDecode, encryptPushPayload, vapidAuthorization } from './push-crypto.ts';
 import type { VapidKeys } from './push-crypto.ts';
 import type { PushStore, StoredSubscription } from './push-store.ts';
@@ -144,7 +145,7 @@ export class PushNotifier {
     this.store = opts.store;
     this.keys = opts.keys;
     this.subject = opts.subject;
-    this.fetchImpl = opts.fetch ?? ((url, init) => fetch(url, init));
+    this.fetchImpl = opts.fetch ?? publicFetch;
     this.now = opts.now ?? Date.now;
     this.log = opts.log ?? (() => {});
   }

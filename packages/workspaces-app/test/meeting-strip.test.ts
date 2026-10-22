@@ -2062,12 +2062,13 @@ describe('what the strip tells the microphone and the server about the room', ()
 });
 
 describe('a server whose profile turned transcription off', () => {
-  const OFF = 'Transcription is off on this server, so meetings cannot be recorded here.';
+  const OFF = 'Transcription is off on this server.';
   const offServer = () => Promise.resolve({ engines: [], default: null, off: OFF });
 
-  it('says so on the Record button before anyone presses it', async () => {
+  it('disables the Record button and gives it the reason', async () => {
     const h = mount(undefined, { listEngines: offServer });
     await settle();
+    expect(h.record().disabled).toBe(true);
     expect(h.record().querySelector('.meeting-record-setting')?.textContent).toBe(
       'Off on this server',
     );
@@ -2076,7 +2077,7 @@ describe('a server whose profile turned transcription off', () => {
     expect(h.options().hidden).toBe(true);
   });
 
-  it('shows the sentence on a press and opens no socket and no mic', async () => {
+  it('opens no socket and no mic when pressed', async () => {
     const capture = vi.fn();
     const h = mount(capture, { listEngines: offServer, alone: () => true });
     await settle();
@@ -2084,7 +2085,6 @@ describe('a server whose profile turned transcription off', () => {
     await settle();
     expect(h.sockets).toHaveLength(0);
     expect(capture).not.toHaveBeenCalled();
-    expect(h.note()).toBe(OFF);
   });
 
   it('leaves the button as it was on a server that turned nothing off', async () => {
@@ -2096,6 +2096,7 @@ describe('a server whose profile turned transcription off', () => {
       'Off on this server',
     );
     expect(h.record().title).not.toBe(OFF);
+    expect(h.record().disabled).toBe(false);
   });
 });
 

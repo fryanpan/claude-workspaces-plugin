@@ -29,6 +29,7 @@
  * `createServer` never builds the real one; `server-deps.ts` does.
  */
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { fixedHostFetch } from '../outbound-fetch.ts';
 import { readKeychainPassword } from '../share/keychain.ts';
 import { HAIKU_MODEL, HAIKU_NO_THINKING, resolveKeySlotFrom } from '../summarize.ts';
 
@@ -141,7 +142,7 @@ export function haikuCoachSummarizer(opts: HaikuCoachSummarizerOpts = {}): Coach
   const resolved = resolveKeySlotFrom('coach-digest', opts.apiKey, readKeychainPassword);
   if (!resolved) return null;
   const key = resolved.key;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   return async (marks) => {
     const { system, user } = buildCoachSummaryPrompt(marks);

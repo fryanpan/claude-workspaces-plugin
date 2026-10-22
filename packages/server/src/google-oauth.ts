@@ -19,6 +19,7 @@
  * `recall-calendar.ts` does not import this file.
  */
 import { spawnSync } from 'node:child_process';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { type FetchLike, clip } from './recall.ts';
 import { type KeychainRunner, readKeychainAccountPassword } from './share/keychain.ts';
 
@@ -94,7 +95,7 @@ export function createGoogleOauthApp(opts: {
   redirectUri: string;
   fetch?: FetchLike;
 }): GoogleOauthApp {
-  const doFetch = opts.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
+  const doFetch = opts.fetch ?? fixedHostFetch;
   const { clientId, clientSecret } = opts.creds;
   return {
     clientId,

@@ -1,3 +1,4 @@
+import { configuredHostFetch } from '../outbound-fetch.ts';
 /**
  * The relay: carries agent messages between project servers, applying the
  * organization rule and the filter on the way.
@@ -102,7 +103,8 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 export function createRelay(opts: RelayOptions): Relay {
   const { config, store } = opts;
-  const fetchFn: RelayFetch = opts.fetch ?? ((input, init) => fetch(input, init));
+  const fetchFn: RelayFetch =
+    opts.fetch ?? configuredHostFetch(Array.from(config.servers.values(), (s) => s.baseUrl));
   const now = opts.now ?? Date.now;
   const log = opts.log ?? ((line: string) => console.error(line));
   const filterTimeoutMs = opts.filterTimeoutMs ?? 15_000;

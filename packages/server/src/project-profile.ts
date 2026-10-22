@@ -98,17 +98,23 @@ export interface FeaturesOff {
   readonly spoken?: string;
 }
 
-export const TRANSCRIPTION_OFF_LINE =
-  'Transcription is off on this server, so meetings cannot be recorded here.';
+/** One short reason each, worn by the control it disables or qualifies. */
+export const TRANSCRIPTION_OFF_LINE = 'Transcription is off on this server.';
+export const SPOKEN_OFF_LINE = 'Spoken replies are off on this server.';
 
-/** The spoken-reply line, naming whichever of voice and Gemini are off. */
+/**
+ * The spoken-reply line. Every setup needs one of the three features (setup 1
+ * speaks through Soniox, a transcription vendor), so with all three off the
+ * whole reply is off; with some off, the line names only those.
+ */
 export function spokenOffLine(off: ReadonlySet<ProjectFeature>): string | undefined {
+  if (PROJECT_FEATURES.every((f) => off.has(f))) return SPOKEN_OFF_LINE;
   const names = [
     off.has('voice') ? 'ElevenLabs voices' : '',
     off.has('gemini') ? 'Gemini Live' : '',
   ].filter((s) => s);
   if (names.length === 0) return undefined;
-  return `Spoken replies with ${names.join(' and ')} are off on this server.`;
+  return `${names.join(' and ')} ${names.length > 1 ? 'are' : 'is'} off on this server.`;
 }
 
 /** The lines for this process, or an empty object on the Mac. */

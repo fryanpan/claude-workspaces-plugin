@@ -45,6 +45,7 @@ import {
   slotForService,
 } from './claude-key-slot.ts';
 import { ACCESS_TOKEN_ENV, claudeKeyAddHint } from './claude-key-source.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { ORG_KEY_ENV, isProjectServer } from './project-profile.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
@@ -358,7 +359,7 @@ export class ThreadSummarizer {
 
   constructor(opts: SummarizerOpts = {}) {
     this.key = resolveKey(opts.apiKey);
-    this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    this.fetchImpl = opts.fetchImpl ?? fixedHostFetch;
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.waitImpl = opts.waitImpl ?? realWait;
   }

@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { User } from '@claude-workspaces/core';
+import { createPublicFetch } from '../src/outbound-fetch.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { pastWriteBack, waitForFileToBe } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -29,7 +30,13 @@ describe('suggested edits — HTTP routes', () => {
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-suggest-routes-'));
-    handle = createServer({ port: 0, dataDir });
+    // The webhook sink listens on 127.0.0.1, which the production guard
+    // refuses; permit loopback here and nothing else.
+    handle = createServer({
+      port: 0,
+      dataDir,
+      webhookFetch: createPublicFetch({ permit: new Set(['loopback']) }),
+    });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });

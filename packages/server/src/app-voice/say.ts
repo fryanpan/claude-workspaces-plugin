@@ -13,13 +13,14 @@ import { upstreamUrl } from '../app-proxy.ts';
  * Access assertion, no token — and follows no redirect.
  */
 import type { DocStore } from '../doc-store.ts';
+import { loopbackFetch } from '../outbound-fetch.ts';
 
 const SAY_TIMEOUT_MS = 10_000;
 
 /** The write to doc `docId`'s dev server, or null when it is not an attached app. */
 export function appSayer(
   docStore: Pick<DocStore, 'peekMeta' | 'resolveDocId'>,
-  doFetch: typeof fetch = fetch,
+  doFetch: typeof fetch = loopbackFetch('attached-app'),
 ): (docId: string) => ((text: string) => Promise<number>) | null {
   return (docId) => {
     const meta = docStore.peekMeta(docStore.resolveDocId(docId));
