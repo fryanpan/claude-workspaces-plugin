@@ -43,7 +43,9 @@ describe.skipIf(CHROME === null)('the widget signs in and posts on a board token
   });
 
   it('stores a board token for this page’s board, not the retired popup token', () => {
-    expect(reading.tokenTag).toBe('wt2.');
+    // The browser's pages ride on the message: a refused hand-back leaves
+    // the popup open with the line that says why.
+    expect(reading.tokenTag, JSON.stringify(reading.pages)).toBe('wt2.');
     expect(reading.tokenBoard).toBe(reading.board);
   });
 

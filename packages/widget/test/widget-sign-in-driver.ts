@@ -57,6 +57,30 @@ export interface SignInReading {
   comment: { text: string; authorId: string } | null;
   /** Who the session cookie belongs to. */
   signedInAs: string;
+  /** Every page the browser holds once the token is read, with the sign-in
+   *  popup's status line when it is still open — what a failed hand-back
+   *  said, rather than a bare null. */
+  pages: Array<{ url: string; status: string | null }>;
+}
+
+/** The browser's pages, and the status line of any sign-in popup among them. */
+async function readPages(port: number): Promise<SignInReading['pages']> {
+  const list = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{
+    type: string;
+    url: string;
+    webSocketDebuggerUrl?: string;
+  }>;
+  const out: SignInReading['pages'] = [];
+  for (const t of list.filter((x) => x.type === 'page')) {
+    let status: string | null = null;
+    if (t.url.includes('/widget-auth') && t.webSocketDebuggerUrl) {
+      const popup = await Cdp.connect(t.webSocketDebuggerUrl);
+      status = (await popup.evaluate('document.body?.innerText ?? null')) as string | null;
+      popup.close();
+    }
+    out.push({ url: t.url, status });
+  }
+  return out;
 }
 
 async function buildWidget(dist: string): Promise<void> {
@@ -227,6 +251,7 @@ async function main(): Promise<void> {
       const c = t?.comments[0];
       return c ? { text: c.text, authorId: c.author.id } : null;
     });
+    const pages = await readPages(b.port);
     const boardField = token?.split('.')[4];
     const reading: SignInReading = {
       offered,
@@ -235,6 +260,7 @@ async function main(): Promise<void> {
       board,
       comment,
       signedInAs: emailIdentityId(EMAIL),
+      pages,
     };
     cdp.close();
     process.stdout.write(`\n${JSON.stringify(reading)}\n`);
