@@ -103,7 +103,7 @@ describe('a socket from another origin carrying the reader’s credentials', () 
     for (const credential of [
       { cookie: 'cw_session=v2.riverbend' },
       { 'cf-access-jwt-assertion': 'riverbend' },
-    ]) {
+    ] as Record<string, string>[]) {
       it(`${kind}: opens read-only and names nobody (${Object.keys(credential)[0]})`, () => {
         const g = grants(stampFor(path, { origin: DEV, credential }));
         expect(g).toEqual({ readOnly: true, named: false, ownerProven: false });
