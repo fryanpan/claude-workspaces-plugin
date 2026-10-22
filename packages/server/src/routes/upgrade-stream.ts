@@ -56,7 +56,7 @@ import type { DocStore } from '../doc-store.ts';
 import type { SocketEditor } from '../edit-sessions.ts';
 import { currentEventOrigin } from '../event-origin.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
-import { isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import { crossOriginCredentials, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
@@ -186,6 +186,10 @@ export interface UpgradeStreamRequest {
    *  tailnet widget door with, or null. A door socket opens read-only and
    *  carries the pair, so the sweep can hang up once the token is dead. */
   widgetDoorGrant: { token: string; origin: string } | null;
+  /** Whether a widget token (`wt1` or `wt2`) on this request proved a
+   *  person. A token is bound to the page origin it was minted for, so it is
+   *  the credential a widget on another origin brings, where a cookie is not. */
+  widgetTokenProved: boolean;
 }
 
 /**
@@ -289,7 +293,26 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     ownerProven,
     anyoneProven,
     widgetDoorGrant,
+    widgetTokenProved,
   }: UpgradeStreamRequest): StreamOutcome => {
+    // A page on another origin sends the reader's cookie with every socket it
+    // opens: a dev server on another port is same-site, and a handshake has
+    // no `credentials: 'omit'`. The REST write gate refuses such a write
+    // (`crossOriginCredentialedWrite`). A socket is judged as though the
+    // cookie and the Access assertion were not there, so it gets what a
+    // socket with no sign-in gets: read-only where sign-in is required, and
+    // no author, owner or editor named from them. A widget token is the
+    // credential such a page does bring, so a socket that carries one is
+    // judged by it as before. The app voice socket below keeps the raw
+    // values: its credential is its own token, and a sign-in there can only
+    // refuse.
+    const cookieIgnored = (): boolean =>
+      !widgetTokenProved &&
+      widgetDoorGrant === null &&
+      crossOriginCredentials(req.headers, policyFor(req));
+    const provedNobody = (): boolean => cookieIgnored() || browserProvedNobody();
+    const socketAuthor = (): User | null => (cookieIgnored() ? null : provenAuthor());
+    const socketOwnerProven = (): boolean => !cookieIgnored() && ownerProven();
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
     // the trailing `null` for the fall-through. The wrapper below is the
@@ -346,7 +369,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // so the strip can render the reason (meeting-protocol.ts refuses
         // the `start` frame); an upgrade refused here reaches the page as
         // a bare error event with no body to show.
-        const audioReadOnly = requireSignInToWrite && browserProvedNobody();
+        const audioReadOnly = requireSignInToWrite && provedNobody();
         const upgraded = server.upgrade(req, {
           data: {
             docId,
@@ -366,7 +389,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             // Who this socket PROVED it is, so the same person can take their
             // own meeting back from an older socket (`meeting-takeover.ts`).
             // Proof only: Access, the session cookie, the widget token.
-            author: provenAuthor(),
+            author: socketAuthor(),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });
@@ -393,7 +416,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             workspaceId: voice.workspaceId,
             kind: 'voice' as const,
             // Carried, not refused here, so the page can say why — as above.
-            ...(requireSignInToWrite && browserProvedNobody() ? { readOnly: true } : {}),
+            ...(requireSignInToWrite && provedNobody() ? { readOnly: true } : {}),
             // WHAT AUTHORIZED THIS SOCKET, for the same reason `/y` carries
             // it: the door checks the board token once, at the upgrade, so
             // without this the sweep could not find a recorder left running
@@ -407,7 +430,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             // the identity this upgrade proved, ranked as the thread routes
             // rank it. None proven, the page's own claim at \`start\` is
             // used, as a typed comment's body is (\`voice-feedback-relay.ts\`).
-            author: provenAuthor(),
+            author: socketAuthor(),
             ...(socketViaOf(url) ? { via: socketViaOf(url) } : {}),
           },
         });
@@ -471,10 +494,10 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             docId: '',
             workspaceId,
             kind: 'spoken' as const,
-            ...(requireSignInToWrite && browserProvedNobody() ? { readOnly: true } : {}),
-            ...(ownerProven() ? { ownerProven: true } : {}),
+            ...(requireSignInToWrite && provedNobody() ? { readOnly: true } : {}),
+            ...(socketOwnerProven() ? { ownerProven: true } : {}),
             ...(widgetDoorGrant ? { widgetDoorGrant } : {}),
-            author: provenAuthor(),
+            author: socketAuthor(),
           },
         });
         if (!upgraded) return new Response('upgrade required', { status: 426 });
@@ -507,7 +530,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
           taskStore.getWorkspace(boardRoom.workspaceId) !== undefined ||
           docStore.list().some((m) => m.workspaceId === boardRoom.workspaceId);
         if (!roomExists) return j(404, { error: 'workspace not found' });
-        const roomReadOnly = requireSignInToWrite && browserProvedNobody();
+        const roomReadOnly = requireSignInToWrite && provedNobody();
         const upgraded = server.upgrade(req, {
           data: {
             docId: `ws:${boardRoom.workspaceId}`,
@@ -560,7 +583,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // socket could plant a thread with no such mark — or, naming an id
         // nobody made, a doc.
         const fromMockFrame = socketViaOf(url) !== undefined;
-        const mayCreate = !(requireSignInToWrite && browserProvedNobody()) && !fromMockFrame;
+        const mayCreate = !(requireSignInToWrite && provedNobody()) && !fromMockFrame;
         // A door socket is read-only too, but NOT refused creation: its
         // token proved a person, and the widget's first socket on a new page
         // is how that page's doc comes to exist. What it never gets is a
@@ -596,7 +619,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // Who is behind a WRITABLE socket, read now because the request is
         // the only place it can be: an edit over the socket arrives long
         // after this handshake was answered (edit-sessions.ts).
-        const editor = readOnly ? null : editorOf(provenAuthor());
+        const editor = readOnly ? null : editorOf(socketAuthor());
         const upgraded = server.upgrade(req, {
           data: {
             docId,
