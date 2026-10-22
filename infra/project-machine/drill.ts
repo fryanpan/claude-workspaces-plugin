@@ -49,7 +49,8 @@ async function waitForServer(app: string): Promise<void> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const project = args[args.indexOf('--project') + 1];
+  const at = args.indexOf('--project');
+  const project = at >= 0 ? args[at + 1] : undefined;
   if (!project || !project.endsWith('-test')) {
     console.error('[drill] --project <name>-test is required: the drill destroys the volume');
     process.exit(2);
