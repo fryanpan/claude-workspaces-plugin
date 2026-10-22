@@ -228,10 +228,11 @@ describe('POST /api/auth/widget-token', () => {
     const cookie = await signIn(base, 'reviewer@example.com');
     // A dev-server page calling the mint route directly: its Origin header
     // names the dev server, not us. (Its fetch could not carry the SameSite
-    // cookie anyway; this pins the second, independent refusal.)
+    // cookie anyway.) Carrying the cookie, it now meets the chain's
+    // cross-origin credential refusal before the route's own same-origin one.
     const res = await mintToken(base, cookie, DEV_ORIGIN, { origin: DEV_ORIGIN });
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ error: 'same_origin_only' });
+    expect(((await res.json()) as { error: string }).error).toBe('cross_origin_credentials');
   });
 });
 

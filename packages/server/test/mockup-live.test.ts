@@ -173,10 +173,10 @@ describe('a bound mockup updates in place and keeps its rounds', () => {
     // that round one is still readable, so a comment left on it is still
     // answerable.
     const docId = 'mock-live-3';
+    // Round two is written over round one's file, the one way a mock changes
+    // round: a create naming the doc with ANOTHER file is refused (H3).
     const first = join(dataDir, 'live-3a.html');
-    const second = join(dataDir, 'live-3b.html');
     writeFileSync(first, ROUND_ONE);
-    writeFileSync(second, ROUND_TWO);
     const { meta } = await bind(docId, first);
 
     const made = await fetch(
@@ -206,7 +206,8 @@ describe('a bound mockup updates in place and keeps its rounds', () => {
     expect(made.status, await made.clone().text()).toBe(200);
     const threadId = ((await made.json()) as { thread: { id: string } }).thread.id;
 
-    await bind(docId, second);
+    writeFileSync(first, ROUND_TWO);
+    await bind(docId, first);
     expect(await (await fetch(mockUrl(docId))).text()).toContain('Round two');
 
     // The page the comment was left on. Before this change these bytes were
