@@ -42,6 +42,7 @@
  */
 import type { Comment, Thread } from '@claude-workspaces/core';
 import { asksPerson } from './ask-detection.ts';
+import { loopbackFetch } from './outbound-fetch.ts';
 import { knownPeople, unansweredRun } from './review-queue.ts';
 
 export type Disposition = 'question' | 'receipt' | 'skim';
@@ -272,8 +273,10 @@ export function formatPlan(plan: MigrationPlan, now: number): string {
 // test. The end-to-end test drives THESE against the real routes, which is the
 // only thing that proves the queue's field names and the reader's agree.
 
+const ownServerFetch = loopbackFetch('own-server');
+
 async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url);
+  const res = await ownServerFetch(url);
   if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${await res.text()}`);
   return res.json();
 }
@@ -359,7 +362,7 @@ export async function resolveReceipts(
   const failed: { row: ThreadTriage; error: string }[] = [];
   for (const row of rows) {
     const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(row.docId)}/threads/${encodeURIComponent(row.threadId)}/resolve`;
-    const res = await fetch(url, {
+    const res = await ownServerFetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ author: { name: author } }),

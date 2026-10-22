@@ -45,6 +45,7 @@ import type { NotesTurn } from './meeting-notes.ts';
 import { contentWords, ideaCarried } from './notes-idea-coverage.ts';
 import { NOTES_SPEAKERS_HEADING } from './notes-prompt-store.ts';
 import { MAX_BULLET_WORDS } from './notes-quality.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { appendToSection, replaceSection } from './prompt-sections.ts';
 import { HAIKU_NO_THINKING, type SummaryCredential, authHeader } from './summarize.ts';
 
@@ -198,7 +199,7 @@ export function ledgerPrompt(points: readonly string[]): string {
 }
 
 async function extractPoints(deps: NotesLedgerDeps, transcript: string): Promise<string[]> {
-  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = deps.fetchImpl ?? fixedHostFetch;
   let res: Response;
   try {
     res = await fetchImpl(API_URL, {

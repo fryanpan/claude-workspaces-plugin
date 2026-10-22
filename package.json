@@ -32,6 +32,7 @@
     "check:hooks": "bash scripts/check-hooks.sh",
     "check:architecture": "bun run scripts/architecture-freshness.ts",
     "check:imports": "bun run scripts/import-direction.ts",
+    "check:outbound-fetch": "bun run scripts/outbound-fetch-audit.ts",
     "check:import-cycles": "bun run scripts/import-cycles.ts",
     "check:client-boot": "bun run scripts/client-boot-check.ts",
     "check:meeting-smoke": "bun run scripts/meeting-smoke-check.ts",

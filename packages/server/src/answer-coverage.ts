@@ -42,6 +42,7 @@ import {
   standingPartials,
 } from '@claude-workspaces/core/answer-coverage-prompt';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, resolveKeySlotFrom } from './summarize.ts';
 
@@ -87,7 +88,7 @@ export function haikuAnswerCoverage(opts: HaikuAnswerCoverageOpts = {}): AnswerC
   const resolved = resolveKeySlotFrom('answer-coverage', opts.apiKey, readKeychainPassword);
   if (!resolved) return null;
   const key = resolved.key;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const timeoutMs = opts.timeoutMs ?? ANSWER_COVERAGE_TIMEOUT_MS;
   return async (input) => {
     const { system, user } = buildAnswerCoveragePrompt(input.item, input.answers);

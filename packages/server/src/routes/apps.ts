@@ -65,6 +65,7 @@ import {
 } from '../mockup-frame.ts';
 import { appLinkWarning, linksOutsidePrefix, rootRelativePageLinks } from '../mockup-page-links.ts';
 import { injectWidget } from '../mockup-widget.ts';
+import { loopbackFetch } from '../outbound-fetch.ts';
 import { readAppAssetManifest, renderAppNotFound } from '../shells.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
 
@@ -266,6 +267,9 @@ function waitingResponse(
   });
 }
 
+/** The app's origin was checked as loopback when it was attached. */
+const attachedAppFetch = loopbackFetch('attached-app');
+
 /** The most of the root page the link check reads. */
 const PROBE_HTML_MAX = 2 * 1024 * 1024;
 
@@ -275,7 +279,7 @@ const PROBE_HTML_MAX = 2 * 1024 * 1024;
 async function probe(origin: string): Promise<{ reachable: boolean; html: string | null }> {
   let r: Response;
   try {
-    r = await fetch(`${origin}/`, {
+    r = await attachedAppFetch(`${origin}/`, {
       redirect: 'manual',
       signal: AbortSignal.timeout(PROBE_MS),
     });
@@ -321,7 +325,7 @@ async function serveApp(
 
   let up: Response;
   try {
-    up = await fetch(target, {
+    up = await attachedAppFetch(target, {
       method: req.method,
       headers: upstreamRequestHeaders(req.headers),
       redirect: 'manual',

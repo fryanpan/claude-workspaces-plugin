@@ -37,6 +37,7 @@ import { refusalMessage } from './model-quota.ts';
 import { parseNotesEdits } from './notes-edit-parse.ts';
 import { buildNotesPrompt } from './notes-prompt-build.ts';
 import { createPromptCacheWatcher } from './notes-prompt-cache-shape.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, authHeader, resolveCredentialSlotFrom } from './summarize.ts';
 
@@ -169,7 +170,7 @@ export function createHaikuNotesComposer(opts: HaikuNotesComposerOpts = {}): Not
   // key down, which would otherwise leave the process ledger saying this
   // path spends an explicit argument while the meeting spends a Keychain item.
   noteClaudeSlot('meeting-notes-compose', keySlot);
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const model = opts.model ?? NOTES_MODEL;
   const maxTokens = opts.maxTokens ?? MAX_TOKENS;
   // WHY A MISS WAS A MISS. The usage block says how much was read from the

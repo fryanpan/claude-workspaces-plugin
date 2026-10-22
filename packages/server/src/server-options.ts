@@ -464,6 +464,11 @@ export interface ServerOptions {
   artifactCheckFetch?: typeof fetch;
   /** Per-link budget for that check (default 5s). Tests only. */
   artifactCheckTimeoutMs?: number;
+  /** Makes webhook deliveries. Default `publicFetch`, which refuses a
+   *  webhook URL on loopback or a private network. Tests only: a test's sink
+   *  listens on 127.0.0.1, so it passes `createPublicFetch` permitting
+   *  `loopback` and keeps every other check. */
+  webhookFetch?: typeof fetch;
   /**
    * How the dispatch registry watches builder worktrees (default: recursive
    * fs.watch). A test seam for the same reason `stallNudgeQuietMs` is one —

@@ -26,6 +26,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { parseBoardOrigins } from '../../../infra/board-router-worker/worker.js';
 import { type HomeFeedRow, readHomeFeed } from './home-feed.ts';
+import { configuredHostFetch } from './outbound-fetch.ts';
 
 export interface ServiceToken {
   clientId: string;
@@ -179,7 +180,7 @@ export function createHomeRemotes(opts: {
   maxRetryMs?: number;
 }): HomeRemotes {
   const { config, onChange } = opts;
-  const fetchFn: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init));
+  const fetchFn: FetchLike = opts.fetch ?? configuredHostFetch([config.address]);
   const retryMs = opts.retryMs ?? 1000;
   const maxRetryMs = opts.maxRetryMs ?? 30_000;
   const held = boardsByOrigin(config.table);

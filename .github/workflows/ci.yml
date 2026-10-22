@@ -110,6 +110,11 @@ jobs:
       # shipped as `import type`, which nothing else in CI can see.
       - name: Import direction holds
         run: bun run check:imports
+      # Every request the server makes goes through outbound-fetch.ts, which
+      # refuses loopback, private, link-local and Fly-internal addresses. A
+      # bare fetch elsewhere in packages/server/src is a request that skipped it.
+      - name: Every server request goes through the outbound guard
+        run: bun run check:outbound-fetch
       # No runtime import cycle in packages/core/src or packages/workspaces-app/src.
       # A cycle is not an error in ESM — it just makes correctness depend on
       # evaluation order, and the bundler orders differently from vitest and

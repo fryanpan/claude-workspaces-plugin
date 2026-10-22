@@ -35,6 +35,7 @@ import {
   withoutBoardParams,
 } from '@claude-workspaces/core/page-thread-link';
 import { appPrefix, upstreamUrl } from './app-proxy.ts';
+import { loopbackFetch } from './outbound-fetch.ts';
 
 /** Redirects followed to find the page, and how long each answer may take. */
 const MAX_HOPS = 5;
@@ -87,7 +88,7 @@ export async function servedPath(
   origin: string,
   prefix: string,
   path: string,
-  get: typeof fetch = fetch,
+  get: typeof fetch = loopbackFetch('attached-app'),
 ): Promise<string> {
   const hashAt = path.indexOf('#');
   const hash = hashAt < 0 ? '' : path.slice(hashAt);
@@ -175,7 +176,7 @@ export function pageThreadPlan(a: PageThreadArgs): PageThreadPlan {
  *  an app's `path` is (`servedPath`). */
 export async function planPageThread(
   a: PageThreadArgs & { origin?: string },
-  get: typeof fetch = fetch,
+  get: typeof fetch = loopbackFetch('attached-app'),
 ): Promise<PageThreadPlan> {
   const { origin, ...args } = a;
   if (a.type !== 'app' || !origin || !a.workspaceId) return pageThreadPlan(args);

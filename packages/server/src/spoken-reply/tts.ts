@@ -22,6 +22,7 @@
  * nothing here logs, throws or returns them.
  */
 import { SPOKEN_OUTPUT_RATE } from '@claude-workspaces/core/spoken-reply';
+import { fixedHostFetch } from '../outbound-fetch.ts';
 import type { EngineSocket, EngineSocketFactory } from '../transcribe-assemblyai.ts';
 
 /**
@@ -188,7 +189,7 @@ export function createElevenLabsVoice(opts: {
   fetch?: typeof fetch;
   timeoutMs?: number;
 }): SpokenVoice {
-  const doFetch = opts.fetch ?? fetch;
+  const doFetch = opts.fetch ?? fixedHostFetch;
   const timeoutMs = opts.timeoutMs ?? SPEAK_TIMEOUT_MS;
   return {
     name: 'elevenlabs',

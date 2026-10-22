@@ -1,4 +1,5 @@
 import type { WebhookPayload } from '@claude-workspaces/core';
+import { publicFetch } from './outbound-fetch.ts';
 
 export interface WebhookDispatcher {
   send(url: string, payload: WebhookPayload): Promise<void>;
@@ -26,7 +27,7 @@ export interface WebhookDispatcherOptions {
 }
 
 export function createWebhookDispatcher(opts: WebhookDispatcherOptions = {}): WebhookDispatcher {
-  const fetchImpl = opts.fetchImpl ?? fetch;
+  const fetchImpl = opts.fetchImpl ?? publicFetch;
   const retries = opts.retries ?? 2;
   const timeoutMs = opts.timeoutMs ?? 5000;
   return {

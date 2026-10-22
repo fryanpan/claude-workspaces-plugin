@@ -440,6 +440,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     : null;
   const webhookLog: WebhookLogEntry[] = [];
   const webhooks = createWebhookDispatcher({
+    ...(opts.webhookFetch ? { fetchImpl: opts.webhookFetch } : {}),
     onLog: (e) => {
       webhookLog.push(e);
       if (webhookLog.length > 1000) webhookLog.shift();

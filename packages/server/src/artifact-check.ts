@@ -26,6 +26,7 @@
  * of them is loud.
  */
 
+import { fixedHostFetch } from './outbound-fetch.ts';
 import type { ArtifactCheck, ArtifactLinkCheck, Ref, Task, TaskStoreEvent } from './tasks.ts';
 
 /** Whether a doc currently exists on this server. `archived` counts as
@@ -72,7 +73,7 @@ async function checkGitHubPr(
   pr: Extract<ClassifiedLink, { kind: 'github-pr' }>,
   deps: ArtifactCheckDeps,
 ): Promise<{ verdict: ArtifactLinkCheck['verdict']; detail?: string }> {
-  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = deps.fetchImpl ?? fixedHostFetch;
   const ask = (path: string) =>
     fetchImpl(`https://api.github.com/${path}`, {
       headers: {

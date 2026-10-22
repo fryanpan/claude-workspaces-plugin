@@ -93,6 +93,12 @@ export const MEMBERS: Member[] = [
     ci: 'check:imports',
   },
   {
+    id: 'check:outbound-fetch',
+    title: 'every server request goes through the outbound guard',
+    argv: ['check:outbound-fetch'],
+    ci: 'check:outbound-fetch',
+  },
+  {
     id: 'check:import-cycles',
     title: 'no runtime import cycles in the code a browser loads',
     argv: ['check:import-cycles'],

@@ -1,3 +1,4 @@
+import { fixedHostFetch } from '../outbound-fetch.ts';
 /**
  * Delivering a login code through Postmark.
  *
@@ -86,7 +87,7 @@ function providerMessage(status: number, body: string, secrets: readonly string[
 }
 
 export function createPostmarkCodeSender(config: PostmarkCodeSenderConfig): CodeSender {
-  const doFetch = config.fetch ?? ((url, init) => fetch(url, init));
+  const doFetch = config.fetch ?? fixedHostFetch;
   const timeoutMs = config.timeoutMs ?? SEND_TIMEOUT_MS;
   return {
     name: 'postmark',

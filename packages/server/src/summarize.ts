@@ -44,6 +44,7 @@ import {
   noteClaudeSlot,
 } from './claude-key-slot.ts';
 import { ACCESS_TOKEN_ENV, claudeKeyAddHint } from './claude-key-source.ts';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 
 /** The Haiku model every small server call runs on. */
@@ -349,7 +350,7 @@ export class ThreadSummarizer {
 
   constructor(opts: SummarizerOpts = {}) {
     this.key = resolveKey(opts.apiKey);
-    this.fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+    this.fetchImpl = opts.fetchImpl ?? fixedHostFetch;
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.waitImpl = opts.waitImpl ?? realWait;
   }
