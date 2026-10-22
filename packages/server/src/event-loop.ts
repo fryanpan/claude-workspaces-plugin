@@ -257,7 +257,7 @@ export interface ProcessSample {
  * Node, where `bun:jsc` does not exist.
  */
 let heapBytes: (() => number) | undefined;
-function readHeap(): number {
+export function readHeap(): number {
   if (!heapBytes) {
     heapBytes =
       typeof (globalThis as { Bun?: unknown }).Bun === 'undefined'

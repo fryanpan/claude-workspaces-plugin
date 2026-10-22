@@ -1623,7 +1623,9 @@ flight is that second thing, and the line says so.
 write the `[doc-store] mem` line: the footprint macOS counts, read every 30
 seconds through `bun:ffi`, printed on a 64 MB move or every five minutes, with
 the window's requests by route family and its busiest doc-store activator.
-`doc-store.ts` owns the sampler and `server.ts` counts each request at the
+Each line also carries the JS heap, and every ten minutes one carries the
+heap's commonest object types and biggest growers, so heap growth can be told
+from native growth. `doc-store.ts` owns the sampler and `server.ts` counts each request at the
 front door; neither module imports a subsystem.
 
 `doc-residency.ts` joins the doc-store group and moves no boundary. It is the
