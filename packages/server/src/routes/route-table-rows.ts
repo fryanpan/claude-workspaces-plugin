@@ -235,9 +235,16 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
   // Mint, list and revoke `at2`: refused through the edge, from off this
   // machine, from a page, and to every visitor, `at2` holders included.
+  // Refresh is the holder's own, and needs the live token it renews.
   ...family('routes/board-tokens.ts', [
     ['loopback-only', '/api/board-tokens', 'GET POST'],
     ['loopback-only', '/api/board-tokens/:id/revoke', 'POST'],
+    [
+      'trusted-local',
+      '/api/board-tokens/refresh',
+      'POST',
+      'Answers only a live `at2` the board-token door admitted, with a fresh value for that same record (`middleware/board-agent-door.ts`).',
+    ],
   ]),
 
   ...family('routes/workspaces-create-read.ts', [

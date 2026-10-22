@@ -14,13 +14,18 @@
  *      would fail here rather than pass.
  *   C. Its watch set is its own, cut to its board.
  *   D. A revoked token is refused, and the stream it held open is hung up.
+ *   E. A token past its expiry is refused; a live one renews itself through
+ *      the tunnel, with no one minting by hand.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
+import { boardAgentToken, boardAgentTokenKey } from '../src/auth/board-agent-token.ts';
+import { mintToken } from '../src/auth/signed-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { loadCookieKey } from '../src/share/link-session.ts';
 import { waitFor } from './wait-for.ts';
 
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
@@ -338,5 +343,67 @@ describe('D. revocation', () => {
     await local(`/api/board-tokens/${a.id}/revoke`, { method: 'POST' });
     expect((await remote(a.token, `/workspaces/${ownBoard}`)).status).toBe(401);
     expect((await remote(b.token, `/workspaces/${ownBoard}`)).status).toBe(200);
+  });
+});
+
+describe('E. expiry, and renewal from off the machine', () => {
+  /** A value for a real record, signed with this server's key, expiring when told. */
+  const signed = (id: string, expiresAt: number | null) =>
+    mintToken(
+      boardAgentToken,
+      { tokenId: id, agentId: AGENT, boardId: ownBoard, expiresAt },
+      boardAgentTokenKey(loadCookieKey(dataDir)),
+    );
+  const refresh = (token: string) =>
+    remote(token, '/api/board-tokens/refresh', { method: 'POST', body: '{}' });
+
+  it('mints a token that says when it expires', async () => {
+    const res = await local('/api/board-tokens', {
+      method: 'POST',
+      body: JSON.stringify({ agentId: AGENT, boardId: ownBoard }),
+    });
+    const body = (await res.json()) as { token: string; expiresAt: number };
+    expect(body.expiresAt).toBeGreaterThan(Date.now());
+    expect(body.token.split('.')[4]).toBe(String(body.expiresAt));
+  });
+
+  it('refuses a token past its expiry, on its board and on renewal', async () => {
+    const { id } = await mint(AGENT, ownBoard);
+    const expired = signed(id, Date.now() - 1);
+    expect((await remote(expired, `/workspaces/${ownBoard}`)).status).toBe(401);
+    expect((await refresh(expired)).status).toBe(401);
+    // Control: the same record, unexpired, opens the board.
+    expect((await remote(signed(id, Date.now() + 60_000), `/workspaces/${ownBoard}`)).status).toBe(
+      200,
+    );
+  });
+
+  it('renews a live token through the tunnel, and the new value opens the board', async () => {
+    const { id, token } = await mint(AGENT, ownBoard);
+    const res = await refresh(token);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const fresh = (await res.json()) as { token: string; expiresAt: number };
+    expect(fresh.token.startsWith(`at2.${id}.${AGENT}.${ownBoard}.`)).toBe(true);
+    expect((await remote(fresh.token, `/workspaces/${ownBoard}`)).status).toBe(200);
+    // Renewing opens nothing wider: the new value is still refused another board.
+    expect((await remote(fresh.token, `/workspaces/${otherBoard}`)).status).toBe(403);
+  });
+
+  it('turns a value minted before the expiry existed into one that expires', async () => {
+    const { id } = await mint(AGENT, ownBoard);
+    const legacy = signed(id, null);
+    expect((await remote(legacy, `/workspaces/${ownBoard}`)).status).toBe(200);
+    const res = await refresh(legacy);
+    expect(res.status).toBe(200);
+    const fresh = (await res.json()) as { token: string; expiresAt: number };
+    expect(fresh.token.split('.')).toHaveLength(6);
+  });
+
+  it('renews nothing once revoked, and nothing for a caller with no token', async () => {
+    const { id, token } = await mint(AGENT, ownBoard);
+    await local(`/api/board-tokens/${id}/revoke`, { method: 'POST' });
+    expect((await refresh(token)).status).toBe(401);
+    const bare = await local('/api/board-tokens/refresh', { method: 'POST', body: '{}' });
+    expect(bare.status).toBe(401);
   });
 });

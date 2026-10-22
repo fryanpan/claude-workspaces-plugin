@@ -5,6 +5,7 @@
  *   POST /api/board-tokens              mint one: `{ agentId, boardId, label? }`;
  *                                       the value is returned once
  *   POST /api/board-tokens/<id>/revoke  revoke one, and hang up what it opened
+ *   POST /api/board-tokens/refresh      a fresh value for the live `at2` presented
  *
  * Loopback only, for the person or lead at this machine's keyboard. All three
  * refuse a request through the edge (`cf-ray`), from a peer address that is
@@ -12,6 +13,11 @@
  * `at2` holder, so a token can never mint, list or revoke tokens. A page on
  * this machine also has a loopback peer address and rides the owner's
  * cookie; refusing a browser is what stops one minting a token for itself.
+ *
+ * Refresh is the one exception, and it is the holder's own: it answers only a
+ * request the `at2` door admitted (`middleware/board-agent-door.ts`), so the
+ * caller already proved a live token, and it answers a new value for that
+ * same record and nothing wider. A revoked or expired token never reaches it.
  */
 import { SHARED_AGENT_IDS } from '../agent-watches.ts';
 import { refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
@@ -21,6 +27,7 @@ import {
   isValidBoardId,
   isValidBoardTokenId,
 } from '../auth/board-agent-token.ts';
+import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 
 export interface BoardTokenRoutesContext {
@@ -41,7 +48,11 @@ export interface BoardTokenRouteRequest {
   req: Request;
   pathname: string;
   visitor: ShareTarget | null;
+  /** The agent and board an `at2` bearer on this request proved, or null. */
+  boardAgent: BoardAgentClaims | null;
 }
+
+export const BOARD_TOKEN_REFRESH_PATH = '/api/board-tokens/refresh';
 
 const REVOKE_PATH = /^\/api\/board-tokens\/([^/]+)\/revoke$/;
 const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -51,9 +62,16 @@ export async function handleBoardTokenRoutes(
   rq: BoardTokenRouteRequest,
 ): Promise<Response | null> {
   const { req, pathname, visitor } = rq;
+  const { j } = ctx;
+  if (pathname === BOARD_TOKEN_REFRESH_PATH) {
+    if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
+    if (!rq.boardAgent) return j(401, { error: 'board_token_required' });
+    const fresh = ctx.tokens.refresh(rq.boardAgent);
+    if (!fresh) return j(401, { error: 'board_token_invalid' });
+    return j(200, { ok: true, ...fresh });
+  }
   const revoke = pathname.match(REVOKE_PATH);
   if (pathname !== '/api/board-tokens' && !revoke) return null;
-  const { j } = ctx;
   if (visitor) return j(403, { error: 'not available to share visitors' });
   const notLocal = refuseNonLocalAgentCaller(req, ctx.requestAddress(req));
   if (notLocal) {
@@ -89,6 +107,6 @@ export async function handleBoardTokenRoutes(
   if (!ctx.boardExists(boardId)) return j(404, { error: 'unknown_workspace', boardId });
   if (!ctx.ensureAgent(agentId)) return j(400, { error: 'not an agent id', agentId });
   const label = typeof body?.label === 'string' ? body.label : '';
-  const { record, token } = ctx.tokens.mint(agentId, boardId, label);
-  return j(201, { ...record, token });
+  const { record, token, expiresAt } = ctx.tokens.mint(agentId, boardId, label);
+  return j(201, { ...record, token, expiresAt });
 }

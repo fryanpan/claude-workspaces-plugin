@@ -256,6 +256,7 @@ export async function serveBoardRoutes(
       req,
       pathname,
       visitor,
+      boardAgent,
     });
     if (handled) return handled;
   }

@@ -258,6 +258,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'agent-notes'],
   ['api', 'agents', ':id', 'token'],
   ['api', 'board-tokens'],
+  ['api', 'board-tokens', 'refresh'],
   ['api', 'board-tokens', ':id', 'revoke'],
   ['api', 'attachments'],
   ['api', 'calendar', 'events'],

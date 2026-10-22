@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
 import {
+  BOARD_AGENT_TOKEN_TTL_MS,
   BoardAgentTokens,
   boardAgentBearerOf,
   boardAgentMemberKey,
@@ -45,7 +46,12 @@ describe('the at2 format', () => {
 
   it('round-trips its claims and refuses a payload with a dot in a field', () => {
     const key = boardAgentTokenKey(BASE_KEY);
-    const claims = { tokenId: 'abcdefghijklmnop', agentId: AGENT, boardId: BOARD };
+    const claims = {
+      tokenId: 'abcdefghijklmnop',
+      agentId: AGENT,
+      boardId: BOARD,
+      expiresAt: Date.now() + 60_000,
+    };
     const v = verifyToken(boardAgentToken, mintToken(boardAgentToken, claims, key), key);
     expect(v).toEqual({ ok: true, claims });
     expect(boardAgentToken.decode(`at2.abcdefghijklmnop.${AGENT}.${BOARD}.extra`)).toBeNull();
@@ -78,7 +84,7 @@ describe('the revocation record', () => {
     const { tokens } = store();
     const unissued = mintToken(
       boardAgentToken,
-      { tokenId: 'neverissued00000', agentId: AGENT, boardId: BOARD },
+      { tokenId: 'neverissued00000', agentId: AGENT, boardId: BOARD, expiresAt: null },
       boardAgentTokenKey(BASE_KEY),
     );
     expect(tokens.verify(unissued)).toBeNull();
@@ -89,7 +95,7 @@ describe('the revocation record', () => {
     const { record } = tokens.mint(AGENT, BOARD, '');
     const moved = mintToken(
       boardAgentToken,
-      { tokenId: record.id, agentId: AGENT, boardId: OTHER },
+      { tokenId: record.id, agentId: AGENT, boardId: OTHER, expiresAt: null },
       boardAgentTokenKey(BASE_KEY),
     );
     expect(tokens.verify(moved)).toBeNull();
@@ -102,6 +108,66 @@ describe('the revocation record', () => {
     const reread = new BoardAgentTokens(path, () => boardAgentTokenKey(BASE_KEY));
     expect(reread.verify(token)?.tokenId).toBe(record.id);
     expect(JSON.stringify(reread.list())).not.toContain(token);
+  });
+});
+
+describe('the expiry', () => {
+  /** A store whose clock the test moves. */
+  function clocked(): { tokens: BoardAgentTokens; clock: { now: number } } {
+    const dir = mkdtempSync(join(tmpdir(), 'at2-clock-'));
+    dirs.push(dir);
+    const clock = { now: 1_800_000_000_000 };
+    const tokens = new BoardAgentTokens(
+      boardTokensPath(dir),
+      () => boardAgentTokenKey(BASE_KEY),
+      () => clock.now,
+    );
+    return { tokens, clock };
+  }
+
+  it('carries its expiry, and is refused once past it', () => {
+    const { tokens, clock } = clocked();
+    const { token, expiresAt } = tokens.mint(AGENT, BOARD, '');
+    expect(expiresAt).toBe(clock.now + BOARD_AGENT_TOKEN_TTL_MS);
+    clock.now = expiresAt - 1;
+    expect(tokens.verify(token)?.agentId).toBe(AGENT);
+    clock.now = expiresAt;
+    expect(tokens.verify(token)).toBeNull();
+  });
+
+  it('renews a live token for the same record, and the new value outlives the old', () => {
+    const { tokens, clock } = clocked();
+    const { record, token, expiresAt } = tokens.mint(AGENT, BOARD, '');
+    clock.now += BOARD_AGENT_TOKEN_TTL_MS - 1_000;
+    const grant = tokens.verify(token);
+    expect(grant).not.toBeNull();
+    const fresh = grant ? tokens.refresh(grant) : null;
+    expect(fresh?.expiresAt).toBeGreaterThan(expiresAt);
+    clock.now = expiresAt;
+    expect(tokens.verify(token)).toBeNull();
+    expect(tokens.verify(fresh?.token ?? null)?.tokenId).toBe(record.id);
+  });
+
+  it('renews nothing once revoked', () => {
+    const { tokens } = clocked();
+    const { record, token } = tokens.mint(AGENT, BOARD, '');
+    const grant = tokens.verify(token);
+    tokens.revoke(record.id);
+    expect(grant ? tokens.refresh(grant) : 'no grant').toBeNull();
+  });
+
+  it('still accepts a value minted before the expiry existed, while its record stands', () => {
+    const { tokens } = clocked();
+    const { record } = tokens.mint(AGENT, BOARD, '');
+    const legacy = mintToken(
+      boardAgentToken,
+      { tokenId: record.id, agentId: AGENT, boardId: BOARD, expiresAt: null },
+      boardAgentTokenKey(BASE_KEY),
+    );
+    expect(legacy.split('.')).toHaveLength(5);
+    expect(tokens.verify(legacy)?.tokenId).toBe(record.id);
+    tokens.revoke(record.id);
+    expect(tokens.verify(legacy)).toBeNull();
   });
 });
 
