@@ -25,6 +25,7 @@ import {
   FEATURE_CREDENTIAL_ENV,
   FOREIGN_CREDENTIAL_ENV,
   ORG_KEY_ENV,
+  SPOKEN_OFF_LINE,
   TRANSCRIPTION_OFF_LINE,
   featureOn,
   featuresOff,
@@ -32,6 +33,7 @@ import {
   isProjectServer,
   projectProfile,
   scrubForeignCredentials,
+  spokenOffLine,
 } from '../src/project-profile.ts';
 import { ENV_VAR as RECALL_ENV_VAR } from '../src/recall.ts';
 import { keychainRunnerFor } from '../src/share/keychain.ts';
@@ -204,8 +206,9 @@ describe('the claude-only profile', () => {
     }
     const off = featuresOff(env);
     expect(off.transcription).toBe(TRANSCRIPTION_OFF_LINE);
-    expect(off.spoken).toContain('ElevenLabs');
-    expect(off.spoken).toContain('Gemini');
+    expect(off.spoken).toBe(SPOKEN_OFF_LINE);
+    expect(spokenOffLine(new Set(['gemini']))).toBe('Gemini Live is off on this server.');
+    expect(spokenOffLine(new Set())).toBeUndefined();
   });
 
   it('builds no spoken setup even with every key present, and reads none of them', () => {

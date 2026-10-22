@@ -1515,11 +1515,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     record.classList.toggle('is-live', isRecording);
     record.title = face.title;
     record.setAttribute('aria-label', face.ariaLabel);
-    // Transcription off by this server's profile: the button says so before
-    // a press, and keeps its width (the sizer holds this line too).
-    const off = transcriptionOff !== null && !isRecording;
-    record.classList.toggle('is-off', off);
-    if (off && transcriptionOff) {
+    // Transcription off by this server's profile: the button is disabled
+    // and wears one short reason, at the width it always has (the sizer holds
+    // this line too). Only ever set, never cleared: the write gate may have
+    // disabled it for its own reason, and the profile cannot change live.
+    if (transcriptionOff && !isRecording) {
+      record.disabled = true;
       recordSettingEl.textContent = RECORD_OFF_SETTING;
       record.title = transcriptionOff;
       record.setAttribute('aria-label', `${face.label} — ${transcriptionOff}`);
@@ -2442,11 +2443,6 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   const onRecordClick = (): void => {
     if (view !== 'none') {
       closePop();
-      return;
-    }
-    // Nothing to open: say why on the strip rather than ask for a mic.
-    if (transcriptionOff && state.kind === 'idle') {
-      setState({ kind: 'unavailable', reason: 'not_configured', message: transcriptionOff });
       return;
     }
     const want = popForNow();
