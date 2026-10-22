@@ -15,6 +15,9 @@
  *   a write-only credential for it (put objects under snapshots/, nothing else)
  *   a rule that expires snapshots after 30 days, since the machine cannot delete
  *   the machine's secrets, then the image built from <ref> by Fly's builder
+ *   the org's Anthropic key as CW_ORG_ANTHROPIC_API_KEY, only when the
+ *   Keychain holds `cw-<name>-anthropic-api-key`; without it the server
+ *   refuses every Claude call
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
@@ -28,6 +31,7 @@ import { dirname, join } from 'node:path';
 import {
   type Action,
   type BucketCredential,
+  ORG_KEY_SECRET,
   type ObservedMachine,
   type ProjectConfig,
   type TunnelMode,
@@ -138,6 +142,8 @@ function secretValue(cfg: ProjectConfig, name: string): string {
         .secretAccessKey;
     case 'CW_TUNNEL_MODE':
       return cfg.tunnel;
+    case ORG_KEY_SECRET:
+      return keychainRead(cfg.keychain.orgKey).trim();
     default:
       throw new Error(`no source for secret ${name}`);
   }

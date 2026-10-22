@@ -32,7 +32,7 @@ function complete(): Observed {
   return {
     app: true,
     volumes: 1,
-    keychain: new Set(Object.values(cfg.keychain)),
+    keychain: new Set([cfg.keychain.identity, cfg.keychain.bucketAdmin, cfg.keychain.writer]),
     lifecycle: true,
     secrets: new Set(requiredSecrets('quick')),
     machines: [{ id: 'm1', state: 'started', imageTag: SHA, memoryMb: 512 }],
@@ -143,6 +143,17 @@ describe('plan', () => {
   it('never makes a second key pair or bucket over existing Keychain entries', () => {
     const obs = { ...complete(), lifecycle: false };
     expect(plan(cfg, obs)).toEqual([{ kind: 'set-lifecycle' }]);
+  });
+
+  it('sets the org Anthropic key only once a person has put one in the Keychain', () => {
+    expect(requiredSecrets('quick')).not.toContain('CW_ORG_ANTHROPIC_API_KEY');
+    const keychain = new Set([...complete().keychain, cfg.keychain.orgKey]);
+    expect(plan(cfg, { ...complete(), keychain })).toEqual([
+      { kind: 'set-secrets', names: ['CW_ORG_ANTHROPIC_API_KEY'] },
+      { kind: 'deploy' },
+    ]);
+    const secrets = new Set([...complete().secrets, 'CW_ORG_ANTHROPIC_API_KEY']);
+    expect(plan(cfg, { ...complete(), keychain, secrets })).toEqual([]);
   });
 
   it('asks a named-tunnel machine for its tunnel token instead of the quick mode', () => {

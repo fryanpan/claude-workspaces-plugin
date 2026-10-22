@@ -25,8 +25,12 @@ export interface ProjectConfig {
   tunnel: TunnelMode;
   /** The git commit the image is built from; it is also the image label. */
   imageLabel: string;
-  /** Keychain entries, under the `claude-workspaces-secret.` prefix. */
-  keychain: { identity: string; bucketAdmin: string; writer: string };
+  /**
+   * Keychain entries, under the `claude-workspaces-secret.` prefix. The
+   * script makes the first three. `orgKey` is the org's own Anthropic key,
+   * which only a person can provide; the machine gets it only when it exists.
+   */
+  keychain: { identity: string; bucketAdmin: string; writer: string; orgKey: string };
 }
 
 export interface ConfigInput {
@@ -80,6 +84,7 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
       identity: `${app}-backup-identity`,
       bucketAdmin: `${app}-bucket-admin`,
       writer: `${app}-backup-writer`,
+      orgKey: `${app}-anthropic-api-key`,
     },
   };
 }
@@ -115,9 +120,16 @@ export type Action =
   | { kind: 'deploy' }
   | { kind: 'start-machine'; id: string };
 
-/** The Fly secrets the machine needs, by tunnel mode. */
-export function requiredSecrets(tunnel: TunnelMode): string[] {
+/** The secret a project server spends Claude calls from (project-profile.ts). */
+export const ORG_KEY_SECRET = 'CW_ORG_ANTHROPIC_API_KEY';
+
+/**
+ * The Fly secrets the machine needs, by tunnel mode, plus the org's Anthropic
+ * key when one was provided. Without it the server refuses every Claude call.
+ */
+export function requiredSecrets(tunnel: TunnelMode, orgKey = false): string[] {
   return [
+    ...(orgKey ? [ORG_KEY_SECRET] : []),
     'BACKUP_RECIPIENT',
     'BACKUP_S3_ENDPOINT',
     'BACKUP_S3_BUCKET',
@@ -138,7 +150,9 @@ export function plan(cfg: ProjectConfig, obs: Observed): Action[] {
   if (bucketIsNew || !obs.lifecycle) actions.push({ kind: 'set-lifecycle' });
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once.
-  const names = requiredSecrets(cfg.tunnel).filter((n) => !obs.secrets.has(n));
+  const names = requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey)).filter(
+    (n) => !obs.secrets.has(n),
+  );
   if (names.length > 0) actions.push({ kind: 'set-secrets', names });
   const current = obs.machines.filter((m) => m.state !== 'destroyed');
   if (

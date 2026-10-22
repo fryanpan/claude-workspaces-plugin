@@ -42,7 +42,9 @@ gh token from its own environment, and logs an error if a gh login file is on
 disk. `CW_PROJECT_PROFILE` picks the features: `standard` (the default) runs
 each one whose key is set; `claude-only` turns off transcription, ElevenLabs and
 Gemini, and the doc and board pages say so
-(`packages/server/src/project-profile.ts`).
+(`packages/server/src/project-profile.ts`). `machine:deploy` sets the key
+only when the Keychain holds `cw-<project>-anthropic-api-key`, which a person
+adds; a project without one runs with Claude off.
 
 ## What the deploy needs
 
