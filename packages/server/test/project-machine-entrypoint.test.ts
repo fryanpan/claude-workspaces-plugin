@@ -91,7 +91,9 @@ exec "$@"`,
   write('cloudflared', `${record}\nexec /bin/sleep 1000`);
   // The first backup waits an hour; everything else that sleeps waits long.
   write('sleep', 'case $1 in 3600) exit 0;; *) exec /bin/sleep 1000;; esac');
-  for (const name of ['mkdir', 'ln', 'chown', 'chmod']) write(name, 'exit 0');
+  for (const name of ['mkdir', 'ln', 'chown']) write(name, 'exit 0');
+  // Recorded, for the mode the snapshot is handed to the uploader with.
+  write('chmod', `echo "$*" >> "${log}/.chmod"`);
   return { bin, log };
 }
 
@@ -158,6 +160,9 @@ describe.skipIf(BASH === null)('the project machine process tree', () => {
 
       expect(snapshot?.uid).toBe('cw');
       expect(uploader?.uid).toBe('cwbackup');
+      // The snapshot is made 0600; the uploader reads it through its group.
+      const chmods = readFileSync(join(log, '.chmod'), 'utf8').trim().split('\n');
+      expect(chmods).toContain('0640 /data/backup-outbox/snapshot.cwsnap');
 
       const values = Object.values(SECRETS);
       // Nothing the server's user runs holds a secret, under any name.

@@ -36,6 +36,11 @@ status=0
   umask 027
   run_as cw bun run "$APP/infra/project-machine/backup.ts" --out "$SNAPSHOT"
 ) || status=$?
+# backup.ts creates the snapshot 0600, so its group cannot read it even in
+# the setgid outbox. Root opens it to that group, cwbackup, and no wider.
+if [ "$status" = 0 ]; then
+  chmod 0640 "$SNAPSHOT" || status=$?
+fi
 if [ "$status" = 0 ]; then
   (
     only_env PATH BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET BACKUP_S3_REGION BACKUP_S3_PREFIX \
