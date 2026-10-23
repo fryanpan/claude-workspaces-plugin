@@ -11,6 +11,16 @@
  * that user, its arguments and its whole environment. The uploader's record
  * holding the bucket credential is the positive control: the recorder sees a
  * secret when one is there.
+ *
+ * The root steps (security review, 23 October 2026, S1): root must never
+ * change the owner or mode of a path `cw` could have swapped for a symlink.
+ * The volume's root is a scratch directory here (`CW_MACHINE_DATA_ROOT`).
+ * A test cannot run as root, so `chown` is a stub that records its
+ * arguments and whether each one was a symlink when it ran; `mkdir` and
+ * `chmod` are real where a test says so, so a followed link shows up as a
+ * changed mode on the link's target. What this does not prove: that Linux's
+ * `chown -h` and `[ -O ]` behave as the stubs and macOS's do, and that cw
+ * cannot write the volume's root on a real machine. That is the image's.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
@@ -21,6 +31,8 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +41,7 @@ import { waitFor } from './wait-for.ts';
 
 const repoRoot = join(import.meta.dir, '..', '..', '..');
 const entrypoint = join(repoRoot, 'infra', 'project-machine', 'entrypoint.sh');
+const backupOnce = join(repoRoot, 'infra', 'project-machine', 'backup-once.sh');
 
 /** Fixture secrets: obviously fake, and distinct, so a leak names itself. */
 const SECRETS = {
@@ -60,13 +73,20 @@ interface Rec {
   env: Map<string, string>;
 }
 
-function stubs(idOutput: string): { bin: string; log: string } {
+function stubs(
+  idOutput: string,
+  real: string[] = [],
+): { bin: string; log: string; volume: string } {
   const root = mkdtempSync(join(scratch, 'run-'));
+  // The volume's root: the test user's, 0700, so only its owner writes it.
+  const volume = join(root, 'data');
+  mkdirSync(volume, { mode: 0o700 });
   const bin = join(root, 'bin');
   const log = join(root, 'log');
   mkdirSync(bin);
   mkdirSync(log);
   const write = (name: string, body: string) => {
+    if (real.includes(name)) return;
     writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`);
     chmodSync(join(bin, name), 0o755);
   };
@@ -91,10 +111,17 @@ exec "$@"`,
   write('cloudflared', `${record}\nexec /bin/sleep 1000`);
   // The first backup waits an hour; everything else that sleeps waits long.
   write('sleep', 'case $1 in 3600) exit 0;; *) exec /bin/sleep 1000;; esac');
-  for (const name of ['mkdir', 'ln', 'chown']) write(name, 'exit 0');
+  for (const name of ['mkdir', 'ln']) write(name, 'exit 0');
+  // Each line is the user it ran as and its arguments; a symlink among them
+  // adds a line of its own.
+  write(
+    'chown',
+    `for a in "$@"; do if [ -L "$a" ]; then echo "link $a" >> "${log}/.chown"; fi; done
+echo "\${STUB_UID:-root} $*" >> "${log}/.chown"`,
+  );
   // Recorded, for the mode the snapshot is handed to the uploader with.
-  write('chmod', `echo "$*" >> "${log}/.chmod"`);
-  return { bin, log };
+  write('chmod', `echo "\${STUB_UID:-root} $*" >> "${log}/.chmod"`);
+  return { bin, log, volume };
 }
 
 function readRecords(log: string): { recs: Rec[]; setprivArgv: string[] } {
@@ -118,9 +145,18 @@ function readRecords(log: string): { recs: Rec[]; setprivArgv: string[] } {
   return { recs, setprivArgv };
 }
 
-function machineEnv(bin: string): Record<string, string> {
+function lines(log: string, name: string): string[] {
+  try {
+    return readFileSync(join(log, name), 'utf8').trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function machineEnv(bin: string, volume: string): Record<string, string> {
   return {
     PATH: `${bin}:${dirname(BASH ?? '/bin/bash')}:/usr/bin:/bin`,
+    CW_MACHINE_DATA_ROOT: volume,
     ...SECRETS,
     ...SERVER_OWN,
     BACKUP_RECIPIENT: 'age1harborlight',
@@ -131,10 +167,10 @@ function machineEnv(bin: string): Record<string, string> {
 
 describe.skipIf(BASH === null)('the project machine process tree', () => {
   it('runs the server as cw without the tunnel token or the bucket credential', async () => {
-    const { bin, log } = stubs('0');
+    const { bin, log, volume } = stubs('0');
     // Its own process group, so the test can stop everything it started.
     const child = spawn(BASH as string, [entrypoint], {
-      env: machineEnv(bin),
+      env: machineEnv(bin, volume),
       detached: true,
       stdio: 'ignore',
     });
@@ -161,8 +197,15 @@ describe.skipIf(BASH === null)('the project machine process tree', () => {
       expect(snapshot?.uid).toBe('cw');
       expect(uploader?.uid).toBe('cwbackup');
       // The snapshot is made 0600; the uploader reads it through its group.
-      const chmods = readFileSync(join(log, '.chmod'), 'utf8').trim().split('\n');
-      expect(chmods).toContain('0640 /data/backup-outbox/snapshot.cwsnap');
+      // cw opens it, not root: the name is in a directory cw writes.
+      const snap = `${volume}/backup-outbox/snapshot.cwsnap`;
+      expect(lines(log, '.chmod').filter((l) => l.endsWith(snap))).toEqual([`cw 0640 ${snap}`]);
+      // Root takes the volume's root back, and gives cw only what is inside.
+      const chowns = lines(log, '.chown');
+      expect(chowns).toContain(`root root:root ${volume}`);
+      expect(lines(log, '.chmod')).toContain(`root 0755 ${volume}`);
+      expect(chowns.filter((l) => l.includes('cw:') && l.split(' ').includes(volume))).toEqual([]);
+      expect(chowns.filter((l) => l.startsWith('link '))).toEqual([]);
 
       const values = Object.values(SECRETS);
       // Nothing the server's user runs holds a secret, under any name.
@@ -198,9 +241,81 @@ describe.skipIf(BASH === null)('the project machine process tree', () => {
   }, 30_000);
 
   it('refuses to start as any user but root', () => {
-    const { bin, log } = stubs('10001');
-    const r = spawnSync(BASH as string, [entrypoint], { env: machineEnv(bin), encoding: 'utf8' });
+    const { bin, log, volume } = stubs('10001');
+    const r = spawnSync(BASH as string, [entrypoint], {
+      env: machineEnv(bin, volume),
+      encoding: 'utf8',
+    });
     expect(r.status).toBe(2);
     expect(readRecords(log).recs).toEqual([]);
+  }, 30_000);
+});
+
+describe.skipIf(BASH === null)('root on the volume', () => {
+  /** A directory a symlink can point at, with a mode a followed chmod changes. */
+  function victim(): string {
+    const dir = mkdtempSync(join(scratch, 'victim-'));
+    chmodSync(dir, 0o700);
+    return dir;
+  }
+  const modeOf = (p: string) => statSync(p).mode & 0o7777;
+
+  it('refuses to back up when the outbox is a symlink, and changes nothing it points at', () => {
+    const { bin, log, volume } = stubs('0', ['mkdir', 'chmod']);
+    const target = victim();
+    symlinkSync(target, join(volume, 'backup-outbox'));
+    const r = spawnSync(BASH as string, [backupOnce], {
+      env: machineEnv(bin, volume),
+      encoding: 'utf8',
+    });
+    // A real chmod 2750 through the link would have changed this.
+    expect(modeOf(target)).toBe(0o700);
+    expect(lines(log, '.chown')).toEqual([]);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('is a symlink');
+    expect(readRecords(log).recs).toEqual([]);
   });
+
+  it('refuses to back up when anyone but its owner can write the volume root', () => {
+    const { bin, log, volume } = stubs('0', ['mkdir', 'chmod']);
+    chmodSync(volume, 0o775);
+    const r = spawnSync(BASH as string, [backupOnce], {
+      env: machineEnv(bin, volume),
+      encoding: 'utf8',
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('only root can write');
+    expect(lines(log, '.chown')).toEqual([]);
+    expect(readRecords(log).recs).toEqual([]);
+  });
+
+  it('refuses to boot when the data dir is a symlink, and never chowns through it', async () => {
+    const { bin, log, volume } = stubs('0');
+    symlinkSync(victim(), join(volume, 'cw'));
+    // Detached, so a boot that does not refuse is stopped rather than left
+    // running its children.
+    const child = spawn(BASH as string, [entrypoint], {
+      env: machineEnv(bin, volume),
+      detached: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr?.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
+    let status: number | null = null;
+    child.on('close', (code) => {
+      status = code;
+    });
+    try {
+      await waitFor(() => status !== null, { timeout: 10_000, describe: 'the entrypoint to exit' });
+    } finally {
+      if (status === null && child.pid) process.kill(-child.pid, 'SIGKILL');
+    }
+    expect(status as number | null).toBe(2);
+    expect(stderr).toContain(`${volume}/cw is a symlink`);
+    expect(lines(log, '.chown').filter((l) => l.startsWith('link '))).toEqual([]);
+    expect(lines(log, '.chown').filter((l) => l.includes('cw:'))).toEqual([]);
+    expect(readRecords(log).recs).toEqual([]);
+  }, 30_000);
 });

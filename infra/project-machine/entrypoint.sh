@@ -20,7 +20,8 @@
 # as an argument, because any user can read any process's arguments.
 set -euo pipefail
 
-DATA_ROOT=/data
+# The volume. Overridable only so a test can run this off a machine.
+DATA_ROOT="${CW_MACHINE_DATA_ROOT:-/data}"
 export CW_DATA_DIR="${CW_DATA_DIR:-$DATA_ROOT/cw}"
 PORT=8787
 APP=/app
@@ -33,6 +34,20 @@ if [ "$(id -u)" != 0 ]; then
   exit 2
 fi
 
+# Root never changes the owner of a path cw could have swapped for a link.
+# The volume's root is root's and only root writes it, so cw cannot rename
+# or replace the names in it while root works; the directories cw is given
+# are checked for a link before root touches them. Nothing runs as cw yet:
+# a machine that stops stops every process, so none survives into this boot.
+# A volume from before this rule had /data owned by cw; this takes it back.
+chown root:root "$DATA_ROOT"
+chmod 0755 "$DATA_ROOT"
+for d in "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude; do
+  if [ -L "$d" ]; then
+    echo "[machine] $d is a symlink; refusing to start" >&2
+    exit 2
+  fi
+done
 mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
 # Claude Code writes session transcripts to ~/.claude/projects. The home
 # directory is the image's and does not survive a restart, so that one
@@ -40,7 +55,7 @@ mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
 # rest of ~/.claude (credentials among it) stays off the volume and out
 # of every backup.
 ln -sfn "$TRANSCRIPTS" /home/cw/.claude/projects
-chown cw:cw "$DATA_ROOT" "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
+chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
 
 # shellcheck source=run-as.sh
 . "$HERE/run-as.sh"
