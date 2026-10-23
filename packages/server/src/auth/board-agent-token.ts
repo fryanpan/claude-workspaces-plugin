@@ -23,9 +23,19 @@
  * nothing — and is still written mode 600. A revoked record is kept, marked,
  * never deleted.
  *
- * No expiry, for the reason `agent-token.ts` gives: the holder keeps it for
- * the life of a session and has no re-mint path from off the machine.
- * Revocation is the record.
+ * It expires (`BOARD_AGENT_TOKEN_TTL_MS`, carried in the value), and the
+ * holder renews it from off the machine without anyone minting by hand:
+ * `POST /api/board-tokens/refresh`, presenting the live token, answers a
+ * fresh value for the same record (`routes/board-tokens.ts`). The relay does
+ * that once half the life has gone (`org-relay/relay-bearers.ts`). So the
+ * expiry bounds a token nobody is using, a copy left in an old config or a
+ * log, and revocation stays the record: a revoked id refreshes nothing.
+ *
+ * A value minted before the expiry existed has four fields and no expiry. It
+ * still verifies while its record stands, for one release, because the relay
+ * holding one cannot be restarted onto a new value by this server; the
+ * refresh route turns it into one that expires. `legacyBoardAgentToken` is
+ * where that window is closed.
  */
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -48,19 +58,39 @@ export interface BoardAgentClaims {
   boardId: string;
 }
 
-export const boardAgentToken: TokenFormat<BoardAgentClaims> = {
+/** Seven days. The relay renews at half of it, so a relay that is down for
+ *  more than three days still comes back to a live token. */
+export const BOARD_AGENT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The claims the value carries: the grant, plus when it stops verifying.
+ *  Null only for a value minted before the expiry existed. */
+export interface BoardAgentTokenClaims extends BoardAgentClaims {
+  expiresAt: number | null;
+}
+
+/**
+ * `at2.<tokenId>.<agentId>.<boardId>.<expiresAt ms>`, or the four-field
+ * shape with no expiry that values minted before 22 Oct 2026 carry.
+ */
+export const boardAgentToken: TokenFormat<BoardAgentTokenClaims> = {
   keyDomain: 'cw-board-agent-token-v1',
   tags: [VERSION],
-  encode: (c) => [VERSION, c.tokenId, c.agentId, c.boardId].join('.'),
+  encode: (c) =>
+    [VERSION, c.tokenId, c.agentId, c.boardId, ...(c.expiresAt === null ? [] : [c.expiresAt])].join(
+      '.',
+    ),
   decode(payload) {
-    const [version, tokenId, agentId, boardId, ...rest] = payload.split('.');
+    const [version, tokenId, agentId, boardId, expiresRaw, ...rest] = payload.split('.');
     if (version !== VERSION || rest.length > 0) return null;
     if (!tokenId || !TOKEN_ID.test(tokenId)) return null;
     if (!agentId || !AGENT_ID.test(agentId)) return null;
     if (!boardId || !BOARD_ID.test(boardId)) return null;
-    return { tokenId, agentId, boardId };
+    if (expiresRaw === undefined) return { tokenId, agentId, boardId, expiresAt: null };
+    const expiresAt = Number(expiresRaw);
+    if (!/^\d{1,15}$/.test(expiresRaw) || !Number.isSafeInteger(expiresAt)) return null;
+    return { tokenId, agentId, boardId, expiresAt };
   },
-  expiresAt: () => null,
+  expiresAt: (c) => c.expiresAt,
 };
 
 /** This format's key, derived from the one key file under its own domain. */
@@ -103,6 +133,8 @@ export interface BoardTokenRecord {
   /** Who asked for it, as the mint request said. Informational. */
   label: string;
   createdAt: number;
+  /** When the holder last renewed it (`refresh`). Informational. */
+  refreshedAt?: number;
   revokedAt?: number;
 }
 
@@ -145,7 +177,7 @@ export class BoardAgentTokens {
     agentId: string,
     boardId: string,
     label: string,
-  ): { record: BoardTokenRecord; token: string } {
+  ): { record: BoardTokenRecord; token: string; expiresAt: number } {
     if (!AGENT_ID.test(agentId)) throw new Error('bad agentId');
     if (!BOARD_ID.test(boardId)) throw new Error('bad boardId');
     const record: BoardTokenRecord = {
@@ -157,8 +189,27 @@ export class BoardAgentTokens {
     };
     this.load().push(record);
     this.save();
-    const claims = { tokenId: record.id, agentId, boardId };
-    return { record: { ...record }, token: mintToken(boardAgentToken, claims, this.key()) };
+    return { record: { ...record }, ...this.sign(record) };
+  }
+
+  /**
+   * A fresh value for the record a live token names, with a new expiry. The
+   * caller has already verified the token it was handed (`verify`), so this
+   * only re-reads the record: one revoked in between refreshes nothing.
+   */
+  refresh(grant: BoardAgentClaims): { token: string; expiresAt: number } | null {
+    const r = this.load().find((x) => x.id === grant.tokenId);
+    if (!r || r.revokedAt !== undefined) return null;
+    if (r.agentId !== grant.agentId || r.boardId !== grant.boardId) return null;
+    r.refreshedAt = this.now();
+    this.save();
+    return this.sign(r);
+  }
+
+  private sign(r: BoardTokenRecord): { token: string; expiresAt: number } {
+    const expiresAt = this.now() + BOARD_AGENT_TOKEN_TTL_MS;
+    const claims = { tokenId: r.id, agentId: r.agentId, boardId: r.boardId, expiresAt };
+    return { token: mintToken(boardAgentToken, claims, this.key()), expiresAt };
   }
 
   list(): BoardTokenRecord[] {
@@ -184,14 +235,34 @@ export class BoardAgentTokens {
    * same answer, so a caller learns nothing about which check refused.
    */
   verify(bearer: string | null): BoardAgentClaims | null {
-    const claims = tokenClaims(boardAgentToken, bearer, this.key());
+    const claims = tokenClaims(boardAgentToken, bearer, this.key(), this.now());
     if (!claims) return null;
+    if (claims.expiresAt === null && !legacyBoardAgentToken.accepted) return null;
     const r = this.load().find((x) => x.id === claims.tokenId);
     if (!r || r.revokedAt !== undefined) return null;
     if (r.agentId !== claims.agentId || r.boardId !== claims.boardId) return null;
-    return claims;
+    if (claims.expiresAt === null) legacyBoardAgentToken.warn(r.id);
+    return { tokenId: claims.tokenId, agentId: claims.agentId, boardId: claims.boardId };
   }
 }
+
+/**
+ * The one-release window for a value with no expiry. `accepted` turns false
+ * in the release after this one; until then each such id is logged once, so
+ * the operator can see which holders have not yet refreshed.
+ */
+export const legacyBoardAgentToken = {
+  accepted: true,
+  seen: new Set<string>(),
+  warn(tokenId: string): void {
+    if (this.seen.has(tokenId)) return;
+    this.seen.add(tokenId);
+    console.warn(
+      `[claude-workspaces] board token ${tokenId} has no expiry; its holder should ` +
+        'POST /api/board-tokens/refresh for one that does. Values without one stop verifying next release.',
+    );
+  },
+};
 
 function isRecord(r: unknown): r is BoardTokenRecord {
   if (!r || typeof r !== 'object') return false;

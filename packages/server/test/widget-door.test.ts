@@ -7,13 +7,11 @@
  * `widget-door-http.test.ts`. Fixtures are fictional hosts; the repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { mintSession } from '../src/auth/session.ts';
+import { mintSession, sessionKey, signSession } from '../src/auth/session.ts';
 import {
   BOARD_WIDGET_TOKEN_TTL_MS,
   mintBoardWidgetToken,
-  mintWidgetToken,
   verifyBoardWidgetToken,
-  verifyWidgetToken,
   widgetTokenKey,
 } from '../src/auth/widget-token.ts';
 import { classifyHost, isWidgetDoorHost } from '../src/middleware/host-guard.ts';
@@ -183,6 +181,7 @@ describe('the board widget token (wt2)', () => {
       ...grant,
       issuedAt: now,
       expiresAt: now + BOARD_WIDGET_TOKEN_TTL_MS,
+      sessionId: null,
     });
     expect(BOARD_WIDGET_TOKEN_TTL_MS).toBe(24 * 60 * 60 * 1000);
   });
@@ -193,7 +192,7 @@ describe('the board widget token (wt2)', () => {
     expect(verifyBoardWidgetToken(token, KEY, now + BOARD_WIDGET_TOKEN_TTL_MS + 1)).toBeNull();
   });
 
-  it('refuses another key, a tampered board, and a session token in its place', () => {
+  it('refuses another key, a tampered board, and a session cookie in its place', () => {
     const token = mintBoardWidgetToken(grant, KEY, now);
     expect(verifyBoardWidgetToken(token, widgetTokenKey('other-cookie-key'), now)).toBeNull();
     const [payload, sig] = [
@@ -203,10 +202,8 @@ describe('the board widget token (wt2)', () => {
     const parts = payload.split('.');
     parts[4] = Buffer.from('w-saltmarsh').toString('base64url');
     expect(verifyBoardWidgetToken(`${parts.join('.')}${sig}`, KEY, now)).toBeNull();
-    // The two tags never cross: same key, same scheme, different shapes.
-    const session = mintWidgetToken(mintSession('user-abc123', now), PAGE, KEY, now) as string;
-    expect(verifyBoardWidgetToken(session, KEY, now)).toBeNull();
-    expect(verifyWidgetToken(token, KEY, now)).toBeNull();
+    const cookie = signSession(mintSession('user-abc123', now), sessionKey('test-cookie-key'));
+    expect(verifyBoardWidgetToken(cookie, KEY, now)).toBeNull();
   });
 
   it('keeps a workspace id or origin with dots whole', () => {

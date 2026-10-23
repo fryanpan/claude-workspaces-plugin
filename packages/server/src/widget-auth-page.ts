@@ -1,17 +1,18 @@
 /**
- * The widget sign-in popup — the one page in the popup-token handshake.
+ * The widget sign-in popup — the one page in the sign-in popup handshake.
  *
- * The widget (on a dev server's origin) opens this page ON the workspace
+ * The widget (on an app page's origin) opens this page ON the workspace
  * origin, so the `cw_session` cookie flows: `window.open` is a top-level
  * navigation, which SameSite=Lax permits. The page exchanges that session
- * for a widget token (`POST /api/auth/widget-token`) and hands the token to
+ * for a board token (`POST /api/auth/widget-token`, `wt2`: the widget's
+ * board, the page's origin, one day, ended by logout) and hands the token to
  * `window.opener` via postMessage — targeted at the SERVER-VALIDATED origin
  * the response echoes back, never `*`, so the browser refuses delivery to
  * anything but the embedding page the server approved.
  *
  * A page on the tailnet widget door opens this on the PUBLIC host instead,
  * where the person is proven by Cloudflare Access rather than a session
- * cookie, and names its board so the token can be scoped to it
+ * cookie. Either way the page names its board, and the token is scoped to it
  * (middleware/widget-door.ts).
  *
  * Served with `X-Frame-Options: DENY` (see the route): inside an iframe the
@@ -43,8 +44,7 @@ export function widgetAuthPage(): string {
   const say = (html) => { status.innerHTML = html; };
   const params = new URLSearchParams(location.search);
   const origin = params.get('origin') || '';
-  // The board a tailnet page's widget is on. Only a door origin's token
-  // carries it; the server ignores it for every other page.
+  // The board the widget is on. The token opens that board and no other.
   const workspaceId = params.get('workspace') || '';
   if (!window.opener) {
     say('This page is opened by the feedback widget\\u2019s \\u201cSign in\\u201d button \\u2014 it does nothing on its own.');

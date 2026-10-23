@@ -224,7 +224,7 @@ export function resolveServerConfig(opts: {
    * no way to sign in, so flipping the gate would have refused every comment
    * from every mockup and dev page with nothing on screen that could fix it.
    * The widget now asks `GET /api/auth/session` on load and offers the
-   * popup-token handshake whenever the answer is `signInToWrite:true` — and
+   * sign-in popup handshake whenever the answer is `signInToWrite:true` — and
    * again as the backstop when a write comes back `sign_in_required` — so the
    * refusal always arrives with the control that lifts it. The board app has
    * carried its own prompt since the gate shipped. Agents are untouched: the

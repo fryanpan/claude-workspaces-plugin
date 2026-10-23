@@ -17,7 +17,7 @@
  *
  * None of the three existing schemes fits. The share link-session cookie and
  * the auth session cookie are cookies: the frame's script must hold this
- * value, and must never hold those. The widget popup token names a person
+ * value, and must never hold those. The widget token names a person
  * for a widget origin and no doc, so a mock holding one could open another
  * doc's socket.
  */

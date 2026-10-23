@@ -88,21 +88,21 @@ describe('connect().reconnect()', () => {
  */
 describe('a token the handshake was refused with', () => {
   it('is left off the next attempt only', () => {
-    const client = connect('ws://localhost:0/y/test', () => 'wt1.dead');
+    const client = connect('ws://localhost:0/y/test', () => 'wt2.dead');
     opened[0]?.fire('close');
     vi.advanceTimersByTime(500);
     opened[1]?.fire('close');
     vi.advanceTimersByTime(1000);
-    expect(opened.map((s) => s.protocol)).toEqual(['wt1.dead', undefined, 'wt1.dead']);
+    expect(opened.map((s) => s.protocol)).toEqual(['wt2.dead', undefined, 'wt2.dead']);
     client.close();
   });
 
   it('CONTROL: a socket that opened and then closed keeps its token', () => {
-    const client = connect('ws://localhost:0/y/test', () => 'wt1.live');
+    const client = connect('ws://localhost:0/y/test', () => 'wt2.live');
     opened[0]?.fire('open');
     opened[0]?.fire('close');
     vi.advanceTimersByTime(500);
-    expect(opened.map((s) => s.protocol)).toEqual(['wt1.live', 'wt1.live']);
+    expect(opened.map((s) => s.protocol)).toEqual(['wt2.live', 'wt2.live']);
     client.close();
   });
 });

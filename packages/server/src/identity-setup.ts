@@ -3,13 +3,14 @@
  * predicates that answer "who is this request".
  *
  * One module because they are one chain. A session cookie names a session,
- * a widget token names the same session, and every liveness rule the cookie
- * faces — the failed-closed denylist, the per-session revocations a logout
- * writes, roster status, the `sessionsValidFrom` watermark — has to apply to
- * the token on every use as well. `sessionIdentityFor` and
- * `widgetTokenIdentityFor` are written to read the same, deliberately, so an
- * edit to one is obviously a change to both; splitting them would be the
- * drift that lets a revoked session keep commenting through its token.
+ * a widget token minted from it names the same session, and every liveness
+ * rule the cookie faces — the failed-closed denylist, the per-session
+ * revocations a logout writes, roster status, the `sessionsValidFrom`
+ * watermark — has to apply to the token on every use as well.
+ * `sessionIdentityFor` and `boardWidgetGrantFor` are written to read the
+ * same, deliberately, so an edit to one is obviously a change to both;
+ * splitting them would be the drift that lets a revoked session keep
+ * commenting through its token.
  *
  * The roster is built here whether or not `CW_REQUIRE_EMAIL_AUTH` is set:
  * the flag governs what a session MEANS, not whether a person can create
@@ -43,7 +44,6 @@ import {
 import {
   widgetTokenKey as deriveWidgetTokenKey,
   verifyBoardWidgetToken,
-  verifyWidgetToken,
 } from './auth/widget-token.ts';
 import { Identities, type IdentityRecord } from './identities.ts';
 import { loadIdentityLinks } from './identity-links.ts';
@@ -213,7 +213,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
   };
 
   /**
-   * The widget popup-token a request presents, or null.
+   * The widget token a request presents, or null.
    *
    * Only `Bearer wt1.…` / `Bearer wt2.…` is ours — any other Authorization
    * value is somebody else's protocol and must stay invisible here, so
@@ -229,21 +229,35 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
   };
 
   /**
-   * What a BOARD widget token (`wt2`) grants, or null: the identity it names
-   * and the one board it reaches.
+   * What a widget board token (`wt2`) grants, or null: the identity it names,
+   * the one board it reaches, and whether a session (rather than Access) is
+   * what proved the person.
    *
-   * The same liveness rules a session faces, minus the one that cannot apply.
-   * There is no session id to revoke, so logout ends nothing here; what ends a
-   * board token early is the roster — an identity that is not `active`, or
-   * whose `sessionsValidFrom` watermark has moved past the token's mint time.
-   * `failedClosed` stays for the reason it stays in `sessionIdentityFor`: with
-   * the revocation store broken nothing can be told apart, and a widget door
-   * that kept admitting through that state would be the one hole in it.
+   * The same liveness rules a session faces. Every token answers to the
+   * roster: an identity that is not `active`, or whose `sessionsValidFrom`
+   * watermark has moved past the token's mint time, is refused. Status is
+   * load-bearing on its own, not only via the watermark: `archive()` bumps
+   * sessionsValidFrom, but a roster row hand-edited to `archived` carries no
+   * bump, and only that check refuses its tokens. Then, by what minted it:
+   *
+   * - **A session.** The per-session revocation a logout writes ends it, as
+   *   it ends the cookie.
+   * - **Access.** There is no session to revoke, so the holder must still
+   *   have a role on the board that lets them comment: minting checked it
+   *   once, and a member removed since must not keep commenting for the rest
+   *   of the day.
+   *
+   * `presentedOrigin` is the request's `Origin` header. The token was minted
+   * for exactly one page origin, and only a request the browser stamped with
+   * that origin may use it: absent (curl, a server-side replay), `null` (an
+   * opaque origin) or any other origin is refused. `failedClosed` stays for
+   * the reason it stays in `sessionIdentityFor`: with the revocation store
+   * broken nothing can be told apart.
    */
   const boardWidgetGrantFor = (
     raw: string,
     presentedOrigin: string | null,
-  ): { identity: IdentityRecord; workspaceId: string } | null => {
+  ): { identity: IdentityRecord; workspaceId: string; sessionBound: boolean } | null => {
     if (sessionRevocations.failedClosed()) return null;
     const claims = verifyBoardWidgetToken(raw, widgetTokenKey());
     if (!claims) return null;
@@ -251,56 +265,29 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     const rec = identities.get(claims.identityId);
     if (!rec || rec.status !== 'active') return null;
     if (claims.issuedAt < rec.sessionsValidFrom) return null;
-    // And the holder must still have a role on the board that lets them
-    // comment. Minting checked it once; a member removed since then must not
-    // keep commenting for the rest of the day.
-    if (!rec.email || !mayCommentOnBoard(claims.workspaceId, rec.email)) return null;
-    return { identity: rec, workspaceId: claims.workspaceId };
+    if (claims.sessionId !== null) {
+      if (sessionRevocations.isRevoked(claims.sessionId)) return null;
+    } else if (!rec.email || !mayCommentOnBoard(claims.workspaceId, rec.email)) {
+      return null;
+    }
+    return {
+      identity: rec,
+      workspaceId: claims.workspaceId,
+      sessionBound: claims.sessionId !== null,
+    };
   };
 
   /**
-   * The identity a widget token attests to, or null. The mirror of
-   * `sessionIdentityFor`: the token names a session, so every liveness rule
-   * a cookie faces — the failed-closed denylist, the per-session revocation
-   * logout writes, roster status, the `sessionsValidFrom` watermark —
-   * applies to the token on every use. Remove any of these and a revoked
-   * session keeps commenting through its token.
-   *
-   * `presentedOrigin` is the request's `Origin` header. The token was
-   * minted for exactly one page origin (signed in), and only a request the
-   * browser stamped with that origin may use it: absent (curl, a server-
-   * side replay), `null` (an opaque origin), or any other origin is a 401.
-   * The widget's every use is a cross-origin fetch, which always carries
-   * the header — this costs the real caller nothing and a thief everything.
+   * What a presented widget token attributes to, or null when it does not
+   * stand. Only a board token can: a `wt1` value (the retired seven-day
+   * token) is refused like a forged one, so the widget holding it hears
+   * "signed out" and offers sign-in again.
    */
-  const widgetTokenIdentityFor = (
+  const widgetTokenGrantFor = (
     raw: string,
     presentedOrigin: string | null,
-  ): IdentityRecord | null => {
-    // Belt-and-braces, deliberately: `isRevoked` below already answers true
-    // while the denylist is failed closed, and a widget token always
-    // carries a session id (verifyWidgetToken refuses one without), so this
-    // line is never the only thing refusing. It mirrors sessionIdentityFor,
-    // where a v1 cookie has no session id and WOULD skip `isRevoked`; kept
-    // so the two gates read the same and a future edit to one is obviously
-    // a change to both. Mutation-tested: removing it turns nothing red.
-    if (sessionRevocations.failedClosed()) return null;
-    // A board token attributes exactly as a session token does; which board
-    // it may reach is the widget door's question, not attribution's.
-    if (raw.startsWith('wt2.')) return boardWidgetGrantFor(raw, presentedOrigin)?.identity ?? null;
-    const claims = verifyWidgetToken(raw, widgetTokenKey());
-    if (!claims) return null;
-    if (presentedOrigin === null || presentedOrigin !== claims.origin) return null;
-    if (sessionRevocations.isRevoked(claims.sessionId)) return null;
-    const rec = identities.get(claims.identityId);
-    // Status is load-bearing on its own, not only via the watermark:
-    // `archive()` bumps sessionsValidFrom, but a roster row hand-edited to
-    // `archived` (the file is meant to be editable) carries no bump, and
-    // only this check refuses its tokens. Pinned in the routes test.
-    if (!rec || rec.status !== 'active') return null;
-    if (claims.sessionIssuedAt < rec.sessionsValidFrom) return null;
-    return rec;
-  };
+  ): { identity: IdentityRecord; workspaceId: string } | null =>
+    raw.startsWith('wt2.') ? boardWidgetGrantFor(raw, presentedOrigin) : null;
 
   /**
    * Which client the login rate limits count this request against.
@@ -413,7 +400,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     emailSessionKey,
     widgetTokenKey,
     widgetBearerOf,
-    widgetTokenIdentityFor,
+    widgetTokenGrantFor,
     boardWidgetGrantFor,
     clientKeyFor,
     isSecureRequest,

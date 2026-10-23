@@ -131,10 +131,9 @@ export function mountVoiceMode(
         : // The tailnet widget door asks every route but its two static
           // scripts for the reviewer's board token, and a browser cannot set
           // a header on a WebSocket — so it rides as the one subprotocol
-          // offered, which is what the door reads. Only a BOARD token, never
-          // a session one, for the reason the doc socket gives in
-          // `widget.ts`: a session token that died on a localhost socket
-          // would turn a read-only socket into a refused one.
+          // offered, which is what the door reads. Only a board token: a
+          // retired `wt1` left in storage would be refused, and unlike the
+          // doc socket this one does not retry without it.
           (new WebSocket(
             u,
             widget.authToken?.startsWith('wt2.') ? widget.authToken : undefined,

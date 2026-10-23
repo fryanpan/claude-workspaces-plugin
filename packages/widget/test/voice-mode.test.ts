@@ -452,10 +452,9 @@ describe('the recorder’s socket', () => {
     expect(opened[0]?.[1]).toBe('wt2.abc.def.ghi.jkl');
   });
 
-  it('offers nothing where there is no board token, and never a session one', () => {
+  it('offers nothing where there is no board token, nor a retired wt1 left in storage', () => {
     expect(mountWithRealSocket(null)[0]?.[1]).toBeUndefined();
-    // A `wt1` is a SESSION token. It dies at logout, and the doc socket
-    // refuses to ride one for the same reason.
+    // The server refuses a `wt1`, and this socket does not retry without it.
     expect(mountWithRealSocket('wt1.abc.def')[0]?.[1]).toBeUndefined();
   });
 });
