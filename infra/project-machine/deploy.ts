@@ -25,7 +25,7 @@
  * Why Tigris: README.md.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -150,7 +150,12 @@ function secretValue(cfg: ProjectConfig, name: string): string {
 }
 
 function deploy(cfg: ProjectConfig): void {
-  const ctx = mkdtempSync(join(tmpdir(), `${cfg.app}-build-`));
+  // Through the keeper, `fly deploy` runs as the keeper's user, which cannot
+  // open this user's temp folder; the context is the public repo at one
+  // commit, so it is built where any user may read it.
+  const viaKeeper = Boolean(process.env.CW_KEEPER_URL?.trim());
+  const ctx = mkdtempSync(join(viaKeeper ? '/tmp' : tmpdir(), `${cfg.app}-build-`));
+  if (viaKeeper) chmodSync(ctx, 0o755);
   try {
     const archive = spawnSync(
       'sh',
