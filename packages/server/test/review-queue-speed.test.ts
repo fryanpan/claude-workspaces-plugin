@@ -4,12 +4,13 @@
  * The route took 2.2s a call on the 6,000-key fixture: every ranked item asks
  * the coach's privacy check whether its place is off, the check asks the repo
  * registry for the key of every doc on the item's board, and the registry
- * answered by walking all of its keys. The registry now looks a doc up.
+ * answered by walking all of its keys. The registry now looks a doc up, and
+ * since 2026-10-23 a rank asks the privacy check nothing at all.
  *
  * These cases pin what the queue answers, so a faster path cannot change it:
- * the same items in the same order as the walk gave, with the local-only
- * board's ranks still not counting, and every change to an item reaching the
- * next read. Fixtures are invented; the repo is public.
+ * the same items in the same order as the walk gave, the local-only board's
+ * ranks counting like any other (the owner, 2026-10-23: the plan lead sees
+ * every board he does), and every change to an item reaching the next read. Fixtures are invented; the repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -79,9 +80,12 @@ describe('the review queue over ranked boards', () => {
     expect(items).toEqual(walked);
 
     // The ranked items lead, in rank order. Ranks 1-3 were written on the
-    // Saltmarsh board, which is local-only, so they do not count.
+    // Saltmarsh board, which is local-only; they count all the same.
     const ranked = items.filter((i) => i.leadRank !== undefined).map(describeItem);
     expect(ranked).toEqual([
+      'Saltmarsh board | task-review | Which Saltmarsh gauge for chart 1? | easy rank=1 tag=not-this-week',
+      'Saltmarsh board | doc-thread | Riverbend, ready to publish Saltmarsh plan 2? | easy rank=2 tag=urgent',
+      'Saltmarsh board | doc-thread | Riverbend, ready to publish Saltmarsh plan 0? | easy rank=3 tag=not-this-week',
       'Riverbend board | task-thread | Riverbend, which Riverbend chart for shoal 9? | easy rank=4 tag=not-this-week',
       'Riverbend board | doc-thread | Riverbend, ready to publish Riverbend plan 1? | easy rank=5 tag=urgent',
       'Harborlight board | task-review | Which Harborlight gauge for chart 1? | easy rank=6 tag=not-this-week',
@@ -100,10 +104,7 @@ describe('the review queue over ranked boards', () => {
         'Riverbend board | doc-thread | Riverbend, ready to publish Riverbend plan 0? | easy',
         'Riverbend board | doc-thread | Riverbend, ready to publish Riverbend plan 2? | easy',
         'Riverbend board | task-review | Which Riverbend gauge for chart 1? | easy',
-        'Saltmarsh board | doc-thread | Riverbend, ready to publish Saltmarsh plan 0? | easy',
         'Saltmarsh board | doc-thread | Riverbend, ready to publish Saltmarsh plan 1? | easy',
-        'Saltmarsh board | doc-thread | Riverbend, ready to publish Saltmarsh plan 2? | easy',
-        'Saltmarsh board | task-review | Which Saltmarsh gauge for chart 1? | easy',
         'Saltmarsh board | task-thread | Riverbend, which Saltmarsh chart for shoal 9? | easy',
       ].sort(),
     );
