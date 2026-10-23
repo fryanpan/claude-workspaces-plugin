@@ -44,9 +44,13 @@ export const MAX_EMBEDS = 16;
 /** Asks the app door to leave the comment widget out of an embed's page. */
 export const EMBED_PARAM = 'cw-embed';
 
-/** The frame heights an embed may ask for. */
+/**
+ * The frame heights an embed may ask for. The frame does not scroll on its
+ * own, so the ceiling only stops a runaway report: 2,000 cut off the bottom
+ * of a 41-row table on a phone.
+ */
 export const EMBED_MIN_HEIGHT = 80;
-export const EMBED_MAX_HEIGHT = 2000;
+export const EMBED_MAX_HEIGHT = 10000;
 
 /** An https origin written exactly: no path, no wildcard, no credentials. */
 export function isExactHttpsOrigin(s: string): boolean {

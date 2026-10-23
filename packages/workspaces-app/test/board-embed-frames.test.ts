@@ -84,13 +84,21 @@ describe('board embed frames', () => {
       }),
     );
     expect(frame.style.height).toBe(before);
+    // A 41-row table on a phone is well past 2,000px; it gets all of it.
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: { type: 'sfworks:height', block: 'goal-chart', height: 99999 },
+        data: { type: 'sfworks:height', block: 'goal-chart', height: 4500 },
         source: own,
       }),
     );
-    expect(frame.style.height).toBe('2000px');
+    expect(frame.style.height).toBe('4500px');
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'sfworks:height', block: 'goal-chart', height: 50000 },
+        source: own,
+      }),
+    );
+    expect(frame.style.height).toBe('10000px');
     editor.destroy();
   });
 
