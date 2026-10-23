@@ -11,13 +11,17 @@
  * Renewed values are written to `bearers.json` in the relay's state directory
  * (mode 600; the directory is the relay's own and the leads cannot write it),
  * because the config file is what a person edits and the relay never writes
- * it. At start the newer of the two values for each board wins, so a restart
- * after a renewal does not fall back to the expired value in the config.
+ * it. Each saved value records a hash of the config value it was renewed
+ * from. At start a saved value wins only while the config still holds that
+ * same value, so a restart after a renewal does not fall back to the expired
+ * value in the config, and a person who puts a new token in the config gets
+ * that token even when the saved one expires later.
  *
  * The expiry is read from the token's own last dot-field before the MAC. The
  * relay trusts it only to decide WHEN to ask; the server decides whether the
  * token still stands.
  */
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RelayFetch } from './relay-client.ts';
@@ -45,7 +49,13 @@ export function bearersPath(stateDir: string): string {
   return join(stateDir, 'bearers.json');
 }
 
-type Saved = Record<string, Record<string, string>>;
+/** A renewed value, and a hash of the config value it was renewed from. */
+interface SavedBearer {
+  value: string;
+  from: string;
+}
+/** A bare string is the shape written before `from` existed. */
+type Saved = Record<string, Record<string, SavedBearer | string>>;
 
 function readSaved(path: string): Saved {
   try {
@@ -57,22 +67,45 @@ function readSaved(path: string): Saved {
   }
 }
 
+function hashOf(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+/** Each server's bearers as the config gave them, before any renewal. */
+const configValues = new WeakMap<RelayServer, Map<string, string>>();
+
+function configValuesOf(server: RelayServer): Map<string, string> {
+  let values = configValues.get(server);
+  if (!values) {
+    values = new Map(server.bearers);
+    configValues.set(server, values);
+  }
+  return values;
+}
+
 /**
- * Put each saved value over the config's when it expires later. A saved value
- * for a server or board the config no longer names is ignored: the config
- * decides what the relay reaches.
+ * Put each saved value over the config's when it was renewed from the value
+ * the config holds now. A saved value for a server or board the config no
+ * longer names is ignored: the config decides what the relay reaches. A value
+ * saved before `from` existed falls back to the older rule, the later expiry,
+ * and its next save records `from`.
  */
 export function applySavedBearers(config: RelayConfig, stateDir: string): void {
   const saved = readSaved(bearersPath(stateDir));
   for (const server of config.servers.values()) {
+    configValuesOf(server);
     const boards = saved[server.id];
     if (!boards || typeof boards !== 'object') continue;
-    for (const [board, value] of Object.entries(boards)) {
+    for (const [board, entry] of Object.entries(boards)) {
       const current = server.bearers.get(board);
-      if (current === undefined || typeof value !== 'string' || !TOKEN.test(value)) continue;
-      if ((bearerExpiresAt(value) ?? 0) > (bearerExpiresAt(current) ?? 0)) {
-        server.bearers.set(board, value);
-      }
+      if (current === undefined) continue;
+      const value = typeof entry === 'string' ? entry : entry?.value;
+      if (typeof value !== 'string' || !TOKEN.test(value)) continue;
+      const wins =
+        typeof entry === 'string'
+          ? (bearerExpiresAt(value) ?? 0) > (bearerExpiresAt(current) ?? 0)
+          : entry.from === hashOf(current);
+      if (wins) server.bearers.set(board, value);
     }
   }
 }
@@ -80,7 +113,13 @@ export function applySavedBearers(config: RelayConfig, stateDir: string): void {
 function save(config: RelayConfig, stateDir: string): void {
   const out: Saved = {};
   for (const server of config.servers.values()) {
-    out[server.id] = Object.fromEntries(server.bearers);
+    const from = configValuesOf(server);
+    out[server.id] = Object.fromEntries(
+      [...server.bearers].map(([board, value]) => [
+        board,
+        { value, from: hashOf(from.get(board) ?? value) },
+      ]),
+    );
   }
   const path = bearersPath(stateDir);
   const tmp = `${path}.tmp`;
@@ -137,6 +176,7 @@ const RETRY_AFTER_MS = 60_000;
  */
 export function createBearerKeeper(opts: BearerKeeperOptions): { run(): Promise<number> } {
   const retryAt = new Map<string, number>();
+  for (const server of opts.config.servers.values()) configValuesOf(server);
   return {
     async run() {
       let renewed = 0;
