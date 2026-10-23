@@ -12,6 +12,7 @@
     "machine:restore": "bun run infra/project-machine/restore-machine.ts",
     "machine:drill": "bun run infra/project-machine/drill.ts",
     "router:deploy": "bun run infra/board-router-worker/deploy.ts",
+    "access:plan": "bun run infra/access-apps/plan.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "routes:table": "bun run scripts/routes-table.ts",
     "verify": "bun run scripts/verify.ts",
