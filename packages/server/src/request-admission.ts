@@ -507,6 +507,10 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const search = new URL(req.url).searchParams;
         const verdict = frameGate(req, pathname, search);
         if (!verdict.ok) return frameGateRefusal(verdict.status);
+        const viaTunnel = req.headers.has('cf-ray');
+        // Through the tunnel is external reach, so the master switch covers
+        // it, a frame ticket included.
+        if (viaTunnel && !sharingGate.isEnabled()) return j(403, { error: 'sharing_disabled' });
         // The board's frame ticket (frame-ticket.ts), on or off the tunnel:
         // the one proof a frame on another domain can carry in Safari.
         const proof = frameHost.prove(req, pathname, search);
@@ -515,14 +519,13 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         if (proof.kind === 'public' || proof.kind === 'held') return null;
         // Off the tunnel: a caller on this machine that is not a browser. A
         // browser's frame came from a host page, which handed it a ticket.
-        if (!req.headers.has('cf-ray')) {
+        if (!viaTunnel) {
           if (req.headers.has('sec-fetch-dest')) return j(403, { error: 'frame_ticket_required' });
           return isLoopbackAddress(requestAddress(req)) ? null : j(403, { error: 'unknown_host' });
         }
-        // Through it: external reach, so the master switch covers it, and the
-        // operator's own token and allowlisted email exactly as on their
-        // proxied hostname. A member's token opens nothing here.
-        if (!sharingGate.isEnabled()) return j(403, { error: 'sharing_disabled' });
+        // Through it, without a ticket: the operator's own token and
+        // allowlisted email exactly as on their proxied hostname. A member's
+        // token opens nothing here.
         if (!proxiedTrustedVerifier) return j(503, { error: 'access_not_configured' });
         const result = await proxiedTrustedVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });

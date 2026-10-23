@@ -347,4 +347,63 @@ describe('a server with the frame hostname configured', () => {
     expect(res.status).toBe(503);
     expect(((await res.json()) as { error: string }).error).toBe('access_not_configured');
   });
+
+  it('refuses a held ticket through the tunnel while external access is off', async () => {
+    const offDir = mkdtempSync(join(tmpdir(), 'frame-host-off-'));
+    const off = createServer({
+      port: 0,
+      dataDir: offDir,
+      frameOrigin,
+      frameBoardHosts: ['127.0.0.1'],
+      sharingEnvLocked: true,
+    });
+    try {
+      const at = `http://127.0.0.1:${off.port}`;
+      const make = async (path: string, body: unknown) =>
+        (await (
+          await fetch(`${at}${path}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        ).json()) as Record<string, unknown>;
+      const board = (
+        (await make('/workspaces', { name: 'Tide table', author: AGENT })) as {
+          workspace: { id: string };
+        }
+      ).workspace.id;
+      const file = join(offDir, 'tides.html');
+      writeFileSync(file, '<!doctype html><html><body><h1>Saltmarsh tides</h1></body></html>');
+      const doc = String(
+        (
+          await make(`/workspaces/${board}/docs`, {
+            docId: 'tides',
+            type: 'mockup',
+            sourceUrl: file,
+          })
+        ).docId,
+      );
+      await make(`/workspaces/${board}/docs:attach`, { docId: doc });
+      const html = await (await fetch(`${at}/workspaces/${board}/mockups/${doc}`)).text();
+      const src = new URL(/data-src="([^"]+)"/.exec(html)?.[1]?.replace(/&amp;/g, '&') ?? '');
+      const framesOff = { host: `frames.localhost:${off.port}`, 'sec-fetch-dest': 'iframe' };
+      const traded = await fetch(`${at}${src.pathname}${src.search}`, {
+        headers: framesOff,
+        redirect: 'manual',
+      });
+      expect(traded.status).toBe(303);
+      const cookie = (traded.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+      const frame = `${at}/workspaces/${board}/mockups/${doc}?cw-frame=1`;
+      // CONTROL: the box's own browser holds its frame with the cookie.
+      expect((await fetch(frame, { headers: { ...framesOff, cookie } })).status).toBe(200);
+      const tunnelled = await fetch(frame, {
+        headers: { ...framesOff, cookie, 'cf-ray': '8f0000000000-SJC' },
+      });
+      expect(tunnelled.status).toBe(403);
+      expect(((await tunnelled.json()) as { error: string }).error).toBe('sharing_disabled');
+    } finally {
+      await off.stop();
+      rmSync(offDir, { recursive: true, force: true });
+    }
+  });
 });
