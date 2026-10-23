@@ -51,9 +51,10 @@ const PLAN = [
     `${FILLER} ${FILLER}\n`,
   ]),
 ].join('\n');
-/** Long enough to wrap the reply box onto a third line at 430. */
+/** Long enough to grow the reply box past its two starting rows at 430. */
 const TYPED =
-  'Alice signs off the berth once the Saltmarsh survey is back and the tide table agrees.';
+  'Alice signs off the berth once the Saltmarsh survey is back and the tide table agrees. ' +
+  'Bob checks the Riverbend slipway first, because the loaded ferry needs the deeper one.';
 
 /** About an iPhone's keyboard. */
 const KEYBOARD_PX = 336;
@@ -121,6 +122,13 @@ const HELPERS = (cardSelector: string, index: number) => `(() => {
       keyboard: Math.round(innerHeight - visualViewport.height),
       focus: box && a === box ? 'reply' : a === docEditor ? 'doc' : 'other',
       replyText: box ? box.textContent : '',
+      replyHeight: reply ? Math.round(reply.height) : null,
+      // How far the card's own content overruns its measured slots: the
+      // foot's Resolve button is what goes missing when it does.
+      slotShortfall: Math.max(0, ...[...card.querySelectorAll('.thread-slot')].map((slot) => {
+        const face = slot.querySelector(card.classList.contains('expanded') ? '.face-detail' : '.face-summary');
+        return face ? face.offsetHeight - slot.clientHeight : 0;
+      })),
     };
   };
   window.__settled = async () => {

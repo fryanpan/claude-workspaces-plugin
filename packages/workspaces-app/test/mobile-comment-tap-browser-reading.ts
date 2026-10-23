@@ -17,8 +17,12 @@ export interface TapView {
   keyboard: number;
   /** Where the caret is: the card's reply box, the document, or neither. */
   focus: 'reply' | 'doc' | 'other';
-  /** What the card's reply box holds. */
+  /** What the card's reply box holds, and how tall it is. */
   replyText: string;
+  replyHeight: number | null;
+  /** Pixels by which the card's showing content overruns its measured
+   *  slots, which clips the foot. Zero when the card fits. */
+  slotShortfall: number;
 }
 
 /** The phone page, step by step. */

@@ -9,7 +9,8 @@
  * pointed at a checkout of it) every 430 case below fails. The tap focused
  * the DOCUMENT, so its first keystroke was typed into the doc; the reply box
  * sat under the keyboard; and closing handed focus back to the document,
- * whose caret-follow scrolled the page by 45px.
+ * whose caret-follow scrolled the page by 45px. The re-measure case fails on
+ * it too: the reply box grew and the card's foot overran its slot.
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -66,10 +67,19 @@ describe.skipIf(CHROME === null)('a doc comment tapped on a phone', () => {
     expect(typedIntoDoc).toBe(false);
     expect(typed.focus).toBe('reply');
     expect(typed.replyText.trim()).toBe(
-      'Alice signs off the berth once the Saltmarsh survey is back and the tide table agrees.',
+      'Alice signs off the berth once the Saltmarsh survey is back and the tide table agrees. ' +
+        'Bob checks the Riverbend slipway first, because the loaded ferry needs the deeper one.',
     );
     expect(typed.keyboard).toBeGreaterThan(0);
     replyInView(typed);
+  });
+
+  it('re-measures the card as the reply box grows, so its foot is not clipped', () => {
+    const { open, typed } = result().phone;
+    // The control on the setup: the typing really did grow the box.
+    expect(typed.replyHeight as number).toBeGreaterThan(open.after.replyHeight as number);
+    expect(open.after.slotShortfall).toBe(0);
+    expect(typed.slotShortfall).toBe(0);
   });
 
   it('closing an open comment leaves the page where it was', () => {
