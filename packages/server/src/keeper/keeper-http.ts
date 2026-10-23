@@ -21,29 +21,38 @@
  *   opens nothing on a keeper that started after the link was made.
  *
  * The page origin is `http://localhost:<port>`, and `localhost` may resolve
- * to either loopback address, so `keeper-serve.ts` holds the port on both
- * and refuses to start if either is taken. A process that listens there
+ * to either loopback address, so the port is held on both: by launchd's own
+ * listeners in production (`keeper-launchd.ts`), or by `keeper-serve.ts`,
+ * which refuses to start if either is taken. A process that listens there
  * while no keeper runs can serve a lookalike page, but every challenge and
  * every live link belongs to a running keeper, so that page can obtain
  * nothing to sign.
  */
 import { randomBytes } from 'node:crypto';
-import { type Page, approvePage, enrollPage, indexPage } from './keeper-page.ts';
+import { type Page, alarmPage, approvePage, enrollPage, indexPage } from './keeper-page.ts';
 import type { HeldRequest, KeeperCall, KeeperRequests, Submitted } from './keeper-requests.ts';
 import { type KeeperStore, hashToken } from './keeper-store.ts';
+import { CLEAR_SITE_DATA, REMOVING_WORKER, workerEvidence } from './keeper-worker-guard.ts';
 import { b64url, verifyRegistration } from './webauthn.ts';
 
 export const API_HEADER = 'x-cw-keeper';
 /** The header a held answer carries, so a client tells it from a result. */
 export const HELD_HEADER = 'x-cw-keeper-held';
 const MAX_BODY = 1024 * 1024;
-const LOOPBACK_PEERS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+/**
+ * The peer `keeper-serve.ts` names for a connection on its unix socket, which
+ * only launchd's loopback listeners relay to (`keeper-launchd.ts`). No TCP
+ * peer address can take this value.
+ */
+export const RELAYED_PEER = 'launchd-relay';
+const LOOPBACK_PEERS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', RELAYED_PEER]);
 
 export interface KeeperHttpDeps {
   requests: KeeperRequests;
   store: KeeperStore;
   port: number;
   now?: () => number;
+  log?: (line: string) => void;
 }
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}): Response =>
@@ -117,11 +126,35 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
     );
   };
 
+  const log = deps.log ?? (() => {});
+  /** The alarm is raised once and stays until the owner clears it. */
+  const raise = (reason: string) => {
+    if (store.alarm()) return;
+    store.saveAlarm({ at: now(), reason });
+    log(`alarm: ${reason}; approvals and enrollment are stopped`);
+  };
+  const stopped = () => json(423, { error: 'the keeper saw a service worker on its origin' });
+
+  // Every response tells the browser to drop any worker and cache it holds here.
   return async function handle(req: Request, peer: string | null): Promise<Response> {
+    const res = await route(req, peer);
+    res.headers.set('clear-site-data', CLEAR_SITE_DATA);
+    return res;
+  };
+
+  async function route(req: Request, peer: string | null): Promise<Response> {
     const url = new URL(req.url);
     if (!peer || !LOOPBACK_PEERS.has(peer)) return json(403, { error: 'loopback only' });
     if (!hosts.has(req.headers.get('host') ?? '')) return json(403, { error: 'wrong host' });
     if (req.headers.has('cf-ray')) return json(403, { error: 'not through a tunnel' });
+    const evidence = workerEvidence(req);
+    if (evidence) raise(evidence);
+    if (req.headers.has('service-worker')) {
+      return new Response(REMOVING_WORKER, {
+        headers: { 'content-type': 'text/javascript', 'cache-control': 'no-store' },
+      });
+    }
+    const alarm = store.alarm();
     const path = url.pathname;
     const method = req.method;
     const isApi = req.headers.get(API_HEADER) === '1';
@@ -129,9 +162,14 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
 
     try {
       // ── Pages ────────────────────────────────────────────────────────────
-      if (method === 'GET' && path === '/') return html(indexPage(requests.pending()));
-      if (method === 'GET' && path === '/enroll') return html(enrollPage());
+      const enrollMatch = /^\/enroll\/[A-Za-z0-9_-]{16,64}$/.test(path);
       const approveMatch = /^\/approve\/([A-Za-z0-9_-]{1,64})$/.exec(path);
+      if (method === 'GET' && alarm && (path === '/' || enrollMatch || approveMatch)) {
+        return html(alarmPage(alarm.reason, alarm.at, port));
+      }
+      if (method === 'GET' && path === '/') return html(indexPage(requests.pending()));
+      // The link's path is new each time, so no page cached under it can exist.
+      if (method === 'GET' && enrollMatch) return html(enrollPage());
       if (method === 'GET' && approveMatch) {
         const id = approveMatch[1] as string;
         const r = requests.get(id);
@@ -182,6 +220,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       const act = /^\/v1\/requests\/([A-Za-z0-9_-]{1,64})\/(challenge|approve|deny)$/.exec(path);
       if (method === 'POST' && (act || path.startsWith('/v1/enroll'))) {
         if (!fromPage) return json(403, { error: 'only the approval page may post here' });
+        if (alarm) return stopped();
       }
       if (method === 'POST' && act) {
         const [, id = '', verb] = act;
@@ -274,5 +313,5 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
     } catch (err) {
       return json(400, { error: err instanceof Error ? err.message : String(err) });
     }
-  };
+  }
 }

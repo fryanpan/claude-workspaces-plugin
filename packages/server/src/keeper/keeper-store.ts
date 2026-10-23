@@ -60,6 +60,12 @@ export interface EnrollRecord {
   sessionHash?: string;
 }
 
+/** Evidence of a service worker on the keeper's origin (`keeper-worker-guard.ts`). */
+export interface KeeperAlarm {
+  at: number;
+  reason: string;
+}
+
 export interface KeeperStore {
   readonly dir: string;
   credentials(): KeeperCredentials;
@@ -70,6 +76,9 @@ export interface KeeperStore {
   addApp(app: string): void;
   enroll(): EnrollRecord | null;
   saveEnroll(record: EnrollRecord | null): void;
+  /** While set, the keeper gives no challenge and opens no enrollment. */
+  alarm(): KeeperAlarm | null;
+  saveAlarm(alarm: KeeperAlarm | null): void;
 }
 
 export const hashToken = (token: string): string =>
@@ -94,7 +103,7 @@ export function storeModeProblem(path: string, uid: number): string | null {
 }
 
 export const APP_NAME = /^[a-z][a-z0-9-]{1,62}$/;
-const FILES = ['credentials.json', 'passkeys.json', 'apps.json', 'enroll.json'];
+const FILES = ['credentials.json', 'passkeys.json', 'apps.json', 'enroll.json', 'alarm.json'];
 
 /** Open the store at `dir`, or say why it is refused. */
 export function openKeeperStore(
@@ -155,5 +164,7 @@ export function openKeeperStore(
     },
     enroll: () => read<EnrollRecord | null>('enroll.json', null),
     saveEnroll: (record) => write('enroll.json', record),
+    alarm: () => read<KeeperAlarm | null>('alarm.json', null),
+    saveAlarm: (alarm) => write('alarm.json', alarm),
   };
 }

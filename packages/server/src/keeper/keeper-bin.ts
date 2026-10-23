@@ -7,22 +7,26 @@
  *   bun packages/server/src/keeper/keeper-bin.ts enroll         print a one-time passkey registration link
  *   bun packages/server/src/keeper/keeper-bin.ts adopt <app>    let routine calls reach a Fly app made before the keeper
  *   bun packages/server/src/keeper/keeper-bin.ts check          the start guard and the store check, nothing else
+ *   bun packages/server/src/keeper/keeper-bin.ts plist port|keeper  print one of the two LaunchDaemons
+ *   bun packages/server/src/keeper/keeper-bin.ts clear-alarm    let approvals run again after a service-worker alarm
  *
  * `CW_KEEPER_DIR` names the store (mode 700, `keeper-store.ts`);
  * `CW_KEEPER_FLY_BIN` the `fly` binary, which must sit where only root or
  * the keeper's user can write; `CW_KEEPER_PORT` the loopback port (default
- * 8797). Every command but `check` refuses to run when the start guard
+ * 8797); `CW_KEEPER_SOCKET` the unix socket launchd's port job relays to
+ * (`keeper-launchd.ts`). Without it the keeper listens on the port itself. Every command but `check` refuses to run when the start guard
  * (`keeper-guard.ts`) finds a path another user could change, so a keeper
  * running from Bryan's checkout, or with Homebrew's `fly`, never starts.
  * The runbook is `docs/process/keeper.md`.
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { homedir, userInfo } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fixedHostFetch } from '../outbound-fetch.ts';
 import { keeperExecutors } from './keeper-exec.ts';
 import { keeperStartProblems } from './keeper-guard.ts';
+import { keeperJobPlist, portJobPlist } from './keeper-launchd.ts';
 import { DEFAULT_KEEPER_PORT, serveKeeper } from './keeper-serve.ts';
 import {
   CREDENTIAL_NAMES,
@@ -42,6 +46,7 @@ const [command, arg] = process.argv.slice(2);
 const dir = process.env.CW_KEEPER_DIR?.trim() || fail('CW_KEEPER_DIR is not set');
 const port = Number(process.env.CW_KEEPER_PORT) || DEFAULT_KEEPER_PORT;
 const flyBin = process.env.CW_KEEPER_FLY_BIN?.trim() ?? '';
+const socket = process.env.CW_KEEPER_SOCKET?.trim() ?? '';
 const uid = process.getuid?.() ?? -1;
 
 // The install root is four folders above this file. Everything the keeper
@@ -66,7 +71,11 @@ if (command === 'check') {
   for (const p of problems) console.log(`unsafe: ${p}`);
   const store = openKeeperStore(dir);
   if ('error' in store) console.log(`store: ${store.error}`);
-  else console.log(`store: ok, ${store.passkeys().length} passkeys, ${store.apps().length} apps`);
+  else {
+    const alarm = store.alarm();
+    if (alarm) console.log(`alarm: ${alarm.reason} at ${new Date(alarm.at).toISOString()}`);
+    console.log(`store: ok, ${store.passkeys().length} passkeys, ${store.apps().length} apps`);
+  }
   process.exit(problems.length || 'error' in store ? 1 : 0);
 }
 if (problems.length) {
@@ -90,8 +99,23 @@ if (command === 'import') {
   const createdAt = Date.now();
   store.saveEnroll({ tokenHash: hashToken(token), expiresAt: createdAt + ENROLL_MS, createdAt });
   console.log(
-    `Open this within 15 minutes, on this Mac, and register your passkey. It works only on the keeper running now; if the keeper restarts, make a new one:\n  http://localhost:${port}/enroll#${token}`,
+    `Open this within 15 minutes, on this Mac, and register your passkey. It works only on the keeper running now; if the keeper restarts, make a new one:\n  http://localhost:${port}/enroll/${b64url(new Uint8Array(randomBytes(16)))}#${token}`,
   );
+} else if (command === 'plist') {
+  // `$K` is the store's parent; the socket's folder sits beside the store.
+  const job = {
+    user: userInfo().username,
+    port,
+    socketPath: socket || join(dirname(resolve(dir)), 'run', 'keeper.sock'),
+  };
+  if (arg === 'port') process.stdout.write(portJobPlist(job));
+  else if (arg === 'keeper') {
+    process.stdout.write(keeperJobPlist({ ...job, root: dirname(resolve(dir)), home: homedir() }));
+  } else fail('plist needs port or keeper');
+} else if (command === 'clear-alarm') {
+  const alarm = store.alarm();
+  store.saveAlarm(null);
+  console.log(alarm ? `[keeper] cleared: ${alarm.reason}` : '[keeper] no alarm was raised');
 } else if (command === 'adopt') {
   if (!arg) fail('adopt needs an app name');
   store.addApp(arg);
@@ -104,6 +128,7 @@ if (command === 'import') {
     exec,
     port,
     guarded: [homedir(), store.dir],
+    ...(socket ? { unix: socket } : {}),
     log: (line) => console.error(`[keeper] ${new Date().toISOString()} ${line}`),
   });
   console.error(

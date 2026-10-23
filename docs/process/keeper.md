@@ -13,8 +13,12 @@ token.
   onto a machine (a secret or a shell), creating an Access application, and
   anything else the keeper does not recognise are held until you approve them
   with Touch ID on the approval page. One approval of a new project also covers
-  that project's volume, secrets and image for 30 minutes. Its backup bucket,
-  a shell, and anything else are a tap each.
+  that project's volume and secrets for 30 minutes. Its image (`fly deploy`),
+  its backup bucket, a shell, and anything else are a tap each, and a deploy's
+  page lists the folder it uploads and what is in it.
+- **No `fly` call may read the keeper's own folders.** A build folder,
+  `--config` or `--dockerfile` inside the keeper's home or store, through a
+  link or not, is refused even with a tap, and so is a relative one.
 - **Some requests are refused outright**, because their answer would hand the
   requester a credential or the org: `fly auth`, `fly tokens`, `fly orgs`,
   `fly wireguard`, `fly ssh issue`, `fly apps move`, `--access-token`,
@@ -97,42 +101,56 @@ sudo -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
 
 ## 2. Run it under launchd
 
-Write `/Library/LaunchDaemons/com.claude-workspaces.keeper.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.claude-workspaces.keeper</string>
-  <key>UserName</key><string>cw-relay</string>
-  <key>WorkingDirectory</key><string>/Users/cw-relay/keeper/app</string>
-  <key>ProgramArguments</key><array>
-    <string>/Users/cw-relay/keeper/bin/bun</string>
-    <string>/Users/cw-relay/keeper/app/packages/server/src/keeper/keeper-bin.ts</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>CW_KEEPER_DIR</key><string>/Users/cw-relay/keeper/state</string>
-    <key>CW_KEEPER_FLY_BIN</key><string>/Users/cw-relay/keeper/bin/fly</string>
-    <key>HOME</key><string>/Users/cw-relay</string>
-  </dict>
-  <key>KeepAlive</key><true/>
-  <key>RunAtLoad</key><true/>
-  <key>StandardErrorPath</key><string>/Users/cw-relay/keeper/keeper.log</string>
-</dict></plist>
-```
+Two LaunchDaemons run the keeper. The **port job** has launchd itself listen
+on `127.0.0.1:8797` and `[::1]:8797` from boot, so no other process can take
+the keeper's address, even while the keeper restarts. It hands each
+connection to `/usr/bin/nc`, which passes it to the keeper's unix socket in
+`$K/run`. The **keeper job** runs the keeper on that socket. The keeper
+prints both plists itself:
 
 ```bash
-sudo chown root:wheel /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
-sudo chmod 644 /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
-lsof -nP -iTCP:8797 -sTCP:LISTEN
+/usr/bin/sudo -H -u cw-relay mkdir -m 700 "$K/run"
+for JOB in port keeper; do
+  /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
+    "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" plist "$JOB" \
+    > "/tmp/keeper-$JOB.plist"
+done
+less /tmp/keeper-port.plist /tmp/keeper-keeper.plist
+```
+
+The port plist must list `/usr/bin/nc`, `-U`, `$K/run/keeper.sock`, and two
+`Sockets` entries, `127.0.0.1` and `::1`, on 8797. The keeper plist must run
+`$K/bin/bun` on `$K/app/.../keeper-bin.ts` with `CW_KEEPER_SOCKET` set to the
+same socket. Then install and load both:
+
+```bash
+/usr/bin/sudo install -o root -g wheel -m 644 /tmp/keeper-port.plist \
+  /Library/LaunchDaemons/com.claude-workspaces.keeper-port.plist
+/usr/bin/sudo install -o root -g wheel -m 644 /tmp/keeper-keeper.plist \
+  /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
+/usr/bin/sudo launchctl bootstrap system /Library/LaunchDaemons/com.claude-workspaces.keeper-port.plist
+/usr/bin/sudo launchctl bootstrap system /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
+/usr/bin/sudo lsof -nP -iTCP:8797 -sTCP:LISTEN
+curl -s http://localhost:8797/ | grep -c 'Waiting for your passkey'
 ```
 
 The `lsof` output must show two listeners, `127.0.0.1:8797` and
-`[::1]:8797`, both with `cw-relay` as the user. `localhost` can resolve to
-either address, so the keeper holds both and refuses to start if either is
-taken (its log, `$K/keeper.log`, then names the address). If anything else
-holds port 8797, stop here and find out what it is.
+`[::1]:8797`, both owned by `launchd` (process 1), and `curl` must print 1.
+If `bootstrap` of the port job fails because the address is in use,
+something else holds port 8797: stop and find out what it is before going
+on.
+
+**Never boot out the port job** once it is loaded, except to uninstall. While
+it is loaded nobody else can serve the keeper's address; the moment it is
+not, anyone can. An update restarts only the keeper job.
+
+**Then clear the keeper's site data in every browser on this Mac**, before
+you open any keeper page. Until the port job was loaded, any process could
+serve `http://localhost:8797` and leave a service worker or a cached page
+there, which would show you one request while your tap approves another. In
+Chrome: Settings, Privacy and security, Site data, search `localhost`, and
+delete it. In Safari: Settings, Privacy, Manage Website Data, `localhost`,
+Remove. Do this again if the port job is ever unloaded.
 
 ## 3. Register your passkey
 
@@ -146,7 +164,8 @@ running now: if the keeper restarts, make a new link. The first page to open
 it spends it, so a copy that ends up in your browser history is no use to
 anyone. Open it in Safari or Chrome on this Mac, press **Register passkey**,
 and confirm with Touch ID. The page says `Registered.` If it says the link is
-not open, make a new link and check `lsof` again first. The passkey is tied to
+not open, make a new link and check `lsof` again first. If the page says
+**Approvals are stopped**, follow "If approvals are stopped" below. The passkey is tied to
 `localhost`, so approvals happen on this Mac, not on the iPad.
 
 ## 4. Move the credentials, as new ones
@@ -208,6 +227,28 @@ Touch ID: denying takes your passkey too, so no other process can cancel a
 request you are about to approve. Open
 `http://localhost:8797` to see everything waiting for you.
 
+## If approvals are stopped
+
+The keeper stops giving challenges and opening enrollment when a browser
+shows it signs of a service worker on its address: a request for a worker
+script, or a page fetched by a script rather than opened by you. Every page
+then says **Approvals are stopped** and names what it saw. Any local process
+can also cause this, by sending the same headers.
+
+1. Clear the keeper's site data in every browser on this Mac, as at the end
+   of section 2.
+2. In a clean shell (`/bin/zsh -f`):
+
+   ```bash
+   /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
+     "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" clear-alarm
+   ```
+
+3. Open the approval link again.
+
+If it happens again without a reason you know, check `lsof` (section 2) and
+look at which processes on this Mac opened `localhost:8797` in a browser.
+
 ## 7. Retire the old tokens
 
 Once a routine call works through the keeper:
@@ -233,6 +274,12 @@ the keeper's own clone and checked against GitHub. Then check it and restart:
 /usr/bin/sudo launchctl kickstart -k system/com.claude-workspaces.keeper
 ```
 
+That restarts the keeper job only. The port job keeps the address while the
+keeper is down; a page opened in that second gets no answer, never someone
+else's. If an update changes the port plist (`plist port` prints something
+different from the installed one), reload the port job and then clear site
+data again, as in section 2.
+
 Updating `bun` or `fly` is the `sudo install` line for that binary, then the
 same check and restart. The older release folders are the rollback: point
 `app` back at one and restart.
@@ -249,11 +296,12 @@ same check and restart. The older release folders are the rollback: point
   already replaced those binaries in your user's paths would be installed
   with them. Install each from its vendor's release, as an admin, if you
   doubt them.
-- **While no keeper runs, another process can take its port** and serve a
-  lookalike page at the same address. It cannot get anything signed: every
-  challenge and every live enrollment link belongs to a running keeper. But
-  the page could still mislead you, so check `lsof` (section 2) whenever the
-  keeper has restarted and a page looks wrong.
+- **Before the port job is loaded, anyone can serve the keeper's address.**
+  A service worker left there then could show you one request while your
+  tap approves another. Clearing site data after loading the port job
+  (section 2) removes it. Skip that step and a worker that never contacts
+  the keeper stays until you clear it. A worker that does contact the keeper
+  is removed and stops approvals (above).
 - **A held request is lost on a keeper restart.** The requester asks again.
 - **Approvals are on this Mac only.** The passkey is registered for
   `localhost`; approving from the iPad needs the page on an HTTPS address of

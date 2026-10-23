@@ -93,7 +93,7 @@ try {
     expiresAt: Date.now() + 60_000,
     createdAt: Date.now(),
   });
-  await open(cdp, `${keeper.origin}/enroll#${token}`);
+  await open(cdp, `${keeper.origin}/enroll/browser-driver-link#${token}`);
   await cdp.evaluate(`document.getElementById('enroll').click()`);
   const enrollStatus = await statusText(cdp, /Registered|Not registered/);
 

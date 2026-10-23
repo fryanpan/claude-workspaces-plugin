@@ -38,6 +38,7 @@ import {
   classifyFly,
   grantCovers,
 } from './keeper-policy.ts';
+import { stageFlyPaths } from './keeper-stage.ts';
 import type { KeeperStore } from './keeper-store.ts';
 import {
   type AssertionInput,
@@ -136,6 +137,8 @@ export function createKeeperRequests(deps: {
   log?: (line: string) => void;
   /** Folders no fly call may read: the keeper's home and store. */
   guarded?: string[];
+  /** The user whose files a fly call may not read; this process's own by default. */
+  keeperUid?: number;
 }): KeeperRequests {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
@@ -167,6 +170,7 @@ export function createKeeperRequests(deps: {
       : classifyCloudflare(call.method, call.path);
 
   const guarded = deps.guarded ?? [deps.store.dir];
+  const keeperUid = deps.keeperUid ?? process.getuid?.() ?? -1;
 
   /** Checked at submit and again just before fly starts. */
   const local = (call: FlyCall) => resolveFlyPaths(call.args, guarded);
@@ -175,7 +179,13 @@ export function createKeeperRequests(deps: {
     if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
     const checked = local(call);
     if ('error' in checked) throw new Error(`refused: ${checked.error}`);
-    return deps.exec.fly(checked.args, call.input);
+    if (!checked.at.length) return deps.exec.fly(checked.args, call.input);
+    const staged = stageFlyPaths(checked.args, checked.at, keeperUid);
+    try {
+      return await deps.exec.fly(staged.args, call.input);
+    } finally {
+      staged.done();
+    }
   };
 
   /** Check the owner's tap on one page's challenge, which is spent either way. */

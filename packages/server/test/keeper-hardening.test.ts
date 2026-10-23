@@ -7,9 +7,17 @@
  * header, so these requests carry the page's own `Origin` throughout.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
 import { type RunningKeeper, serveKeeper } from '../src/keeper/keeper-serve.ts';
 import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keeper-store.ts';
@@ -20,10 +28,15 @@ const tmp = mkdtempSync(join(tmpdir(), 'keeper-hardening-'));
 const outside = mkdtempSync(join(tmpdir(), 'keeper-hardening-ctx-'));
 writeFileSync(join(outside, 'Dockerfile'), 'FROM scratch\n');
 writeFileSync(join(outside, 'server.ts'), '// app\n');
+/** A user id nobody on this machine has, standing in for the keeper's. */
+const KEEPER_UID = 4_000_000;
 const ran: string[][] = [];
+/** Whether each build folder fly was handed existed while it ran. */
+const present: boolean[] = [];
 const exec: Executors = {
   fly: async (args) => {
     ran.push(args);
+    if (args[0] === 'deploy') present.push(existsSync(join(args[1] ?? '', 'marker')));
     return { status: 0, stdout: 'ok\n', stderr: '' };
   },
   cloudflare: async () => ({ status: 200, body: '{"success":true,"result":[]}' }),
@@ -88,7 +101,8 @@ const enrollOptions = async (token: string) => {
 beforeAll(async () => {
   store = openStore('store');
   store.addApp('cw-harborlight');
-  keeper = serveKeeper({ store, exec, port: 0 });
+  // The test's files are this process's own, so the keeper here is another user.
+  keeper = serveKeeper({ store, exec, port: 0, keeperUid: KEEPER_UID });
   base = `http://127.0.0.1:${keeper.port}`;
   openEnroll('owner-link');
   const o = await enrollOptions('owner-link');
@@ -285,9 +299,10 @@ describe('paths a fly call names', () => {
     expect(ran.length).toBe(before);
   });
 
-  it('checks the paths again when the owner approves, and runs fly on the resolved ones', async () => {
+  it('checks the paths again when the owner approves, and runs fly on a copy', async () => {
     const swapped = mkdtempSync(join(tmpdir(), 'keeper-hardening-swap-'));
     const kept = mkdtempSync(join(tmpdir(), 'keeper-hardening-kept-'));
+    writeFileSync(join(kept, 'marker'), 'x');
     try {
       const approveNow = async (args: string[]) => {
         const r = await submit(args);
@@ -307,9 +322,13 @@ describe('paths a fly call names', () => {
       const before = ran.length;
       expect((await tapped(a))?.error).toContain("reaches the keeper's own folders");
       expect(ran.length).toBe(before);
-      // CONTROL: an unchanged folder runs, under its real path.
+      // CONTROL: an unchanged folder runs, from a copy the keeper made and removed.
       expect((await tapped(await approveNow(deploy(kept))))?.error).toBeUndefined();
-      expect(ran.at(-1)?.[1]).toBe(realpathSync(kept));
+      const copy = ran.at(-1)?.[1] ?? '';
+      expect(copy).not.toBe(realpathSync(kept));
+      expect(basename(copy)).toBe(basename(kept));
+      expect(present.at(-1)).toBe(true);
+      expect(existsSync(copy)).toBe(false);
     } finally {
       rmSync(swapped, { force: true });
       rmSync(kept, { recursive: true, force: true });
@@ -324,5 +343,52 @@ describe('paths a fly call names', () => {
     expect(html).toContain(realpathSync(outside));
     expect(html).toContain('Dockerfile');
     expect(html).toContain('server.ts');
+  });
+});
+
+describe("a service worker on the keeper's origin", () => {
+  const get = (path: string, headers: Record<string, string>) =>
+    fetch(`${base}${path}`, { headers: { host: `localhost:${keeper.port}`, ...headers } });
+  const clear = () => store.saveAlarm(null);
+
+  it("every response tells the browser to drop the origin's workers and cache", async () => {
+    for (const r of [await get('/', {}), await post('/v1/enroll/options', { token: 'x' })]) {
+      expect(r.headers.get('clear-site-data')).toBe('"cache", "storage"');
+    }
+  });
+
+  it('answers a worker update check with a worker that removes itself, and stops approvals', async () => {
+    const id = await hold(['apps', 'create', 'cw-saltmarsh-sw']);
+    const pageToken = await pageTokenOf(id);
+    const r = await get('/sw.js', {
+      'service-worker': 'script',
+      'sec-fetch-dest': 'serviceworker',
+    });
+    expect(r.headers.get('content-type')).toBe('text/javascript');
+    expect(await r.text()).toContain('self.registration.unregister()');
+    expect(store.alarm()?.reason).toContain('service worker script at /sw.js');
+    // Stopped: no challenge, no enrollment, and the page explains why.
+    expect((await challengeFor(id, pageToken)).status).toBe(423);
+    openEnroll('link-during-alarm');
+    expect((await enrollOptions('link-during-alarm')).status).toBe(423);
+    expect(await (await fetch(`${base}/approve/${id}`)).text()).toContain('Approvals are stopped');
+    // CONTROL: once the owner clears it, the same page token gets a challenge.
+    clear();
+    expect((await challengeFor(id, pageToken)).status).toBe(200);
+  });
+
+  it("raises the alarm on a navigation a worker passed on, not on the browser's own", async () => {
+    await get('/approve/x', { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' });
+    expect(store.alarm()).toBeNull();
+    await get('/approve/x', { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'empty' });
+    expect(store.alarm()?.reason).toContain('passed on a navigation');
+    clear();
+  });
+
+  it("serves enrollment only under a link's own path, which nothing can have cached", async () => {
+    expect((await get('/enroll', {})).status).toBe(404);
+    const r = await get('/enroll/aHarborlightLink123', {});
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain('Register your passkey');
   });
 });

@@ -15,7 +15,7 @@ export const escapeHtml = (s: string): string =>
 
 const WHAT: Record<HoldKind, string> = {
   'project.create':
-    'Creates a new Fly app. Approving also lets the rest of this project’s setup run on it for 30 minutes without another tap: volumes, secrets, the image and a shell.',
+    'Creates a new Fly app. Approving also lets its volume and secrets be set up in the next 30 minutes without another tap. Its image, a shell and anything else are a tap each.',
   'token.move':
     'Puts a secret on a machine, or opens a shell on it as root. A shell can read and change every secret the machine holds.',
   'access.open':
@@ -139,6 +139,17 @@ document.getElementById('deny')?.addEventListener('click', async () => {
   } catch (e) { say('Not denied: ' + e.message); }
 });`;
   return page(`Approve ${r.hold}`, body, r.status === 'pending' && pageToken ? script : '');
+}
+
+/** Served in place of every page while the alarm is raised. */
+export function alarmPage(reason: string, at: number, port: number): Page {
+  return page(
+    'Keeper stopped',
+    `<h1>Approvals are stopped</h1>
+<p>The keeper saw signs of a service worker on its address in a browser: ${escapeHtml(reason)}, at ${escapeHtml(new Date(at).toISOString())}. A service worker there can show you one request while your tap approves another, so the keeper gives no challenge and opens no enrollment until you clear this.</p>
+<ol><li>In every browser on this Mac, remove the site data for <code>localhost:${port}</code>. In Chrome: Settings, Privacy and security, Site data, search <code>localhost</code>, delete. In Safari: Settings, Privacy, Manage Website Data, <code>localhost</code>, Remove.</li>
+<li>In a clean shell, run <code>keeper-bin.ts clear-alarm</code> as the keeper's user (the runbook's \"If approvals are stopped\").</li></ol>`,
+  );
 }
 
 export function enrollPage(): Page {

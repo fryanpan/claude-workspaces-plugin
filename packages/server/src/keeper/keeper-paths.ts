@@ -11,9 +11,8 @@
  * refused, because `fly` would resolve it against the keeper's own working
  * folder.
  *
- * The check runs again just before `fly` starts, on the paths as they are
- * then, and `fly` is handed the resolved paths. A folder swapped for a link
- * after that last check still reaches `fly`; see security.md's known limits.
+ * The check runs again just before `fly` starts, and then `fly` reads a copy
+ * the keeper made of each path, never the agent's folder (`keeper-stage.ts`).
  */
 import { readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -83,11 +82,12 @@ const valueAt = (args: readonly string[], i: number): string => {
 export function resolveFlyPaths(
   args: readonly string[],
   guarded: readonly string[],
-): { error: string } | { args: string[]; paths: string[] } {
+): { error: string } | { args: string[]; paths: string[]; at: number[] } {
   const roots = guarded.map(realish);
   const out = [...args];
   const paths: string[] = [];
-  for (const i of pathArgIndexes(args)) {
+  const at = pathArgIndexes(args);
+  for (const i of at) {
     const value = valueAt(args, i);
     if (!isAbsolute(value)) return { error: `name ${value.slice(0, 80)} as a full path` };
     const real = realish(value);
@@ -98,7 +98,7 @@ export function resolveFlyPaths(
     out[i] = a.startsWith('-') ? `${a.slice(0, a.indexOf('=') + 1)}${real}` : real;
     paths.push(real);
   }
-  return { args: out, paths };
+  return { args: out, paths, at };
 }
 
 /** The first entries of a folder, for the approval page. */

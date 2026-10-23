@@ -66,6 +66,7 @@ describe('resolveFlyPaths', () => {
     expect(r).toEqual({
       args: ['deploy', real, `--dockerfile=${real}/Dockerfile`, '--app', 'x'],
       paths: [`${real}/Dockerfile`, real],
+      at: [2, 1],
     });
   });
 
@@ -73,6 +74,7 @@ describe('resolveFlyPaths', () => {
     expect(resolveFlyPaths(['status', '--app', 'x'], guarded)).toEqual({
       args: ['status', '--app', 'x'],
       paths: [],
+      at: [],
     });
   });
 });
