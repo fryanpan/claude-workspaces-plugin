@@ -126,11 +126,14 @@ describe('handleBoardRequest', () => {
     return new Response('from origin', { status: 200 });
   };
 
-  it('forwards a listed board with its stamp and cookie intact', async () => {
+  it('forwards a listed board with its stamp and session cookie intact', async () => {
     calls.length = 0;
     const res = await handleBoardRequest(
       new Request(`${ONE}/workspaces/w-river?format=json`, {
-        headers: { 'cf-access-jwt-assertion': 'stamp-value', cookie: 'CF_Authorization=c' },
+        headers: {
+          'cf-access-jwt-assertion': 'stamp-value',
+          cookie: 'CF_Authorization=c; __Host-cw_session=s',
+        },
       }),
       { BOARD_ORIGINS: CONFIG },
       upstream,
@@ -141,7 +144,9 @@ describe('handleBoardRequest', () => {
     expect(calls[0]?.redirect).toBe('manual');
     expect(calls[0]?.request.url).toBe(`${ONE}/workspaces/w-river?format=json`);
     expect(calls[0]?.request.headers.get('cf-access-jwt-assertion')).toBe('stamp-value');
-    expect(calls[0]?.request.headers.get('cookie')).toBe('CF_Authorization=c');
+    // The Access cookie is dropped: the stamp header carries the same token
+    // (board-router-subdomains.test.ts covers the cookie rule).
+    expect(calls[0]?.request.headers.get('cookie')).toBe('__Host-cw_session=s');
   });
 
   it('answers 404 itself for an unknown board and calls no origin', async () => {

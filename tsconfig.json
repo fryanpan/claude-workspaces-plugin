@@ -13,7 +13,8 @@
     "demos/*/scripts/**/*.ts",
     "cookbook/**/*.ts",
     "scripts/**/*.ts",
-    "infra/project-machine/**/*.ts"
+    "infra/project-machine/**/*.ts",
+    "infra/board-router-worker/**/*.ts"
   ],
   "exclude": ["**/node_modules", "**/dist", "**/build"]
 }

@@ -9,7 +9,10 @@
  * What this proves: a board on the second server is reached through the one
  * address with a valid stamp; that server refuses the same request with no
  * stamp or a forged one; an unknown board stops at the Worker; and the second
- * server's loopback callers are unaffected.
+ * server's loopback callers are unaffected. Every one of those runs with the
+ * project subdomains configured, so the board paths of today are shown
+ * unchanged by them, and the second server is also reached on its own
+ * subdomain.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -27,6 +30,8 @@ const ONE_HOST = 'workspaces.harborlight.test';
 const OWNER_EMAIL = 'owner@harborlight.test';
 const MAC_ORIGIN = 'mac-origin.harborlight.test';
 const CLOUD_ORIGIN = 'riverbend-origin.harborlight.test';
+const CLOUD_HOST = `riverbend.${ONE_HOST}`;
+const MAC_HOST = `harborlight.${ONE_HOST}`;
 
 type Sign = (opts?: { aud?: string; email?: string }) => Promise<string>;
 let jwks: JSONWebKeySet;
@@ -70,14 +75,15 @@ describe('the one address routes a board to the server that holds it', () => {
   let config: string;
   const reached: string[] = [];
 
-  const boot = () => {
+  const boot = (ownHost: string) => {
     const dataDir = mkdtempSync(join(tmpdir(), 'board-router-'));
     dataDirs.push(dataDir);
     return createServer({
       port: 0,
       dataDir,
       cfAccess: { teamDomain: TEAM_DOMAIN, audience: APP_AUD, jwks },
-      proxiedTrustedHosts: [ONE_HOST],
+      // Each server answers the one address and its own project subdomain.
+      proxiedTrustedHosts: [ONE_HOST, ownHost],
       proxiedTrustedEmails: [OWNER_EMAIL],
       // Sharing wired, as on every deployed server. Without it the server
       // runs in legacy whole-server mode, where loopback needs a stamp too.
@@ -125,17 +131,23 @@ describe('the one address routes a board to the server that holds it', () => {
       redirect: 'manual',
     });
   };
-  const viaOneAddress = (path: string, headers: Record<string, string> = {}) =>
+  const via = (host: string, path: string, headers: Record<string, string> = {}) =>
     handleBoardRequest(
-      new Request(`https://${ONE_HOST}${path}`, { headers }),
-      { BOARD_ORIGINS: config },
+      new Request(`https://${host}${path}`, { headers }),
+      {
+        ONE_ADDRESS: ONE_HOST,
+        BOARD_ORIGINS: config,
+        PROJECT_ORIGINS: JSON.stringify({ harborlight: MAC_ORIGIN, riverbend: CLOUD_ORIGIN }),
+      },
       tunnel,
     );
+  const viaOneAddress = (path: string, headers: Record<string, string> = {}) =>
+    via(ONE_HOST, path, headers);
   const boardJson = (id: string) => `/workspaces/${id}?format=json`;
 
   beforeAll(async () => {
-    mac = boot();
-    cloud = boot();
+    mac = boot(MAC_HOST);
+    cloud = boot(CLOUD_HOST);
     macBoard = await makeBoard(mac, 'Harborlight board');
     cloudBoard = await makeBoard(cloud, 'Riverbend board');
     config = JSON.stringify({ [MAC_ORIGIN]: [macBoard], [CLOUD_ORIGIN]: [cloudBoard] });
@@ -206,6 +218,57 @@ describe('the one address routes a board to the server that holds it', () => {
     });
     expect(res.status).toBe(404);
     expect(reached).toEqual([]);
+  });
+
+  it('loads the board page itself through the one address', async () => {
+    reached.length = 0;
+    const res = await viaOneAddress(`/workspaces/${cloudBoard}`, {
+      'cf-access-jwt-assertion': await sign(),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(reached).toEqual([CLOUD_ORIGIN]);
+  });
+
+  it("reaches the second server's board on that project's subdomain", async () => {
+    reached.length = 0;
+    const res = await via(CLOUD_HOST, boardJson(cloudBoard), {
+      'cf-access-jwt-assertion': await sign(),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('Riverbend board');
+    expect(reached).toEqual([CLOUD_ORIGIN]);
+  });
+
+  it("CONTROL: the first project's subdomain reaches the first server, which lacks that board", async () => {
+    reached.length = 0;
+    const res = await via(MAC_HOST, boardJson(cloudBoard), {
+      'cf-access-jwt-assertion': await sign(),
+    });
+    expect(reached).toEqual([MAC_ORIGIN]);
+    // A 404 from the board lookup, not a refused host: the first server
+    // answers its own subdomain, as the next case shows.
+    expect(res.status).toBe(404);
+    expect(await res.text()).toContain('workspace not found');
+    const own = await via(MAC_HOST, boardJson(macBoard), {
+      'cf-access-jwt-assertion': await sign(),
+    });
+    expect(own.status).toBe(200);
+  });
+
+  it('an unknown project subdomain stops at the Worker and reaches neither server', async () => {
+    reached.length = 0;
+    const res = await via(`saltmarsh.${ONE_HOST}`, boardJson(cloudBoard), {
+      'cf-access-jwt-assertion': await sign(),
+    });
+    expect(res.status).toBe(404);
+    expect(reached).toEqual([]);
+  });
+
+  it('the second server refuses its subdomain with no stamp', async () => {
+    const res = await via(CLOUD_HOST, boardJson(cloudBoard));
+    expect(res.status).toBe(401);
+    expect(await res.text()).not.toContain('Riverbend board');
   });
 
   it('loopback on the second server is unchanged: no stamp, and it reads the board', async () => {
