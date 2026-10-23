@@ -7,7 +7,7 @@
  * header, so these requests carry the page's own `Origin` throughout.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Executors } from '../src/keeper/keeper-requests.ts';
@@ -16,6 +16,10 @@ import { type KeeperStore, hashToken, openKeeperStore } from '../src/keeper/keep
 import { TestPasskey } from './keeper-authenticator.ts';
 
 const tmp = mkdtempSync(join(tmpdir(), 'keeper-hardening-'));
+/** A build folder outside the keeper's own folders, as the deploy script makes. */
+const outside = mkdtempSync(join(tmpdir(), 'keeper-hardening-ctx-'));
+writeFileSync(join(outside, 'Dockerfile'), 'FROM scratch\n');
+writeFileSync(join(outside, 'server.ts'), '// app\n');
 const ran: string[][] = [];
 const exec: Executors = {
   fly: async (args) => {
@@ -100,6 +104,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await keeper?.stop();
   rmSync(tmp, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
 });
 
 describe('the keeper holds its origin on both loopback addresses', () => {
@@ -212,6 +217,21 @@ describe('the approval page', () => {
     expect((await challengeFor(id, await pageTokenOf(id))).status).toBe(200);
   });
 
+  it("an agent opening many pages does not push the owner's page out", async () => {
+    const id = await hold(['apps', 'create', 'cw-riverbend-two']);
+    const ownerPage = await pageTokenOf(id);
+    for (let i = 0; i < 8; i++) await pageTokenOf(id);
+    // Past the cap a page is served with no token and no buttons.
+    expect(await pageTokenOf(id)).toBe('');
+    const c = await challengeFor(id, ownerPage);
+    expect(c.status).toBe(200);
+    const ok = await post(`/v1/requests/${id}/approve`, {
+      page: ownerPage,
+      ...signed(owner, c.challenge ?? ''),
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it('denies a request only with the passkey', async () => {
     const id = await hold(['apps', 'create', 'cw-harborlight-two']);
     const pageToken = await pageTokenOf(id);
@@ -226,5 +246,83 @@ describe('the approval page', () => {
     });
     expect(r.status).toBe(200);
     expect(keeper.requests.get(id)?.status).toBe('denied');
+  });
+});
+
+describe('paths a fly call names', () => {
+  const submit = async (args: string[]) => {
+    const r = await fetch(`${base}/v1/fly`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-cw-keeper': '1' },
+      body: JSON.stringify({ args }),
+    });
+    return { status: r.status, body: (await r.json()) as { id?: string; error?: string } };
+  };
+  const deploy = (ctx: string, more: string[] = []) => [
+    'deploy',
+    ctx,
+    '--app',
+    'cw-harborlight',
+    '--remote-only',
+    ...more,
+  ];
+
+  it("refuses a deploy that would read the keeper's store, even before any tap", async () => {
+    const before = ran.length;
+    const linked = join(tmp, 'looks-harmless');
+    symlinkSync(store.dir, linked);
+    for (const args of [
+      deploy(store.dir),
+      deploy(join(store.dir, '..')),
+      deploy(linked),
+      deploy(outside, ['--dockerfile', join(store.dir, 'credentials.json')]),
+      deploy(outside, [`--config=${join(linked, 'apps.json')}`]),
+      deploy('relative/ctx'),
+    ]) {
+      const r = await submit(args);
+      expect({ args, status: r.status }).toEqual({ args, status: 403 });
+    }
+    expect(ran.length).toBe(before);
+  });
+
+  it('checks the paths again when the owner approves, and runs fly on the resolved ones', async () => {
+    const swapped = mkdtempSync(join(tmpdir(), 'keeper-hardening-swap-'));
+    const kept = mkdtempSync(join(tmpdir(), 'keeper-hardening-kept-'));
+    try {
+      const approveNow = async (args: string[]) => {
+        const r = await submit(args);
+        expect(r.status).toBe(202);
+        const id = r.body.id ?? '';
+        return { id, page: await pageTokenOf(id) };
+      };
+      const tapped = async ({ id, page }: { id: string; page: string }) => {
+        const c = await challengeFor(id, page);
+        await post(`/v1/requests/${id}/approve`, { page, ...signed(owner, c.challenge ?? '') });
+        return keeper.requests.get(id);
+      };
+      // The folder is clean when the agent asks, then becomes a link to the store.
+      const a = await approveNow(deploy(swapped));
+      rmSync(swapped, { recursive: true });
+      symlinkSync(store.dir, swapped);
+      const before = ran.length;
+      expect((await tapped(a))?.error).toContain("reaches the keeper's own folders");
+      expect(ran.length).toBe(before);
+      // CONTROL: an unchanged folder runs, under its real path.
+      expect((await tapped(await approveNow(deploy(kept))))?.error).toBeUndefined();
+      expect(ran.at(-1)?.[1]).toBe(realpathSync(kept));
+    } finally {
+      rmSync(swapped, { force: true });
+      rmSync(kept, { recursive: true, force: true });
+    }
+  });
+
+  it('holds a deploy from a clean folder, and the page shows the folder and what is in it', async () => {
+    // CONTROL: the same deploy from a folder outside the keeper is held, not refused.
+    const r = await submit(deploy(outside, ['--dockerfile', join(outside, 'Dockerfile')]));
+    expect(r.status).toBe(202);
+    const html = await (await fetch(`${base}/approve/${r.body.id}`)).text();
+    expect(html).toContain(realpathSync(outside));
+    expect(html).toContain('Dockerfile');
+    expect(html).toContain('server.ts');
   });
 });

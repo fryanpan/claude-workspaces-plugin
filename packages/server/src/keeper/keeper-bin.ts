@@ -103,6 +103,7 @@ if (command === 'import') {
     store,
     exec,
     port,
+    guarded: [homedir(), store.dir],
     log: (line) => console.error(`[keeper] ${new Date().toISOString()} ${line}`),
   });
   console.error(

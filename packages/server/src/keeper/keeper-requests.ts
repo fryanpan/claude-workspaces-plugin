@@ -27,6 +27,7 @@
  * one tap each.
  */
 import { randomBytes } from 'node:crypto';
+import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import {
   ACCESS_GRANT_MS,
   type Grant,
@@ -90,6 +91,8 @@ export interface HeldRequest {
   requester: string;
   createdAt: number;
   status: RequestStatus;
+  /** Each local path the call names, resolved, with a folder's first entries. */
+  local?: { path: string; entries: string[] }[];
   /** Each served page's token, and the challenge that page was last given. */
   pages: Map<string, string | null>;
   result?: KeeperResult;
@@ -107,7 +110,7 @@ export const PENDING_MS = 60 * 60_000;
 /** A finished request's result stays readable for this long. */
 export const RESULT_MS = 15 * 60_000;
 const MAX_HELD = 100;
-/** Pages open on one request at once; the oldest is dropped past this. */
+/** Pages open on one request at once; no more are served past this. */
 const MAX_PAGES = 8;
 
 const token = (): string => b64url(new Uint8Array(randomBytes(24)));
@@ -116,7 +119,7 @@ export interface KeeperRequests {
   submit(call: KeeperCall, requester: string): Promise<Submitted>;
   get(id: string): HeldRequest | undefined;
   pending(): HeldRequest[];
-  /** A token for one served approval page, or null when not pending. */
+  /** A token for one served approval page, or null when not pending or at the cap. */
   openPage(id: string): string | null;
   /** A fresh challenge for one served page. */
   challenge(id: string, page: string): { challenge: string } | { error: 'not-waiting' | 'no-page' };
@@ -131,6 +134,8 @@ export function createKeeperRequests(deps: {
   ceremony: Omit<CeremonyExpectation, 'challenge'>;
   now?: () => number;
   log?: (line: string) => void;
+  /** Folders no fly call may read: the keeper's home and store. */
+  guarded?: string[];
 }): KeeperRequests {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
@@ -161,10 +166,17 @@ export function createKeeperRequests(deps: {
       ? classifyFly(call.args, deps.store.apps())
       : classifyCloudflare(call.method, call.path);
 
-  const run = async (call: KeeperCall): Promise<KeeperResult> =>
-    call.type === 'fly'
-      ? deps.exec.fly(call.args, call.input)
-      : deps.exec.cloudflare(call.method, call.path, call.body);
+  const guarded = deps.guarded ?? [deps.store.dir];
+
+  /** Checked at submit and again just before fly starts. */
+  const local = (call: FlyCall) => resolveFlyPaths(call.args, guarded);
+
+  const run = async (call: KeeperCall): Promise<KeeperResult> => {
+    if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
+    const checked = local(call);
+    if ('error' in checked) throw new Error(`refused: ${checked.error}`);
+    return deps.exec.fly(checked.args, call.input);
+  };
 
   /** Check the owner's tap on one page's challenge, which is spent either way. */
   const verifyTap = (id: string, page: string, assertion: AssertionInput): HeldRequest => {
@@ -214,6 +226,11 @@ export function createKeeperRequests(deps: {
         log(`refused ${requester}: ${verdict.reason}`);
         return { outcome: 'refused', reason: verdict.reason };
       }
+      const paths = call.type === 'fly' ? local(call) : null;
+      if (paths && 'error' in paths) {
+        log(`refused ${requester}: ${paths.error}`);
+        return { outcome: 'refused', reason: paths.error };
+      }
       const cfPath = call.type === 'cloudflare' ? call.path : null;
       if (verdict.kind === 'routine' || grantCovers(grants, call.type, verdict, cfPath, now())) {
         log(`ran ${requester}: ${verdict.summary}`);
@@ -233,6 +250,9 @@ export function createKeeperRequests(deps: {
         status: 'pending',
         pages: new Map(),
       };
+      if (paths?.paths.length) {
+        request.local = paths.paths.map((path) => ({ path, entries: folderEntries(path) }));
+      }
       held.set(request.id, request);
       log(`held ${request.id} for ${request.requester}: ${verdict.hold} ${verdict.summary}`);
       return { outcome: 'held', request };
@@ -252,9 +272,10 @@ export function createKeeperRequests(deps: {
       sweep();
       const r = held.get(id);
       if (!r || r.status !== 'pending') return null;
+      // Capped, never evicted: the first page served stays valid until it is used.
+      if (r.pages.size >= MAX_PAGES) return null;
       const page = token();
       r.pages.set(page, null);
-      while (r.pages.size > MAX_PAGES) r.pages.delete(r.pages.keys().next().value as string);
       return page;
     },
 

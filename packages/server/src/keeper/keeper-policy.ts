@@ -111,8 +111,9 @@ const ROUTINE_ANY: readonly Spec[] = [spec('apps list', 0, { json: 'bare', org: 
 
 /**
  * What a setup grant may run on the app it was opened on, and nothing else:
- * the project's volume, its secrets and its image. A shell, a bucket (an
- * org-level command), a destroy, and any flag not written here are each a tap.
+ * the project's volume and its secrets. An image (`deploy`), a shell, a
+ * bucket (an org-level command), a destroy, and any flag not written here
+ * are each a tap.
  */
 const SETUP_ON_GRANTED: readonly Spec[] = [
   ...both('volume create', 1, {
@@ -123,17 +124,23 @@ const SETUP_ON_GRANTED: readonly Spec[] = [
     json: 'bare',
   }),
   spec('secrets import', 0, { app: 'value', stage: 'bare' }),
-  spec('deploy', 1, {
-    app: 'value',
-    config: 'value',
-    dockerfile: 'value',
-    'remote-only': 'bare',
-    ha: 'bool',
-    'no-public-ips': 'bare',
-    'image-label': 'value',
-    yes: 'bare',
-  }),
 ];
+
+/**
+ * `fly deploy`, which is always a tap, written only as the deploy script
+ * writes it: one build folder, and no flag that names another local path to
+ * read (`--build-secret`, `--file-local` and the rest are refused).
+ */
+const DEPLOY: Spec = spec('deploy', 1, {
+  app: 'value',
+  config: 'value',
+  dockerfile: 'value',
+  'remote-only': 'bare',
+  ha: 'bool',
+  'no-public-ips': 'bare',
+  'image-label': 'value',
+  yes: 'bare',
+});
 
 /** The flag an arg names (`app` for `-a`, `--app` and `--app=x`), or null for a word. */
 function flagName(a: string): string | null {
@@ -266,6 +273,15 @@ export function classifyFly(args: unknown, apps: readonly string[]): Verdict {
   }
 
   if (matches(argv, ROUTINE_ANY)) return { kind: 'routine', app: null, summary };
+  if (command === 'deploy') {
+    if (words.length !== 2 || !matches(argv, [DEPLOY])) {
+      return {
+        kind: 'refused',
+        reason: `fly deploy takes one build folder and only --${Object.keys(DEPLOY.flags).join(', --')}`,
+      };
+    }
+    return { kind: 'held', hold: 'other', app, summary, setup: false };
+  }
   if (command === 'apps' && sub === 'create') {
     const flag = onlyValue(argv, 'name');
     const positional = words[2];

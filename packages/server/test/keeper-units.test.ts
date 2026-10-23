@@ -119,6 +119,42 @@ describe('fly argv is parsed strictly', () => {
   });
 });
 
+describe('fly deploy', () => {
+  it('is held, never routine and never on a grant, with the flags the deploy script uses', () => {
+    const v = classifyFly(
+      [
+        'deploy',
+        '/tmp/ctx',
+        '--app',
+        'cw-harborlight',
+        '--config',
+        '/tmp/ctx/fly.toml',
+        '--dockerfile',
+        '/tmp/ctx/Dockerfile',
+        '--remote-only',
+        '--ha=false',
+        '--no-public-ips',
+        '--image-label',
+        'abc',
+        '--yes',
+      ],
+      APPS,
+    );
+    expect(v).toMatchObject({ kind: 'held', hold: 'other' });
+    expect('setup' in v && v.setup).toBeFalsy();
+  });
+
+  it.each([
+    // A flag outside the deploy script's list may name another path to read.
+    [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--build-secret', 'A=/x']],
+    [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--file-local', '/m=/x']],
+    // No folder named: fly builds the keeper's own working folder.
+    [['deploy', '--app', 'cw-harborlight']],
+  ])('refuses %j', (args) => {
+    expect(classifyFly(args, APPS).kind).toBe('refused');
+  });
+});
+
 describe('cloudflare policy', () => {
   it('runs reads, holds writes, and holds a new Access application as access.open', () => {
     expect(classifyCloudflare('GET', '/accounts/abc/access/apps?page=1').kind).toBe('routine');
@@ -153,7 +189,6 @@ describe('grants', () => {
     for (const args of [
       ['secrets', 'import', '--app', 'cw-saltmarsh', '--stage'],
       ['volumes', 'create', 'data', '--app', 'cw-saltmarsh', '--region', 'iad', '--size', '1'],
-      ['deploy', '/tmp/ctx', '--app', 'cw-saltmarsh', '--remote-only', '--ha=false', '--yes'],
     ]) {
       expect({ args, covered: grantCovers(fly, 'fly', held(args), null, now) }).toEqual({
         args,
@@ -170,6 +205,8 @@ describe('grants', () => {
       ['machine', 'destroy', 'm1', '--app', 'cw-saltmarsh', '--force'],
       // An app the keeper never created, named under the granted one.
       ['secrets', 'import', '--app', 'cw-saltmarsh-prod'],
+      // An image built from an agent-chosen folder: always its own tap.
+      ['deploy', '/tmp/ctx', '--app', 'cw-saltmarsh', '--remote-only', '--ha=false', '--yes'],
       // A listed command with a flag the list does not name.
       ['secrets', 'import', '--app', 'cw-saltmarsh', '--config', 'other.toml'],
     ]) {

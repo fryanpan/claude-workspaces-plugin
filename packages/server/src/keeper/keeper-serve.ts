@@ -23,6 +23,8 @@ export function serveKeeper(opts: {
   port: number;
   now?: () => number;
   log?: (line: string) => void;
+  /** Folders no fly call may read; the store alone when not given. */
+  guarded?: string[];
 }): RunningKeeper {
   let handle: ((req: Request, peer: string | null) => Promise<Response>) | null = null;
   const listen = (hostname: string, port: number) => {
@@ -61,6 +63,7 @@ export function serveKeeper(opts: {
     ceremony: { origin, rpId: 'localhost' },
     ...(opts.now ? { now: opts.now } : {}),
     ...(opts.log ? { log: opts.log } : {}),
+    ...(opts.guarded ? { guarded: opts.guarded } : {}),
   });
   handle = createKeeperHttp({
     requests,

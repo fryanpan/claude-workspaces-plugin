@@ -89,13 +89,21 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
     const names = secretNames(r.call.input);
     if (names.length)
       details.push(`<dt>Secrets it sets</dt><dd>${escapeHtml(names.join(', '))}</dd>`);
+    for (const l of r.local ?? []) {
+      const inside = l.entries.length ? `<pre>${escapeHtml(l.entries.join('\n'))}</pre>` : '';
+      details.push(
+        `<dt>Local path it reads</dt><dd><code>${escapeHtml(l.path)}</code>${inside}</dd>`,
+      );
+    }
   } else if (r.call.body) {
     details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body.slice(0, 4000))}</pre></dd>`);
   }
   const state =
     r.status === 'pending' && pageToken
       ? `<p><button id="approve" type="button">Approve with passkey</button><button id="deny" type="button">Deny</button></p>`
-      : `<p>This request is ${escapeHtml(r.status)}.</p>`;
+      : r.status === 'pending'
+        ? '<p>Too many pages are open on this request. Use the one you opened first.</p>'
+        : `<p>This request is ${escapeHtml(r.status)}.</p>`;
   const body = `<h1>Approve ${escapeHtml(r.hold)}?</h1>
 <pre id="summary">${escapeHtml(r.summary)}</pre>
 <dl>${details.join('')}</dl>${state}<p id="status" role="status"></p>`;
