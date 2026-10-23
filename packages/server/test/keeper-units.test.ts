@@ -73,6 +73,52 @@ describe('fly policy', () => {
   });
 });
 
+describe('fly argv is parsed strictly', () => {
+  const verdict = (args: string[]) => classifyFly(args, APPS).kind;
+
+  it.each([
+    // A joined short flag: pflag reads -aprod as --app prod, and keeps the last.
+    [['machine', 'stop', 'm1', '-a', 'cw-harborlight', '-aprod']],
+    [['machine', 'list', '-acw-riverbend']],
+    [['status', '-tTOKEN', '--app', 'cw-harborlight']],
+    [['machine', 'stop', 'm1', '-a=cw-riverbend']],
+    [['machine', 'stop', 'm1', '--app', 'cw-harborlight', '--', '-a', 'cw-riverbend']],
+    [['status', '-', '--app', 'cw-harborlight']],
+    [['status', '--app']],
+  ])('refuses the flag shape in %j', (args) => {
+    expect(verdict(args)).toBe('refused');
+  });
+
+  it.each([
+    // A leading flag hides the command from a check that reads argv[0].
+    [['--debug', 'tokens', 'create', 'deploy', '-a', 'cw-harborlight']],
+    [['-a', 'cw-harborlight', 'status']],
+    // So does a flag between a command and its subcommand.
+    [['ssh', '-a', 'cw-harborlight', 'issue']],
+    [['wireguard', 'create', 'org', 'iad', 'peer', '-a', 'cw-harborlight']],
+    [['organizations', 'invite', 'alice@example.test']],
+    // Debug output may carry the Authorization header.
+    [['status', '--app', 'cw-harborlight', '--debug']],
+    [['status', '--app', 'cw-harborlight', '--verbose']],
+    [['logs', '--app', 'cw-harborlight', '--no-tail', '--debug=true']],
+  ])('refuses %j', (args) => {
+    expect(verdict(args)).toBe('refused');
+  });
+
+  it('runs a routine command only when every flag is one it names', () => {
+    // --signal takes a value, so fly reads "-a" as the signal and takes the
+    // app from the config file: this must not run as a restart of ours.
+    expect(
+      verdict(['machine', 'stop', 'm1', '--signal', '-a', 'cw-harborlight', '--config', 'x.toml']),
+    ).not.toBe('routine');
+    expect(
+      verdict(['machine', 'stop', 'm1', '--app', 'cw-harborlight', '--config', 'x.toml']),
+    ).toBe('held');
+    // CONTROL: the plain form still runs.
+    expect(verdict(['machine', 'stop', 'm1', '--app', 'cw-harborlight'])).toBe('routine');
+  });
+});
+
 describe('cloudflare policy', () => {
   it('runs reads, holds writes, and holds a new Access application as access.open', () => {
     expect(classifyCloudflare('GET', '/accounts/abc/access/apps?page=1').kind).toBe('routine');
@@ -103,19 +149,35 @@ describe('grants', () => {
     return v;
   };
 
-  it("CONTROL: a setup grant covers the project's own secrets and bucket", () => {
-    expect(
-      grantCovers(fly, 'fly', held(['secrets', 'import', '--app', 'cw-saltmarsh']), null, now),
-    ).toBe(true);
-    expect(
-      grantCovers(
-        fly,
-        'fly',
-        held(['storage', 'create', '--name', 'cw-saltmarsh-backups']),
-        null,
-        now,
-      ),
-    ).toBe(true);
+  it("CONTROL: a setup grant covers the project's own volume, secrets and image", () => {
+    for (const args of [
+      ['secrets', 'import', '--app', 'cw-saltmarsh', '--stage'],
+      ['volumes', 'create', 'data', '--app', 'cw-saltmarsh', '--region', 'iad', '--size', '1'],
+      ['deploy', '/tmp/ctx', '--app', 'cw-saltmarsh', '--remote-only', '--ha=false', '--yes'],
+    ]) {
+      expect({ args, covered: grantCovers(fly, 'fly', held(args), null, now) }).toEqual({
+        args,
+        covered: true,
+      });
+    }
+  });
+
+  it('covers only the commands on its list, and only the app it was opened on', () => {
+    for (const args of [
+      // A shell, an org-level bucket, a destroy: each is its own tap.
+      ['ssh', 'console', '--app', 'cw-saltmarsh'],
+      ['storage', 'create', '--org', 'x', '--name', 'cw-saltmarsh-backups', '--yes'],
+      ['machine', 'destroy', 'm1', '--app', 'cw-saltmarsh', '--force'],
+      // An app the keeper never created, named under the granted one.
+      ['secrets', 'import', '--app', 'cw-saltmarsh-prod'],
+      // A listed command with a flag the list does not name.
+      ['secrets', 'import', '--app', 'cw-saltmarsh', '--config', 'other.toml'],
+    ]) {
+      expect({ args, covered: grantCovers(fly, 'fly', held(args), null, now) }).toEqual({
+        args,
+        covered: false,
+      });
+    }
   });
 
   it('covers no other app, no new app, and nothing once expired', () => {

@@ -13,6 +13,10 @@
  * **An approval runs exactly the request Bryan read.** Its challenge is
  * issued for that one request and cleared on the first attempt, pass or
  * fail, so an assertion can approve nothing else and cannot be replayed.
+ * Each served approval page gets its own page token and holds its own
+ * challenge, so another caller asking for a challenge cannot spoil the
+ * owner's tap. Denying takes the passkey too: any local process can load
+ * the page, so a page token alone proves nothing about who is denying.
  *
  * **One tap per project.** A `project.create` that succeeds adds the app to
  * the keeper's list (so routine starts and stops work on it from then on) and
@@ -86,7 +90,8 @@ export interface HeldRequest {
   requester: string;
   createdAt: number;
   status: RequestStatus;
-  challenge?: string;
+  /** Each served page's token, and the challenge that page was last given. */
+  pages: Map<string, string | null>;
   result?: KeeperResult;
   /** Why the approval or the command failed, for the page and the requester. */
   error?: string;
@@ -102,6 +107,8 @@ export const PENDING_MS = 60 * 60_000;
 /** A finished request's result stays readable for this long. */
 export const RESULT_MS = 15 * 60_000;
 const MAX_HELD = 100;
+/** Pages open on one request at once; the oldest is dropped past this. */
+const MAX_PAGES = 8;
 
 const token = (): string => b64url(new Uint8Array(randomBytes(24)));
 
@@ -109,10 +116,12 @@ export interface KeeperRequests {
   submit(call: KeeperCall, requester: string): Promise<Submitted>;
   get(id: string): HeldRequest | undefined;
   pending(): HeldRequest[];
-  /** A fresh challenge for the approval page, or null when not pending. */
-  challenge(id: string): string | null;
-  approve(id: string, assertion: AssertionInput): Promise<HeldRequest>;
-  deny(id: string): HeldRequest | undefined;
+  /** A token for one served approval page, or null when not pending. */
+  openPage(id: string): string | null;
+  /** A fresh challenge for one served page. */
+  challenge(id: string, page: string): { challenge: string } | { error: 'not-waiting' | 'no-page' };
+  approve(id: string, page: string, assertion: AssertionInput): Promise<HeldRequest>;
+  deny(id: string, page: string, assertion: AssertionInput): HeldRequest;
   grants(): Grant[];
 }
 
@@ -134,6 +143,7 @@ export function createKeeperRequests(deps: {
     for (const [id, r] of held) {
       if (r.status === 'pending' && t - r.createdAt > PENDING_MS) {
         r.status = 'expired';
+        r.pages.clear();
         r.call = stripInput(r.call);
       }
       if (
@@ -155,6 +165,26 @@ export function createKeeperRequests(deps: {
     call.type === 'fly'
       ? deps.exec.fly(call.args, call.input)
       : deps.exec.cloudflare(call.method, call.path, call.body);
+
+  /** Check the owner's tap on one page's challenge, which is spent either way. */
+  const verifyTap = (id: string, page: string, assertion: AssertionInput): HeldRequest => {
+    sweep();
+    const r = held.get(id);
+    if (!r) throw new Error('no such request');
+    if (r.status !== 'pending') throw new Error(`request is ${r.status}`);
+    const challenge = r.pages.get(page);
+    if (challenge) r.pages.set(page, null);
+    if (!challenge) throw new Error('ask for a challenge first');
+    const passkeys = deps.store.passkeys();
+    const { id: passkeyId, signCount } = verifyAssertion(assertion, passkeys, {
+      ...deps.ceremony,
+      challenge,
+    });
+    deps.store.savePasskeys(passkeys.map((p) => (p.id === passkeyId ? { ...p, signCount } : p)));
+    r.pages.clear();
+    log(`passkey ${passkeyId.slice(0, 8)} answered ${r.id}`);
+    return r;
+  };
 
   /** After an approved request ran: record the app, open the grant. */
   const afterApproved = (r: HeldRequest, result: KeeperResult) => {
@@ -201,6 +231,7 @@ export function createKeeperRequests(deps: {
         requester: requester.slice(0, 120),
         createdAt: now(),
         status: 'pending',
+        pages: new Map(),
       };
       held.set(request.id, request);
       log(`held ${request.id} for ${request.requester}: ${verdict.hold} ${verdict.summary}`);
@@ -217,31 +248,30 @@ export function createKeeperRequests(deps: {
       return [...held.values()].filter((r) => r.status === 'pending');
     },
 
-    challenge(id) {
+    openPage(id) {
       sweep();
       const r = held.get(id);
       if (!r || r.status !== 'pending') return null;
-      r.challenge = token();
-      return r.challenge;
+      const page = token();
+      r.pages.set(page, null);
+      while (r.pages.size > MAX_PAGES) r.pages.delete(r.pages.keys().next().value as string);
+      return page;
     },
 
-    async approve(id, assertion) {
+    challenge(id, page) {
       sweep();
       const r = held.get(id);
-      if (!r) throw new Error('no such request');
-      if (r.status !== 'pending') throw new Error(`request is ${r.status}`);
-      const challenge = r.challenge;
-      // Single use, whatever the outcome below.
-      r.challenge = undefined;
-      if (!challenge) throw new Error('ask for a challenge first');
-      const passkeys = deps.store.passkeys();
-      const { id: passkeyId, signCount } = verifyAssertion(assertion, passkeys, {
-        ...deps.ceremony,
-        challenge,
-      });
-      deps.store.savePasskeys(passkeys.map((p) => (p.id === passkeyId ? { ...p, signCount } : p)));
+      if (!r || r.status !== 'pending') return { error: 'not-waiting' };
+      if (!r.pages.has(page)) return { error: 'no-page' };
+      const challenge = token();
+      r.pages.set(page, challenge);
+      return { challenge };
+    },
+
+    async approve(id, page, assertion) {
+      const r = verifyTap(id, page, assertion);
       r.status = 'running';
-      log(`approved ${r.id} with passkey ${passkeyId.slice(0, 8)}: ${r.summary}`);
+      log(`approved ${r.id}: ${r.summary}`);
       try {
         const result = await run(r.call);
         r.result = result;
@@ -254,11 +284,9 @@ export function createKeeperRequests(deps: {
       return r;
     },
 
-    deny(id) {
-      const r = held.get(id);
-      if (!r || r.status !== 'pending') return r;
+    deny(id, page, assertion) {
+      const r = verifyTap(id, page, assertion);
       r.status = 'denied';
-      r.challenge = undefined;
       r.call = stripInput(r.call);
       log(`denied ${r.id}: ${r.summary}`);
       return r;

@@ -83,17 +83,28 @@ const askFly = async (args: string[], input?: string) => {
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 };
 
-async function approve(id: string, passkey: TestPasskey, challengeFor = id): Promise<Response> {
-  const c = (await (await page(`/v1/requests/${challengeFor}/challenge`)).json()) as {
-    challenge: string;
-  };
+/** Load the approval page and tap: `verb` the request with `challengeFor`'s challenge. */
+async function tap(
+  verb: 'approve' | 'deny',
+  id: string,
+  passkey: TestPasskey,
+  challengeFor = id,
+): Promise<Response> {
+  const html = await (await fetch(`${base}/approve/${challengeFor}`)).text();
+  const pageToken = /const pageToken = "([^"]+)"/.exec(html)?.[1] ?? '';
+  const c = (await (
+    await page(`/v1/requests/${challengeFor}/challenge`, { page: pageToken })
+  ).json()) as { challenge: string };
   const assertion = passkey.assert({
     challenge: c.challenge,
     origin: keeper.origin,
     rpId: 'localhost',
   });
-  return page(`/v1/requests/${id}/approve`, assertion);
+  return page(`/v1/requests/${id}/${verb}`, { page: pageToken, ...assertion });
 }
+
+const approve = (id: string, passkey: TestPasskey, challengeFor = id) =>
+  tap('approve', id, passkey, challengeFor);
 
 beforeAll(async () => {
   mkdirSync(home, { recursive: true });
@@ -127,10 +138,17 @@ beforeAll(async () => {
 
   // Register the test passkey through the enrollment link, as Bryan would.
   const token = 'enroll-test-token';
-  store.saveEnroll({ tokenHash: hashToken(token), expiresAt: Date.now() + 60_000 });
-  const o = (await (await page('/v1/enroll/options', { token })).json()) as { challenge: string };
+  store.saveEnroll({
+    tokenHash: hashToken(token),
+    expiresAt: Date.now() + 60_000,
+    createdAt: Date.now(),
+  });
+  const o = (await (await page('/v1/enroll/options', { token })).json()) as {
+    challenge: string;
+    session: string;
+  };
   const reg = key.register({ challenge: o.challenge, origin: keeper.origin, rpId: 'localhost' });
-  const done = await page('/v1/enroll', { token, ...reg });
+  const done = await page('/v1/enroll', { session: o.session, ...reg });
   expect(done.status).toBe(200);
 });
 
@@ -256,7 +274,7 @@ describe('held calls', () => {
       headers: { host: `keeper.evil.test:${keeper.port}` },
     });
     expect(rebound.status).toBe(403);
-    expect((await page(`/v1/requests/${id}/deny`)).status).toBe(200);
+    expect((await tap('deny', id, key)).status).toBe(200);
   });
 });
 

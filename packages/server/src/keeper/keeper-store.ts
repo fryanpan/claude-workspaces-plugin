@@ -46,11 +46,18 @@ export const CREDENTIAL_NAMES = [
 export type CredentialName = (typeof CREDENTIAL_NAMES)[number];
 
 export interface EnrollRecord {
-  /** sha256 of the link's token, hex. The token itself is never stored. */
+  /**
+   * sha256 of the link's token, hex, while the link is unspent. The token
+   * itself is never stored. Empty once a page has asked for options.
+   */
   tokenHash: string;
   expiresAt: number;
-  /** The challenge last handed to the page that holds the link. */
+  /** When `keeper enroll` made the link. A keeper started later refuses it. */
+  createdAt: number;
+  /** The one challenge handed to the page that spent the link. */
   challenge?: string;
+  /** sha256 of the session that page was given, to finish with. */
+  sessionHash?: string;
 }
 
 export interface KeeperStore {

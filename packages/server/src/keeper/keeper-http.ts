@@ -14,9 +14,18 @@
  *   Any local process may call it: a routine call is safe for anyone to make,
  *   and a held one does nothing until Bryan's passkey answers.
  * - **The page's own posts** (challenge, approve, deny, enroll) must carry
- *   the page's `Origin`. An agent can forge that header, and it buys nothing:
- *   approving takes a passkey assertion, and enrolling takes a link only the
- *   keeper's user can mint.
+ *   the page's `Origin`. That stops another web page, not a local process,
+ *   which can forge it. What stops a local process: approving and denying
+ *   take a passkey assertion on a challenge issued to one served page; and
+ *   an enrollment link is spent by the first page that asks for options, and
+ *   opens nothing on a keeper that started after the link was made.
+ *
+ * The page origin is `http://localhost:<port>`, and `localhost` may resolve
+ * to either loopback address, so `keeper-serve.ts` holds the port on both
+ * and refuses to start if either is taken. A process that listens there
+ * while no keeper runs can serve a lookalike page, but every challenge and
+ * every live link belongs to a running keeper, so that page can obtain
+ * nothing to sign.
  */
 import { randomBytes } from 'node:crypto';
 import { type Page, approvePage, enrollPage, indexPage } from './keeper-page.ts';
@@ -79,7 +88,8 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
   const { requests, store, port } = deps;
   const now = deps.now ?? Date.now;
   const origin = `http://localhost:${port}`;
-  const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
+  const hosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]);
+  const startedAt = now();
 
   const answer = (s: Submitted): Response => {
     if (s.outcome === 'refused') return json(403, { error: s.reason });
@@ -123,8 +133,11 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       if (method === 'GET' && path === '/enroll') return html(enrollPage());
       const approveMatch = /^\/approve\/([A-Za-z0-9_-]{1,64})$/.exec(path);
       if (method === 'GET' && approveMatch) {
-        const r = requests.get(approveMatch[1] as string);
-        return r ? html(approvePage(r)) : json(404, { error: 'no such request' });
+        const id = approveMatch[1] as string;
+        const r = requests.get(id);
+        return r
+          ? html(approvePage(r, requests.openPage(id)))
+          : json(404, { error: 'no such request' });
       }
 
       // ── The agent API ───────────────────────────────────────────────────
@@ -172,53 +185,77 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       }
       if (method === 'POST' && act) {
         const [, id = '', verb] = act;
+        const body = await readJson(req);
+        const pageToken = str(body.page);
         if (verb === 'challenge') {
-          const challenge = requests.challenge(id);
-          if (!challenge) return json(409, { error: 'this request is not waiting' });
+          const c = requests.challenge(id, pageToken);
+          if ('error' in c) {
+            return c.error === 'no-page'
+              ? json(403, { error: 'load the approval page again' })
+              : json(409, { error: 'this request is not waiting' });
+          }
           return json(200, {
-            challenge,
+            challenge: c.challenge,
             rpId: 'localhost',
             allow: store.passkeys().map((p) => p.id),
           });
         }
-        if (verb === 'deny') {
-          const r = requests.deny(id);
-          return r ? json(200, view(r)) : json(404, { error: 'no such request' });
-        }
-        const body = await readJson(req);
+        const assertion = {
+          credentialId: str(body.credentialId),
+          clientDataJSON: str(body.clientDataJSON),
+          authenticatorData: str(body.authenticatorData),
+          signature: str(body.signature),
+        };
         try {
-          const r = await requests.approve(id, {
-            credentialId: str(body.credentialId),
-            clientDataJSON: str(body.clientDataJSON),
-            authenticatorData: str(body.authenticatorData),
-            signature: str(body.signature),
-          });
+          if (verb === 'deny') return json(200, view(requests.deny(id, pageToken, assertion)));
+          const r = await requests.approve(id, pageToken, assertion);
           return json(200, { ...view(r), ...(r.result ?? {}) });
         } catch (err) {
           return json(403, { error: err instanceof Error ? err.message : String(err) });
         }
       }
-      if (method === 'POST' && (path === '/v1/enroll/options' || path === '/v1/enroll')) {
+      if (method === 'POST' && path === '/v1/enroll/options') {
         const body = await readJson(req);
         const record = store.enroll();
         if (
           !record ||
           record.expiresAt <= now() ||
+          !record.tokenHash ||
+          !(record.createdAt >= startedAt) ||
           hashToken(str(body.token)) !== record.tokenHash
         ) {
           return json(403, { error: 'this enrollment link is not open' });
         }
-        if (path === '/v1/enroll/options') {
-          const challenge = b64url(new Uint8Array(randomBytes(32)));
-          store.saveEnroll({ ...record, challenge });
-          return json(200, {
-            challenge,
-            rpId: 'localhost',
-            userId: b64url(new Uint8Array(randomBytes(16))),
-          });
+        const challenge = b64url(new Uint8Array(randomBytes(32)));
+        const session = b64url(new Uint8Array(randomBytes(24)));
+        // The link is spent here: a second caller holding it gets nothing,
+        // and only this caller's session can finish.
+        store.saveEnroll({
+          tokenHash: '',
+          expiresAt: record.expiresAt,
+          createdAt: record.createdAt,
+          challenge,
+          sessionHash: hashToken(session),
+        });
+        return json(200, {
+          challenge,
+          session,
+          rpId: 'localhost',
+          userId: b64url(new Uint8Array(randomBytes(16))),
+        });
+      }
+      if (method === 'POST' && path === '/v1/enroll') {
+        const body = await readJson(req);
+        const record = store.enroll();
+        if (
+          !record?.challenge ||
+          !record.sessionHash ||
+          record.expiresAt <= now() ||
+          hashToken(str(body.session)) !== record.sessionHash
+        ) {
+          return json(403, { error: 'this enrollment is not open' });
         }
-        if (!record.challenge) return json(409, { error: 'ask for options first' });
-        // The link is spent by this attempt, pass or fail.
+        // Spent by this attempt, pass or fail.
         store.saveEnroll(null);
         const passkey = verifyRegistration(
           {
@@ -227,8 +264,10 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
           },
           { challenge: record.challenge, origin, rpId: 'localhost' },
         );
-        const list = store.passkeys().filter((p) => p.id !== passkey.id);
-        store.savePasskeys([...list, passkey]);
+        if (store.passkeys().some((p) => p.id === passkey.id)) {
+          return json(409, { error: 'this passkey is already registered' });
+        }
+        store.savePasskeys([...store.passkeys(), passkey]);
         return json(200, { registered: passkey.id });
       }
       return json(404, { error: 'not found' });

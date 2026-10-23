@@ -88,7 +88,11 @@ try {
   });
 
   const token = 'browser-enroll-token';
-  store.saveEnroll({ tokenHash: hashToken(token), expiresAt: Date.now() + 60_000 });
+  store.saveEnroll({
+    tokenHash: hashToken(token),
+    expiresAt: Date.now() + 60_000,
+    createdAt: Date.now(),
+  });
   await open(cdp, `${keeper.origin}/enroll#${token}`);
   await cdp.evaluate(`document.getElementById('enroll').click()`);
   const enrollStatus = await statusText(cdp, /Registered|Not registered/);

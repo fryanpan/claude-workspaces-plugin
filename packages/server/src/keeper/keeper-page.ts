@@ -77,7 +77,8 @@ export function indexPage(pending: readonly HeldRequest[]): Page {
   return page('Keeper', `<h1>Waiting for your passkey</h1>${rows}`);
 }
 
-export function approvePage(r: HeldRequest): Page {
+/** `pageToken` names this one served page; its challenge is its own. */
+export function approvePage(r: HeldRequest, pageToken: string | null): Page {
   const details: string[] = [
     `<dt>What</dt><dd>${escapeHtml(WHAT[r.hold])}</dd>`,
     `<dt>Asked by (as the caller says)</dt><dd>${escapeHtml(r.requester || 'an unnamed caller')}</dd>`,
@@ -92,34 +93,44 @@ export function approvePage(r: HeldRequest): Page {
     details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body.slice(0, 4000))}</pre></dd>`);
   }
   const state =
-    r.status === 'pending'
+    r.status === 'pending' && pageToken
       ? `<p><button id="approve" type="button">Approve with passkey</button><button id="deny" type="button">Deny</button></p>`
       : `<p>This request is ${escapeHtml(r.status)}.</p>`;
   const body = `<h1>Approve ${escapeHtml(r.hold)}?</h1>
 <pre id="summary">${escapeHtml(r.summary)}</pre>
 <dl>${details.join('')}</dl>${state}<p id="status" role="status"></p>`;
-  const id = JSON.stringify(r.id);
   const script = `
-const id = ${id};
+const id = ${JSON.stringify(r.id)};
+const pageToken = ${JSON.stringify(pageToken ?? '')};
 const base = '/v1/requests/' + encodeURIComponent(id);
+const buttons = () => ['approve', 'deny'].map((b) => document.getElementById(b));
+// Approving and denying are both a passkey tap on this page's own challenge.
+const tap = async () => {
+  const c = await post(base + '/challenge', { page: pageToken });
+  const cred = await navigator.credentials.get({ publicKey: {
+    challenge: u2b(c.challenge), rpId: c.rpId, timeout: 120000, userVerification: 'required',
+    allowCredentials: c.allow.map((p) => ({ type: 'public-key', id: u2b(p) })) } });
+  const a = cred.response;
+  return { page: pageToken, credentialId: b2u(cred.rawId), clientDataJSON: b2u(a.clientDataJSON),
+    authenticatorData: b2u(a.authenticatorData), signature: b2u(a.signature) };
+};
 document.getElementById('approve')?.addEventListener('click', async () => {
   try {
     say('Waiting for your passkey…');
-    const c = await post(base + '/challenge', {});
-    const cred = await navigator.credentials.get({ publicKey: {
-      challenge: u2b(c.challenge), rpId: c.rpId, timeout: 120000, userVerification: 'required',
-      allowCredentials: c.allow.map((p) => ({ type: 'public-key', id: u2b(p) })) } });
-    const a = cred.response;
-    const done = await post(base + '/approve', { credentialId: b2u(cred.rawId),
-      clientDataJSON: b2u(a.clientDataJSON), authenticatorData: b2u(a.authenticatorData), signature: b2u(a.signature) });
+    const done = await post(base + '/approve', await tap());
     say('Approved. ' + (done.error ? 'The command failed: ' + done.error : 'It ran with exit ' + done.status + '.'));
-    document.getElementById('approve').disabled = true; document.getElementById('deny').disabled = true;
+    for (const b of buttons()) b.disabled = true;
   } catch (e) { say('Not approved: ' + e.message); }
 });
 document.getElementById('deny')?.addEventListener('click', async () => {
-  try { await post(base + '/deny', {}); say('Denied.'); } catch (e) { say('Could not deny: ' + e.message); }
+  try {
+    say('Waiting for your passkey…');
+    await post(base + '/deny', await tap());
+    say('Denied.');
+    for (const b of buttons()) b.disabled = true;
+  } catch (e) { say('Not denied: ' + e.message); }
 });`;
-  return page(`Approve ${r.hold}`, body, r.status === 'pending' ? script : '');
+  return page(`Approve ${r.hold}`, body, r.status === 'pending' && pageToken ? script : '');
 }
 
 export function enrollPage(): Page {
@@ -137,7 +148,7 @@ document.getElementById('enroll').addEventListener('click', async () => {
       user: { id: u2b(o.userId), name: 'owner', displayName: 'Owner' },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }], attestation: 'none', timeout: 120000,
       authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' } } });
-    await post('/v1/enroll', { token, clientDataJSON: b2u(cred.response.clientDataJSON),
+    await post('/v1/enroll', { session: o.session, clientDataJSON: b2u(cred.response.clientDataJSON),
       attestationObject: b2u(cred.response.attestationObject) });
     say('Registered.');
     document.getElementById('enroll').disabled = true;

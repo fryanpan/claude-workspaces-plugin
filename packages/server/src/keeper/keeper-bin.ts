@@ -87,9 +87,10 @@ if (command === 'import') {
   console.log(`[keeper] stored ${arg}`);
 } else if (command === 'enroll') {
   const token = b64url(new Uint8Array(randomBytes(32)));
-  store.saveEnroll({ tokenHash: hashToken(token), expiresAt: Date.now() + ENROLL_MS });
+  const createdAt = Date.now();
+  store.saveEnroll({ tokenHash: hashToken(token), expiresAt: createdAt + ENROLL_MS, createdAt });
   console.log(
-    `Open this within 15 minutes, on this Mac, and register your passkey:\n  http://localhost:${port}/enroll#${token}`,
+    `Open this within 15 minutes, on this Mac, and register your passkey. It works only on the keeper running now; if the keeper restarts, make a new one:\n  http://localhost:${port}/enroll#${token}`,
   );
 } else if (command === 'adopt') {
   if (!arg) fail('adopt needs an app name');
