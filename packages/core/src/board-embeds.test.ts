@@ -112,6 +112,7 @@ describe('parseBoardEmbeds', () => {
 
 it('clamps a height into range', () => {
   expect(clampEmbedHeight(5)).toBe(80);
-  expect(clampEmbedHeight(99999)).toBe(2000);
+  expect(clampEmbedHeight(4500)).toBe(4500);
+  expect(clampEmbedHeight(99999)).toBe(10000);
   expect(clampEmbedHeight(321.4)).toBe(321);
 });
