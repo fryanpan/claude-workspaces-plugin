@@ -5,6 +5,7 @@ import {
   createRemoteJWKSet,
   jwtVerify,
 } from 'jose';
+import { normalizeHost } from './host-guard.ts';
 
 export interface CfAccessOptions {
   /** Cloudflare Zero Trust team domain, e.g. "<team>.cloudflareaccess.com". */
@@ -23,6 +24,16 @@ export interface CfAccessOptions {
    *     lists. An absent audience answers no by its type.
    */
   audience?: string | ((host: string) => string | null);
+  /**
+   * Hostname -> the audience of the Access application in front of it, for a
+   * server reached under more than one application (the one address and its
+   * project's own subdomain, while boards move). A host named here is checked
+   * against its own audience and no other, whatever `audience` says, so a
+   * stamp another project's application minted is refused on it. A host not
+   * named here falls back to `audience`. Keys are bare lower-case hostnames
+   * (`parseHostAudiences`).
+   */
+  hostAudiences?: ReadonlyMap<string, string>;
   /** For tests: pass a static JWKS instead of fetching from the team domain. */
   jwks?: JSONWebKeySet;
 }
@@ -55,7 +66,10 @@ export function createCfAccessVerifier(opts: CfAccessOptions): CfAccessVerifier 
     const token = extractToken(req);
     if (!token) return { ok: false, status: 401, error: 'missing_jwt' };
     let audience: string;
-    if (typeof opts.audience === 'function') {
+    const own = opts.hostAudiences?.get(normalizeHost(req.headers.get('host')));
+    if (own) {
+      audience = own;
+    } else if (typeof opts.audience === 'function') {
       const host = req.headers.get('host')?.toLowerCase() ?? '';
       const resolved = opts.audience(host);
       if (!resolved) return { ok: false, status: 401, error: 'no_share_for_host' };
@@ -85,6 +99,37 @@ export function createCfAccessVerifier(opts: CfAccessOptions): CfAccessVerifier 
       return { ok: false, status: 401, error: 'access_token_invalid' };
     }
   };
+}
+
+const HOSTNAME =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const AUDIENCE = /^[A-Za-z0-9._-]{1,256}$/;
+
+/**
+ * `CF_ACCESS_HOST_AUDS`: `{"<hostname>": "<audience>", ...}`. Answers the map,
+ * or a reason it was refused. Any bad part refuses the whole value. Two
+ * hostnames may share an audience: one application can cover several names
+ * of the same project.
+ */
+export function parseHostAudiences(raw: string): Map<string, string> | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { error: 'not JSON' };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { error: 'not a JSON object' };
+  }
+  const map = new Map<string, string>();
+  for (const [host, aud] of Object.entries(parsed)) {
+    if (!HOSTNAME.test(host)) return { error: `${host} is not a bare lower-case hostname` };
+    if (typeof aud !== 'string' || !AUDIENCE.test(aud)) {
+      return { error: `the audience for ${host} is not an audience tag` };
+    }
+    map.set(host, aud);
+  }
+  return map;
 }
 
 function extractToken(req: Request): string | null {

@@ -23,6 +23,13 @@ export interface RouterConfig {
    * today's boards offline.
    */
   bindBoardPaths: boolean;
+  /**
+   * The origin that owns the one address's Access application, the Worker's
+   * `ONE_ADDRESS_ORIGIN`. Set, the one address forwards boards only there and
+   * redirects every other board to its project's subdomain. Absent, every
+   * board is forwarded, as before each project had an application.
+   */
+  oneAddressOrigin?: string;
 }
 
 /** The wildcard record every project subdomain resolves through. */
@@ -89,7 +96,18 @@ export function parseRouterConfig(raw: string): RouterConfig {
   if (bindBoardPaths && Object.keys(boards).length === 0) {
     throw new Error('bindBoardPaths needs a boards table');
   }
-  return { zone, oneAddress, projects, boards, bindBoardPaths };
+  const oneAddressOrigin = typeof o.oneAddressOrigin === 'string' ? o.oneAddressOrigin : '';
+  if (oneAddressOrigin && !origins.includes(oneAddressOrigin)) {
+    throw new Error(`oneAddressOrigin ${oneAddressOrigin} is not an origin in the tables`);
+  }
+  return {
+    zone,
+    oneAddress,
+    projects,
+    boards,
+    bindBoardPaths,
+    ...(oneAddressOrigin ? { oneAddressOrigin } : {}),
+  };
 }
 
 /** Every origin hostname the config sends requests to, once each. */
@@ -160,6 +178,7 @@ export function renderWranglerToml(cfg: RouterConfig, workerPath: string): strin
     `ONE_ADDRESS = ${toml(cfg.oneAddress)}`,
     `PROJECT_ORIGINS = ${toml(JSON.stringify(cfg.projects))}`,
     `BOARD_ORIGINS = ${toml(JSON.stringify(cfg.boards))}`,
+    ...(cfg.oneAddressOrigin ? [`ONE_ADDRESS_ORIGIN = ${toml(cfg.oneAddressOrigin)}`] : []),
     '',
     '[observability]',
     'enabled = false',

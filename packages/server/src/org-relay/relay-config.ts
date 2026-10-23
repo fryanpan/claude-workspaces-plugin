@@ -17,7 +17,7 @@
  * ```json
  * {"servers": {"<server id>": {
  *    "organization": "<org id>",
- *    "baseUrl": "https://<the one address>",
+ *    "baseUrl": "https://<that server's own project address>",
  *    "serviceToken": {"clientId": "…", "clientSecret": "…"},
  *    "bearers": {"<board id>": "<the relay's at2 for that board>"}}},
  *  "seats": {"<seat id>": {
@@ -29,6 +29,12 @@
  *
  * `baseUrl` may be plain http only on a loopback host (a co-located server,
  * or a test); anything else is https and must carry a service token.
+ *
+ * `baseUrl` is the project's own address, not the one address: each project
+ * server admits only its own Access application's stamp, and Access stamps
+ * the service token with the audience of the application whose host was
+ * asked. At the one address the stamp would carry the one address's
+ * audience, which the project's server refuses.
  */
 import { readFileSync, statSync } from 'node:fs';
 

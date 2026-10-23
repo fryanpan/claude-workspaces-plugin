@@ -58,6 +58,51 @@ describe('parseHomeRemotesConfig', () => {
   });
 });
 
+describe('parseHomeRemotesConfig addresses', () => {
+  it("reads each origin's own project address", () => {
+    const c = parseHomeRemotesConfig(
+      configJson({ addresses: { [CLOUD]: 'https://riverbend.workspaces.harborlight.test' } }),
+    );
+    if ('error' in c) throw new Error(c.error);
+    expect([...c.addresses]).toEqual([[CLOUD, 'https://riverbend.workspaces.harborlight.test']]);
+    const none = parseHomeRemotesConfig(configJson());
+    if ('error' in none) throw new Error(none.error);
+    expect(none.addresses.size).toBe(0);
+  });
+
+  it('refuses an address that is not a bare https origin, or names no board’s origin', () => {
+    for (const addresses of [
+      [],
+      { [CLOUD]: 'http://riverbend.workspaces.harborlight.test' },
+      { [CLOUD]: 'https://riverbend.workspaces.harborlight.test/path' },
+      { [CLOUD]: 7 },
+      { 'saltmarsh-origin.harborlight.test': 'https://saltmarsh.workspaces.harborlight.test' },
+    ]) {
+      expect('error' in parseHomeRemotesConfig(configJson({ addresses }))).toBe(true);
+    }
+  });
+
+  it('pulls a board at its origin’s own address', async () => {
+    const c = parseHomeRemotesConfig(
+      configJson({ addresses: { [CLOUD]: 'https://riverbend.workspaces.harborlight.test' } }),
+    );
+    if ('error' in c) throw new Error(c.error);
+    const asked: string[] = [];
+    const fetch: FetchLike = async (input) => {
+      asked.push(new URL(input).host);
+      return new Response('down', { status: 503 });
+    };
+    const home = createHomeRemotes({ config: c, fetch, onChange: () => {}, retryMs: 10_000 });
+    try {
+      home.start();
+      await waitFor(() => asked.length >= 2, { describe: 'the feed and its stream asked for' });
+      expect(new Set(asked)).toEqual(new Set(['riverbend.workspaces.harborlight.test']));
+    } finally {
+      home.dispose();
+    }
+  });
+});
+
 describe('homeRemotesFromEnv', () => {
   const dirs: string[] = [];
   afterEach(() => {
