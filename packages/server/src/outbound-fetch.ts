@@ -21,7 +21,8 @@
  *  - **`fixedHostFetch`** — for the vendors the server is built to call
  *    (`VENDOR_HOSTS`) and the hosts an operator configured
  *    (`configuredHostFetch`). The host is a constant or the operator's own
- *    config, never a value a reader typed, so nothing is resolved here.
+ *    config, never a value a reader typed, so nothing is resolved here. A
+ *    vendor request follows a redirect only to its own host, over https.
  *  - **`loopbackFetch(purpose)`** — for an origin on this machine, and only
  *    for the purposes named in `LoopbackPurpose`: a dev server attached for
  *    review, and this server calling itself. The host must be written as
@@ -349,13 +350,58 @@ export function isVendorHost(hostname: string): boolean {
   );
 }
 
-/** Requests to the vendors in `VENDOR_HOSTS`, over https only. */
-export const fixedHostFetch: GuardedFetch = guarded(async (url, init) => {
-  if (url.protocol !== 'https:' || !isVendorHost(url.hostname)) {
-    throw new OutboundRefused(url.href, 'host', `${url.host} is not a vendor host`);
-  }
-  return globalThis.fetch(url.href, init);
-});
+/** How many same-host redirects a vendor request follows before it gives up. */
+const MAX_VENDOR_REDIRECTS = 5;
+
+/**
+ * Requests to the vendors in `VENDOR_HOSTS`, over https only. A redirect is
+ * followed only to the host the request was made to, over https; one that
+ * leaves it is refused, so a vendor host cannot bounce the server onto
+ * another address, the cloud metadata one among them. `transport` is for
+ * tests.
+ */
+export function createFixedHostFetch(
+  transport: (url: string, init: RequestInit) => Promise<Response> = (url, init) =>
+    globalThis.fetch(url, init),
+): GuardedFetch {
+  return guarded(async (first, init) => {
+    if (first.protocol !== 'https:' || !isVendorHost(first.hostname)) {
+      throw new OutboundRefused(first.href, 'host', `${first.host} is not a vendor host`);
+    }
+    let url = first;
+    let request: RequestInit = { ...init, redirect: 'manual' };
+    for (let hops = 0; ; hops++) {
+      const res = await transport(url.href, request);
+      const location =
+        res.status >= 300 && res.status < 400 && res.status !== 304
+          ? res.headers.get('location')
+          : null;
+      if (location === null) return res;
+      let next: URL;
+      try {
+        next = new URL(location, url);
+      } catch {
+        return res;
+      }
+      await res.body?.cancel().catch(() => {});
+      if (next.protocol !== 'https:' || next.host !== first.host) {
+        throw new OutboundRefused(next.href, 'host', `a redirect from ${first.host} leaves it`);
+      }
+      if (hops >= MAX_VENDOR_REDIRECTS) {
+        throw new OutboundRefused(next.href, 'host', `more than ${MAX_VENDOR_REDIRECTS} redirects`);
+      }
+      // As fetch itself does: a 303, or a 301/302 after a POST, is a GET with no body.
+      const method = (request.method ?? 'GET').toUpperCase();
+      if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+        request = { ...request, method: 'GET', body: null };
+      }
+      url = next;
+    }
+  });
+}
+
+/** The production vendor fetch. See `createFixedHostFetch`. */
+export const fixedHostFetch: GuardedFetch = createFixedHostFetch();
 
 /**
  * Requests to origins an operator configured — another board server for Home
