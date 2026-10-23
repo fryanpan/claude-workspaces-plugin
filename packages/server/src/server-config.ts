@@ -20,6 +20,7 @@ import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin } from './frame-host.ts';
+import { parseHostAudiences } from './middleware/cf-access.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -326,8 +327,22 @@ export function resolveServerConfig(opts: {
   // placeholder answered yes — leaving every fail-closed host rule depending on
   // this file remembering to empty the lists. Absent, the verifier refuses every
   // token on its own, and the shares registry still overrides it per hostname.
+  // One Access application per project: a host named here is checked against
+  // its own application's audience only (`CfAccessOptions.hostAudiences`).
+  // FATAL when malformed, because the fallback for an unnamed host is
+  // `CF_ACCESS_AUD`, so a dropped entry would quietly accept the wrong stamp.
+  const rawHostAuds = env.CF_ACCESS_HOST_AUDS?.trim() ?? '';
+  const hostAudiences = rawHostAuds ? parseHostAudiences(rawHostAuds) : undefined;
+  if (hostAudiences && !(hostAudiences instanceof Map)) {
+    console.error(`[feedback] CF_ACCESS_HOST_AUDS refused: ${hostAudiences.error}.`);
+    process.exit(1);
+  }
   const cfAccess = cfAccessTeam
-    ? { teamDomain: cfAccessTeam, ...(cfAccessAud ? { audience: cfAccessAud } : {}) }
+    ? {
+        teamDomain: cfAccessTeam,
+        ...(cfAccessAud ? { audience: cfAccessAud } : {}),
+        ...(hostAudiences instanceof Map && hostAudiences.size > 0 ? { hostAudiences } : {}),
+      }
     : undefined;
 
   /**
@@ -439,10 +454,11 @@ export function resolveServerConfig(opts: {
   if (
     shareLinkHosts.length &&
     cfAccessShareAud &&
-    cfAccessShareAud === (cfAccessAud ?? '').trim()
+    (cfAccessShareAud === (cfAccessAud ?? '').trim() ||
+      [...(cfAccess?.hostAudiences?.values() ?? [])].includes(cfAccessShareAud))
   ) {
     console.error(
-      '[feedback] CF_ACCESS_SHARE_AUD equals CF_ACCESS_AUD: the share hostname and the ' +
+      '[feedback] CF_ACCESS_SHARE_AUD equals CF_ACCESS_AUD or a CF_ACCESS_HOST_AUDS entry: the share hostname and the ' +
         "owner's hostname would be one Access application, so a token minted by anyone " +
         "who typed an email at the share sign-in would verify on the owner's hostname. " +
         'Create a SEPARATE Access application for the share hostname and use its audience.',

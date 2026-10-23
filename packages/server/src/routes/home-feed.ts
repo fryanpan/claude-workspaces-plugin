@@ -12,7 +12,7 @@ import { LANDING_CHANNEL } from '../landing-changes.ts';
  * A project server answers these; the Mac's server is the only intended
  * caller, and it calls OUT (`home-remotes.ts`). Both paths sit under
  * `/workspaces/<board>/` so the board router Worker routes them to the server
- * that holds the board, through the one address, with no second table.
+ * that holds the board, at its project's own address, with no second table.
  *
  * Answered ABOVE request admission, with a gate of its own, because the
  * Mac's request carries no person. It arrives through Access with a service
@@ -20,9 +20,10 @@ import { LANDING_CHANNEL } from '../landing-changes.ts';
  * for exactly one of two callers and nothing else:
  *
  *  - a process on this machine: a loopback peer with no `cf-ray`;
- *  - through the tunnel: a stamp signed for the one address's Access
- *    application (the static audience, `CF_ACCESS_AUD`, checked against
- *    Cloudflare's keys) that names no email and whose `common_name` is the
+ *  - through the tunnel: a stamp signed for the Access application in front
+ *    of the host it arrived on (that host's `CF_ACCESS_HOST_AUDS` entry, else
+ *    `CF_ACCESS_AUD`, checked against Cloudflare's keys), so a stamp another
+ *    project's application minted is refused, that names no email and whose `common_name` is the
  *    service token client id this server was configured with
  *    (`CW_HOME_FEED_CLIENT_ID`). A person's stamp, a share visitor's, or
  *    another service token's is refused.
@@ -43,7 +44,7 @@ export interface HomeFeedRoutesContext {
   boardName: (workspaceId: string) => string | undefined;
   /** The board's feed, read off the cross-board queue. */
   feed: (workspaceId: string) => Promise<HomeFeed>;
-  /** The static-audience Access verifier, or null when none is configured. */
+  /** The per-host Access verifier, or null when none is configured. */
   verifier: CfAccessVerifier | null;
   /** The Access service token client id the Mac pulls with, or undefined. */
   clientId: string | undefined;

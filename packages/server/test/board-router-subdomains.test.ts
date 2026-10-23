@@ -26,7 +26,11 @@ const RIVERBEND = 'riverbend-origin.harborlight.test';
 const SALTMARSH = 'saltmarsh-origin.harborlight.test';
 const BOARDS = JSON.stringify({ [MAC]: ['w-mac1'], [RIVERBEND]: ['w-river'] });
 const PROJECTS = JSON.stringify({ harborlight: MAC, riverbend: RIVERBEND, saltmarsh: SALTMARSH });
-const ENV = { ONE_ADDRESS: ONE_HOST, BOARD_ORIGINS: BOARDS, PROJECT_ORIGINS: PROJECTS };
+const ENV: Record<string, string> = {
+  ONE_ADDRESS: ONE_HOST,
+  BOARD_ORIGINS: BOARDS,
+  PROJECT_ORIGINS: PROJECTS,
+};
 
 type Call = { request: Request; origin: string };
 const recorder = (response: () => Response = () => new Response('ok')) => {
@@ -268,5 +272,62 @@ describe('every current board path on the one address routes as before', () => {
       return r.kind === 'forward' ? r.origin : r.kind;
     });
     expect(new Set(origins)).toEqual(new Set([RIVERBEND, MAC, 'not_found']));
+  });
+});
+
+describe('ONE_ADDRESS_ORIGIN keeps the one address’s stamp on its own machine', () => {
+  const STRICT = { ...ENV, ONE_ADDRESS_ORIGIN: MAC };
+
+  it('forwards a board the owning machine holds', () => {
+    const r = routeRequest(new URL('/workspaces/w-mac1', ONE), null, STRICT);
+    expect(r).toEqual({ kind: 'forward', boardId: 'w-mac1', origin: MAC });
+  });
+
+  it("redirects another machine's board to its project's subdomain, path and query kept", async () => {
+    const { res, calls } = await send(`${ONE}/workspaces/w-river/tasks?x=1`, {}, STRICT);
+    expect(res.status).toBe(308);
+    expect(res.headers.get('location')).toBe(
+      `https://riverbend.${ONE_HOST}/workspaces/w-river/tasks?x=1`,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('CONTROL: unset, the same request is forwarded to that machine', async () => {
+    const { res, calls } = await send(`${ONE}/workspaces/w-river/tasks?x=1`);
+    expect(res.status).toBe(200);
+    expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
+  });
+
+  it('a board on an origin with no single project label is a 404 that calls nothing', async () => {
+    const twoLabels = JSON.stringify({ harborlight: MAC, riverbend: RIVERBEND, delta: RIVERBEND });
+    for (const projects of [JSON.stringify({ harborlight: MAC }), twoLabels]) {
+      const { res, calls } = await send(
+        `${ONE}/workspaces/w-river`,
+        {},
+        { ...STRICT, PROJECT_ORIGINS: projects },
+      );
+      expect(res.status).toBe(404);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('a malformed value routes nothing on the one address', async () => {
+    const { res, calls } = await send(
+      `${ONE}/workspaces/w-mac1`,
+      {},
+      { ...ENV, ONE_ADDRESS_ORIGIN: 'Not An Origin' },
+    );
+    expect(res.status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+
+  it('leaves the project subdomains as they were', async () => {
+    const { res, calls } = await send(
+      `https://riverbend.${ONE_HOST}/workspaces/w-river`,
+      {},
+      STRICT,
+    );
+    expect(res.status).toBe(200);
+    expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
   });
 });

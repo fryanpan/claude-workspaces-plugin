@@ -6,12 +6,16 @@ export type BoardRoute =
   | { kind: 'forward'; boardId: string; origin: string }
   | { kind: 'not_found' };
 
-export type Route = BoardRoute | { kind: 'forward'; project: string; origin: string };
+export type Route =
+  | BoardRoute
+  | { kind: 'forward'; project: string; origin: string }
+  | { kind: 'redirect'; location: string };
 
 export interface RouterEnv {
   BOARD_ORIGINS?: string;
   PROJECT_ORIGINS?: string;
   ONE_ADDRESS?: string;
+  ONE_ADDRESS_ORIGIN?: string;
 }
 
 export type Upstream = (
@@ -23,6 +27,7 @@ export function parseBoardOrigins(raw: unknown): Map<string, string> | null;
 export function parseProjectOrigins(raw: unknown): Map<string, string> | null;
 export function boardIdOfPath(pathname: string): string | null;
 export function projectOfHost(hostname: string, oneAddress: string): string | null;
+export function projectHost(label: string, oneAddress: string): string;
 export function keptCookies(header: string | null): string | null;
 export function setsDomainCookie(setCookie: string): boolean;
 export function withoutDomainCookies(response: Response): Response;

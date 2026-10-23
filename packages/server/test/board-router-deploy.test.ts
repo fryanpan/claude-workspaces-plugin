@@ -136,6 +136,27 @@ describe('renderWranglerToml', () => {
   });
 });
 
+describe('oneAddressOrigin', () => {
+  const varsOf = (toml: string) =>
+    Object.fromEntries(
+      [...toml.matchAll(/^([A-Z_]+) = (".*")$/gm)].map((m) => [m[1], JSON.parse(m[2] ?? '""')]),
+    );
+
+  it('is carried to the Worker as ONE_ADDRESS_ORIGIN when it names an origin in the tables', () => {
+    const c = cfg({ boards: { [MAC]: ['w-mac1'] }, oneAddressOrigin: MAC });
+    expect(c.oneAddressOrigin).toBe(MAC);
+    expect(varsOf(renderWranglerToml(c, '/w/worker.js')).ONE_ADDRESS_ORIGIN).toBe(MAC);
+  });
+
+  it('is absent from the Worker when unset', () => {
+    expect(varsOf(renderWranglerToml(cfg(), '/w/worker.js')).ONE_ADDRESS_ORIGIN).toBeUndefined();
+  });
+
+  it('refuses an origin the tables do not name', () => {
+    expect(() => cfg({ oneAddressOrigin: MAC })).toThrow(/not an origin in the tables/);
+  });
+});
+
 describe('versionIdOf', () => {
   it('reads the version wrangler printed, and nothing from output without one', () => {
     const id = '0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b';

@@ -17,6 +17,11 @@
  * (`withoutDomainCookies`), so a cookie one project's pages set cannot ride
  * along to another project's server.
  *
+ * With `ONE_ADDRESS_ORIGIN` set, the one address forwards only to the machine
+ * that owns its Access application and redirects every other board to its
+ * project's subdomain (`keepOneAddressStampHome`), so no server ever holds a
+ * copy of a stamp that another server accepts.
+ *
  * The Worker is routing, not authorization. `Cf-Access-Jwt-Assertion` goes
  * through as it arrived, and every server verifies that stamp against
  * Cloudflare's keys itself (`packages/server/src/middleware/cf-access.ts`). A
@@ -136,6 +141,22 @@ export function projectOfHost(hostname, oneAddress) {
   return PROJECT_LABEL.test(label) ? label : null;
 }
 
+/** The hostname a project's subdomain is: the inverse of `projectOfHost`. */
+export function projectHost(label, oneAddress) {
+  return `${label}.${oneAddress}`;
+}
+
+/** The one project label whose origin this is, or null for none or several. */
+function soleLabelOf(origin, projects) {
+  let found = null;
+  for (const [label, o] of projects ?? []) {
+    if (o !== origin) continue;
+    if (found !== null) return null;
+    found = label;
+  }
+  return found;
+}
+
 /** The board a path names: `/workspaces/<id>` or anything under it. */
 export function boardIdOfPath(pathname) {
   const m = /^\/workspaces\/([^/]+)(?:\/|$)/.exec(pathname);
@@ -178,7 +199,33 @@ export function routeRequest(url, referer, env) {
     const origin = project ? parseProjectOrigins(env?.PROJECT_ORIGINS)?.get(project) : undefined;
     return origin ? { kind: 'forward', project, origin } : { kind: 'not_found' };
   }
-  return routeBoardRequest(url, referer, parseBoardOrigins(env?.BOARD_ORIGINS));
+  const route = routeBoardRequest(url, referer, parseBoardOrigins(env?.BOARD_ORIGINS));
+  return oneAddress ? keepOneAddressStampHome(route, url, oneAddress, env) : route;
+}
+
+/**
+ * One Access application per project. A request on the one address carries a
+ * stamp minted for the one address's own application, and the machine that
+ * owns that application (`ONE_ADDRESS_ORIGIN`) is the only one that may
+ * receive it: any other server holding a copy could replay it to that machine.
+ * So with `ONE_ADDRESS_ORIGIN` set, a board held anywhere else is not
+ * forwarded. It is redirected to its project's own subdomain, where the
+ * browser signs in to that project's application and gets a stamp of its own;
+ * a board on an origin with no single project label gets a 404. A malformed
+ * value routes nothing on the one address. Unset, every board is forwarded as
+ * before projects had applications of their own.
+ */
+function keepOneAddressStampHome(route, url, oneAddress, env) {
+  const home = env?.ONE_ADDRESS_ORIGIN;
+  if (home === undefined || home === '' || route.kind !== 'forward') return route;
+  if (typeof home !== 'string' || !ORIGIN_HOST.test(home)) return { kind: 'not_found' };
+  if (route.origin === home) return route;
+  const label = soleLabelOf(route.origin, parseProjectOrigins(env?.PROJECT_ORIGINS));
+  if (!label) return { kind: 'not_found' };
+  return {
+    kind: 'redirect',
+    location: `https://${projectHost(label, oneAddress)}${url.pathname}${url.search}`,
+  };
 }
 
 /** The response without any `Set-Cookie` that names a Domain; untouched when it has none. */
@@ -203,6 +250,13 @@ export function withoutDomainCookies(response) {
  */
 export async function handleBoardRequest(request, env, upstream = fetch) {
   const route = routeRequest(new URL(request.url), request.headers.get('referer'), env);
+  if (route.kind === 'redirect') {
+    // 308 keeps the method and body, so a write lands where it was aimed.
+    return new Response(null, {
+      status: 308,
+      headers: { location: route.location, 'cache-control': 'no-store' },
+    });
+  }
   if (route.kind !== 'forward') {
     return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
   }
