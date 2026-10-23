@@ -410,6 +410,9 @@ export interface ServerOptions {
   /** How long a coach digest window stays open (default 15 minutes). A test
    *  seam, like `stallNudgeQuietMs`. */
   coachDigestWindowMs?: number;
+  /** How long the plan lead's feed of new asks holds a window open (default
+   *  10 minutes, `ask-feed.ts`). A test seam, like `coachDigestWindowMs`. */
+  askFeedWindowMs?: number;
   /**
    * How long a held review item may stand before the stall loop complains
    * (default `HELD_ITEM_DEFAULT_MS`, five minutes; `CW_HELD_ITEM_MINUTES`
