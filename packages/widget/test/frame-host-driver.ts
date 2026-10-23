@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
 /**
- * Attachments framed on the frame-only hostname (`server/src/frame-host.ts`),
- * in headless Chromium against a real board server.
+ * Attachments framed on the project's frame hostname
+ * (`server/src/frame-host.ts`), in headless Chromium against a real board
+ * server.
  *
- * The board is `127.0.0.1:<port>` and the frame hostname is
- * `frames.localhost:<port>`, the same server under a second name, as the
- * tunnel would give it one. Two attachments:
+ * The board is `harborlight.board.localhost:<port>` and the frame hostname is
+ * `harborlight.frames.localhost:<port>`, the same server under a second name
+ * on another domain, as the router would give it one. Every frame there loads
+ * only with the board's frame ticket (`server/src/frame-ticket.ts`). Two
+ * attachments, and two pages that are not the board's:
  *
  * - A mock whose script tries to read the board's cookie and storage: its own
  *   `document.cookie` and `localStorage`, and the page holding it through
@@ -13,11 +16,20 @@
  *   bridge, which is the one write the frame is meant to have. The CONTROL is
  *   the same reads run on the board's page itself, where the planted cookie
  *   and stored value must both show: an absence in the frame is then the
- *   origin boundary, not a value that was never there.
+ *   origin boundary, not a value that was never there. The mock's script also
+ *   sets a cookie on the board's domain and the board's hostname, and the
+ *   board's page looks for both afterwards.
+ * - A page on another hostname of the board's domain, setting a cookie on
+ *   that domain the same way: the CONTROL that such a cookie, set from the
+ *   board's own site, does reach the board's page.
  * - An app door, standing in for a site's staging door: a dev server on
  *   loopback attached to the board, whose page loads its own stylesheet and
  *   script under the app's prefix. The reader opens it, and a comment is
  *   typed and posted through the widget inside the frame.
+ * - Another project's frame, `riverbend.frames.localhost`, held by
+ *   Riverbend's board, whose page asks for the staging door's script on
+ *   Harborlight's frame hostname. The reader's cookie for Harborlight is in
+ *   the same partition, so only the server's rule refuses it.
  *
  * Spawned by `frame-host.test.ts`, which reads the JSON it prints.
  *
@@ -57,6 +69,8 @@ export const COMMENT = 'Riverbend berth prices look right';
 /** What one page could read of the board's cookie and storage. */
 export interface Sight {
   origin: string;
+  /** The page's own query, as it ended up after any redirect. */
+  search: string;
   cookie: string;
   stored: string | null;
   /** The reader's name as this page's own storage holds it. */
@@ -74,8 +88,14 @@ export interface FrameHostReading {
   board: Sight;
   /** The same reads from inside the mock's frame. */
   frame: Sight | null;
+  /** The board page's cookies after the frame and the control planted theirs. */
+  boardAfter: string;
+  /** What Riverbend's frame got asking for Harborlight's door script. */
+  riverbend: { loaded: boolean | null; upstreamHits: number };
   door: {
     origin: string | null;
+    /** The app's own script, as many times as the dev server served it. */
+    upstreamHits: number;
     /** The app's own script and stylesheet, loaded by the frame itself. */
     script: boolean;
     color: string | null;
@@ -93,6 +113,7 @@ const SIGHT = `() => {
   try { stored = localStorage.getItem('cw-board-probe'); name = localStorage.getItem('feedback-user-name'); } catch {}
   return {
     origin: location.origin,
+    search: location.search,
     cookie: document.cookie,
     stored,
     name,
@@ -109,6 +130,9 @@ const SPY = (ws: string, doc: string) => `<!doctype html><html><head><meta chars
 (async () => {
   // A moment for the bridge's seed and the page holding it to settle.
   await new Promise((r) => setTimeout(r, 200));
+  for (const d of ${JSON.stringify(PLANT_DOMAINS)}) {
+    document.cookie = '${FRAME_PLANT}=1; domain=' + d + '; path=/';
+  }
   const seen = (${SIGHT})();
   await fetch('/workspaces/${ws}/docs/${doc}/threads', {
     method: 'POST',
@@ -130,6 +154,25 @@ const doorPage = (prefix: string) => `<!doctype html><html><head><meta charset="
 </head><body><h1 id="title">Harborlight Street Projects</h1>
 <p id="lede">Riverbend opens at nine.</p></body></html>`;
 
+/** The board's domain, and the board's hostname, as the mock tries to plant. */
+const BOARD_DOMAIN = 'board.localhost';
+const BOARD_HOST = `harborlight.${BOARD_DOMAIN}`;
+const FRAME_HOST = 'harborlight.frames.localhost';
+const PLANT_DOMAINS = [BOARD_DOMAIN, BOARD_HOST];
+/** The cookie the mock's script tries to set on the board. */
+export const FRAME_PLANT = 'cw_frame_plant';
+/** The cookie the control page on the board's domain sets the same way. */
+export const CONTROL_PLANT = 'cw_control_plant';
+
+/** Riverbend's frame, asking for Harborlight's door script. */
+const riverbendFrame = (src: string) => `<!doctype html><html><body><script>
+const s = document.createElement('script');
+s.src = ${JSON.stringify(src)};
+s.onload = () => fetch('/report?loaded=1');
+s.onerror = () => fetch('/report?loaded=0');
+document.head.appendChild(s);
+</script></body></html>`;
+
 let browser: { proc: ChildProcess; profile: string } | undefined;
 
 async function main(): Promise<void> {
@@ -148,13 +191,18 @@ async function main(): Promise<void> {
       dataDir: join(dir, 'data'),
       widgetDistDir: dist,
       requireSignInToWrite: false,
-      frameOrigin: `http://frames.localhost:${port}`,
-      frameBoardHosts: ['127.0.0.1'],
+      // The board's test hostname, as a name for this machine: the
+      // access-only default grants loopback names alone.
+      accessOnlyBrowserHosts: false,
+      trustedHosts: [BOARD_HOST],
+      frameOrigin: `http://${FRAME_HOST}:${port}`,
+      frameBoardHosts: [BOARD_HOST],
     });
     const h = handle;
-    const base = `http://127.0.0.1:${port}`;
+    const api = `http://127.0.0.1:${port}`;
+    const base = `http://${BOARD_HOST}:${port}`;
     const post = async (path: string, body: unknown) => {
-      const res = await fetch(`${base}${path}`, {
+      const res = await fetch(`${api}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -180,18 +228,42 @@ async function main(): Promise<void> {
     writeFileSync(spyFile, SPY(ws, spy));
 
     // The staging door: a dev server on loopback, its links under the prefix.
+    // The same listener answers the control page and Riverbend's two pages,
+    // told apart by Host.
     let prefix = '';
+    let doorJsHits = 0;
+    let riverbendLoaded: boolean | null = null;
     door = Bun.serve({
       port: 0,
       hostname: '127.0.0.1',
       fetch(req) {
-        const p = new URL(req.url).pathname;
+        const u = new URL(req.url);
+        const p = u.pathname;
+        const html = (body: string) =>
+          new Response(body, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+        const at = (req.headers.get('host') ?? '').split(':')[0];
+        if (at === `control.${BOARD_DOMAIN}`) {
+          return html(
+            `<script>document.cookie = '${CONTROL_PLANT}=1; domain=${BOARD_DOMAIN}; path=/';</script>`,
+          );
+        }
+        if (at === `riverbend.${BOARD_DOMAIN}`) {
+          return html(`<iframe src="http://riverbend.frames.localhost:${u.port}/frame"></iframe>`);
+        }
+        if (at === 'riverbend.frames.localhost') {
+          if (p === '/report') {
+            riverbendLoaded = u.searchParams.get('loaded') === '1';
+            return new Response('ok');
+          }
+          return html(riverbendFrame(`http://${FRAME_HOST}:${port}${prefix}door.js`));
+        }
         if (p.endsWith('/door.css')) {
           return new Response('h1{color:rgb(4, 5, 6)}', {
             headers: { 'content-type': 'text/css' },
           });
         }
         if (p.endsWith('/door.js')) {
+          doorJsHits++;
           return new Response('window.__door = 1;', {
             headers: { 'content-type': 'text/javascript' },
           });
@@ -263,6 +335,7 @@ async function main(): Promise<void> {
     const doorColor = (await frame.eval(
       `getComputedStyle(document.getElementById('title')).color`,
     )) as string | null;
+    const doorHits = doorJsHits;
     await typeComment(cdp, frame, COMMENT);
     await tapUntil(cdp, frame, Q('.composer .submit'), `!${Q('.composer')}`, 'Post');
     const thread = await poll(
@@ -272,11 +345,25 @@ async function main(): Promise<void> {
     ).catch(() => null);
     const first = thread?.comments[0];
 
+    // The control plants on the board's domain from a page on that domain,
+    // then the board's page reads what reached it.
+    step("plant from the board's own domain");
+    await navigate(cdp, `http://control.${BOARD_DOMAIN}:${door.port}/`);
+    await navigate(cdp, `${base}/workspaces/${ws}`);
+    const boardAfter = (await cdp.evaluate('document.cookie')) as string;
+
+    step("Riverbend's frame asks for Harborlight's script");
+    await navigate(cdp, `http://riverbend.${BOARD_DOMAIN}:${door.port}/`);
+    await poll('Riverbend reported', () => riverbendLoaded, 300).catch(() => null);
+
     const reading: FrameHostReading = {
       board: boardSight,
       frame: frameSight,
+      boardAfter,
+      riverbend: { loaded: riverbendLoaded, upstreamHits: doorJsHits - doorHits },
       door: {
         origin: doorOrigin,
+        upstreamHits: doorHits,
         script: doorScript,
         color: doorColor,
         posted: first ? { text: first.text, author: first.author?.name ?? null } : null,
