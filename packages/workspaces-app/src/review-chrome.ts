@@ -83,6 +83,9 @@ export interface ChromeOpts {
   placeComposer?: () => ComposerSlot | null;
   /** Runs after a comment posts successfully (markdown blurs the editor). */
   onPosted?: () => void;
+  /** Lift the focused field clear of the on-screen keyboard
+   *  (`edit-viewport.ts`). Absent where nothing follows the caret. */
+  followCaret?: () => void;
   /** Hide the surface's comment pill (called when the composer or the
    *  thread view opens). */
   hidePill?: () => void;
@@ -440,6 +443,13 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
    */
   function engageThread(id: string): void {
     const range = resolveThreadRange(id);
+    // A tap on an inline card: its words are right above it, on screen.
+    // Scrolling to them would also focus the document at them — a keyboard
+    // on the doc, and the tap's next keystrokes typed into it.
+    if (mobile.openInline(id)) {
+      if (range) surface.pulseRange(range.from, range.to);
+      return;
+    }
     if (range) {
       surface.scrollToPos(range.from);
       surface.pulseRange(range.from, range.to);
@@ -517,6 +527,7 @@ export function mountReviewChrome(opts: ChromeOpts): ReviewChrome {
     openSheet: openDrawer,
     closeSheet: closeDrawer,
     isSheetOpen: () => shell.classList.contains('threads-open'),
+    followCaret: () => opts.followCaret?.(),
     onCleanup: (fn) => opts.scope?.onCleanup(fn),
   });
   // Crossing either width boundary changes which surface owns the comments —

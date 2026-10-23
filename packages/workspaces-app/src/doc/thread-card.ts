@@ -38,7 +38,7 @@ import { attachMarkdownComposer } from '../md-composer.ts';
 import { clearNotSent, markNotSent } from '../not-sent.ts';
 import { reviewItemSeen } from '../review-item-seen.ts';
 import { threadGlyph, threadKind } from '../thread-kind.ts';
-import { isFoldingTap, syncFaceVisibility } from '../thread-morph.ts';
+import { isFoldingTap, sizeThreadSlots, syncFaceVisibility } from '../thread-morph.ts';
 import type { ThreadPanelOpts } from '../threads.ts';
 import { voiceFoot } from './voice-note-foot.ts';
 
@@ -396,6 +396,13 @@ function slotB(
     );
 
   const reply = div('thread-reply');
+  // The slots hold heights we measured, so a reply box that grows a line as
+  // it is typed into would push the card's foot out of its slot, clipped.
+  // Before the document's caret-follow runs, which needs the new height.
+  reply.addEventListener('input', () => {
+    const card = reply.closest<HTMLElement>('.thread');
+    if (card) sizeThreadSlots(card);
+  });
   // The ask these words will answer, if there is one. `pendingDeclaration`
   // (computed by the caller, above both slots) is the SAME rule the server's
   // queue reads (core exports one copy): newest declaration wins, ts order
