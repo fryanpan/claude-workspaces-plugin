@@ -334,7 +334,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     // and would skip that call entirely.
     if (sessionRevocations.failedClosed()) return null;
     const claims = verifyEmailSession(
-      readSessionCookie(req.headers.get('cookie'))?.value,
+      readSessionCookie(req.headers.get('cookie'), { secure: isSecureRequest(req) })?.value,
       emailSessionKey(),
     );
     if (!claims) return null;
@@ -362,10 +362,10 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
    * cheap: the refresh only fires once a day of the session has been spent.
    */
   const refreshSession = (req: Request, res: Response): Response => {
-    const read = readSessionCookie(req.headers.get('cookie'));
+    const secure = isSecureRequest(req);
+    const read = readSessionCookie(req.headers.get('cookie'), { secure });
     if (!read) return res;
     const claims = verifyEmailSession(read.value, emailSessionKey());
-    const secure = isSecureRequest(req);
     // A reader signed in before the `__Host-` name arrives with the plain
     // one; over https that is moved across now, not when a day has passed.
     const rename = secure && read.name === SESSION_COOKIE;

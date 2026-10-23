@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { emailIdentityId } from '@claude-workspaces/core';
 import {
   HOST_SESSION_COOKIE,
+  PLAIN_SESSION_OVER_HTTPS_UNTIL,
   SESSION_COOKIE,
   SESSION_COOKIE_MAX_AGE_SECONDS,
   SESSION_REFRESH_AFTER_MS,
@@ -171,15 +172,53 @@ describe('the Set-Cookie header', () => {
   });
 
   it('reads the __Host- cookie first and the plain one for a reader signed in before it', () => {
-    expect(readSessionCookie(`${SESSION_COOKIE}=old; ${HOST_SESSION_COOKIE}=new`)).toEqual({
+    const before = { secure: true, now: PLAIN_SESSION_OVER_HTTPS_UNTIL - 1 };
+    expect(readSessionCookie(`${SESSION_COOKIE}=old; ${HOST_SESSION_COOKIE}=new`, before)).toEqual({
       value: 'new',
       name: HOST_SESSION_COOKIE,
     });
-    expect(readSessionCookie(`other=1; ${SESSION_COOKIE}=old`)).toEqual({
+    expect(readSessionCookie(`other=1; ${SESSION_COOKIE}=old`, before)).toEqual({
       value: 'old',
       name: SESSION_COOKIE,
     });
-    expect(readSessionCookie('other=1')).toBeUndefined();
+    expect(readSessionCookie('other=1', before)).toBeUndefined();
+  });
+
+  it('stops reading a plain cw_session over https on the named date', () => {
+    const after = { secure: true, now: PLAIN_SESSION_OVER_HTTPS_UNTIL };
+    // A plain cookie a sibling subdomain could have planted signs nobody in.
+    expect(readSessionCookie(`other=1; ${SESSION_COOKIE}=planted`, after)).toBeUndefined();
+    // POSITIVE CONTROL: the __Host- cookie still reads beside it, and over
+    // http the plain name is the only one there is.
+    expect(
+      readSessionCookie(`${SESSION_COOKIE}=planted; ${HOST_SESSION_COOKIE}=mine`, after),
+    ).toEqual({
+      value: 'mine',
+      name: HOST_SESSION_COOKIE,
+    });
+    expect(
+      readSessionCookie(`${SESSION_COOKIE}=mine`, {
+        secure: false,
+        now: PLAIN_SESSION_OVER_HTTPS_UNTIL,
+      }),
+    ).toEqual({ value: 'mine', name: SESSION_COOKIE });
+  });
+
+  it('names a cutoff no later than a month after the __Host- name shipped', () => {
+    // PR 1353 shipped the name on 21 October 2026. A later date is a decision
+    // to leave login CSRF open longer, and has to change this line to make it.
+    expect(PLAIN_SESSION_OVER_HTTPS_UNTIL).toBeLessThanOrEqual(Date.parse('2026-11-21T00:00:00Z'));
+  });
+
+  it('fails the build once the date has passed, until the fallback is deleted', () => {
+    // A date gate, not a timing assertion. After the cutoff the fallback is
+    // dead code, and so is the migration case in auth-routes.test.ts ("moves
+    // a reader signed in before it across"). Delete both, and this case.
+    if (Date.now() >= PLAIN_SESSION_OVER_HTTPS_UNTIL) {
+      throw new Error(
+        'PLAIN_SESSION_OVER_HTTPS_UNTIL has passed: delete the plain cw_session fallback in readSessionCookie (auth/session.ts) and its tests',
+      );
+    }
   });
 
   it('asks the browser to keep a revocable session as long as browsers allow', () => {

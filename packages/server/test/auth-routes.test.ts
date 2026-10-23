@@ -395,7 +395,9 @@ describe('logout revokes the session server-side', () => {
     expect(((await read.json()) as { authenticated: boolean }).authenticated).toBe(true);
 
     // A cookie under the old name, as a browser signed in before the deploy
-    // holds it: still signed in, and the answer moves it onto __Host-.
+    // holds it: still signed in, and the answer moves it onto __Host-. Only
+    // until PLAIN_SESSION_OVER_HTTPS_UNTIL; auth-session.test.ts fails the
+    // build after that date until this part is deleted with the fallback.
     const plain = await signIn(email);
     const moved = await fetch(`${base2}/api/auth/session`, {
       headers: { cookie: plain, ...https },
