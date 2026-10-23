@@ -422,11 +422,6 @@ if (cfAccess) {
         ? 'auto-from-shares'
         : 'NONE (every token refused)';
   console.log(`[feedback]   cf-access:  team=${cfAccess.teamDomain} aud=${audDisplay}…`);
-  if (cfAccess.hostAudiences) {
-    console.log(
-      `[feedback]   cf-access:  own audience on ${[...cfAccess.hostAudiences.keys()].join(', ')}`,
-    );
-  }
 }
 if (share) {
   const st = handle.sharingGate.status();
