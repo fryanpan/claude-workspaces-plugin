@@ -10,10 +10,10 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 
 | Part | What it does |
 | --- | --- |
-| `Dockerfile` | The board server and both browser bundles, plus cloudflared. Runs as the `cw` user; root only hands the volume to `cw` at boot |
+| `Dockerfile` | The board server and both browser bundles, plus cloudflared, and three users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
-| `entrypoint.sh` | Starts the server on `127.0.0.1:8787`, the tunnel, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it |
-| `backup.ts` | Tars the data dir and the agents' session transcripts, encrypts them to the project's public key and PUTs them to the bucket. Every 6 hours, the first an hour after boot |
+| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so the server's user cannot read the tunnel token or the bucket credential |
+| `backup-once.sh`, `backup.ts` | Tars the data dir and the agents' session transcripts and encrypts them to the project's public key as `cw`, then PUTs the file to the bucket as `cwbackup`. Every 6 hours, the first an hour after boot |
 | `restore.ts` | Decrypts a downloaded snapshot onto a data dir (and a transcripts dir) that is missing or empty. Refuses anything else |
 
 **What a snapshot holds.** The data dir, which carries every board's docs,

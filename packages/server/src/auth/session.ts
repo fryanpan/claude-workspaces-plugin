@@ -50,9 +50,10 @@ export const SESSION_COOKIE = 'cw_session';
  * The cookie's name over https. `__Host-` makes the browser insist on
  * `Secure`, `Path=/` and no `Domain`, so a page on a sibling subdomain cannot
  * plant or overwrite the session (cookie tossing). Reading still accepts the
- * plain name for one release, so a reader signed in before the deploy stays
- * signed in; the next request over https re-issues the cookie under this name
- * and expires the old one (`identity-setup.ts`, `refreshSession`).
+ * plain name over https until `PLAIN_SESSION_OVER_HTTPS_UNTIL`, so a reader
+ * signed in before the deploy stays signed in; the next request over https
+ * re-issues the cookie under this name and expires the old one
+ * (`identity-setup.ts`, `refreshSession`).
  */
 export const HOST_SESSION_COOKIE = '__Host-cw_session';
 
@@ -61,11 +62,28 @@ export function sessionCookieName(secure: boolean): string {
   return secure ? HOST_SESSION_COOKIE : SESSION_COOKIE;
 }
 
-/** The session cookie a request carries, the `__Host-` one first. */
+/**
+ * The last moment a plain `cw_session` is read over https: two weeks after
+ * the `__Host-` name shipped (PR 1353, 21 October 2026). Until then a sibling
+ * subdomain can still plant a plain cookie for a signed-out reader (login
+ * CSRF), and this date is what ends that without anybody having to remember
+ * to. A reader who has not visited since then signs in again. Delete the
+ * fallback, and this, once the date has passed.
+ */
+export const PLAIN_SESSION_OVER_HTTPS_UNTIL = Date.parse('2026-11-04T00:00:00Z');
+
+/**
+ * The session cookie a request carries, the `__Host-` one first. Over https
+ * the plain name is read only until `PLAIN_SESSION_OVER_HTTPS_UNTIL`; over
+ * http it is the only name there is.
+ */
 export function readSessionCookie(
   header: string | null | undefined,
+  opts: { secure: boolean; now?: number },
 ): { value: string; name: string } | undefined {
+  const plainAllowed = !opts.secure || (opts.now ?? Date.now()) < PLAIN_SESSION_OVER_HTTPS_UNTIL;
   for (const name of [HOST_SESSION_COOKIE, SESSION_COOKIE]) {
+    if (name === SESSION_COOKIE && !plainAllowed) continue;
     const value = readCookie(header, name);
     if (value) return { value, name };
   }

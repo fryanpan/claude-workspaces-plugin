@@ -130,6 +130,20 @@ describe('a socket from another origin carrying the reader’s credentials', () 
       );
       expect(g.readOnly).toBe(false);
       if (kind !== 'board') expect(g.named).toBe(true);
+      // The token never proves the owner, and the cookie beside it crossed
+      // origins, so nothing on this socket does.
+      expect(g.ownerProven).toBe(false);
+    });
+
+    it(`${kind}: a widget token from this server’s own page keeps owner proof — POSITIVE CONTROL`, () => {
+      const g = grants(
+        stampFor(path, {
+          origin: OWN,
+          credential: { cookie: 'cw_session=v2.riverbend' },
+          widgetTokenProved: true,
+        }),
+      );
+      if (kind === 'converse') expect(g.ownerProven).toBe(true);
     });
 
     it(`${kind}: another origin with no credential is not touched by this gate`, () => {

@@ -13,6 +13,7 @@ import {
   type ResolvedAddress,
   classifyAddress,
   configuredHostFetch,
+  createFixedHostFetch,
   createPublicFetch,
   isVendorHost,
   loopbackFetch,
@@ -333,5 +334,71 @@ describe('vendor hosts', () => {
     expect(isVendorHost('evilrecall.ai')).toBe(false);
     expect(isVendorHost('api.anthropic.com.riverbend.test')).toBe(false);
     expect(isVendorHost('localhost')).toBe(false);
+  });
+});
+
+describe('vendor fetch and redirects', () => {
+  /** A vendor fetch whose replies come from `replies`, one per request, recorded not sent. */
+  function vendor(replies: Response[]) {
+    const sent: { url: string; method: string; body: unknown; redirect: unknown }[] = [];
+    const fetcher = createFixedHostFetch(async (url, init) => {
+      sent.push({ url, method: init.method ?? 'GET', body: init.body, redirect: init.redirect });
+      return replies.shift() ?? new Response('ok');
+    });
+    return { fetcher, sent };
+  }
+  const to = (location: string, status = 302) =>
+    new Response(null, { status, headers: { location } });
+
+  it('refuses a redirect to the cloud metadata address and never requests it', async () => {
+    const { fetcher, sent } = vendor([to('http://169.254.169.254/latest/meta-data/')]);
+    const err = await refusal(fetcher('https://us-east-1.recall.ai/api/v1/bot/'));
+    expect(err.range).toBe('host');
+    expect(sent.map((s) => s.url)).toEqual(['https://us-east-1.recall.ai/api/v1/bot/']);
+    expect(sent[0]?.redirect).toBe('manual');
+  });
+
+  it('refuses a redirect to another vendor host, and to its own host over http', async () => {
+    const other = vendor([to('https://api.github.com/')]);
+    expect((await refusal(other.fetcher('https://api.anthropic.com/v1/messages'))).range).toBe(
+      'host',
+    );
+    const plain = vendor([to('http://api.anthropic.com/v1/messages', 301)]);
+    expect((await refusal(plain.fetcher('https://api.anthropic.com/v1/messages'))).range).toBe(
+      'host',
+    );
+    expect(other.sent).toHaveLength(1);
+    expect(plain.sent).toHaveLength(1);
+  });
+
+  it('follows a redirect on its own host — POSITIVE CONTROL', async () => {
+    const { fetcher, sent } = vendor([to('/api/v1/bot/', 307), new Response('bot')]);
+    const res = await fetcher('https://us-east-1.recall.ai/api/v1/bot', {
+      method: 'POST',
+      body: '{"meeting_url":"x"}',
+    });
+    expect(await res.text()).toBe('bot');
+    // A 307 keeps the method and the body.
+    expect(sent.map((s) => [s.url, s.method, s.body])).toEqual([
+      ['https://us-east-1.recall.ai/api/v1/bot', 'POST', '{"meeting_url":"x"}'],
+      ['https://us-east-1.recall.ai/api/v1/bot/', 'POST', '{"meeting_url":"x"}'],
+    ]);
+  });
+
+  it('turns a POST into a bodiless GET on a 303, as fetch does', async () => {
+    const { fetcher, sent } = vendor([to('/done', 303), new Response('done')]);
+    await fetcher('https://api.postmarkapp.com/email', { method: 'POST', body: 'x' });
+    expect(sent[1]).toMatchObject({
+      url: 'https://api.postmarkapp.com/done',
+      method: 'GET',
+      body: null,
+    });
+  });
+
+  it('gives up after five same-host redirects', async () => {
+    const loop = Array.from({ length: 10 }, () => to('/again'));
+    const { fetcher, sent } = vendor(loop);
+    expect((await refusal(fetcher('https://slack.com/api/chat.postMessage'))).range).toBe('host');
+    expect(sent).toHaveLength(6);
   });
 });

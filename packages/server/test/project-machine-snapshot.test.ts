@@ -201,6 +201,62 @@ describe('backup upload', () => {
       bucket.stop(true);
     }
   }, 30_000);
+
+  it('--upload puts a snapshot --out wrote, and refuses a symlink in its place', async () => {
+    const keys = generateSnapshotKeys();
+    const objects = new Map<string, Uint8Array>();
+    const bucket = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(req) {
+        if (req.method !== 'PUT') return new Response('AccessDenied', { status: 403 });
+        objects.set(new URL(req.url).pathname, new Uint8Array(await req.arrayBuffer()));
+        return new Response('', { status: 200, headers: { etag: '"x"' } });
+      },
+    });
+    // Only the bucket's settings: --upload needs no data dir and no recipient.
+    const bucketEnv = {
+      PATH: process.env.PATH ?? '',
+      BACKUP_S3_ENDPOINT: `http://127.0.0.1:${bucket.port}`,
+      BACKUP_S3_BUCKET: 'harborlight-backups',
+      // Obviously fake: the stand-in bucket checks no signature.
+      BACKUP_S3_ACCESS_KEY_ID: 'test-access-key',
+      BACKUP_S3_SECRET_ACCESS_KEY: 'test-secret-key',
+    };
+    const run = async (file: string) => {
+      const child = Bun.spawn(
+        ['bun', join(repoRoot, 'infra', 'project-machine', 'backup.ts'), '--upload', file],
+        { stdout: 'pipe', stderr: 'pipe', env: bucketEnv },
+      );
+      return { status: await child.exited, stderr: await new Response(child.stderr).text() };
+    };
+    try {
+      const dir = fresh('outbox');
+      const snap = join(dir, 'snapshot.cwsnap');
+      await snapshotDataDir(sampleDataDir(), keys.recipient, snap);
+      const ok = await run(snap);
+      expect(ok.stderr).toBe('');
+      expect(ok.status).toBe(0);
+      const [body] = [...objects.values()];
+      const downloaded = join(fresh('dl'), 'downloaded.cwsnap');
+      writeFileSync(downloaded, body ?? new Uint8Array());
+      const target = join(scratch, `restored-${n++}`);
+      restoreSnapshot(downloaded, keys.identity, target);
+      expect(readFileSync(join(target, 'riverbend.ydoc'), 'utf8')).toBe('riverbend survey');
+
+      // The outbox is written by another user: a link there must not make
+      // the uploader send a file only it can read.
+      const secretFile = join(fresh('uploader-only'), 'environ');
+      writeFileSync(secretFile, 'BACKUP_S3_SECRET_ACCESS_KEY=test-secret-key');
+      const link = join(dir, 'linked.cwsnap');
+      symlinkSync(secretFile, link);
+      const refused = await run(link);
+      expect(refused.status).toBe(1);
+      expect(objects.size).toBe(1);
+    } finally {
+      bucket.stop(true);
+    }
+  }, 30_000);
 });
 
 /** A transcripts dir as Claude Code lays one out: a folder per project. */

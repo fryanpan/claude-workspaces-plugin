@@ -26,13 +26,17 @@ FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git tini \
   && rm -rf /var/lib/apt/lists/* \
-  && useradd --uid 10001 --create-home --shell /usr/sbin/nologin cw
+  && useradd --uid 10001 --create-home --shell /usr/sbin/nologin cw \
+  && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
+  && useradd --uid 10003 --create-home --shell /usr/sbin/nologin cwbackup
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 COPY --from=build /app /app
 WORKDIR /app
 ENV NODE_ENV=production \
   CW_DATA_DIR=/data/cw
-# The entrypoint starts as root only to hand the volume to `cw`, then drops
-# to it before starting anything (entrypoint.sh).
+# The entrypoint stays root to supervise and starts each child as its own
+# user: the server as `cw`, cloudflared as `cwtunnel`, the backup upload as
+# `cwbackup`, so the server's user cannot read the others' secrets
+# (entrypoint.sh).
 # `-s`: Fly's own init is PID 1, so tini registers as a subreaper to reap.
 ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/infra/project-machine/entrypoint.sh"]

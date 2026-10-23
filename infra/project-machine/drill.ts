@@ -21,7 +21,6 @@ import { restoreMachine } from './restore-machine.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PROBE = 'bun /app/infra/project-machine/drill-probe.ts';
-const AS_CW = 'setpriv --reuid=cw --regid=cw --init-groups env HOME=/home/cw';
 
 /** The last JSON line of a command's output; `fly ssh` prints its own lines first. */
 function lastJson<T>(out: string): T {
@@ -71,7 +70,7 @@ async function main(): Promise<void> {
   const before = lastJson<DrillPrint>(onMachine(cfg.app, `${PROBE} fingerprint`));
   console.log(`[drill] before: ${summary(before)}`);
   if (before.count === 0) throw new Error('nothing to back up');
-  const backup = onMachine(cfg.app, `${AS_CW} bun run /app/infra/project-machine/backup.ts`);
+  const backup = onMachine(cfg.app, 'bash /app/infra/project-machine/backup-once.sh');
   console.log(`[drill] ${backup.trim().split('\n').at(-1)}`);
 
   for (const m of machines(cfg.app)) {

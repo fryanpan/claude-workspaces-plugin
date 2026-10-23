@@ -353,7 +353,7 @@ export async function handleAuthShareRoutes(
       return j(400, { error: 'unknown_workspace' });
     }
     const claims = verifyEmailSession(
-      readSessionCookie(req.headers.get('cookie'))?.value,
+      readSessionCookie(req.headers.get('cookie'), { secure: isSecureRequest(req) })?.value,
       emailSessionKey(),
     );
     if (!claims || claims.sessionId === null) {
