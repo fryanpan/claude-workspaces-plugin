@@ -312,7 +312,12 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
       crossOriginCredentials(req.headers, policyFor(req));
     const provedNobody = (): boolean => cookieIgnored() || browserProvedNobody();
     const socketAuthor = (): User | null => (cookieIgnored() ? null : provenAuthor());
-    const socketOwnerProven = (): boolean => !cookieIgnored() && ownerProven();
+    // Owner proof comes only from the cookie or the Access assertion, never
+    // from a widget token or a door grant. So it is refused whenever those
+    // crossed origins, even on a socket the token lets through: the token
+    // passed the origin rule, and the cookie beside it did not.
+    const socketOwnerProven = (): boolean =>
+      !crossOriginCredentials(req.headers, policyFor(req)) && ownerProven();
     // The run itself, unchanged from the position it held in `route()`:
     // a `Response` to send, `undefined` for a socket that took over, and
     // the trailing `null` for the fall-through. The wrapper below is the
