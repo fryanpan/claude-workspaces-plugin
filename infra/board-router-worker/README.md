@@ -61,6 +61,14 @@ stamp for the one address never reaches another machine, which could replay
 it to the Mac. Unset, every board is forwarded, as before each project had an
 application of its own; malformed, the one address routes nothing.
 
+`FRAME_DOMAIN` names the frame domain, a domain that is not the one
+address's, where each project's mocks and app doors run on
+`<project>.<frame domain>` (`packages/server/src/frame-host.ts`). The Worker
+sends that hostname to the project's origin from `PROJECT_ORIGINS`, exactly as
+it sends the project's subdomain. A frame domain that is the one address, sits
+under it, or holds it routes no frame, because the frames would be back on the
+board's site. Unset, no frame hostname is routed.
+
 A missing or malformed table routes nothing. Malformed means any of: not a JSON
 object, an origin that is not a bare lower-case hostname, a label that is not
 one lower-case DNS label, a board id outside `[A-Za-z0-9_-]`, or one board
@@ -89,6 +97,10 @@ gets through, because nothing in the request tells it apart. Each is signed
 or labels an event only, so a planted one can sign a reader out but reads
 nothing. That is the accepted risk in the design (decision 16). Renaming
 `lf_share` to `__Host-lf_share` would close it for share links.
+
+On a frame hostname only `cw_frame` is kept: the board's frame ticket, the one
+cookie a project server reads there. The board's session and share cookies
+never travel to a frame hostname, and nor does anything a frame's page set.
 
 On the way back, a `Set-Cookie` that names a Domain is removed from the
 server's response, so one project's server cannot set a cookie that every
@@ -167,6 +179,14 @@ has no address outside these routes.
 
 ## Not covered yet
 
+- The frame domain is routed but not deployed. `router:deploy` binds only
+  `*.<one-address>/*`; the frame domain is its own zone, which needs buying,
+  a proxied wildcard record, a certificate for `*.<frame domain>` and a
+  route for `*.<frame domain>/*`. Each project's tunnel needs an ingress rule
+  for `<project>.<frame domain>`, and its server `CW_FRAME_ORIGIN` set to
+  that origin. An Access application on the frame domain must let requests
+  through to the server's frame ticket check, or Safari cannot load the frame.
+
 - `resolveOverride` and the tunnel's Host-based ingress are documented
   Cloudflare behaviour that this repo's tests stand in for, not run.
   `packages/server/test/board-router-two-servers.test.ts` drives the handler
@@ -180,6 +200,7 @@ has no address outside these routes.
 
 Tests: `packages/server/test/board-router-subdomains.test.ts` (subdomains,
 cookies, today's board paths, `ONE_ADDRESS_ORIGIN`),
+`board-router-frames.test.ts` (the frame domain),
 `access-per-project.test.ts` (three Access applications over two servers), `board-router-worker.test.ts` (board routing),
 `board-router-two-servers.test.ts` (two real servers) and
 `board-router-deploy.test.ts` (the deploy's decisions).
