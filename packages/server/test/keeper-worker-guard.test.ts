@@ -23,7 +23,7 @@ describe('workerEvidence', () => {
 
   it("finds nothing in the browser's own navigation, a page's fetch, or curl", () => {
     // Headers measured from headless Chrome's own navigation and the page's fetch.
-    for (const headers of [
+    const cases: Record<string, string>[] = [
       { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document', 'sec-fetch-user': '?1' },
       { 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' },
       { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'iframe', 'sec-fetch-site': 'cross-site' },
@@ -34,7 +34,8 @@ describe('workerEvidence', () => {
       },
       { 'sec-fetch-mode': 'no-cors', 'sec-fetch-dest': 'image', 'sec-fetch-site': 'cross-site' },
       {},
-    ]) {
+    ];
+    for (const headers of cases) {
       expect({ headers, found: workerEvidence(req(headers)) }).toEqual({ headers, found: null });
     }
   });

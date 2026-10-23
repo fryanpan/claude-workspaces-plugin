@@ -126,7 +126,6 @@ function serveRelayed(opts: ServeOpts & { unix: string }): RunningKeeper {
   const { requests, handle } = wire(opts, opts.port);
   const server = Bun.serve({
     unix: opts.unix,
-    idleTimeout: 30,
     fetch: (req) => handle(req, RELAYED_PEER),
   });
   return {
