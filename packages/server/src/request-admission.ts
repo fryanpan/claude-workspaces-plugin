@@ -504,10 +504,19 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       // operator alone. Ahead of every other kind, so nothing else this
       // server answers is reachable on it, whatever the lists say.
       if (frameHost?.isFrameHost(req)) {
-        const verdict = frameGate(req, pathname, new URL(req.url).searchParams);
+        const search = new URL(req.url).searchParams;
+        const verdict = frameGate(req, pathname, search);
         if (!verdict.ok) return frameGateRefusal(verdict.status);
-        // Off the tunnel: a caller on this machine, as the box's own pages are.
+        // The board's frame ticket (frame-ticket.ts), on or off the tunnel:
+        // the one proof a frame on another domain can carry in Safari.
+        const proof = frameHost.prove(req, pathname, search);
+        if (proof.kind === 'redeem') return proof.response;
+        if (proof.kind === 'bad_ticket') return frameGateRefusal(404);
+        if (proof.kind === 'public' || proof.kind === 'held') return null;
+        // Off the tunnel: a caller on this machine that is not a browser. A
+        // browser's frame came from a host page, which handed it a ticket.
         if (!req.headers.has('cf-ray')) {
+          if (req.headers.has('sec-fetch-dest')) return j(403, { error: 'frame_ticket_required' });
           return isLoopbackAddress(requestAddress(req)) ? null : j(403, { error: 'unknown_host' });
         }
         // Through it: external reach, so the master switch covers it, and the
