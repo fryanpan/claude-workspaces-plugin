@@ -9,6 +9,7 @@
  * (`packages/server/src/secret-store.ts`).
  */
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { secretAddCommandLine } from '../../packages/core/src/secret-line.ts';
 import { SECRET_ACCOUNT, storedSecretService } from '../../packages/core/src/secret-name.ts';
 
@@ -48,8 +49,30 @@ export interface RunResult {
 
 let flyToken: string | undefined;
 
+const KEEPER_FLY_CLI = join(import.meta.dir, '../../packages/server/src/keeper/keeper-fly-cli.ts');
+
+/**
+ * Once the keeper holds the org token (`CW_KEEPER_URL` set,
+ * `docs/process/keeper.md`), every `fly` call is asked of the keeper
+ * instead: a routine one runs at once, a held one prints its approval link
+ * and waits for Bryan's passkey. No token is read here.
+ */
+function keeperFlySync(args: string[], input: string | undefined): RunResult {
+  const r = spawnSync(process.execPath, [KEEPER_FLY_CLI], {
+    input: JSON.stringify({ args, ...(input !== undefined ? { input } : {}) }),
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'inherit'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (r.status !== 0) return { status: 1, stdout: '', stderr: 'could not reach the keeper' };
+  return JSON.parse(r.stdout) as RunResult;
+}
+
+const viaKeeper = (): boolean => Boolean(process.env.CW_KEEPER_URL?.trim());
+
 /** Run `fly` with the org token in its environment. Output is returned, not shown. */
 export function fly(args: string[], opts: { input?: string; quiet?: boolean } = {}): RunResult {
+  if (viaKeeper()) return keeperFlySync(args, opts.input);
   flyToken ??= keychainRead('fly-org-token').trim();
   const r = spawnSync('fly', args, {
     encoding: 'utf8',
@@ -78,6 +101,14 @@ export function flyJson<T>(args: string[]): T {
 
 /** Run `fly` with its output going straight to this terminal (builds, deploys). */
 export function flyLive(args: string[]): void {
+  if (viaKeeper()) {
+    // The keeper returns output when the command ends, not as it runs.
+    const r = keeperFlySync(args, undefined);
+    process.stdout.write(r.stdout);
+    process.stderr.write(r.stderr);
+    if (r.status !== 0) throw new Error(`fly ${args.slice(0, 2).join(' ')} exited ${r.status}`);
+    return;
+  }
   flyToken ??= keychainRead('fly-org-token').trim();
   const r = spawnSync('fly', args, {
     stdio: 'inherit',

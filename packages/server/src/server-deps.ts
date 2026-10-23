@@ -28,6 +28,7 @@ import {
   createKeychainRefreshTokenVault,
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
+import { KEEPER_URL_ENV, keeperFetch } from './keeper/keeper-client.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
 import { createNotesMethodComposer } from './notes-method-composer.ts';
@@ -45,6 +46,7 @@ import { createRecallCalendarClient } from './recall-calendar.ts';
 import { createRecallClient, recallStatusWebhookUrl } from './recall.ts';
 import { haikuReviewJudge, reviewGateEnabled } from './review-judge.ts';
 import type { ServerConfig } from './server-config.ts';
+import { CfApi } from './share/cf-api.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { createSpokenEngines } from './spoken-reply/engines.ts';
 import { ThreadSummarizer } from './summarize.ts';
@@ -90,9 +92,11 @@ export function createServerDeps(
         // Only read the Keychain when Access mode is actually configured —
         // the reader throws when the entry is missing, and a link-only
         // deployment has no reason to hold a Cloudflare token at all.
-        ...(cfg.accessShareConfigured
-          ? { cfApiToken: readKeychainPassword('cloudflare-api-token') }
-          : {}),
+        //
+        // Once the keeper holds the token (`CW_KEEPER_URL`), the server reads
+        // none: its Access calls are asked of the keeper, and creating an
+        // application waits there for Bryan's passkey (`keeper/`).
+        ...(cfg.accessShareConfigured ? shareCloudflare(cfg.shareConfig.cfAccountId) : {}),
       }
     : undefined;
 
@@ -448,3 +452,22 @@ export function createServerDeps(
 
 /** What the boot has to work with — inferred, so the two cannot drift. */
 export type ServerDeps = ReturnType<typeof createServerDeps>;
+
+/**
+ * How the share module reaches Cloudflare: through the keeper when
+ * `CW_KEEPER_URL` names one, else with the Keychain's token. A held call
+ * waits under the board server's 120s idle timeout for the tap.
+ */
+function shareCloudflare(accountId: string | undefined): { cfApi: CfApi } | { cfApiToken: string } {
+  const keeper = process.env[KEEPER_URL_ENV]?.trim();
+  if (!keeper || !accountId) return { cfApiToken: readKeychainPassword('cloudflare-api-token') };
+  const fetchImpl = keeperFetch(keeper, {
+    requester: 'board server (sharing)',
+    waitMs: 100_000,
+    onHeld: (held) =>
+      console.log(stamped(`[keeper] ${held.summary} waits for a passkey: ${held.approveUrl}`)),
+  });
+  return {
+    cfApi: new CfApi({ accountId, token: '', apiBase: `${keeper}/v1/cloudflare`, fetchImpl }),
+  };
+}
