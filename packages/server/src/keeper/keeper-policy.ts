@@ -8,11 +8,16 @@
  * project, and an agent restarting a crashed machine must not wait for a
  * person.
  *
- * **Held** (a passkey on the approval page): everything else. Creating a Fly
- * app is `project.create`; setting a secret or opening a shell on a machine
- * is `token.move`, because a shell or a secret is how a token reaches a
- * machine; creating a Cloudflare Access application is `access.open`. The
- * default for a command this file does not name is held, not run.
+ * **Held** (a passkey on the approval page): the commands in `HELD`, each
+ * written exactly as listed, like a routine one. Creating a Fly app is
+ * `project.create`; setting a secret or opening a shell on a machine is
+ * `token.move`, because a shell or a secret is how a token reaches a
+ * machine; creating a Cloudflare Access application is `access.open`. A fly
+ * command or flag the list does not name is refused, not held: fly has flags
+ * that read a local file as the keeper's user (`--file-local`, `--env-file`,
+ * `--build-secret`), and a list of what may run cannot miss one the way a
+ * list of what may not can. A Cloudflare call this file does not name is
+ * held.
  *
  * **Refused**: a request whose answer would hand a credential to the
  * requester, which no approval makes safe because the requester is an agent.
@@ -57,25 +62,6 @@ const REFUSED_COMMANDS = new Set([
 const LEAF_COMMANDS = new Set(['status', 'releases', 'logs', 'deploy']);
 /** Flags whose output may carry the Authorization header, or that swap the token. */
 const FORBIDDEN_FLAGS = new Set(['debug', 'verbose', 'access-token', '-t', '-v']);
-
-/**
- * Flags whose value fly reads from the local disk, as the keeper's user, and
- * which the keeper does not copy (`keeper-stage.ts` copies --config,
- * --dockerfile and --ignorefile). Read off flyctl v0.4.120's help for
- * deploy, launch, console and machine run/update/create; none is in the
- * deploy script.
- */
-const LOCAL_READ_FLAGS = new Set([
-  'file-local',
-  'machine-config',
-  'env-file',
-  'buildpacks-volume',
-  'local-only',
-  'path',
-  'from',
-  'into',
-  'build-secret',
-]);
 
 /**
  * How one flag of a listed command is written: `value` takes the next arg or
@@ -166,6 +152,38 @@ const DEPLOY: Spec = spec(
   ['config'],
 );
 
+/**
+ * Every other command the keeper will hold for a tap, written as the scripts
+ * in `infra/project-machine/` write it. Lifecycle and reads on an app the
+ * keeper did not create are the routine specs, held.
+ */
+const HELD: readonly { hold: HoldKind; specs: readonly Spec[] }[] = [
+  {
+    hold: 'project.create',
+    specs: [spec('apps create', 1, { org: 'value', network: 'value', name: 'value' })],
+  },
+  {
+    hold: 'token.move',
+    specs: [
+      spec('secrets import', 0, { app: 'value', stage: 'bare' }),
+      spec('secrets set', 32, { app: 'value', stage: 'bare' }),
+      spec('ssh console', 0, { app: 'value', command: 'value' }),
+      spec('ssh sftp put', 2, { app: 'value' }),
+      spec('ssh sftp get', 2, { app: 'value' }),
+    ],
+  },
+  {
+    hold: 'other',
+    specs: [
+      spec('storage create', 0, { org: 'value', name: 'value', yes: 'bare' }),
+      ...SETUP_ON_GRANTED,
+      ...both('machine destroy', 1, { app: 'value', force: 'bare' }),
+      ...both('volume destroy', 1, { app: 'value', yes: 'bare' }),
+      ...ROUTINE_ON_OURS,
+    ],
+  },
+];
+
 /** The flag an arg names (`app` for `-a`, `--app` and `--app=x`), or null for a word. */
 function flagName(a: string): string | null {
   if (a === '-a') return 'app';
@@ -246,9 +264,6 @@ function scan(args: unknown): Scan {
     if (name !== null && FORBIDDEN_FLAGS.has(name)) {
       return { error: `${a.split('=', 1)[0]} could print or replace the keeper's token` };
     }
-    if (name !== null && LOCAL_READ_FLAGS.has(name)) {
-      return { error: `--${name} would have fly read a local file as the keeper` };
-    }
   }
   const words: string[] = [];
   for (const a of argv) {
@@ -309,7 +324,17 @@ export function classifyFly(args: unknown, apps: readonly string[]): Verdict {
     }
     return { kind: 'held', hold: 'other', app, summary, setup: false };
   }
-  if (command === 'apps' && sub === 'create') {
+  if (app !== null && apps.includes(app) && matches(argv, ROUTINE_ON_OURS)) {
+    return { kind: 'routine', app, summary };
+  }
+  const held = HELD.find((h) => matches(argv, h.specs));
+  if (!held) {
+    return {
+      kind: 'refused',
+      reason: `fly ${words.slice(0, 3).join(' ')} is not written as a command the keeper holds; it takes only the flags its scripts use`,
+    };
+  }
+  if (held.hold === 'project.create') {
     const flag = onlyValue(argv, 'name');
     const positional = words[2];
     if (flag === undefined || (flag !== null && positional !== undefined)) {
@@ -319,17 +344,8 @@ export function classifyFly(args: unknown, apps: readonly string[]): Verdict {
     if (!APP_NAME.test(name)) return { kind: 'refused', reason: 'apps create needs an app name' };
     return { kind: 'held', hold: 'project.create', app: name, summary };
   }
-  if (command === 'storage' && sub === 'create') {
-    return { kind: 'held', hold: 'other', app: null, summary };
-  }
-  if (app !== null && apps.includes(app) && matches(argv, ROUTINE_ON_OURS)) {
-    return { kind: 'routine', app, summary };
-  }
   const setup = app !== null && matches(argv, SETUP_ON_GRANTED);
-  if (command === 'secrets' || command === 'ssh' || command === 'sftp') {
-    return { kind: 'held', hold: 'token.move', app, summary, setup };
-  }
-  return { kind: 'held', hold: 'other', app, summary, setup };
+  return { kind: 'held', hold: held.hold, app, summary, setup };
 }
 
 const CF_PATH = /^\/[A-Za-z0-9_.\-/]*$/;

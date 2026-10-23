@@ -113,7 +113,7 @@ describe('fly argv is parsed strictly', () => {
     ).not.toBe('routine');
     expect(
       verdict(['machine', 'stop', 'm1', '--app', 'cw-harborlight', '--config', 'x.toml']),
-    ).toBe('held');
+    ).toBe('refused');
     // CONTROL: the plain form still runs.
     expect(verdict(['machine', 'stop', 'm1', '--app', 'cw-harborlight'])).toBe('routine');
   });
@@ -156,27 +156,51 @@ describe('fly deploy', () => {
     expect(classifyFly(args, APPS).kind).toBe('refused');
   });
 
-  // Every flyctl v0.4.120 flag whose value fly reads from the local disk, other
-  // than the --config, --dockerfile and --ignorefile the keeper copies itself.
+  // A held command runs only as written below; any flag or command outside
+  // the list is refused, so no flag that reads a local file can reach fly.
   it.each([
+    ['machine', 'run', 'img', '--app', 'cw-harborlight'],
     ['machine', 'run', 'img', '--app', 'cw-harborlight', '--file-local', '/m=/x'],
     ['machine', 'update', 'm1', '--app', 'cw-harborlight', '--file-local=/m=/x'],
-    ['machine', 'run', 'img', '--app', 'cw-harborlight', '--machine-config', '/x.json'],
     ['console', '--app', 'cw-harborlight', '--file-local', '/m=/x'],
     ['launch', '--path', '/x'],
-    ['launch', '--from', '/x'],
-    ['launch', '--into', '/x'],
-    ['launch', '--buildpacks-volume', '/x:/y'],
-    ['launch', '--local-only'],
-    ['machine', 'run', 'img', '--app', 'cw-harborlight', '--env-file', '/x'],
-  ])('refuses a local-file flag on any command: %j', (...args) => {
+    ['secrets', 'import', '--app', 'cw-harborlight', '--env-file', '/x'],
+    ['secrets', 'set', 'A=b', '--app', 'cw-harborlight', '--config', '/x/fly.toml'],
+    ['ssh', 'console', '--app', 'cw-harborlight', '--pty'],
+    ['ssh', 'sftp', 'shell', '--app', 'cw-harborlight'],
+    ['apps', 'create', 'cw-saltmarsh', '--org', 'x', '--generate-name'],
+    ['storage', 'create', '--org', 'x', '--name', 'b', '--public'],
+    ['machine', 'destroy', 'm1', '--app', 'cw-harborlight', '--image', 'x'],
+    ['certs', 'add', 'example.test', '--app', 'cw-harborlight'],
+  ])('refuses a command or flag the held list does not name: %j', (...args) => {
     expect(classifyFly(args, APPS)).toMatchObject({ kind: 'refused' });
   });
 
-  it('CONTROL: the same commands without those flags are held, not refused', () => {
-    expect(classifyFly(['machine', 'run', 'img', '--app', 'cw-harborlight'], APPS).kind).toBe(
-      'held',
-    );
+  it("CONTROL: every held command the scripts send is held, with the scripts' flags", () => {
+    for (const args of [
+      ['apps', 'create', 'cw-saltmarsh', '--org', 'x', '--network', 'n'],
+      ['storage', 'create', '--org', 'x', '--name', 'b', '--yes'],
+      ['secrets', 'import', '--app', 'cw-harborlight', '--stage'],
+      [
+        'volumes',
+        'create',
+        'cw_data',
+        '--app',
+        'cw-riverbend',
+        '--region',
+        'sjc',
+        '--size',
+        '1',
+        '--yes',
+      ],
+      ['ssh', 'console', '--app', 'cw-harborlight', '--command', "sh -c 'true'"],
+      ['ssh', 'sftp', 'put', '/tmp/a.tgz', '/data/a.tgz', '--app', 'cw-harborlight'],
+      ['machine', 'restart', 'm1', '--app', 'cw-riverbend'],
+      ['machine', 'destroy', 'm1', '--app', 'cw-harborlight', '--force'],
+      ['volumes', 'destroy', 'v1', '--app', 'cw-harborlight', '--yes'],
+    ]) {
+      expect({ args, kind: classifyFly(args, APPS).kind }).toEqual({ args, kind: 'held' });
+    }
   });
 });
 
@@ -232,14 +256,17 @@ describe('grants', () => {
       ['secrets', 'import', '--app', 'cw-saltmarsh-prod'],
       // An image built from an agent-chosen folder: always its own tap.
       ['deploy', '/tmp/ctx', '--app', 'cw-saltmarsh', '--config', '/tmp/ctx/fly.toml', '--yes'],
-      // A listed command with a flag the list does not name.
-      ['secrets', 'import', '--app', 'cw-saltmarsh', '--config', 'other.toml'],
     ]) {
       expect({ args, covered: grantCovers(fly, 'fly', held(args), null, now) }).toEqual({
         args,
         covered: false,
       });
     }
+    // A listed command with a flag the list does not name is not even held.
+    expect(
+      classifyFly(['secrets', 'import', '--app', 'cw-saltmarsh', '--config', 'other.toml'], APPS)
+        .kind,
+    ).toBe('refused');
   });
 
   it('covers no other app, no new app, and nothing once expired', () => {

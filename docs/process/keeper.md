@@ -11,7 +11,7 @@ token.
   machine of an app the keeper created, and any read, run at once.
 - **Risky setup waits for your passkey.** Creating a project, moving a token
   onto a machine (a secret or a shell), creating an Access application, and
-  anything else the keeper does not recognise are held until you approve them
+  the other commands the project scripts send are held until you approve them
   with Touch ID on the approval page. One approval of a new project also covers
   that project's volume and secrets for 30 minutes. Its image (`fly deploy`),
   its backup bucket, a shell, and anything else are a tap each, and a deploy's
@@ -20,9 +20,9 @@ token.
   `--config` or `--dockerfile` inside the keeper's home or store, through a
   link or not, is refused even with a tap, and so is a relative one. A
   `fly.toml` may hold only keys that name no local file (the app, region,
-  `[env]`, `[mounts]`, `[[restart]]` and `[[vm]]`), and the flags that make
-  `fly` read some other local file (`--file-local`, `--env-file`,
-  `--build-secret` and the like) are refused.
+  `[env]`, `[mounts]`, `[[restart]]` and `[[vm]]`), and a `fly` command or flag
+  the project scripts do not use is refused, so no flag that reads some other
+  local file (`--file-local`, `--env-file`, `--build-secret`) reaches `fly`.
 - **Some requests are refused outright**, because their answer would hand the
   requester a credential or the org: `fly auth`, `fly tokens`, `fly orgs`,
   `fly wireguard`, `fly ssh issue`, `fly apps move`, `--access-token`,
@@ -111,39 +111,46 @@ process can take the keeper's address, even while the keeper restarts. It
 hands each connection to `/usr/bin/nc`, which passes it to the keeper's unix
 socket in `$K/run`. The **keeper job** runs the keeper on that socket.
 
-The port is drawn at random the first time you ask for it and kept in the
-store, so nothing on this Mac could have known it before now. Keep it out of
-files others can read until the port job holds it: the plists go in a
-private folder, not `/tmp`. The keeper prints both plists itself:
+The port is drawn at random from 20000 to 60999 the first time the keeper
+needs it, and kept in its store. Nothing on this Mac may learn it before the
+port job holds it, and an agent running as you can read what your shell
+prints and keeps. So one root step draws it, writes both plists readable only by
+root, and loads the port job, and nothing prints the port until then:
+
+```bash
+/usr/bin/sudo -H -u cw-relay mkdir -m 700 "$K/run"
+/usr/bin/sudo /bin/sh -c '
+  set -e; umask 077; K="$1"; D=/Library/LaunchDaemons
+  keeper() { /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
+    "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" "$@"; }
+  keeper plist port > "$D/com.claude-workspaces.keeper-port.plist"
+  keeper plist keeper > "$D/com.claude-workspaces.keeper.plist"
+  chown root:wheel "$D"/com.claude-workspaces.keeper-port.plist "$D"/com.claude-workspaces.keeper.plist
+  launchctl bootstrap system "$D/com.claude-workspaces.keeper-port.plist"
+' sh "$K"
+```
+
+If it stops with an error, nothing was loaded unless the error came from
+`bootstrap`; if `bootstrap` says the address is in use, something took the
+port in the second since it was drawn: stop and find out what it is. Now the
+port is held, read it, and check both plists before loading the keeper job:
 
 ```bash
 PORT=$(/usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
   "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" port)
 echo "$PORT"
-P=$(mktemp -d)
-/usr/bin/sudo -H -u cw-relay mkdir -m 700 "$K/run"
-for JOB in port keeper; do
-  /usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
-    "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" plist "$JOB" \
-    > "$P/keeper-$JOB.plist"
-done
-less "$P/keeper-port.plist" "$P/keeper-keeper.plist"
+/usr/bin/sudo cat /Library/LaunchDaemons/com.claude-workspaces.keeper-port.plist \
+  /Library/LaunchDaemons/com.claude-workspaces.keeper.plist | less
 ```
 
-`echo` prints a number from 20000 to 60999. Asking again prints the same
-one; in a new shell, run the `PORT=` line again to set it. The port plist
-must list `/usr/bin/nc`, `-U`, `$K/run/keeper.sock`, and two `Sockets`
-entries, `127.0.0.1` and `::1`, on that port. The keeper plist must run
-`$K/bin/bun` on `$K/app/.../keeper-bin.ts` with `CW_KEEPER_SOCKET` set to the
-same socket and `CW_KEEPER_PORT` set to the port. Then install and load both:
+`echo` prints a number from 20000 to 60999; in a new shell, run the `PORT=`
+line again. The port plist must list `/usr/bin/nc`, `-U`,
+`$K/run/keeper.sock`, and two `Sockets` entries, `127.0.0.1` and `::1`, on
+that port. The keeper plist must run `$K/bin/bun` on
+`$K/app/.../keeper-bin.ts` with `CW_KEEPER_SOCKET` set to the same socket and
+`CW_KEEPER_PORT` set to the port. Then load the keeper job and check:
 
 ```bash
-/usr/bin/sudo install -o root -g wheel -m 644 "$P/keeper-port.plist" \
-  /Library/LaunchDaemons/com.claude-workspaces.keeper-port.plist
-/usr/bin/sudo install -o root -g wheel -m 644 "$P/keeper-keeper.plist" \
-  /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
-rm "$P"/keeper-*.plist && rmdir "$P"
-/usr/bin/sudo launchctl bootstrap system /Library/LaunchDaemons/com.claude-workspaces.keeper-port.plist
 /usr/bin/sudo launchctl bootstrap system /Library/LaunchDaemons/com.claude-workspaces.keeper.plist
 /usr/bin/sudo lsof -nP -iTCP:"$PORT" -sTCP:LISTEN
 curl -s "http://localhost:$PORT/" | grep -c 'Waiting for your passkey'
@@ -151,9 +158,6 @@ curl -s "http://localhost:$PORT/" | grep -c 'Waiting for your passkey'
 
 The `lsof` output must show two listeners, `127.0.0.1:$PORT` and
 `[::1]:$PORT`, both owned by `launchd` (process 1), and `curl` must print 1.
-If `bootstrap` of the port job fails because the address is in use,
-something else took the port after it was chosen: stop and find out what it
-is before going on.
 
 **Never boot out the port job** once it is loaded, except to uninstall. While
 it is loaded nobody else can serve the keeper's address; the moment it is

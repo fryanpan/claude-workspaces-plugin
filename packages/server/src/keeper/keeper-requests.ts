@@ -28,7 +28,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
-import { flyConfigsOf } from './keeper-flyconfig.ts';
+import { flyConfigFiles, flyConfigsOf } from './keeper-flyconfig.ts';
 import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import {
   ACCESS_GRANT_MS,
@@ -184,17 +184,24 @@ export function createKeeperRequests(deps: {
     return 'error' in cfg ? cfg : { ...checked, configs: cfg.configs };
   };
 
-  const run = async (call: KeeperCall): Promise<KeeperResult> => {
+  type Configs = readonly { path: string; toml: string }[];
+  /** `configs` are the ones cleaned at submit: what the owner saw is what fly reads. */
+  const run = async (call: KeeperCall, configs: Configs): Promise<KeeperResult> => {
     if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
     const checked = local(call);
     if ('error' in checked) throw new Error(`refused: ${checked.error}`);
     if (!checked.at.length) return deps.exec.fly(checked.args, call.input);
     const staged = stageFlyPaths(checked.args, checked.at, keeperUid);
     try {
-      // fly reads the configs rewritten from their allowed keys, never as written.
-      const cfg = flyConfigsOf(staged.args, checked.at, keeperUid);
-      if ('error' in cfg) throw new Error(`refused: ${cfg.error}`);
-      for (const c of cfg.configs) writeFileSync(c.path, c.toml);
+      // fly reads the configs cleaned at submit, written over the keeper's own
+      // copies. The copies are the keeper's, so they are never read back
+      // through the check that refuses the keeper's files.
+      const found = flyConfigFiles(staged.args, checked.at);
+      if ('error' in found) throw new Error(`refused: ${found.error}`);
+      if (found.files.length !== configs.length) {
+        throw new Error('refused: the configs fly would read changed after the request');
+      }
+      found.files.forEach((path, n) => writeFileSync(path, (configs[n] as Configs[number]).toml));
       return await deps.exec.fly(staged.args, call.input);
     } finally {
       staged.done();
@@ -257,7 +264,10 @@ export function createKeeperRequests(deps: {
       const cfPath = call.type === 'cloudflare' ? call.path : null;
       if (verdict.kind === 'routine' || grantCovers(grants, call.type, verdict, cfPath, now())) {
         log(`ran ${requester}: ${verdict.summary}`);
-        return { outcome: 'ran', result: await run(call) };
+        return {
+          outcome: 'ran',
+          result: await run(call, paths && 'configs' in paths ? paths.configs : []),
+        };
       }
       const open = [...held.values()].filter((r) => r.status === 'pending').length;
       if (open >= MAX_HELD) return { outcome: 'refused', reason: 'too many requests are waiting' };
@@ -318,7 +328,7 @@ export function createKeeperRequests(deps: {
       r.status = 'running';
       log(`approved ${r.id}: ${r.summary}`);
       try {
-        const result = await run(r.call);
+        const result = await run(r.call, r.configs ?? []);
         r.result = result;
         afterApproved(r, result);
       } catch (err) {

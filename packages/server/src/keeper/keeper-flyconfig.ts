@@ -55,7 +55,7 @@ export function cleanFlyConfig(text: string): { toml: string } | { error: string
         }
         later.push(`${name} = ${str(v)}`);
       }
-    } else if (key in TABLES) {
+    } else if (Object.hasOwn(TABLES, key)) {
       const keys = TABLES[key] as Record<string, 'string' | 'int'>;
       const many = Array.isArray(value);
       const rows = many ? (value as unknown[]) : [value];
@@ -65,7 +65,7 @@ export function cleanFlyConfig(text: string): { toml: string } | { error: string
         }
         later.push(many ? `[[${key}]]` : `[${key}]`);
         for (const [k, v] of Object.entries(row)) {
-          const kind = keys[k];
+          const kind = Object.hasOwn(keys, k) ? keys[k] : undefined;
           const ok =
             kind === 'string' ? typeof v === 'string' : kind === 'int' && Number.isInteger(v);
           if (!ok)
@@ -83,16 +83,14 @@ export function cleanFlyConfig(text: string): { toml: string } | { error: string
 const isConfigFlag = (a: string | undefined): boolean => a === '--config' || a === '-c';
 
 /**
- * Each config `fly` would read from this argv, cleaned: every `--config`
- * value, and the `fly.toml` of every build folder. `at` are the indexes of
- * the argv's local paths, already resolved. A file is read as opened and
- * refused if it is the keeper's (`readPlainFile`).
+ * The config files `fly` would read from this argv: every `--config` value,
+ * and the `fly.toml` of a deploy's build folder. `at` are the indexes of the
+ * argv's local paths, already resolved.
  */
-export function flyConfigsOf(
+export function flyConfigFiles(
   args: readonly string[],
   at: readonly number[],
-  keeperUid: number,
-): { error: string } | { configs: { path: string; toml: string }[] } {
+): { error: string } | { files: string[] } {
   const files: string[] = [];
   for (const i of at) {
     const a = args[i] as string;
@@ -110,13 +108,30 @@ export function flyConfigsOf(
         files.push(join(a, 'fly.toml'));
     }
   }
+  return { files };
+}
+
+/**
+ * Each config `fly` would read from this argv, cleaned. Read from the
+ * agent's own files at submit: each is read as opened and refused if it is
+ * the keeper's (`readPlainFile`), so this is never run on the keeper's copy.
+ */
+export function flyConfigsOf(
+  args: readonly string[],
+  at: readonly number[],
+  keeperUid: number,
+): { error: string } | { configs: { path: string; toml: string }[] } {
+  const found = flyConfigFiles(args, at);
+  if ('error' in found) return found;
   const configs: { path: string; toml: string }[] = [];
-  for (const path of files) {
+  for (const path of found.files) {
     let text: string;
     try {
       text = readPlainFile(path, keeperUid, MAX_CONFIG).bytes.toString('utf8');
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
+      return {
+        error: (err instanceof Error ? err.message : String(err)).replace(/^refused: /, ''),
+      };
     }
     const clean = cleanFlyConfig(text);
     if ('error' in clean) return { error: `${clean.error} (${path.slice(-80)})` };

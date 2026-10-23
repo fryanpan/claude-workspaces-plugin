@@ -65,6 +65,10 @@ describe('cleanFlyConfig', () => {
     ['[env]\nA = 1\n'],
     ['app = ["x"]\n'],
     ['not toml at all ='],
+    // Names Object.prototype holds are not tables on the list.
+    ['[toString]\n'],
+    ['__proto__ = {}\n'],
+    ['[constructor]\n'],
   ])('refuses a key outside the allowlist: %j', (text) => {
     expect('error' in cleanFlyConfig(text)).toBe(true);
   });
