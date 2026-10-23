@@ -390,7 +390,7 @@ async function serveApp(
           items: [],
           visitor: rq.visitor,
           coachHref: assetHref(assets, 'coach.js'),
-          frameOrigin: ctx.frameHost?.frameOriginFor(req, rq.visitor) ?? null,
+          frame: ctx.frameHost?.frameFor(req, rq.visitor, workspaceId) ?? null,
         }),
         ctx.browserSentry,
         'mockup',

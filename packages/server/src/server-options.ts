@@ -634,10 +634,12 @@ export interface ServerOptions {
    * the board's (`frame-host.ts`). Unset — every deployment that has not
    * opted in — keeps every frame opaque, exactly as before.
    *
-   * It must be the same SITE as the board hostnames (a subdomain of the same
-   * domain), and behind the same Access application as the operator's
-   * proxied hostname: the frame hostname admits the operator alone, by the
-   * same verifier and allowlist.
+   * One per project, `<project>.<frame domain>`, on a domain that is not the
+   * board's, so an attachment's script cannot set a cookie any board
+   * receives. A browser is admitted there by the board's frame ticket
+   * (`frame-ticket.ts`), since Safari sends a frame on another domain no
+   * Access cookie; through the tunnel the operator's Access token still
+   * admits, by the same verifier and allowlist as their proxied hostname.
    */
   frameOrigin?: string;
   /**
