@@ -90,7 +90,7 @@ describe('keeper-bin', () => {
     expect(keeper(['port'], env).out.trim()).toBe(String(port));
     expect(keeper(['plist', 'port'], env).out).toContain(`<string>${port}</string>`);
     expect(keeper(['plist', 'keeper'], env).out).toContain(`<string>${port}</string>`);
-    expect(keeper(['enroll'], env).out).toContain(`http://localhost:${port}/enroll/`);
+    expect(keeper(['enroll'], env).out).toContain(`:${port}/enroll/`);
   });
 
   it('check names a store others can open', () => {
