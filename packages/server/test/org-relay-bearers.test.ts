@@ -1,10 +1,11 @@
 /**
  * The relay renews its board tokens before they expire
  * (`org-relay/relay-bearers.ts`), keeps the renewed values in its own state
- * directory, and prefers them over the config's after a restart.
+ * directory, and prefers them over the config's after a restart unless the
+ * config now holds a different token.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -145,5 +146,43 @@ describe('the keeper', () => {
     const edited = config(at2(NOW + 2 * TTL));
     applySavedBearers(edited, stateDir);
     expect(edited.servers.get('harborlight')?.bearers.get('w-harbor')).toBe(at2(NOW + 2 * TTL));
+  });
+
+  it('after a restart, a token rotated in the config wins over a saved one that expires later', async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'relay-bearers-'));
+    dirs.push(stateDir);
+    // The old token, renewed half an hour before the restart.
+    const old = config(at2(NOW + 1000));
+    await createBearerKeeper({
+      fetch: renewer(() => at2(NOW + TTL + 30 * 60_000)).fetch,
+      config: old,
+      stateDir,
+      ttlMs: TTL,
+      now: () => NOW,
+      log: () => {},
+    }).run();
+    // A person put a newly minted token in the config, expiring sooner than
+    // the renewed old one. Theirs is the one the relay must use.
+    const rotated = config(at2(NOW + TTL));
+    applySavedBearers(rotated, stateDir);
+    expect(rotated.servers.get('harborlight')?.bearers.get('w-harbor')).toBe(at2(NOW + TTL));
+    // Control, same file: the unrotated config still takes the renewal.
+    const unrotated = config(at2(NOW + 1000));
+    applySavedBearers(unrotated, stateDir);
+    expect(unrotated.servers.get('harborlight')?.bearers.get('w-harbor')).toBe(
+      at2(NOW + TTL + 30 * 60_000),
+    );
+  });
+
+  it('reads a file saved before the config hash existed, by the later expiry', () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'relay-bearers-'));
+    dirs.push(stateDir);
+    writeFileSync(
+      bearersPath(stateDir),
+      JSON.stringify({ harborlight: { 'w-harbor': at2(NOW + TTL) } }),
+    );
+    const cfg = config(at2(NOW + 1000));
+    applySavedBearers(cfg, stateDir);
+    expect(cfg.servers.get('harborlight')?.bearers.get('w-harbor')).toBe(at2(NOW + TTL));
   });
 });
