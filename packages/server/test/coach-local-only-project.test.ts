@@ -1,6 +1,7 @@
 /**
- * A doc bound from a project marked local-only is off for the coach and for
- * the plan lead's rank, through the real server.
+ * A doc bound from a project marked local-only is off for the coach, through
+ * the real server, and still takes the plan lead's rank: the lead sees every
+ * board the owner does (the owner, 2026-10-23).
  *
  * The privacy check asked the project store about the doc's KEY
  * (`repoKey\0relPath`) where it takes the project's key, so no doc was ever
@@ -9,7 +10,7 @@
  * has been seen to reach the coach and to take a rank, so the only thing
  * that changes between the two halves is the project's privacy. A doc from a
  * project that is not local-only, on another board, still reaches the coach
- * and still takes a rank afterwards.
+ * afterwards, and both docs still take a rank.
  *
  * The real server, a real git repo per project, the owner's Access assertion
  * for his comments, and the coach session's own stream. Nothing here reaches
@@ -213,7 +214,7 @@ async function rank(key: string, value: number): Promise<number> {
 }
 
 describe('a doc in a local-only project', () => {
-  it('stops reaching the coach and the plan lead once its project is local-only, while another project still does', async () => {
+  it('stops reaching the coach once its project is local-only, while another project still does; both still take a rank', async () => {
     // The coach: its board, its seated lead, and that lead's stream.
     const setup = await ok<{ url: string }>(send('POST', '/coach/setup', {}, await owner()));
     const coachBoard = decodeURIComponent(setup.url.split('/')[2] ?? '');
@@ -272,9 +273,8 @@ describe('a doc in a local-only project', () => {
       expect(after).not.toContain(records);
       expect(after).not.toContain('Clinic letters');
 
-      // The plan lead: the letters ask answers as if it did not exist, and
-      // the post's still takes a rank.
-      expect(await rank(lettersKey, 2)).toBe(404);
+      // The plan lead is not the coach: both asks still take a rank.
+      expect(await rank(lettersKey, 2)).toBe(200);
       expect(await rank(postKey, 1)).toBe(200);
     } finally {
       stream.close();

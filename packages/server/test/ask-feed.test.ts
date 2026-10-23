@@ -1,8 +1,9 @@
 /**
  * The plan lead's feed of new asks: asks from several boards arrive as one
  * addressed frame when the window closes, carrying board, row, key, headline
- * and createdAt and nothing else. A board the coach may not hear from never
- * reaches it, and neither does an ask the lead already hears or filed.
+ * and createdAt and nothing else. An ask the lead already hears or filed
+ * never reaches it. That a private or coach-off board's asks do is
+ * `lead-sees-every-board.test.ts`, through the real server.
  *
  * Fixtures are invented; the repo is public.
  */
@@ -17,7 +18,6 @@ import {
   askFromReviewItemAdded,
   asksFromThreadEvent,
 } from '../src/ask-feed.ts';
-import { boardPrivacyFrom, placeIsOff } from '../src/coach/exclusion.ts';
 
 /** A clock and a timer the test moves by hand. */
 function fakeTime(start = 1_000_000) {
@@ -49,22 +49,11 @@ function fakeTime(start = 1_000_000) {
 const PLAN = 'w-saltmarsh';
 const LEAD = 'agent-team-lead';
 
-function feed(opts: { locked?: Set<string>; connected?: boolean } = {}) {
+function feed(opts: { connected?: boolean } = {}) {
   const time = fakeTime();
   const sent: [string, string, AskFrame][] = [];
-  const locked = opts.locked ?? new Set<string>();
-  const privacy = boardPrivacyFrom({
-    isLocalOnlySet: () => false,
-    setOfDoc: () => undefined,
-    docKeyOf: () => undefined,
-    projectIsLocalOnly: () => false,
-    docIdsOf: () => [],
-    isBoardLocked: (id) => locked.has(id),
-    boardsOfDoc: () => [],
-  });
   const f = new AskFeed({
     lead: () => ({ workspaceId: PLAN, agentId: LEAD }),
-    isOff: (place) => placeIsOff(place, privacy, new Set()),
     send: (ws, agent, frame) => {
       sent.push([ws, agent, frame]);
       return 1;
@@ -73,7 +62,7 @@ function feed(opts: { locked?: Set<string>; connected?: boolean } = {}) {
     now: time.now,
     schedule: time.schedule,
   });
-  return { f, sent, time, locked };
+  return { f, sent, time };
 }
 
 const ticketAsk = (workspaceId: string, taskId: string, headline: string, ts: number) =>
@@ -131,25 +120,6 @@ describe('AskFeed', () => {
     // A quiet window sends nothing.
     time.advance(ASK_WINDOW_MS * 3);
     expect(sent).toHaveLength(1);
-  });
-
-  it('never sends an ask on a locked board', () => {
-    const { f, sent, time } = feed({ locked: new Set(['w-river']) });
-    expect(f.offer(ticketAsk('w-river', 't-2', 'Private ferry question', 1_000_100))).toBe(false);
-    expect(f.offer(ticketAsk('w-harbor', 't-1', 'Which tide table?', 1_000_300))).toBe(true);
-    time.advance(ASK_WINDOW_MS);
-    const frame = sent[0]?.[2];
-    expect(frame?.items.map((i) => i.workspaceId)).toEqual(['w-harbor']);
-    expect(JSON.stringify(sent)).not.toContain('Private ferry question');
-  });
-
-  it('drops an ask whose board was locked while its window was open', () => {
-    const { f, sent, time, locked } = feed();
-    f.offer(ticketAsk('w-river', 't-2', 'Ferry question', 1_000_100));
-    f.offer(ticketAsk('w-harbor', 't-1', 'Tide question', 1_000_200));
-    locked.add('w-river');
-    time.advance(ASK_WINDOW_MS);
-    expect(sent[0]?.[2].items.map((i) => i.workspaceId)).toEqual(['w-harbor']);
   });
 
   it('does not echo the plan board’s own asks, nor an ask the lead filed', () => {

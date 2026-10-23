@@ -1,8 +1,9 @@
 /**
  * `POST /api/review-queue/rank` through the real server: the plan board's
  * lead ranks one item on another board and the cross-board queue (Home's
- * order) follows it, while every other caller is refused and an item on a
- * locked board cannot be ranked.
+ * order) follows it, while every other caller is refused. An item on a
+ * locked board takes a rank like any other (the owner, 2026-10-23: the lead
+ * has the same visibility he does).
  *
  * Fixtures are invented; the repo is public.
  */
@@ -144,7 +145,7 @@ describe('POST /api/review-queue/rank', () => {
     expect((await rank(LEAD.id, `${harbor}:task-review:t-none:r-none`, 1, token)).status).toBe(404);
   });
 
-  it('cannot rank an item on a locked board, and a rank set before the lock stops counting', async () => {
+  it('ranks an item on a locked board, and a rank set before the lock still counts', async () => {
     const token = await tokenFor(LEAD.id);
     await jj(await rank(LEAD.id, riverKey, 1, token));
     expect((await queueKeys())[0]).toBe(riverKey);
@@ -155,10 +156,10 @@ describe('POST /api/review-queue/rank', () => {
       actor: { id: 'known-owner', name: 'Owner' },
     });
     expect(lock.status, await lock.clone().text()).toBe(200);
-    const res = await rank(LEAD.id, riverKey, 2, token);
-    expect(res.status).toBe(404);
-    // River's rank 1 would still beat harbor's 5 if it counted.
+    // River's rank 1 still beats harbor's 5 after the lock.
     await jj(await rank(LEAD.id, harborKey, 5, token));
+    expect((await queueKeys())[0]).toBe(riverKey);
+    await jj(await rank(LEAD.id, riverKey, 6, token));
     expect((await queueKeys())[0]).toBe(harborKey);
   });
 });

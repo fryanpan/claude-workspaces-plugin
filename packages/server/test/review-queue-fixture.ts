@@ -3,10 +3,11 @@
  * boards with ranked review items, and a repo registry holding thousands of
  * doc keys.
  *
- * The ranks are what make the queue ask the coach's privacy check about each
+ * The ranks are what made the queue ask the coach's privacy check about each
  * item, and that check asks the registry about every doc on the item's board.
  * On this fixture with 6,000 keys the route took 2.2s a call before the
- * registry learned to look a doc up rather than scan for it.
+ * registry learned to look a doc up rather than scan for it. Since
+ * 2026-10-23 a rank no longer asks the check.
  *
  * `seedReviewQueueFixture` writes everything with one server and stops it, so
  * a test boots a second server over a cold data dir, as prod does. Fixtures

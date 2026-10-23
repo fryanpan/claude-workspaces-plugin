@@ -29,8 +29,8 @@
  * Only the agent seated as the plan board's lead may make it, proven by its
  * own agent token from this machine (`auth/agent-token.ts`); any other
  * caller is refused before the key is looked up. The key must name an open
- * item on a board the lead may hear from (`ask-feed.ts`): an item on an
- * excluded board answers the same 404 as one that does not exist.
+ * item on any board: the lead sees every board the owner does (the owner,
+ * 2026-10-23), so a private or coach-off board takes a rank like any other.
  *
  * The goal tag rides the same verb rather than a sibling: the lead places an
  * ask against the week's goals in one decision, rank and goal together, and
@@ -69,9 +69,6 @@ export interface ReviewQueueRoutesContext {
   refuseNonLocal: (req: Request) => Extract<AgentCallerVerdict, { ok: false }> | null;
   /** The caller proves it is `agentId` (token, loopback, not a browser). */
   authorizeAgent: (req: Request, agentId: string) => AgentCallerVerdict;
-  /** True when the lead may not rank or tag at this place: local-only,
-   *  locked, turned off, or unreadable. A shared board is allowed. */
-  isOff: (place: { workspaceId: string; docId?: string }) => boolean;
 }
 
 export interface ReviewQueueRouteRequest {
@@ -156,13 +153,7 @@ async function handleRank(ctx: ReviewQueueRoutesContext, req: Request): Promise<
     return j(400, { error: 'bad-key', message: 'key is the queue key the feed named' });
   }
   const { item } = await ctx.crossReview.item(key);
-  const docId =
-    item && item.kind !== 'task-review'
-      ? item.docId
-      : item?.taskId !== undefined
-        ? `task:${item.taskId}`
-        : undefined;
-  if (!item || ctx.isOff({ workspaceId: item.workspaceId, ...(docId ? { docId } : {}) })) {
+  if (!item) {
     return j(404, { error: 'not-found', message: 'No open review item has that key.' });
   }
   if (hasRank) ctx.ranks.set(item.key, rank, agentId);

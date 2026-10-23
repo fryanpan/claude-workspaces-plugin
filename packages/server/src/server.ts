@@ -43,7 +43,7 @@ import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-mem
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
-import { boardPrivacyFrom, placeIsOff } from './coach/exclusion.ts';
+import { boardPrivacyFrom } from './coach/exclusion.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
@@ -1243,17 +1243,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     };
   }
   /** The plan lead's per-item ranks and its batched feed of new asks
-   *  (lead-rank-wiring.ts). Both skip every board the coach may not hear
-   *  from. */
-  const isOffForLead = (place: { workspaceId: string; docId?: string }): boolean =>
-    coachWiring.store.readFailed || placeIsOff(place, boardPrivacy, coachWiring.store.offBoards);
+   *  (lead-rank-wiring.ts), over every board: the lead sees what the owner
+   *  sees (the owner, 2026-10-23). */
   const leadRanks = wireLeadRanks({
     dataDir,
     planBoard: () => crossReview.projects().planWorkspaceId,
     leadOf: (workspaceId) => taskStore.getWorkspace(workspaceId)?.leadAgentId,
     boardName: (workspaceId) => taskStore.getWorkspace(workspaceId)?.name,
     goalTitle: (goalId) => taskStore.getGoalRow(goalId)?.title,
-    isOff: isOffForLead,
     taskWorkspace: (taskId) => taskStore.getTask(taskId)?.workspaceId,
     goalWorkspace: (rowId) => taskStore.getGoalRow(rowId)?.workspaceId,
     boardsForDoc: (docId) => boardsForDoc(docId),
@@ -1261,6 +1258,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sendToAgent: (workspaceId, agentId, frame) =>
       sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
     agentConnected: (workspaceId, agentId) => sse.agentsOn(`ws~${workspaceId}`).has(agentId),
+    ...(opts.askFeedWindowMs === undefined ? {} : { askWindowMs: opts.askFeedWindowMs }),
   });
   {
     const stallDocEvent = stallWiring.onLiveDocEvent;
@@ -2249,7 +2247,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         key: agentTokenKeyFor(),
         requireToken: true,
       }),
-    isOff: isOffForLead,
     sessionIdentityId: (req) => sessionIdentityFor(req)?.id ?? null,
     renderPage: () => renderReviewsShell(browserSentry, readAppAssetManifest(markdownAppDist)),
     pageHeaders: HTML_SHELL_HEADERS,

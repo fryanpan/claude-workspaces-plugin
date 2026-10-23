@@ -1,8 +1,7 @@
 /**
  * The plan lead's ranks and feed, composed: a ticket's `review_item.added`
- * and a doc thread's declared item reach the lead in one frame, a person
- * moving a task voids the lead's earlier rank on it, and a rank on a board
- * the lead may not hear from never counts.
+ * and a doc thread's declared item reach the lead in one frame, and a
+ * person moving a task voids the lead's earlier rank on it.
  *
  * Fixtures are invented; the repo is public.
  */
@@ -25,7 +24,7 @@ afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-function wired(locked = new Set<string>()) {
+function wired() {
   dir = mkdtempSync(join(tmpdir(), 'lead-rank-wiring-'));
   let now = 1_000_000;
   let pending: (() => void) | null = null;
@@ -36,7 +35,6 @@ function wired(locked = new Set<string>()) {
     planBoard: () => PLAN,
     leadOf: (ws) => (ws === PLAN ? LEAD : undefined),
     boardName: (ws) => NAMES[ws],
-    isOff: (place) => locked.has(place.workspaceId),
     taskWorkspace: (taskId) => (taskId === 't-ferry' ? 'w-river' : undefined),
     goalWorkspace: () => undefined,
     boardsForDoc: (docId) => (docId === 'd-tides' ? ['w-harbor'] : []),
@@ -131,14 +129,6 @@ describe('wireLeadRanks', () => {
     w.stop();
   });
 
-  it('never sends an ask from a locked board', () => {
-    const { w, sent, emit, closeWindow } = wired(new Set(['w-river']));
-    emit(added('w-river', 't-ferry', 'Private ferry question', 10));
-    closeWindow();
-    expect(sent).toHaveLength(0);
-    w.stop();
-  });
-
   it('a person moving the task voids the lead’s earlier rank; an agent’s move does not', () => {
     const { w, emit, tick } = wired();
     const it1 = item('w-river:task-review:t-ferry:r-1', 'w-river', 't-ferry');
@@ -159,17 +149,6 @@ describe('wireLeadRanks', () => {
     expect(w.leadRank(it1)).toBe(2);
     tick(5);
     emit(regrouped('person', 2_000_000));
-    expect(w.leadRank(it1)).toBeUndefined();
-    w.stop();
-  });
-
-  it('a rank on a board the lead may not hear from never counts', () => {
-    const locked = new Set<string>();
-    const { w } = wired(locked);
-    const it1 = item('w-river:task-review:t-ferry:r-1', 'w-river', 't-ferry');
-    w.ranks.set(it1.key, 1, LEAD);
-    expect(w.leadRank(it1)).toBe(1);
-    locked.add('w-river');
     expect(w.leadRank(it1)).toBeUndefined();
     w.stop();
   });

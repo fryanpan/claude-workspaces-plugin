@@ -15,12 +15,11 @@
  * that stops work also carries what it stops and that goal's title
  * (`review-blocks.ts`), so the lead ranks it knowing the cost of the wait.
  *
- * **What is never sent.** The frame carries headlines from many boards to one
- * agent, so a board the coach would not hear from is not heard from here
- * either (`coach/exclusion.ts`: kept on this machine, sharing-locked, or
- * reachable by anyone besides the owner). The check runs when an ask is
- * offered and again when the window closes, so a board locked inside the
- * window keeps its asks. Asks on the plan board itself are not sent, because
+ * **Every board.** The lead sees every board the owner does (the owner,
+ * 2026-10-23: "They should have the same visibility I do"), so a board kept
+ * on this machine, locked private or with the coach turned off still sends
+ * its asks here; the coach's own exclusion (`coach/exclusion.ts`) is the
+ * coach's alone. Asks on the plan board itself are not sent, because
  * the lead already hears them on that board's own stream, and neither is an
  * ask the lead filed itself (code-health.md, "An agent is only woken by news
  * it can act on").
@@ -93,12 +92,12 @@ export interface OfferedAsk extends NewAsk {
 export interface AskFeedDeps {
   /** The plan board and its lead, or null when there is no plan or no lead. */
   lead: () => { workspaceId: string; agentId: string } | null;
-  /** True when nothing about this place may reach the lead's session. */
-  isOff: (place: { workspaceId: string; docId?: string }) => boolean;
   /** Sends one addressed frame; answers how many of the lead's streams took it. */
   send: (workspaceId: string, agentId: string, frame: AskFrame) => number;
   /** Whether the lead is holding a stream on its board now. */
   connected: (workspaceId: string, agentId: string) => boolean;
+  /** How long a window stays open (default `ASK_WINDOW_MS`). A test seam. */
+  windowMs?: number;
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => () => void;
 }
@@ -106,17 +105,12 @@ export interface AskFeedDeps {
 const clip = (s: string): string =>
   s.length > MAX_HEADLINE ? `${s.slice(0, MAX_HEADLINE - 1)}…` : s;
 
-const placeOf = (ask: NewAsk): { workspaceId: string; docId?: string } =>
-  ask.row.kind === 'task-review'
-    ? { workspaceId: ask.workspaceId, docId: `task:${ask.row.taskId}` }
-    : { workspaceId: ask.workspaceId, docId: ask.row.docId };
-
 export class AskFeed {
   private readonly window: HeldWindow<NewAsk>;
 
   constructor(private readonly deps: AskFeedDeps) {
     this.window = new HeldWindow<NewAsk>({
-      windowMs: ASK_WINDOW_MS,
+      windowMs: deps.windowMs ?? ASK_WINDOW_MS,
       close: (held, from, to) => this.close(held, from, to),
       ...(deps.now ? { now: deps.now } : {}),
       ...(deps.schedule ? { schedule: deps.schedule } : {}),
@@ -128,7 +122,6 @@ export class AskFeed {
     const lead = this.deps.lead();
     if (!lead || !this.deps.connected(lead.workspaceId, lead.agentId)) return false;
     if (ask.workspaceId === lead.workspaceId || ask.actorId === lead.agentId) return false;
-    if (this.off(ask)) return false;
     const { actorId: _actor, ...item } = ask;
     this.window.hold({ ...item, headline: clip(item.headline) });
     return true;
@@ -139,21 +132,12 @@ export class AskFeed {
     this.window.stop();
   }
 
-  private off(ask: NewAsk): boolean {
-    try {
-      return this.deps.isOff(placeOf(ask));
-    } catch {
-      // "Could not tell" is not a yes.
-      return true;
-    }
-  }
-
   private close(held: NewAsk[], from: number, to: number): void {
     const lead = this.deps.lead();
     if (!lead || !this.deps.connected(lead.workspaceId, lead.agentId)) return;
     const seen = new Set<string>();
     const items = held.filter((ask) => {
-      if (seen.has(ask.key) || ask.workspaceId === lead.workspaceId || this.off(ask)) return false;
+      if (seen.has(ask.key) || ask.workspaceId === lead.workspaceId) return false;
       seen.add(ask.key);
       return true;
     });

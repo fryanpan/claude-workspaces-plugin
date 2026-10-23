@@ -2240,9 +2240,10 @@ and a person moving a task after the rank voids it. `POST
 agent token (MCP verb `rank_review_item`). The lead hears what to rank from
 `ask-feed.ts`: every new review item on another board, batched over a
 10-minute window into one addressed `workspace.new_asks` frame carrying board,
-row, key, headline and filing time, never the detail. A board the coach is
-off for (`coach/exclusion.ts`) is excluded from the feed and from the ranks.
-A board with members or a share link is not off.
+row, key, headline and filing time, never the detail. The feed and the
+ranks cover every board, including one that is private or that the coach is
+off for: the lead sees what the owner sees (the owner, 2026-10-23), and
+`coach/exclusion.ts` applies to the coach alone.
 The window is `held-window.ts`, which the coach's session feed uses too, and
 `lead-rank-wiring.ts` composes the three against the stores.
 

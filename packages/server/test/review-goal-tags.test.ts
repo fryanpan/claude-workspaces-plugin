@@ -3,8 +3,9 @@
  * /api/review-queue/rank` with a `goal` files an ask under one of the plan
  * board's goals (or urgent, not-this-week, drop), the queue carries it, and
  * Home groups by it. Only the plan lead may tag, a tag must name something the
- * plan has, and an item on a locked board cannot be tagged. A shared board's
- * item can: the lead holds the key already, the write answers with no more
+ * plan has. An item on a locked board takes a tag like any other (the owner,
+ * 2026-10-23: the lead has the same visibility he does), and so does a shared
+ * board's: the lead holds the key already, the write answers with no more
  * than it was sent, and the tag is read only on the owner's Home.
  *
  * Fixtures are invented; the repo is public.
@@ -185,7 +186,7 @@ describe('the plan lead’s goal tag', () => {
     expect(await tagOf(harborKey)).toBe(tideGoal);
   });
 
-  it('cannot tag an item on a locked board, and a tag set before the lock stops counting', async () => {
+  it('tags an item on a locked board, and a tag set before the lock still counts', async () => {
     const token = await tokenFor(LEAD.id);
     expect(await tagOf(riverKey)).toBe('urgent');
     const lock = await post('/api/share/lock', {
@@ -195,8 +196,10 @@ describe('the plan lead’s goal tag', () => {
       actor: { id: 'known-owner', name: 'Owner' },
     });
     expect(lock.status, await lock.clone().text()).toBe(200);
-    expect((await tag(LEAD.id, riverKey, { goal: 'drop' }, token)).status).toBe(404);
-    expect(headings(await landing())).not.toContain('Urgent 1');
+    expect(await tagOf(riverKey)).toBe('urgent');
+    expect(headings(await landing())).toContain('Urgent 1');
+    expect((await tag(LEAD.id, riverKey, { goal: 'drop' }, token)).status).toBe(200);
+    expect(await tagOf(riverKey)).toBe('drop');
   });
 
   it('ranks and tags an item on a shared board, and Home applies both', async () => {
