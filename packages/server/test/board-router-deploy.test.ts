@@ -48,8 +48,10 @@ describe('parseRouterConfig', () => {
       JSON.stringify({ ...BASE, projects: { r: 'r.saltmarsh.test' } }),
     ],
     ['an origin under the one address', JSON.stringify({ ...BASE, projects: { r: `r.${ONE}` } })],
-    // At the apex every origin in the zone would itself be a project subdomain.
+    // At the apex `*.<zone>/*` would take every other name in the zone.
     ['a one address at the zone apex', JSON.stringify({ ...BASE, oneAddress: ZONE })],
+    ['the apex and no projects', JSON.stringify({ zone: ZONE, oneAddress: ZONE, projects: {} })],
+    ['an upper-case one address', JSON.stringify({ ...BASE, oneAddress: `Workspaces.${ZONE}` })],
     ['a bad board table', JSON.stringify({ ...BASE, boards: { [MAC]: ['w/x'] } })],
     ['board paths bound with no boards', JSON.stringify({ ...BASE, bindBoardPaths: true })],
   ])('refuses a config with %s', (_label, raw) => {

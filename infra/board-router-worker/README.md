@@ -120,11 +120,12 @@ environment and wrangler's, never an argument or a file. The token needs Zone
 Read, DNS Edit, SSL and Certificates Read, Workers Routes Edit on the zone,
 and Workers Scripts Edit on the account.
 
-**Certificate.** Universal SSL covers the zone and one level under it. When
-the one address is itself a name under the zone, `<project>.<one-address>` is
-two levels down, so it needs an advanced certificate for `*.<one-address>`
-(Advanced Certificate Manager). That is a purchase, so it is Bryan's call; the
-deploy refuses until one exists.
+**Certificate.** Universal SSL covers the zone and one level under it. The
+one address is a name under the zone (the deploy refuses the apex, whose
+`*.<zone>/*` route would take every other name in the zone), so
+`<project>.<one-address>` is two levels down and needs an advanced
+certificate for `*.<one-address>` (Advanced Certificate Manager). That is a
+purchase, so it is Bryan's call; the deploy refuses until one exists.
 
 **What it binds.** Only `*.<one-address>/*`, so the one address keeps reaching
 the Mac's tunnel exactly as today. `bindBoardPaths: true` adds

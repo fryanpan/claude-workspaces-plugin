@@ -10,7 +10,7 @@ import { parseBoardOrigins, parseProjectOrigins } from './worker.js';
 export interface RouterConfig {
   /** The Cloudflare zone everything lives in, e.g. `harborlight.test`. */
   zone: string;
-  /** The one address: the zone itself or a name under it. */
+  /** The one address: a name under the zone, never the zone itself. */
   oneAddress: string;
   /** Project label -> origin hostname, the Worker's `PROJECT_ORIGINS`. */
   projects: Record<string, string>;
@@ -43,6 +43,10 @@ export function wildcardRecord(oneAddress: string): DnsRecord {
   return { type: 'AAAA', name: `*.${oneAddress}`, content: '100::', proxied: true };
 }
 
+/** A lower-case hostname, no port: what `url.hostname` gives the Worker. */
+const HOSTNAME =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 const inZone = (name: string, zone: string) => name === zone || name.endsWith(`.${zone}`);
 
 /** Parse and check `router.local.json`. Throws naming the first problem. */
@@ -60,8 +64,10 @@ export function parseRouterConfig(raw: string): RouterConfig {
   const zone = typeof o.zone === 'string' ? o.zone : '';
   const oneAddress = typeof o.oneAddress === 'string' ? o.oneAddress : '';
   if (!zone) throw new Error('zone is missing');
-  if (!oneAddress || !inZone(oneAddress, zone)) {
-    throw new Error('oneAddress must be the zone or a name under it');
+  // Not the apex: the route `*.<zone>/*` would take every other name in the
+  // zone, and every origin, which must sit in the zone, would be a subdomain.
+  if (!HOSTNAME.test(oneAddress) || !oneAddress.endsWith(`.${zone}`)) {
+    throw new Error('oneAddress must be a lower-case name under the zone, not the zone itself');
   }
   const projects = (o.projects ?? {}) as Record<string, string>;
   const boards = (o.boards ?? {}) as Record<string, string[]>;
