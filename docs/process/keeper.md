@@ -13,11 +13,15 @@ token.
   onto a machine (a secret or a shell), creating an Access application, and
   anything else the keeper does not recognise are held until you approve them
   with Touch ID on the approval page. One approval of a new project also covers
-  the rest of that project's setup for 30 minutes.
+  that project's volume, secrets and image for 30 minutes. Its backup bucket,
+  a shell, and anything else are a tap each.
 - **Some requests are refused outright**, because their answer would hand the
   requester a credential or the org: `fly auth`, `fly tokens`, `fly orgs`,
-  `fly ssh issue`, `fly apps move`, `--access-token`, and Cloudflare token
-  creation.
+  `fly wireguard`, `fly ssh issue`, `fly apps move`, `--access-token`,
+  `--debug` and `--verbose` (their output may carry the token), and Cloudflare
+  token creation. So is any `fly` command the keeper cannot read the way `fly`
+  does: one starting with a flag, a short flag with its value joined on
+  (`-aprod`), or an app named twice.
 
 How it works and what it checks is in
 [security.md](../architecture/security.md), under "The keeper holds the
@@ -34,7 +38,17 @@ The steps assume the relay's macOS user is `cw-relay`, created by
 [mac-lead-users.md](mac-lead-users.md). Create it there first if it does not
 exist; this runbook creates no users.
 
-`$REPO` below is your checkout. `$K` is `/Users/cw-relay/keeper`.
+`$K` below is `/Users/cw-relay/keeper`.
+
+**Start every session below in a clean shell**: `/bin/zsh -f`, then use
+`/usr/bin/sudo`. Agents run as you today, so they can edit your shell's
+startup files, and a changed `sudo`, `git` or `PATH` there would run their
+code with your password.
+
+**The keeper's code never comes from your checkout.** Agents can write your
+checkout, including its `origin/main` ref, so an install from there could be
+any commit an agent chose. The keeper installs from its own clone, owned by
+`cw-relay`, and you check the commit against GitHub before it is used.
 
 ## 1. Install the keeper
 
@@ -44,15 +58,34 @@ root. So it gets its own copy of each.
 
 ```bash
 K=/Users/cw-relay/keeper
-sudo -u cw-relay mkdir -p "$K/bin" "$K/state" "$K/releases"
-sudo -u cw-relay chmod 700 "$K/state"
-sudo install -o cw-relay -m 755 "$(realpath "$(which bun)")" "$K/bin/bun"
-sudo install -o cw-relay -m 755 "$(realpath "$(which fly)")" "$K/bin/fly"
-REL="$K/releases/$(git -C "$REPO" rev-parse --short origin/main)"
-sudo -u cw-relay mkdir "$REL"
-git -C "$REPO" archive origin/main | sudo -u cw-relay tar -x -C "$REL"
-sudo -u cw-relay ln -sfn "$REL" "$K/app"
+URL=https://github.com/fryanpan/claude-workspaces-plugin.git
+/usr/bin/sudo -H -u cw-relay mkdir -p "$K/bin" "$K/state" "$K/releases"
+/usr/bin/sudo -H -u cw-relay chmod 700 "$K/state"
+/usr/bin/sudo install -o cw-relay -m 755 "$(realpath "$(which bun)")" "$K/bin/bun"
+/usr/bin/sudo install -o cw-relay -m 755 "$(realpath "$(which fly)")" "$K/bin/fly"
+/usr/bin/sudo -H -u cw-relay git clone --quiet --no-checkout "$URL" "$K/src"
 ```
+
+Then the release step, which an update repeats. It fetches into the keeper's
+clone, asks GitHub for `main` separately, and stops unless the two agree:
+
+```bash
+/usr/bin/sudo -H -u cw-relay git -C "$K/src" fetch --quiet origin main
+SHA=$(/usr/bin/sudo -H -u cw-relay git -C "$K/src" rev-parse FETCH_HEAD)
+LIVE=$(/usr/bin/sudo -H -u cw-relay git ls-remote "$URL" refs/heads/main | cut -f1)
+if [ -n "$SHA" ] && [ "$SHA" = "$LIVE" ]; then
+  REL="$K/releases/$SHA"
+  /usr/bin/sudo -H -u cw-relay mkdir "$REL"
+  /usr/bin/sudo -H -u cw-relay sh -c 'git -C "$1" archive "$2" | tar -x -C "$3"' _ "$K/src" "$SHA" "$REL"
+  /usr/bin/sudo -H -u cw-relay ln -sfn "$REL" "$K/app"
+  echo "installed $SHA"
+else
+  echo "STOP: fetched $SHA, GitHub says $LIVE. Nothing was installed."
+fi
+```
+
+If it printed `STOP`, nothing changed; do not go on. The sha it printed should be the merge
+commit you meant to ship; GitHub shows it on the merged pull request.
 
 **Check it.** No line may start with `unsafe:`, and the last line must read
 `store: ok`.
@@ -95,9 +128,11 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.claude-workspaces.kee
 lsof -nP -iTCP:8797 -sTCP:LISTEN
 ```
 
-The `lsof` line must name `cw-relay` as the listener's user. If anything else
-holds port 8797, stop here: a process holding the port could show you a false
-approval page.
+The `lsof` output must show two listeners, `127.0.0.1:8797` and
+`[::1]:8797`, both with `cw-relay` as the user. `localhost` can resolve to
+either address, so the keeper holds both and refuses to start if either is
+taken (its log, `$K/keeper.log`, then names the address). If anything else
+holds port 8797, stop here and find out what it is.
 
 ## 3. Register your passkey
 
@@ -106,10 +141,13 @@ sudo -u cw-relay env CW_KEEPER_DIR="$K/state" \
   "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" enroll
 ```
 
-It prints a link that works once, for 15 minutes. Open it in Safari or Chrome
-on this Mac, press **Register passkey**, and confirm with Touch ID. The page
-says `Registered.` The passkey is tied to `localhost`, so approvals happen on
-this Mac, not on the iPad.
+It prints a link that works once, for 15 minutes, and only on the keeper
+running now: if the keeper restarts, make a new link. The first page to open
+it spends it, so a copy that ends up in your browser history is no use to
+anyone. Open it in Safari or Chrome on this Mac, press **Register passkey**,
+and confirm with Touch ID. The page says `Registered.` If it says the link is
+not open, make a new link and check `lsof` again first. The passkey is tied to
+`localhost`, so approvals happen on this Mac, not on the iPad.
 
 ## 4. Move the credentials, as new ones
 
@@ -165,7 +203,9 @@ curl -s -H 'x-cw-keeper: 1' -H 'content-type: application/json' \
   -d '{"args":["apps","create","cw-keeper-probe"]}' http://localhost:8797/v1/fly
 ```
 
-Open the link the last command printed and press **Deny**. Open
+Open the link the last command printed, press **Deny**, and confirm with
+Touch ID: denying takes your passkey too, so no other process can cancel a
+request you are about to approve. Open
 `http://localhost:8797` to see everything waiting for you.
 
 ## 7. Retire the old tokens
@@ -184,16 +224,13 @@ with the new token) and the old Cloudflare token in the dashboard.
 
 The keeper runs only from files `cw-relay` or root owns, and it checks that at
 every start, so nothing your user can write changes what it runs. An update is
-the install step again into a new release folder, then a restart:
+the release step from section 1 again, in a clean shell (`/bin/zsh -f`), from
+the keeper's own clone and checked against GitHub. Then check it and restart:
 
 ```bash
-REL="$K/releases/$(git -C "$REPO" rev-parse --short origin/main)"
-sudo -u cw-relay mkdir "$REL"
-git -C "$REPO" archive origin/main | sudo -u cw-relay tar -x -C "$REL"
-sudo -u cw-relay ln -sfn "$REL" "$K/app"
-sudo -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
+/usr/bin/sudo -H -u cw-relay env CW_KEEPER_DIR="$K/state" CW_KEEPER_FLY_BIN="$K/bin/fly" \
   "$K/bin/bun" "$K/app/packages/server/src/keeper/keeper-bin.ts" check
-sudo launchctl kickstart -k system/com.claude-workspaces.keeper
+/usr/bin/sudo launchctl kickstart -k system/com.claude-workspaces.keeper
 ```
 
 Updating `bun` or `fly` is the `sudo install` line for that binary, then the
@@ -208,6 +245,15 @@ same check and restart. The older release folders are the rollback: point
 - **Three credentials stay outside the keeper**: each project's Tigris bucket
   admin key and its backup identity (in your Keychain, read by the deploy and
   restore scripts), and Home's feed tokens (`CW_HOME_REMOTES_FILE`).
+- **The `bun` and `fly` it installs are copies of yours.** An agent that had
+  already replaced those binaries in your user's paths would be installed
+  with them. Install each from its vendor's release, as an admin, if you
+  doubt them.
+- **While no keeper runs, another process can take its port** and serve a
+  lookalike page at the same address. It cannot get anything signed: every
+  challenge and every live enrollment link belongs to a running keeper. But
+  the page could still mislead you, so check `lsof` (section 2) whenever the
+  keeper has restarted and a page looks wrong.
 - **A held request is lost on a keeper restart.** The requester asks again.
 - **Approvals are on this Mac only.** The passkey is registered for
   `localhost`; approving from the iPad needs the page on an HTTPS address of
