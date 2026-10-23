@@ -95,6 +95,11 @@ export function approvePage(r: HeldRequest, pageToken: string | null): Page {
         `<dt>Local path it reads</dt><dd><code>${escapeHtml(l.path)}</code>${inside}</dd>`,
       );
     }
+    for (const c of r.configs ?? []) {
+      details.push(
+        `<dt>Fly config it uses</dt><dd><code>${escapeHtml(c.path)}</code><pre>${escapeHtml(c.toml)}</pre></dd>`,
+      );
+    }
   } else if (r.call.body) {
     details.push(`<dt>Body</dt><dd><pre>${escapeHtml(r.call.body.slice(0, 4000))}</pre></dd>`);
   }

@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -28,15 +29,24 @@ const tmp = mkdtempSync(join(tmpdir(), 'keeper-hardening-'));
 const outside = mkdtempSync(join(tmpdir(), 'keeper-hardening-ctx-'));
 writeFileSync(join(outside, 'Dockerfile'), 'FROM scratch\n');
 writeFileSync(join(outside, 'server.ts'), '// app\n');
+/** A config written only with keys the keeper accepts. */
+const FLY_TOML = 'app = "cw-harborlight"\nprimary_region = "sjc"\n';
+writeFileSync(join(outside, 'fly.toml'), FLY_TOML);
 /** A user id nobody on this machine has, standing in for the keeper's. */
 const KEEPER_UID = 4_000_000;
 const ran: string[][] = [];
 /** Whether each build folder fly was handed existed while it ran. */
 const present: boolean[] = [];
+/** The config file each deploy's fly would have read, as it read it. */
+const configs: string[] = [];
 const exec: Executors = {
   fly: async (args) => {
     ran.push(args);
-    if (args[0] === 'deploy') present.push(existsSync(join(args[1] ?? '', 'marker')));
+    if (args[0] === 'deploy') {
+      present.push(existsSync(join(args[1] ?? '', 'marker')));
+      const c = args.indexOf('--config');
+      configs.push(c > 0 ? readFileSync(args[c + 1] ?? '', 'utf8') : '');
+    }
     return { status: 0, stdout: 'ok\n', stderr: '' };
   },
   cloudflare: async () => ({ status: 200, body: '{"success":true,"result":[]}' }),
@@ -278,6 +288,7 @@ describe('paths a fly call names', () => {
     '--app',
     'cw-harborlight',
     '--remote-only',
+    ...(more.some((m) => m.startsWith('--config')) ? [] : ['--config', join(ctx, 'fly.toml')]),
     ...more,
   ];
 
@@ -303,6 +314,8 @@ describe('paths a fly call names', () => {
     const swapped = mkdtempSync(join(tmpdir(), 'keeper-hardening-swap-'));
     const kept = mkdtempSync(join(tmpdir(), 'keeper-hardening-kept-'));
     writeFileSync(join(kept, 'marker'), 'x');
+    writeFileSync(join(kept, 'fly.toml'), FLY_TOML);
+    writeFileSync(join(swapped, 'fly.toml'), FLY_TOML);
     try {
       const approveNow = async (args: string[]) => {
         const r = await submit(args);
@@ -335,6 +348,61 @@ describe('paths a fly call names', () => {
     }
   });
 
+  it('refuses a config that names a local path, in --config or in the build folder', async () => {
+    const before = ran.length;
+    const creds = join(store.dir, 'credentials.json');
+    const bad = mkdtempSync(join(tmpdir(), 'keeper-hardening-badcfg-'));
+    const inFolder = mkdtempSync(join(tmpdir(), 'keeper-hardening-rootcfg-'));
+    try {
+      writeFileSync(
+        join(bad, 'fly.toml'),
+        `${FLY_TOML}[[files]]\nguest_path = "/x"\nlocal_path = ${JSON.stringify(creds)}\n`,
+      );
+      writeFileSync(join(inFolder, 'fly.toml'), `[build]\ndockerfile = ${JSON.stringify(creds)}\n`);
+      writeFileSync(join(inFolder, 'clean.toml'), FLY_TOML);
+      for (const args of [
+        deploy(bad),
+        deploy(inFolder, ['--config', join(inFolder, 'clean.toml')]),
+      ]) {
+        const r = await submit(args);
+        expect({ args, status: r.status }).toEqual({ args, status: 403 });
+      }
+      expect(ran.length).toBe(before);
+    } finally {
+      rmSync(bad, { recursive: true, force: true });
+      rmSync(inFolder, { recursive: true, force: true });
+    }
+  });
+
+  it('a config changed after the tap reaches fly only through the allowlist', async () => {
+    const ctx = mkdtempSync(join(tmpdir(), 'keeper-hardening-latecfg-'));
+    try {
+      writeFileSync(join(ctx, 'fly.toml'), FLY_TOML);
+      const r = await submit(deploy(ctx));
+      expect(r.status).toBe(202);
+      const id = r.body.id ?? '';
+      const page = await pageTokenOf(id);
+      // After the owner saw it, the agent adds a path key.
+      writeFileSync(join(ctx, 'fly.toml'), `${FLY_TOML}[build]\ndockerfile = "/etc/hosts"\n`);
+      const c = await challengeFor(id, page);
+      await post(`/v1/requests/${id}/approve`, { page, ...signed(owner, c.challenge ?? '') });
+      expect(keeper.requests.get(id)?.error).toContain('not one the keeper accepts');
+      // CONTROL: unchanged, fly reads the config rewritten from its keys.
+      writeFileSync(join(ctx, 'fly.toml'), `# note\n${FLY_TOML}`);
+      const ok = await submit(deploy(ctx));
+      const okPage = await pageTokenOf(ok.body.id ?? '');
+      const c2 = await challengeFor(ok.body.id ?? '', okPage);
+      await post(`/v1/requests/${ok.body.id}/approve`, {
+        page: okPage,
+        ...signed(owner, c2.challenge ?? ''),
+      });
+      expect(keeper.requests.get(ok.body.id ?? '')?.error).toBeUndefined();
+      expect(configs.at(-1)).toBe('app = "cw-harborlight"\nprimary_region = "sjc"\n');
+    } finally {
+      rmSync(ctx, { recursive: true, force: true });
+    }
+  });
+
   it('holds a deploy from a clean folder, and the page shows the folder and what is in it', async () => {
     // CONTROL: the same deploy from a folder outside the keeper is held, not refused.
     const r = await submit(deploy(outside, ['--dockerfile', join(outside, 'Dockerfile')]));
@@ -343,6 +411,8 @@ describe('paths a fly call names', () => {
     expect(html).toContain(realpathSync(outside));
     expect(html).toContain('Dockerfile');
     expect(html).toContain('server.ts');
+    // And what its config says.
+    expect(html).toContain('primary_region = &#34;sjc&#34;');
   });
 });
 
@@ -351,9 +421,14 @@ describe("a service worker on the keeper's origin", () => {
     fetch(`${base}${path}`, { headers: { host: `localhost:${keeper.port}`, ...headers } });
   const clear = () => store.saveAlarm(null);
 
-  it("every response tells the browser to drop the origin's workers and cache", async () => {
-    for (const r of [await get('/', {}), await post('/v1/enroll/options', { token: 'x' })]) {
+  it("every response tells the browser to drop the origin's workers and cache, and to cache nothing", async () => {
+    for (const r of [
+      await get('/', {}),
+      await get('/nowhere', {}),
+      await post('/v1/enroll/options', { token: 'x' }),
+    ]) {
       expect(r.headers.get('clear-site-data')).toBe('"cache", "storage"');
+      expect(r.headers.get('cache-control')).toBe('no-store');
     }
   });
 

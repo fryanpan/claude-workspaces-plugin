@@ -7,13 +7,15 @@
  *   bun packages/server/src/keeper/keeper-bin.ts enroll         print a one-time passkey registration link
  *   bun packages/server/src/keeper/keeper-bin.ts adopt <app>    let routine calls reach a Fly app made before the keeper
  *   bun packages/server/src/keeper/keeper-bin.ts check          the start guard and the store check, nothing else
+ *   bun packages/server/src/keeper/keeper-bin.ts port           print the keeper's port, choosing it at random the first time
  *   bun packages/server/src/keeper/keeper-bin.ts plist port|keeper  print one of the two LaunchDaemons
  *   bun packages/server/src/keeper/keeper-bin.ts clear-alarm    let approvals run again after a service-worker alarm
  *
  * `CW_KEEPER_DIR` names the store (mode 700, `keeper-store.ts`);
  * `CW_KEEPER_FLY_BIN` the `fly` binary, which must sit where only root or
- * the keeper's user can write; `CW_KEEPER_PORT` the loopback port (default
- * 8797); `CW_KEEPER_SOCKET` the unix socket launchd's port job relays to
+ * the keeper's user can write; `CW_KEEPER_PORT` overrides the loopback port,
+ * which is otherwise chosen once and kept in the store (`keeper-port.ts`);
+ * `CW_KEEPER_SOCKET` the unix socket launchd's port job relays to
  * (`keeper-launchd.ts`). Without it the keeper listens on the port itself. Every command but `check` refuses to run when the start guard
  * (`keeper-guard.ts`) finds a path another user could change, so a keeper
  * running from Bryan's checkout, or with Homebrew's `fly`, never starts.
@@ -27,7 +29,8 @@ import { fixedHostFetch } from '../outbound-fetch.ts';
 import { keeperExecutors } from './keeper-exec.ts';
 import { keeperStartProblems } from './keeper-guard.ts';
 import { keeperJobPlist, portJobPlist } from './keeper-launchd.ts';
-import { DEFAULT_KEEPER_PORT, serveKeeper } from './keeper-serve.ts';
+import { keeperPort } from './keeper-port.ts';
+import { serveKeeper } from './keeper-serve.ts';
 import {
   CREDENTIAL_NAMES,
   type CredentialName,
@@ -44,7 +47,6 @@ function fail(line: string): never {
 const ENROLL_MS = 15 * 60_000;
 const [command, arg] = process.argv.slice(2);
 const dir = process.env.CW_KEEPER_DIR?.trim() || fail('CW_KEEPER_DIR is not set');
-const port = Number(process.env.CW_KEEPER_PORT) || DEFAULT_KEEPER_PORT;
 const flyBin = process.env.CW_KEEPER_FLY_BIN?.trim() ?? '';
 const socket = process.env.CW_KEEPER_SOCKET?.trim() ?? '';
 const uid = process.getuid?.() ?? -1;
@@ -73,6 +75,8 @@ if (command === 'check') {
   if ('error' in store) console.log(`store: ${store.error}`);
   else {
     const alarm = store.alarm();
+    const saved = store.port();
+    if (saved !== null) console.log(`port: ${saved}`);
     if (alarm) console.log(`alarm: ${alarm.reason} at ${new Date(alarm.at).toISOString()}`);
     console.log(`store: ok, ${store.passkeys().length} passkeys, ${store.apps().length} apps`);
   }
@@ -84,6 +88,7 @@ if (problems.length) {
 }
 const store = openKeeperStore(dir);
 if ('error' in store) fail(`refusing to start: ${store.error}`);
+const port = keeperPort(store, process.env);
 
 if (command === 'import') {
   if (!CREDENTIAL_NAMES.includes(arg as CredentialName)) {
@@ -101,6 +106,8 @@ if (command === 'import') {
   console.log(
     `Open this within 15 minutes, on this Mac, and register your passkey. It works only on the keeper running now; if the keeper restarts, make a new one:\n  http://localhost:${port}/enroll/${b64url(new Uint8Array(randomBytes(16)))}#${token}`,
   );
+} else if (command === 'port') {
+  console.log(port);
 } else if (command === 'plist') {
   // `$K` is the store's parent; the socket's folder sits beside the store.
   const job = {

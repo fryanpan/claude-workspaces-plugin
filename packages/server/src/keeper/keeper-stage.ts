@@ -114,15 +114,28 @@ function copy(
     return;
   }
   if (!st.isFile()) return;
-  const fd = openSync(src, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const { bytes, mode } = readPlainFile(src, keeperUid, budget.bytes);
+  budget.bytes -= bytes.length;
+  writeFileSync(dest, bytes, { mode: mode & 0o755 });
+}
+
+/**
+ * One plain file's bytes, checked as opened: not a link, not the keeper's
+ * own, not over `max` bytes. Opened without blocking, so a FIFO swapped in
+ * for the file cannot stall the keeper's one thread; `fstat` then refuses it.
+ */
+export function readPlainFile(
+  path: string,
+  keeperUid: number,
+  max: number,
+): { bytes: Buffer; mode: number } {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     // The check that holds: the file as opened, not the path as looked up.
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.uid === keeperUid) {
-      throw new Error(`refused: ${src} belongs to the keeper`);
-    }
-    budget.bytes -= opened.size;
-    if (budget.bytes < 0) throw new Error('the build folder is too large');
+    if (!opened.isFile()) throw new Error(`refused: ${path} is not a plain file`);
+    if (opened.uid === keeperUid) throw new Error(`refused: ${path} belongs to the keeper`);
+    if (opened.size > max) throw new Error(`refused: ${path} is too large`);
     const buf = Buffer.alloc(opened.size);
     let read = 0;
     while (read < buf.length) {
@@ -130,7 +143,7 @@ function copy(
       if (n === 0) break;
       read += n;
     }
-    writeFileSync(dest, buf.subarray(0, read), { mode: opened.mode & 0o755 });
+    return { bytes: buf.subarray(0, read), mode: opened.mode };
   } finally {
     closeSync(fd);
   }

@@ -150,8 +150,33 @@ describe('fly deploy', () => {
     [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--file-local', '/m=/x']],
     // No folder named: fly builds the keeper's own working folder.
     [['deploy', '--app', 'cw-harborlight']],
+    // No --config: fly would look for one in the build folder or the keeper's own.
+    [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--remote-only']],
   ])('refuses %j', (args) => {
     expect(classifyFly(args, APPS).kind).toBe('refused');
+  });
+
+  // Every flyctl v0.4.120 flag whose value fly reads from the local disk, other
+  // than the --config, --dockerfile and --ignorefile the keeper copies itself.
+  it.each([
+    ['machine', 'run', 'img', '--app', 'cw-harborlight', '--file-local', '/m=/x'],
+    ['machine', 'update', 'm1', '--app', 'cw-harborlight', '--file-local=/m=/x'],
+    ['machine', 'run', 'img', '--app', 'cw-harborlight', '--machine-config', '/x.json'],
+    ['console', '--app', 'cw-harborlight', '--file-local', '/m=/x'],
+    ['launch', '--path', '/x'],
+    ['launch', '--from', '/x'],
+    ['launch', '--into', '/x'],
+    ['launch', '--buildpacks-volume', '/x:/y'],
+    ['launch', '--local-only'],
+    ['machine', 'run', 'img', '--app', 'cw-harborlight', '--env-file', '/x'],
+  ])('refuses a local-file flag on any command: %j', (...args) => {
+    expect(classifyFly(args, APPS)).toMatchObject({ kind: 'refused' });
+  });
+
+  it('CONTROL: the same commands without those flags are held, not refused', () => {
+    expect(classifyFly(['machine', 'run', 'img', '--app', 'cw-harborlight'], APPS).kind).toBe(
+      'held',
+    );
   });
 });
 
@@ -206,7 +231,7 @@ describe('grants', () => {
       // An app the keeper never created, named under the granted one.
       ['secrets', 'import', '--app', 'cw-saltmarsh-prod'],
       // An image built from an agent-chosen folder: always its own tap.
-      ['deploy', '/tmp/ctx', '--app', 'cw-saltmarsh', '--remote-only', '--ha=false', '--yes'],
+      ['deploy', '/tmp/ctx', '--app', 'cw-saltmarsh', '--config', '/tmp/ctx/fly.toml', '--yes'],
       // A listed command with a flag the list does not name.
       ['secrets', 'import', '--app', 'cw-saltmarsh', '--config', 'other.toml'],
     ]) {

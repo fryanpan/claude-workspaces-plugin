@@ -59,6 +59,25 @@ const LEAF_COMMANDS = new Set(['status', 'releases', 'logs', 'deploy']);
 const FORBIDDEN_FLAGS = new Set(['debug', 'verbose', 'access-token', '-t', '-v']);
 
 /**
+ * Flags whose value fly reads from the local disk, as the keeper's user, and
+ * which the keeper does not copy (`keeper-stage.ts` copies --config,
+ * --dockerfile and --ignorefile). Read off flyctl v0.4.120's help for
+ * deploy, launch, console and machine run/update/create; none is in the
+ * deploy script.
+ */
+const LOCAL_READ_FLAGS = new Set([
+  'file-local',
+  'machine-config',
+  'env-file',
+  'buildpacks-volume',
+  'local-only',
+  'path',
+  'from',
+  'into',
+  'build-secret',
+]);
+
+/**
  * How one flag of a listed command is written: `value` takes the next arg or
  * `=value`, `bare` takes nothing, `bool` takes nothing or `=true|false`.
  */
@@ -128,19 +147,24 @@ const SETUP_ON_GRANTED: readonly Spec[] = [
 
 /**
  * `fly deploy`, which is always a tap, written only as the deploy script
- * writes it: one build folder, and no flag that names another local path to
- * read (`--build-secret`, `--file-local` and the rest are refused).
+ * writes it: one build folder, a --config (without one fly looks for a config
+ * file on its own), and no flag that names another local path to read.
  */
-const DEPLOY: Spec = spec('deploy', 1, {
-  app: 'value',
-  config: 'value',
-  dockerfile: 'value',
-  'remote-only': 'bare',
-  ha: 'bool',
-  'no-public-ips': 'bare',
-  'image-label': 'value',
-  yes: 'bare',
-});
+const DEPLOY: Spec = spec(
+  'deploy',
+  1,
+  {
+    app: 'value',
+    config: 'value',
+    dockerfile: 'value',
+    'remote-only': 'bare',
+    ha: 'bool',
+    'no-public-ips': 'bare',
+    'image-label': 'value',
+    yes: 'bare',
+  },
+  ['config'],
+);
 
 /** The flag an arg names (`app` for `-a`, `--app` and `--app=x`), or null for a word. */
 function flagName(a: string): string | null {
@@ -221,6 +245,9 @@ function scan(args: unknown): Scan {
     const name = flagName(a);
     if (name !== null && FORBIDDEN_FLAGS.has(name)) {
       return { error: `${a.split('=', 1)[0]} could print or replace the keeper's token` };
+    }
+    if (name !== null && LOCAL_READ_FLAGS.has(name)) {
+      return { error: `--${name} would have fly read a local file as the keeper` };
     }
   }
   const words: string[] = [];

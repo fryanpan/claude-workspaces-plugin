@@ -27,6 +27,8 @@
  * one tap each.
  */
 import { randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { flyConfigsOf } from './keeper-flyconfig.ts';
 import { folderEntries, resolveFlyPaths } from './keeper-paths.ts';
 import {
   ACCESS_GRANT_MS,
@@ -94,6 +96,8 @@ export interface HeldRequest {
   status: RequestStatus;
   /** Each local path the call names, resolved, with a folder's first entries. */
   local?: { path: string; entries: string[] }[];
+  /** Each config fly will read, as the keeper rewrote it. */
+  configs?: { path: string; toml: string }[];
   /** Each served page's token, and the challenge that page was last given. */
   pages: Map<string, string | null>;
   result?: KeeperResult;
@@ -173,7 +177,12 @@ export function createKeeperRequests(deps: {
   const keeperUid = deps.keeperUid ?? process.getuid?.() ?? -1;
 
   /** Checked at submit and again just before fly starts. */
-  const local = (call: FlyCall) => resolveFlyPaths(call.args, guarded);
+  const local = (call: FlyCall) => {
+    const checked = resolveFlyPaths(call.args, guarded);
+    if ('error' in checked) return checked;
+    const cfg = flyConfigsOf(checked.args, checked.at, keeperUid);
+    return 'error' in cfg ? cfg : { ...checked, configs: cfg.configs };
+  };
 
   const run = async (call: KeeperCall): Promise<KeeperResult> => {
     if (call.type === 'cloudflare') return deps.exec.cloudflare(call.method, call.path, call.body);
@@ -182,6 +191,10 @@ export function createKeeperRequests(deps: {
     if (!checked.at.length) return deps.exec.fly(checked.args, call.input);
     const staged = stageFlyPaths(checked.args, checked.at, keeperUid);
     try {
+      // fly reads the configs rewritten from their allowed keys, never as written.
+      const cfg = flyConfigsOf(staged.args, checked.at, keeperUid);
+      if ('error' in cfg) throw new Error(`refused: ${cfg.error}`);
+      for (const c of cfg.configs) writeFileSync(c.path, c.toml);
       return await deps.exec.fly(staged.args, call.input);
     } finally {
       staged.done();
@@ -263,6 +276,7 @@ export function createKeeperRequests(deps: {
       if (paths?.paths.length) {
         request.local = paths.paths.map((path) => ({ path, entries: folderEntries(path) }));
       }
+      if (paths?.configs.length) request.configs = paths.configs;
       held.set(request.id, request);
       log(`held ${request.id} for ${request.requester}: ${verdict.hold} ${verdict.summary}`);
       return { outcome: 'held', request };

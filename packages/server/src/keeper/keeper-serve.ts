@@ -14,8 +14,6 @@ import { RELAYED_PEER, createKeeperHttp } from './keeper-http.ts';
 import { type Executors, type KeeperRequests, createKeeperRequests } from './keeper-requests.ts';
 import type { KeeperStore } from './keeper-store.ts';
 
-export const DEFAULT_KEEPER_PORT = 8797;
-
 export interface RunningKeeper {
   port: number;
   /** `http://localhost:<port>`: the page origin, and the passkeys' relying party. */

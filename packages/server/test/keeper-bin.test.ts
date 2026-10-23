@@ -78,6 +78,21 @@ describe('keeper-bin', () => {
     expect(r.out).toContain('refusing to start');
   });
 
+  it('port chooses the port once, and the plists and the enroll link use it', () => {
+    const env = { CW_KEEPER_DIR: storeDir('port', 0o700) };
+    const r = keeper(['port'], env);
+    if (r.status !== 0) {
+      expect(r.out).toContain('unsafe:');
+      return;
+    }
+    const port = Number(r.out.trim());
+    expect(port).toBeGreaterThanOrEqual(20000);
+    expect(keeper(['port'], env).out.trim()).toBe(String(port));
+    expect(keeper(['plist', 'port'], env).out).toContain(`<string>${port}</string>`);
+    expect(keeper(['plist', 'keeper'], env).out).toContain(`<string>${port}</string>`);
+    expect(keeper(['enroll'], env).out).toContain(`http://localhost:${port}/enroll/`);
+  });
+
   it('check names a store others can open', () => {
     const r = keeper(['check'], { CW_KEEPER_DIR: storeDir('loose', 0o755) });
     expect(r.status).toBe(1);

@@ -135,10 +135,12 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
   };
   const stopped = () => json(423, { error: 'the keeper saw a service worker on its origin' });
 
-  // Every response tells the browser to drop any worker and cache it holds here.
+  // Every response tells the browser to drop any worker and cache it holds
+  // here, and to keep no copy of this one.
   return async function handle(req: Request, peer: string | null): Promise<Response> {
     const res = await route(req, peer);
     res.headers.set('clear-site-data', CLEAR_SITE_DATA);
+    res.headers.set('cache-control', 'no-store');
     return res;
   };
 

@@ -59,3 +59,24 @@ describe('stageFlyPaths', () => {
     expect(new Set(readdirSync(tmp))).toEqual(before);
   });
 });
+
+describe('readPlainFile', () => {
+  it('refuses a FIFO without blocking the thread', () => {
+    const fifo = join(tmp, 'fifo');
+    expect(Bun.spawnSync(['mkfifo', fifo]).exitCode).toBe(0);
+    // In a child, so a blocking open would hang it and not the test runner.
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        '-e',
+        `import { readPlainFile } from ${JSON.stringify(join(import.meta.dir, '../src/keeper/keeper-stage.ts'))};
+try { readPlainFile(${JSON.stringify(fifo)}, ${OTHER}, 1024); console.log('read'); }
+catch (e) { console.log(e.message); }`,
+      ],
+      { timeout: 5_000 },
+    );
+    expect(child.exitCode).toBe(0);
+    expect(child.stdout.toString()).toContain('is not a plain file');
+    rmSync(fifo);
+  });
+});

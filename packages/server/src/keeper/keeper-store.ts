@@ -79,6 +79,9 @@ export interface KeeperStore {
   /** While set, the keeper gives no challenge and opens no enrollment. */
   alarm(): KeeperAlarm | null;
   saveAlarm(alarm: KeeperAlarm | null): void;
+  /** The loopback port chosen at install (`keeper-port.ts`), or null before. */
+  port(): number | null;
+  savePort(port: number): void;
 }
 
 export const hashToken = (token: string): string =>
@@ -103,7 +106,14 @@ export function storeModeProblem(path: string, uid: number): string | null {
 }
 
 export const APP_NAME = /^[a-z][a-z0-9-]{1,62}$/;
-const FILES = ['credentials.json', 'passkeys.json', 'apps.json', 'enroll.json', 'alarm.json'];
+const FILES = [
+  'credentials.json',
+  'passkeys.json',
+  'apps.json',
+  'enroll.json',
+  'alarm.json',
+  'config.json',
+];
 
 /** Open the store at `dir`, or say why it is refused. */
 export function openKeeperStore(
@@ -166,5 +176,7 @@ export function openKeeperStore(
     saveEnroll: (record) => write('enroll.json', record),
     alarm: () => read<KeeperAlarm | null>('alarm.json', null),
     saveAlarm: (alarm) => write('alarm.json', alarm),
+    port: () => read<{ port?: number }>('config.json', {}).port ?? null,
+    savePort: (port) => write('config.json', { ...read('config.json', {}), port }),
   };
 }
