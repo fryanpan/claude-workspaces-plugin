@@ -167,6 +167,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
       (document.activeElement as HTMLElement | null)?.blur?.();
     },
     hidePill: () => pill?.hide(),
+    followCaret: () => editViewport?.follow(),
     // The composer opens in the balloon margin, level with the words it is
     // about, whenever that margin is on screen (doc/composer-slot.ts). The
     // column is mounted just below this call, so it is looked up per open
@@ -277,7 +278,10 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
       const view = editor.editor.view;
       // View mode never focuses the editor; there is no caret to follow and
       // no keyboard that could be covering one.
-      if (!view.dom.contains(document.activeElement)) return null;
+      // The doc's own caret only: a reply box in an inline card is inside
+      // view.dom too, and measuring the doc's selection for it left the box
+      // under the keyboard. Null falls back to the focused box itself.
+      if (document.activeElement !== view.dom) return null;
       try {
         const c = view.coordsAtPos(view.state.selection.head);
         return { top: c.top, bottom: c.bottom };
