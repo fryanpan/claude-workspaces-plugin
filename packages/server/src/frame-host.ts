@@ -59,25 +59,27 @@
  * the frame because Safari sends no Access cookie to a frame on another
  * domain. Without one: through the tunnel, the operator's own Access token
  * and allowlisted email, with external access switched on; off the tunnel, a
- * caller on this machine that is not a browser. The widget's public scripts
- * need nothing. A share or collaboration visitor's host page never points
- * here and mints no ticket, and their token is refused if they try.
+ * caller on this machine that is not a browser. Off the tunnel nothing is
+ * answered to a peer that is not this machine, a ticket included. The
+ * widget's public scripts need nothing. A share or collaboration visitor's
+ * host page never points here and mints no ticket, and their token is
+ * refused if they try.
  *
  * Off unless configured (`CW_FRAME_ORIGIN`). Unset, every frame stays opaque
  * exactly as before.
  */
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
 import {
-  FRAME_COOKIE_TTL_MS,
   FRAME_TICKET_PARAM,
-  FRAME_TICKET_TTL_MS,
-  checkFrameTicket,
+  type FrameKeys,
+  checkFrameCookie,
   frameCookieHeader,
   frameCookiesOf,
   mintFrameTicket,
+  redeemFrameTicket,
 } from './frame-ticket.ts';
 import { normalizeHost } from './middleware/host-guard.ts';
-import { FRAME_HOST_SANDBOX } from './mockup-frame.ts';
+import { FRAME_HOST_SANDBOX, queryParamName } from './mockup-frame.ts';
 
 export interface FrameHostOptions {
   /** The frame hostname's origin, scheme included: `https://harborlight.frames.example`. */
@@ -88,8 +90,8 @@ export interface FrameHostOptions {
    * operator's proxied hostnames.
    */
   boardHosts: readonly string[];
-  /** The frame ticket's signing key (`frame-ticket.ts`), read per use. */
-  ticketKey: () => string;
+  /** The ticket's and the cookie's signing keys (`frame-ticket.ts`), read per use. */
+  keys: () => FrameKeys;
 }
 
 /** A frame the host page points at the frame hostname. */
@@ -187,12 +189,14 @@ function workspaceOfPath(pathname: string): string | null {
   }
 }
 
-/** The address without the ticket, every other byte of the query as sent. */
+/** The address without the ticket, every other byte of the query as sent.
+ *  Names are compared decoded, as `URLSearchParams` read the ticket, so
+ *  `cw%2Dft` cannot keep a ticket in the redirect. */
 function withoutTicket(pathname: string, search: string): string {
   const parts = search
     .replace(/^\?/, '')
     .split('&')
-    .filter((part) => part !== '' && part.split('=')[0] !== FRAME_TICKET_PARAM);
+    .filter((part) => part !== '' && queryParamName(part) !== FRAME_TICKET_PARAM);
   return parts.length === 0 ? pathname : `${pathname}?${parts.join('&')}`;
 }
 
@@ -210,18 +214,20 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
       if (!boards.has(normalizeHost(req.headers.get('host')))) return null;
       return {
         origin: opts.origin,
-        ticket: mintFrameTicket(opts.ticketKey(), frameHost, workspaceId, FRAME_TICKET_TTL_MS),
+        ticket: mintFrameTicket(opts.keys().ticket, frameHost, workspaceId),
       };
     },
     prove: (req, pathname, search) => {
       if (WIDGET_SCRIPT.test(pathname)) return { kind: 'public' };
       const ws = workspaceOfPath(pathname);
       if (ws === null) return { kind: 'none' };
-      const key = opts.ticketKey();
+      const keys = opts.keys();
       const ticket = search.get(FRAME_TICKET_PARAM);
       if (ticket !== null && search.get(MOCK_FRAME_PARAM) === '1') {
-        if (!checkFrameTicket(key, ticket, frameHost, ws).ok) return { kind: 'bad_ticket' };
-        const cookie = mintFrameTicket(key, frameHost, ws, FRAME_COOKIE_TTL_MS);
+        // Only a ticket redeems: a cookie value here is refused, so a cookie
+        // cannot buy itself another twelve hours.
+        const redeemed = redeemFrameTicket(keys, ticket, frameHost, ws);
+        if (!redeemed.ok) return { kind: 'bad_ticket' };
         const raw = new URL(req.url).search;
         return {
           kind: 'redeem',
@@ -229,7 +235,7 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
             status: 303,
             headers: {
               location: withoutTicket(pathname, raw),
-              'set-cookie': frameCookieHeader(cookie, ws),
+              'set-cookie': frameCookieHeader(redeemed.cookie, ws, redeemed.maxAgeMs),
               'cache-control': 'no-store',
               'referrer-policy': 'no-referrer',
             },
@@ -237,7 +243,7 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
         };
       }
       const held = frameCookiesOf(req.headers.get('cookie')).some(
-        (v) => checkFrameTicket(key, v, frameHost, ws).ok,
+        (v) => checkFrameCookie(keys.cookie, v, frameHost, ws).ok,
       );
       return held ? { kind: 'held' } : { kind: 'none' };
     },

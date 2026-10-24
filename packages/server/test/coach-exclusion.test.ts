@@ -96,6 +96,22 @@ describe('boardPrivacyFrom', () => {
     expect(privacy.localOnlyBoard('w-launch')).toBe(false);
     expect(new Set(asked)).toEqual(new Set(['saltmarsh-clinic']));
   });
+
+  it('counts a board holding a local-only folder bind, which it lists by the set id', () => {
+    const privacy = boardPrivacyFrom({
+      isLocalOnlySet: (id) => id === 'saltmarsh-records-1a2b3c',
+      setOfDoc: () => undefined,
+      docKeyOf: () => undefined,
+      projectIsLocalOnly: () => false,
+      docIdsOf: (ws) =>
+        ws === 'w-records' ? ['saltmarsh-records-1a2b3c'] : ['harborlight-1a2b3c'],
+      isBoardLocked: () => false,
+      boardsOfDoc: () => [],
+    });
+    expect(privacy.localOnlyBoard('w-records')).toBe(true);
+    // The control: a board holding a bind that is not local-only.
+    expect(privacy.localOnlyBoard('w-launch')).toBe(false);
+  });
 });
 
 let dir: string;

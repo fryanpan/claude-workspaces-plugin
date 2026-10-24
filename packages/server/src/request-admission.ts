@@ -511,6 +511,12 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // Through the tunnel is external reach, so the master switch covers
         // it, a frame ticket included.
         if (viaTunnel && !sharingGate.isEnabled()) return j(403, { error: 'sharing_disabled' });
+        // Off the tunnel, this machine only, before any ticket is read: a
+        // ticket or cookie must not open the frames to the LAN or tailnet,
+        // where the master switch above does not apply.
+        if (!viaTunnel && !isLoopbackAddress(requestAddress(req))) {
+          return j(403, { error: 'unknown_host' });
+        }
         // The board's frame ticket (frame-ticket.ts), on or off the tunnel:
         // the one proof a frame on another domain can carry in Safari.
         const proof = frameHost.prove(req, pathname, search);
@@ -521,7 +527,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // browser's frame came from a host page, which handed it a ticket.
         if (!viaTunnel) {
           if (req.headers.has('sec-fetch-dest')) return j(403, { error: 'frame_ticket_required' });
-          return isLoopbackAddress(requestAddress(req)) ? null : j(403, { error: 'unknown_host' });
+          return null;
         }
         // Through it, without a ticket: the operator's own token and
         // allowlisted email exactly as on their proxied hostname. A member's

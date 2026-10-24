@@ -76,6 +76,7 @@ function openMux(
     keys: () => string[];
     cursors?: Map<string, string>;
     onWatchSetChanged?: (cb: () => void) => () => void;
+    transform?: (p: { event: string } & Record<string, unknown>) => { event: string } | undefined;
   },
 ) {
   return openAgentMuxStream({
@@ -85,6 +86,7 @@ function openMux(
     channelFor: (key) => channelForWatchKey(key, (id) => id),
     ...(opts.cursors ? { cursors: opts.cursors } : {}),
     ...(opts.onWatchSetChanged ? { onWatchSetChanged: opts.onWatchSetChanged } : {}),
+    ...(opts.transform ? { transform: opts.transform } : {}),
     // A 15s interval would keep the test process alive for 15s.
     keepaliveMs: 60_000,
   });
@@ -123,6 +125,28 @@ describe('agent mux stream', () => {
     // per-key streams were.
     expect([...bus.agentsOn('ws~w-board')]).toEqual(['agent-mira']);
     expect([...bus.agentsOn('doc-a')]).toEqual([]);
+    out.cancel();
+  });
+
+  it('writes each frame, live and replayed, through its transform, which may drop it', async () => {
+    const bus = new SseBus();
+    bus.broadcast('doc-a', { event: 'a.seen' });
+    const seen = bus.lastIdOn('doc-a') as string;
+    bus.broadcast('doc-a', { event: 'a.drop' });
+    bus.broadcast('doc-a', { event: 'a.keep' });
+    const res = openMux(bus, {
+      keys: () => ['doc-a'],
+      cursors: new Map([['doc-a', seen]]),
+      transform: (p) => (p.event.endsWith('.drop') ? undefined : { ...p, viewed: true }),
+    });
+    const out = drain(res);
+    bus.broadcast('doc-a', { event: 'b.drop' });
+    bus.broadcast('doc-a', { event: 'b.keep' });
+    await settle();
+    expect(out.frames().map((f) => [f.event, f.data.viewed, f.data.watchKey])).toEqual([
+      ['a.keep', true, 'doc-a'],
+      ['b.keep', true, 'doc-a'],
+    ]);
     out.cancel();
   });
 

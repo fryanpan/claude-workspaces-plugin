@@ -72,6 +72,12 @@ export interface AgentMuxStreamOptions {
   onWatchSetChanged?: (cb: () => void) => () => void;
   /** Injectable so a test does not hold a 15s interval open. */
   keepaliveMs?: number;
+  /** Rewrites each frame before it is written, live and replayed alike, or
+   *  drops it with undefined — `openSseStream`'s `transform`, for a stream
+   *  opened off this machine. */
+  transform?: (
+    payload: { event: string } & Record<string, unknown>,
+  ) => { event: string } | undefined;
 }
 
 /**
@@ -93,9 +99,14 @@ export function openAgentMuxStream(opts: AgentMuxStreamOptions): Response {
    *  what makes a single socket equivalent to N. */
   const emit = (watchKey: string, event: string, data: unknown, id?: string): void => {
     if (!out) return;
+    let viewed: unknown = data;
+    if (opts.transform && data !== null && typeof data === 'object') {
+      viewed = opts.transform(data as { event: string } & Record<string, unknown>);
+      if (viewed === undefined) return;
+    }
     const payload =
-      data !== null && typeof data === 'object'
-        ? { ...(data as Record<string, unknown>), watchKey }
+      viewed !== null && typeof viewed === 'object'
+        ? { ...(viewed as Record<string, unknown>), watchKey }
         : { event, watchKey };
     const idLine = id ? `id: ${id}\n` : '';
     out.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);

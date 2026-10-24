@@ -27,8 +27,18 @@
  * `auth/signed-token.ts` under its own key domain. It opens the reads the
  * frame gate allows for ONE board, on ONE frame hostname, until it expires:
  * a ticket minted for another project's frame hostname, or for another board,
- * opens nothing here. The ticket in the address lives two minutes; the cookie
- * twelve hours, scoped by its path to the board's own paths.
+ * opens nothing here. The ticket in the address lives two minutes.
+ *
+ * The cookie it is traded for is a second format, `fc1`, with the same
+ * fields under a key domain of its own, scoped by its path to the board's own
+ * paths. The two are not interchangeable: a cookie value sent as a ticket is
+ * refused, and a ticket sent as a cookie is too. That is what bounds the
+ * grant. Only a ticket can be redeemed, only the host page mints one, and the
+ * cookie a redeem sets expires twelve hours after the ticket was minted, not
+ * twelve hours after the redeem. So no chain of redeems keeps a frame open
+ * past twelve hours from the host page's own serve. Before the split, one
+ * `ft1` format served both, and a cookie value redeemed as a ticket for
+ * another twelve hours, for as long as anybody kept redeeming it.
  *
  * None of the existing schemes fits. The session and share cookies are the
  * board's, and must never be sent to a page an attachment's script runs in.
@@ -38,7 +48,10 @@
  */
 import { type TokenFormat, mintToken, tokenKey, verifyToken } from './auth/signed-token.ts';
 
-const VERSION = 'ft1';
+/** The tag of a ticket in a frame's address. */
+const TICKET_TAG = 'ft1';
+/** The tag of the cookie a ticket is traded for. */
+const COOKIE_TAG = 'fc1';
 
 /** The query parameter the host page writes the ticket into. */
 export const FRAME_TICKET_PARAM = 'cw-ft';
@@ -46,7 +59,7 @@ export const FRAME_TICKET_PARAM = 'cw-ft';
 export const FRAME_COOKIE = 'cw_frame';
 /** How long a ticket in a frame's address may be traded for the cookie. */
 export const FRAME_TICKET_TTL_MS = 2 * 60_000;
-/** How long the cookie opens the board's frames. */
+/** How long the grant a ticket starts lasts, counted from the ticket's mint. */
 export const FRAME_COOKIE_TTL_MS = 12 * 60 * 60_000;
 
 export interface FrameTicketClaims {
@@ -62,40 +75,74 @@ const B64 = /^[A-Za-z0-9_-]{1,512}$/;
 const unb64 = (s: string): string | null =>
   B64.test(s) ? Buffer.from(s, 'base64url').toString('utf8') : null;
 
-export const frameTicket: TokenFormat<FrameTicketClaims> = {
-  keyDomain: 'cw-frame-ticket-v1',
-  tags: [VERSION],
-  encode: (c) =>
-    `${VERSION}.${b64(c.frameHost)}.${b64(c.workspaceId)}.${Math.floor(c.expiresAt / 1000).toString(36)}`,
-  decode(payload) {
-    const [version, host, ws, exp, ...rest] = payload.split('.');
-    if (version !== VERSION || rest.length > 0 || !host || !ws || !exp) return null;
-    const frameHost = unb64(host);
-    const workspaceId = unb64(ws);
-    if (!/^[0-9a-z]{1,12}$/.test(exp) || frameHost === null || workspaceId === null) return null;
-    return { frameHost, workspaceId, expiresAt: Number.parseInt(exp, 36) * 1000 };
-  },
-  expiresAt: (c) => c.expiresAt,
-};
-
-export function frameTicketKey(cookieKey: string): string {
-  return tokenKey(cookieKey, frameTicket);
+/** One format per use: the same fields, under its own tag and key domain. */
+function frameFormat(tag: string, keyDomain: string): TokenFormat<FrameTicketClaims> {
+  return {
+    keyDomain,
+    tags: [tag],
+    encode: (c) =>
+      `${tag}.${b64(c.frameHost)}.${b64(c.workspaceId)}.${Math.floor(c.expiresAt / 1000).toString(36)}`,
+    decode(payload) {
+      const [version, host, ws, exp, ...rest] = payload.split('.');
+      if (version !== tag || rest.length > 0 || !host || !ws || !exp) return null;
+      const frameHost = unb64(host);
+      const workspaceId = unb64(ws);
+      if (!/^[0-9a-z]{1,12}$/.test(exp) || frameHost === null || workspaceId === null) return null;
+      return { frameHost, workspaceId, expiresAt: Number.parseInt(exp, 36) * 1000 };
+    },
+    expiresAt: (c) => c.expiresAt,
+  };
 }
 
+/** The ticket in a frame's address. */
+export const frameTicket = frameFormat(TICKET_TAG, 'cw-frame-ticket-v1');
+/** The cookie a ticket is traded for. */
+export const frameCookie = frameFormat(COOKIE_TAG, 'cw-frame-cookie-v1');
+
+/** The two signing keys, each derived from the server's cookie key. */
+export interface FrameKeys {
+  ticket: string;
+  cookie: string;
+}
+
+export function frameKeys(cookieKey: string): FrameKeys {
+  return { ticket: tokenKey(cookieKey, frameTicket), cookie: tokenKey(cookieKey, frameCookie) };
+}
+
+const whole = (ms: number): number => Math.floor(ms / 1000) * 1000;
+
+/** A ticket for the host page to write into a frame's address. */
 export function mintFrameTicket(
   key: string,
   frameHost: string,
   workspaceId: string,
-  ttlMs: number,
   now: number = Date.now(),
 ): string {
-  const expiresAt = Math.floor((now + ttlMs) / 1000) * 1000;
+  const expiresAt = whole(now + FRAME_TICKET_TTL_MS);
   return mintToken(frameTicket, { frameHost, workspaceId, expiresAt }, key);
 }
 
+type FrameCheck = { ok: true; expiresAt: number } | { ok: false; reason: string };
+
+function check(
+  format: TokenFormat<FrameTicketClaims>,
+  key: string,
+  value: string | null | undefined,
+  frameHost: string,
+  workspaceId: string,
+  now: number,
+): FrameCheck {
+  const v = verifyToken(format, value, key, now);
+  if (!v.ok) return { ok: false, reason: v.reason };
+  if (v.claims.frameHost !== frameHost) return { ok: false, reason: 'other_frame_host' };
+  if (v.claims.workspaceId !== workspaceId) return { ok: false, reason: 'other_board' };
+  return { ok: true, expiresAt: v.claims.expiresAt };
+}
+
 /**
- * Whether `value` opens board `workspaceId`'s frames on `frameHost`. The
- * reason is for the tests; every failure is refused the same way.
+ * Whether `value` is a ticket for board `workspaceId`'s frames on
+ * `frameHost`. A cookie value is not one. The reason is for the tests; every
+ * failure is refused the same way.
  */
 export function checkFrameTicket(
   key: string,
@@ -103,12 +150,42 @@ export function checkFrameTicket(
   frameHost: string,
   workspaceId: string,
   now: number = Date.now(),
-): { ok: true } | { ok: false; reason: string } {
-  const v = verifyToken(frameTicket, value, key, now);
-  if (!v.ok) return { ok: false, reason: v.reason };
-  if (v.claims.frameHost !== frameHost) return { ok: false, reason: 'other_frame_host' };
-  if (v.claims.workspaceId !== workspaceId) return { ok: false, reason: 'other_board' };
-  return { ok: true };
+): FrameCheck {
+  return check(frameTicket, key, value, frameHost, workspaceId, now);
+}
+
+/** Whether `value` is a cookie that opens board `workspaceId`'s frames on
+ *  `frameHost`. A ticket is not one. */
+export function checkFrameCookie(
+  key: string,
+  value: string | null | undefined,
+  frameHost: string,
+  workspaceId: string,
+  now: number = Date.now(),
+): FrameCheck {
+  return check(frameCookie, key, value, frameHost, workspaceId, now);
+}
+
+/**
+ * A ticket traded for the cookie: the cookie's value and how long it has
+ * left. The cookie ends `FRAME_COOKIE_TTL_MS` after the ticket was minted,
+ * whenever inside its two minutes the ticket is redeemed.
+ */
+export function redeemFrameTicket(
+  keys: FrameKeys,
+  ticket: string | null | undefined,
+  frameHost: string,
+  workspaceId: string,
+  now: number = Date.now(),
+): { ok: true; cookie: string; maxAgeMs: number } | { ok: false; reason: string } {
+  const t = checkFrameTicket(keys.ticket, ticket, frameHost, workspaceId, now);
+  if (!t.ok) return t;
+  const expiresAt = t.expiresAt - FRAME_TICKET_TTL_MS + FRAME_COOKIE_TTL_MS;
+  return {
+    ok: true,
+    cookie: mintToken(frameCookie, { frameHost, workspaceId, expiresAt }, keys.cookie),
+    maxAgeMs: Math.max(0, expiresAt - now),
+  };
 }
 
 /** The path the cookie is scoped to: the board's own paths, and no other's. */
@@ -121,10 +198,14 @@ export function frameCookiePath(workspaceId: string): string {
  * HttpOnly so the attachment's script cannot read it, and with no Domain so
  * it is this frame hostname's alone.
  */
-export function frameCookieHeader(value: string, workspaceId: string): string {
+export function frameCookieHeader(
+  value: string,
+  workspaceId: string,
+  maxAgeMs: number = FRAME_COOKIE_TTL_MS,
+): string {
   return (
     `${FRAME_COOKIE}=${value}; Path=${frameCookiePath(workspaceId)}; ` +
-    `Max-Age=${Math.floor(FRAME_COOKIE_TTL_MS / 1000)}; HttpOnly; Secure; SameSite=None; Partitioned`
+    `Max-Age=${Math.floor(maxAgeMs / 1000)}; HttpOnly; Secure; SameSite=None; Partitioned`
   );
 }
 

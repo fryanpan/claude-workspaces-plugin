@@ -521,7 +521,9 @@ frame at the same path on that hostname, and the frame gets a real origin on
 another site: storage of its own, and no way to read or set the board's
 cookies. The host page writes a frame ticket into the frame's address
 (`frame-ticket.ts`), which the frame hostname trades for a partitioned cookie,
-because Safari sends a frame on another site no Access cookie. A share or
+because Safari sends a frame on another site no Access cookie. The ticket and
+the cookie are two signed formats, so a cookie cannot be redeemed for another
+one, and the cookie ends twelve hours after its ticket was minted. A share or
 collaboration visitor's page keeps the opaque frame. Request admission checks
 the frame hostname before any other kind, and answers there only a mock's
 frame, an app door's paths and the widget's public scripts, each only as the
@@ -2248,7 +2250,10 @@ agent token (MCP verb `rank_review_item`). The lead hears what to rank from
 row, key, headline and filing time, never the detail. The feed and the
 ranks cover every board, including one that is private or that the coach is
 off for: the lead sees what the owner sees (the owner, 2026-10-23), and
-`coach/exclusion.ts` applies to the coach alone.
+`coach/exclusion.ts` applies to the coach alone. A lead stream opened off this
+machine (through the tunnel, or from a peer that is not loopback) gets the
+frame without the asks from local-only boards and docs (`offBoxAskView`,
+which `routes/upgrade-stream.ts` hands both stream kinds as their transform).
 The window is `held-window.ts`, which the coach's session feed uses too, and
 `lead-rank-wiring.ts` composes the three against the stores.
 

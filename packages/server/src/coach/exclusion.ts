@@ -99,7 +99,9 @@ export interface BoardPrivacySources {
 
 export function boardPrivacyFrom(src: BoardPrivacySources): BoardPrivacy {
   const localOnlyDoc = (docId: string): boolean => {
-    if (src.isLocalOnlySet(src.setOfDoc(docId))) return true;
+    // A board lists a filed folder bind by the SET's id, not its members',
+    // so an id on the board can be a local-only set itself.
+    if (src.isLocalOnlySet(docId) || src.isLocalOnlySet(src.setOfDoc(docId))) return true;
     const docKey = src.docKeyOf(docId);
     const repoKey = docKey === undefined ? undefined : parseDocKey(docKey)?.repoKey;
     return repoKey !== undefined && src.projectIsLocalOnly(repoKey);

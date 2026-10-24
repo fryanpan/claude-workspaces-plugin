@@ -55,7 +55,7 @@ describe('the frame hostname setting', () => {
     const fh = createFrameHost({
       origin: 'https://harborlight.frames.test',
       boardHosts: ['harborlight.board.test', 'harborlight.frames.test'],
-      ticketKey: () => 'k',
+      keys: () => ({ ticket: 'k', cookie: 'c' }),
     });
     const on = (host: string) => new Request('http://x/', { headers: { host } });
     const target = fh.frameFor(on('harborlight.board.test'), false, 'w-harbor');
@@ -87,7 +87,7 @@ describe('the frame hostname setting', () => {
     const fh = createFrameHost({
       origin: 'https://harborlight.frames.test',
       boardHosts: [],
-      ticketKey: () => 'k',
+      keys: () => ({ ticket: 'k', cookie: 'c' }),
     });
     expect(fh.frameCsp.endsWith("frame-ancestors 'none'")).toBe(true);
   });
@@ -317,6 +317,27 @@ describe('a server with the frame hostname configured', () => {
       cookie,
     });
     expect(other.status).toBe(403);
+  });
+
+  it('refuses a cookie value sent back as a ticket, so a cookie cannot renew itself', async () => {
+    const { cookie } = await redeem();
+    const value = cookie.slice(`${FRAME_COOKIE}=`.length);
+    // CONTROL: the same value, sent as the cookie, holds the frame.
+    expect((await onFrames(FRAME(), { 'sec-fetch-dest': 'iframe', cookie })).status).toBe(200);
+    const res = await onFrames(`${FRAME()}&cw-ft=${encodeURIComponent(value)}`, {
+      'sec-fetch-dest': 'iframe',
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('drops a ticket from the redirect when its name is percent-encoded', async () => {
+    const src = await frameSrc();
+    const encoded = src.search.replace('cw-ft=', 'cw%2Dft=');
+    expect(encoded).toContain('cw%2Dft=');
+    const res = await onFrames(`${src.pathname}${encoded}`, { 'sec-fetch-dest': 'iframe' });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe(`/workspaces/${ws}/mockups/${mock}?v=1&cw-frame=1`);
   });
 
   it('refuses the host page, the API, the board and a write on the frame hostname', async () => {

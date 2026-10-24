@@ -639,7 +639,9 @@ export class SseBus {
  *  and expiry can hang it up. `transform` rewrites each payload before it is
  *  serialized — how a share visitor's stream gets the redacted view of an
  *  event every other subscriber receives raw. It must not change the event
- *  name.
+ *  name. Returning undefined drops the frame from this stream alone: how a
+ *  stream off this machine loses a frame that would be empty once the
+ *  local-only part is gone (`offBoxAskView` in `ask-feed.ts`).
  *
  *  `lastEventId` is the id the reconnecting client last saw (the
  *  `Last-Event-ID` header a native EventSource sends by itself, or the
@@ -655,7 +657,7 @@ export function openSseStream(
   bus: SseBus,
   docId: string,
   shareId?: string,
-  transform?: (payload: SsePayload & Record<string, unknown>) => SsePayload,
+  transform?: (payload: SsePayload & Record<string, unknown>) => SsePayload | undefined,
   agentId?: string,
   lastEventId?: string,
   shareMember?: string,
@@ -682,6 +684,7 @@ export function openSseStream(
           const payload = transform
             ? transform(data as SsePayload & Record<string, unknown>)
             : data;
+          if (payload === undefined) return;
           const idLine = id ? `id: ${id}\n` : '';
           writer.write(`${idLine}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
         },

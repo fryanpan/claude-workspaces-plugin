@@ -24,6 +24,13 @@
  * ask the lead filed itself (code-health.md, "An agent is only woken by news
  * it can act on").
  *
+ * **Except off this machine.** "Local-only" promises that a board's content
+ * stays on this machine, and the lead's seat may be held by a session that
+ * reaches the plan board through the tunnel or from another address. So a
+ * stream opened that way gets the frame without any ask whose board or doc
+ * is local-only, and no frame at all when nothing else is left
+ * (`offBoxAskView`). A stream on this machine gets every board.
+ *
  * With no lead, or a lead holding no stream, nothing is held: an addressed
  * frame is replayed to a stream that comes back, and a session that returns
  * should not read a backlog of stale asks.
@@ -154,6 +161,33 @@ export class AskFeed {
       ...(more > 0 ? { more } : {}),
     });
   }
+}
+
+/** Whether an ask's board, or its doc, keeps its content on this machine. */
+export type AskIsLocalOnly = (ask: NewAsk) => boolean;
+
+/**
+ * A frame as a stream off this machine may carry it: a `workspace.new_asks`
+ * frame without the asks `localOnly` names, or undefined when none is left.
+ * Every other frame is unchanged. A check that throws counts as local-only:
+ * the question is what may leave the machine, and "could not tell" is not a
+ * no.
+ */
+export function offBoxAskView<P extends { event: string }>(
+  payload: P,
+  localOnly: AskIsLocalOnly,
+): P | undefined {
+  if (payload.event !== 'workspace.new_asks') return payload;
+  const frame = payload as unknown as AskFrame;
+  const items = (frame.items ?? []).filter((ask) => {
+    try {
+      return !localOnly(ask);
+    } catch {
+      return false;
+    }
+  });
+  if (items.length === 0) return undefined;
+  return { ...payload, items };
 }
 
 /** A ticket's review item, from its `review_item.added` event. */
