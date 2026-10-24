@@ -60,9 +60,10 @@
  * domain. Without one: through the tunnel, the operator's own Access token
  * and allowlisted email, with external access switched on; off the tunnel, a
  * caller on this machine that is not a browser. Off the tunnel nothing is
- * answered to a peer that is not this machine, a ticket included. The widget's public scripts
- * need nothing. A share or collaboration visitor's host page never points
- * here and mints no ticket, and their token is refused if they try.
+ * answered to a peer that is not this machine, a ticket included. The
+ * widget's public scripts need nothing. A share or collaboration visitor's
+ * host page never points here and mints no ticket, and their token is
+ * refused if they try.
  *
  * Off unless configured (`CW_FRAME_ORIGIN`). Unset, every frame stays opaque
  * exactly as before.
