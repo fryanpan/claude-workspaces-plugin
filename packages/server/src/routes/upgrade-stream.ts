@@ -57,7 +57,7 @@ import type { SocketEditor } from '../edit-sessions.ts';
 import { currentEventOrigin } from '../event-origin.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import { crossOriginCredentials, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
-import type { ShareTarget } from '../middleware/host-guard.ts';
+import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts';
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
@@ -153,6 +153,13 @@ export interface UpgradeStreamContext {
   ) => { ok: true } | { ok: false; reason: string };
   /** The frame-only hostname's origin, or null when it is not configured. */
   frameOrigin: string | null;
+  /** How a stream opened off this machine (through the tunnel, or from a
+   *  peer that is not loopback) sees each frame: the lead's ask feed without
+   *  its local-only asks (`offBoxAskView` in `ask-feed.ts`). Undefined
+   *  drops the frame from that stream. */
+  offBoxView: (
+    payload: { event: string } & Record<string, unknown>,
+  ) => { event: string } | undefined;
 }
 
 /** The address this request is asking about, and what admission proved. */
@@ -236,7 +243,13 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
     warnLegacyAgentCaller,
     appVoiceToken,
     frameOrigin,
+    offBoxView,
   } = ctx;
+
+  /** Whether this stream leaves the machine: through the tunnel, or to a
+   *  socket peer that is not loopback. */
+  const offBox = (req: Request): boolean =>
+    req.headers.has('cf-ray') || !isLoopbackAddress(requestAddress(req));
 
   /**
    * `/workspaces/<ws>/docs/<docId>/<verb>` — the three long-lived
@@ -689,6 +702,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
           channelFor: (key) => channelForWatchKey(key, canonicalDocId),
           cursors: parseMuxCursor(sseLastEventId(req, url)),
           onWatchSetChanged: (cb) => agentWatches.onChange(streamAgentId, cb),
+          ...(offBox(req) ? { transform: offBoxView } : {}),
         });
       }
 
@@ -727,7 +741,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
           sse,
           `ws~${workspaceId}`,
           visitorShareId ?? undefined,
-          visitor ? redactBoardEventForVisitor : undefined,
+          visitor ? redactBoardEventForVisitor : offBox(req) ? offBoxView : undefined,
           streamAgentId,
           sseLastEventId(req, url),
           visitorMemberKey ?? undefined,

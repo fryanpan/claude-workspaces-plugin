@@ -14,9 +14,11 @@ import {
   AskFeed,
   type AskFrame,
   MAX_HEADLINE,
+  type NewAsk,
   type OfferedAsk,
   askFromReviewItemAdded,
   asksFromThreadEvent,
+  offBoxAskView,
 } from '../src/ask-feed.ts';
 
 /** A clock and a timer the test moves by hand. */
@@ -200,5 +202,41 @@ describe('asksFromThreadEvent', () => {
     expect(
       asksFromThreadEvent({ ...base, thread: thread(true), event: 'thread.resolved' }, homes),
     ).toEqual([]);
+  });
+});
+
+describe('the ask frame off this machine', () => {
+  const ask = (workspaceId: string): NewAsk => ({
+    workspaceId,
+    row: { kind: 'task-review', taskId: 't-1', reviewItemId: 'r-1' },
+    key: `${workspaceId}:task-review:t-1:r-1`,
+    headline: 'Tide table right?',
+    createdAt: 1,
+  });
+  const frame: AskFrame = {
+    event: 'workspace.new_asks',
+    workspaceId: 'w-plan',
+    at: 2,
+    from: 1,
+    to: 2,
+    items: [ask('w-harbor'), ask('w-records')],
+  };
+  const records = (a: NewAsk) => a.workspaceId === 'w-records';
+
+  it('leaves out the local-only board and keeps the rest', () => {
+    expect(offBoxAskView(frame, records)?.items.map((a) => a.workspaceId)).toEqual(['w-harbor']);
+  });
+
+  it('sends nothing when only local-only asks were in it, and counts a failed check as local-only', () => {
+    expect(offBoxAskView({ ...frame, items: [ask('w-records')] }, records)).toBeUndefined();
+    const throws = () => {
+      throw new Error('privacy store unreadable');
+    };
+    expect(offBoxAskView(frame, throws)).toBeUndefined();
+  });
+
+  it('passes every other frame unchanged', () => {
+    const other = { event: 'task.updated', workspaceId: 'w-records' };
+    expect(offBoxAskView(other, () => true)).toBe(other);
   });
 });
