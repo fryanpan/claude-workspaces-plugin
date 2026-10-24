@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { applyBlockEdits, blocksAuthoredBy, splitLeadingListItems } from './prose-batch.ts';
+import { splitLeadingListItems } from './prose-batch-write.ts';
+import { applyBlockEdits, blocksAuthoredBy } from './prose-batch.ts';
 import { getProseFragment } from './prose-fragment.ts';
 import { parseMarkdownBlocks, serializeFragmentToMarkdown } from './prose-markdown.ts';
 import {

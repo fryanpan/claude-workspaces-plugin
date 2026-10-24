@@ -2131,7 +2131,11 @@ which proposes whole blocks rather than a run of text: the target's words
 struck, the replacement offered as real blocks beside it under the same sid,
 so `suggest-ops.ts` resolves it with no new code and a replacement that is
 itself a heading, a list or a fence is accepted as one rather than as
-characters. `prose-batch-structure.ts` holds what an applied edit must leave
+characters. `prose-batch-write.ts` is the writer under the batch: it turns
+markdown into elements at a position — growing a list rather than starting a
+second one, rewriting one bullet as several, keeping a rewritten block's id —
+and knows nothing about ops, outcomes or who owns a block.
+`prose-batch-structure.ts` holds what an applied edit must leave
 standing around itself: the notes nested under a bullet it replaces, the
 editor's trailing blank line kept at the end rather than stranded above an
 insert, and a block with no words, which applies directly whoever owns it.
