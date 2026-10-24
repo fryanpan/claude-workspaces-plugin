@@ -149,10 +149,20 @@ export function searchWithoutFrameParam(search: string): string {
     .replace(/^\?/, '')
     .split('&')
     .filter((part) => {
-      const name = part.split('=')[0];
+      const name = queryParamName(part);
       return part !== '' && name !== MOCK_FRAME_PARAM && name !== FRAME_TICKET_PARAM;
     });
   return parts.length === 0 ? '' : `?${parts.join('&')}`;
+}
+
+/**
+ * One `name=value` pair's name, decoded exactly as `URLSearchParams` decodes
+ * it (`+` as a space, `%2D` as `-`). The ticket is READ through
+ * `URLSearchParams`, so it must be REMOVED by the same reading: compared raw,
+ * `cw%2Dft=<ticket>` is redeemed and still kept in the address.
+ */
+export function queryParamName(part: string): string {
+  return new URLSearchParams(part).keys().next().value ?? '';
 }
 
 const escapeAttr = (v: string): string =>

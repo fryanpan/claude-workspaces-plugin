@@ -58,7 +58,7 @@ import { InflightRegistry, LoopLagMonitor } from './event-loop.ts';
 import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-watch.ts';
 import { createFrameHost } from './frame-host.ts';
-import { frameTicketKey } from './frame-ticket.ts';
+import { frameKeys } from './frame-ticket.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
@@ -1893,7 +1893,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ? createFrameHost({
         origin: opts.frameOrigin,
         boardHosts: opts.frameBoardHosts ?? proxiedTrustedHosts,
-        ticketKey: () => frameTicketKey(cookieKey()),
+        keys: () => frameKeys(cookieKey()),
       })
     : null;
 
