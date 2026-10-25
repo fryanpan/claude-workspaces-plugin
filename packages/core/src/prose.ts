@@ -140,12 +140,8 @@ export {
   plainTextOf,
 } from './prose-outline.ts';
 export type { OutlineEntry, OutlineKind, OutlineOptions } from './prose-outline.ts';
-export {
-  applyBlockEdits,
-  splitLeadingListItems,
-  blocksAuthoredBy,
-  releaseAuthorship,
-} from './prose-batch.ts';
+export { applyBlockEdits, blocksAuthoredBy, releaseAuthorship } from './prose-batch.ts';
+export { splitLeadingListItems } from './prose-batch-write.ts';
 export type {
   BlockEdit,
   BlockEditOp,
