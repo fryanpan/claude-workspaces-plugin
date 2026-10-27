@@ -46,10 +46,12 @@ import {
 import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import {
   DESTRUCTIVE_STEP_PASS_REASON,
+  HUMAN_ONLY_COMMIT_PASS_REASON,
   REFUSAL_DENIAL_PASS_REASON,
   REVIEW_REFUSAL_RULES,
   type ReviewRefusalKind,
   namesDestructiveGitStep,
+  namesHumanOnlyCommit,
 } from '@claude-workspaces/core/review-refusal';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -772,6 +774,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
      * force-push under "ship" although its prompt named the exception, so
      * this does not rely on the judge. "self-check" stays: it tells the
      * agent to read a fact, never to take the step.
+     *
+     * Never "ship" on an item that says agents may not commit or push on its
+     * repo (`namesHumanOnlyCommit`): there is no consent to use.
      */
     let refusal: ReviewRefusalKind | undefined;
     if (verdict !== null && !verdict.ok && !target.ownerCheck) {
@@ -786,6 +791,9 @@ export function createReviewGate(ctx: ReviewGateContext) {
       ) {
         refusal = undefined;
         verdict = { ok: true, reason: DESTRUCTIVE_STEP_PASS_REASON };
+      } else if (refusal === 'ship' && namesHumanOnlyCommit(judgedText(words))) {
+        refusal = undefined;
+        verdict = { ok: true, reason: HUMAN_ONLY_COMMIT_PASS_REASON };
       }
     } else if (verdict !== null && !verdict.ok && verdict.refuse !== undefined) {
       // The owner line's hold. The judge is told a refusal needs no reason,

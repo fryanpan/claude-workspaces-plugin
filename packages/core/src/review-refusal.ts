@@ -113,6 +113,39 @@ export function namesDestructiveGitStep(text: string | undefined): boolean {
 }
 
 /**
+ * Does this ask say agents may not commit or push on its repo?
+ *
+ * Some repos keep every commit and push for a person: Good Neighbor's
+ * AGENTS.md says "The human pushes and commits code changes themselves". An
+ * ask there is how the person learns the commit is ready, and no ship method
+ * carries consent an agent is forbidden to use. The judge refused such asks
+ * under "ship" three times on 2026-10-27, once after the item quoted the
+ * rule, so the gate drops a "ship" refusal on an item this matches rather
+ * than relying on the judge. Only "ship": a spend or a self-check on the same
+ * repo is answered by its rule as before.
+ */
+const HUMAN_ONLY_COMMIT = [
+  // "agents may not push", "I'm not allowed to commit", "agents never commit".
+  /\b(?:agents?|I|I'm|I am|we)\b(?:[^.\n]){0,20}\b(?:may not|must not|cannot|can't|can not|never|not allowed to|forbidden to|barred from|not permitted to)\b(?:[^.\n]){0,20}\b(?:commit|push)/i,
+  // "the human commits", "a person pushes", "the owner commits and pushes".
+  /\b(?:the human|a human|humans|a person|the owner|the reader)\s+(?:commits|pushes)\b/i,
+  // "Never push or commit code", as AGENTS.md says it.
+  /\bnever\s+(?:push|commit)\b(?:[^.\n]){0,20}\b(?:push|commit)/i,
+  // "human-only push", "pushes are human-only".
+  /\bhuman[\s-]only\b(?:[^.\n]){0,20}\b(?:commit|push)|\b(?:commits?|push(?:es)?)\b(?:[^.\n]){0,20}\bhuman[\s-]only\b/i,
+];
+
+export function namesHumanOnlyCommit(text: string | undefined): boolean {
+  if (!text) return false;
+  return HUMAN_ONLY_COMMIT.some((re) => re.test(text));
+}
+
+/** What the gate records when a "ship" refusal is dropped because the repo
+ *  keeps commits and pushes for a person. */
+export const HUMAN_ONLY_COMMIT_PASS_REASON =
+  'The item says agents may not commit or push on this repo, so no ship consent covers it and the reader is the one to ask.';
+
+/**
  * What the gate records when a refusal is dropped because the item asks about
  * a destructive git step. Fixed words for the reason `REVIEW_REFUSAL_RULES` are.
  */
@@ -135,7 +168,7 @@ export function refusalSystemLines(priorRefusal?: ReviewRefusalKind): string[] {
     // approval first".
     '- "spend": it asks approval to spend money on API calls, evals or model runs, and the spend it names is $50 or less. NOT refused when the spend is over $50, or when the item cannot say what it will cost.',
     // ship-auto's D-class list, ship-push-only, and ship-guarded's risk pause.
-    '- "ship": it asks whether to push, merge or open a pull request. NOT refused when the item says why consent is not already given: the repo ships push-only so a person merges, or the action is a breaking change on the default branch, a public deploy of a breaking change, an external send, an irreversible delete or a destructive git step, or it touches a named risk surface (user-facing flows, a removed feature, a schema, a performance-sensitive path) under a guarded ship method.',
+    '- "ship": it asks whether to push, merge or open a pull request. NOT refused when the item says why consent is not already given: the repo ships push-only so a person merges, the repo forbids agents to commit or push so a person does it, or the action is a breaking change on the default branch, a public deploy of a breaking change, an external send, an irreversible delete or a destructive git step, or it touches a named risk surface (user-facing flows, a removed feature, a schema, a performance-sensitive path) under a guarded ship method.',
     // The refusal the gate gave on 2026-10-17, to an ask to approve a
     // force-push of a rebased PR branch. Spelled out as its own line because
     // "a force-push" buried in the exception list above did not stop it.

@@ -69,6 +69,12 @@ const DENIED = {
   detail: 'The permission classifier denied my push to the shared branch.',
 };
 
+/** The human-only ask: the repo forbids agents to commit or push. */
+const HUMAN_ONLY = {
+  headline: 'Did you commit and push the Riverbend caret fix?',
+  detail: 'Riverbend’s AGENTS.md says the human pushes and commits code changes themselves.',
+};
+
 const kindOf = (headline: string): ReviewRefusalKind | undefined =>
   (Object.keys(REFUSABLE) as ReviewRefusalKind[]).find((k) => REFUSABLE[k].headline === headline);
 
@@ -76,7 +82,10 @@ const kindOf = (headline: string): ReviewRefusalKind | undefined =>
  *  overrule it. Passes everything else. Swappable per test. */
 let judge = async (input: ReviewJudgeInput): Promise<ReviewJudgeVerdict> => {
   const { system } = buildReviewJudgePrompt(input.criteria, input.item);
-  const kind = input.item.headline === DENIED.headline ? 'ship' : kindOf(input.item.headline);
+  const kind =
+    input.item.headline === DENIED.headline || input.item.headline === HUMAN_ONLY.headline
+      ? 'ship'
+      : kindOf(input.item.headline);
   if (kind !== undefined && system.includes(`- "${kind}":`)) {
     return { ok: false, reason: LAUNDERING, refuse: kind };
   }
@@ -340,6 +349,15 @@ describe('an ask a fleet rule answers is refused', () => {
     expect(res.held).toBeUndefined();
     expect(res.item?.judge?.refused).toBeUndefined();
     expect(JSON.stringify(res)).not.toContain('separate agent');
+    expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).toContain(res.item?.id);
+  });
+
+  it('never refuses under "ship" an ask on a repo where only a person commits', async () => {
+    boot();
+    const { workspaceId, taskId } = await board();
+    const res = await fileItem(workspaceId, taskId, HUMAN_ONLY.headline, HUMAN_ONLY.detail);
+    expect(res.held).toBeUndefined();
+    expect(res.item?.judge?.refused).toBeUndefined();
     expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).toContain(res.item?.id);
   });
 });
