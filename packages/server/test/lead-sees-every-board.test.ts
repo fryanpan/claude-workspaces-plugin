@@ -10,7 +10,7 @@
  * public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ReviewPayload } from '@claude-workspaces/core';
@@ -99,12 +99,13 @@ async function rank(key: string, value: number): Promise<Response> {
 const queueKeys = async () =>
   (await ok<CrossReviewQueue>(fetch(`${base}/api/review-queue`))).items.map((i) => i.key);
 
-/** The lead's own stream: the keys of every `workspace.new_asks` item. */
-async function leadStream(plan: string) {
+/** The lead's own stream: the keys of every `workspace.new_asks` item.
+ *  `headers` opens it the way a session elsewhere would. */
+async function leadStream(plan: string, headers: Record<string, string> = {}) {
   const controller = new AbortController();
   const res = await fetch(
     `${base}/workspaces/${encodeURIComponent(plan)}/events:stream?agentId=${encodeURIComponent(LEAD.id)}`,
-    { signal: controller.signal, headers: { accept: 'text/event-stream' } },
+    { signal: controller.signal, headers: { accept: 'text/event-stream', ...headers } },
   );
   if (!res.ok) throw new Error(`lead stream: HTTP ${res.status}`);
   const reader = (res.body as ReadableStream<Uint8Array>).getReader();
@@ -136,6 +137,7 @@ let plan = '';
 let open = '';
 let locked = '';
 let coachOff = '';
+let localOnly = '';
 
 beforeAll(async () => {
   const { publicKey, privateKey } = await generateKeyPair('RS256');
@@ -175,6 +177,19 @@ beforeAll(async () => {
   open = await board('Harborlight');
   locked = await board('Riverbend');
   coachOff = await board('Riverbend ferries');
+  localOnly = await board('Saltmarsh records');
+  // A folder that stays on this machine, bound onto the board: the board is
+  // local-only from then on (`coach/exclusion.ts`, `localOnlyBoard`).
+  const records = join(dataDir, 'saltmarsh-records');
+  mkdirSync(records, { recursive: true });
+  writeFileSync(join(records, 'README.md'), '# Saltmarsh records\n\nKept on this machine.\n');
+  await ok(
+    send('POST', '/workspaces', {
+      folderPath: records,
+      hubWorkspaceId: localOnly,
+      privacy: 'local-only',
+    }),
+  );
   await ok(
     send('POST', '/api/share/lock', {
       workspaceId: locked,
@@ -226,6 +241,41 @@ describe('the plan lead on a private board and a coach-off board', () => {
           describe: 'the private and coach-off boards’ asks in the lead’s feed',
         },
       );
+    } finally {
+      stream.close();
+    }
+  }, 30_000);
+});
+
+/**
+ * "Local-only" promises a board's content stays on this machine, and the
+ * lead's seat may be held by a session elsewhere. So the lead hears a
+ * local-only board's asks on a stream opened here, and not on one that came
+ * through the tunnel.
+ */
+describe('the plan lead and a local-only board', () => {
+  it('hears its asks on a stream on this machine', async () => {
+    const stream = await leadStream(plan);
+    try {
+      const localKey = await ticketItem(localOnly, 'Mooring ledger', 'Mooring ledger right?');
+      await waitFor(() => stream.askKeys().includes(localKey), {
+        describe: 'the local-only board’s ask in the lead’s feed on this machine',
+      });
+    } finally {
+      stream.close();
+    }
+  }, 30_000);
+
+  it('does not hear them on a stream through the tunnel, which still hears other boards', async () => {
+    const stream = await leadStream(plan, await owner());
+    try {
+      const localKey = await ticketItem(localOnly, 'Slipway ledger', 'Slipway ledger right?');
+      // The positive control, in the same window: an ordinary board's ask.
+      const openKey = await ticketItem(open, 'Harbour buoys', 'Harbour buoys right?');
+      await waitFor(() => stream.askKeys().includes(openKey), {
+        describe: 'the ordinary board’s ask in the lead’s feed through the tunnel',
+      });
+      expect(stream.askKeys()).not.toContain(localKey);
     } finally {
       stream.close();
     }

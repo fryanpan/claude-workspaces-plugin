@@ -51,13 +51,16 @@ adds; a project without one runs with Claude off.
 - `flyctl` (`brew install flyctl`). No `fly auth login`: the scripts read the
   shared org's token from the Keychain (`fly-org-token`, `fly-org-slug`) into
   each `fly` command's environment.
-- For a named tunnel, a `cloudflare-api-token` Keychain entry. Without one
-  the deploy takes `--tunnel quick` only (below).
+- For a named tunnel, a `cloudflare-api-token` Keychain entry, and the board
+  router's `router.local.json` (`infra/board-router-worker/README.md`,
+  "Deploying"), which names the zone and the one address. Without them the
+  deploy takes `--tunnel quick` only (below).
 
 ## Deploy
 
 ```bash
 bun run machine:deploy --project <project> [--memory 512] [--volume-gb 1] [--region sjc]
+    [--tunnel quick|named] [--router-config <path>] [--dry-run]
 ```
 
 It reads what exists and does only what is missing:
@@ -93,12 +96,35 @@ machine start, with no Cloudflare account. Its visitors carry `cf-ray` and no
 Access identity, so the server answers them `403 unknown_host` on every
 path. It proves the machine can be reached; it is not a way in.
 
-`--tunnel named` is the production path and is not scripted yet: it needs
-the `cloudflare-api-token` Keychain entry. Until then the steps are the
-board router README's 1 and 2 (`infra/board-router-worker/README.md`): a
-tunnel named `cw-<project>`, its token set as `CLOUDFLARE_TUNNEL_TOKEN`, an
-origin hostname with no Access application on it, and the one ingress rule
-to `http://localhost:8787`.
+`--tunnel named` is the production path. Before it touches Fly, the deploy
+reads Cloudflare and does only what is missing there:
+
+1. The tunnel `cw-<project>`, configured from Cloudflare rather than from a
+   file on the machine. The zone and its account come from the zone lookup
+   of `router.local.json`'s `zone`.
+2. The tunnel's ingress: `<project>.<one address>` to
+   `http://localhost:8787`, and a 404 for every other hostname. That is the
+   Host header the router Worker sends.
+3. The origin hostname `<project>-origin.<zone>`: a proxied CNAME to
+   `<tunnel id>.cfargotunnel.com`.
+4. The tunnel's token, read from Cloudflare into memory and set as the
+   machine's `CLOUDFLARE_TUNNEL_TOKEN` through `fly secrets import` on stdin.
+   A run that creates the tunnel sets it again, since the old value belongs
+   to a tunnel that no longer exists. A machine that ran a quick tunnel loses
+   its `CW_TUNNEL_MODE` secret, so it starts the named one.
+
+It stops, having changed nothing anywhere, when it finds two live tunnels of
+the name, a tunnel configured from a file, a record at the origin hostname
+that is not a proxied CNAME to this tunnel, or an Access application covering
+the origin hostname. It never repoints or deletes what it finds. The last
+lines name the origin hostname and the entry to add to the router's
+`projects` before `bun run router:deploy`.
+
+The Cloudflare token needs, on top of what `router:deploy` uses: Cloudflare
+Tunnel Edit and Access: Apps and Policies Read on the account, and DNS Edit on
+the zone. What stays a person's step: the project's Access application on its
+subdomain, the router entry, and the server's `CW_PROXIED_TRUSTED_HOSTS` and
+Access settings (board router README, "Each project's side").
 
 ### Checking it
 

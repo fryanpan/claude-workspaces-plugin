@@ -8,6 +8,10 @@
  * - `<one address>` itself: the board id in the path picks the server, from
  *   `BOARD_ORIGINS`. This is the path every board uses today, kept until the
  *   boards move.
+ * - `<project>.<frame domain>`: the project's frame hostname, on a domain of
+ *   its own (`FRAME_DOMAIN`), where its mocks and app doors run. The same
+ *   project's origin, from `PROJECT_ORIGINS`, and only the frame cookie goes
+ *   with it (`frameCookies`).
  *
  * Anything it cannot place gets a 404 here, and there is no default server: a
  * request this Worker cannot place never reaches any machine.
@@ -57,6 +61,22 @@ const PROJECT_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
  * first.
  */
 const KEPT_COOKIES = new Set(['cw_session', 'lf_share', 'cw_geo', 'cw_touch']);
+
+/** The one cookie a frame hostname's server reads: the board's frame ticket
+ *  (`packages/server/src/frame-ticket.ts`). A frame's page can set any other
+ *  name on its own hostname, and none of them grants anything there. */
+const FRAME_COOKIE = 'cw_frame';
+
+/** The `Cookie` header on a frame hostname, cut down to the frame cookie. */
+export function frameCookies(header) {
+  if (!header) return null;
+  const kept = [];
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq >= 0 && part.slice(0, eq).trim() === FRAME_COOKIE) kept.push(part.trim());
+  }
+  return kept.length > 0 ? kept.join('; ') : null;
+}
 
 /** The `Cookie` header cut down to the names above, or null when none is left. */
 export function keptCookies(header) {
@@ -194,6 +214,19 @@ export function routeBoardRequest(url, referer, table) {
  */
 export function routeRequest(url, referer, env) {
   const oneAddress = typeof env?.ONE_ADDRESS === 'string' ? env.ONE_ADDRESS : '';
+  const frameDomain = typeof env?.FRAME_DOMAIN === 'string' ? env.FRAME_DOMAIN : '';
+  // A frame domain that is the one address, or under it, would put the
+  // frames back on the board's site, so it routes no frame at all.
+  if (frameDomain && url.hostname.endsWith(`.${frameDomain}`)) {
+    const sameSite =
+      oneAddress !== '' &&
+      (frameDomain === oneAddress ||
+        frameDomain.endsWith(`.${oneAddress}`) ||
+        oneAddress.endsWith(`.${frameDomain}`));
+    const project = sameSite ? null : projectOfHost(url.hostname, frameDomain);
+    const origin = project ? parseProjectOrigins(env?.PROJECT_ORIGINS)?.get(project) : undefined;
+    return origin ? { kind: 'forward', project, origin, frame: true } : { kind: 'not_found' };
+  }
   if (oneAddress && url.hostname !== oneAddress) {
     const project = projectOfHost(url.hostname, oneAddress);
     const origin = project ? parseProjectOrigins(env?.PROJECT_ORIGINS)?.get(project) : undefined;
@@ -262,7 +295,9 @@ export async function handleBoardRequest(request, env, upstream = fetch) {
   }
   // A copy, because an incoming request's headers are immutable.
   const outbound = new Request(request);
-  const cookies = keptCookies(request.headers.get('cookie'));
+  const cookies = route.frame
+    ? frameCookies(request.headers.get('cookie'))
+    : keptCookies(request.headers.get('cookie'));
   if (cookies) outbound.headers.set('cookie', cookies);
   else outbound.headers.delete('cookie');
   // `manual`: a redirect the server answers (sign-in, a share redeem) goes

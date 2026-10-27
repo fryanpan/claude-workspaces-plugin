@@ -41,6 +41,17 @@ export function keychainCreate(name: string, value: string): void {
     throw new Error(`could not store ${name} in the Keychain`);
 }
 
+/**
+ * The Cloudflare API token, for `router:deploy` and a named tunnel. Every
+ * read of it is this one function, so moving where it is kept changes one
+ * place. Held in memory only.
+ */
+export function cloudflareApiToken(): string {
+  const entry = 'cloudflare-api-token';
+  if (!keychainHas(entry)) throw new Error(`the Keychain has no ${entry}; nothing was changed`);
+  return keychainRead(entry).trim();
+}
+
 export interface RunResult {
   status: number;
   stdout: string;

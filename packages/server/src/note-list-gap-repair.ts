@@ -1,7 +1,7 @@
 /**
  * The one-off repair for documents already carrying a note-list gap.
  *
- * The defect is in `insertBlocksMerging` (`packages/core/src/prose-batch.ts`)
+ * The defect is in `insertBlocksMerging` (`packages/core/src/prose-batch-write.ts`)
  * and is fixed there: a browser holding a doc open keeps an empty paragraph
  * at its end (Tiptap's `TrailingNode`), a meeting's notes heading is the last
  * heading, so every note landed after that paragraph, the merge test saw the

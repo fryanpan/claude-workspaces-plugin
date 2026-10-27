@@ -53,6 +53,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { WriteVia } from '@claude-workspaces/core';
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
+import { FRAME_TICKET_PARAM } from './frame-ticket.ts';
 import { isWithinRoot } from './safe-path.ts';
 
 /** The query parameter that asks for the mock itself rather than its host. */
@@ -138,8 +139,8 @@ export function frameSrcFor(url: URL): string {
 }
 
 /**
- * `search` with every frame flag removed and every other byte as the browser
- * sent it. Re-serialising through `URLSearchParams` would re-encode the rest
+ * `search` with every frame flag and frame ticket removed and every other
+ * byte as the browser sent it. Re-serialising through `URLSearchParams` would re-encode the rest
  * (`,` becomes `%2C`, a bare `a` becomes `a=`), and a page that keeps its
  * state in the query reads its own string back.
  */
@@ -147,8 +148,21 @@ export function searchWithoutFrameParam(search: string): string {
   const parts = search
     .replace(/^\?/, '')
     .split('&')
-    .filter((part) => part !== '' && part.split('=')[0] !== MOCK_FRAME_PARAM);
+    .filter((part) => {
+      const name = queryParamName(part);
+      return part !== '' && name !== MOCK_FRAME_PARAM && name !== FRAME_TICKET_PARAM;
+    });
   return parts.length === 0 ? '' : `?${parts.join('&')}`;
+}
+
+/**
+ * One `name=value` pair's name, decoded exactly as `URLSearchParams` decodes
+ * it (`+` as a space, `%2D` as `-`). The ticket is READ through
+ * `URLSearchParams`, so it must be REMOVED by the same reading: compared raw,
+ * `cw%2Dft=<ticket>` is redeemed and still kept in the address.
+ */
+export function queryParamName(part: string): string {
+  return new URLSearchParams(part).keys().next().value ?? '';
 }
 
 const escapeAttr = (v: string): string =>
@@ -197,20 +211,21 @@ export function renderMockHost(args: {
   /** The coach card's script, on every page but a share visitor's. */
   coachHref?: string;
   /**
-   * The frame-only hostname's origin (`frame-host.ts`), when this page frames
-   * its attachment there: the frame's address is the same path on that
-   * origin, and its sandbox adds `allow-same-origin`, which there grants the
-   * frame hostname's origin and never the board's. Unset, the frame is the
-   * opaque same-host one.
+   * The frame-only hostname (`frame-host.ts`), when this page frames its
+   * attachment there: the frame's address is the same path on that origin
+   * with the board's frame ticket, and its sandbox adds `allow-same-origin`,
+   * which there grants the frame hostname's origin and never the board's.
+   * Unset, the frame is the opaque same-host one.
    */
-  frameOrigin?: string | null;
+  frame?: { origin: string; ticket: string } | null;
 }): string {
   const title = TITLE.exec(args.html)?.[1]?.trim() ?? '';
   const boardLink = args.visitor ? BOARD_LINK(args.workspaceId) : { style: '', anchor: '' };
   const items = JSON.stringify(args.items.map((i) => [i.taskId, i.reviewItemId]));
-  const sandbox = args.frameOrigin ? FRAME_HOST_SANDBOX : MOCK_FRAME_SANDBOX;
-  const src = args.frameOrigin
-    ? `${args.frameOrigin}${args.url.pathname}${frameSrcFor(args.url)}`
+  const sandbox = args.frame ? FRAME_HOST_SANDBOX : MOCK_FRAME_SANDBOX;
+  const src = args.frame
+    ? `${args.frame.origin}${args.url.pathname}${frameSrcFor(args.url)}` +
+      `&${FRAME_TICKET_PARAM}=${encodeURIComponent(args.frame.ticket)}`
     : frameSrcFor(args.url);
   const coach =
     args.coachHref && !args.visitor

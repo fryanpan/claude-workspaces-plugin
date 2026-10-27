@@ -4,6 +4,7 @@
  *
  *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
+ *       [--router-config <path>]
  *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
@@ -18,6 +19,10 @@
  *   the org's Anthropic key as CW_ORG_ANTHROPIC_API_KEY, only when the
  *   Keychain holds `cw-<name>-anthropic-api-key`; without it the server
  *   refuses every Claude call
+ *
+ * With `--tunnel named` it first sets up the project's Cloudflare tunnel
+ * `cw-<name>`, its ingress and its origin hostname (`tunnel.ts`), then gives
+ * the machine the tunnel's token as CLOUDFLARE_TUNNEL_TOKEN.
  *
  * The image is built from `git archive <ref>`, never the working tree, so no
  * local data dir, node_modules or uncommitted file reaches Fly. Every
@@ -59,10 +64,13 @@ import {
   hasLifecycle,
   setLifecycle,
 } from './tigris.ts';
+import { TUNNEL_TOKEN_SECRET } from './tunnel-plan.ts';
+import { type NamedTunnel, prepareTunnel, routerNames } from './tunnel.ts';
 
 const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
 const KEEP_DAYS = 30;
+const ROUTER_CONFIG = join(REPO, 'infra', 'board-router-worker', 'router.local.json');
 
 function arg(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -187,7 +195,14 @@ function deploy(cfg: ProjectConfig): void {
   }
 }
 
-async function act(cfg: ProjectConfig, a: Action, org: string): Promise<void> {
+interface RunContext {
+  org: string;
+  /** The tunnel token, when this run has a named tunnel. */
+  tunnelToken?: () => Promise<string>;
+}
+
+async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void> {
+  const { org } = ctx;
   switch (a.kind) {
     case 'create-app':
       flyOk(['apps', 'create', cfg.app, '--org', org, '--network', cfg.network]);
@@ -233,10 +248,22 @@ async function act(cfg: ProjectConfig, a: Action, org: string): Promise<void> {
       await setLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS);
       return;
     case 'set-secrets': {
-      const input = a.names.map((n) => `${n}=${secretValue(cfg, n)}`).join('\n');
-      flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input: `${input}\n` });
+      const lines: string[] = [];
+      for (const n of a.names) {
+        if (n !== TUNNEL_TOKEN_SECRET) {
+          lines.push(`${n}=${secretValue(cfg, n)}`);
+        } else if (ctx.tunnelToken) {
+          lines.push(`${n}=${await ctx.tunnelToken()}`);
+        } else {
+          throw new Error(`no source for secret ${n}`);
+        }
+      }
+      flyOk(['secrets', 'import', '--app', cfg.app, '--stage'], { input: `${lines.join('\n')}\n` });
       return;
     }
+    case 'unset-secrets':
+      flyOk(['secrets', 'unset', ...a.names, '--app', cfg.app, '--stage']);
+      return;
     case 'deploy':
       deploy(cfg);
       // Fly leaves a machine that was stopped before the update stopped
@@ -252,30 +279,49 @@ async function act(cfg: ProjectConfig, a: Action, org: string): Promise<void> {
 }
 
 function describe(a: Action): string {
-  return a.kind === 'set-secrets'
-    ? `set-secrets ${a.names.join(',')}`
+  return a.kind === 'set-secrets' || a.kind === 'unset-secrets'
+    ? `${a.kind} ${a.names.join(',')}`
     : a.kind === 'start-machine'
       ? `start-machine ${a.id}`
       : a.kind;
 }
 
-export async function deployProject(cfg: ProjectConfig, dryRun: boolean): Promise<Action[]> {
-  if (cfg.tunnel === 'named') {
-    throw new Error(
-      'named tunnels are not scripted yet: they need the cloudflare-api-token Keychain entry. Use --tunnel quick',
+export async function deployProject(
+  cfg: ProjectConfig,
+  dryRun: boolean,
+  routerConfig = ROUTER_CONFIG,
+): Promise<Action[]> {
+  // Cloudflare is read first: a named tunnel that cannot be set up stops the
+  // run before Fly is touched.
+  const tunnel: NamedTunnel | undefined =
+    cfg.tunnel === 'named' ? await prepareTunnel(cfg, routerConfig) : undefined;
+  const org = keychainRead('fly-org-slug').trim();
+  // A new tunnel has a new token, so an existing secret holds the old one.
+  const refresh = tunnel?.actions.some((a) => a.kind === 'create-tunnel')
+    ? [TUNNEL_TOKEN_SECRET]
+    : [];
+  const actions = plan(cfg, await observe(cfg), refresh);
+  if (tunnel) {
+    console.log(
+      tunnel.actions.length === 0
+        ? `[deploy] tunnel ${tunnel.names.tunnel} and ${tunnel.names.origin}: nothing to do`
+        : `[deploy] tunnel ${tunnel.names.tunnel}: ${tunnel.actions.map((a) => a.kind).join(', ')}`,
     );
   }
-  const org = keychainRead('fly-org-slug').trim();
-  const actions = plan(cfg, await observe(cfg));
   console.log(
     actions.length === 0
       ? `[deploy] ${cfg.app} is up to date at ${cfg.imageLabel.slice(0, 9)}: nothing to do`
       : `[deploy] ${cfg.app}: ${actions.map(describe).join(', ')}`,
   );
   if (dryRun) return actions;
+  const ctx: RunContext = { org };
+  if (tunnel) {
+    const id = await tunnel.apply();
+    ctx.tunnelToken = () => tunnel.token(id);
+  }
   for (const a of actions) {
     console.log(`[deploy] ${describe(a)}`);
-    await act(cfg, a, org);
+    await act(cfg, a, ctx);
   }
   return actions;
 }
@@ -311,13 +357,21 @@ async function main(): Promise<void> {
     vmMemoryMb: num(arg(args, 'memory')),
     tunnel: arg(args, 'tunnel') as TunnelMode | undefined,
   });
-  const done = await deployProject(cfg, args.includes('--dry-run'));
-  if (args.includes('--dry-run') || cfg.tunnel !== 'quick') return;
+  const routerConfig = arg(args, 'router-config') ?? ROUTER_CONFIG;
+  const done = await deployProject(cfg, args.includes('--dry-run'), routerConfig);
+  if (cfg.tunnel === 'named') {
+    const names = routerNames(cfg, routerConfig);
+    console.log(`[deploy] origin hostname: ${names.origin}`);
+    console.log(
+      `[deploy] to route ${names.publicHost}, add "${cfg.project}": "${names.origin}" to the router's projects and run bun run router:deploy`,
+    );
+  }
+  if (args.includes('--dry-run')) return;
   const state = machines(cfg.app).map(
     (m) => `${m.id} ${m.state} ${m.imageTag.slice(0, 9)} ${m.memoryMb}MB`,
   );
   console.log(`[deploy] machines: ${state.join('; ') || 'none'}`);
-  if (done.length > 0 || state.length > 0)
+  if (cfg.tunnel === 'quick' && (done.length > 0 || state.length > 0))
     console.log(`[deploy] tunnel: ${(await tunnelAddress(cfg.app)) ?? 'not in the logs yet'}`);
 }
 

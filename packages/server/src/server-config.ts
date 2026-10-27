@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
-import { parseFrameOrigin } from './frame-host.ts';
+import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
 import { parseHostAudiences } from './middleware/cf-access.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
@@ -550,6 +550,16 @@ export function resolveServerConfig(opts: {
     .map((h) => h.trim())
     .filter((h) => h !== '');
   const frameBoardHosts = frameBoardHostsRaw.length > 0 ? frameBoardHostsRaw : undefined;
+  const sharesDomain = frameOrigin
+    ? sameSiteHosts(new URL(frameOrigin).host, frameBoardHosts ?? proxiedTrustedHosts)
+    : [];
+  if (sharesDomain.length > 0) {
+    console.error(
+      `[feedback] CW_FRAME_ORIGIN (${frameOrigin}) shares a domain with ${sharesDomain.join(', ')}: ` +
+        "a mock's script there can set a cookie every board on that domain receives. " +
+        'Put the frame hostname on a domain of its own.',
+    );
+  }
   const alsoCollab = proxiedTrustedHosts.filter((h) =>
     accessTunnelHosts.some((c) => c.toLowerCase() === h.toLowerCase()),
   );
