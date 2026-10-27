@@ -1,9 +1,9 @@
 /**
- * The router's project subdomains (infra/board-router-worker): a request to
- * `<project>.<one address>` reaches that project's origin and no other, an
- * unknown subdomain is a 404 that calls no origin, a cookie not set by a
+ * The router's project hostnames (infra/board-router-worker): a request to
+ * `<project>-<first label of the one address>.<zone>` reaches that project's
+ * origin and no other, an unknown project is a 404 that calls no origin, a cookie not set by a
  * project server for its own host never leaves the Worker, and every board
- * path on the one address routes exactly as it did before subdomains. Each
+ * path on the one address routes exactly as it did before project hostnames. Each
  * refusal is paired with the request that passes once the one thing it
  * lacked is present.
  */
@@ -13,13 +13,15 @@ import {
   keptCookies,
   parseBoardOrigins,
   parseProjectOrigins,
+  projectHost,
   projectOfHost,
   routeBoardRequest,
   routeRequest,
   withoutDomainCookies,
 } from '../../../infra/board-router-worker/worker.js';
 
-const ONE_HOST = 'workspaces.harborlight.test';
+const ZONE = 'harborlight.test';
+const ONE_HOST = `workspaces.${ZONE}`;
 const ONE = `https://${ONE_HOST}`;
 const MAC = 'mac-origin.harborlight.test';
 const RIVERBEND = 'riverbend-origin.harborlight.test';
@@ -54,16 +56,26 @@ const send = (url: string, init: RequestInit = {}, env = ENV) => {
 };
 
 describe('projectOfHost', () => {
-  it('reads the one label in front of the one address', () => {
-    expect(projectOfHost(`riverbend.${ONE_HOST}`, ONE_HOST)).toBe('riverbend');
+  it('reads the label in front of `-<first label>.<zone>`, one level under the zone', () => {
+    expect(projectOfHost(`riverbend-workspaces.${ZONE}`, ONE_HOST)).toBe('riverbend');
+    expect(projectOfHost(`river-bend-workspaces.${ZONE}`, ONE_HOST)).toBe('river-bend');
+  });
+
+  it('is the inverse of projectHost', () => {
+    expect(projectHost('riverbend', ONE_HOST)).toBe(`riverbend-workspaces.${ZONE}`);
+    expect(projectOfHost(projectHost('saltmarsh', ONE_HOST), ONE_HOST)).toBe('saltmarsh');
   });
 
   it('names no project for the one address, a deeper name, or another host', () => {
     expect(projectOfHost(ONE_HOST, ONE_HOST)).toBeNull();
-    expect(projectOfHost(`a.riverbend.${ONE_HOST}`, ONE_HOST)).toBeNull();
+    expect(projectOfHost(`a.riverbend-workspaces.${ZONE}`, ONE_HOST)).toBeNull();
+    expect(projectOfHost(`-workspaces.${ZONE}`, ONE_HOST)).toBeNull();
     expect(projectOfHost(`riverbend${ONE_HOST}`, ONE_HOST)).toBeNull();
+    // The two-level name this scheme replaced.
+    expect(projectOfHost(`riverbend.${ONE_HOST}`, ONE_HOST)).toBeNull();
+    expect(projectOfHost(`riverbend-origin.${ZONE}`, ONE_HOST)).toBeNull();
     expect(projectOfHost('riverbend.saltmarsh.test', ONE_HOST)).toBeNull();
-    expect(projectOfHost(`riverbend.${ONE_HOST}`, '')).toBeNull();
+    expect(projectOfHost(`riverbend-workspaces.${ZONE}`, '')).toBeNull();
   });
 });
 
@@ -92,21 +104,21 @@ describe('parseProjectOrigins', () => {
 describe('a project subdomain reaches that project and no other', () => {
   it("sends every path on a project's subdomain to that project's origin", async () => {
     for (const path of ['/', '/workspaces/w-anything', '/app/board.js', '/api/auth/me']) {
-      const { res, calls } = await send(`https://riverbend.${ONE_HOST}${path}`);
+      const { res, calls } = await send(`https://riverbend-workspaces.${ZONE}${path}`);
       expect(res.status).toBe(200);
       expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
-      expect(calls[0]?.request.url).toBe(`https://riverbend.${ONE_HOST}${path}`);
+      expect(calls[0]?.request.url).toBe(`https://riverbend-workspaces.${ZONE}${path}`);
     }
   });
 
   it('CONTROL: another subdomain reaches its own origin', async () => {
     // So the origin above came from the subdomain, not from a fixed choice.
-    const { calls } = await send(`https://saltmarsh.${ONE_HOST}/`);
+    const { calls } = await send(`https://saltmarsh-workspaces.${ZONE}/`);
     expect(calls.map((c) => c.origin)).toEqual([SALTMARSH]);
   });
 
   it('lets the subdomain win over a board path the one address would send elsewhere', async () => {
-    const { calls } = await send(`https://riverbend.${ONE_HOST}/workspaces/w-mac1`);
+    const { calls } = await send(`https://riverbend-workspaces.${ZONE}/workspaces/w-mac1`);
     expect(calls.map((c) => c.origin)).toEqual([RIVERBEND]);
     // The same path on the one address goes to the Mac.
     const control = await send(`${ONE}/workspaces/w-mac1`);
@@ -114,26 +126,30 @@ describe('a project subdomain reaches that project and no other', () => {
   });
 
   it('answers 404 itself for an unknown subdomain and calls no origin', async () => {
-    const { res, calls } = await send(`https://unlisted.${ONE_HOST}/`);
+    const { res, calls } = await send(`https://unlisted-workspaces.${ZONE}/`);
     expect(res.status).toBe(404);
     expect(calls).toHaveLength(0);
   });
 
   it('CONTROL: the same subdomain is routed once the table lists it', async () => {
     const env = { ...ENV, PROJECT_ORIGINS: JSON.stringify({ unlisted: SALTMARSH }) };
-    const { res, calls } = await send(`https://unlisted.${ONE_HOST}/`, {}, env);
+    const { res, calls } = await send(`https://unlisted-workspaces.${ZONE}/`, {}, env);
     expect(res.status).toBe(200);
     expect(calls.map((c) => c.origin)).toEqual([SALTMARSH]);
   });
 
   it('answers 404 for a deeper name, another host, or a broken project table', async () => {
-    for (const url of [`https://a.riverbend.${ONE_HOST}/`, 'https://riverbend.saltmarsh.test/']) {
+    for (const url of [
+      `https://a.riverbend-workspaces.${ZONE}/`,
+      `https://riverbend.${ONE_HOST}/`,
+      'https://riverbend.saltmarsh.test/',
+    ]) {
       const { res, calls } = await send(url);
       expect(res.status).toBe(404);
       expect(calls).toHaveLength(0);
     }
     const broken = await send(
-      `https://riverbend.${ONE_HOST}/`,
+      `https://riverbend-workspaces.${ZONE}/`,
       {},
       {
         ...ENV,
@@ -145,7 +161,7 @@ describe('a project subdomain reaches that project and no other', () => {
   });
 
   it('routes no subdomain at all when the one address is not configured', async () => {
-    const { res, calls } = await send(`https://riverbend.${ONE_HOST}/`, {}, {
+    const { res, calls } = await send(`https://riverbend-workspaces.${ZONE}/`, {}, {
       BOARD_ORIGINS: BOARDS,
       PROJECT_ORIGINS: PROJECTS,
     } as typeof ENV);
@@ -154,7 +170,7 @@ describe('a project subdomain reaches that project and no other', () => {
   });
 
   it('carries the method, body and stamp through unchanged', async () => {
-    const { calls } = await send(`https://riverbend.${ONE_HOST}/workspaces/w-river/tasks`, {
+    const { calls } = await send(`https://riverbend-workspaces.${ZONE}/workspaces/w-river/tasks`, {
       method: 'POST',
       headers: { 'cf-access-jwt-assertion': 'stamp-value', 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'Harborlight task' }),
@@ -183,21 +199,26 @@ describe('a cookie not set by a project server for its own host is stripped', ()
   });
 
   it('a parent-domain cookie never reaches the project server', async () => {
-    const { calls } = await send(`https://riverbend.${ONE_HOST}/`, {
-      headers: { cookie: `parent_pref=dark; ${PROJECT_COOKIES}` },
+    // The project's hostname and the one address are siblings under the
+    // zone, so a browser sends every cookie set with `Domain=<zone>` to
+    // both: here a preference, the zone's Access cookie, and a session
+    // cookie without the `__Host-` prefix's guarantee under another name.
+    const zoneCookies = 'parent_pref=dark; CF_Authorization=zone-stamp; cw_sess=planted';
+    const { calls } = await send(`https://riverbend-workspaces.${ZONE}/`, {
+      headers: { cookie: `${zoneCookies}; ${PROJECT_COOKIES}` },
     });
     expect(calls[0]?.request.headers.get('cookie')).toBe(PROJECT_COOKIES);
   });
 
   it('CONTROL: a request carrying only kept cookies arrives with them all', async () => {
-    const { calls } = await send(`https://riverbend.${ONE_HOST}/`, {
+    const { calls } = await send(`https://riverbend-workspaces.${ZONE}/`, {
       headers: { cookie: PROJECT_COOKIES },
     });
     expect(calls[0]?.request.headers.get('cookie')).toBe(PROJECT_COOKIES);
   });
 
   it('sends no Cookie header when every cookie was dropped', async () => {
-    const { calls } = await send(`https://riverbend.${ONE_HOST}/`, {
+    const { calls } = await send(`https://riverbend-workspaces.${ZONE}/`, {
       headers: { cookie: 'parent_pref=dark' },
     });
     expect(calls).toHaveLength(1);
@@ -220,7 +241,7 @@ describe('a cookie not set by a project server for its own host is stripped', ()
       return new Response('body', { status: 201, headers });
     });
     const res = await handleBoardRequest(
-      new Request(`https://riverbend.${ONE_HOST}/`),
+      new Request(`https://riverbend-workspaces.${ZONE}/`),
       ENV,
       rec.upstream,
     );
@@ -287,7 +308,7 @@ describe('ONE_ADDRESS_ORIGIN keeps the one address’s stamp on its own machine'
     const { res, calls } = await send(`${ONE}/workspaces/w-river/tasks?x=1`, {}, STRICT);
     expect(res.status).toBe(308);
     expect(res.headers.get('location')).toBe(
-      `https://riverbend.${ONE_HOST}/workspaces/w-river/tasks?x=1`,
+      `https://riverbend-workspaces.${ZONE}/workspaces/w-river/tasks?x=1`,
     );
     expect(calls).toEqual([]);
   });
@@ -323,7 +344,7 @@ describe('ONE_ADDRESS_ORIGIN keeps the one address’s stamp on its own machine'
 
   it('leaves the project subdomains as they were', async () => {
     const { res, calls } = await send(
-      `https://riverbend.${ONE_HOST}/workspaces/w-river`,
+      `https://riverbend-workspaces.${ZONE}/workspaces/w-river`,
       {},
       STRICT,
     );

@@ -1,10 +1,14 @@
 /**
- * Router for the one address and its project subdomains. Cloudflare Access
- * signs the visitor in first; this Worker then picks the server and sends the
- * request down that machine's tunnel and no other.
+ * Router for the one address and each project's own hostname. Cloudflare
+ * Access signs the visitor in first; this Worker then picks the server and
+ * sends the request down that machine's tunnel and no other.
  *
- * - `<project>.<one address>`: the project's own server, from
- *   `PROJECT_ORIGINS`. Every path goes there.
+ * - `<project>-<first label of the one address>.<rest of it>`, e.g.
+ *   `riverbend-workspaces.<zone>` beside `workspaces.<zone>`: the project's
+ *   own server, from `PROJECT_ORIGINS`. Every path goes there. The name is
+ *   one level under the zone, which the zone's free Universal SSL
+ *   certificate covers; `<project>.<one address>`, two levels down, needed a
+ *   paid one.
  * - `<one address>` itself: the board id in the path picks the server, from
  *   `BOARD_ORIGINS`. This is the path every board uses today, kept until the
  *   boards move.
@@ -23,7 +27,7 @@
  *
  * With `ONE_ADDRESS_ORIGIN` set, the one address forwards only to the machine
  * that owns its Access application and redirects every other board to its
- * project's subdomain (`keepOneAddressStampHome`), so no server ever holds a
+ * project's own hostname (`keepOneAddressStampHome`), so no server ever holds a
  * copy of a stamp that another server accepts.
  *
  * The Worker is routing, not authorization. `Cf-Access-Jwt-Assertion` goes
@@ -40,7 +44,7 @@ const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** A hostname as Cloudflare DNS holds it: lower-case labels, no port. */
 const ORIGIN_HOST =
   /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
-/** One DNS label: the project's name in `<project>.<one address>`. */
+/** One DNS label: a project's name in its hostname. */
 const PROJECT_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 /**
@@ -129,7 +133,7 @@ export function parseBoardOrigins(raw) {
 /**
  * Parse the project table: `{"<project label>": "<origin hostname>", ...}`.
  * Answers a Map from label to origin, or null when the config is missing or
- * malformed in any part. Null routes no subdomain.
+ * malformed in any part. Null routes no project hostname.
  */
 export function parseProjectOrigins(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') return null;
@@ -150,20 +154,39 @@ export function parseProjectOrigins(raw) {
   return table;
 }
 
-/**
- * The project a hostname names: the one label in front of the one address.
- * `a.b.<one address>` names nothing, and neither does the one address itself.
- */
-export function projectOfHost(hostname, oneAddress) {
-  const suffix = `.${oneAddress}`;
-  if (!oneAddress || !hostname.endsWith(suffix)) return null;
+/** The one label in front of `domain`: `<label>.<domain>`, and nothing deeper. */
+function labelUnder(hostname, domain) {
+  const suffix = `.${domain}`;
+  if (!domain || !hostname.endsWith(suffix)) return null;
   const label = hostname.slice(0, -suffix.length);
   return PROJECT_LABEL.test(label) ? label : null;
 }
 
-/** The hostname a project's subdomain is: the inverse of `projectOfHost`. */
+/**
+ * What every project hostname ends with: `-<first label>.<rest>` of the one
+ * address, so `-workspaces.<zone>` for `workspaces.<zone>`. Null for a one
+ * address with no dot.
+ */
+function projectSuffix(oneAddress) {
+  const dot = typeof oneAddress === 'string' ? oneAddress.indexOf('.') : -1;
+  return dot > 0 ? `-${oneAddress.slice(0, dot)}${oneAddress.slice(dot)}` : null;
+}
+
+/**
+ * The project a hostname names: `riverbend` for
+ * `riverbend-workspaces.<zone>` when the one address is `workspaces.<zone>`.
+ * A deeper name, the one address itself and any other host name nothing.
+ */
+export function projectOfHost(hostname, oneAddress) {
+  const suffix = projectSuffix(oneAddress);
+  if (!suffix || !hostname.endsWith(suffix)) return null;
+  const label = hostname.slice(0, -suffix.length);
+  return PROJECT_LABEL.test(label) ? label : null;
+}
+
+/** A project's own hostname: the inverse of `projectOfHost`. */
 export function projectHost(label, oneAddress) {
-  return `${label}.${oneAddress}`;
+  return `${label}${projectSuffix(oneAddress) ?? `-${oneAddress}`}`;
 }
 
 /** The one project label whose origin this is, or null for none or several. */
@@ -208,9 +231,9 @@ export function routeBoardRequest(url, referer, table) {
 
 /**
  * Where a request goes, by its host first. With `ONE_ADDRESS` set, a
- * subdomain goes to its project's origin, the one address goes by board, and
- * any other host goes nowhere. With it unset there are no subdomains and every
- * request goes by board, which is how the Worker behaved before subdomains.
+ * project hostname goes to its project's origin, the one address goes by board, and
+ * any other host goes nowhere. With it unset there are no project hostnames and
+ * every request goes by board, which is how the Worker behaved before them.
  */
 export function routeRequest(url, referer, env) {
   const oneAddress = typeof env?.ONE_ADDRESS === 'string' ? env.ONE_ADDRESS : '';
@@ -223,7 +246,7 @@ export function routeRequest(url, referer, env) {
       (frameDomain === oneAddress ||
         frameDomain.endsWith(`.${oneAddress}`) ||
         oneAddress.endsWith(`.${frameDomain}`));
-    const project = sameSite ? null : projectOfHost(url.hostname, frameDomain);
+    const project = sameSite ? null : labelUnder(url.hostname, frameDomain);
     const origin = project ? parseProjectOrigins(env?.PROJECT_ORIGINS)?.get(project) : undefined;
     return origin ? { kind: 'forward', project, origin, frame: true } : { kind: 'not_found' };
   }
@@ -242,7 +265,7 @@ export function routeRequest(url, referer, env) {
  * owns that application (`ONE_ADDRESS_ORIGIN`) is the only one that may
  * receive it: any other server holding a copy could replay it to that machine.
  * So with `ONE_ADDRESS_ORIGIN` set, a board held anywhere else is not
- * forwarded. It is redirected to its project's own subdomain, where the
+ * forwarded. It is redirected to its project's own hostname, where the
  * browser signs in to that project's application and gets a stamp of its own;
  * a board on an origin with no single project label gets a 404. A malformed
  * value routes nothing on the one address. Unset, every board is forwarded as
