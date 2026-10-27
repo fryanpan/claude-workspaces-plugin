@@ -725,6 +725,25 @@ describe('an answered review item wakes the lead immediately', () => {
   });
 });
 
+// A ticket answer is already on the lead's stream as `decision.answered`, so
+// the nudger records it and sends nothing of its own (one answer, one wake).
+describe('an answer already on the board wakes nobody a second time', () => {
+  it('sends nothing, and still keeps the idle nudge from piling on', () => {
+    const { world, sent, nudger } = harness();
+    world.boards[0]!.lastActivityAt = world.now - 20 * MIN;
+
+    nudger.answerOnBoard({ workspaceId: 'w-search', actorId: 'user-jordan' });
+    nudger.tick();
+
+    expect(sent).toHaveLength(0);
+    // Positive control: without the answer, the same board is nudged.
+    const control = harness();
+    control.world.boards[0]!.lastActivityAt = control.world.now - 20 * MIN;
+    control.nudger.tick();
+    expect(control.sent).toHaveLength(1);
+  });
+});
+
 describe('the timer', () => {
   it('defaults to a fifteen-minute idle window', () => {
     expect(READY_IDLE_DEFAULT_MS).toBe(15 * MIN);

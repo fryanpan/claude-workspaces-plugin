@@ -147,9 +147,13 @@ export function isReviewItemMeasurementEvent(event: unknown): boolean {
  * 2026-09-17: an event that exists for analytics does not go to a listening
  * agent.
  *
- * `review_item.answered` is NOT on this list, although the same file builds
- * it. An answer is the thing an agent waits for, and the wake is the point.
- * The test for this list is "who acts on it", not "which file wrote it".
+ * `review_item.answered` says an answer landed. The filer does act on an
+ * answer, but it hears of it from `decision.answered`, which every ticket
+ * answer emits beside this row and which carries the words, the task's title
+ * and this item's id. A doc-thread answer reaches the filer as the thread's
+ * own frame. Sent as well, this row cost the filer a second turn per answer
+ * (Bryan, 2026-10-27: "Why did you get three separate events?"), and no page
+ * reads it. `one-wake-per-answer.test.ts` counts the wakes.
  *
  * `review_item.refused` says the gate refused an ask a fleet rule answers.
  * The filer is told in its own filing reply; the row exists to be counted.
@@ -164,7 +168,12 @@ export function isReviewItemMeasurementEvent(event: unknown): boolean {
  * calls any listener, so Weekly Review reads the same `events.jsonl` it read
  * before.
  */
-export const ANALYTICS_ONLY_EVENTS = ['review_item.viewed', 'review_item.refused', 'edit_session'];
+export const ANALYTICS_ONLY_EVENTS = [
+  'review_item.viewed',
+  'review_item.answered',
+  'review_item.refused',
+  'edit_session',
+];
 
 /** Does this event exist for measurement alone? */
 export function isAnalyticsOnlyEvent(event: unknown): boolean {

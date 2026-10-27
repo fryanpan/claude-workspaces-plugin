@@ -62,10 +62,9 @@
  *
  *   - `thread.reopened` — a reopen says the work is not done. That is a
  *     request, and it is the exact inverse of a resolve.
- *   - `review_item.withdrawn` and `review_item.answered` — both DO carry a
- *     request, for exactly one session: the agent that raised the ask. Its
- *     question went away, or it got the answer it stopped for. That is a
- *     third rule — who the request is FOR — and it needs the reader's
+ *   - `review_item.withdrawn` — it DOES carry a request, for exactly one
+ *     session: the agent that raised the ask. Its question went away. That
+ *     is a third rule — who the request is FOR — and it needs the reader's
  *     identity, which this file's two arguments do not include. It lives in
  *     `review-item-line.ts` as `readsThisReviewItemEvent`, reading the
  *     `filedById` the server stamps, and `channel-messages.ts` asks it. The
@@ -75,12 +74,12 @@
  *     item off the clock entirely, and the wake addresses the row's holder
  *     rather than the ask's filer), so the filer would have waited on an ask
  *     that no longer existed.
- *   - `review_item.answered` — an answer is the outcome the filer is blocked
- *     on. It is ids-only like `viewed`, and its words do ride `thread.replied`
- *     and `decision.answered`, so a case could be made; the case is not
- *     strong enough to risk being the one that was the only signal. It is
- *     also, deliberately, not in the server's analytics list for the same
- *     reason.
+ *   - `review_item.answered` — not here because the SERVER keeps it off the
+ *     stream (`ANALYTICS_ONLY_EVENTS`): its name settles it, and no page reads
+ *     it. Every ticket answer also emits `decision.answered`, which carries
+ *     the words, and a doc-thread answer posts a `thread.replied`. Bryan,
+ *     2026-10-27, after one answer woke its filer three times: "Why did you
+ *     get three separate events? That seems like a waste of tokens".
  *   - `task.transitioned`, `task.regrouped`, `task.archived`,
  *     `task.retitled`, `task.body_edited`, `task.assigned` — each changes
  *     what the agent should be doing, not merely the record of what it did. A
@@ -200,6 +199,17 @@ export function isBookkeepingEvent(event: string, payload: unknown): boolean {
   if (event === 'thread.resolved') {
     if (!payload || typeof payload !== 'object') return false;
     return mayCarryAnOpenAsk((payload as { thread?: unknown }).thread) === false;
+  }
+  // A question asked ON a review item's thread. The `thread.created` beside
+  // it carries the words and names the item, so this second frame would be a
+  // second turn for one comment. The typed "tell me more" has no thread, and
+  // this frame is then the only signal, so it wakes. Not dropped in the
+  // server: the board page reads it (`board-presence-model.ts`), and the
+  // decision turns on the frame's `threadId` rather than its name.
+  if (event === 'decision.info_requested') {
+    if (!payload || typeof payload !== 'object') return false;
+    const threadId = (payload as { threadId?: unknown }).threadId;
+    return typeof threadId === 'string' && threadId !== '';
   }
   return false;
 }

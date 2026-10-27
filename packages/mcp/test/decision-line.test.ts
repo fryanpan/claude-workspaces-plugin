@@ -166,3 +166,32 @@ describe('the shipped bundle renders the event with it', () => {
     }
   }, 60_000);
 });
+
+/**
+ * `decision.answered` is the one frame a ticket answer wakes its filer with,
+ * so it names the row and the item that the dropped `review_answered` and
+ * `review_item.answered` frames used to name beside it.
+ */
+describe('the answer line names the row and the item', () => {
+  it('carries the title and the item id after the task id', () => {
+    const line = decisionAnsweredLine({
+      ...ANSWERED,
+      title: 'Agent can rebuild the Riverbend index nightly',
+      headline: 'Which key should the rebuild sort on?',
+      reviewItemId: 'r-synthetic',
+    });
+    expect(line).toBe(
+      '[decision.answered] t-synthetic "Agent can rebuild the Riverbend index nightly" item r-synthetic by Alex: "Rebuild after the freeze." to "Which key should the rebuild sort on?"',
+    );
+  });
+
+  // On the legacy path the title IS the question, and it is said once.
+  it('does not repeat a title that is the headline', () => {
+    const line = decisionAnsweredLine({
+      ...ANSWERED,
+      title: 'Rebuild now or after the freeze?',
+      headline: 'Rebuild now or after the freeze?',
+    });
+    expect(line.split('Rebuild now or after the freeze?')).toHaveLength(2);
+  });
+});

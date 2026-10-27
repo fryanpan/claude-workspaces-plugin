@@ -1,6 +1,6 @@
 /**
- * The line an agent reads when a review item on a TASK is filed, revised,
- * withdrawn or answered — and, for the last two, whether it reads one at all.
+ * The line an agent reads when a review item on a TASK is filed, revised or
+ * withdrawn — and, for a withdrawal, whether it reads one at all.
  *
  * THE DEFECT THIS CLOSES. These are ticket events:
  * `packages/server/src/review-items/store.ts` emits `added`, `revised` and
@@ -63,34 +63,32 @@ export interface ReviewItemEventPayload {
   reinstated?: boolean;
   /** `review_item.withdrawn` only: the asker's one line on why. */
   reason?: string;
-  /** `review_item.withdrawn` and `.answered`: the agent that RAISED the ask,
-   *  which is who the frame is for. See `addressedToFiler`. */
+  /** `review_item.withdrawn`: the agent that RAISED the ask, which is who
+   *  the frame is for. See `readsThisReviewItemEvent`. */
   filedById?: string;
   actor?: { id?: string; name?: string };
 }
 
 /**
- * The four ticket events this renderer claims.
+ * The three ticket events this renderer claims.
  *
- * `review_item.viewed` is deliberately absent: it is the one review-item row
- * the server really does keep off the fan-out
- * (`ANALYTICS_ONLY_EVENTS` in `review-items/analytics.ts` holds it and
- * nothing else), so no child ever sees one. `review_item.answered` is NOT on
- * that list, deliberately — an answer is the thing an agent waits for — so it
- * reaches a child and belongs here.
+ * `review_item.viewed` and `review_item.answered` are absent: the server
+ * keeps both off the fan-out (`ANALYTICS_ONLY_EVENTS` in
+ * `review-items/analytics.ts`). An answer reaches its filer as
+ * `decision.answered`, which carries the words; `channel-messages.ts` drops
+ * an older server's `review_item.answered` frame by name.
  */
 const TASK_REVIEW_ITEM_EVENTS = new Set([
   'review_item.added',
   'review_item.revised',
   'review_item.withdrawn',
-  'review_item.answered',
 ]);
 
 /**
- * The two whose only reader is the agent that RAISED the ask.
+ * The one whose only reader is the agent that RAISED the ask.
  *
- * A withdrawal retires somebody's question and an answer settles it; either
- * way the one session with something to do is the one that stopped for it.
+ * A withdrawal retires somebody's question; the one session with something
+ * to do is the one that stopped for it.
  * Everyone else on the board has nothing — and "everyone else" is the common
  * case rather than the rare one: `withdraw_review_item` says in as many words
  * that any agent may retire a stale ask, and every server auto-withdrawal
@@ -102,7 +100,7 @@ const TASK_REVIEW_ITEM_EVENTS = new Set([
  * the event carries a request at all and drops it for everybody. This asks
  * who the request is FOR, and delivers to exactly one session.
  */
-const FILER_ADDRESSED_EVENTS = new Set(['review_item.withdrawn', 'review_item.answered']);
+const FILER_ADDRESSED_EVENTS = new Set(['review_item.withdrawn']);
 
 /**
  * Is this a review-item event about a TASK, as opposed to one about a doc
@@ -125,8 +123,8 @@ export function isTaskReviewItemEvent(event: string, payload: unknown): boolean 
  * May this session read this frame?
  *
  * `true` for every event that is news to the board — a filing, a revision.
- * For the two addressed ones it is `true` only for the filer the server
- * named, so a frame with no `filedById` reaches nobody.
+ * For a withdrawal it is `true` only for the filer the server named, so a
+ * frame with no `filedById` reaches nobody.
  *
  * That last part is a suppression on missing data, which this codebase
  * otherwise refuses to do. It is deliberate and it is bounded: `filedById` is
@@ -161,9 +159,7 @@ function truncate(s: string, n: number): string {
  * with.
  *
  * The actor clause is dropped rather than filled with a placeholder when the
- * frame carries no name: `by ?` reads as an attribution and is not one. The
- * answered line has no actor clause at all — that row names who answered as a
- * bare id derived from an email, and this file does not print those.
+ * frame carries no name: `by ?` reads as an attribution and is not one.
  */
 export function reviewItemTaskLine(event: string, p: ReviewItemEventPayload): string {
   const item = p.reviewItemId ?? '?';
@@ -176,10 +172,6 @@ export function reviewItemTaskLine(event: string, p: ReviewItemEventPayload): st
   if (event === 'review_item.revised') {
     const after = p.threadId ? ` — after a question on thread ${p.threadId}` : '';
     return `[review item revised] ${where}${by}${after}`;
-  }
-  if (event === 'review_item.answered') {
-    // Delivered to the filer alone, so the second person is accurate.
-    return `[review item answered] ${where} — the ask you filed has an answer`;
   }
   if (p.reinstated === true) {
     return `[review item reinstated] ${where}${by} — the ask is back on the ticket`;

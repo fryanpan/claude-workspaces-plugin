@@ -165,20 +165,6 @@ const FRAMES: Array<{ event: string; frame: (who: string) => Record<string, unkn
     }),
   },
   {
-    // Same reason as the withdrawal above: an answer is addressed to the
-    // filer, so the filer is pinned at this session and the actor is what
-    // varies.
-    event: 'review_item.answered',
-    frame: (who) => ({
-      workspaceId: 'w1',
-      taskId: 't1',
-      reviewItemId: 'r1',
-      actorId: who,
-      filedById: SELF,
-      isOwner: false,
-    }),
-  },
-  {
     event: 'review_item.viewed',
     frame: (who) => ({
       workspaceId: 'w1',

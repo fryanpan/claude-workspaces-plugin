@@ -85,7 +85,8 @@ const EXPECTED = [
   'review_item.added',
   'review_item.revised',
   'review_item.withdrawn',
-  'review_item.answered',
+  // `review_item.answered` is not here: the server keeps it off every stream
+  // (`ANALYTICS_ONLY_EVENTS`), and `decision.answered` carries the answer.
   'decision.answered',
   'task.archived',
   'thread.created',
