@@ -7,7 +7,7 @@
  * loopback proxy that admits a request only with a `CF_Authorization` cookie
  * minted for its application, turns that cookie into the
  * `Cf-Access-Jwt-Assertion` header and adds `cf-ray`, as the edge does. The
- * hosts are two subdomains of one address, which this browser alone resolves
+ * hosts are two project hostnames in one zone, which this browser alone resolves
  * to loopback, so they are one site as the real ones are, and a `Lax` cookie
  * rides a fetch between them. (`*.localhost` would not do: Chrome treats
  * each of those as a site of its own, and the cookie never leaves.) The
@@ -43,11 +43,10 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
 const KID = 'per-project-browser-kid';
 const OWNER_EMAIL = 'owner@harborlight.test';
-const ONE_ADDRESS = 'workspaces.harborlight.test';
-const MAC_HOST = `harborlight.${ONE_ADDRESS}`;
-const CLOUD_HOST = `riverbend.${ONE_ADDRESS}`;
-/** Every name under the one address goes to loopback, in this browser only. */
-const RESOLVE_TO_LOOPBACK = `--host-resolver-rules=MAP *.${ONE_ADDRESS} 127.0.0.1`;
+const MAC_HOST = 'harborlight-workspaces.harborlight.test';
+const CLOUD_HOST = 'riverbend-workspaces.harborlight.test';
+/** Every name in the zone goes to loopback, in this browser only. */
+const RESOLVE_TO_LOOPBACK = '--host-resolver-rules=MAP *.harborlight.test 127.0.0.1';
 const AUD: Record<string, string> = {
   [MAC_HOST]: 'aud-harborlight-app',
   [CLOUD_HOST]: 'aud-riverbend-app',

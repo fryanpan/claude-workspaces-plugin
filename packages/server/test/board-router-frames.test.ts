@@ -90,9 +90,12 @@ describe('a frame hostname carries the frame cookie and nothing else', () => {
   });
 
   it('CONTROL: the same cookies reach a board subdomain as they always did', async () => {
-    const { calls } = await send(`https://harborlight.${ONE_HOST}/workspaces/w-mac1`, {
-      headers: { cookie: '__Host-cw_session=s; lf_share=x; cw_frame=a.1' },
-    });
+    const { calls } = await send(
+      'https://harborlight-workspaces.harborlight.test/workspaces/w-mac1',
+      {
+        headers: { cookie: '__Host-cw_session=s; lf_share=x; cw_frame=a.1' },
+      },
+    );
     expect(calls[0]?.request.headers.get('cookie')).toBe('__Host-cw_session=s; lf_share=x');
   });
 });

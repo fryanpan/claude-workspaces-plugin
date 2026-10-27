@@ -10,9 +10,11 @@ audience there.
 ## Not deployed
 
 Nothing here has been sent to Cloudflare. `access-plan.ts` builds the request
-bodies; no script in the repo sends them, and the hostname form is still open
-(`<project>.<one address>` or a one-level name), so the config takes each
-project's hostnames as written rather than deriving them.
+bodies; no script in the repo sends them. The config takes each project's
+hostnames as written rather than deriving them. A project's own hostname is
+`<project>-<first label of the one address>.<zone>`, one level under the zone
+(`riverbend-workspaces.<zone>`; board router README), so that is the host to
+list.
 
 ```bash
 bun run access:plan            # reads access.local.json beside this file (gitignored)
@@ -35,7 +37,7 @@ would then, per project:
   "sessionDuration": "24h",
   "projects": {
     "riverbend": {
-      "hosts": ["<riverbend's host>"],
+      "hosts": ["riverbend-workspaces.<zone>"],
       "emails": ["<a person's address>"],
       "emailDomains": ["<a team's domain>"],
       "serviceTokens": ["home feed riverbend", "relay riverbend"]

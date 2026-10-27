@@ -102,7 +102,9 @@ reads Cloudflare and does only what is missing there:
 1. The tunnel `cw-<project>`, configured from Cloudflare rather than from a
    file on the machine. The zone and its account come from the zone lookup
    of `router.local.json`'s `zone`.
-2. The tunnel's ingress: `<project>.<one address>` to
+2. The tunnel's ingress: the project's own hostname,
+   `<project>-<first label of the one address>.<zone>` (so
+   `riverbend-workspaces.<zone>` beside `workspaces.<zone>`), to
    `http://localhost:8787`, and a 404 for every other hostname. That is the
    Host header the router Worker sends.
 3. The origin hostname `<project>-origin.<zone>`: a proxied CNAME to
@@ -123,7 +125,7 @@ lines name the origin hostname and the entry to add to the router's
 The Cloudflare token needs, on top of what `router:deploy` uses: Cloudflare
 Tunnel Edit and Access: Apps and Policies Read on the account, and DNS Edit on
 the zone. What stays a person's step: the project's Access application on its
-subdomain, the router entry, and the server's `CW_PROXIED_TRUSTED_HOSTS` and
+own hostname, the router entry, and the server's `CW_PROXIED_TRUSTED_HOSTS` and
 Access settings (board router README, "Each project's side").
 
 ### Checking it

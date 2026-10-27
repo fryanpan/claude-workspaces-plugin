@@ -30,8 +30,8 @@ const ONE_HOST = 'workspaces.harborlight.test';
 const OWNER_EMAIL = 'owner@harborlight.test';
 const MAC_ORIGIN = 'mac-origin.harborlight.test';
 const CLOUD_ORIGIN = 'riverbend-origin.harborlight.test';
-const CLOUD_HOST = `riverbend.${ONE_HOST}`;
-const MAC_HOST = `harborlight.${ONE_HOST}`;
+const CLOUD_HOST = 'riverbend-workspaces.harborlight.test';
+const MAC_HOST = 'harborlight-workspaces.harborlight.test';
 
 type Sign = (opts?: { aud?: string; email?: string }) => Promise<string>;
 let jwks: JSONWebKeySet;
@@ -258,7 +258,7 @@ describe('the one address routes a board to the server that holds it', () => {
 
   it('an unknown project subdomain stops at the Worker and reaches neither server', async () => {
     reached.length = 0;
-    const res = await via(`saltmarsh.${ONE_HOST}`, boardJson(cloudBoard), {
+    const res = await via('saltmarsh-workspaces.harborlight.test', boardJson(cloudBoard), {
       'cf-access-jwt-assertion': await sign(),
     });
     expect(res.status).toBe(404);
