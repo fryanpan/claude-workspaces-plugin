@@ -117,6 +117,7 @@ export type Action =
   | { kind: 'make-writer-key' }
   | { kind: 'set-lifecycle' }
   | { kind: 'set-secrets'; names: string[] }
+  | { kind: 'unset-secrets'; names: string[] }
   | { kind: 'deploy' }
   | { kind: 'start-machine'; id: string };
 
@@ -139,7 +140,11 @@ export function requiredSecrets(tunnel: TunnelMode, orgKey = false): string[] {
   ];
 }
 
-export function plan(cfg: ProjectConfig, obs: Observed): Action[] {
+/**
+ * `refresh` names secrets to set even though they exist: the tunnel token,
+ * when this run creates the tunnel it belongs to.
+ */
+export function plan(cfg: ProjectConfig, obs: Observed, refresh: readonly string[] = []): Action[] {
   const actions: Action[] = [];
   if (!obs.app) actions.push({ kind: 'create-app' });
   if (obs.volumes === 0) actions.push({ kind: 'create-volume' });
@@ -151,13 +156,18 @@ export function plan(cfg: ProjectConfig, obs: Observed): Action[] {
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once.
   const names = requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey)).filter(
-    (n) => !obs.secrets.has(n),
+    (n) => !obs.secrets.has(n) || refresh.includes(n),
   );
   if (names.length > 0) actions.push({ kind: 'set-secrets', names });
+  // A machine that ran a quick tunnel keeps running one while this is set.
+  const unset =
+    cfg.tunnel === 'named' && obs.secrets.has('CW_TUNNEL_MODE') ? ['CW_TUNNEL_MODE'] : [];
+  if (unset.length > 0) actions.push({ kind: 'unset-secrets', names: unset });
   const current = obs.machines.filter((m) => m.state !== 'destroyed');
   if (
     current.length === 0 ||
     names.length > 0 ||
+    unset.length > 0 ||
     current.some((m) => m.imageTag !== cfg.imageLabel || m.memoryMb !== cfg.vmMemoryMb)
   ) {
     actions.push({ kind: 'deploy' });
