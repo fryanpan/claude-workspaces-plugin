@@ -14177,6 +14177,12 @@ function isBookkeepingEvent(event, payload) {
       return false;
     return mayCarryAnOpenAsk(payload.thread) === false;
   }
+  if (event === "decision.info_requested") {
+    if (!payload || typeof payload !== "object")
+      return false;
+    const threadId = payload.threadId;
+    return typeof threadId === "string" && threadId !== "";
+  }
   return false;
 }
 
@@ -14345,7 +14351,18 @@ function decisionAnsweredLine(p) {
   const by = `${p.actor?.name ? ` by ${p.actor.name}` : ""}${fromMockNote(p.via)}`;
   const asked = p.headline ? ` to "${truncate2(p.headline, 100)}"` : "";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? " — walk its links as the propagation checklist" : "";
-  return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+  return `[decision.answered] ${p.taskId}${rowClause(p)}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+}
+function rowClause(p) {
+  const title = p.title && p.title !== p.headline ? ` "${truncate2(p.title, 80)}"` : "";
+  const item = p.reviewItemId ? ` item ${p.reviewItemId}` : "";
+  return `${title}${item}`;
+}
+function infoRequestedLine(p) {
+  const by = p.actor?.name ? ` by ${p.actor.name}` : "";
+  const item = p.reviewItemId ? ` item ${p.reviewItemId}` : "";
+  const q = p.question ? `: "${truncate2(p.question, 120)}"` : "";
+  return `[decision.info_requested] ${p.taskId ?? "?"}${item}${by} wants more context before deciding${q}`;
 }
 
 // packages/mcp/src/done-when-ready-line.ts
@@ -14760,10 +14777,9 @@ function reviewItemHeldLine(p) {
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
   "review_item.revised",
-  "review_item.withdrawn",
-  "review_item.answered"
+  "review_item.withdrawn"
 ]);
-var FILER_ADDRESSED_EVENTS = new Set(["review_item.withdrawn", "review_item.answered"]);
+var FILER_ADDRESSED_EVENTS = new Set(["review_item.withdrawn"]);
 function isTaskReviewItemEvent(event, payload) {
   if (!TASK_REVIEW_ITEM_EVENTS.has(event))
     return false;
@@ -14797,9 +14813,6 @@ function reviewItemTaskLine(event, p) {
   if (event === "review_item.revised") {
     const after = p.threadId ? ` — after a question on thread ${p.threadId}` : "";
     return `[review item revised] ${where}${by}${after}`;
-  }
-  if (event === "review_item.answered") {
-    return `[review item answered] ${where} — the ask you filed has an answer`;
   }
   if (p.reinstated === true) {
     return `[review item reinstated] ${where}${by} — the ask is back on the ticket`;
@@ -15065,6 +15078,9 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
     case "decision.answered":
       body = decisionAnsweredLine(p);
       break;
+    case "decision.info_requested":
+      body = infoRequestedLine(p);
+      break;
     case "workspace.lead_changed":
       body = p.leadAgentId === deps.authorId ? `[workspace.lead_changed]${by}: you are now the lead agent — this board's asks are addressed to you` : `[workspace.lead_changed]${by}: lead agent is now ${p.leadAgentId ?? "?"}`;
       break;
@@ -15139,6 +15155,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
         workspace_id: p.workspaceId ?? "unknown",
         ...p.taskId ? { task_id: p.taskId } : {},
         ...p.docId ? { doc_id: p.docId } : {},
+        ...p.reviewItemId ? { review_item_id: p.reviewItemId } : {},
         event,
         ...p.actor?.name ? { author: p.actor.name } : {}
       }
@@ -15158,6 +15175,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
     return;
   }
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (event === "review_item.answered")
     return;
   if (isTaskReviewItemEvent(event, rawPayload)) {
     const r = rawPayload;
@@ -21556,7 +21575,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.322";
+var PLUGIN_VERSION = "0.1.323";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

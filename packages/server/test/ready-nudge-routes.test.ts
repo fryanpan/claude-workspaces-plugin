@@ -682,6 +682,8 @@ describe('the board wakes its lead over the wire', () => {
     await tab.stop();
   });
 
+  // The wake is the board's own `decision.answered`, not an addressed nudge
+  // beside it: one answer, one turn (`one-wake-per-answer.test.ts`).
   it('wakes the lead the moment a review item is answered', async () => {
     const { workspaceId, taskId, lead, tab } = await boardWithReadyWork();
 
@@ -710,13 +712,14 @@ describe('the board wakes its lead over the wire', () => {
         },
       ),
     );
-    await waitForFrames(lead.frames, REVIEW_ANSWERED_EVENT, 1);
+    await waitForFrames(lead.frames, 'decision.answered', 1);
     await settle();
 
-    expect(nudges(lead.frames, REVIEW_ANSWERED_EVENT)).toHaveLength(1);
-    expect(nudges(lead.frames, REVIEW_ANSWERED_EVENT)[0]?.data?.taskId).toBe(taskId);
-    // Addressed here too — an answer is the lead's to act on.
-    expect(nudges(tab.frames, REVIEW_ANSWERED_EVENT)).toHaveLength(0);
+    const answered = nudges(lead.frames, 'decision.answered');
+    expect(answered).toHaveLength(1);
+    expect(answered[0]?.data?.taskId).toBe(taskId);
+    expect(answered[0]?.data?.reviewItemId).toBe(item.id);
+    expect(nudges(lead.frames, REVIEW_ANSWERED_EVENT)).toHaveLength(0);
 
     await lead.stop();
     await tab.stop();

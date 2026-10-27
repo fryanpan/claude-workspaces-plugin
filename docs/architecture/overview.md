@@ -1041,8 +1041,10 @@ always delivered, because an agent cannot detect silence. Rules in
 
 *An analytics event.* `review_item.viewed` records that a person opened a card
 and changes nothing, so the server keeps it off the fan-out while the audit log
-still gets the row. `review_item.answered` stays on the stream, because an
-answer is the wake an agent waits for. The list is in
+still gets the row. `review_item.answered` is kept off too: a ticket answer
+reaches its filer and the lead as `decision.answered`, which carries the
+words, the task's title and the item's id, so one answer is one wake. The
+list is in
 `packages/server/src/review-items/analytics.ts`.
 
 *An act with no words.* A resolve is a status flip and carries no text, so the
@@ -1053,13 +1055,21 @@ thread, so a resolve that closed an unanswered ask still wakes: it is the only
 report that reaches the agent who asked. Rule in
 `packages/mcp/src/bookkeeping-events.ts`.
 
-*An act with one reader.* A review item WITHDRAWN or ANSWERED on a ticket does
-carry a request, but only for the agent that RAISED the ask: its question went
-away, or the answer it stopped for arrived. Nobody else on the board has
-anything to do, and everybody else is the common case — any agent may retire a
-stale ask, and the server's own auto-withdrawals fire as a board actor that the
-self-echo rule suppresses for no one. So the store stamps the filer's id on
-those two events and the child delivers to that session alone
+*A second frame for one act.* A question asked on a review item's thread
+arrives as the thread's `thread.created`, with the words, and as
+`decision.info_requested`. The board page reads the second, so the server
+sends it, and the child drops it when it carries a `threadId`. A typed "tell
+me more" has no thread, so its `decision.info_requested` still wakes. Rule in
+`packages/mcp/src/bookkeeping-events.ts`; `packages/server/test/one-wake-per-answer.test.ts`
+counts the wakes for an answer and for a comment.
+
+*An act with one reader.* A review item WITHDRAWN on a ticket does carry a
+request, but only for the agent that RAISED the ask: its question went away.
+Nobody else on the board has anything to do, and everybody else is the common
+case — any agent may retire a stale ask, and the server's own auto-withdrawals
+fire as a board actor that the self-echo rule suppresses for no one. So the
+store stamps the filer's id on that event and the child delivers to that
+session alone
 (`readsThisReviewItemEvent` in `packages/mcp/src/review-item-line.ts`). A
 filing and a revision are not addressed this way: those are news to the board.
 The id is stripped from a visitor's copy with every other id
