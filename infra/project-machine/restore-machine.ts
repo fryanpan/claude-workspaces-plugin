@@ -6,7 +6,11 @@
  *
  * The decrypt happens on the Mac, so the identity never goes near the
  * machine: download with the bucket's admin credential, restore into a
- * private temp dir with `restoreSnapshot`, pack it, and copy it up. On the
+ * private temp dir with `restoreSnapshot`, pack it, and copy it up. The
+ * tarballs are packed where `fly` can read them: through the keeper it runs
+ * as the keeper's user, so they go in a folder only this user and that one
+ * can open (`keeperStage`). They are copied up before anything on the
+ * machine changes, so a copy that fails leaves the machine as it was. On the
  * machine the services are held off with `/data/maintenance`, the current
  * data dir and transcripts dir are moved aside (never deleted) to
  * `<dir>.before-restore-<stamp>`, and the restored ones take their place. The steps are the runbook's
@@ -18,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ProjectConfig, newestSnapshot, projectConfig } from './deploy-plan.ts';
 import { bucketAdmin, machines } from './deploy.ts';
-import { flyOk, keychainRead, onMachine } from './mac-ops.ts';
+import { flyOk, keeperStage, keychainRead, onMachine } from './mac-ops.ts';
 import { restoreSnapshot } from './snapshot.ts';
 
 const ZERO_SHA = '0'.repeat(40);
@@ -52,6 +56,9 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
   const machine = machines(cfg.app).find((m) => m.state !== 'destroyed');
   if (!machine) throw new Error(`${cfg.app} has no machine; run machine:deploy first`);
 
+  // The decrypted copy stays in this user's own temp folder; only the
+  // tarballs fly uploads are staged for the keeper.
+  const stage = keeperStage(`${cfg.app}-restore-upload-`);
   const work = mkdtempSync(join(tmpdir(), `${cfg.app}-restore-`));
   try {
     const snap = join(work, 'snapshot.cwsnap');
@@ -63,12 +70,12 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
       local.data,
       local.transcripts,
     );
-    const parts = [{ from: local.data, to: MACHINE_DATA_DIR, tgz: join(work, 'data.tgz') }];
+    const parts = [{ from: local.data, to: MACHINE_DATA_DIR, tgz: join(stage.dir, 'data.tgz') }];
     if (r.transcripts) {
       parts.push({
         from: local.transcripts,
         to: MACHINE_TRANSCRIPTS_DIR,
-        tgz: join(work, 'transcripts.tgz'),
+        tgz: join(stage.dir, 'transcripts.tgz'),
       });
     }
     for (const p of parts) {
@@ -83,8 +90,13 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
         },
       );
       if (tar.status !== 0) throw new Error('tar failed');
+      stage.share(p.tgz);
     }
 
+    console.log(`[restore] ${key} -> ${machine.id}: copying up`);
+    for (const p of parts) {
+      flyOk(['ssh', 'sftp', 'put', p.tgz, `${p.to}.restored.tgz`, '--app', cfg.app]);
+    }
     console.log(`[restore] ${key} -> ${machine.id}: holding services off`);
     onMachine(cfg.app, 'touch /data/maintenance');
     flyOk(['machine', 'restart', machine.id, '--app', cfg.app]);
@@ -93,7 +105,6 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
     for (const p of parts) {
       const upload = `${p.to}.restored.tgz`;
       onMachine(cfg.app, `if [ -e ${p.to} ]; then mv ${p.to} ${p.to}.before-restore-${stamp}; fi`);
-      flyOk(['ssh', 'sftp', 'put', p.tgz, upload, '--app', cfg.app]);
       onMachine(
         cfg.app,
         `mkdir ${p.to} && tar -xzf ${upload} -C ${p.to} && chown -R cw:cw ${p.to} && rm ${upload}`,
@@ -107,6 +118,7 @@ export async function restoreMachine(cfg: ProjectConfig, snapshotKey?: string): 
     return key;
   } finally {
     rmSync(work, { recursive: true, force: true });
+    stage.done();
   }
 }
 

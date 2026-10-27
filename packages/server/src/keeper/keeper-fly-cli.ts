@@ -6,9 +6,11 @@
  * held call can wait minutes for a tap, so it spawns this instead: the call
  * arrives on stdin as `{"args": [...], "input": "..."}`, the approval link is
  * printed to stderr (the caller's terminal), and the result is printed to
- * stdout as `{"status", "stdout", "stderr"}`.
+ * stdout as `{"status", "stdout", "stderr"}`. Stopped while it waits for a
+ * tap (Ctrl-C), it withdraws the request first.
  */
-import { KEEPER_URL_ENV, keeperFly } from './keeper-client.ts';
+import { configuredHostFetch } from '../outbound-fetch.ts';
+import { type HeldAnswer, KEEPER_URL_ENV, keeperFly, withdrawRequest } from './keeper-client.ts';
 
 const origin = process.env[KEEPER_URL_ENV]?.trim();
 if (!origin) {
@@ -16,9 +18,21 @@ if (!origin) {
   process.exit(2);
 }
 const call = JSON.parse(await Bun.stdin.text()) as { args: string[]; input?: string };
+let waiting: HeldAnswer | null = null;
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    const held = waiting;
+    if (!held) process.exit(130);
+    void withdrawRequest(origin, held, configuredHostFetch([origin])).finally(() => {
+      console.error(`[keeper] stopped; request ${held.id} withdrawn`);
+      process.exit(130);
+    });
+  });
+}
 const result = await keeperFly(origin, call.args, call.input, {
   requester: process.env.FEEDBACK_AGENT_NAME?.trim() || 'deploy script',
   onHeld: (held) => {
+    waiting = held;
     console.error(`[keeper] ${held.hold} waits for Bryan's passkey: ${held.summary}`);
     console.error(`[keeper] approve at ${held.approveUrl}`);
   },

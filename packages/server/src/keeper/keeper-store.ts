@@ -1,6 +1,6 @@
 /**
  * The keeper's store: a directory only the keeper's macOS user can open,
- * holding four JSON files, each mode 600.
+ * holding these JSON files, each mode 600.
  *
  * - `credentials.json`: the Cloudflare API token and account id, and the
  *   Fly org token and org slug. The only copy on the Mac once the cutover in
@@ -8,6 +8,8 @@
  * - `passkeys.json`: the public half of each passkey Bryan registered.
  * - `apps.json`: the Fly apps this keeper created (or Bryan adopted). Only
  *   these may be started, stopped or restarted without a passkey.
+ * - `access.json`: the Access applications this keeper opened. Only these
+ *   may be deleted without a passkey, which is how a share is revoked.
  * - `enroll.json`: the hash of the one-time enrollment link, while one is open.
  *
  * **It refuses rather than repairs.** The directory must be owned by the
@@ -74,6 +76,8 @@ export interface KeeperStore {
   savePasskeys(list: StoredPasskey[]): void;
   apps(): string[];
   addApp(app: string): void;
+  accessApps(): string[];
+  addAccessApp(id: string): void;
   enroll(): EnrollRecord | null;
   saveEnroll(record: EnrollRecord | null): void;
   /** While set, the keeper gives no challenge and opens no enrollment. */
@@ -106,10 +110,12 @@ export function storeModeProblem(path: string, uid: number): string | null {
 }
 
 export const APP_NAME = /^[a-z][a-z0-9-]{1,62}$/;
+export const ACCESS_APP_ID = /^[A-Za-z0-9-]{1,64}$/;
 const FILES = [
   'credentials.json',
   'passkeys.json',
   'apps.json',
+  'access.json',
   'enroll.json',
   'alarm.json',
   'config.json',
@@ -171,6 +177,12 @@ export function openKeeperStore(
       if (!APP_NAME.test(app)) throw new Error(`"${app}" is not a Fly app name`);
       const apps = read<{ apps: string[] }>('apps.json', { apps: [] }).apps;
       if (!apps.includes(app)) write('apps.json', { apps: [...apps, app].sort() });
+    },
+    accessApps: () => read<{ apps: string[] }>('access.json', { apps: [] }).apps,
+    addAccessApp(id) {
+      if (!ACCESS_APP_ID.test(id)) throw new Error(`"${id}" is not an Access application id`);
+      const apps = read<{ apps: string[] }>('access.json', { apps: [] }).apps;
+      if (!apps.includes(id)) write('access.json', { apps: [...apps, id].sort() });
     },
     enroll: () => read<EnrollRecord | null>('enroll.json', null),
     saveEnroll: (record) => write('enroll.json', record),

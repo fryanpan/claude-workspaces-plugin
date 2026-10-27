@@ -205,16 +205,73 @@ describe('fly deploy', () => {
 });
 
 describe('cloudflare policy', () => {
-  it('runs reads, holds writes, and holds a new Access application as access.open', () => {
+  it('runs the reads its callers make, holds writes, and holds a new Access application as access.open', () => {
     expect(classifyCloudflare('GET', '/accounts/abc/access/apps?page=1').kind).toBe('routine');
     expect(classifyCloudflare('POST', '/accounts/abc/access/apps')).toMatchObject({
       kind: 'held',
       hold: 'access.open',
     });
-    expect(classifyCloudflare('DELETE', '/accounts/abc/access/apps/123')).toMatchObject({
+    expect(classifyCloudflare('POST', '/zones/z1/dns_records')).toMatchObject({
       kind: 'held',
       hold: 'other',
     });
+  });
+
+  it('CONTROL: every read the sharing, tunnel and router callers make is routine', () => {
+    for (const path of [
+      '/accounts/abc/access/apps?domain=share.example.com',
+      '/accounts/abc/access/apps?page=2&per_page=50',
+      '/zones?name=example.com',
+      '/zones/z1/dns_records?name=%2A.example.com',
+      '/zones/z1/ssl/certificate_packs?status=all',
+      '/accounts/abc/cfd_tunnel?name=cw-harborlight&is_deleted=false',
+      '/accounts/abc/cfd_tunnel/0f1e-2d3c/configurations',
+    ]) {
+      expect({ path, kind: classifyCloudflare('GET', path).kind }).toEqual({
+        path,
+        kind: 'routine',
+      });
+    }
+  });
+
+  it('refuses a read that answers with a credential, and holds a read no caller makes', () => {
+    for (const path of [
+      '/accounts/abc/cfd_tunnel/0f1e-2d3c/token',
+      '/accounts/abc/warp_connector/0f1e/token',
+      '/accounts/abc/token',
+    ]) {
+      expect({ path, kind: classifyCloudflare('GET', path).kind }).toEqual({
+        path,
+        kind: 'refused',
+      });
+    }
+    expect(classifyCloudflare('GET', '/accounts/abc/workers/scripts')).toMatchObject({
+      kind: 'held',
+      hold: 'other',
+    });
+    expect(classifyCloudflare('GET', '/user/tokens')).toMatchObject({ kind: 'held' });
+  });
+
+  it('revokes an Access application the keeper opened, and its policies, without a tap', () => {
+    const ours = ['123'];
+    expect(classifyCloudflare('DELETE', '/accounts/abc/access/apps/123', ours).kind).toBe(
+      'routine',
+    );
+    expect(
+      classifyCloudflare('DELETE', '/accounts/abc/access/apps/123/policies/p9', ours).kind,
+    ).toBe('routine');
+    // Deleting an application it did not open can expose whatever that one guarded.
+    expect(classifyCloudflare('DELETE', '/accounts/abc/access/apps/456', ours)).toMatchObject({
+      kind: 'held',
+      hold: 'other',
+    });
+    expect(classifyCloudflare('DELETE', '/accounts/abc/access/apps/123')).toMatchObject({
+      kind: 'held',
+    });
+    // Only a delete: changing the application's policy is still held.
+    expect(classifyCloudflare('PUT', '/accounts/abc/access/apps/123/policies/p9', ours).kind).toBe(
+      'held',
+    );
   });
 
   it('refuses minting a token and a path that is not plain', () => {
@@ -316,7 +373,10 @@ describe('store', () => {
     store.addApp('cw-harborlight');
     expect(store.credentials().fly?.orgToken).toBe('test-fly-token');
     expect(store.apps()).toEqual(['cw-harborlight']);
-    for (const f of ['credentials.json', 'apps.json']) {
+    store.addAccessApp('0f1e-2d3c');
+    expect(store.accessApps()).toEqual(['0f1e-2d3c']);
+    expect(() => store.addAccessApp('../x')).toThrow();
+    for (const f of ['credentials.json', 'apps.json', 'access.json']) {
       expect(statSync(join(dir, f)).mode & 0o777).toBe(0o600);
     }
   });

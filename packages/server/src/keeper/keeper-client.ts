@@ -4,11 +4,15 @@
  *
  * A routine call answers at once. A held one answers 202 with a link to the
  * approval page; the client says where to tap (`onHeld`), then polls with
- * its own poll token until Bryan approves, denies, or the wait runs out.
+ * its own poll token until Bryan approves, denies, or the wait runs out. A
+ * request nobody approved in time is withdrawn, so it cannot be approved
+ * after the requester has gone. Once approved, the command has a limit of
+ * its own (`runMs`), at least as long as the keeper lets `fly` run.
  * `CW_KEEPER_URL` (for example `http://localhost:8797`) is the setting that
  * turns this on; without it every caller keeps its old path.
  */
 import { configuredHostFetch } from '../outbound-fetch.ts';
+import { FLY_TIMEOUT_MS } from './keeper-exec.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
 import type { CloudflareResult, FlyResult } from './keeper-requests.ts';
 
@@ -27,6 +31,8 @@ export interface KeeperClientOptions {
   onHeld?: (held: HeldAnswer) => void;
   /** How long to wait for a tap. Default 10 minutes. */
   waitMs?: number;
+  /** How long an approved command may run. Default: fly's own limit, and a minute. */
+  runMs?: number;
   pollMs?: number;
   requester?: string;
   /** Injected in tests; production is the configured-host guard. */
@@ -35,6 +41,23 @@ export interface KeeperClientOptions {
 
 type Waited<T> = { ok: true; result: T } | { ok: false; error: string };
 
+/** Give up on a held request: the keeper drops it, so no later tap runs it. */
+export async function withdrawRequest(
+  origin: string,
+  held: Pick<HeldAnswer, 'id' | 'pollToken'>,
+  doFetch: typeof fetch,
+): Promise<boolean> {
+  try {
+    const res = await doFetch(`${origin}/v1/requests/${held.id}`, {
+      method: 'DELETE',
+      headers: { [API_HEADER]: '1', 'x-cw-keeper-poll': held.pollToken },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function waitForApproval<T>(
   origin: string,
   held: HeldAnswer,
@@ -42,7 +65,8 @@ async function waitForApproval<T>(
   doFetch: typeof fetch,
 ): Promise<Waited<T>> {
   opts.onHeld?.(held);
-  const deadline = Date.now() + (opts.waitMs ?? 10 * 60_000);
+  let deadline = Date.now() + (opts.waitMs ?? 10 * 60_000);
+  let running = false;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, opts.pollMs ?? 1000));
     const res = await doFetch(`${origin}/v1/requests/${held.id}`, {
@@ -54,13 +78,24 @@ async function waitForApproval<T>(
       if (view.result) return { ok: true, result: view.result };
       return { ok: false, error: view.error ?? 'the approved command did not run' };
     }
-    if (view.status === 'denied' || view.status === 'expired') {
+    if (view.status === 'denied' || view.status === 'expired' || view.status === 'withdrawn') {
       return { ok: false, error: `${held.summary} was ${view.status}` };
     }
+    // Approved: the tap wait no longer applies, the run's own limit does.
+    if (view.status === 'running' && !running) {
+      running = true;
+      deadline = Date.now() + (opts.runMs ?? FLY_TIMEOUT_MS + 60_000);
+    }
   }
+  if (running) {
+    return { ok: false, error: `${held.summary} was approved and is still running past the wait` };
+  }
+  const withdrawn = await withdrawRequest(origin, held, doFetch);
   return {
     ok: false,
-    error: `no approval within the wait; it is still open at ${held.approveUrl}`,
+    error: withdrawn
+      ? 'no approval within the wait; the request was withdrawn, so ask again'
+      : `no approval within the wait, and it could not be withdrawn; deny it at ${held.approveUrl}`,
   };
 }
 
@@ -111,12 +146,21 @@ export async function keeperFly(
     },
     body: JSON.stringify({ args, ...(input !== undefined ? { input } : {}) }),
   });
-  if (res.status === 403) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let reason = text.slice(0, 200) || 'no reason given';
+    try {
+      reason = (JSON.parse(text) as { error?: string }).error ?? reason;
+    } catch {
+      // not JSON: the text itself is the reason
+    }
     return {
       status: 1,
       stdout: '',
-      stderr: `the keeper refused: ${body.error ?? 'no reason given'}`,
+      stderr:
+        res.status === 403
+          ? `the keeper refused: ${reason}`
+          : `the keeper answered ${res.status}: ${reason}`,
     };
   }
   if (!res.headers.has(HELD_HEADER)) return (await res.json()) as FlyResult;

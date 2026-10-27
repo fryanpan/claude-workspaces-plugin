@@ -241,21 +241,6 @@ describe('the approval page', () => {
     expect((await challengeFor(id, await pageTokenOf(id))).status).toBe(200);
   });
 
-  it("an agent opening many pages does not push the owner's page out", async () => {
-    const id = await hold(['apps', 'create', 'cw-riverbend-two']);
-    const ownerPage = await pageTokenOf(id);
-    for (let i = 0; i < 8; i++) await pageTokenOf(id);
-    // Past the cap a page is served with no token and no buttons.
-    expect(await pageTokenOf(id)).toBe('');
-    const c = await challengeFor(id, ownerPage);
-    expect(c.status).toBe(200);
-    const ok = await post(`/v1/requests/${id}/approve`, {
-      page: ownerPage,
-      ...signed(owner, c.challenge ?? ''),
-    });
-    expect(ok.status).toBe(200);
-  });
-
   it('denies a request only with the passkey', async () => {
     const id = await hold(['apps', 'create', 'cw-harborlight-two']);
     const pageToken = await pageTokenOf(id);

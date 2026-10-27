@@ -8,8 +8,8 @@
  * - **Every request** must come from a loopback peer, name the keeper's own
  *   host (`localhost:<port>` or `127.0.0.1:<port>`, so a rebound DNS name
  *   cannot reach it from a browser), and carry no `cf-ray`.
- * - **The agent API** (`POST /v1/fly`, `/v1/cloudflare/*`, `GET
- *   /v1/requests/<id>`) must also carry `x-cw-keeper: 1`. A web page cannot
+ * - **The agent API** (`POST /v1/fly`, `/v1/cloudflare/*`, `GET` and
+ *   `DELETE /v1/requests/<id>`) must also carry `x-cw-keeper: 1`. A web page cannot
  *   add that header without a CORS preflight, which the keeper never grants.
  *   Any local process may call it: a routine call is safe for anyone to make,
  *   and a held one does nothing until Bryan's passkey answers.
@@ -184,7 +184,7 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
       if (
         path === '/v1/fly' ||
         path.startsWith('/v1/cloudflare/') ||
-        (path.startsWith('/v1/requests/') && method === 'GET')
+        (path.startsWith('/v1/requests/') && (method === 'GET' || method === 'DELETE'))
       ) {
         if (!isApi) return json(403, { error: `the API needs ${API_HEADER}: 1` });
       }
@@ -214,6 +214,19 @@ export function createKeeperHttp(deps: KeeperHttpDeps) {
         const r = requests.get(pollMatch[1] as string);
         if (!r || req.headers.get('x-cw-keeper-poll') !== r.pollToken) {
           return json(404, { error: 'no such request' });
+        }
+        return json(200, view(r));
+      }
+      // The requester stops waiting: only its poll token can withdraw it.
+      if (method === 'DELETE' && pollMatch) {
+        const r = requests.withdraw(
+          pollMatch[1] as string,
+          req.headers.get('x-cw-keeper-poll') ?? '',
+        );
+        if ('error' in r) {
+          return r.error === 'not-waiting'
+            ? json(409, { error: 'this request is not waiting' })
+            : json(404, { error: 'no such request' });
         }
         return json(200, view(r));
       }

@@ -11,10 +11,13 @@
  * refused, because `fly` would resolve it against the keeper's own working
  * folder.
  *
+ * A path the keeper's user cannot read (or, for a folder, list) is refused
+ * too, except the one `fly ssh sftp get` writes to.
+ *
  * The check runs again just before `fly` starts, and then `fly` reads a copy
  * the keeper made of each path, never the agent's folder (`keeper-stage.ts`).
  */
-import { readdirSync, realpathSync } from 'node:fs';
+import { constants, accessSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 /** Flags whose value is a local file or folder, on any fly command. */
@@ -41,6 +44,11 @@ const within = (inner: string, outer: string): boolean =>
 
 /** The index of each local path in a fly argv. */
 export function pathArgIndexes(args: readonly string[]): number[] {
+  return localPaths(args).at;
+}
+
+/** Every local path's index, and the one `fly ssh sftp get` writes to, if any. */
+function localPaths(args: readonly string[]): { at: number[]; written: number | null } {
   const at: number[] = [];
   const words: number[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -63,11 +71,13 @@ export function pathArgIndexes(args: readonly string[]): number[] {
   if (word(0) === 'deploy' && words[1] !== undefined && !at.includes(words[1])) {
     at.push(words[1]);
   }
+  let written: number | null = null;
   if (word(0) === 'ssh' && word(1) === 'sftp') {
     const local = word(2) === 'put' ? words[3] : word(2) === 'get' ? words[4] : undefined;
     if (local !== undefined) at.push(local);
+    if (word(2) === 'get' && local !== undefined) written = local;
   }
-  return at;
+  return { at, written };
 }
 
 const valueAt = (args: readonly string[], i: number): string => {
@@ -86,7 +96,7 @@ export function resolveFlyPaths(
   const roots = guarded.map(realish);
   const out = [...args];
   const paths: string[] = [];
-  const at = pathArgIndexes(args);
+  const { at, written } = localPaths(args);
   for (const i of at) {
     const value = valueAt(args, i);
     if (!isAbsolute(value)) return { error: `name ${value.slice(0, 80)} as a full path` };
@@ -94,11 +104,32 @@ export function resolveFlyPaths(
     if (roots.some((root) => within(real, root) || within(root, real))) {
       return { error: `${value.slice(0, 80)} reaches the keeper's own folders` };
     }
+    // `fly` runs as the keeper's user. A path that user cannot read would
+    // fail only once the command runs, after the tap and after whatever the
+    // requester changed before it, so it is refused now.
+    if (i !== written && !readable(real)) {
+      return {
+        error: `the keeper's user cannot read ${value.slice(0, 80)}; stage it where that user can (docs/process/keeper.md)`,
+      };
+    }
     const a = args[i] as string;
     out[i] = a.startsWith('-') ? `${a.slice(0, a.indexOf('=') + 1)}${real}` : real;
     paths.push(real);
   }
   return { args: out, paths, at };
+}
+
+/** Whether this process can read `path`, and list it when it is a folder. */
+function readable(path: string): boolean {
+  try {
+    accessSync(
+      path,
+      statSync(path).isDirectory() ? constants.R_OK | constants.X_OK : constants.R_OK,
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The first entries of a folder, for the approval page. */

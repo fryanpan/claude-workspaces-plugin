@@ -18,13 +18,20 @@
  * owner's tap. Denying takes the passkey too: any local process can load
  * the page, so a page token alone proves nothing about who is denying.
  *
+ * Each page token is good until the owner approves or denies, or until
+ * enough newer pages push it out; the owner's reload is always served.
+ *
+ * A requester that stops waiting withdraws its request with its poll token,
+ * so an abandoned request cannot be approved later.
+ *
  * **One tap per project.** A `project.create` that succeeds adds the app to
  * the keeper's list (so routine starts and stops work on it from then on) and
- * opens a 30-minute grant on it, so the rest of that project's setup
- * (volumes, secrets, the image, a shell) runs without a second tap. An
- * `access.open` that succeeds opens a 10-minute grant on the new Access
- * application, so its policy can be written. Every other held request is
- * one tap each.
+ * opens a 30-minute grant on it covering `SETUP_ON_GRANTED` only: the
+ * project's volume and its secrets. Its image (`fly deploy`), a bucket, a
+ * shell and a destroy are a tap each. An `access.open` that succeeds records
+ * the new Access application (so revoking it later needs no tap) and opens a
+ * 10-minute grant on it, so its policy can be written. Every other held
+ * request is one tap each.
  */
 import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -82,7 +89,7 @@ export interface Executors {
   cloudflare(method: string, path: string, body: string | undefined): Promise<CloudflareResult>;
 }
 
-export type RequestStatus = 'pending' | 'running' | 'done' | 'denied' | 'expired';
+export type RequestStatus = 'pending' | 'running' | 'done' | 'denied' | 'expired' | 'withdrawn';
 
 export interface HeldRequest {
   id: string;
@@ -115,7 +122,7 @@ export const PENDING_MS = 60 * 60_000;
 /** A finished request's result stays readable for this long. */
 export const RESULT_MS = 15 * 60_000;
 const MAX_HELD = 100;
-/** Pages open on one request at once; no more are served past this. */
+/** Pages open on one request at once; a new one pushes the oldest out. */
 const MAX_PAGES = 8;
 
 const token = (): string => b64url(new Uint8Array(randomBytes(24)));
@@ -124,12 +131,17 @@ export interface KeeperRequests {
   submit(call: KeeperCall, requester: string): Promise<Submitted>;
   get(id: string): HeldRequest | undefined;
   pending(): HeldRequest[];
-  /** A token for one served approval page, or null when not pending or at the cap. */
+  /** A token for one served approval page, or null when not pending. */
   openPage(id: string): string | null;
   /** A fresh challenge for one served page. */
   challenge(id: string, page: string): { challenge: string } | { error: 'not-waiting' | 'no-page' };
   approve(id: string, page: string, assertion: AssertionInput): Promise<HeldRequest>;
   deny(id: string, page: string, assertion: AssertionInput): HeldRequest;
+  /** The requester gives up on a pending request; its poll token proves it is the requester. */
+  withdraw(
+    id: string,
+    pollToken: string,
+  ): HeldRequest | { error: 'no-such-request' | 'not-waiting' };
   grants(): Grant[];
 }
 
@@ -171,7 +183,7 @@ export function createKeeperRequests(deps: {
   const classify = (call: KeeperCall): Verdict =>
     call.type === 'fly'
       ? classifyFly(call.args, deps.store.apps())
-      : classifyCloudflare(call.method, call.path);
+      : classifyCloudflare(call.method, call.path, deps.store.accessApps());
 
   const guarded = deps.guarded ?? [deps.store.dir];
   const keeperUid = deps.keeperUid ?? process.getuid?.() ?? -1;
@@ -241,6 +253,7 @@ export function createKeeperRequests(deps: {
     if (r.hold === 'access.open' && r.call.type === 'cloudflare') {
       const id = accessAppId((result as CloudflareResult).body);
       if (id) {
+        deps.store.addAccessApp(id);
         const target = `${r.call.path.split('?', 1)[0]?.replace(/\/$/, '')}/${id}`;
         grants.push({ scope: 'cloudflare', target, expiresAt: now() + ACCESS_GRANT_MS });
         log(`access application ${id} created; policy grant open for 10 minutes`);
@@ -306,8 +319,15 @@ export function createKeeperRequests(deps: {
       sweep();
       const r = held.get(id);
       if (!r || r.status !== 'pending') return null;
-      // Capped, never evicted: the first page served stays valid until it is used.
-      if (r.pages.size >= MAX_PAGES) return null;
+      // At the cap the oldest page with no challenge out goes, so the owner's
+      // reload is always served and a page mid-tap outlasts pages loaded
+      // after it. A page pushed out is told to load again; it approves
+      // nothing, and no page approves without the owner's passkey.
+      if (r.pages.size >= MAX_PAGES) {
+        const idle = [...r.pages].find(([, c]) => c === null)?.[0];
+        const oldest = idle ?? (r.pages.keys().next().value as string);
+        r.pages.delete(oldest);
+      }
       const page = token();
       r.pages.set(page, null);
       return page;
@@ -344,6 +364,18 @@ export function createKeeperRequests(deps: {
       r.status = 'denied';
       r.call = stripInput(r.call);
       log(`denied ${r.id}: ${r.summary}`);
+      return r;
+    },
+
+    withdraw(id, pollToken) {
+      sweep();
+      const r = held.get(id);
+      if (!r || r.pollToken !== pollToken) return { error: 'no-such-request' };
+      if (r.status !== 'pending') return { error: 'not-waiting' };
+      r.status = 'withdrawn';
+      r.pages.clear();
+      r.call = stripInput(r.call);
+      log(`withdrawn ${r.id} by ${r.requester}`);
       return r;
     },
 

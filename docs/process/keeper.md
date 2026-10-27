@@ -8,7 +8,10 @@ that becomes the only holder of both. Agents ask it to act and never see a
 token.
 
 - **Routine work needs nothing from you.** Starting, stopping and restarting a
-  machine of an app the keeper created, and any read, run at once.
+  machine of an app the keeper created, the `fly` reads, the Cloudflare reads
+  the board server and the deploy scripts make, and revoking a share the
+  keeper opened, run at once. Any other Cloudflare read is held, because some
+  of them answer with a credential.
 - **Risky setup waits for your passkey.** Creating a project, moving a token
   onto a machine (a secret or a shell), creating an Access application, and
   the other commands the project scripts send are held until you approve them
@@ -27,7 +30,8 @@ token.
   requester a credential or the org: `fly auth`, `fly tokens`, `fly orgs`,
   `fly wireguard`, `fly ssh issue`, `fly apps move`, `--access-token`,
   `--debug` and `--verbose` (their output may carry the token), and Cloudflare
-  token creation. So is any `fly` command the keeper cannot read the way `fly`
+  token creation, and any Cloudflare call on a `token` path (a tunnel's
+  token, for one). So is any `fly` command the keeper cannot read the way `fly`
   does: one starting with a flag, a short flag with its value joined on
   (`-aprod`), or an app named twice.
 
@@ -219,7 +223,18 @@ them: make new ones, give the new ones to the keeper, then revoke the old.
 - **Agents' deploy scripts**: set `CW_KEEPER_URL=http://localhost:$PORT` (the
   number, written out) in the environment the fleet's sessions launch with. `machine:deploy`, `machine:drill`
   and `machine:restore` then ask the keeper for every `fly` call, and print the
-  approval link when one is held.
+  approval link when one is held. `machine:restore` packs its tarballs in a
+  folder under `/tmp` that only you and `cw-relay` can open (an ACL entry,
+  never a world bit); set `CW_KEEPER_USER` if the relay's user has another
+  name. `router:deploy` and `machine:deploy --tunnel named` ask the keeper
+  for their Cloudflare calls too.
+- **`wrangler deploy` in `router:deploy`** then runs on wrangler's own login,
+  not on a token from your Keychain: run `wrangler login` once as yourself.
+  That login is a Cloudflare credential outside the keeper (see the end of
+  this page).
+- **A named tunnel's token** cannot be set through the keeper yet: the
+  keeper refuses the read that returns it. Until it can, set up a project's
+  named tunnel before you retire the Keychain's Cloudflare token (section 7).
 - **The board server's sharing**: add `CW_KEEPER_URL` with the same value to
   prod's launchd environment, then restart prod. Creating a share then waits
   up to 100 seconds for your tap on the link the server log prints.
@@ -273,9 +288,14 @@ look at which processes on this Mac opened `localhost:$PORT` in a browser.
 Once a routine call works through the keeper:
 
 ```bash
+# The board server's copy, and the deploy scripts' copy (router:deploy, the named tunnel):
 security delete-generic-password -s cloudflare-api-token
+security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.cloudflare-api-token
 security delete-generic-password -a claude-workspaces -s claude-workspaces-secret.fly-org-token
 ```
+
+Each line should print the item it deleted. One that says the item could not
+be found is fine only if you never stored that copy.
 
 Then revoke the old Fly token (`fly tokens list`, then `fly tokens revoke`
 with the new token) and the old Cloudflare token in the dashboard.
@@ -308,9 +328,11 @@ same check and restart. The older release folders are the rollback: point
 - **Your admin password opens everything.** Anyone who has it, or a `sudo`
   session you left open in a terminal an agent can type into, can read the
   store. A takeover of the Mac still holds both tokens.
-- **Three credentials stay outside the keeper**: each project's Tigris bucket
+- **Four credentials stay outside the keeper**: each project's Tigris bucket
   admin key and its backup identity (in your Keychain, read by the deploy and
-  restore scripts), and Home's feed tokens (`CW_HOME_REMOTES_FILE`).
+  restore scripts), Home's feed tokens (`CW_HOME_REMOTES_FILE`), and
+  wrangler's own login, which `router:deploy` uses for `wrangler deploy`.
+  Any agent running as you can read that login and deploy Workers with it.
 - **The `bun` and `fly` it installs are copies of yours.** An agent that had
   already replaced those binaries in your user's paths would be installed
   with them. Install each from its vendor's release, as an admin, if you
@@ -322,6 +344,9 @@ same check and restart. The older release folders are the rollback: point
   the keeper stays until you clear it. A worker that does contact the keeper
   is removed and stops approvals (above).
 - **A held request is lost on a keeper restart.** The requester asks again.
+  A requester that stops waiting withdraws its request, so it cannot be
+  approved later; one killed outright leaves it open until it expires an
+  hour later, and the approval page still shows it.
 - **Approvals are on this Mac only.** The passkey is registered for
   `localhost`; approving from the iPad needs the page on an HTTPS address of
   its own, which is not built.

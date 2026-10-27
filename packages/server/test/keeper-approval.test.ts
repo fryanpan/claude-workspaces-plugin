@@ -324,5 +324,13 @@ describe('clients', () => {
       '/accounts/acct1/access/apps/app-riverbend/policies',
     ]);
     expect(posts.every((c) => c.auth === `Bearer ${CF_TOKEN}`)).toBe(true);
+    // Revoking the share it opened needs no tap, even after the grant is gone.
+    expect(store.accessApps()).toContain('app-riverbend');
+    await cf.deleteApp(app.id);
+    expect(ids.length).toBe(1);
+    expect(cfSeen.at(-1)).toMatchObject({
+      method: 'DELETE',
+      path: '/accounts/acct1/access/apps/app-riverbend',
+    });
   });
 });

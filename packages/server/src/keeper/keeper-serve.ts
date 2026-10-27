@@ -34,6 +34,8 @@ export function serveKeeper(opts: {
   keeperUid?: number;
   /** Serve this unix socket instead; `port` is then the port launchd holds. */
   unix?: string;
+  /** Seconds a TCP connection may sit idle outside the API; tests shorten it. */
+  idleTimeout?: number;
 }): RunningKeeper {
   let handle: ((req: Request, peer: string | null) => Promise<Response>) | null = null;
   if (opts.unix) return serveRelayed({ ...opts, unix: opts.unix });
@@ -43,9 +45,12 @@ export function serveKeeper(opts: {
         hostname,
         port,
         // A held request's poll is short; nothing here streams.
-        idleTimeout: 30,
+        idleTimeout: opts.idleTimeout ?? 30,
         fetch(req, srv) {
           if (!handle) return new Response('starting', { status: 503 });
+          // An API call or an approval runs its command before it answers:
+          // a deploy, up to fly's own 30-minute limit.
+          if (new URL(req.url).pathname.startsWith('/v1/')) srv.timeout(req, 0);
           return handle(req, srv.requestIP(req)?.address ?? null);
         },
       });
@@ -122,10 +127,18 @@ function serveRelayed(opts: ServeOpts & { unix: string }): RunningKeeper {
     // no stale socket
   }
   const { requests, handle } = wire(opts, opts.port);
-  const server = Bun.serve({
+  // No idle limit: an approval runs its command before it answers. Bun
+  // 1.3.10 ignores `server.timeout(req, 0)` on a unix socket and cuts an idle
+  // GET off at its 10s default, so the limit is off for the socket, which
+  // only launchd's relay connects to. Bun honours `idleTimeout` here (a 13s
+  // GET answered with it, and was cut at 12s without it) though its types
+  // leave it off the unix options.
+  const relay = {
     unix: opts.unix,
-    fetch: (req) => handle(req, RELAYED_PEER),
-  });
+    idleTimeout: 0,
+    fetch: (req: Request) => handle(req, RELAYED_PEER),
+  };
+  const server = Bun.serve(relay as unknown as Parameters<typeof Bun.serve>[0]);
   return {
     port: opts.port,
     origin: `http://localhost:${opts.port}`,

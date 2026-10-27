@@ -2,7 +2,9 @@
  * What the keeper does with a request before any credential is touched:
  * run it now, hold it for Bryan's passkey, or refuse it.
  *
- * **Routine** (no passkey): reads, and starting, stopping or restarting a
+ * **Routine** (no passkey): the Cloudflare reads the keeper's callers make
+ * (`ROUTINE_GETS`), deleting an Access application the keeper opened or one
+ * of its policies (revoking a share), and starting, stopping or restarting a
  * machine of an app the keeper created, written exactly as listed below:
  * every flag named, each once, positionals before flags. These cannot widen who reaches a
  * project, and an agent restarting a crashed machine must not wait for a
@@ -25,7 +27,8 @@
  * invites people to the whole org, `fly ssh issue` mints a certificate, and
  * `--access-token` would let the requester swap whose token runs, and
  * `--debug` or `--verbose` may print the Authorization header. A
- * Cloudflare write under any `tokens` path mints an API token.
+ * Cloudflare write under any `tokens` path mints an API token, and any call
+ * on a `token` path (`cfd_tunnel/<id>/token`) answers with one.
  */
 import { APP_NAME } from './keeper-store.ts';
 
@@ -350,27 +353,73 @@ export function classifyFly(args: unknown, apps: readonly string[]): Verdict {
 
 const CF_PATH = /^\/[A-Za-z0-9_.\-/]*$/;
 const CF_QUERY = /^[A-Za-z0-9_.\-=&%,]*$/;
+const ID = '[A-Za-z0-9-]+';
+
+/**
+ * The reads the keeper's callers make, which run without a tap: the share
+ * module's (`share/cf-api.ts`), the named tunnel's
+ * (`infra/project-machine/tunnel.ts`) and the router deploy's
+ * (`infra/board-router-worker/deploy.ts`). None answers with a credential.
+ * Every other read is held, because some Cloudflare reads do.
+ */
+const ROUTINE_GETS: readonly RegExp[] = [
+  /^\/zones$/,
+  new RegExp(`^/zones/${ID}/dns_records$`),
+  new RegExp(`^/zones/${ID}/ssl/certificate_packs$`),
+  new RegExp(`^/accounts/${ID}/cfd_tunnel$`),
+  new RegExp(`^/accounts/${ID}/cfd_tunnel/${ID}/configurations$`),
+  new RegExp(`^/accounts/${ID}/access/apps$`),
+];
+
+/** A delete of an Access application, or of one of its policies: the app's id, or null. */
+function accessDeleteOf(pathname: string): string | null {
+  const m = new RegExp(`^/accounts/${ID}/access/apps/(${ID})(?:/policies/${ID})?$`).exec(pathname);
+  return m?.[1] ?? null;
+}
 
 /**
  * Classify one Cloudflare API call. `path` is under `/client/v4`, with its
- * query string, if any, after a `?`.
+ * query string, if any, after a `?`. `accessApps` are the ids of the Access
+ * applications this keeper opened.
  */
-export function classifyCloudflare(method: string, path: string): Verdict {
+export function classifyCloudflare(
+  method: string,
+  path: string,
+  accessApps: readonly string[] = [],
+): Verdict {
   const [pathname = '', query = ''] = path.split('?', 2);
   if (!CF_PATH.test(pathname) || pathname.split('/').includes('..') || !CF_QUERY.test(query)) {
     return { kind: 'refused', reason: 'not a plain Cloudflare API path' };
   }
   const m = method.toUpperCase();
   const summary = `${m} ${path}`;
-  if (m === 'GET') return { kind: 'routine', app: null, summary };
+  const segments = pathname.split('/');
+  // `cfd_tunnel/<id>/token`, `warp_connector/<id>/token`: the answer is a credential.
+  if (segments.includes('token')) {
+    return {
+      kind: 'refused',
+      reason: 'a call on a token path hands a credential to the requester',
+    };
+  }
+  if (m === 'GET') {
+    return ROUTINE_GETS.some((r) => r.test(pathname))
+      ? { kind: 'routine', app: null, summary }
+      : { kind: 'held', hold: 'other', app: null, summary };
+  }
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(m)) {
     return { kind: 'refused', reason: `method ${m} is not a Cloudflare API method` };
   }
-  if (pathname.split('/').includes('tokens')) {
+  if (segments.includes('tokens')) {
     return { kind: 'refused', reason: 'a write under tokens mints a credential for the requester' };
   }
-  if (m === 'POST' && /^\/accounts\/[A-Za-z0-9]+\/access\/apps\/?$/.test(pathname)) {
+  if (m === 'POST' && new RegExp(`^/accounts/${ID}/access/apps/?$`).test(pathname)) {
     return { kind: 'held', hold: 'access.open', app: null, summary };
+  }
+  // Revoking a share. Only one the keeper opened: deleting another
+  // application can expose whatever that one guarded.
+  const revoked = m === 'DELETE' ? accessDeleteOf(pathname) : null;
+  if (revoked !== null && accessApps.includes(revoked)) {
+    return { kind: 'routine', app: null, summary };
   }
   return { kind: 'held', hold: 'other', app: null, summary };
 }

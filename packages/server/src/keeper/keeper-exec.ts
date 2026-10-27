@@ -15,7 +15,8 @@ import type { CloudflareResult, Executors, FlyResult } from './keeper-requests.t
 import type { KeeperStore } from './keeper-store.ts';
 
 const MAX_OUTPUT = 16 * 1024 * 1024;
-const FLY_TIMEOUT_MS = 30 * 60_000;
+/** The longest the keeper lets one `fly` run before it kills it. */
+export const FLY_TIMEOUT_MS = 30 * 60_000;
 const CF_API = 'https://api.cloudflare.com/client/v4';
 
 export function runFly(
