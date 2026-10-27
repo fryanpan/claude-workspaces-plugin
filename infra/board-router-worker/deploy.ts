@@ -21,7 +21,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { keychainHas, keychainRead } from '../project-machine/mac-ops.ts';
+import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
+import { cloudflareApiToken } from '../project-machine/mac-ops.ts';
 import {
   type DnsRecord,
   type Observed,
@@ -35,36 +36,8 @@ import {
 } from './deploy-plan.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
-const API = 'https://api.cloudflare.com/client/v4';
-const TOKEN_ENTRY = 'cloudflare-api-token';
 
-interface Envelope<T> {
-  success: boolean;
-  errors?: Array<{ code: number; message: string }>;
-  result: T;
-}
-
-function cloudflare(token: string) {
-  return async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-    const res = await fetch(`${API}${path}`, {
-      method,
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const json = (await res.json().catch(() => null)) as Envelope<T> | null;
-    if (!res.ok || !json?.success) {
-      const why = json?.errors?.map((e) => `${e.code} ${e.message}`).join('; ') ?? res.statusText;
-      throw new Error(`${method} ${path.split('?')[0]} failed (${res.status}): ${why}`);
-    }
-    return json.result;
-  };
-}
-
-async function observe(
-  api: ReturnType<typeof cloudflare>,
-  zoneId: string,
-  cfg: RouterConfig,
-): Promise<Observed> {
+async function observe(api: CloudflareApi, zoneId: string, cfg: RouterConfig): Promise<Observed> {
   const records = (name: string) =>
     api<DnsRecord[]>('GET', `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`);
   const origins: Record<string, DnsRecord[]> = {};
@@ -113,11 +86,8 @@ async function main(args: string[]): Promise<void> {
   const cfg = parseRouterConfig(
     readFileSync(i >= 0 ? (args[i + 1] ?? '') : join(HERE, 'router.local.json'), 'utf8'),
   );
-  if (!keychainHas(TOKEN_ENTRY)) {
-    throw new Error(`the Keychain has no ${TOKEN_ENTRY}; nothing was changed`);
-  }
-  const token = keychainRead(TOKEN_ENTRY).trim();
-  const api = cloudflare(token);
+  const token = cloudflareApiToken();
+  const api = cloudflareApi(token);
 
   const zones = await api<Array<{ id: string; account: { id: string } }>>(
     'GET',

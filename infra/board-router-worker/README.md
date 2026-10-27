@@ -158,6 +158,9 @@ has no address outside these routes.
 
 ## Each project's side
 
+`bun run machine:deploy --project <name> --tunnel named` makes the first two
+for a Fly project machine (docs/process/project-machine.md, "The tunnel").
+
 - **An origin hostname per machine.** A proxied DNS record pointing at the
   machine's tunnel, with no Access application on it. A visitor who types it
   directly is refused by the server, because the hostname is on none of its
