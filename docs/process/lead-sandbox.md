@@ -102,7 +102,9 @@ bun scripts/lead-sandbox.ts --config ~/.config/claude-workspaces/lead-sandbox.js
 
 **3. Check.** It writes the profiles, then lists each lead's own projects
 (they must list: the control) and every protected folder (it must refuse)
-from inside that lead's profile. Any failure exits 1 and names the lead and
+from inside that lead's profile, then asks `bun` (from PATH, as the hooks
+run it) how many environment variables it sees from the lead's first
+project: zero is a failure. Any failure exits 1 and names the lead and
 the folder. It never lists the prod root; the home folder above it proves
 the same deny.
 
@@ -194,7 +196,8 @@ above:
   on each Bash call, UserPromptSubmit and Stop;
 - `--continue` resumed the probe's previous session;
 - reading a Riverbend file and listing `~/dev` still answered
-  `Operation not permitted`.
+  `Operation not permitted`. Listing `~/dev` now answers with its names:
+  see "Names, not contents, of the folder above each project" below.
 
 Without the config's `allowRead` list, the same probe broke on each row of
 the table in step 1. The status line is the exception: `claude -p` draws
@@ -229,6 +232,15 @@ present and skips, saying so, when it is not (Linux CI).
 - **Names, not contents, of other scratch folders.** Claude Code opens
   `/private/tmp/claude-<uid>` itself at start, so a lead can list the names
   of the other projects' scratch folders there.
+- **Names, not contents, of the folder above each project.** bun 1.3.10
+  starts with an empty environment when it cannot list the folders above
+  its cwd, so every hook lost `CW_WORKSPACE_ID` and the Stop hook posted
+  nothing (measured 28 October: 0 variables, 57 once the parent lists).
+  `file-read-metadata` there is not enough. So the profile allows
+  `file-read-data` on the parent of each own project, at both ends of a
+  symlink, as a literal: `ls ~/dev` lists the sibling projects' names, and
+  listing or reading inside one is still refused. A parent inside another
+  lead's project gets no such rule.
 - **Claude Code's own Bash sandbox cannot start inside this one.** A nested
   `sandbox-exec` fails with `sandbox_apply: Operation not permitted`. The
   owner's settings do not turn it on today.

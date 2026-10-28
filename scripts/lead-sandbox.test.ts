@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   type LeadSandboxConfig,
@@ -155,6 +155,32 @@ describe('buildProfile', () => {
     expect(prod).toBeGreaterThan(l.findIndex((x) => x.includes(`(subpath "${HOME}/Library")`)));
   });
 
+  it("lets bun list its own project's parent, at both ends, and nothing below it", () => {
+    for (const parent of [`${HOME}/dev`, `${TWIN}/dev`]) {
+      const list = at(`(allow file-read-data (literal "${parent}"))`);
+      expect(list, parent).toBeGreaterThan(at(`(subpath "${dirname(parent)}"))`));
+      expect(lines).not.toContain(`(allow file-read* (subpath "${parent}"))`);
+      expect(lines.some((l) => l.startsWith('(allow') && l.includes(`(subpath "${parent}")`))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("does not list a parent inside another lead's project", () => {
+    const nested = parseConfig(
+      {
+        leads: [
+          { name: 'harborlight-lead', projects: [`${HOME}/dev/harborlight/tools`] },
+          { name: 'riverbend-lead', projects: [`${HOME}/dev/harborlight`] },
+        ],
+      },
+      HOME,
+    );
+    if (!nested.ok || !nested.config.leads[0]) throw new Error('fixture refused');
+    const l = rules(buildProfile(nested.config.leads[0], nested.config, fakeMachine));
+    expect(l.some((x) => x.startsWith('(allow file-read-data'))).toBe(false);
+  });
+
   it('checks every other lead and protected folder, and not its own project', () => {
     const t = checkTargets(harborlight, c, fakeMachine);
     expect(t.own).toEqual([`${HOME}/dev/harborlight`]);
@@ -292,6 +318,21 @@ describe.skipIf(!HAVE_SANDBOX)('the profile under the real sandbox-exec', () => 
       sh(`mkdir -p '${own}' && echo t > '${own}/s.jsonl' && echo h >> '${claudeDir}/history.jsonl'`)
         .status,
     ).toBe(0);
+  });
+
+  it('starts bun with its environment, and still cannot list a sibling project', () => {
+    const bun = spawnSync(
+      SANDBOX_EXEC,
+      ['-f', profileFile, 'bun', '-e', 'console.log(Object.keys(process.env).length)'],
+      { cwd: harborlight, encoding: 'utf8' },
+    );
+    expect(Number(bun.stdout.trim()), bun.stderr).toBeGreaterThan(0);
+    const sibling = join(home, 'dev', 'saltmarsh');
+    mkdirSync(sibling);
+    writeFileSync(join(sibling, 'notes.md'), 'saltmarsh\n');
+    expect(sh(`ls '${join(home, 'dev')}'`).status).toBe(0); // the parent lists
+    expect(sh(`ls '${sibling}'`).status).not.toBe(0);
+    expect(sh(`cat '${sibling}/notes.md'`).status).not.toBe(0);
   });
 
   it('cannot read or rewrite the config or its own profile', () => {
