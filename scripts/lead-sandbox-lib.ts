@@ -19,47 +19,18 @@
  * `mac-lead-users-lib.ts` does for its ACLs.
  */
 import { dirname } from 'node:path';
+import { gitProxyNetworkRules, gitProxyPaths } from './git-proxy-lead.ts';
+import type { Lead, LeadSandboxConfig, Machine } from './lead-sandbox-config.ts';
 import { expandRealPaths } from './mac-lead-users-lib.ts';
 
-export interface Lead {
-  /** Lowercase words, for the profile's file name. */
-  name: string;
-  /** The lead's own repos: read and write, with their worktrees inside. */
-  projects: string[];
-  /** Extra folders or files the lead may read and write (a build cache). */
-  allow: string[];
-  /** Extra folders or files the lead may only read (`~/.gitconfig`). */
-  allowRead: string[];
-  /**
-   * Leave the tmux socket reachable, for a lead that runs tmux sessions of
-   * its own. Off by default: with it, the lead can `send-keys` into every
-   * unsandboxed session on the machine.
-   */
-  allowTmux: boolean;
-  /**
-   * Leave the keychain readable, for a lead whose `gh` or git over HTTPS it
-   * holds. Off by default: with it, the lead reads every item in it.
-   */
-  allowKeychain: boolean;
-}
-
-export interface LeadSandboxConfig {
-  leads: Lead[];
-  /** Folders no lead may read or write, beyond the built-in ones. */
-  protect: string[];
-}
-
-/** The machine, as the generator may ask about it. */
-export interface Machine {
-  home: string;
-  uid: number;
-  /** The path with every symlink resolved, or the path itself if it is missing. */
-  realpath(path: string): string;
-}
+export {
+  type Lead,
+  type LeadSandboxConfig,
+  type Machine,
+  parseConfig,
+} from './lead-sandbox-config.ts';
 
 export const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
-
-const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * Folders every lead is denied whatever the config says, relative to the
@@ -182,63 +153,6 @@ interface Rule {
   last?: true;
 }
 
-/** The config, checked, or the reason it is refused. A path may start `~/`. */
-export function parseConfig(
-  raw: unknown,
-  home: string,
-): { ok: true; config: LeadSandboxConfig } | { ok: false; error: string } {
-  if (typeof raw !== 'object' || raw === null)
-    return { ok: false, error: 'config is not an object' };
-  const r = raw as { leads?: unknown; protect?: unknown };
-  if (!Array.isArray(r.leads) || r.leads.length === 0)
-    return { ok: false, error: 'config.leads must list at least one lead' };
-  const paths = (v: unknown, what: string): string[] | string => {
-    if (v === undefined) return [];
-    if (!Array.isArray(v) || !v.every((p) => typeof p === 'string'))
-      return `${what} must be a list of paths`;
-    const expanded = (v as string[]).map((p) => (p.startsWith('~/') ? `${home}${p.slice(1)}` : p));
-    for (const p of expanded) {
-      if (!p.startsWith('/')) return `${what}: ${p} must be absolute`;
-      if (p === '/' || /\/\.\.?(\/|$)/.test(p))
-        return `${what}: ${p} must name one folder, not / or a relative step`;
-      if (/["\\\n\r]/.test(p)) return `${what}: ${p} must not hold a quote or a backslash`;
-    }
-    return expanded;
-  };
-  const leads: Lead[] = [];
-  const seen = new Set<string>();
-  for (const l of r.leads as unknown[]) {
-    const o = (l ?? {}) as Record<string, unknown>;
-    const name = o.name;
-    if (typeof name !== 'string' || !NAME.test(name))
-      return { ok: false, error: `lead name ${JSON.stringify(name)} must be lowercase words` };
-    if (seen.has(name)) return { ok: false, error: `${name} is listed twice` };
-    seen.add(name);
-    const projects = paths(o.projects, `${name}.projects`);
-    const allow = paths(o.allow, `${name}.allow`);
-    const allowRead = paths(o.allowRead, `${name}.allowRead`);
-    if (o.allowTmux !== undefined && typeof o.allowTmux !== 'boolean')
-      return { ok: false, error: `${name}.allowTmux must be true or false` };
-    if (o.allowKeychain !== undefined && typeof o.allowKeychain !== 'boolean')
-      return { ok: false, error: `${name}.allowKeychain must be true or false` };
-    for (const p of [projects, allow, allowRead])
-      if (typeof p === 'string') return { ok: false, error: p };
-    if ((projects as string[]).length === 0)
-      return { ok: false, error: `${name}.projects must name at least one repo` };
-    leads.push({
-      name,
-      projects: projects as string[],
-      allow: allow as string[],
-      allowRead: allowRead as string[],
-      allowTmux: o.allowTmux === true,
-      allowKeychain: o.allowKeychain === true,
-    });
-  }
-  const protect = paths(r.protect, 'protect');
-  if (typeof protect === 'string') return { ok: false, error: protect };
-  return { ok: true, config: { leads, protect } };
-}
-
 /** Claude Code's name for a project's transcript folder: every other character a dash. */
 export function transcriptSlug(path: string): string {
   return path.replace(/[^a-zA-Z0-9]/g, '-');
@@ -315,6 +229,10 @@ function rulesFor(
       rules.push({ access: 'list', filter: { literal: parent }, why: 'bun needs its env' });
   for (const p of lead.allow) add('write', p, 'config allow');
   for (const p of lead.allowRead) add('read', p, 'config allowRead');
+  for (const p of gitProxyPaths(lead, m.home)) {
+    add('read', p, 'git proxy token');
+    rules.push({ access: 'nowrite', filter: { subpath: p }, why: 'git proxy token', last: true });
+  }
   rules.push(...claudeCodeRules(m));
   // The config and the profiles: a lead that could edit them would widen
   // its own next launch. Denied last, so no allow at any depth reopens them,
@@ -454,6 +372,7 @@ export function buildProfile(
     ';; Starting a process outside the wall.',
     ...escapeRules(lead, m),
     ...keychainRules(lead),
+    ...gitProxyNetworkRules(lead, config.gitProxyPort),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',
