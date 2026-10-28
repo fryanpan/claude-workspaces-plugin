@@ -58,7 +58,7 @@ flowchart TB
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
     ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -1693,6 +1693,13 @@ covers the manual pull-and-kickstart fallback the verb never sees.
 SIGTERM-then-SIGKILL sequence `scripts/serve.ts` runs on its children before it
 exits, moved out of the script so a test can drive it, and it imports nothing
 from the server.
+
+`supervisor-hang-capture.ts` joins Ops beside them and moves no boundary. It is
+what the supervisor records before it restarts a server that is listening and
+not answering: a `sample` of the child into the data directory, the machine's
+swap and memory-pressure readings, and the child's RSS and page-ins.
+`supervisor-health.ts` imports its budget and runs it through an injected hook;
+it imports nothing from the server.
 
 `claude-key-source.ts` joins the DOMAIN row and moves no boundary. It
 decides which Claude key a process may spend: prod's Keychain item when the
