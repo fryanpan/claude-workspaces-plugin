@@ -96,6 +96,23 @@ describe('staleAsk', () => {
     expect(staleAsk(t, ask)).toEqual({ rule: 'settled', at: 200, commentId: 'c2' });
   });
 
+  it('is settled by a reply posted in the same millisecond, after the ask', () => {
+    // A clock read in milliseconds ties for two posts made back to back, and
+    // the server suite makes them: CI read the ask still on Home after its
+    // settling reply. Thread order breaks the tie; a tied comment BEFORE the
+    // ask still settles nothing.
+    const t = {
+      anchor: { kind: 'text-range' },
+      comments: [
+        reply('c0', 100, 'I removed the Riverbend button.'),
+        ask,
+        reply('c2', 100, 'I removed the Riverbend button.'),
+      ],
+    };
+    expect(staleAsk(t, ask)).toEqual({ rule: 'settled', at: 100, commentId: 'c2' });
+    expect(staleAsk({ ...t, comments: t.comments.slice(0, 2) }, ask)).toBeUndefined();
+  });
+
   it('is not settled by somebody else saying the same words, nor by an earlier comment', () => {
     const t = {
       anchor: { kind: 'text-range' },
