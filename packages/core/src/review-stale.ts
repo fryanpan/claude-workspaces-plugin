@@ -148,8 +148,16 @@ export function staleAsk(thread: ThreadLike, declaring: CommentLike): StaleAsk |
   }
   const headline = (declaring.review as { headline?: unknown } | undefined)?.headline;
   if (typeof headline !== 'string') return undefined;
-  const later = [...(thread.comments ?? [])]
-    .filter((c) => c.ts > declaring.ts && c.id !== declaring.id)
+  // Later by clock, or tied to the millisecond and after it in the thread:
+  // two posts made back to back read the same `Date.now()`.
+  const comments = thread.comments ?? [];
+  const at = comments.findIndex((c) => c.id === declaring.id);
+  const later = comments
+    .filter(
+      (c, i) =>
+        c.id !== declaring.id &&
+        (c.ts > declaring.ts || (c.ts === declaring.ts && at >= 0 && i > at)),
+    )
     .sort((a, b) => a.ts - b.ts);
   for (const c of later) {
     if (c.review !== undefined) continue;
