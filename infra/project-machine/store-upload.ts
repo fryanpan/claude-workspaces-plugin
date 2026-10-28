@@ -6,9 +6,12 @@
  * Files are assumed to be only appended to, and that is checked. Per file the
  * state keeps the bytes already sent and a hash of the last 4 KiB of them.
  * Each run sends whole lines past that point as
- * `<kind>/<board>/<host>/<name>/<offset>.jsonl.zst.cw`: zstd, then sealed with
+ * `<host>/<kind>/<board>/<name>/<offset>.jsonl.zst.cw`: zstd, then sealed with
  * `snapshot.ts`'s format. A file that shrank, or whose sent tail changed, is
  * sent again from offset 0 under `<name>/rewrite-<n>/`.
+ *
+ * The writing host comes first, so a writer's credential is a plain trailing
+ * prefix, `<host>/*`. Boards are kept apart by their keys, not by the path.
  *
  * The offset in the key means no upload replaces another, so a create-only
  * credential is enough. The state is saved only after a put succeeds; a put
@@ -230,13 +233,16 @@ export async function runOnce(opts: RunOptions): Promise<RunReport> {
         report.held.push({ path: src.path, reason: 'local-only board' });
         break;
       }
-      const tail = `${rec.folder}/${opts.host}/${src.name}/${genPart}${rec.sent}.jsonl.zst.cw`;
-      const key = `${kind}/${tail}`;
+      const tail = `${rec.folder}/${src.name}/${genPart}${rec.sent}.jsonl.zst.cw`;
+      const key = `${opts.host}/${kind}/${tail}`;
       await opts.store.put(key, seal(chunk, recipient));
       report.uploaded.push({ key, bytes: chunk.length });
       const usage = src.kind === 'transcript' && opts.keys.usage ? usageLines(chunk) : '';
       if (usage && opts.keys.usage) {
-        await opts.store.put(`usage/${tail}`, seal(Buffer.from(usage), opts.keys.usage));
+        await opts.store.put(
+          `${opts.host}/usage/${tail}`,
+          seal(Buffer.from(usage), opts.keys.usage),
+        );
       }
       const sent = rec.sent + chunk.length;
       rec = { ...rec, sent, tail: tailHash(src.path, sent) };

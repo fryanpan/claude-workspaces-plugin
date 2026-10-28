@@ -130,7 +130,7 @@ describe('a pass against a bucket', () => {
       const status = await child.exited;
       expect(await new Response(child.stderr).text()).toBe('');
       expect(status).toBe(0);
-      const path = '/cw-store-test/transcripts/saltmarsh/fly/sess-s/0.jsonl.zst.cw';
+      const path = '/cw-store-test/fly/transcripts/saltmarsh/sess-s/0.jsonl.zst.cw';
       expect(seen).toEqual([`PUT ${path}`]);
       const body = objects.get(path) ?? new Uint8Array();
       expect(openChunk(body, saltmarsh.identity).toString()).toBe(text);

@@ -158,13 +158,13 @@ describe('each file is sealed to its board’s key', () => {
     const state = join(fresh('state'), 'state.json');
     await runOnce({ sources, store, statePath: state, host: 'mac', keys, classOf });
 
-    const river = 'transcripts/riverbend/mac/sess-river/';
-    const salt = 'transcripts/saltmarsh/mac/sess-salt/';
+    const river = 'mac/transcripts/riverbend/sess-river/';
+    const salt = 'mac/transcripts/saltmarsh/sess-salt/';
     expect(joined(store, river, review.identity)).toBe(readFileSync(files.riverbend, 'utf8'));
     expect(joined(store, salt, saltmarsh.identity)).toBe(readFileSync(files.saltmarsh, 'utf8'));
     // A subagent transcript goes with its session.
     expect(
-      joined(store, 'transcripts/riverbend/mac/sess-river/subagents/agent-1/', review.identity),
+      joined(store, 'mac/transcripts/riverbend/sess-river/subagents/agent-1/', review.identity),
     ).toBe(readFileSync(files.riverbendSub, 'utf8'));
 
     // Different keys: the private chunk does not open with the review key.
@@ -177,8 +177,8 @@ describe('each file is sealed to its board’s key', () => {
     expect(all.some((k) => k.includes('harborlight') || k.includes('sess-harbor'))).toBe(false);
 
     // No board, and two boards, both land in unsorted under the owner's key.
-    const loose = 'transcripts/unsorted/mac/sess-loose/';
-    const both = 'transcripts/unsorted/mac/sess-both/';
+    const loose = 'mac/transcripts/unsorted/sess-loose/';
+    const both = 'mac/transcripts/unsorted/sess-both/';
     expect(joined(store, loose, owner.identity)).toBe(readFileSync(files.loose, 'utf8'));
     expect(joined(store, both, owner.identity)).toBe(readFileSync(files.twoBoards, 'utf8'));
     expect(() =>
@@ -200,7 +200,7 @@ describe('each file is sealed to its board’s key', () => {
       keys,
       classOf,
     });
-    const k = store.keysUnder('usage/saltmarsh/mac/sess-salt/')[0] ?? '';
+    const k = store.keysUnder('mac/usage/saltmarsh/sess-salt/')[0] ?? '';
     const rows = openChunk(store.objects.get(k) ?? new Uint8Array(), usage.identity)
       .toString('utf8')
       .trim()
@@ -214,7 +214,7 @@ describe('each file is sealed to its board’s key', () => {
       },
     ]);
     expect(JSON.stringify(rows)).not.toContain('Saltmarsh client notes');
-    expect(store.keysUnder('usage/harborlight/')).toEqual([]);
+    expect(store.keysUnder('mac/usage/harborlight/')).toEqual([]);
   });
 
   it('a board whose class cannot be read is private: it never gets the review key', async () => {
@@ -233,11 +233,33 @@ describe('each file is sealed to its board’s key', () => {
         throw new Error('server down');
       },
     });
-    const body = store.objects.get('transcripts/riverbend/mac/x/0.jsonl.zst.cw');
+    const body = store.objects.get('mac/transcripts/riverbend/x/0.jsonl.zst.cw');
     if (!body) throw new Error('nothing uploaded');
     // No board key is configured for riverbend, so it falls back to the owner.
     expect(openChunk(body, owner.identity).toString()).toBe(line(1));
     expect(() => openChunk(body, review.identity)).toThrow(/did not decrypt/);
+  });
+});
+
+describe('the writing host', () => {
+  it('is the first segment of every key, so its credential is the prefix <host>/', async () => {
+    const { projects, ledger } = threeBoards();
+    const data = fresh('data');
+    mkdirSync(join(data, 'workspaces'));
+    writeFileSync(join(data, 'workspaces', 'riverbend.events.jsonl'), line(1));
+    const store = new MemoryStore();
+    await runOnce({
+      sources: [...transcriptSources(projects, ledgerResolver(ledger)), ...eventSources(data)],
+      store,
+      statePath: join(fresh('state'), 'state.json'),
+      host: 'mac',
+      keys,
+      classOf,
+    });
+    // Every kind is present, so the check below is not vacuous.
+    const kinds = new Set(store.log.map((k) => k.split('/')[1]));
+    expect([...kinds].sort()).toEqual(['events', 'transcripts', 'usage']);
+    expect(store.log.filter((k) => !k.startsWith('mac/'))).toEqual([]);
   });
 });
 
@@ -266,12 +288,12 @@ describe('event logs', () => {
       classOf,
     });
     // On a project machine every log is that machine's board.
-    expect(store.keysUnder('events/').sort()).toEqual([
-      'events/saltmarsh/fly/activity/0.jsonl.zst.cw',
-      'events/saltmarsh/fly/harborlight.agent-notes/0.jsonl.zst.cw',
-      'events/saltmarsh/fly/riverbend.events/0.jsonl.zst.cw',
+    expect(store.keysUnder('fly/events/').sort()).toEqual([
+      'fly/events/saltmarsh/activity/0.jsonl.zst.cw',
+      'fly/events/saltmarsh/harborlight.agent-notes/0.jsonl.zst.cw',
+      'fly/events/saltmarsh/riverbend.events/0.jsonl.zst.cw',
     ]);
-    expect(store.keysUnder('usage/')).toEqual([]);
+    expect(store.keysUnder('fly/usage/')).toEqual([]);
   });
 });
 
@@ -303,7 +325,7 @@ describe('a run resumes where it stopped', () => {
     await runOnce(opts);
     const resent = store.log.slice(firstRun).filter((k) => acknowledged.includes(k));
     expect(resent).toEqual([]);
-    const prefix = 'transcripts/riverbend/fly/s/';
+    const prefix = 'fly/transcripts/riverbend/s/';
     expect(joined(store, prefix, review.identity)).toBe(expected);
 
     // A third run with nothing new sends nothing.
@@ -341,10 +363,10 @@ describe('a run resumes where it stopped', () => {
     await runOnce(opts);
     writeFileSync(path, line(9) + line(2) + line(3));
     await runOnce(opts);
-    expect(joined(opts.store, 'transcripts/riverbend/mac/r/rewrite-1/', review.identity)).toBe(
+    expect(joined(opts.store, 'mac/transcripts/riverbend/r/rewrite-1/', review.identity)).toBe(
       line(9) + line(2) + line(3),
     );
-    expect(joined(opts.store, 'transcripts/riverbend/mac/r/', review.identity)).toBe(
+    expect(joined(opts.store, 'mac/transcripts/riverbend/r/', review.identity)).toBe(
       line(1) + line(2),
     );
   });
