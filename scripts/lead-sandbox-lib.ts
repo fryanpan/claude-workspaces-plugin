@@ -36,6 +36,11 @@ export interface Lead {
    * unsandboxed session on the machine.
    */
   allowTmux: boolean;
+  /**
+   * Leave the keychain readable, for a lead whose `gh` or git over HTTPS it
+   * holds. Off by default: with it, the lead reads every item in it.
+   */
+  allowKeychain: boolean;
 }
 
 export interface LeadSandboxConfig {
@@ -135,6 +140,23 @@ export function escapeRules(lead: Lead, m: Machine): string[] {
   ];
 }
 
+/**
+ * The Mach services every keychain read goes through. A file rule cannot
+ * see a read, since `securityd` does it; denying these refuses every item
+ * at once. Measured 28 October: a dummy item read back from inside a
+ * profile before, refused after (exit 44), and Claude Code 2.1.312 still
+ * signs in, from `~/.claude/.credentials.json`. `gh` (its token is in the
+ * keyring) and git over HTTPS (credential helper `osxkeychain`) lose their
+ * credentials, so a lead that needs them sets `allowKeychain`.
+ */
+export const KEYCHAIN_SERVICES = ['com.apple.SecurityServer', 'com.apple.securityd'];
+
+export function keychainRules(lead: Lead): string[] {
+  if (lead.allowKeychain) return [];
+  const names = KEYCHAIN_SERVICES.map((n) => `(global-name ${sbString(n)})`).join(' ');
+  return [`(deny mach-lookup ${names}) ; the keychain`];
+}
+
 /** The Shortcuts helper the `shortcuts` CLI talks to (found by denying names until `list` failed). */
 export const SHORTCUTS_SERVICE = 'com.apple.siri.VoiceShortcuts.xpc';
 
@@ -186,6 +208,8 @@ export function parseConfig(
     const allowRead = paths(o.allowRead, `${name}.allowRead`);
     if (o.allowTmux !== undefined && typeof o.allowTmux !== 'boolean')
       return { ok: false, error: `${name}.allowTmux must be true or false` };
+    if (o.allowKeychain !== undefined && typeof o.allowKeychain !== 'boolean')
+      return { ok: false, error: `${name}.allowKeychain must be true or false` };
     for (const p of [projects, allow, allowRead])
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
@@ -196,6 +220,7 @@ export function parseConfig(
       allow: allow as string[],
       allowRead: allowRead as string[],
       allowTmux: o.allowTmux === true,
+      allowKeychain: o.allowKeychain === true,
     });
   }
   const protect = paths(r.protect, 'protect');
@@ -406,6 +431,7 @@ export function buildProfile(
     ...new Set(lines.map((l) => l.text)),
     ';; Starting a process outside the wall.',
     ...escapeRules(lead, m),
+    ...keychainRules(lead),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',

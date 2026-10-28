@@ -140,6 +140,45 @@ function launchdRow(profile: string, cwd: string): EscapeRow {
   };
 }
 
+/**
+ * A dummy item of the check's own, put in the keychain outside: read back
+ * outside (the control), refused inside, and deleted either way. It never
+ * reads a real item.
+ */
+export function keychainRow(profile: string, cwd: string): EscapeRow {
+  // One fixed name, so a run killed before its delete is replaced (`-U`), not added to.
+  const service = 'lead-sandbox-check-harborlight';
+  const security = (prefix: string[], ...args: string[]) =>
+    spawnSync(prefix[0] ?? '', [...prefix.slice(1), ...args], { cwd, stdio: 'ignore' }).status ===
+    0;
+  const outside = ['/usr/bin/security'];
+  const inside = [SANDBOX_EXEC, '-f', profile, '/usr/bin/security'];
+  if (
+    !security(
+      outside,
+      'add-generic-password',
+      '-U',
+      '-a',
+      'lead-sandbox',
+      '-s',
+      service,
+      '-w',
+      'dummy',
+    )
+  )
+    return { ok: false, says: 'keychain: could not add a dummy item to test against' };
+  try {
+    const control = security(outside, 'find-generic-password', '-s', service, '-w');
+    const read = security(inside, 'find-generic-password', '-s', service, '-w');
+    return {
+      ok: control && !read,
+      says: `keychain: a dummy item ${control ? 'reads' : 'does not read'} outside (the control), ${read ? 'reads' : 'refused'} inside (must be refused)`,
+    };
+  } finally {
+    security(outside, 'delete-generic-password', '-s', service);
+  }
+}
+
 /** Every escape row for one lead's profile, run from the lead's first project. */
 export function escapeRows(
   profile: string,
