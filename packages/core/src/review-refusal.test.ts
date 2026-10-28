@@ -11,6 +11,7 @@ import {
   REVIEW_REFUSAL_KINDS,
   REVIEW_REFUSAL_RULES,
   namesDestructiveGitStep,
+  namesHumanOnlyCommit,
   refusalSystemLines,
 } from './review-refusal.ts';
 
@@ -173,5 +174,31 @@ describe('no rule text says consent covers a destructive git step', () => {
     }
     // The positive control: the clauses that name a step were found at all.
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+describe('an ask on a repo where only a person commits is recognised', () => {
+  it('names the repo rule, as an agent or the repo would say it', () => {
+    for (const text of [
+      'AGENTS.md says "Never push or commit code. The human pushes and commits code changes themselves".',
+      'Agents may not commit or push on the Riverbend repo.',
+      "I'm not allowed to push here, so the commit is yours.",
+      'Agents are forbidden to commit on Harborlight.',
+      'On this repo a person pushes every change.',
+      'Pushes are human-only on the Saltmarsh repo.',
+    ]) {
+      expect({ text, named: namesHumanOnlyCommit(text) }).toEqual({ text, named: true });
+    }
+  });
+
+  it('leaves an ordinary ship ask alone', () => {
+    for (const text of [
+      'Open the pull request for the Riverbend export fix now?',
+      'Push the fix and merge it once CI is green?',
+      'Merge the Harborlight branch into main?',
+      'Commit the Saltmarsh fixture and push it?',
+    ]) {
+      expect({ text, named: namesHumanOnlyCommit(text) }).toEqual({ text, named: false });
+    }
   });
 });
