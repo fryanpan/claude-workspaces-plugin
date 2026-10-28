@@ -17,7 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { escapeRows } from './lead-sandbox-escapes.ts';
+import { escapeRows, keychainRow } from './lead-sandbox-escapes.ts';
 import {
   type LeadSandboxConfig,
   type Machine,
@@ -128,6 +128,20 @@ describe('buildProfile', () => {
       '(deny file-read* file-write* (subpath "/tmp/tmux-501"))',
       '(deny file-read* file-write* (subpath "/private/tmp/tmux-501"))',
     ]);
+  });
+
+  it("refuses the keychain unless the lead's config says allowKeychain", () => {
+    const deny =
+      '(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))';
+    expect(lines).toContain(deny);
+    const own = parseConfig(
+      { leads: [{ name: 'harborlight-lead', projects: ['/a'], allowKeychain: true }] },
+      HOME,
+    );
+    if (!own.ok || !own.config.leads[0]) throw new Error('fixture refused');
+    expect(rules(buildProfile(own.config.leads[0], own.config, fakeMachine))).not.toContain(deny);
+    const bad = { leads: [{ name: 'harborlight-lead', projects: ['/a'], allowKeychain: 1 }] };
+    expect(parseConfig(bad, HOME).ok).toBe(false);
   });
 
   it('refuses the tmux socket at both spellings, open and Apple events', () => {
@@ -386,6 +400,16 @@ describe.skipIf(!HAVE_SANDBOX)('the profile under the real sandbox-exec', () => 
       expect(rows.filter((r, i) => i !== row && !r.ok).map((r) => r.says)).toEqual([]);
     }
   }, 120_000);
+
+  it('cannot read a keychain item, and can once the rule is removed', () => {
+    const full = join(root, 'keychain-full.sb');
+    const text = buildProfile(lead, parsed.config, m, []);
+    writeFileSync(full, text);
+    expect(keychainRow(full, harborlight)).toMatchObject({ ok: true });
+    const mutated = join(root, 'keychain-mutated.sb');
+    writeFileSync(mutated, text.replace(/^\(deny mach-lookup.*securityd.*$/m, ''));
+    expect(keychainRow(mutated, harborlight).ok).toBe(false);
+  }, 60_000);
 
   it('cannot read or rewrite the config or its own profile', () => {
     expect(sh(`cat '${configFile}'`).status).not.toBe(0);

@@ -44,7 +44,11 @@ profile per lead. A profile allows everything, then:
   cannot ask Terminal or iTerm to run a script; and the Shortcuts helper, so
   `shortcuts run` cannot run a shortcut there. The tmux rule is a
   `network-outbound` deny: a lead in a pane finds the socket in `$TMUX`, and a
-  file deny on the folder alone still let it connect.
+  file deny on the folder alone still let it connect;
+- **refuses the keychain**: every read goes to `securityd` over Mach, so the
+  profile denies its two services and every item is refused at once. Claude
+  Code still signs in, from `~/.claude/.credentials.json`. A lead whose
+  config sets `allowKeychain` keeps it (step 1).
 
 Seatbelt applies the last rule that matches, so the profile runs from the
 shortest path to the longest and the most specific folder decides. It
@@ -102,6 +106,15 @@ lives in another repo gets that one file, never the repo. A plugin from a
 `directory` marketplace (`extraKnownMarketplaces` in `settings.json`) gets
 its folder, read only.
 
+**A lead that needs `gh` or git over HTTPS** sets `"allowKeychain": true` in
+its entry. Both keep their credential in the keychain on the owner's Mac
+(`gh` in the keyring, git through the `osxkeychain` helper), and with the
+keychain refused, measured 28 October, `gh auth status` exits 1 and
+`git ls-remote` of a private repo over HTTPS exits 128. A fetch of a public
+repo still works. Every other lead is refused the keychain by default,
+because a lead that can read it reads every item there, the Cloudflare and
+Fly tokens included until the keeper's cutover.
+
 **2. Dry run.** It writes nothing, and prints each profile and the command
 that launches each lead.
 
@@ -117,7 +130,7 @@ project: zero is a failure. Any failure exits 1 and names the lead and
 the folder. It never lists the prod root; the home folder above it proves
 the same deny.
 
-Then five rows per lead try the ways out of the wall
+Then six rows per lead try the ways out of the wall and the keychain
 (`scripts/lead-sandbox-escapes.ts`), each with a control outside it:
 
 | Row | Inside the profile | Control outside |
@@ -127,11 +140,12 @@ Then five rows per lead try the ways out of the wall
 | osascript | `sandbox_check` says `appleevent-send` is denied | as above |
 | shortcuts | `shortcuts list` fails | `shortcuts list` answers |
 | launchd | a `launchctl submit` of `/usr/bin/true` is not loaded (launchd's own refusal; no rule of ours) | the same job submitted outside loads, and is removed at once |
+| keychain | `security find-generic-password` of a dummy item the check made (`lead-sandbox-check-harborlight`) is refused | the same read outside returns it; the item is deleted after |
 
 `open` and `osascript` are asked of the sandbox rather than driven, because
 driving them would start an app or show a window. The check starts and kills
 its own tmux server and never touches another session. Removing any one of
-the four rules fails its row; `scripts/lead-sandbox.test.ts` does that for
+the five rules fails its row; `scripts/lead-sandbox.test.ts` does that for
 each, against the real `sandbox-exec`.
 
 ```bash
@@ -317,38 +331,16 @@ Option 3 is the smallest change that closes the gap, and option 2 is what a
 lead on another machine already uses. Either needs `--check` to gain a row
 that the lead cannot reach another board.
 
-### The keychain answers the lead
+### The keychain answers a lead with `allowKeychain`
 
-**Measured:** a generic-password item made with `security
-add-generic-password` (a dummy, service `harborlight-sbx-probe`) was read back
-from inside a profile with `security find-generic-password -w`, then deleted.
-Reads go to `securityd` over Mach, so no file rule sees them.
-
-**Measured:** adding `(deny mach-lookup (global-name "com.apple.SecurityServer")
-(global-name "com.apple.securityd"))` refused the same read (exit 44), and a
-`claude -p` under that profile still signed in and answered. Claude Code
-2.1.312 signed in from `~/.claude/.credentials.json`, a file inside the wall.
-That changes what step 1's table says the keychain folder is for: the 16
-October run that answered "Not logged in" without it may have had no
-credentials file. Not measured with that deny: `gh`, `git` over HTTPS, and
-anything else in the owner's settings that keeps its secret in the
-keychain; each would lose it.
-
-**Inferred:** a profile rule can only deny the keychain whole, not one item,
-because the item is named in the request to `securityd`, which Seatbelt does
-not see. So the choice is all or nothing:
-
-1. **Deny `securityd` for leads now**, after checking `gh` and git inside the
-   wall, and move what they need into files the lead may read. That closes
-   every other keychain item, including the Cloudflare and Fly tokens
-   security.md says are still there.
-2. **Wait for the keeper** ([keeper.md](keeper.md)), which moves those
-   tokens behind Bryan's passkey. Until its cutover, a sandboxed lead can read
-   them.
-
-Either way, `~/.claude/.credentials.json` is Bryan's Claude sign-in and the
-lead can read and write it. No rule can deny it without signing the lead
-out; a config folder per lead, signed in on its own, is the only split.
+By default the profile now refuses the keychain (step 1). Measured 28
+October: a dummy item read back from inside a profile before the rule was
+refused after it (exit 44), and `claude -p` still signed in and answered,
+with the owner's full settings as well: every MCP server connected. A lead
+that sets `allowKeychain`, for `gh` or git over HTTPS, still reads every
+item; that closes with the keeper ([keeper.md](keeper.md)).
+`~/.claude/.credentials.json`, Bryan's Claude sign-in, stays readable and
+writable by every lead, since denying it signs the lead out.
 
 ## What this does not close
 

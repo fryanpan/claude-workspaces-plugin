@@ -18,13 +18,14 @@
  * and each protected folder (it must refuse) from inside that lead's
  * profile, asks `bun` there for its environment (it must not be empty),
  * tries each way out of the wall (`lead-sandbox-escapes.ts`: tmux, `open`,
- * `osascript`, `shortcuts`, launchd), and exits 1 on any failure.
+ * `osascript`, `shortcuts`, launchd), reads a dummy keychain item it made
+ * (it must be refused), and exits 1 on any failure.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { escapeRows } from './lead-sandbox-escapes.ts';
+import { escapeRows, keychainRow } from './lead-sandbox-escapes.ts';
 import {
   type Lead,
   type LeadSandboxConfig,
@@ -175,7 +176,10 @@ function main(argv: string[]): number {
       say(
         `${vars > 0 ? 'ok  ' : 'FAIL'} ${lead.name}  bun sees ${vars} env vars  in ${cwd}  (must be more than 0)`,
       );
-      for (const row of escapeRows(profile, cwd, machine.uid)) {
+      const keychain = lead.allowKeychain
+        ? { ok: true, says: 'keychain: left readable, as the config asks (allowKeychain)' }
+        : keychainRow(profile, cwd);
+      for (const row of [...escapeRows(profile, cwd, machine.uid), keychain]) {
         total++;
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
