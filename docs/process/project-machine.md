@@ -144,6 +144,68 @@ The plan's unchecked point belongs here too: whether Claude Code's Remote
 Control session runs on this machine in a long-lived terminal. That needs the
 lead's own user on the machine and is the next task, not this image.
 
+## GitHub events for a board here
+
+A board on this machine holds no GitHub token. It keeps a list of the events
+it wants, and the GitHub relay on the Mac reads that list and pushes each
+matching event, which reaches the board's agents as a `workspace.github_event`
+line. The design is in
+[security.md](../architecture/security.md) ("A board on another server hears
+GitHub"). Adding a board takes five steps; the first two run on the machine,
+the rest on the Mac.
+
+1. **Mint the board's push key and put it in the Mac's Keychain.** The key is
+   printed once and never stored on the machine. Keep it out of the terminal
+   and out of any argument list:
+
+   ```bash
+   KEY=$(fly ssh console --app cw-<project> -C \
+     "curl -s -H 'host: localhost:8787' -H 'content-type: application/json' \
+       -d '{\"workspaceId\":\"<board id>\"}' http://127.0.0.1:8787/api/github-push-keys" \
+     | tail -1 | jq -r .key)
+   printf 'add-generic-password -U -a %s -s cw-<project>-github-push -w %s\n' "$USER" "$KEY" | security -i
+   unset KEY
+   ```
+
+   Minting again replaces the key, and the old one stops working at once.
+
+2. **Subscribe the board.** An agent on the machine calls
+   `set_github_subscriptions`; from the Mac, the same PUT over `fly ssh`:
+
+   ```bash
+   fly ssh console --app cw-<project> -C \
+     "curl -s -X PUT -H 'host: localhost:8787' -H 'content-type: application/json' \
+       -d '{\"subscriptions\":[{\"repo\":\"<owner>/<repo>\",\"kinds\":[\"ci\",\"review\",\"mention\",\"merge\"]}]}' \
+       http://127.0.0.1:8787/workspaces/<board id>/github-subscriptions"
+   ```
+
+   Spell the repo as GitHub does: the broker matches it exactly. The relay
+   rereads the list once a minute.
+
+3. **Give the relay the board's Access service token.** The relay calls the
+   board at its project address, through Access, with the same service token
+   Home across servers uses, so the server's `CW_HOME_FEED_CLIENT_ID` must
+   already name it. Put the token's secret in the Keychain as
+   `cw-<project>-access-secret` the same way as step 1.
+
+4. **Add the board to the relay's config**, `.claude/github-relay.local.json`
+   at the root of the checkout the relay runs from (gitignored, mode 600):
+
+   ```json
+   {"broker": "http://127.0.0.1:7902",
+    "boards": {"<project>": {
+      "baseUrl": "https://<project>-workspaces.<zone>",
+      "workspaceId": "<board id>",
+      "pushKeyService": "cw-<project>-github-push",
+      "serviceToken": {"clientId": "<client id>.access", "secretService": "cw-<project>-access-secret"}}}}
+   ```
+
+5. **Restart the relay** so it reads the Keychain again:
+   `bun packages/server/src/github-relay/relay-bin.ts`. It logs
+   `<project>: registered, watching N repo(s)` once the board answers. It
+   registers again by itself when the broker restarts, so the broker never
+   needs to know about it.
+
 ## Restore
 
 ```bash

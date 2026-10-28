@@ -90,6 +90,10 @@
  *   Access stamp naming no email whose `common_name` is the service token
  *   client id this server was configured with. No person and no share or
  *   collab visitor reaches it.
+ * - `github-push` — answered ABOVE the host guard by `routes/github-hub.ts`:
+ *   the `home-feed` caller check, then the board's live push key (`gp1`).
+ *   A request carrying a cookie is refused before either. The Mac's GitHub
+ *   relay is its one caller.
  * - `open` — answered ABOVE the host guard. A row claiming this must say in
  *   `reason` why reading it is free; `gated` refuses one that does not.
  */
@@ -101,6 +105,7 @@ export type RouteGate =
   | 'collab-scope'
   | 'recall-callback'
   | 'home-feed'
+  | 'github-push'
   | 'open';
 
 /** One front-door path pattern. */

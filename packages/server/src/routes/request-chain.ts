@@ -6,7 +6,7 @@
  * door (the bad-path refusal, the hydration prewarm, the Sentry span,
  * compression, CORS and the slow-request line), then the gates in the order
  * they must run — the CORS preflight, the cross-origin write gate, the home
- * feed, admission, the local-only gate, attribution, the sign-in write gate,
+ * feed and the GitHub hub, admission, the local-only gate, attribution, the sign-in write gate,
  * the sign-in and share routes, the two vendor callbacks, the upgrades and
  * streams, and the workspace scope — and then the two halves below them:
  * the board and REST families (`request-chain-board.ts`) and the top-level
@@ -43,6 +43,7 @@ import { renderBoardMemberNotFound, renderBoardNotFound } from '../shells.ts';
 import type { BoardWorkspace } from '../tasks.ts';
 import { matchWorkspaceRoute } from '../workspace-path.ts';
 import { handleAuthShareRoutes } from './auth-share.ts';
+import { handleGithubHubRoute } from './github-hub.ts';
 import { handleHomeFeedRoute } from './home-feed.ts';
 import { handleRecallWebhookRoute } from './recall-webhook.ts';
 import { serveBoardRoutes } from './request-chain-board.ts';
@@ -224,11 +225,11 @@ export function createRequestChain(
         });
       }
 
-      // ── The home feed ── see routes/home-feed.ts. ABOVE admission, with a
-      // gate of its own: its one remote caller is a service token, which
-      // names nobody, and admission refuses a stamp that names nobody.
-      const homeFeed = await handleHomeFeedRoute(homeFeedCtx, req, pathname);
-      if (homeFeed) return homeFeed;
+      // ── Home feed, GitHub hub ── ABOVE admission, own gates: callers name nobody.
+      const above =
+        (await handleHomeFeedRoute(homeFeedCtx, req, pathname)) ??
+        (await handleGithubHubRoute(ctx.githubHubCtx, req, pathname));
+      if (above) return above;
 
       // ── Request admission ── see request-admission.ts.
       // The gate ANSWERS this request or hands back what it proved. A

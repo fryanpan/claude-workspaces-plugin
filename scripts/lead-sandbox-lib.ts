@@ -18,6 +18,7 @@
  * symlink alone protects nothing; every path is written at both ends, as
  * `mac-lead-users-lib.ts` does for its ACLs.
  */
+import { dirname } from 'node:path';
 import { expandRealPaths } from './mac-lead-users-lib.ts';
 
 export interface Lead {
@@ -67,12 +68,35 @@ export const PROD_ROOT = 'Library/Application Support/claude-workspaces';
  * What Claude Code reads and writes under the home folder to start, sign in
  * and keep its state, measured by running `claude -p` under the profile.
  * `~/.claude/projects` is denied again below this, and reopened only for the
- * lead's own transcript folders.
+ * lead's own transcript folders. What in it runs code is read only
+ * (CLAUDE_CODE_FOLDERS).
  */
 export const CLAUDE_READ_WRITE = ['.claude', '.local/share/claude', '.local/state/claude'];
 export const CLAUDE_READ = ['.local/bin', '.bun', 'Library/Keychains'];
 
-type Access = 'deny' | 'read' | 'write';
+/**
+ * What under `~/.claude` an unsandboxed session later runs or obeys:
+ * settings (hooks, MCP servers, the status line), plugin and skill code,
+ * instructions, and the shell snapshot and env files each Bash call
+ * sources. Readable, never writable, after every other rule, with
+ * `~/.claude.json` (its MCP servers) and the `~/.claude` folder itself, so
+ * it cannot be renamed away, edited and put back. Measured on 2.1.302: a
+ * `claude -p` with every write under `~/.claude` refused still signed in
+ * and ran a Bash call.
+ */
+export const CLAUDE_CODE_FOLDERS = [
+  'hooks',
+  'plugins',
+  'skills',
+  'agents',
+  'commands',
+  'rules',
+  'output-styles',
+  'shell-snapshots',
+  'session-env',
+];
+
+type Access = 'deny' | 'read' | 'write' | 'nowrite' | 'list';
 
 interface Rule {
   access: Access;
@@ -164,9 +188,9 @@ function rulesFor(
       for (const p of other.projects) add('deny', p, `${other.name}'s project`);
   for (const rel of CLAUDE_READ_WRITE) add('write', under(m.home, rel), 'Claude Code');
   for (const rel of CLAUDE_READ) add('read', under(m.home, rel), 'Claude Code');
-  // `~/.claude.json` and the temporary files it is replaced through.
+  // `~/.claude.json`, read only: claudeCodeRules refuses its writes.
   rules.push({
-    access: 'write',
+    access: 'read',
     filter: { regex: `^${escapeRegex(m.realpath(m.home))}/\\.claude\\.json[^/]*$`, under: m.home },
     why: 'Claude Code',
   });
@@ -195,8 +219,22 @@ function rulesFor(
       }
     }
   }
+  // bun starts with an EMPTY environment when it cannot list the folders
+  // above its cwd (measured on 1.3.10: 0 vars, so every hook lost its
+  // workspace). Listing the parent is enough; `file-read-metadata` is not.
+  // A literal: the lead sees its siblings' names, never what is in them.
+  // Not inside another lead's project, whose names are that lead's data.
+  const theirs = expandRealPaths(
+    config.leads.filter((o) => o.name !== lead.name).flatMap((o) => o.projects),
+    m.realpath,
+  );
+  const parents = new Set(lead.projects.flatMap((p) => [dirname(p), dirname(m.realpath(p))]));
+  for (const parent of parents)
+    if (!theirs.some((t) => parent === t || parent.startsWith(`${t}/`)))
+      rules.push({ access: 'list', filter: { literal: parent }, why: 'bun needs its env' });
   for (const p of lead.allow) add('write', p, 'config allow');
   for (const p of lead.allowRead) add('read', p, 'config allowRead');
+  rules.push(...claudeCodeRules(m));
   // The config and the profiles: a lead that could edit them would widen
   // its own next launch. Denied last, so no allow at any depth reopens them,
   // and prod's root with them.
@@ -211,6 +249,36 @@ function rulesFor(
   return rules;
 }
 
+/** No writes to what an unsandboxed session runs; see CLAUDE_CODE_FOLDERS. */
+function claudeCodeRules(m: Machine): Rule[] {
+  const why = 'runs outside the sandbox';
+  const claude = under(m.home, '.claude');
+  const rules: Rule[] = [{ access: 'nowrite', filter: { literal: claude }, why, last: true }];
+  // Written from both ends of `~/.claude`, not resolved one by one: a folder
+  // that does not exist yet resolves to itself, and a lead would create it
+  // at the far end of the symlink, where nothing denies it (measured).
+  for (const end of new Set([claude, m.realpath(claude)])) {
+    for (const rel of CLAUDE_CODE_FOLDERS)
+      rules.push({ access: 'nowrite', filter: { subpath: `${end}/${rel}` }, why, last: true });
+    rules.push({ access: 'nowrite', filter: { literal: `${end}/CLAUDE.md` }, why, last: true });
+    // settings.json, settings.local.json and the files they are replaced through.
+    rules.push({
+      access: 'nowrite',
+      filter: { regex: `^${escapeRegex(end)}/settings[^/]*$`, under: claude },
+      why,
+      last: true,
+    });
+  }
+  for (const end of new Set([m.home, m.realpath(m.home)]))
+    rules.push({
+      access: 'nowrite',
+      filter: { regex: `^${escapeRegex(end)}/\\.claude\\.json[^/]*$`, under: m.home },
+      why,
+      last: true,
+    });
+  return rules;
+}
+
 function depth(path: string): number {
   return path.split('/').filter(Boolean).length;
 }
@@ -221,7 +289,9 @@ function sbString(s: string): string {
 
 const VERB: Record<Access, string> = {
   deny: '(deny file-read* file-write*',
+  nowrite: '(deny file-write*',
   read: '(allow file-read*',
+  list: '(allow file-read-data',
   write: '(allow file-read* file-write*',
 };
 
@@ -243,7 +313,8 @@ export function buildProfile(
   const ancestors = new Set<string>();
   // At the same depth the lead's own grant wins over a shared protection:
   // the config may protect every project, the lead's own among them.
-  const order: Record<Access, number> = { deny: 0, read: 1, write: 2 };
+  const order: Record<Access, number> = { deny: 0, nowrite: 0, list: 1, read: 1, write: 2 };
+  const opens = (r: Rule) => r.access === 'read' || r.access === 'write';
   for (const r of rulesFor(lead, config, m, guard)) {
     if ('subpath' in r.filter) {
       for (const p of expandRealPaths([r.filter.subpath], m.realpath)) {
@@ -252,26 +323,26 @@ export function buildProfile(
           order: order[r.access],
           text: `${VERB[r.access]} (subpath ${sbString(p)})) ; ${r.why}`,
         });
-        if (r.access !== 'deny') for (const a of ancestorsOf(p)) ancestors.add(a);
+        if (opens(r)) for (const a of ancestorsOf(p)) ancestors.add(a);
       }
     } else if ('literal' in r.filter) {
       for (const p of expandRealPaths([r.filter.literal], m.realpath)) {
         lines.push({
           // After the subpath of the same folder, which it narrows.
-          depth: depth(p) + 0.5,
+          depth: r.last ? Number.POSITIVE_INFINITY : depth(p) + 0.5,
           order: order[r.access],
           text: `${VERB[r.access]} (literal ${sbString(p)})) ; ${r.why}`,
         });
-        for (const a of ancestorsOf(p)) ancestors.add(a);
+        if (opens(r)) for (const a of ancestorsOf(p)) ancestors.add(a);
       }
     } else {
       const root = m.realpath(r.filter.under);
       lines.push({
-        depth: depth(root) + 1,
+        depth: r.last ? Number.POSITIVE_INFINITY : depth(root) + 1,
         order: order[r.access],
         text: `${VERB[r.access]} (regex #${sbString(r.filter.regex)})) ; ${r.why}`,
       });
-      for (const a of [...ancestorsOf(root), root]) ancestors.add(a);
+      if (opens(r)) for (const a of [...ancestorsOf(root), root]) ancestors.add(a);
     }
   }
   lines.sort((a, b) => a.depth - b.depth || a.order - b.order);
@@ -282,7 +353,8 @@ export function buildProfile(
     `;; Seatbelt profile for lead ${lead.name}. Generated by scripts/lead-sandbox.ts; do not edit.`,
     '(version 1)',
     '(allow default)',
-    ...lines.map((l) => l.text),
+    // A rule named from both ends of a symlink can come out twice.
+    ...new Set(lines.map((l) => l.text)),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',

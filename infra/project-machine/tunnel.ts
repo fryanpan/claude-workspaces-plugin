@@ -10,9 +10,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { parseRouterConfig } from '../board-router-worker/deploy-plan.ts';
-import { type CloudflareApi, cloudflareApi } from './cloudflare.ts';
+import type { CloudflareApi } from './cloudflare.ts';
 import type { ProjectConfig } from './deploy-plan.ts';
-import { cloudflareApiToken } from './mac-ops.ts';
+import { cloudflareClient } from './mac-ops.ts';
 import {
   type DnsRecord,
   type TunnelAction,
@@ -85,7 +85,7 @@ export async function prepareTunnel(
   routerConfigPath: string,
 ): Promise<NamedTunnel> {
   const names = routerNames(cfg, routerConfigPath);
-  const api = cloudflareApi(cloudflareApiToken());
+  const api = cloudflareClient('machine:deploy (named tunnel)');
   const zones = await api<Array<{ id: string; account: { id: string } }>>(
     'GET',
     `/zones?name=${encodeURIComponent(names.zone)}`,
@@ -127,6 +127,12 @@ export async function prepareTunnel(
       return id;
     },
     async token(tunnelId) {
+      // The keeper refuses this read: its answer is a credential.
+      if (process.env.CW_KEEPER_URL?.trim()) {
+        throw new Error(
+          "the keeper does not hand out a tunnel's token, so a named tunnel's token cannot be set through it yet (docs/process/keeper.md)",
+        );
+      }
       return parseTunnelToken(await api('GET', `${tunnelPath(tunnelId)}/token`));
     },
   };

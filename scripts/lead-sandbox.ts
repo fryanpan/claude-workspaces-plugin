@@ -16,7 +16,8 @@
  *
  * `--check` lists each lead's own projects (they must list: the control)
  * and each protected folder (it must refuse) from inside that lead's
- * profile, and exits 1 on any failure.
+ * profile, asks `bun` there for its environment (it must not be empty),
+ * and exits 1 on any failure.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -64,6 +65,20 @@ function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): s
 function lists(profile: string, path: string): boolean {
   const r = spawnSync(SANDBOX_EXEC, ['-f', profile, '/bin/ls', path], { stdio: 'ignore' });
   return r.status === 0;
+}
+
+/**
+ * How many variables `bun` (from PATH, as the hooks run it) sees inside the
+ * profile, from the lead's first project. Zero is the failure: the hooks
+ * then lose the workspace they post to.
+ */
+function bunEnvCount(profile: string, cwd: string): number {
+  const r = spawnSync(
+    SANDBOX_EXEC,
+    ['-f', profile, 'bun', '-e', 'console.log(Object.keys(process.env).length)'],
+    { cwd, encoding: 'utf8' },
+  );
+  return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
 }
 
 function main(argv: string[]): number {
@@ -151,6 +166,13 @@ function main(argv: string[]): number {
           `${ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${listed ? 'lists' : 'refused'}  ${path}  ${what}`,
         );
       }
+      const cwd = launchCommand(lead, profile, []).cwd;
+      const vars = bunEnvCount(profile, cwd);
+      total++;
+      if (vars === 0) bad++;
+      say(
+        `${vars > 0 ? 'ok  ' : 'FAIL'} ${lead.name}  bun sees ${vars} env vars  in ${cwd}  (must be more than 0)`,
+      );
     }
     say(bad === 0 ? `All ${total} checks hold.` : `${bad} of ${total} checks failed.`);
     return bad === 0 ? 0 : 1;

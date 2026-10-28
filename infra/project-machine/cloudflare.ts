@@ -33,11 +33,23 @@ export interface CloudflareApi {
   all<T>(path: string): Promise<T[]>;
 }
 
-export function cloudflareApi(token: string): CloudflareApi {
+/**
+ * `token` is null when the calls go through the keeper (`base` its
+ * `/v1/cloudflare`, `fetchImpl` its client), which adds the token itself.
+ */
+export function cloudflareApi(
+  token: string | null,
+  opts: { base?: string; fetchImpl?: typeof fetch } = {},
+): CloudflareApi {
+  const base = opts.base ?? API;
+  const doFetch = opts.fetchImpl ?? fetch;
   const send = async <T>(method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${API}${path}`, {
+    const res = await doFetch(`${base}${path}`, {
       method,
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: {
+        ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+        'content-type': 'application/json',
+      },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const json = (await res.json().catch(() => null)) as Envelope<T> | null;

@@ -628,6 +628,15 @@ export async function handleWorkspaceTool(
         lastChange: res.lastChange,
       });
     }
+    case 'set_github_subscriptions': {
+      const { workspaceId, subscriptions } = a as { workspaceId: string; subscriptions: unknown };
+      // The route checks the list and answers a 400 naming what is wrong.
+      return ok(
+        await http('PUT', `/workspaces/${encodeURIComponent(workspaceId)}/github-subscriptions`, {
+          subscriptions,
+        }),
+      );
+    }
     case 'set_board_embeds': {
       const { workspaceId, embeds } = a as { workspaceId: string; embeds: unknown };
       // The route checks the mapping's shape and answers a 400 naming it.
