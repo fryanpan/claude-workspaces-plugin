@@ -35,7 +35,16 @@ profile per lead. A profile allows everything, then:
   code that runs outside the sandbox in Bryan's next session;
 - **denies the config, the profiles and the prod root again** after every
   other rule, so no `allow` reopens prod and a lead cannot widen its next
-  launch.
+  launch;
+- **refuses the ways a lead could start a process outside the wall**:
+  connecting to, or moving, a socket in the tmux folder
+  (`/private/tmp/tmux-<uid>`, also written as `/tmp/tmux-<uid>`), so it cannot
+  `tmux send-keys` into an unsandboxed session; `open` (LaunchServices
+  starts the app it opens outside the sandbox); Apple events, so `osascript`
+  cannot ask Terminal or iTerm to run a script; and the Shortcuts helper, so
+  `shortcuts run` cannot run a shortcut there. The tmux rule is a
+  `network-outbound` deny: a lead in a pane finds the socket in `$TMUX`, and a
+  file deny on the folder alone still let it connect.
 
 Seatbelt applies the last rule that matches, so the profile runs from the
 shortest path to the longest and the most specific folder decides. It
@@ -107,6 +116,23 @@ run it) how many environment variables it sees from the lead's first
 project: zero is a failure. Any failure exits 1 and names the lead and
 the folder. It never lists the prod root; the home folder above it proves
 the same deny.
+
+Then five rows per lead try the ways out of the wall
+(`scripts/lead-sandbox-escapes.ts`), each with a control outside it:
+
+| Row | Inside the profile | Control outside |
+|---|---|---|
+| tmux | connecting to a tmux server of the check's own, by socket path as `$TMUX` gives it, and moving that socket into the project: both refused | the same server answers `tmux ls` |
+| open | `sandbox_check` says `lsopen` is denied | none needed: it is the sandbox's own verdict |
+| osascript | `sandbox_check` says `appleevent-send` is denied | as above |
+| shortcuts | `shortcuts list` fails | `shortcuts list` answers |
+| launchd | a `launchctl submit` of `/usr/bin/true` is not loaded | none: launchd refuses it, no rule of ours |
+
+`open` and `osascript` are asked of the sandbox rather than driven, because
+driving them would start an app or show a window. The check starts and kills
+its own tmux server and never touches another session. Removing any one of
+the four rules fails its row; `scripts/lead-sandbox.test.ts` does that for
+each, against the real `sandbox-exec`.
 
 ```bash
 bun scripts/lead-sandbox.ts --config ~/.config/claude-workspaces/lead-sandbox.json --check
@@ -208,13 +234,134 @@ inside the wall.
 `scripts/lead-sandbox.test.ts` drives the real `sandbox-exec` when it is
 present and skips, saying so, when it is not (Linux CI).
 
+### The ways out, probed 28 October
+
+From inside a generated profile, cwd the lead's own project, Claude Code
+2.1.312:
+
+| Way out | Before | After |
+|---|---|---|
+| `tmux ls`, then `send-keys` into an unsandboxed session | `tmux ls` exit 0, every session listed | exit 1: `Operation not permitted` on the socket; also with `$TMUX` set, as in a pane |
+| `open` an app or a `.command` file | `sandbox_check` says `lsopen` allowed | denied. `open` itself was never run |
+| `osascript` telling Terminal or iTerm to run a script | `appleevent-send` allowed | denied. `osascript -e 'return 1'` still runs, and `do shell script` runs inside the wall (it could not list another project) |
+| `shortcuts run` | `shortcuts list` answered | exit 1, "Couldn't communicate with a helper application". `run` was not tried: it would run a real shortcut |
+| `launchctl submit`, `bootstrap`, `load` | refused already: submit exit 1, bootstrap error 5, the job never ran | unchanged; no rule needed |
+| `crontab`, `at` | refused already: the sandbox will not exec a setuid binary | unchanged |
+| `launchctl asuser` | runs, but its child is still inside the wall (could not list another project) | unchanged |
+| `ssh` to this Mac (Remote Login is on) | port 22 connects; the login is refused for lack of a key, inside and outside alike | not closed; see below |
+| Spotlight (`mdfind` over another project) | 0 results inside, 169 outside | unchanged |
+
+`--check` then held 20 of 20 for two leads. `claude -p` through the wrapper
+with `$TMUX` set, signed in, read and wrote its own project, and its own
+Bash calls got `Operation not permitted` from `tmux ls`, `shortcuts list` and
+a Riverbend file. A second run with the owner's full settings connected every
+MCP server (`claude mcp list`) and answered `list_watched_docs`. The hooks'
+exit codes were not read in either run.
+
+## What the wall does not cover yet
+
+Two gaps, for Bryan to choose between the options. What was measured on 28
+October is marked measured; the rest is read from the code or inferred.
+
+### The board server trusts a loopback caller
+
+**Measured:** from inside a profile, `curl http://127.0.0.1:8787/workspaces?format=json`
+answers 200 (status code only; the body was not read). **From the code and
+security.md:** a caller on loopback with no token is trusted-local
+(`isTrustedLocalHost`, `middleware/host-guard.ts`), so a lead can read every
+board, mint a board agent token for any agent and board over
+`/api/board-tokens`, have the server (running as Bryan, outside the wall)
+bind and read a file the lead cannot open, and call `POST /api/deploy`, which
+runs `git pull` and a restart outside the wall. The lead's own
+claude-workspaces MCP child, and the plugin's hooks, run inside the same
+profile and reach the same port.
+
+Options:
+
+1. **Deny the port in the profile.** **Measured:** `(deny network-outbound
+   (remote tcp "*:8787"))` refuses `curl` and `nc` on `127.0.0.1:8787`; `*`
+   also covers the Mac's LAN and Tailscale addresses, which `localhost` would
+   not. Alone it breaks the lead's own board: the MCP child and every hook
+   lose the server. **Measured:** a rule can exempt one binary,
+   `(require-not (process-path …))`: with `/usr/bin/nc` exempt, `nc`
+   connected and `bun` did not. **Inferred:** that does not help, because the
+   MCP child and the hooks run under `bun` or `node`, which the lead can run
+   with any script, and the compiled relay is an MCP server the lead could
+   start itself and drive. So this option only works with option 2's token:
+   the profile denies the port to everything, and the board is reached some
+   other way, or the token makes the port harmless.
+2. **A token scoped to the lead's own board, and loopback stops being enough.**
+   The board agent token (`at2`, `auth/board-agent-token.ts`) already scopes
+   a holder to one board through `collabScope`, refusing Mac paths, mounts,
+   repos, deploy and every other board. Today it is honoured from loopback
+   but does not confine a loopback caller who omits it. What this takes:
+   the wrapper mints an `at2` for the lead's board outside the wall and hands
+   it in through the environment; the MCP child and the hooks send it; and
+   the server refuses a sandboxed loopback caller that sends no token. The
+   mint route must stay out of reach, or a lead mints a wider one: the mint
+   is loopback-only, so it needs the server to know the caller is sandboxed.
+3. **The server tells a sandboxed caller from an unsandboxed one.**
+   **Measured:** `sandbox_check(pid, NULL, 0)`, from outside, returns 1 for a
+   process under a lead profile and 0 for an ordinary one. The server already
+   maps a loopback socket to the caller's pid with `lsof` and `ps` to name its
+   agent (`identifyCallerAgent`, `auth/agent-caller.ts`). **Inferred:** the
+   same lookup plus `sandbox_check` lets the server treat a sandboxed caller
+   as a visitor on the board its launching session names, with no new token
+   and no change to the profile. The board would come from the session's
+   environment, which the wrapper sets outside the wall and the lead cannot
+   rewrite. It costs an `lsof` and a `ps` per new connection, which the agent
+   lookup already pays on the routes that use it, and it is only as safe as
+   its failure case: a caller whose pid cannot be resolved must be refused.
+
+Option 3 is the smallest change that closes the gap, and option 2 is what a
+lead on another machine already uses. Either needs `--check` to gain a row
+that the lead cannot reach another board.
+
+### The keychain answers the lead
+
+**Measured:** a generic-password item made with `security
+add-generic-password` (a dummy, service `harborlight-sbx-probe`) was read back
+from inside a profile with `security find-generic-password -w`, then deleted.
+Reads go to `securityd` over Mach, so no file rule sees them.
+
+**Measured:** adding `(deny mach-lookup (global-name "com.apple.SecurityServer")
+(global-name "com.apple.securityd"))` refused the same read (exit 44), and a
+`claude -p` under that profile still signed in and answered. Claude Code
+2.1.312 signed in from `~/.claude/.credentials.json`, a file inside the wall.
+That changes what step 1's table says the keychain folder is for: the 16
+October run that answered "Not logged in" without it may have had no
+credentials file. Not measured with that deny: `gh`, `git` over HTTPS, and
+anything else in the owner's settings that keeps its secret in the
+keychain; each would lose it.
+
+**Inferred:** a profile rule can only deny the keychain whole, not one item,
+because the item is named in the request to `securityd`, which Seatbelt does
+not see. So the choice is all or nothing:
+
+1. **Deny `securityd` for leads now**, after checking `gh` and git inside the
+   wall, and move what they need into files the lead may read. That closes
+   every other keychain item, including the Cloudflare and Fly tokens
+   security.md says are still there.
+2. **Wait for the keeper** ([keeper.md](keeper.md)), which moves those
+   tokens behind Bryan's passkey. Until its cutover, a sandboxed lead can read
+   them.
+
+Either way, `~/.claude/.credentials.json` is Bryan's Claude sign-in and the
+lead can read and write it. No rule can deny it without signing the lead
+out; a config folder per lead, signed in on its own, is the only split.
+
 ## What this does not close
 
-- **The board server still trusts loopback.** A sandboxed lead can still
-  call the board on `127.0.0.1:8787`, where a local caller is trusted, and
-  ask the server, which runs as the owner, to bind and read a file it cannot
-  read itself. The board-scoped agent token closes that. Until it ships,
-  this wall covers files only.
+- **`ssh` to this Mac.** Remote Login is on, so port 22 on loopback answers
+  inside the wall. Today the login is refused, inside and outside alike,
+  because no key the lead can reach is authorized (`~/.ssh` is denied and the
+  agent holds none). A profile rule cannot deny it cleanly: `localhost:22`
+  misses the Mac's LAN address, and `*:22` also refuses `git` over ssh to
+  GitHub. Adding a key to `authorized_keys` and to the agent would open it.
+- **Not probed:** Login Items and Folder Actions (both need an app bundle or
+  Apple events), the pasteboard (`pbpaste` answers inside the wall), and
+  messages to other sessions over `claude-hive`, which another session acts
+  on as it would on any peer's message.
 - **`~/.claude` is shared.** The lead reads all of it except other
   projects' transcripts, and writes what is not code or settings.
   `history.jsonl` holds every project's prompts, `file-history` holds file
