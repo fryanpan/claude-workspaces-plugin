@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The GitHub proxy for sandboxed leads (scripts/git-proxy.ts). Runbook:
+  docs/process/lead-sandbox.md, "GitHub through the proxy". Nothing installs
+  this file: fill the placeholders, copy it to ~/Library/LaunchAgents and
+  bootstrap it by hand, as the runbook says.
+
+  {{REPO_DIR}} is prod's checkout, which no lead can write. {{BUN}} is the bun
+  binary that holds Full Disk Access. {{GH_DIR}} is the folder that holds `gh`,
+  which reads the owner's credential from the keychain once, at start.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.fryanpan.git-proxy</string>
+
+    <key>WorkingDirectory</key>
+    <string>{{REPO_DIR}}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{BUN}}</string>
+        <string>{{REPO_DIR}}/scripts/git-proxy.ts</string>
+        <string>--config</string>
+        <string>{{HOME_DIR}}/.config/claude-workspaces/lead-sandbox.json</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{HOME_DIR}}</string>
+        <key>PATH</key>
+        <string>{{GH_DIR}}:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- A long-running service: restart it if it exits, but not in a tight
+         loop when the credential command keeps failing. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- The log names leads, repos and verdicts. It never holds the
+         credential: every line is redacted before it is written. -->
+    <key>StandardOutPath</key>
+    <string>{{LOG_DIR}}/com.fryanpan.git-proxy.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{LOG_DIR}}/com.fryanpan.git-proxy.err.log</string>
+</dict>
+</plist>

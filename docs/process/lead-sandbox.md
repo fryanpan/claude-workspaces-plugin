@@ -120,7 +120,9 @@ keychain refused, measured 28 October, `gh auth status` exits 1 and
 `git ls-remote` of a private repo over HTTPS exits 128. A fetch of a public
 repo still works. Every other lead is refused the keychain by default,
 because a lead that can read it reads every item there, the Cloudflare and
-Fly tokens included until the keeper's cutover.
+Fly tokens included until the keeper's cutover. A lead that needs only git
+fetch and push to named GitHub repos lists them in `githubRepos` instead and
+keeps the keychain refused ("GitHub through the proxy", below).
 
 **A lead that runs tmux sessions of its own** sets `"allowTmux": true` in its
 entry. Every other lead is refused the tmux socket by default, because a lead
@@ -179,6 +181,109 @@ bun "$HOME/Library/Application Support/claude-workspaces/repo/scripts/lead-sandb
 
 It writes the profile, then runs `sandbox-exec -f <profile> claude …` in the
 lead's first project with the terminal handed through.
+
+## GitHub through the proxy
+
+A lead whose entry names repos fetches and pushes them through
+`scripts/git-proxy.ts`, a small Bun process on `127.0.0.1:8793` that holds
+Bryan's GitHub credential. The lead never holds that credential, and never
+reads `~/.ssh` or the keychain:
+
+```json
+{ "name": "harborlight-lead", "projects": ["~/dev/harborlight"],
+  "githubRepos": ["Harborlight/notes", "Harborlight/site"] }
+```
+
+**What the wrapper writes**, at `--write` and at each launch, in
+`~/.config/claude-workspaces/git-proxy/<lead>/`, mode 700:
+
+- `token`: 32 random bytes, mode 600, made once and kept across launches.
+  Delete it to rotate it; the next launch makes a new one.
+- `gitconfig`, which every git inside the wall reads, because the wrapper
+  launches the lead with `GIT_CONFIG_COUNT=1`,
+  `GIT_CONFIG_KEY_0=include.path` and `GIT_CONFIG_VALUE_0=<that file>`:
+
+  ```ini
+  [url "http://127.0.0.1:8793/"]
+  	insteadOf = git@github.com:
+  	insteadOf = ssh://git@github.com/
+  	insteadOf = https://github.com/
+  [credential "http://127.0.0.1:8793"]
+  	helper =
+  	helper = "!f() { test \"$1\" = get || exit 0; echo username=<lead>; printf 'password='; cat '<token file>'; echo; }; f"
+  ```
+
+  The empty `helper` drops every helper configured before it, the keychain's
+  included, for the proxy's URL only. The token is read from its file when
+  git asks, so it is in no environment variable.
+
+**What the profile adds.** For a lead with repos, its own folder above is
+readable and, after every other rule, not writable. Every other lead's folder
+stays under the denied home. A lead with no repos gets
+`(deny network-outbound (remote ip "localhost:8793"))` and cannot reach the
+proxy at all. `gitProxyPort` at the top of the config changes the port for
+the profiles and the proxy together.
+
+**What the proxy answers**, in this order:
+
+| Request | Answer |
+|---|---|
+| anything but one repo's `info/refs?service=…`, `git-upload-pack` or `git-receive-pack` (the dumb-HTTP paths, a dot step, an encoded character) | 404 |
+| no token, or a token no lead holds | 401 |
+| a repo not in that lead's `githubRepos` (GitHub's names match without case) | 403 |
+| a push that deletes a ref | 403 |
+| a push that moves a ref other than forward (a force-push, a reset back) | 403 |
+| everything else | sent to `https://github.com` with Bryan's credential |
+
+A push that creates a ref is allowed. One refused command refuses the whole
+push. The proxy reads its config and every token file on each request, so a
+new lead or a changed list needs no restart.
+
+**How it tells a fast-forward.** The client's old sha cannot tell: git sends
+the ref's current value as old for a force-push too. So the proxy asks
+whether old is an ancestor of new. It adds `no-thin` to the push's
+capabilities, so the client sends a pack whose deltas need nothing from
+GitHub, reads the pushed commits from it in a scratch repo, and walks from
+new down to the commits GitHub already has. Old met on the way means yes;
+otherwise it asks GitHub's compare API (`/repos/<repo>/compare/<old>...<commit>`)
+for each commit where the walk left the pack, and `ahead` or `identical`
+means yes. A pack it cannot read, or a compare that fails, is a refusal.
+
+**The credential.** The proxy runs `gh auth token` once at start (or
+`--credential-command <sh>`), keeps the answer in memory, and sends it only
+to GitHub. It writes it nowhere, passes it to no child process, returns no
+upstream header but the content type and caching ones, replaces a GitHub
+refusal with fixed text, and redacts it, raw and in its Basic form, from
+every other error text and every log line.
+
+**Starting it.** Nothing installs or starts it. By hand:
+
+```bash
+bun "$HOME/Library/Application Support/claude-workspaces/repo/scripts/git-proxy.ts" \
+  --config ~/.config/claude-workspaces/lead-sandbox.json
+```
+
+As a service: fill the placeholders in
+`scripts/launchd/com.fryanpan.git-proxy.plist.template`, copy it to
+`~/Library/LaunchAgents/com.fryanpan.git-proxy.plist`, then
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.fryanpan.git-proxy.plist`.
+Run it from prod's checkout, which no lead can write. Not measured yet:
+whether `gh auth token` reads the keychain from under launchd.
+
+**What it was proved against.** `scripts/git-proxy.test.ts` drives a real
+`git` client, configured with the wrapper's own files, through the proxy to
+bare repos served by `git http-backend`, with a fake credential: a clone and
+a fast-forward reach the upstream, including one the compare API decides; a
+push to an unlisted repo, a force-push, a reset back and a branch delete are
+each refused and the upstream ref is unchanged; no token, a wrong one and
+the owner's own credential get 401. A tap between git and the proxy keeps
+every byte both ways, and the fake credential is in none of them, nor in a
+log line, while the upstream saw it on every request. An upstream error that
+repeats the credential reaches the client redacted.
+`scripts/git-proxy-lead.test.ts` runs the profile under the real
+`sandbox-exec`: a lead with repos reaches the port and reads its token, and
+cannot write it; a lead without them reaches neither. Not run yet: a real
+push to GitHub through it.
 
 ## Restarting the fleet's leads under it
 
