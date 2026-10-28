@@ -114,6 +114,15 @@ describe('live redline — pipe tables', () => {
     expect(marked(parent)).toEqual(['Riverbend', '81']);
   });
 
+  it('a table replaced by an unrelated one is marked whole', async () => {
+    const base = 'Ports.\n\n| Host | Port |\n|---|---|\n| Harborlight | 80 |\n\nEnd.\n';
+    const next = 'Ports.\n\n| Team | Lead |\n|---|---|\n| Saltmarsh | Alice |\n\nEnd.\n';
+    const { parent, surface } = mount(base, next);
+    await tick();
+    expect(marked(parent)).toEqual(['Team', 'Lead', 'Saltmarsh', 'Alice']);
+    expect(surface.getDeletions()).toHaveLength(1);
+  });
+
   it('a paragraph added elsewhere leaves every table unmarked', async () => {
     const next = BASE.replace('Owners.\n', 'Owners.\n\nAsk before you page anyone.\n');
     const { parent, surface } = mount(BASE, next);

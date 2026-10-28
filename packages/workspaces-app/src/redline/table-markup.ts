@@ -83,6 +83,9 @@ export function tableMarkup(
 
   const key = (cells: string[]) => cells.join('\u0000');
   const { keptA, keptB } = lcsKept(baseCells.map(key), newCells.map(key));
+  // No row in common: one table removed and an unrelated one added, which
+  // the whole-table markup already says correctly.
+  if (keptB.size === 0) return null;
 
   const out: TableMarkup = { insRanges: [], deletions: [] };
   const lastCell = rows[rows.length - 1]?.cells.at(-1);
