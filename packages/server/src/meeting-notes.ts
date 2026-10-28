@@ -1394,6 +1394,23 @@ export function beginNotesSession(
    */
   const settledAtOf = new Map<number, number>();
   /**
+   * WHEN EACH TURN SETTLED — its first final frame — and, for a turn still
+   * being said, when its words last grew. These are the clock the goal's
+   * "within 10s of its turn settling" is written against, and the one
+   * `settledToWrittenMs` reads.
+   *
+   * `settledAtOf` above stamps the FIRST frame, so the seventh slice of a
+   * long turn, or the pause tick after a minute of argument, was billed for
+   * the whole time the person spent talking: replayed meetings read a 15s
+   * median from a stub composer that took no time at all. A note cannot be
+   * written before its words are said, so that number measured the speaker,
+   * not the note-taker. `settledAtOf` is kept for the spoken clocks beside it.
+   */
+  const finalAtOf = new Map<number, number>();
+  const grewAtOf = new Map<number, { words: number; at: number }>();
+  const settleOf = (turn: number): number | undefined =>
+    finalAtOf.get(turn) ?? grewAtOf.get(turn)?.at ?? settledAtOf.get(turn);
+  /**
    * When each turn's words were SPOKEN — the opening of it, and the latest
    * end of it — on the server's clock.
    *
@@ -1587,9 +1604,7 @@ export function beginNotesSession(
       // --- timing: opened here so every exit below reports one row ---
       const startedAt = firedAt.get(tick) ?? clock();
       const composeStart = clock();
-      const settled = raw
-        .map((t) => settledAtOf.get(t.turn))
-        .filter((v): v is number => v !== undefined);
+      const settled = raw.map((t) => settleOf(t.turn)).filter((v): v is number => v !== undefined);
       const settledAt = settled.length > 0 ? Math.min(...settled) : null;
       const spokenStarts = raw
         .map((t) => spokenAtOf.get(t.turn))
@@ -2382,6 +2397,11 @@ export function beginNotesSession(
       // carries words out of a turn still being spoken, and the latency
       // those words are owed is counted from when they were said.
       if (!settledAtOf.has(turn.turn)) settledAtOf.set(turn.turn, clock());
+      if (turn.final && !finalAtOf.has(turn.turn)) finalAtOf.set(turn.turn, clock());
+      const grown = wordsOf(turn.text).length;
+      if (!turn.final && grown > (grewAtOf.get(turn.turn)?.words ?? 0)) {
+        grewAtOf.set(turn.turn, { words: grown, at: clock() });
+      }
       if (spokenAt !== undefined && Number.isFinite(spokenAt)) {
         if (!spokenAtOf.has(turn.turn)) spokenAtOf.set(turn.turn, spokenAt);
         // Every later frame moves the end forward; a revision that shortens a
