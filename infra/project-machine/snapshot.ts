@@ -111,6 +111,11 @@ function privateKeyOf(identity: string): { key: KeyObject; raw: Buffer } {
   return { key, raw: raw32(createPublicKey(key), 'spki') };
 }
 
+/** Throws unless `recipient` is a well-formed public key. */
+export function checkRecipient(recipient: string): void {
+  publicKeyOf(recipient);
+}
+
 /** The recipient an identity decrypts for, so only the identity needs storing. */
 export function recipientOf(identity: string): string {
   return PUBLIC_PREFIX + privateKeyOf(identity).raw.toString('base64url');
@@ -128,12 +133,11 @@ function nonce(counter: number, final: boolean): Buffer {
   return n;
 }
 
-/** Streams `input` into `outPath` as an encrypted snapshot. */
-export async function encryptToFile(
-  input: AsyncIterable<Uint8Array>,
-  recipient: string,
-  outPath: string,
-): Promise<void> {
+/** A fresh header for `recipient`, and the function that seals each chunk under it. */
+function sealer(recipient: string): {
+  header: Buffer;
+  seal: (plain: Buffer, final: boolean) => Buffer;
+} {
   const { key: recipientKey, raw: recipientRaw } = publicKeyOf(recipient);
   const eph = generateKeyPairSync('x25519');
   const ephRaw = raw32(eph.publicKey, 'spki');
@@ -144,33 +148,108 @@ export async function encryptToFile(
     ephRaw,
     recipientRaw,
   );
+  let counter = 0;
+  return {
+    header: Buffer.concat([MAGIC, ephRaw, salt]),
+    seal: (plain, final) => {
+      const c = createCipheriv('aes-256-gcm', key, nonce(counter++, final));
+      return Buffer.concat([c.update(plain), c.final(), c.getAuthTag()]);
+    },
+  };
+}
+
+/** Streams `input` into `outPath` as an encrypted snapshot. */
+export async function encryptToFile(
+  input: AsyncIterable<Uint8Array>,
+  recipient: string,
+  outPath: string,
+): Promise<void> {
+  const { header, seal } = sealer(recipient);
   const fd = openSync(outPath, 'wx', 0o600);
   try {
-    writeSync(fd, Buffer.concat([MAGIC, ephRaw, salt]));
-    let counter = 0;
-    const seal = (plain: Buffer, final: boolean): void => {
-      const c = createCipheriv('aes-256-gcm', key, nonce(counter++, final));
-      writeSync(fd, Buffer.concat([c.update(plain), c.final(), c.getAuthTag()]));
-    };
+    writeSync(fd, header);
     // One full chunk is held back until the next byte arrives, because only
     // then is it known not to be the last.
     let pending = Buffer.alloc(0);
     for await (const piece of input) {
       pending = Buffer.concat([pending, Buffer.from(piece)]);
       while (pending.length > CHUNK) {
-        seal(pending.subarray(0, CHUNK), false);
+        writeSync(fd, seal(pending.subarray(0, CHUNK), false));
         pending = pending.subarray(CHUNK);
       }
     }
-    seal(pending, true);
+    writeSync(fd, seal(pending, true));
   } finally {
     closeSync(fd);
   }
 }
 
+/** `plain` sealed to `recipient`, in memory, in the same format a snapshot file has. */
+export function sealBytes(plain: Uint8Array, recipient: string): Buffer {
+  const { header, seal } = sealer(recipient);
+  const buf = Buffer.from(plain.buffer, plain.byteOffset, plain.byteLength);
+  const parts = [header];
+  let pos = 0;
+  while (buf.length - pos > CHUNK) {
+    parts.push(seal(buf.subarray(pos, pos + CHUNK), false));
+    pos += CHUNK;
+  }
+  parts.push(seal(buf.subarray(pos), true));
+  return Buffer.concat(parts);
+}
+
+/** The key a header was sealed under, for `identity`. */
+function keyFromHeader(header: Buffer, identity: string): Buffer {
+  const { key: priv, raw: recipientRaw } = privateKeyOf(identity);
+  if (!header.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error('not a snapshot');
+  const ephRaw = Buffer.from(header.subarray(MAGIC.length, MAGIC.length + 32));
+  const salt = header.subarray(MAGIC.length + 32, HEADER);
+  return deriveKey(
+    diffieHellman({ privateKey: priv, publicKey: publicFromRaw(ephRaw) }),
+    salt,
+    ephRaw,
+    recipientRaw,
+  );
+}
+
+function openChunk(key: Buffer, counter: number, final: boolean, sealed: Buffer): Buffer {
+  const d = createDecipheriv('aes-256-gcm', key, nonce(counter, final));
+  d.setAuthTag(sealed.subarray(sealed.length - TAG));
+  return Buffer.concat([d.update(sealed.subarray(0, sealed.length - TAG)), d.final()]);
+}
+
+function decryptError(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  return new Error(
+    /unable to authenticate|auth/i.test(msg)
+      ? 'snapshot did not decrypt: wrong identity, or the file was altered or truncated'
+      : msg,
+  );
+}
+
+/** What `sealBytes` sealed, or throws when `identity` is not its recipient's. */
+export function openBytes(sealed: Uint8Array, identity: string): Buffer {
+  const buf = Buffer.from(sealed.buffer, sealed.byteOffset, sealed.byteLength);
+  try {
+    if (buf.length < HEADER + TAG) throw new Error('not a snapshot: too short');
+    const key = keyFromHeader(buf.subarray(0, HEADER), identity);
+    const parts: Buffer[] = [];
+    let pos = HEADER;
+    let counter = 0;
+    while (pos < buf.length) {
+      const len = Math.min(CHUNK + TAG, buf.length - pos);
+      if (len < TAG) throw new Error('snapshot is truncated');
+      parts.push(openChunk(key, counter++, pos + len === buf.length, buf.subarray(pos, pos + len)));
+      pos += len;
+    }
+    return Buffer.concat(parts);
+  } catch (err) {
+    throw decryptError(err);
+  }
+}
+
 /** Decrypts a whole snapshot to `outPath`, or throws without leaving one. */
 export function decryptFile(snapshotPath: string, identity: string, outPath: string): void {
-  const { key: priv, raw: recipientRaw } = privateKeyOf(identity);
   const inFd = openSync(snapshotPath, 'r');
   let outFd: number | null = null;
   try {
@@ -179,15 +258,7 @@ export function decryptFile(snapshotPath: string, identity: string, outPath: str
     if (size < HEADER + TAG || readSync(inFd, header, 0, HEADER, 0) !== HEADER) {
       throw new Error('not a snapshot: too short');
     }
-    if (!header.subarray(0, MAGIC.length).equals(MAGIC)) throw new Error('not a snapshot');
-    const ephRaw = Buffer.from(header.subarray(MAGIC.length, MAGIC.length + 32));
-    const salt = header.subarray(MAGIC.length + 32, HEADER);
-    const key = deriveKey(
-      diffieHellman({ privateKey: priv, publicKey: publicFromRaw(ephRaw) }),
-      salt,
-      ephRaw,
-      recipientRaw,
-    );
+    const key = keyFromHeader(header, identity);
     outFd = openSync(outPath, 'wx', 0o600);
     const sealed = CHUNK + TAG;
     const buf = Buffer.alloc(sealed);
@@ -198,11 +269,7 @@ export function decryptFile(snapshotPath: string, identity: string, outPath: str
       if (len < TAG) throw new Error('snapshot is truncated');
       readSync(inFd, buf, 0, len, pos);
       pos += len;
-      const final = pos === size;
-      const d = createDecipheriv('aes-256-gcm', key, nonce(counter++, final));
-      d.setAuthTag(buf.subarray(len - TAG, len));
-      const plain = Buffer.concat([d.update(buf.subarray(0, len - TAG)), d.final()]);
-      writeSync(outFd, plain);
+      writeSync(outFd, openChunk(key, counter++, pos === size, buf.subarray(0, len)));
     }
   } catch (err) {
     if (outFd !== null) {
@@ -210,12 +277,7 @@ export function decryptFile(snapshotPath: string, identity: string, outPath: str
       outFd = null;
       rmSync(outPath, { force: true });
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      /unable to authenticate|auth/i.test(msg)
-        ? 'snapshot did not decrypt: wrong identity, or the file was altered or truncated'
-        : msg,
-    );
+    throw decryptError(err);
   } finally {
     if (outFd !== null) closeSync(outFd);
     closeSync(inFd);

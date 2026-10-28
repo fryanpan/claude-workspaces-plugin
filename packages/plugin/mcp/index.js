@@ -17434,7 +17434,7 @@ var TOOL_LIST = {
     },
     {
       name: "list_shares",
-      description: "List every share of every board: the links, who redeemed each one and when, whether each one is live, revoked or expired, and every member with the role they hold — Owner or Regular User.",
+      description: "List every share of every board: the links, who redeemed each one and when, whether each one is live, revoked or expired, and every member with the role they hold — Owner or Regular User. A live link carries `url`, the address to hand a person (https://<share host>/s/<linkId>); a revoked or expired link has none.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -21621,7 +21621,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.325";
+var PLUGIN_VERSION = "0.1.326";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
