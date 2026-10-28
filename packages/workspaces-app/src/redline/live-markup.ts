@@ -6,6 +6,7 @@ import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import * as Y from 'yjs';
+import { tableMarkup } from './table-markup.ts';
 
 /**
  * Live redline markup over the EDITABLE companion editor.
@@ -166,13 +167,21 @@ export function computeLiveMarkup(
   fragment: Y.XmlFragment,
 ): LiveMarkupResult {
   const children = fragment.toArray();
-  if (children.length !== doc.childCount) return EMPTY_RESULT;
+  // StarterKit's TrailingNode appends an empty paragraph after a doc that
+  // ends in a table, in the editor only. Without this allowance a doc whose
+  // last block is a table never gets markup at all.
+  if (children.length > doc.childCount) return EMPTY_RESULT;
+  for (let k = children.length; k < doc.childCount; k++) {
+    const node = doc.child(k);
+    if (node.type.name !== 'paragraph' || node.content.size > 0) return EMPTY_RESULT;
+  }
 
   // Serialize per block, tracking each block's span in the joined markdown —
   // the same shape serializeFragmentToMarkdown writes to disk.
   const entries: BlockEntry[] = [];
   let newMd = '';
   doc.forEach((node, pmFrom, i) => {
+    if (i >= children.length) return;
     const child = children[i];
     const md = child instanceof Y.XmlElement ? serializeBlockToMarkdown(child) : '';
     if (md === '') {
@@ -218,13 +227,32 @@ export function computeLiveMarkup(
     for (const md of pendingDels.splice(0)) deletions.push({ pos, deletedMarkdown: md });
   };
 
+  // A table the redline shows as deleted and immediately re-added is one
+  // table that changed: mark its rows and cells (table-markup.ts), not all
+  // of it.
+  let delTable: string | null = null;
   for (const block of computeRedline(baseText, newMd)) {
     if (block.kind === 'del') {
-      pendingDels.push(block.segments.map((s) => s.text).join(''));
+      const md = block.segments.map((s) => s.text).join('');
+      pendingDels.push(md);
+      delTable = block.type === 'table' ? md : null;
       continue;
     }
+    const prevTable = delTable;
+    delTable = null;
 
     const owner = block.from != null ? ownerAt(block.from) : null;
+    if (block.kind === 'ins' && block.type === 'table' && prevTable != null && owner) {
+      const newTable = block.segments.map((s) => s.text).join('');
+      const rows = tableMarkup(prevTable, newTable, owner.node, owner.pmFrom);
+      if (rows) {
+        pendingDels.pop();
+        flushDels(owner.pmFrom);
+        insRanges.push(...rows.insRanges);
+        deletions.push(...rows.deletions);
+        continue;
+      }
+    }
     if (owner) flushDels(owner.pmFrom);
     if (block.kind === 'same' || !owner) continue;
 
