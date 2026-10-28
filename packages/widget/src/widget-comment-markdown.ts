@@ -9,9 +9,9 @@ import type { FeedbackWidgetEl } from './widget.ts';
  * The budgeted bundle draws a comment as its escaped words; this rewrites
  * each `.body` it finds from those words. It rides in `mic.js` and
  * `mockup-live.js` beside `widget-ask.ts` rather than in the budgeted bundle,
- * which had 52 bytes to spare. The app's renderer is not imported: it builds
- * an HTML string and hydrates workspace links through the app's title cache,
- * none of which a guest page has.
+ * which it would have put over its ceiling (measured in the PR). The app's
+ * renderer is not imported: it builds an HTML string and hydrates workspace
+ * links through the app's title cache, none of which a guest page has.
  *
  * Comment text is untrusted, so every node is built with `createElement` and
  * text nodes; nothing here parses markup. A link is drawn only for an
