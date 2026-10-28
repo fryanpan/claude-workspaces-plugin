@@ -2784,6 +2784,33 @@ about $0.035 to $0.04:
 | Before the change | 0 of 6 | 5 of 9 | $0.10 |
 | After the change | 6 of 6 | 9 of 9 | $0.11 |
 
+### Does a recorded meeting meet the goal? `bun run notes:replay`
+
+`notes:eval` runs AMI excerpts. A real meeting is checked by replaying it:
+`scripts/notes-replay.ts <meeting folder> --out <dir> --spend-usd <max>`
+feeds the settled turns of a copied meeting directory through the shipped
+note-taker. It does not re-transcribe the audio. It uses the wiring
+`meeting-wiring.ts` builds (`withServerNotesSinks` over a data dir, the
+at-stop quality pass and its filer) and writes the notes, the timing file
+and the quality rows to `<out>/<docId>/`. Each reconnect in the index is
+its own notes session, as it was live. `--one-leg` runs a meeting as one
+session, which is the control for what reconnects cost the notes.
+
+The clock is virtual while no model call is in flight and real while one
+is (`ReplayClock`, `notes-replay-lib.ts`). An hour of talk replays in the
+time its composes take, and a note's settled-to-written wait still includes
+the reply it waited on. The partials between settled turns are modelled as
+`notes-latency-check.ts --replay` models them.
+
+`scripts/notes-replay-score.ts <run dir>... --truth <dir> --spend-usd <max>`
+scores a run on the five goal metrics. These are repeats and doubled
+headings, the lost-idea share, latency (median at most 10s and under 10%
+of notes over 10s), unknown speakers, and whether the filed quality item
+named every miss. Ideas are listed once per doc from the transcript into
+`--truth`, so every later run is judged against the same list. Both
+commands refuse an output path inside the repository and use the eval key
+only. Neither is in `bun run verify`: each run costs money.
+
 ### Cost
 
 The four intents are prompt text on a call that was already being made.
