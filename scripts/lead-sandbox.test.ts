@@ -130,6 +130,20 @@ describe('buildProfile', () => {
     ]);
   });
 
+  it('leaves tmux reachable only for a lead whose config says allowTmux', () => {
+    const own = parseConfig(
+      { leads: [{ name: 'harborlight-lead', projects: ['/a'], allowTmux: true }] },
+      HOME,
+    );
+    if (!own.ok || !own.config.leads[0]) throw new Error('fixture refused');
+    const l = rules(buildProfile(own.config.leads[0], own.config, fakeMachine));
+    expect(l.some((x) => x.includes('tmux-'))).toBe(false);
+    expect(l).toContain('(deny lsopen)');
+    expect(lines.some((x) => x.includes('tmux-'))).toBe(true); // the default
+    const bad = { leads: [{ name: 'harborlight-lead', projects: ['/a'], allowTmux: 'yes' }] };
+    expect(parseConfig(bad, HOME).ok).toBe(false);
+  });
+
   it('refuses the tmux socket at both spellings, open and Apple events', () => {
     expect(lines).toEqual(
       expect.arrayContaining([
