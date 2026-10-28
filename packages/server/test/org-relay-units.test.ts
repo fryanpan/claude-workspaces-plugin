@@ -175,16 +175,34 @@ describe('the organization rule', () => {
     });
   });
 
-  it('refuses across organizations unless the SENDER holds that access', () => {
-    expect(applyOrganizationRule(c, 'harbor-lead', 'river-lead', 'hi')).toEqual({
-      kind: 'refuse',
-      reason: 'cross-organization',
-    });
-    expect(applyOrganizationRule(c, 'river-lead', 'harbor-lead', 'hi')).toMatchObject({
-      kind: 'allow',
-      crossOrganization: true,
-      filter: true,
-    });
+  it('refuses across organizations unless BOTH seats hold that access', () => {
+    const refused = { kind: 'refuse', reason: 'cross-organization' } as const;
+    // harbor-lead holds none: it neither sends nor receives across.
+    expect(applyOrganizationRule(c, 'harbor-lead', 'river-lead', 'hi')).toEqual(refused);
+    expect(applyOrganizationRule(c, 'river-lead', 'harbor-lead', 'hi')).toEqual(refused);
+    const both = parsed(
+      config({
+        seats: {
+          'harbor-lead': {
+            server: 'harbor',
+            board: 'w-harbor',
+            agentId: 'agent-harbor-lead',
+            outboxDoc: 'task:t-out-1',
+            inboxDoc: 'task:t-in-1',
+            crossOrganization: true,
+          },
+        },
+      }),
+    );
+    for (const [from, to] of [
+      ['river-lead', 'harbor-lead'],
+      ['harbor-lead', 'river-lead'],
+    ] as const)
+      expect(applyOrganizationRule(both, from, to, 'hi')).toMatchObject({
+        kind: 'allow',
+        crossOrganization: true,
+        filter: true,
+      });
   });
 
   it('refuses unknown seats, an empty message and an over-long one', () => {
@@ -326,7 +344,13 @@ describe('a delivery that fails in transit', () => {
         },
         log: () => {},
       });
-      const message = { id: 'river-lead:t1', from: 'river-lead', to: 'harbor-lead', text: 'hi' };
+      // An untrusted sender, so the filter is asked.
+      const message = {
+        id: 'harbor-writer:t1',
+        from: 'harbor-writer',
+        to: 'harbor-lead',
+        text: 'hi',
+      };
       expect(await relay.handle(message)).toEqual({ verdict: 'failed', reason: 'delivery-failed' });
       expect(store.entries()).toEqual([]);
       expect(await relay.handle(message)).toEqual({ verdict: 'delivered' });
