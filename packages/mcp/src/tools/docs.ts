@@ -944,11 +944,9 @@ export async function handleDocsTool(
       });
     }
     case 'share_workspace': {
-      // Forwarded AS SENT, plus this session's name. `allowDomains` and
-      // `name` no longer mean anything — one Access application covers the
-      // whole share hostname and the link has no subdomain of its own — but
-      // an older bundle still sends them, so the server accepts and ignores
-      // them and says `allowDomainsIgnored` when one arrived. Destructuring
+      // Forwarded AS SENT, plus this session's name. The server reads
+      // `allowDomains` as the link's audience and refuses a malformed one;
+      // `name` is ignored there for an older bundle's sake. Destructuring
       // named keys here is what once turned an argument nobody honoured into
       // a share wider than the caller asked for; the server refuses or
       // honours each key by name instead.

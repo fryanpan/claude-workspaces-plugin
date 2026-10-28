@@ -17352,7 +17352,7 @@ var TOOL_LIST = {
     },
     {
       name: "share_workspace",
-      description: "Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.",
+      description: "Mint a share link for a board. Anyone you send it to signs in once with their email (pass allowDomains to limit who), and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17368,7 +17368,7 @@ var TOOL_LIST = {
           allowDomains: {
             type: "array",
             items: { type: "string" },
-            description: "Accepted and IGNORED, so that an older caller is not refused. Anyone who opens the link and signs in becomes a member."
+            description: 'Optional audience. Each entry is one address ("someone@partner.example") or one exact domain ("@partner.example"; subdomains are not included). Only a matching sign-in can join, checked on every request. The audience is set when the link is minted; to change it, mint a new link, unshare the old one, and remove_share_member anyone who should lose access. Omit it and anyone who opens the link and signs in joins.'
           },
           role: {
             type: "string",
@@ -21621,7 +21621,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.324";
+var PLUGIN_VERSION = "0.1.325";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

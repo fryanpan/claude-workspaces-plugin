@@ -227,11 +227,11 @@ describe('share links over HTTP', () => {
       await probe.stop();
     });
 
-    it('still accepts the old payload, and says the audience no longer means anything', async () => {
+    it('still accepts the old payload, and applies the audience it names', async () => {
       // Peers keep calling the shared server with the payload THEIR bundle
-      // sends. `allowDomains` and `name` were the per-share-application mint's
-      // two arguments; ignoring them silently would let a caller believe the
-      // link is narrower than it is, so the reply names what it dropped.
+      // sends. `name` was the per-share-application mint's subdomain and is
+      // ignored; `allowDomains` is the link's audience, and the reply says so.
+      // Who it then admits is `share-link-audience.test.ts`.
       const r = await postLocal('/api/share/workspace', {
         workspaceId: board,
         allowDomains: ['@partner.example'],
@@ -239,8 +239,9 @@ describe('share links over HTTP', () => {
         ttlSeconds: undefined,
       });
       expect(r.status).toBe(200);
-      const body = (await r.json()) as { allowDomainsIgnored?: boolean };
-      expect(body.allowDomainsIgnored).toBe(true);
+      const body = (await r.json()) as { audience?: unknown; link: { allowDomains?: string[] } };
+      expect(body.audience).toEqual(['@partner.example']);
+      expect(body.link.allowDomains).toEqual(['@partner.example']);
     });
 
     it('honours an expiry when one is asked for', async () => {

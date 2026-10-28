@@ -48,7 +48,10 @@ import {
   landingPath,
   parseShareLanding,
 } from './share/share-landing.ts';
-import { renderShareLinkUnavailable } from './share/share-link-page.ts';
+import {
+  renderShareLinkOutsideAudience,
+  renderShareLinkUnavailable,
+} from './share/share-link-page.ts';
 import type { ShareLinkMember, ShareLinks } from './share/share-links.ts';
 import { type Shares, audienceEntryAdmits } from './share/shares.ts';
 import type { Share } from './share/types.ts';
@@ -489,6 +492,16 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     if (!link || !taskStore.getWorkspace(link.workspaceId)) return unavailable();
     if (!ctx.boardSharingOpen(link.workspaceId)) return unavailable();
     const outcome = shareLinks.redeem(linkId, email ?? '');
+    if (!outcome.ok && outcome.state === 'outside-audience') {
+      return new Response(renderShareLinkOutsideAudience(email ?? ''), {
+        status: 403,
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'referrer-policy': 'no-referrer',
+          'cache-control': 'no-store',
+        },
+      });
+    }
     if (!outcome.ok) return unavailable();
     // Parsed again rather than trusted: the record is a file on disk, and a
     // hand-edited landing must fall back to the board, not into a path.

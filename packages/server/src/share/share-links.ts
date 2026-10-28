@@ -49,6 +49,7 @@ import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 
 import { type BoardRole, DEFAULT_BOARD_ROLE, normalizeBoardRole } from './board-role.ts';
+import { audienceAdmits, storedAudience } from './share-audience.ts';
 import type { ShareLanding } from './share-landing.ts';
 
 const SECRET_MODE = 0o600;
@@ -91,6 +92,11 @@ export interface ShareLinkRecord {
   role?: BoardRole;
   /** Where redeeming it lands (`share-landing.ts`). Absent = the board. */
   landing?: ShareLanding;
+  /**
+   * Who may redeem it AND stay in (`share-audience.ts`). Absent = whoever
+   * signs in, which is every link minted before audiences existed.
+   */
+  allowDomains?: string[];
   redemptions: ShareLinkRedemption[];
 }
 
@@ -131,6 +137,8 @@ export interface CreateShareLinkReq {
   /** What redeemers arrive as. Omitted = `member`. */
   role?: BoardRole;
   landing?: ShareLanding;
+  /** Already parsed by `parseShareAudience`. Omitted = no audience. */
+  allowDomains?: string[];
 }
 
 interface Persisted {
@@ -172,6 +180,7 @@ export class ShareLinks {
       // byte-identical to every link minted before roles existed.
       ...(req.role === 'owner' ? { role: req.role } : {}),
       ...(req.landing ? { landing: req.landing } : {}),
+      ...(req.allowDomains ? { allowDomains: req.allowDomains.slice() } : {}),
       redemptions: [],
     };
     this.links.push(record);
@@ -232,7 +241,9 @@ export class ShareLinks {
     linkId: string,
     email: string,
     now: number = Date.now(),
-  ): { ok: true; workspaceId: string; added: boolean } | { ok: false; state: ShareLinkState } {
+  ):
+    | { ok: true; workspaceId: string; added: boolean }
+    | { ok: false; state: ShareLinkState | 'outside-audience' } {
     const state = this.state(linkId, now);
     if (state !== 'live') return { ok: false, state };
     const link = this.get(linkId);
@@ -244,6 +255,8 @@ export class ShareLinks {
     // member. Answering `unknown` rather than a distinct reason keeps the
     // visitor's page identical whatever went wrong.
     if (who === '') return { ok: false, state: 'unknown' };
+    // Refused before anything is written: no member row, no redemption.
+    if (!audienceAdmits(link.allowDomains, who)) return { ok: false, state: 'outside-audience' };
     const added = this.addMember(link.workspaceId, who, linkId, now, link.role);
     if (added) {
       link.redemptions.push({ email: who, at: now });
@@ -255,20 +268,35 @@ export class ShareLinks {
   /**
    * Is this email a member of this workspace?
    *
-   * The ONLY question the per-request gate asks, and it reads the membership
-   * rows rather than the links: that is what "from then on the membership,
-   * not the link, grants access" means in code. A revoked link's members
-   * still answer true here, and that is the intended behaviour, not a gap.
+   * The ONLY question the per-request gate asks. The membership row grants
+   * access, and the link it came through is read for one thing only: its
+   * audience, which must still admit the row. A revoked link's members still
+   * answer true here, and that is the intended behaviour, not a gap.
    */
   isMember(workspaceId: string, email: string | null | undefined): boolean {
     const who = email ? normalizeEmail(email) : '';
     if (who === '' || !workspaceId) return false;
-    return this.members.some((m) => m.workspaceId === workspaceId && m.email === who);
+    return this.admittedRow(workspaceId, who) !== null;
+  }
+
+  /**
+   * The member row, if the audience of the link it came through still admits
+   * it. Asked on every request, so a narrowed audience ends access on the
+   * next one. A row whose link is gone has no audience to consult.
+   */
+  private admittedRow(workspaceId: string, who: string): ShareLinkMember | null {
+    const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
+    return row && this.admitted(row) ? row : null;
+  }
+
+  /** Lists show who is in, so a row the gate refuses is not listed. */
+  private admitted(row: ShareLinkMember): boolean {
+    return audienceAdmits(this.get(row.viaLinkId)?.allowDomains, row.email);
   }
 
   /** Every member of a workspace, in the order they arrived. */
   membersOf(workspaceId: string): ShareLinkMember[] {
-    return this.members.filter((m) => m.workspaceId === workspaceId);
+    return this.members.filter((m) => m.workspaceId === workspaceId && this.admitted(m));
   }
 
   /**
@@ -283,7 +311,7 @@ export class ShareLinks {
   roleOf(workspaceId: string, email: string | null | undefined): BoardRole | null {
     const who = email ? normalizeEmail(email) : '';
     if (who === '' || !workspaceId) return null;
-    const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
+    const row = this.admittedRow(workspaceId, who);
     if (!row) return null;
     return row.role ?? DEFAULT_BOARD_ROLE;
   }
@@ -296,7 +324,7 @@ export class ShareLinks {
   setMemberRole(workspaceId: string, email: string, role: BoardRole): boolean {
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
-    const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
+    const row = this.admittedRow(workspaceId, who);
     if (!row) return false;
     if ((row.role ?? DEFAULT_BOARD_ROLE) === role) return true;
     // Rebuilt rather than mutated, so a demotion REMOVES the key instead of
@@ -325,7 +353,7 @@ export class ShareLinks {
    * twice, and a member whose link was deleted would not list at all.
    */
   allMembers(): ShareLinkMember[] {
-    return this.members.slice();
+    return this.members.filter((m) => this.admitted(m));
   }
 
   /**
@@ -373,6 +401,11 @@ export class ShareLinks {
     role?: BoardRole,
   ): boolean {
     if (this.isMember(workspaceId, email)) return false;
+    // A row the audience of its own link no longer admits is replaced, so the
+    // person arrives as this link says, exactly as a first redemption would.
+    this.members = this.members.filter(
+      (m) => !(m.workspaceId === workspaceId && m.email === email),
+    );
     // `member` is written as ABSENT, not as the string: the field's whole
     // contract is that a row which does not name a role is a regular user, and
     // two spellings of the default are two things a later reader can disagree
@@ -412,13 +445,20 @@ export class ShareLinks {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Persisted>;
       const links = Array.isArray(parsed?.links) ? parsed.links : [];
       const members = Array.isArray(parsed?.members) ? parsed.members : [];
-      this.links = links.filter(
-        (l): l is ShareLinkRecord =>
-          typeof l?.linkId === 'string' &&
-          l.linkId !== '' &&
-          typeof l?.workspaceId === 'string' &&
-          l.workspaceId !== '',
-      );
+      this.links = links
+        .filter(
+          (l): l is ShareLinkRecord =>
+            typeof l?.linkId === 'string' &&
+            l.linkId !== '' &&
+            typeof l?.workspaceId === 'string' &&
+            l.workspaceId !== '',
+        )
+        .map((l) => {
+          // A hand-edited audience that does not parse admits nobody.
+          const { allowDomains: raw, ...rest } = l;
+          const audience = storedAudience(raw);
+          return audience ? { ...rest, allowDomains: audience } : rest;
+        });
       // Normalized on the way IN as well as on the way out: a row hand-edited
       // with a capitalised address must not become a member nothing matches.
       this.members = members
