@@ -107,7 +107,10 @@ async function oneLongTurn(opts: {
   const words: string[] = [];
   for (let at = opts.frameMs; at < opts.turnMs; at += opts.frameMs) {
     clock.advanceTo(at);
-    while (words.length < Math.floor(at / opts.wordMs)) words.push(`w${words.length}`);
+    // Short sentences, because a ceiling tick cuts at a sentence end.
+    while (words.length < Math.floor(at / opts.wordMs)) {
+      words.push(`w${words.length}${words.length % 4 === 3 ? '.' : ''}`);
+    }
     if (words.length === 0) continue;
     session.onTurn(
       {

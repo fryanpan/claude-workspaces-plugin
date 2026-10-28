@@ -232,16 +232,16 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   in the input marks the seam. The per-leg state that goes with it —
   `priorRaw`, the offered-suggestion set, `lastTickNo`, the speaker `names`
   map, the idea/coverage ledger, the tick cadence — starts again too.
-- **Reset, and the expensive one: authorship.** `onSessionStart` calls
-  `releaseNotesAuthorship(docStore, docId)`, which drops the note-taker's claim
-  on every block in the doc. So the bullets the meeting wrote BEFORE the drop
-  come back to it as a person's lines: they arrive in `humanNotes`, the outline
-  shows no block of its own, and an edit naming one of them lands as a
-  SUGGESTION rather than a rewrite. That is the safe direction — the same one a
-  restarted server lands in, and the reason the release exists — but on a
-  five-reconnect meeting it means most of the minutes stop being editable by
-  the hand that wrote them. **Left as measured; changing it is a separate
-  decision, not a bug fix.**
+- **Kept, since 2026-10-28: authorship of the meeting's own notes.**
+  `onSessionStart` still calls `releaseNotesAuthorship`, but passes the blocks
+  this same meeting id wrote on earlier legs (`written.read(ids)`) as `keep`.
+  Until then every reconnect turned the minutes written so far into a person's
+  lines: revisions became suggestions or `not-yours` refusals, and every topic
+  read as the doc's own and was opened again. Replayed over four recorded
+  meetings, topics headed twice tracked the reconnect count, 0 with one leg
+  and 20 with twenty-one. A DIFFERENT recording on the doc still releases
+  everything, which is what stops meeting two deleting meeting one's bullets
+  (`notes-second-meeting.test.ts`).
 - **Held, since 2026-09-16: the meeting's quality item.** The at-stop quality
   pass runs at every leg's stop, because `end()` is what runs it — so a
   reconnecting meeting used to put a "the notes came out badly" item in front

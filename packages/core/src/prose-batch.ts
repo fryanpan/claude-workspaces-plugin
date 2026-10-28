@@ -333,10 +333,19 @@ export function blocksAuthoredBy(doc: Y.Doc, author: string): Y.XmlElement[] {
   return addressableBlocks(getProseFragment(doc)).filter((el) => readBlockAuthor(el) === author);
 }
 
-/** Drop an author's claim on every block it holds. Used when a session ends
- *  and the agent should stop treating a doc's words as its own to rewrite. */
-export function releaseAuthorship(doc: Y.Doc, author: string, origin: unknown = 'agent'): number {
-  const held = blocksAuthoredBy(doc, author);
+/** Drop an author's claim on every block it holds, except the ids in `keep`.
+ *  Used when a session ends and the agent should stop treating a doc's words
+ *  as its own to rewrite. */
+export function releaseAuthorship(
+  doc: Y.Doc,
+  author: string,
+  origin: unknown = 'agent',
+  keep: ReadonlySet<string> = new Set(),
+): number {
+  const held = blocksAuthoredBy(doc, author).filter((el) => {
+    const id = readBlockId(el);
+    return id === undefined || !keep.has(id);
+  });
   if (held.length === 0) return 0;
   doc.transact(() => {
     for (const el of held) el.removeAttribute(BLOCK_AUTHOR_ATTR);

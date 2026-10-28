@@ -1627,8 +1627,13 @@ export function withServerNotesSinks(
       // meeting's still-marked notes read as minutes rather than as the
       // person's own writing.
       targets.begin(ids);
-      releaseNotesAuthorship(deps.docStore(), ids.docId);
-      if (targets.targetOf(ids.docId) !== ids.docId) releaseNotesAuthorship(docStore(), ids.docId);
+      // EXCEPT WHAT THIS SAME MEETING WROTE on an earlier leg: a reconnect
+      // resumes the recording rather than starting one (`releaseNotesAuthorship`).
+      const own = written.read(ids);
+      releaseNotesAuthorship(deps.docStore(), ids.docId, own);
+      if (targets.targetOf(ids.docId) !== ids.docId) {
+        releaseNotesAuthorship(docStore(), ids.docId, own);
+      }
       heading.beginMeeting(ids);
       // A leg of this meeting is running again. Whatever reading the drop
       // left is about half a meeting, and the grace that would have filed it
