@@ -281,7 +281,8 @@ a fast-forward reach the upstream, including one the compare API decides; a
 force-push to a feature branch succeeds; a push to an unlisted repo, a
 force-push and a reset back on the default branch, and a branch delete are
 each refused and the upstream ref is unchanged; with upstream's `HEAD`
-moved to another branch, the rule moves with it; no token, a wrong one and
+moved to another branch, the rule moves with it; with HEAD unreadable, a
+force-push to a feature branch is refused; no token, a wrong one and
 the owner's own credential get 401. A tap between git and the proxy keeps
 every byte both ways, and the fake credential is in none of them, nor in a
 log line, while the upstream saw it on every request. An upstream error that

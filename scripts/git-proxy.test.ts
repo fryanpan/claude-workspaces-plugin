@@ -280,6 +280,38 @@ describe.skipIf(!HAVE_GIT)('the GitHub proxy, with a real git client', () => {
     }
   });
 
+  it('refuses a force-push anywhere when the default branch cannot be read', async () => {
+    const work = join(root, 'work');
+    const gitDir = join(repos, 'Harborlight/notes.git');
+    // HEAD names a branch that does not exist, so upstream advertises no HEAD at all.
+    const head = (ref: string) =>
+      expect(git(root, ['--git-dir', gitDir, 'symbolic-ref', 'HEAD', ref]).status).toBe(0);
+    head('refs/heads/nowhere');
+    try {
+      const feature = upstreamRef('Harborlight/notes', 'feature');
+      const sibling = git(work, [
+        'commit-tree',
+        'HEAD^{tree}',
+        '-p',
+        `${feature}~1`,
+        '-m',
+        'rebased again',
+      ]).stdout.trim();
+      const push = await lead(work, [
+        'push',
+        '-q',
+        '--force',
+        'origin',
+        `${sibling}:refs/heads/feature`,
+      ]);
+      expect(push.status).not.toBe(0);
+      expect(upstreamRef('Harborlight/notes', 'feature')).toBe(feature);
+      expect(logs.some((l) => l.includes('the default branch could not be read'))).toBe(true);
+    } finally {
+      head('refs/heads/main');
+    }
+  });
+
   it('refuses a branch delete, and the branch is still there', async () => {
     const work = join(root, 'work');
     const before = upstreamRef('Harborlight/notes', 'feature');
