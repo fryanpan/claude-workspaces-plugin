@@ -88,6 +88,11 @@ export interface CodeSurface extends ReviewSurface {
   /** The whole line under the cursor as a line-snapped anchor selection —
    *  lets a bare click (empty selection) comment on its line. */
   getCursorLineRel: () => { start: Uint8Array; end: Uint8Array; snippet: string } | null;
+  /** Where the comment pill belongs, in viewport pixels: the right edge of
+   *  the last selected character, or of the cursor line's last character
+   *  when nothing is selected. `range` says which. Null for an empty line or
+   *  a position CodeMirror has not rendered. */
+  getPillAnchor: () => { range: boolean; right: number; top: number; bottom: number } | null;
 }
 
 // --- gutter comment markers --------------------------------------------------
@@ -540,6 +545,26 @@ export function createCodeEditor(opts: CreateCodeEditorOpts): CodeSurface {
         end: encodeOffsetRel(content, line.to),
         snippet,
       };
+    },
+    getPillAnchor() {
+      // Read off CodeMirror's own state and coordinates, not the DOM range: a
+      // selection dragged to the start of a later line ends with a zero-width
+      // rect at column 0, which put the pill at the line's left edge.
+      const sel = view.state.selection.main;
+      const doc = view.state.doc;
+      let pos: number;
+      if (sel.empty) {
+        const line = doc.lineAt(sel.head);
+        if (line.from === line.to) return null;
+        pos = line.to;
+      } else {
+        // Ending at a line's start selects nothing on that line: the last
+        // selected text is the end of the line before it.
+        pos = sel.to > sel.from && doc.lineAt(sel.to).from === sel.to ? sel.to - 1 : sel.to;
+      }
+      const at = view.coordsAtPos(pos, -1);
+      if (!at) return null;
+      return { range: !sel.empty, right: at.right, top: at.top, bottom: at.bottom };
     },
     destroy() {
       content.unobserve(onContentChange);
