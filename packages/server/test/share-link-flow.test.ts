@@ -1562,6 +1562,63 @@ describe('share links over HTTP', () => {
       const listed = await listShares();
       expect(listed.links.find((l) => l.linkId === linkId)?.state).toBe('revoked');
     });
+
+    it('gives each live link the URL the mint returned, and a revoked one none', async () => {
+      const live = await mintLink(board);
+      const revoked = await mintLink(board);
+      await local(`/api/share/${revoked.linkId}`, { method: 'DELETE' });
+      const listed = await listShares();
+      const liveRow = listed.links.find((l) => l.linkId === live.linkId);
+      expect(liveRow?.url).toBe(`https://${SHARE_HOST}/s/${live.linkId}`);
+      expect(liveRow?.url).toBe(live.url);
+      const revokedRow = listed.links.find((l) => l.linkId === revoked.linkId);
+      expect(revokedRow?.state).toBe('revoked');
+      expect(revokedRow).not.toHaveProperty('url');
+    });
+
+    it('gives no URL when this deployment configures no share hostname', async () => {
+      // The link is minted on a deployment WITH a share hostname, then the
+      // same data directory is served without one. The cloudflare-share
+      // config stays, so the list still answers rather than 404ing.
+      const dir = mkdtempSync(join(tmpdir(), 'share-link-nohost-'));
+      try {
+        const withHost = createServer({ ...serverOptions(), dataDir: dir });
+        const hostBase = `http://127.0.0.1:${withHost.port}`;
+        const post = (path: string, body: unknown) =>
+          fetch(`${hostBase}${path}`, {
+            method: 'POST',
+            headers: { host: `localhost:${withHost.port}`, 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+        const made = await post('/workspaces', { name: 'Riverbend board' });
+        const id = ((await made.json()) as { workspace: { id: string } }).workspace.id;
+        const minted = await post('/api/share/workspace', { workspaceId: id });
+        expect(minted.status).toBe(200);
+        const { link } = (await minted.json()) as { link: { linkId: string } };
+        await withHost.stop();
+
+        const opts = { ...serverOptions(), dataDir: dir };
+        // biome-ignore lint/performance/noDelete: the absence IS the fixture
+        delete (opts as { shareLinkHosts?: unknown }).shareLinkHosts;
+        const noHost = createServer(opts);
+        try {
+          const r = await fetch(`http://127.0.0.1:${noHost.port}/api/share`, {
+            headers: { host: `localhost:${noHost.port}` },
+          });
+          expect(r.status).toBe(200);
+          const body = (await r.json()) as { links: Array<{ linkId: string; url?: string }> };
+          const row = body.links.find((l) => l.linkId === link.linkId);
+          // Positive control: the link is listed, so the missing url is the
+          // missing hostname and not a missing row.
+          expect(row).toBeDefined();
+          expect(row).not.toHaveProperty('url');
+        } finally {
+          await noHost.stop();
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('the retired per-share-application mode', () => {
@@ -1702,6 +1759,7 @@ describe('share links over HTTP', () => {
       linkId: string;
       state: string;
       label?: string;
+      url?: string;
       redemptions: Array<{ email: string }>;
     }>;
     members: Array<{ workspaceId: string; email: string }>;

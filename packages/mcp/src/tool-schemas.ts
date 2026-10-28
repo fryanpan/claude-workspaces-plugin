@@ -1618,7 +1618,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'list_shares',
       description:
-        'List every share of every board: the links, who redeemed each one and when, whether each one is live, revoked or expired, and every member with the role they hold — Owner or Regular User.',
+        'List every share of every board: the links, who redeemed each one and when, whether each one is live, revoked or expired, and every member with the role they hold — Owner or Regular User. A live link carries `url`, the address to hand a person (https://<share host>/s/<linkId>); a revoked or expired link has none.',
       inputSchema: {
         type: 'object',
         properties: {},
