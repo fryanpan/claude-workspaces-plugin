@@ -100,19 +100,27 @@ function shortcutsRow(profile: string, cwd: string): EscapeRow {
   };
 }
 
-/** launchd refuses a sandboxed caller's job; no rule of ours does this. */
+/**
+ * launchd refuses a sandboxed caller's job; no rule of ours does this. The
+ * control submits the same job from outside, where it must load. Each job
+ * runs `/usr/bin/true` and is removed at once.
+ */
 function launchdRow(profile: string, cwd: string): EscapeRow {
   const label = `com.lead-sandbox.check-${process.pid}`;
-  spawnSync(
-    SANDBOX_EXEC,
-    ['-f', profile, '/bin/launchctl', 'submit', '-l', label, '--', '/usr/bin/true'],
-    { cwd, stdio: 'ignore' },
-  );
-  const loaded = spawnSync('/bin/launchctl', ['list', label], { stdio: 'ignore' }).status === 0;
-  if (loaded) spawnSync('/bin/launchctl', ['remove', label], { stdio: 'ignore' });
+  const submitted = (prefix: string[]) => {
+    spawnSync(prefix[0] ?? '', [...prefix.slice(1), 'submit', '-l', label, '--', '/usr/bin/true'], {
+      cwd,
+      stdio: 'ignore',
+    });
+    const loaded = spawnSync('/bin/launchctl', ['list', label], { stdio: 'ignore' }).status === 0;
+    if (loaded) spawnSync('/bin/launchctl', ['remove', label], { stdio: 'ignore' });
+    return loaded;
+  };
+  const outside = submitted(['/bin/launchctl']);
+  const inside = submitted([SANDBOX_EXEC, '-f', profile, '/bin/launchctl']);
   return {
-    ok: !loaded,
-    says: `launchd: a job submitted from inside ${loaded ? 'was loaded (removed again)' : 'was refused'} (must be refused)`,
+    ok: outside && !inside,
+    says: `launchd: a job submitted outside ${outside ? 'loads' : 'does not load'} (the control), from inside ${inside ? 'was loaded (removed again)' : 'was refused'} (must be refused)`,
   };
 }
 

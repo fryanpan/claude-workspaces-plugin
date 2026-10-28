@@ -126,7 +126,7 @@ Then five rows per lead try the ways out of the wall
 | open | `sandbox_check` says `lsopen` is denied | none needed: it is the sandbox's own verdict |
 | osascript | `sandbox_check` says `appleevent-send` is denied | as above |
 | shortcuts | `shortcuts list` fails | `shortcuts list` answers |
-| launchd | a `launchctl submit` of `/usr/bin/true` is not loaded | none: launchd refuses it, no rule of ours |
+| launchd | a `launchctl submit` of `/usr/bin/true` is not loaded (launchd's own refusal; no rule of ours) | the same job submitted outside loads, and is removed at once |
 
 `open` and `osascript` are asked of the sandbox rather than driven, because
 driving them would start an app or show a window. The check starts and kills
