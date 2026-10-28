@@ -14,16 +14,19 @@
  *   creates the proxied record for each project hostname that has none
  *   runs `wrangler deploy` and prints the version it deployed
  *
- * A second run changes nothing but the Worker's code and vars. The API token
- * comes out of the Keychain (`cloudflare-api-token`) into this process and a
- * child's environment only: never an argument, a log line or a file.
+ * A second run changes nothing but the Worker's code and vars. With
+ * `CW_KEEPER_URL` set, the API calls go through the keeper (the record write
+ * waits for Bryan's passkey) and `wrangler deploy` runs on wrangler's own
+ * login, so no token is read here. Without it, the API token comes out of
+ * the Keychain (`cloudflare-api-token`) into this process and a child's
+ * environment only: never an argument, a log line or a file.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { type CloudflareApi, cloudflareApi } from '../project-machine/cloudflare.ts';
-import { cloudflareApiToken } from '../project-machine/mac-ops.ts';
+import type { CloudflareApi } from '../project-machine/cloudflare.ts';
+import { cloudflareApiToken, cloudflareClient } from '../project-machine/mac-ops.ts';
 import {
   type DnsRecord,
   type Observed,
@@ -57,7 +60,8 @@ async function observe(api: CloudflareApi, zoneId: string, cfg: RouterConfig): P
   };
 }
 
-function wrangler(cfg: RouterConfig, token: string, accountId: string): string {
+/** `token` null: wrangler uses its own login (`wrangler login`), as after the keeper's cutover. */
+function wrangler(cfg: RouterConfig, token: string | null, accountId: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'board-router-deploy-'));
   try {
     const config = join(dir, 'wrangler.toml');
@@ -67,7 +71,7 @@ function wrangler(cfg: RouterConfig, token: string, accountId: string): string {
       encoding: 'utf8',
       env: {
         ...process.env,
-        CLOUDFLARE_API_TOKEN: token,
+        ...(token === null ? {} : { CLOUDFLARE_API_TOKEN: token }),
         CLOUDFLARE_ACCOUNT_ID: accountId,
         WRANGLER_SEND_METRICS: 'false',
       },
@@ -90,8 +94,8 @@ async function main(args: string[]): Promise<void> {
   const cfg = parseRouterConfig(
     readFileSync(i >= 0 ? (args[i + 1] ?? '') : join(HERE, 'router.local.json'), 'utf8'),
   );
-  const token = cloudflareApiToken();
-  const api = cloudflareApi(token);
+  const viaKeeper = Boolean(process.env.CW_KEEPER_URL?.trim());
+  const api = cloudflareClient('router:deploy');
 
   const zones = await api<Array<{ id: string; account: { id: string } }>>(
     'GET',
@@ -117,7 +121,7 @@ async function main(args: string[]): Promise<void> {
       comment: "A project's own hostname, answered by the board-router Worker",
     });
   }
-  const version = wrangler(cfg, token, zone.account.id);
+  const version = wrangler(cfg, viaKeeper ? null : cloudflareApiToken(), zone.account.id);
   console.log(`deployed board-router version ${version}`);
 }
 
