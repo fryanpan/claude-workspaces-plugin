@@ -42,6 +42,7 @@ import { boardLockedRefusal, lockedBoardNamedBy } from '../share/board-lock.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
 import { readCookie } from '../share/link-session.ts';
+import { parseShareAudience } from '../share/share-audience.ts';
 import { landingLookupsFor, landingOnBoard, parseShareLanding } from '../share/share-landing.ts';
 import { type ShareLinks, shareMemberKey } from '../share/share-links.ts';
 import { ACCESS_NOT_CONFIGURED, type Shares } from '../share/shares.ts';
@@ -929,15 +930,12 @@ export async function handleAuthShareRoutes(
   // deciding who may open which workspace is this server's — which is the
   // layering the security model already described everywhere else.
   //
-  // THE OLD PAYLOAD IS STILL ACCEPTED. `allowDomains` and `name` were the two
-  // arguments the per-share-application mint needed — who the policy admits,
-  // and what to call the subdomain — and neither exists any more. Peers keep
-  // calling the shared server with the payload THEIR bundle sends long after
-  // this one stopped sending it (CLAUDE.md), so they are accepted and ignored
-  // rather than refused: the ask "publish this board" did not change. The
-  // reply says `allowDomainsIgnored` so a caller that named an audience is
-  // told its request no longer means anything, instead of believing the link
-  // is narrower than it is.
+  // `allowDomains` is the link's AUDIENCE (`share/share-audience.ts`): when
+  // given, only those addresses or domains may redeem it, and the store
+  // re-checks it on every request a member makes. Omitted, the link admits
+  // whoever signs in, as every earlier link does. `name` was the retired
+  // per-share-application mint's subdomain; an older bundle still sends it,
+  // and it is accepted and ignored.
   //
   // The RESPONSE shape is new (no hostname, no audience, no appId) and there
   // is no shim for the old one — Bryan waived compatibility shims for
@@ -1025,6 +1023,14 @@ export async function handleAuthShareRoutes(
         hint: 'landing must name a task, doc, mock or dev server filed on this board, as its own kind',
       });
     }
+    // Refused whole when any entry is malformed: a typo must not mint a link
+    // that admits someone other than the people the caller named.
+    let allowDomains: string[] | undefined;
+    if (body?.allowDomains !== undefined) {
+      const parsed = parseShareAudience(body.allowDomains);
+      if (!parsed.ok) return j(400, { error: 'bad_allow_domains', hint: parsed.hint });
+      allowDomains = parsed.audience;
+    }
     // NO EXPIRY BY DEFAULT (Bryan, 2026-09-03: links are long-living). An
     // optional one stays on the record for the cases that want it, and the
     // same resolver as every other share route reads it, so a configured
@@ -1061,15 +1067,15 @@ export async function handleAuthShareRoutes(
         ...(typeof body?.label === 'string' ? { label: body.label } : {}),
         ...(role !== undefined ? { role } : {}),
         ...(landing ? { landing } : {}),
+        ...(allowDomains ? { allowDomains } : {}),
       });
       const url = `https://${shareLinkBaseHost}/s/${link.linkId}`;
       return j(200, {
         link,
         url,
-        // Said whenever a caller named one, because the field no longer does
-        // anything: the link admits whoever opens it and signs in, and the
-        // reply must not let a caller believe otherwise.
-        ...(body?.allowDomains !== undefined ? { allowDomainsIgnored: true } : {}),
+        // Said on every reply, so the caller can tell the person who it was
+        // shared with: `anyone-who-signs-in`, or the list it applied.
+        audience: allowDomains ?? 'anyone-who-signs-in',
       });
     } catch (err) {
       return j(400, { error: err instanceof Error ? err.message : 'create_share_link_failed' });

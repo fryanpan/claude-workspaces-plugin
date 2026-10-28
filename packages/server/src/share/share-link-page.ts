@@ -1,7 +1,7 @@
 /**
  * The page a share link renders when it does not open.
  *
- * ONE page for every reason. Revoked, expired, never existed, malformed, and
+ * ONE page for every reason a link is not live. Revoked, expired, never existed, malformed, and
  * "the board behind it is no longer a board" all render this, because four
  * pages would turn the redeem route into an oracle: anyone could walk ids and
  * learn which ones are real from the difference between the answers. The
@@ -25,21 +25,46 @@
  * viewport meta, so the same markup reads at 1180x820 and at 430px without a
  * media query — there is nothing here that could reflow into two columns.
  */
+import { escapeHtml } from '@claude-workspaces/core';
+
 export function renderShareLinkUnavailable(): string {
+  return sharePage(
+    'Link no longer works',
+    'This link no longer works',
+    'It may have been revoked, or it may have expired. Ask whoever shared it for a new one.',
+  );
+}
+
+/**
+ * The page a LIVE link renders to a signed-in address its audience does not
+ * name (`share-audience.ts`). A second page is no oracle the first one
+ * guards against: only a live link reaches it, and its visitor already holds
+ * the link. It names the address they signed in with, so they can tell which
+ * one to switch to, and never the audience itself.
+ */
+export function renderShareLinkOutsideAudience(email: string): string {
+  return sharePage(
+    'Not shared with this address',
+    'This link was shared with a different address',
+    `You are signed in as ${escapeHtml(email)}. Sign in with the address it was shared with, or ask whoever shared it to add yours.`,
+  );
+}
+
+function sharePage(title: string, heading: string, body: string): string {
   return `<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Link no longer works · Workspaces</title>
+<title>${title} · Workspaces</title>
 <style>
 :root{color-scheme:light dark}
 body{font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1c1c1e;background:#fff;
 margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:2rem 1.25rem}
 main{max-width:26rem}
 h1{font-size:1.375rem;line-height:1.25;margin:0 0 .625rem;font-weight:600}
-p{color:#5b5b60;margin:0}
+p{color:#5b5b60;margin:0;overflow-wrap:anywhere}
 @media(prefers-color-scheme:dark){body{background:#131316;color:#ececf0}p{color:#a0a0a8}}
 </style>
 <main>
-<h1>This link no longer works</h1>
-<p>It may have been revoked, or it may have expired. Ask whoever shared it for a new one.</p>
+<h1>${heading}</h1>
+<p>${body}</p>
 </main></html>`;
 }

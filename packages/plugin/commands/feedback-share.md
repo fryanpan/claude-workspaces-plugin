@@ -60,13 +60,15 @@ reports. Everything on that board is available to everyone the share reaches
    board: `create_workspace` takes about a second, and `create_diff_review`
    accepts the new board's id as `hubWorkspaceId` in the same call.
 
-4. **Call `share_workspace`** with `{ workspaceId, ttlSeconds? }`, where
-   `workspaceId` is the BOARD id. Links do not expire by default — pass a ttl
-   only when the user asks for a window. `allowDomains` is accepted and
-   ignored: everyone who opens the link signs in through Cloudflare Access and
-   becomes a member, and the reply says `allowDomainsIgnored` when you sent
-   one. The call answers `410 grouping_sharing_removed` if you hand it a
-   review id by mistake.
+4. **Call `share_workspace`** with `{ workspaceId, allowDomains?, ttlSeconds? }`,
+   where `workspaceId` is the BOARD id. Links do not expire by default — pass
+   a ttl only when the user asks for a window. `allowDomains` limits who can
+   join: each entry is an address (`someone@partner.example`) or an exact
+   domain (`@partner.example`, subdomains not included), and the server checks
+   it on every request, not only the first. Omit it and everyone who opens the
+   link and signs in through Cloudflare Access becomes a member. The reply's
+   `audience` says which applied. The call answers `410
+   grouping_sharing_removed` if you hand it a review id by mistake.
 
 5. **Share the resulting URL** with the user along with a brief instruction
    the user can forward to reviewers:

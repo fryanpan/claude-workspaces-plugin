@@ -1527,7 +1527,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'share_workspace',
       description:
-        'Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.',
+        'Mint a share link for a board. Anyone you send it to signs in once with their email (pass allowDomains to limit who), and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1546,7 +1546,7 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Accepted and IGNORED, so that an older caller is not refused. Anyone who opens the link and signs in becomes a member.',
+              'Optional audience. Each entry is one address ("someone@partner.example") or one exact domain ("@partner.example"; subdomains are not included). Only a matching sign-in can join, and a member stops getting in once the audience no longer names them. Omit it and anyone who opens the link and signs in joins.',
           },
           role: {
             type: 'string',
