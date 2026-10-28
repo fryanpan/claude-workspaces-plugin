@@ -9,7 +9,7 @@
  * that runs `/usr/bin/true` and removes it at once.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { constants, accessSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
 
@@ -177,6 +177,32 @@ export function keychainRow(profile: string, cwd: string): EscapeRow {
   } finally {
     security(outside, 'delete-generic-password', '-s', service);
   }
+}
+
+/**
+ * A file planted beside the `claude` binary every unsandboxed session runs
+ * (`dir` is the folder it resolves into). Outside, the folder must be
+ * writable (the control, asked with `access`, so nothing is made there);
+ * inside, `touch` must be refused. A stray file is removed if the wall fails.
+ */
+export function installRow(profile: string, cwd: string, dir: string): EscapeRow {
+  const probe = join(dir, '.lead-sandbox-check');
+  let control = true;
+  try {
+    accessSync(dir, constants.W_OK);
+  } catch {
+    control = false;
+  }
+  const r = spawnSync(SANDBOX_EXEC, ['-f', profile, '/usr/bin/touch', probe], {
+    cwd,
+    stdio: 'ignore',
+  });
+  const wrote = r.status === 0 || existsSync(probe);
+  rmSync(probe, { force: true });
+  return {
+    ok: control && !wrote,
+    says: `claude install: ${dir} ${control ? 'is writable' : 'is not writable'} outside (the control), a new file ${wrote ? 'written' : 'refused'} inside (must be refused)`,
+  };
 }
 
 /** Every escape row for one lead's profile, run from the lead's first project. */
