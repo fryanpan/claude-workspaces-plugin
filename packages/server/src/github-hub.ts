@@ -56,7 +56,9 @@ export const MAX_GITHUB_SUBSCRIPTIONS = 50;
 export const GITHUB_EVENT_TEXT_MAX = 2_000;
 /** Tab, newline and carriage return pass; every other control character,
  *  and the bidi overrides that reorder what a reader sees, refuse. */
-const UNSAFE_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/;
+export const UNSAFE_GITHUB_TEXT =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the class is the point
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/;
 /** How many recent event ids a board remembers for its retry check. */
 const SEEN_IDS = 500;
 
@@ -97,8 +99,9 @@ export function parseGithubEventPush(raw: unknown): GithubEventPush | string {
   if (!isValidRepo(repo)) return 'repo must be owner/name';
   if (!isKind(kind)) return `kind must be one of ${GITHUB_EVENT_KINDS.join(', ')}`;
   if (typeof text !== 'string' || text.trim() === '') return 'text must be a non-empty string';
-  if (text.length > GITHUB_EVENT_TEXT_MAX) return `text is over ${GITHUB_EVENT_TEXT_MAX} characters`;
-  if (UNSAFE_TEXT.test(text)) return 'text carries a control or bidi-override character';
+  if (text.length > GITHUB_EVENT_TEXT_MAX)
+    return `text is over ${GITHUB_EVENT_TEXT_MAX} characters`;
+  if (UNSAFE_GITHUB_TEXT.test(text)) return 'text carries a control or bidi-override character';
   return { id, repo, kind, text };
 }
 
@@ -166,7 +169,10 @@ export class GithubHub {
   }
 
   subscriptions(boardId: string): GithubSubscription[] {
-    return (this.load().get(boardId)?.subscriptions ?? []).map((s) => ({ ...s, kinds: [...s.kinds] }));
+    return (this.load().get(boardId)?.subscriptions ?? []).map((s) => ({
+      ...s,
+      kinds: [...s.kinds],
+    }));
   }
 
   /** Replace the board's whole list. An empty list unsubscribes from all. */
@@ -185,7 +191,10 @@ export class GithubHub {
     r.keyId = this.newId();
     r.keyMintedAt = this.now();
     this.save();
-    return { key: mintGithubPushKey({ boardId, keyId: r.keyId }, this.key()), mintedAt: r.keyMintedAt };
+    return {
+      key: mintGithubPushKey({ boardId, keyId: r.keyId }, this.key()),
+      mintedAt: r.keyMintedAt,
+    };
   }
 
   /** Whether the bearer is this board's live key. One answer for every

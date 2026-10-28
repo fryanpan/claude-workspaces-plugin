@@ -51,6 +51,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/dispatches/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/docs` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/docs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/github-push-keys` | POST | `routes/github-hub.ts` | loopback-only |  |
 | `/api/goals` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
@@ -260,6 +261,9 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/embeds` | GET, PUT | `routes/workspace-embeds.ts` | trusted-local |  |
 | `/workspaces/:ws/events` | GET | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/events:stream` | GET | `routes/upgrade-stream.ts` | share-scope |  |
+| `/workspaces/:ws/github-subscriptions` | GET, PUT | `routes/github-hub.ts` | loopback-only |  |
+| `/workspaces/:ws/github/events` | POST | `routes/github-hub.ts` | github-push |  |
+| `/workspaces/:ws/github/subscriptions` | GET | `routes/github-hub.ts` | github-push |  |
 | `/workspaces/:ws/goal` | PUT | `routes/workspace-settings.ts` | trusted-local |  |
 | `/workspaces/:ws/goals` | PUT | `routes/workspace-goals.ts` | trusted-local |  |
 | `/workspaces/:ws/goals/:goalId/archive` | POST | `routes/workspace-goals.ts` | share-scope |  |
