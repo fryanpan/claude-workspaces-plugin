@@ -383,7 +383,33 @@ export function dedupeNotesEdits(
     return kept;
   };
 
-  for (const edit of edits) {
+  // A BLOCK-ADDRESSED EDIT HEADS A KNOWN TOPIC AGAIN TOO: a `###` copy of the
+  // SAME name straight under its `##`. The address places the notes, so the
+  // copy goes; before the topic's own heading, they go under it.
+  const unheaded = (edit: prose.BlockEdit): prose.BlockEdit | null => {
+    if (edit.op !== 'insert_before_block' && edit.op !== 'replace_block') return edit;
+    const self = edit.op === 'replace_block' ? edit.blockId : undefined;
+    const lines = edit.markdown.split('\n');
+    let named: string | undefined;
+    const kept = lines.filter((line) => {
+      const h = line.match(/^#{1,6}\s+(.*\S)\s*$/);
+      const key = topicKey(h?.[1] ?? '');
+      const known = key !== '' && topics.find((t) => t.id !== self && topicKey(t.text) === key);
+      if (known) named = known.id;
+      return !known;
+    });
+    if (named === undefined) return edit;
+    notes.push('dropped a heading that named a topic the section already heads');
+    if (!hasWords(kept)) return null;
+    const markdown = kept.join('\n').trim();
+    return edit.op === 'insert_before_block' && edit.blockId === named
+      ? { op: 'insert_under_heading', headingId: named, markdown }
+      : { ...edit, markdown };
+  };
+
+  for (const raw of edits) {
+    const edit = unheaded(raw);
+    if (edit === null) continue;
     if (edit.op !== 'insert_at_end' && edit.op !== 'insert_under_heading') {
       if (
         edit.op === 'replace_block' &&

@@ -51,4 +51,32 @@ describe('a topic heading opened again at another level', () => {
     expect(headingLines(notes, 'Riverbend slipway')).toBe(1);
     expect(notes).toContain('Crane booked');
   });
+
+  it('led by its heading in an edit addressed to a block, is not headed again', async () => {
+    for (const at of ['listItem', 'heading'] as const) {
+      const h = createNotesTickHarness({
+        compose: (input, tick) => {
+          if (tick === 1) return addNotes(input, '### Riverbend slipway\n\n- Costs rose');
+          const target = input.outline.find(
+            (e) => e.kind === at && (at === 'heading' ? e.text.includes('Riverbend') : true),
+          );
+          if (target === undefined) return [];
+          return [
+            {
+              op: 'insert_before_block',
+              blockId: target.id,
+              markdown: '#### Riverbend slipway\n\n- Crane booked',
+            },
+          ];
+        },
+      });
+      await h.speak('the slipway costs rose');
+      await h.speak('the crane is booked');
+      const notes = h.notes();
+      expect(headingLines(notes, 'Riverbend slipway')).toBe(1);
+      // Under the topic, never ahead of its heading.
+      expect(notes.indexOf('Crane booked')).toBeGreaterThan(notes.indexOf('Riverbend slipway'));
+      expect(h.errors).toEqual([]);
+    }
+  });
 });
