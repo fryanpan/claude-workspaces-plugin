@@ -12,6 +12,7 @@ scripts that stand it up. How to run them is
 | `bun run machine:drill --project <name>-test` | the Mac | Backs up, destroys the machine and volume, redeploys, restores, and compares the docs |
 | `entrypoint.sh`, `run-as.sh` | the machine | The process tree, supervised as root: the server as `cw`, cloudflared as `cwtunnel`, so the server's user never holds the tunnel token |
 | `backup-once.sh`, `backup.ts` | the machine | One backup (data dir, with its events and agent notes, plus Claude Code transcripts): snapshot as `cw`, upload as `cwbackup`, so the server's user never holds the bucket credential |
+| `store-uploader.ts`, `store-upload.ts` | any machine running sessions | Every 5 minutes, sends the new lines of each Claude Code transcript and analytics log to the transcript store, each sealed to its board's key; local-only boards never leave. Not installed anywhere yet |
 | `drill-probe.ts` | the machine | Seeds the drill board and fingerprints its docs, on loopback |
 
 ## Why Tigris for the bucket
@@ -54,6 +55,7 @@ recorded response shapes. No test calls Cloudflare.
 with a board's event log and agent-note log, and a transcripts dir beside
 it; snapshots them, restores them, checks the logs and transcripts byte for
 byte and reads the board back from a second server.
+`transcript-store.test.ts` holds the store's uploader: which key each board's files are sealed to, that a local-only board sends nothing, and that a run cut short resumes without repeating or skipping a byte. `transcript-store-uploader.test.ts` holds its keys file and a pass against a stand-in bucket on loopback, which sees PUTs only.
 `project-machine-snapshot.test.ts` holds the refusals, the first snapshot
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs
 `entrypoint.sh` and `backup-once.sh` with stand-ins for `setpriv` and each
