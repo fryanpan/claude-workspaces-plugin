@@ -9,7 +9,7 @@
  * that runs `/usr/bin/true` and removes it at once.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
 
@@ -54,8 +54,11 @@ function sandboxRow(profile: string, cwd: string, op: string, what: string): Esc
  * deny on the folder refuses the move. Outside, the server must answer (the
  * control).
  */
+let tmuxRuns = 0;
+
 function tmuxRow(profile: string, cwd: string, uid: number): EscapeRow {
-  const name = `lead-sandbox-check-${process.pid}`;
+  // A new name per call: a server just killed can still hold the old one.
+  const name = `lead-sandbox-check-${process.pid}-${++tmuxRuns}`;
   // The resolved spelling, where tmux itself puts it.
   const socket = `/private/tmp/tmux-${uid}/${name}`;
   const moved = join(cwd, `.${name}`);
@@ -73,6 +76,12 @@ function tmuxRow(profile: string, cwd: string, uid: number): EscapeRow {
   mkdirSync(dirname(socket), { recursive: true, mode: 0o700 });
   if (!outside('new-session', '-d', '-s', 'check', 'sleep 60'))
     return { ok: false, says: 'tmux: could not start a server to test against' };
+  // Its pid, to stop it by: a socket moved to a long path is past the
+  // 104-byte limit on a socket address, so no client can reach it there.
+  const pid = Number(
+    spawnSync('tmux', ['-S', socket, 'display-message', '-p', '#{pid}'], { encoding: 'utf8' })
+      .stdout,
+  );
   try {
     const control = outside('ls');
     const connects = inside(`tmux -S '${socket}' ls`);
@@ -82,9 +91,16 @@ function tmuxRow(profile: string, cwd: string, uid: number): EscapeRow {
       says: `tmux: its own server ${control ? 'answers' : 'does not answer'} outside (the control); from inside, connecting is ${connects ? 'allowed' : 'refused'} and moving its socket out is ${moves ? 'allowed' : 'refused'} (both must be refused)`,
     };
   } finally {
-    if (existsSync(moved)) spawnSync('tmux', ['-S', moved, 'kill-server'], { stdio: 'ignore' });
-    rmSync(moved, { force: true });
     outside('kill-server');
+    if (pid > 0)
+      try {
+        process.kill(pid);
+      } catch {
+        // Already gone.
+      }
+    rmSync(moved, { force: true });
+    // tmux leaves the socket file behind when its server is killed.
+    rmSync(socket, { force: true });
   }
 }
 
