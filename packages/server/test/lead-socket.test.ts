@@ -117,6 +117,18 @@ describe('the lead socket', () => {
     expect(upgrade.status).toBe(403);
   });
 
+  it('is refused a board closed to outside visitors, as its token is over TCP', async () => {
+    h.sharingGate.setBoardEnabled(harborlight, false);
+    try {
+      expect((await viaSocket(`/workspaces/${harborlight}/tasks`, bearer(token))).status).toBe(403);
+      const overTcp = await tcp(`/workspaces/${harborlight}/tasks`, { headers: bearer(token) });
+      expect(overTcp.status).toBe(403);
+    } finally {
+      h.sharingGate.setBoardEnabled(harborlight, true);
+    }
+    expect((await viaSocket(`/workspaces/${harborlight}/tasks`, bearer(token))).status).toBe(200);
+  });
+
   it('reaches none of the loopback-only routes, whatever the token', async () => {
     const mint = await viaSocket('/api/board-tokens', bearer(token), {
       method: 'POST',

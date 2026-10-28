@@ -522,6 +522,9 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           j,
         });
         if (!door.ok) return door.response;
+        // A board closed to outside visitors is closed to its token here as
+        // on TCP, where the check at the end of this run refuses it.
+        if (!sharingGate.isBoardOpen(door.grant.boardId)) return refuseVisitor('sharing_disabled');
         visitor = door.target;
         visitorMemberKey = door.memberKey;
         boardAgent = door.grant;
