@@ -31,12 +31,12 @@ import {
 const HOME = '/fixture/home/saltmarsh';
 const TWIN = '/fixture/data/saltmarsh';
 
-/** A home whose `.claude` and `dev` are symlinks onto a data volume, as on the owner's Mac. */
+/** A home whose `.claude`, `.local` and `dev` are symlinks onto a data volume, as on the owner's Mac. */
 const fakeMachine: Machine = {
   home: HOME,
   uid: 501,
   realpath: (p) =>
-    p.startsWith(`${HOME}/.claude`) || p.startsWith(`${HOME}/dev`)
+    ['.claude', '.local', 'dev'].some((d) => p.startsWith(`${HOME}/${d}`))
       ? `${TWIN}${p.slice(HOME.length)}`
       : p,
 };
@@ -186,6 +186,30 @@ describe('buildProfile', () => {
         (l) => l.startsWith('(allow file-read* file-write* (regex') && l.includes('.claude\\.json'),
       ),
     ).toBe(false);
+  });
+
+  it("refuses writes to Claude Code's install and its launcher, at both ends, after every grant", () => {
+    const wide = parseConfig(
+      { leads: [{ name: 'harborlight-lead', projects: ['/a'], allow: [`${HOME}/.local`] }] },
+      HOME,
+    );
+    if (!wide.ok || !wide.config.leads[0]) throw new Error('fixture refused');
+    for (const l of [lines, rules(buildProfile(wide.config.leads[0], wide.config, fakeMachine))]) {
+      const grant = Math.max(
+        ...l.map((x, i) => (x.startsWith('(allow file-read* file-write* (subpath') ? i : -1)),
+      );
+      for (const end of [HOME, TWIN]) {
+        expect(
+          l.indexOf(`(deny file-write* (subpath "${end}/.local/share/claude"))`),
+        ).toBeGreaterThan(grant);
+        expect(
+          l.indexOf(`(deny file-write* (literal "${end}/.local/bin/claude"))`),
+        ).toBeGreaterThan(grant);
+      }
+      expect(l).not.toContain(
+        `(allow file-read* file-write* (subpath "${TWIN}/.local/share/claude"))`,
+      );
+    }
   });
 
   it('keeps the prod root shut when a lead is allowed the folder above it', () => {

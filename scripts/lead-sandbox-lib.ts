@@ -76,14 +76,25 @@ export const BUILT_IN_PROTECT = [''];
 export const PROD_ROOT = 'Library/Application Support/claude-workspaces';
 
 /**
+ * Claude Code's install: `~/.local/bin/claude` is a symlink to a binary in
+ * `versions/` here, and every unsandboxed session runs it. Read only, after
+ * every other rule, with the symlink: a lead that could write here could
+ * swap the binary. So a lead cannot update Claude Code from inside the wall.
+ */
+export const CLAUDE_INSTALL = '.local/share/claude';
+export const CLAUDE_LAUNCHER = '.local/bin/claude';
+
+/**
  * What Claude Code reads and writes under the home folder to start, sign in
  * and keep its state, measured by running `claude -p` under the profile.
+ * Measured on 2.1.312 (28 October 2026): `claude -p` answered and ran a Bash
+ * call with CLAUDE_INSTALL read only, at both spellings of `~/.local`.
  * `~/.claude/projects` is denied again below this, and reopened only for the
  * lead's own transcript folders. What in it runs code is read only
  * (CLAUDE_CODE_FOLDERS).
  */
-export const CLAUDE_READ_WRITE = ['.claude', '.local/share/claude', '.local/state/claude'];
-export const CLAUDE_READ = ['.local/bin', '.bun', 'Library/Keychains'];
+export const CLAUDE_READ_WRITE = ['.claude', '.local/state/claude'];
+export const CLAUDE_READ = ['.local/bin', CLAUDE_INSTALL, '.bun', 'Library/Keychains'];
 
 /**
  * What under `~/.claude` an unsandboxed session later runs or obeys:
@@ -350,6 +361,17 @@ function claudeCodeRules(m: Machine): Rule[] {
       why,
       last: true,
     });
+  rules.push({
+    access: 'nowrite',
+    filter: { subpath: under(m.home, CLAUDE_INSTALL) },
+    why,
+    last: true,
+  });
+  // The symlink itself, from both ends of the folder that holds it: its own
+  // realpath is the binary, not the link.
+  const bin = dirname(under(m.home, CLAUDE_LAUNCHER));
+  for (const end of new Set([bin, m.realpath(bin)]))
+    rules.push({ access: 'nowrite', filter: { literal: `${end}/claude` }, why, last: true });
   return rules;
 }
 

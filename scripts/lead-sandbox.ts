@@ -19,14 +19,16 @@
  * profile, asks `bun` there for its environment (it must not be empty),
  * tries each way out of the wall (`lead-sandbox-escapes.ts`: tmux, `open`,
  * `osascript`, `shortcuts`, launchd), reads a dummy keychain item it made
- * (it must be refused), and exits 1 on any failure.
+ * (it must be refused), plants a file beside the `claude` binary (it must
+ * be refused), and exits 1 on any failure.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { escapeRows, keychainRow } from './lead-sandbox-escapes.ts';
+import { dirname, join, resolve } from 'node:path';
+import { escapeRows, installRow, keychainRow } from './lead-sandbox-escapes.ts';
 import {
+  CLAUDE_LAUNCHER,
   type Lead,
   type LeadSandboxConfig,
   type Machine,
@@ -179,7 +181,16 @@ function main(argv: string[]): number {
       const keychain = lead.allowKeychain
         ? { ok: true, says: 'keychain: left readable, as the config asks (allowKeychain)' }
         : keychainRow(profile, cwd);
-      for (const row of [...escapeRows(profile, cwd, machine.uid, lead.allowTmux), keychain]) {
+      const install = installRow(
+        profile,
+        cwd,
+        dirname(machine.realpath(join(machine.home, CLAUDE_LAUNCHER))),
+      );
+      for (const row of [
+        ...escapeRows(profile, cwd, machine.uid, lead.allowTmux),
+        keychain,
+        install,
+      ]) {
         total++;
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);

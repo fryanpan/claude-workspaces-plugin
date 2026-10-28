@@ -20,7 +20,7 @@ profile per lead. A profile allows everything, then:
   every folder in `protect`, and every other lead's projects;
 - **reopens, inside those**, the lead's own projects (worktrees included),
   and what Claude Code needs: `~/.claude`, `~/.claude.json` (read only), its install
-  under `~/.local`, `~/.bun` for plugin servers, and `~/Library/Keychains`
+  under `~/.local` (read only), `~/.bun` for plugin servers, and `~/Library/Keychains`
   to sign in. Without the keychain folder `claude -p` answers "Not logged
   in";
 - **denies other projects' transcripts again**: `~/.claude/projects` and the
@@ -32,7 +32,14 @@ profile per lead. A profile allows everything, then:
   snapshots and session env files each Bash call sources, the `~/.claude`
   folder itself, and all of `~/.claude.json`. A lead can read them, so its
   own session loads them, but it cannot plant a hook, an MCP server or plugin
-  code that runs outside the sandbox in Bryan's next session;
+  code that runs outside the sandbox in Bryan's next session. The same goes
+  for Claude Code's install, `~/.local/share/claude` and the
+  `~/.local/bin/claude` symlink into its `versions/`, so a lead cannot
+  replace the binary every unsandboxed session runs, and cannot update
+  Claude Code from inside the wall. Measured on 2.1.312 (28 October):
+  `claude -p` answered and ran a Bash call with the install read only. It
+  also answered with `~/.local/state/claude` read only; that folder holds
+  its locks and stays writable;
 - **denies the config, the profiles and the prod root again** after every
   other rule, so no `allow` reopens prod and a lead cannot widen its next
   launch;
@@ -148,6 +155,7 @@ Then six rows per lead try the ways out of the wall and the keychain
 | shortcuts | `shortcuts list` fails | `shortcuts list` answers |
 | launchd | a `launchctl submit` of `/usr/bin/true` is not loaded (launchd's own refusal; no rule of ours) | the same job submitted outside loads, and is removed at once |
 | keychain | `security find-generic-password` of a dummy item the check made (`lead-sandbox-check-harborlight`) is refused | the same read outside returns it; the item is deleted after |
+| claude install | `touch` of a new file in the folder `~/.local/bin/claude` resolves into is refused | that folder is writable (asked with `access`, so nothing is made); a file the wall let through is removed |
 
 `open` and `osascript` are asked of the sandbox rather than driven, because
 driving them would start an app or show a window. The check starts and kills
