@@ -295,12 +295,14 @@ export async function mountCode(
     placePill(anchor, false);
   }
   /** Beside the right end of the text the pill comments on, flipped inside
-   *  it when that end is too close to the viewport's right edge. */
+   *  it when that end is too close to the viewport's right edge, and kept on
+   *  screen when a long line's end is scrolled past it. */
   function placePill(at: { right: number; top: number; bottom: number }, caret: boolean): void {
     const gap = 8;
     const pillSize = 36;
+    const maxLeft = window.innerWidth - pillSize - 8;
     let left = at.right + gap;
-    if (left + pillSize > window.innerWidth - 8) left = Math.max(8, at.right - pillSize);
+    if (left > maxLeft) left = Math.min(at.right - pillSize, maxLeft);
     commentPill.classList.toggle('caret', caret);
     commentPill.style.left = `${Math.max(8, left)}px`;
     commentPill.style.top = `${Math.max(8, (at.top + at.bottom - pillSize) / 2)}px`;
