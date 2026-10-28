@@ -236,10 +236,26 @@ async function main(): Promise<void> {
     );
     await cdp.evaluate(`${SHADOW}.querySelector('.composer textarea').focus()`);
     await cdp.send('Input.insertText', { text: WORDS });
+    // The refusal has to have been HANDLED before Sign in is pressed. The
+    // composer can offer Sign in before the first Post, and the refused post
+    // replaces that button with a new one (`composerNote` resets the line); a
+    // press that straddles the swap lands its release on a different element,
+    // so no click fires, no popup opens and no token ever arrives — CI on
+    // 28 Oct, with one page and no popup. So wait for the 401 itself, then for
+    // Post to be re-enabled: it stays disabled from the click until the
+    // refusal has run, so an enabled Post after a 401 is a settled composer.
+    let refused = 0;
+    cdp.on('Network.responseReceived', (p) => {
+      if ((p as { response?: { status?: number } }).response?.status === 401) refused++;
+    });
     await press(`${SHADOW}.querySelector('.composer .submit')`, 'Post');
     const offered =
-      (await poll('the composer to offer sign-in', () =>
-        cdp.evaluate(`!!${SHADOW}.querySelector('.composer .auth-signin')`),
+      (await poll(
+        'the composer to offer sign-in once the unsigned post was refused',
+        async () =>
+          refused > 0 &&
+          (await cdp.evaluate(`(() => { const c = ${SHADOW}.querySelector('.composer');
+            return !!c?.querySelector('.auth-signin') && !c.querySelector('.submit')?.disabled; })()`)),
       )) === true;
     await press(`${SHADOW}.querySelector('.composer .auth-signin')`, 'Sign in');
 
