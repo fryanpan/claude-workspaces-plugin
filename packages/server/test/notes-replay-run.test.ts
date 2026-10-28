@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { planMeetings } from '../../../scripts/notes-replay-lib.ts';
 import type { NotesComposer } from '../src/meeting-notes.ts';
 import { meetingIndexPath, meetingTimingPath, meetingTranscriptPath } from '../src/meetings.ts';
+import { notesTopicHashes } from '../src/notes-heading-level.ts';
 import { readTickWaits } from '../src/notes-tick-timing.ts';
 import { runReplay } from './notes-replay-run.ts';
 import { addNotes } from './notes-tick-harness.ts';
@@ -114,6 +115,31 @@ describe('runReplay', () => {
     const slow = await firstWait(3_000);
     expect(instant).toBeDefined();
     expect((slow ?? 0) - (instant ?? 0)).toBe(3_000);
+  });
+
+  it('files a quality item when the notes cross a bar, as the live server does', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'notes-replay-'));
+    dirs.push(dataDir);
+    const result = await runReplay({
+      docId: DOC,
+      meetings: meeting(),
+      dataDir,
+      composer: {
+        // A new topic every tick, each a wall of six flat bullets: past the
+        // flat-run bar on every topic, which the pass reports.
+        name: 'writes walls',
+        compose: async (input) => [
+          {
+            op: 'insert_at_end',
+            markdown: `${notesTopicHashes(input.outline)} Pier part ${input.tick.tick}\n\n${Array.from(
+              { length: 6 },
+              (_, i) => `- Pier point ${input.tick.tick}.${i}`,
+            ).join('\n')}`,
+          },
+        ],
+      },
+    });
+    expect(result.filings.map((f) => f.op)).toContain('file');
   });
 
   it('restores the real clock afterwards', async () => {

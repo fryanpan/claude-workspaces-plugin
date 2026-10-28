@@ -13,7 +13,8 @@
  * - No board: no task titles in context, no capture, no title namer. The
  *   recorded meeting had a board; the replay cannot know its rows as they
  *   stood, and the namer bills a second model for a title nothing scores.
- * - The quality board is a recorder, so a filed item is kept as a fact
+ * - The doc sits on a stand-in board with no rows, and the quality board is
+ *   a recorder, so a filed item is kept as a fact
  *   rather than posted anywhere.
  * - Names given during a leg are applied at the START of that leg. The index
  *   says which leg a name arrived in, never when within it.
@@ -79,6 +80,7 @@ export interface ReplayRunResult {
 }
 
 const ACTOR_ID = 'notes-replay';
+const REPLAY_BOARD = 'w-replay';
 /** How long after the last stop the replay keeps running timers, so a
  *  quality filer's resume grace can expire and file. */
 const GRACE_HORIZON_MS = 30 * 60_000;
@@ -154,6 +156,10 @@ export async function runReplay(input: ReplayRunInput): Promise<ReplayRunResult>
       docStore: () => docStore,
       tasks: () => ({ listTasks: () => [] }),
       dataDir: input.dataDir,
+      // A board of its own, so the quality pass has somewhere to file: with
+      // no board the pass reads the notes and files nothing, and goal 5
+      // would score a silence the live server does not have.
+      boardOf: () => REPLAY_BOARD,
       qualityBoard: () => board,
       qualityActor: { id: ACTOR_ID, name: 'Notes replay' },
       qualityGraceSchedule: clock,
