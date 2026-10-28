@@ -128,6 +128,14 @@ export type ShareLinkState = 'live' | 'revoked' | 'expired' | 'unknown';
 /** A link as the API serves it: the record plus the state it is in. */
 export type ListedShareLink = ShareLinkRecord & { state: ShareLinkState };
 
+/**
+ * The URL a person opens to redeem a link. The one builder: the mint returns
+ * it and `list_shares` lists it, so the two cannot name different addresses.
+ */
+export function shareLinkUrl(host: string, linkId: string): string {
+  return `https://${host}/s/${linkId}`;
+}
+
 export interface CreateShareLinkReq {
   workspaceId: string;
   createdBy: string;
