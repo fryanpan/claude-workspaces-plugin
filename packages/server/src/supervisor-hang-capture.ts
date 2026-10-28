@@ -32,6 +32,12 @@ import { join } from 'node:path';
 
 /** The most the capture may add to a restart. */
 export const HANG_CAPTURE_BUDGET_MS = 6_000;
+/**
+ * Each command's own timeout. A second under the budget, so a command that
+ * runs out is logged as timed out before the watchdog gives up on the whole
+ * capture.
+ */
+export const HANG_COMMAND_TIMEOUT_MS = HANG_CAPTURE_BUDGET_MS - 1_000;
 /** How long `sample` watches. Its symbol pass runs after, inside the budget. */
 export const HANG_SAMPLE_SECONDS = 2;
 /** Older sample files are transient diagnostics; keep this many. */
@@ -111,11 +117,15 @@ function pruneSamples(dir: string, keep: number): void {
  */
 export async function captureHang(deps: HangCaptureDeps): Promise<void> {
   const now = deps.now ?? Date.now;
-  const timeoutMs = deps.timeoutMs ?? HANG_CAPTURE_BUDGET_MS;
+  const timeoutMs = deps.timeoutMs ?? HANG_COMMAND_TIMEOUT_MS;
   const { pid, run, log } = deps;
   const tag = '[supervisor] hang capture:';
-  const safe = (p: Promise<CommandResult>): Promise<CommandResult> =>
-    p.catch((): CommandResult => ({ stdout: '', code: null }));
+  // A runner that throws synchronously is caught too, so one bad reading
+  // cannot take the others with it.
+  const safe = (call: () => Promise<CommandResult>): Promise<CommandResult> =>
+    Promise.resolve()
+      .then(call)
+      .catch((): CommandResult => ({ stdout: '', code: null }));
 
   let samplePath: string | null = null;
   if (pid !== undefined) {
@@ -133,7 +143,7 @@ export async function captureHang(deps: HangCaptureDeps): Promise<void> {
   const opts = { timeoutMs };
   const [sample, swap, pressure, ps, top] = await Promise.all([
     pid !== undefined && samplePath
-      ? safe(
+      ? safe(() =>
           run(
             'sample',
             [String(pid), String(HANG_SAMPLE_SECONDS), '-mayDie', '-file', samplePath],
@@ -141,11 +151,13 @@ export async function captureHang(deps: HangCaptureDeps): Promise<void> {
           ),
         )
       : null,
-    safe(run('sysctl', ['vm.swapusage'], opts)),
-    safe(run('memory_pressure', ['-Q'], opts)),
-    pid !== undefined ? safe(run('ps', ['-o', 'rss=,stat=', '-p', String(pid)], opts)) : null,
+    safe(() => run('sysctl', ['vm.swapusage'], opts)),
+    safe(() => run('memory_pressure', ['-Q'], opts)),
+    pid !== undefined ? safe(() => run('ps', ['-o', 'rss=,stat=', '-p', String(pid)], opts)) : null,
     pid !== undefined
-      ? safe(run('top', ['-l', '1', '-pid', String(pid), '-stats', 'pid,pageins,faults'], opts))
+      ? safe(() =>
+          run('top', ['-l', '1', '-pid', String(pid), '-stats', 'pid,pageins,faults'], opts),
+        )
       : null,
   ]);
 

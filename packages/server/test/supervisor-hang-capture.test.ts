@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type CommandResult,
+  HANG_CAPTURE_BUDGET_MS,
   HANG_CAPTURE_DIR,
   HANG_SAMPLES_KEPT,
   type RunCommand,
@@ -107,6 +108,26 @@ describe('captureHang', () => {
     expect(text).toContain('stack sample of pid 4242 failed (timed out)');
     expect(text).toContain('swap unread');
     expect(text).toContain('memory free 45%');
+  });
+
+  it('a runner that throws synchronously loses only that reading', async () => {
+    const { run } = fakeRunner({
+      ps: () => {
+        throw new Error('spawn EAGAIN');
+      },
+    });
+    const lines: string[] = [];
+    await captureHang({ pid: 4242, dataDir: tempDir(), run, log: (l) => lines.push(l) });
+    const text = lines.join('\n');
+    expect(text).toContain('RSS unread');
+    expect(text).toContain('1830 page-ins');
+  });
+
+  it('gives each command less time than the watchdog gives the whole capture', async () => {
+    const { run, calls } = fakeRunner();
+    await captureHang({ pid: 4242, dataDir: tempDir(), run, log: () => {} });
+    expect(calls.length).toBe(5);
+    for (const c of calls) expect(c.timeoutMs).toBeLessThan(HANG_CAPTURE_BUDGET_MS);
   });
 
   it('keeps only the newest samples', async () => {
