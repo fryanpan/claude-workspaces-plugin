@@ -47,8 +47,9 @@ export function drawDiff(el: HTMLElement, text: string, full: boolean): void {
   }
 }
 
-/** The words of every comment that carries page edits. */
-function editTexts(widget: FeedbackWidgetEl): Set<string> {
+/** The words of every comment that carries page edits — also read by
+ *  `widget-comment-markdown.ts`, which leaves these comments to this view. */
+export function editTexts(widget: FeedbackWidgetEl): Set<string> {
   const out = new Set<string>();
   const threads = widget.client?.ydoc.getMap('threads').toJSON() ?? {};
   for (const t of Object.values(threads) as Array<{ comments?: unknown }>) {

@@ -682,6 +682,15 @@ controls set gets a dimmed pin. Tapping it loads that address through
 render to show. `widget-thread-text.ts` holds the snippet and receipt markup
 that the popover and the list share. No new route and no new fetch.
 
+**A comment's markdown is drawn rendered in its popover.**
+`widget-comment-markdown.ts` rewrites each popover comment the budgeted bundle
+drew as escaped words: links (`http:`, `https:` and `mailto:` only), bold,
+italics, inline code, lists and fenced code, built as DOM nodes so no comment
+text is parsed as markup. Like `widget-ask.ts`, it ships in `mic.js` and
+`mockup-live.js`; the budgeted bundle is unchanged. It leaves a page-edit
+comment alone, because `edit/edit-diff-view.ts` finds those by their exact
+words.
+
 **A pin follows an element whose words change a little each round.** The
 resolver in core's `anchor/element.ts` takes the element of the anchor's tag
 that says most of its words, over half of them, and none when two are equally
