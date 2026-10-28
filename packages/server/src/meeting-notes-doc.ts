@@ -116,6 +116,7 @@ import {
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
 import { readNotesMethod } from './notes-method-store.ts';
+import { stripPendingClauses } from './notes-pending-clauses.ts';
 import { createNotesQualityFiledFileStore } from './notes-quality-filed-store.ts';
 import { type NotesQualityFiler, createNotesQualityFiler } from './notes-quality-filing.ts';
 import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
@@ -721,7 +722,10 @@ export function applyNotesUpdate(
   );
   // EVERY NOTE A BULLET, before the guard and the dedupe read the batch, so
   // both judge the notes in the shape they will land in (`notes-edit-bullets.ts`).
-  const bulleted = bulletNotesEdits(update.edits, { outline: full }).edits;
+  // And no note left saying its point is unfinished (`notes-pending-clauses.ts`).
+  const bulleted = stripPendingClauses(
+    bulletNotesEdits(update.edits, { outline: full }).edits,
+  ).edits;
   // A detail about a dictated page's last item nests INTO it (`notes-dictation.ts`).
   const shaped = foldDetailsIntoItem(bulleted, full, update.dictation, NOTES_AUTHOR_ID, (id) =>
     itemFirstLine(doc.ydoc, id),

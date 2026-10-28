@@ -32,6 +32,10 @@ import { input } from './notes-compose-input.ts';
  * - "Do not note a request to Claude" (2026-10-03), Bryan's rule after his
  *   second real meeting. Not yet measured by the notes eval: it is his
  *   instruction, and Claude's own minute replaces what it drops.
+ * - "Never write that a point is unfinished" (2026-10-28), after replays of
+ *   four recorded meetings left about one note in eight saying its point was
+ *   not finished yet. Measured by `bun run notes:replay` on those meetings;
+ *   `notes-pending-clauses.ts` is the deterministic backstop.
  * A further rule goes in the same way: change both copies, and say here what
  * it was measured against.
  */
