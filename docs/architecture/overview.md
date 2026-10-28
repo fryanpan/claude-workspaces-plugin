@@ -56,7 +56,7 @@ flowchart TB
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
@@ -2327,6 +2327,26 @@ store it decorates, keeps that record outside the doc and the thread list
 returns it as `openerProof`. It joins the doc-store group and moves no
 boundary. Tests: `org-relay-two-servers.test.ts` (two real servers),
 `org-relay-units.test.ts`, `org-relay-sender.test.ts`.
+
+**GitHub events for boards on other machines.** GitHub is read once, by the
+broker on the Mac (`~/dev/github-claude-channel`, 127.0.0.1:7902, the
+owner's token). A board on another server holds no GitHub token: it stores a
+subscription list, each entry a repo and the kinds wanted (ci, review,
+mention, merge, issue, deploy), and the id of its one live push key
+(`github-hub.ts`, `<dataDir>/github-hub.json`). Agents set the list with
+`set_github_subscriptions`, from the board's own machine.
+`github-relay/` runs on the Mac as a process of its own, like `org-relay/`:
+for each configured board it reads the list with the board's push key, holds
+one broker session watching those repos, and pushes each matching line
+(`routes/github-hub.ts`). It reads the broker's `/state` every pass and
+registers again when its session is gone, because the broker answers a poll
+for a session it forgot with an empty list. The board checks every push
+against its own list again and sends it to each agent holding a stream on it
+as one addressed `workspace.github_event` frame, which the MCP child renders
+with the text quoted (`github-event-line.ts`). Pages never receive it. Tests:
+`github-relay-two-servers.test.ts` (two real servers and a stand-in broker,
+restarted), `github-hub-routes.test.ts`, `github-hub.test.ts`,
+`github-relay-units.test.ts`.
 
 **Incoming Messages** is a section on the landing page that lists the
 message threads an inbox reader agent judged worth Bryan's time. It is not a
