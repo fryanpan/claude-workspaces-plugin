@@ -192,6 +192,7 @@ describe('the relay’s sender check holds against a forged author', () => {
             agentId: 'agent-riverbend-lead',
             outboxDoc: await task(river, riverBoard, 'Outbox for riverbend-lead'),
             inboxDoc: riverInbox,
+            crossOrganization: true,
           },
         },
       }),
