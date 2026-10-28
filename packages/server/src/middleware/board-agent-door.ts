@@ -17,6 +17,8 @@
  * - **A local hostname from a loopback peer**, off the tunnel. A caller on
  *   this machine could omit the token and be trusted-local; presenting one
  *   only narrows it, which is what a test or a co-located relay wants.
+ * - **The lead socket** (`lead-socket.ts`), where it is the only way in: the
+ *   listener marked the request, so there is no host or peer to check.
  *
  * Every other host refuses it, and so does a browser: the holder is a
  * process, and a page carrying one is a token lifted from somewhere.
@@ -37,7 +39,7 @@ import { isBrowserRequest } from './write-gate.ts';
 export interface BoardAgentDoorInput {
   req: Request;
   pathname: string;
-  /** What `classifyHost` decided for this request. */
+  /** What `classifyHost` decided for this request, or `lead-socket`. */
   hostKind: string;
   /** The `at2` value presented. */
   bearer: string;
@@ -98,7 +100,9 @@ export async function admitBoardAgent(input: BoardAgentDoorInput): Promise<Board
     if (req.headers.has('cf-ray') || !isLoopbackAddress(input.address)) {
       return refuse(403, 'board_token_remote');
     }
-  } else {
+  } else if (hostKind !== 'lead-socket') {
+    // The lead socket's listener marked the request; there is nothing on it
+    // to check. Every other host is refused.
     return refuse(403, 'board_token_host');
   }
   if (isBrowserRequest(req.headers)) return refuse(403, 'board_token_browser');

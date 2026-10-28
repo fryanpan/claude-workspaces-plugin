@@ -71,6 +71,7 @@ import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
 import { renderRemoteReview } from './landing-remote.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
+import { openLeadSocket } from './lead-socket.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
@@ -1995,6 +1996,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
     boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    // Forward reference, as above: the lead socket is opened below.
+    isLeadSocketRequest: (req) => leadSocket?.isLeadSocketRequest(req) ?? false,
   });
 
   /**
@@ -3079,6 +3082,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     websocket: socketHandlers,
   });
 
+  // The lead socket (lead-socket.ts), only when asked for: no caller passes
+  // the path yet but a test, until the lead's relay can use it.
+  const leadSocket = opts.leadSocketPath
+    ? openLeadSocket({ path: opts.leadSocketPath, handle: handleWithOrigin, j })
+    : null;
+
   // The port is bound. Stamped HERE rather than at the top of `createServer`
   // because `Bun.serve` THROWS on a taken port and `bin.ts` retries on
   // another — a server that never reached this line is one no request can
@@ -3435,6 +3444,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // below are still live — after `docStore.flush()` that write would have
       // nowhere left to land.
       server.stop(true);
+      leadSocket?.stop();
       // Who the connector was hosting, for the next process to subscribe
       // before its first request; then its subscriptions come down with the
       // sockets that carried them.

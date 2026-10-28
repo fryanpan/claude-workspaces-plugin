@@ -265,6 +265,8 @@ export interface RequestAdmissionContext {
   frameHost: FrameHost | null;
   /** What a board agent token still grants (`auth/board-agent-token.ts`). */
   boardAgentGrantFor: (bearer: string) => BoardAgentClaims | null;
+  /** Whether a request arrived on the lead socket (`lead-socket.ts`). */
+  isLeadSocketRequest: (req: Request) => boolean;
 }
 
 /** Doc metadata as one caller may see it — the full record on the tailnet,
@@ -380,6 +382,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     docTypeOf,
     frameHost,
     boardAgentGrantFor,
+    isLeadSocketRequest,
   } = ctx;
 
   const admit = async (req: Request, addressed: { pathname: string }): Promise<Admission> => {
@@ -500,6 +503,30 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      * Falling off the end means admitted.
      */
     const answered = await (async (): Promise<Response | null> => {
+      // The lead socket (lead-socket.ts): an `at2` and nothing else. Ahead of
+      // every other kind, and the Host header is never read, so a forged one
+      // changes nothing. No bearer, or any bearer but an `at2`, is a 401: no
+      // fallback to trusted-local.
+      if (isLeadSocketRequest(req)) {
+        const bearer = boardAgentBearerOf(req.headers);
+        if (bearer === null) return j(401, { error: 'board_token_required' });
+        const door = await admitBoardAgent({
+          req,
+          pathname,
+          hostKind: 'lead-socket',
+          bearer,
+          address: undefined,
+          proxiedVerifier: null,
+          grantFor: boardAgentGrantFor,
+          workspacesOf: shareWorkspacesOf,
+          j,
+        });
+        if (!door.ok) return door.response;
+        visitor = door.target;
+        visitorMemberKey = door.memberKey;
+        boardAgent = door.grant;
+        return null;
+      }
       // The frame-only hostname (frame-host.ts): two read families, for the
       // operator alone. Ahead of every other kind, so nothing else this
       // server answers is reachable on it, whatever the lists say.

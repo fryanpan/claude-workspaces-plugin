@@ -67,6 +67,12 @@ export interface ServerOptions {
    * must not take the wildcard.
    */
   hostname?: string;
+  /**
+   * Also listen on this unix socket, the lead socket (`lead-socket.ts`): a
+   * sandboxed lead's one way in, admitting a board agent token and nothing
+   * else. Unset, there is none.
+   */
+  leadSocketPath?: string;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,
