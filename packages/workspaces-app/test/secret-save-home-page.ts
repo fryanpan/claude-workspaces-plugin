@@ -220,6 +220,15 @@ function queue(): ReviewQueue {
   return { items: [item], total: 1, blocking: 0 };
 }
 
+/** How many times the card has scrolled its form into view. The fixture
+ *  counts the call rather than guessing when it happened. */
+let clearanceScrolls = 0;
+const ownScroll = Element.prototype.scrollIntoView;
+Element.prototype.scrollIntoView = function (this: Element, arg?: boolean | ScrollIntoViewOptions) {
+  if (this.classList.contains('board-walk-cred-form')) clearanceScrolls++;
+  return ownScroll.call(this, arg);
+};
+
 /** Build the page the product builds, open the walkthrough on the ask, and
  *  paste a three-line value into every field. */
 export async function paint(): Promise<void> {
@@ -234,6 +243,7 @@ export async function paint(): Promise<void> {
   const host = need<HTMLElement>('#board-walkthrough');
   host.classList.remove('hidden');
   mountWalkthroughIsland(host);
+  const scrolled = clearanceScrolls;
   walkthroughData.value = {
     queue: queue(),
     index: 0,
@@ -257,8 +267,13 @@ export async function paint(): Promise<void> {
     box.value = THREE_LINES;
     box.dispatchEvent(new Event('input', { bubbles: true }));
   }
-  // Two frames: one for the paint, one for the card's own clearance effect.
-  await frame();
+  // The card's own clearance scroll, waited for rather than counted. It is a
+  // `useEffect` — run after a frame AND a timer — that asks for one more
+  // frame before it scrolls, so on a loaded runner it lands a frame or two
+  // later than "two frames" assumed, and the first draw read Save while it was
+  // still below the fold: CI on 28 Oct, `nothing` at every point at 390x844.
+  // Bounded, so a card that stopped scrolling is a red reading, not a hang.
+  for (let i = 0; i < 120 && clearanceScrolls === scrolled; i++) await frame();
   await frame();
 }
 
