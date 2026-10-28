@@ -55,6 +55,9 @@ function cgi(root: string, req: http.IncomingMessage, body: Buffer, res: http.Se
   const out: Buffer[] = [];
   child.stdout.on('data', (d: Buffer) => out.push(d));
   child.stderr.resume();
+  // http-backend can exit before it reads the whole body (a refused or no-op
+  // push), and the write then fails with EPIPE; the response is still on stdout.
+  child.stdin.on('error', () => {});
   child.stdin.end(body);
   child.on('close', () => {
     const all = Buffer.concat(out);
