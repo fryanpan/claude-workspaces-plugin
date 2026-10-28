@@ -1,6 +1,7 @@
 /**
  * `--check`'s rows for the ways a lead could start a process outside the
- * wall (`escapeRules` in `lead-sandbox-lib.ts`). Each row drives the thing
+ * wall (`escapeRules` in `lead-sandbox-lib.ts`), and for the board wall
+ * (`lead-sandbox-wall.ts`). Each row drives the thing
  * from inside the profile and has a control outside it, so a row fails when
  * its rule is removed, not only when the probe itself breaks.
  *
@@ -12,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { constants, accessSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
+import { BOARD_SERVER_PORTS, CONNECT_PROBE } from './lead-sandbox-wall.ts';
 
 export interface EscapeRow {
   ok: boolean;
@@ -221,4 +223,50 @@ export function escapeRows(
     shortcutsRow(profile, cwd),
     launchdRow(profile, cwd),
   ];
+}
+
+/** What a TCP connect from `runtime` answers, inside `profile` or, with null, outside any. */
+export function connectFrom(
+  runtime: string,
+  profile: string | null,
+  cwd: string,
+  host: string,
+  port: number,
+): string {
+  const argv = [runtime, '-e', CONNECT_PROBE];
+  const [cmd, ...args] = profile ? [SANDBOX_EXEC, '-f', profile, ...argv] : argv;
+  const r = spawnSync(cmd ?? runtime, args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, HOST: host, PORT: String(port) },
+    timeout: 10_000,
+  });
+  return r.stdout?.trim() || `exit ${r.status}`;
+}
+
+/**
+ * The board wall (`lead-sandbox-wall.ts`): a connect to each port at each
+ * address must answer `EPERM` inside the profile, and `connected` or
+ * `ECONNREFUSED` inside `unwalled`, the same lead's profile with the wall
+ * left out (the control).
+ * Nothing is sent: a connect that lands is closed at once.
+ */
+export function boardWallRows(
+  profile: string,
+  unwalled: string,
+  cwd: string,
+  hosts: readonly string[],
+  ports: readonly number[] = BOARD_SERVER_PORTS,
+  runtime: string = process.execPath,
+): EscapeRow[] {
+  return ports.flatMap((port) =>
+    hosts.map((host) => {
+      const inside = connectFrom(runtime, profile, cwd, host, port);
+      const control = connectFrom(runtime, unwalled, cwd, host, port);
+      return {
+        ok: inside === 'EPERM' && (control === 'connected' || control === 'ECONNREFUSED'),
+        says: `board wall: ${host} port ${port} answers ${control} without the wall (the control), ${inside} inside (must be EPERM)`,
+      };
+    }),
+  );
 }

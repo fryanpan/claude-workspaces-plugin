@@ -20,13 +20,19 @@
  * tries each way out of the wall (`lead-sandbox-escapes.ts`: tmux, `open`,
  * `osascript`, `shortcuts`, launchd), reads a dummy keychain item it made
  * (it must be refused), plants a file beside the `claude` binary (it must
- * be refused), and exits 1 on any failure.
+ * be refused), connects to each board server's port at each of this
+ * machine's addresses for a lead with `boardWall` (it must be refused with
+ * EPERM; the control is the same profile without the wall), and exits 1 on
+ * any failure.
+ *
+ * A lead with `boardWall` is for `--check` only: its board tools do not use
+ * the lead socket yet, so the launch refuses it.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { escapeRows, installRow, keychainRow } from './lead-sandbox-escapes.ts';
+import { boardWallRows, escapeRows, installRow, keychainRow } from './lead-sandbox-escapes.ts';
 import {
   CLAUDE_LAUNCHER,
   type Lead,
@@ -38,6 +44,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { wallHosts } from './lead-sandbox-wall.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
 const machine: Machine = {
@@ -84,6 +91,26 @@ function bunEnvCount(profile: string, cwd: string): number {
     { cwd, encoding: 'utf8' },
   );
   return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
+}
+
+/** The board wall's rows, against the same profile written without the wall as the control. */
+function wallRows(
+  lead: Lead,
+  config: LeadSandboxConfig,
+  guard: string[],
+  profile: string,
+  cwd: string,
+): Array<{ ok: boolean; says: string }> {
+  if (!lead.boardWall) return [{ ok: true, says: 'board wall: off, as the config leaves it' }];
+  const unwalled = join(profileDir, `${lead.name}.unwalled.sb`);
+  writeFileSync(unwalled, buildProfile({ ...lead, boardWall: false }, config, machine, guard), {
+    mode: 0o600,
+  });
+  try {
+    return boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces()));
+  } finally {
+    rmSync(unwalled, { force: true });
+  }
 }
 
 function main(argv: string[]): number {
@@ -134,6 +161,12 @@ function main(argv: string[]): number {
     }
     if (command.length === 0) {
       say('nothing to launch: put the command after --');
+      return 2;
+    }
+    if (lead.boardWall) {
+      say(
+        `${lead.name} has boardWall set, which is for --check only: its board tools cannot reach the lead socket yet, so walled it would have none.`,
+      );
       return 2;
     }
     const here = machine.realpath(import.meta.dirname);
@@ -190,6 +223,7 @@ function main(argv: string[]): number {
         ...escapeRows(profile, cwd, machine.uid, lead.allowTmux),
         keychain,
         install,
+        ...wallRows(lead, config, guard, profile, cwd),
       ]) {
         total++;
         if (!row.ok) bad++;

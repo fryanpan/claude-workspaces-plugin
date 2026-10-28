@@ -122,6 +122,17 @@ repo still works. Every other lead is refused the keychain by default,
 because a lead that can read it reads every item there, the Cloudflare and
 Fly tokens included until the keeper's cutover.
 
+**A test lead for the board wall** sets `"boardWall": true` in its entry.
+The profile then denies every board server's port (8787 to 8790, the list in
+`packages/server/src/reserved-ports.ts`, which `bun run staging` also
+enforces) at every address, so the lead's only way to a board would be the
+lead socket, which admits only a board agent token. The lead's own MCP child
+and hooks do not use that socket yet, so `--lead` refuses to launch a lead
+with `boardWall` set: it is for `--check`, which connects to each port at
+both loopbacks and each LAN and tailnet address from inside the profile and
+must be refused with `EPERM`, against the same profile without the wall as
+the control. Real leads leave it off and are unchanged.
+
 **A lead that runs tmux sessions of its own** sets `"allowTmux": true` in its
 entry. Every other lead is refused the tmux socket by default, because a lead
 that can reach it can `tmux send-keys` into any unsandboxed session, the Team
@@ -308,7 +319,9 @@ Sandbox, a macOS user per lead, a VM) is planned for either.
   which runs as Bryan outside the wall, to read a file the lead cannot. The
   lead's own MCP child and hooks reach the same port, so the profile cannot
   simply deny it. This closes with a board agent token per lead, scoped to
-  that lead's board: the same token a lead on Fly needs.
+  that lead's board: the same token a lead on Fly needs. The wall
+  (`boardWall`, above) and the lead socket it leaves open have landed, for
+  `--check` only; a real lead gets them once its tools reach the socket.
 - **The keychain answers a lead with `allowKeychain`.** By default the
   profile refuses the keychain (step 1): measured 28 October, a dummy item
   read back from inside a profile before the rule was refused after it

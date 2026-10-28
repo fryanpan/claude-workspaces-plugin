@@ -19,6 +19,7 @@
  * `mac-lead-users-lib.ts` does for its ACLs.
  */
 import { dirname } from 'node:path';
+import { boardWallRules } from './lead-sandbox-wall.ts';
 import { expandRealPaths } from './mac-lead-users-lib.ts';
 
 export interface Lead {
@@ -41,6 +42,8 @@ export interface Lead {
    * holds. Off by default: with it, the lead reads every item in it.
    */
   allowKeychain: boolean;
+  /** Deny every board server's port (`lead-sandbox-wall.ts`). Off by default. */
+  boardWall: boolean;
 }
 
 export interface LeadSandboxConfig {
@@ -217,10 +220,9 @@ export function parseConfig(
     const projects = paths(o.projects, `${name}.projects`);
     const allow = paths(o.allow, `${name}.allow`);
     const allowRead = paths(o.allowRead, `${name}.allowRead`);
-    if (o.allowTmux !== undefined && typeof o.allowTmux !== 'boolean')
-      return { ok: false, error: `${name}.allowTmux must be true or false` };
-    if (o.allowKeychain !== undefined && typeof o.allowKeychain !== 'boolean')
-      return { ok: false, error: `${name}.allowKeychain must be true or false` };
+    for (const key of ['allowTmux', 'allowKeychain', 'boardWall'])
+      if (o[key] !== undefined && typeof o[key] !== 'boolean')
+        return { ok: false, error: `${name}.${key} must be true or false` };
     for (const p of [projects, allow, allowRead])
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
@@ -232,6 +234,7 @@ export function parseConfig(
       allowRead: allowRead as string[],
       allowTmux: o.allowTmux === true,
       allowKeychain: o.allowKeychain === true,
+      boardWall: o.boardWall === true,
     });
   }
   const protect = paths(r.protect, 'protect');
@@ -454,6 +457,7 @@ export function buildProfile(
     ';; Starting a process outside the wall.',
     ...escapeRules(lead, m),
     ...keychainRules(lead),
+    ...boardWallRules(lead.boardWall),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',
