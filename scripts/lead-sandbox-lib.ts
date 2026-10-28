@@ -30,6 +30,12 @@ export interface Lead {
   allow: string[];
   /** Extra folders or files the lead may only read (`~/.gitconfig`). */
   allowRead: string[];
+  /**
+   * Leave the tmux socket reachable, for a lead that runs tmux sessions of
+   * its own. Off by default: with it, the lead can `send-keys` into every
+   * unsandboxed session on the machine.
+   */
+  allowTmux: boolean;
 }
 
 export interface LeadSandboxConfig {
@@ -118,9 +124,9 @@ export function tmuxSocketDirs(uid: number): string[] {
  * and `at` need no rule: launchd refuses a job from a sandboxed caller, and
  * the sandbox refuses to exec a setuid binary.
  */
-export function escapeRules(m: Machine): string[] {
+export function escapeRules(lead: Lead, m: Machine): string[] {
   return [
-    ...tmuxSocketDirs(m.uid).map(
+    ...(lead.allowTmux ? [] : tmuxSocketDirs(m.uid)).map(
       (d) => `(deny network-outbound (remote unix-socket (subpath ${sbString(d)}))) ; tmux`,
     ),
     '(deny lsopen) ; open: LaunchServices starts apps outside the wall',
@@ -178,6 +184,8 @@ export function parseConfig(
     const projects = paths(o.projects, `${name}.projects`);
     const allow = paths(o.allow, `${name}.allow`);
     const allowRead = paths(o.allowRead, `${name}.allowRead`);
+    if (o.allowTmux !== undefined && typeof o.allowTmux !== 'boolean')
+      return { ok: false, error: `${name}.allowTmux must be true or false` };
     for (const p of [projects, allow, allowRead])
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
@@ -187,6 +195,7 @@ export function parseConfig(
       projects: projects as string[],
       allow: allow as string[],
       allowRead: allowRead as string[],
+      allowTmux: o.allowTmux === true,
     });
   }
   const protect = paths(r.protect, 'protect');
@@ -283,8 +292,9 @@ function rulesFor(
     last: true,
   });
   // So no second name for a socket in it can be made from inside.
-  for (const d of tmuxSocketDirs(m.uid))
-    rules.push({ access: 'deny', filter: { subpath: d }, why: 'tmux', last: true });
+  if (!lead.allowTmux)
+    for (const d of tmuxSocketDirs(m.uid))
+      rules.push({ access: 'deny', filter: { subpath: d }, why: 'tmux', last: true });
   return rules;
 }
 
@@ -395,7 +405,7 @@ export function buildProfile(
     // A rule named from both ends of a symlink can come out twice.
     ...new Set(lines.map((l) => l.text)),
     ';; Starting a process outside the wall.',
-    ...escapeRules(m),
+    ...escapeRules(lead, m),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',

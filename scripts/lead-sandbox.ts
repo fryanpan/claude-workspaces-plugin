@@ -175,7 +175,7 @@ function main(argv: string[]): number {
       say(
         `${vars > 0 ? 'ok  ' : 'FAIL'} ${lead.name}  bun sees ${vars} env vars  in ${cwd}  (must be more than 0)`,
       );
-      for (const row of escapeRows(profile, cwd, machine.uid)) {
+      for (const row of escapeRows(profile, cwd, machine.uid, lead.allowTmux)) {
         total++;
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);

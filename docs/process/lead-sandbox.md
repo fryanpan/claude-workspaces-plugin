@@ -102,6 +102,13 @@ lives in another repo gets that one file, never the repo. A plugin from a
 `directory` marketplace (`extraKnownMarketplaces` in `settings.json`) gets
 its folder, read only.
 
+**A lead that runs tmux sessions of its own** sets `"allowTmux": true` in its
+entry. Every other lead is refused the tmux socket by default, because a lead
+that can reach it can `tmux send-keys` into any unsandboxed session, the Team
+Lead's included. The opt-out drops the tmux rules and its `--check` row, and
+nothing else. The Team Lead itself runs outside the wall and keeps starting,
+reading and sending to leads' panes as before (measured below).
+
 **2. Dry run.** It writes nothing, and prints each profile and the command
 that launches each lead.
 
@@ -258,97 +265,34 @@ a Riverbend file. A second run with the owner's full settings connected every
 MCP server (`claude mcp list`) and answered `list_watched_docs`. The hooks'
 exit codes were not read in either run.
 
+**A lead in a tmux pane, with the deny.** A tmux server of the probe's own
+started the wrapper in a pane, as the respawn skill does, with `$TMUX` set.
+From outside, `tmux ls`, `send-keys` and `capture-pane` on that pane all
+worked: the keys ran `claude -p` in the pane, and an interactive `claude`
+there took a trust prompt answered by `send-keys`, ran a Bash call that wrote
+its own project, and exited on `/exit`. From inside the pane, `tmux ls`
+answered `error connecting to … (Operation not permitted)`. The pane needs
+no socket: its process reads and writes the pty tmux gave it.
+
 ## What the wall does not cover yet
 
-Two gaps, for Bryan to choose between the options. What was measured on 28
-October is marked measured; the rest is read from the code or inferred.
+Two gaps stay open. Each has a planned fix, and no new Mac isolation (App
+Sandbox, a macOS user per lead, a VM) is planned for either.
 
-### The board server trusts a loopback caller
-
-**Measured:** from inside a profile, `curl http://127.0.0.1:8787/workspaces?format=json`
-answers 200 (status code only; the body was not read). **From the code and
-security.md:** a caller on loopback with no token is trusted-local
-(`isTrustedLocalHost`, `middleware/host-guard.ts`), so a lead can read every
-board, mint a board agent token for any agent and board over
-`/api/board-tokens`, have the server (running as Bryan, outside the wall)
-bind and read a file the lead cannot open, and call `POST /api/deploy`, which
-runs `git pull` and a restart outside the wall. The lead's own
-claude-workspaces MCP child, and the plugin's hooks, run inside the same
-profile and reach the same port.
-
-Options:
-
-1. **Deny the port in the profile.** **Measured:** `(deny network-outbound
-   (remote tcp "*:8787"))` refuses `curl` and `nc` on `127.0.0.1:8787`; `*`
-   also covers the Mac's LAN and Tailscale addresses, which `localhost` would
-   not. Alone it breaks the lead's own board: the MCP child and every hook
-   lose the server. **Measured:** a rule can exempt one binary,
-   `(require-not (process-path …))`: with `/usr/bin/nc` exempt, `nc`
-   connected and `bun` did not. **Inferred:** that does not help, because the
-   MCP child and the hooks run under `bun` or `node`, which the lead can run
-   with any script, and the compiled relay is an MCP server the lead could
-   start itself and drive. So this option only works with option 2's token:
-   the profile denies the port to everything, and the board is reached some
-   other way, or the token makes the port harmless.
-2. **A token scoped to the lead's own board, and loopback stops being enough.**
-   The board agent token (`at2`, `auth/board-agent-token.ts`) already scopes
-   a holder to one board through `collabScope`, refusing Mac paths, mounts,
-   repos, deploy and every other board. Today it is honoured from loopback
-   but does not confine a loopback caller who omits it. What this takes:
-   the wrapper mints an `at2` for the lead's board outside the wall and hands
-   it in through the environment; the MCP child and the hooks send it; and
-   the server refuses a sandboxed loopback caller that sends no token. The
-   mint route must stay out of reach, or a lead mints a wider one: the mint
-   is loopback-only, so it needs the server to know the caller is sandboxed.
-3. **The server tells a sandboxed caller from an unsandboxed one.**
-   **Measured:** `sandbox_check(pid, NULL, 0)`, from outside, returns 1 for a
-   process under a lead profile and 0 for an ordinary one. The server already
-   maps a loopback socket to the caller's pid with `lsof` and `ps` to name its
-   agent (`identifyCallerAgent`, `auth/agent-caller.ts`). **Inferred:** the
-   same lookup plus `sandbox_check` lets the server treat a sandboxed caller
-   as a visitor on the board its launching session names, with no new token
-   and no change to the profile. The board would come from the session's
-   environment, which the wrapper sets outside the wall and the lead cannot
-   rewrite. It costs an `lsof` and a `ps` per new connection, which the agent
-   lookup already pays on the routes that use it, and it is only as safe as
-   its failure case: a caller whose pid cannot be resolved must be refused.
-
-Option 3 is the smallest change that closes the gap, and option 2 is what a
-lead on another machine already uses. Either needs `--check` to gain a row
-that the lead cannot reach another board.
-
-### The keychain answers the lead
-
-**Measured:** a generic-password item made with `security
-add-generic-password` (a dummy, service `harborlight-sbx-probe`) was read back
-from inside a profile with `security find-generic-password -w`, then deleted.
-Reads go to `securityd` over Mach, so no file rule sees them.
-
-**Measured:** adding `(deny mach-lookup (global-name "com.apple.SecurityServer")
-(global-name "com.apple.securityd"))` refused the same read (exit 44), and a
-`claude -p` under that profile still signed in and answered. Claude Code
-2.1.312 signed in from `~/.claude/.credentials.json`, a file inside the wall.
-That changes what step 1's table says the keychain folder is for: the 16
-October run that answered "Not logged in" without it may have had no
-credentials file. Not measured with that deny: `gh`, `git` over HTTPS, and
-anything else in the owner's settings that keeps its secret in the
-keychain; each would lose it.
-
-**Inferred:** a profile rule can only deny the keychain whole, not one item,
-because the item is named in the request to `securityd`, which Seatbelt does
-not see. So the choice is all or nothing:
-
-1. **Deny `securityd` for leads now**, after checking `gh` and git inside the
-   wall, and move what they need into files the lead may read. That closes
-   every other keychain item, including the Cloudflare and Fly tokens
-   security.md says are still there.
-2. **Wait for the keeper** ([keeper.md](keeper.md)), which moves those
-   tokens behind Bryan's passkey. Until its cutover, a sandboxed lead can read
-   them.
-
-Either way, `~/.claude/.credentials.json` is Bryan's Claude sign-in and the
-lead can read and write it. No rule can deny it without signing the lead
-out; a config folder per lead, signed in on its own, is the only split.
+- **The board server trusts a loopback caller.** Measured 28 October: from
+  inside a profile, `curl http://127.0.0.1:8787/workspaces?format=json`
+  answers 200. A caller on loopback with no token is trusted-local, so a
+  lead can read every board, mint a token for any board, and ask the server,
+  which runs as Bryan outside the wall, to read a file the lead cannot. The
+  lead's own MCP child and hooks reach the same port, so the profile cannot
+  simply deny it. This closes with a board agent token per lead, scoped to
+  that lead's board: the same token a lead on Fly needs.
+- **The keychain answers the lead.** Measured 28 October: a dummy item made
+  with `security add-generic-password` was read back from inside a profile,
+  then deleted. Reads go to `securityd`, which no file rule sees. This closes
+  with the keeper ([keeper.md](keeper.md)), which moves the fleet's secrets
+  behind Bryan's passkey. Also measured: Claude Code 2.1.312 signs in from
+  `~/.claude/.credentials.json`, which the lead can read and write.
 
 ## What this does not close
 

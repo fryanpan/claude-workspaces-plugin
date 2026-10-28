@@ -141,9 +141,16 @@ function launchdRow(profile: string, cwd: string): EscapeRow {
 }
 
 /** Every escape row for one lead's profile, run from the lead's first project. */
-export function escapeRows(profile: string, cwd: string, uid: number): EscapeRow[] {
+export function escapeRows(
+  profile: string,
+  cwd: string,
+  uid: number,
+  allowTmux = false,
+): EscapeRow[] {
   return [
-    tmuxRow(profile, cwd, uid),
+    allowTmux
+      ? { ok: true, says: 'tmux: left reachable, as the config asks (allowTmux)' }
+      : tmuxRow(profile, cwd, uid),
     sandboxRow(profile, cwd, 'lsopen', 'open'),
     sandboxRow(profile, cwd, 'appleevent-send', 'osascript'),
     shortcutsRow(profile, cwd),
