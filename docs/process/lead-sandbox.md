@@ -232,14 +232,18 @@ the profiles and the proxy together.
 | no token, or a token no lead holds | 401 |
 | a repo not in that lead's `githubRepos` (GitHub's names match without case) | 403 |
 | a push that deletes a ref | 403 |
-| a push that moves a ref other than forward (a force-push, a reset back) | 403 |
+| a push that moves the default branch other than forward (a force-push, a reset back) | 403 |
 | everything else | sent to `https://github.com` with Bryan's credential |
 
-A push that creates a ref is allowed. One refused command refuses the whole
-push. The proxy reads its config and every token file on each request, so a
+A push that creates a ref is allowed, and so is a force-push to any branch
+but the default one, which a rebase needs. The default branch is whatever
+upstream's `HEAD` points at, read on each push from the `symref=HEAD:<ref>`
+capability of its `git-upload-pack` ref advertisement (the receive-pack one
+names no HEAD). If that cannot be read, every branch gets the fast-forward
+rule. One refused command refuses the whole push. The proxy reads its config and every token file on each request, so a
 new lead or a changed list needs no restart.
 
-**How it tells a fast-forward.** The client's old sha cannot tell: git sends
+**How it tells a fast-forward on the default branch.** The client's old sha cannot tell: git sends
 the ref's current value as old for a force-push too. So the proxy asks
 whether old is an ancestor of new. It adds `no-thin` to the push's
 capabilities, so the client sends a pack whose deltas need nothing from
@@ -274,8 +278,10 @@ whether `gh auth token` reads the keychain from under launchd.
 `git` client, configured with the wrapper's own files, through the proxy to
 bare repos served by `git http-backend`, with a fake credential: a clone and
 a fast-forward reach the upstream, including one the compare API decides; a
-push to an unlisted repo, a force-push, a reset back and a branch delete are
-each refused and the upstream ref is unchanged; no token, a wrong one and
+force-push to a feature branch succeeds; a push to an unlisted repo, a
+force-push and a reset back on the default branch, and a branch delete are
+each refused and the upstream ref is unchanged; with upstream's `HEAD`
+moved to another branch, the rule moves with it; no token, a wrong one and
 the owner's own credential get 401. A tap between git and the proxy keeps
 every byte both ways, and the fake credential is in none of them, nor in a
 log line, while the upstream saw it on every request. An upstream error that

@@ -19,7 +19,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensureGitProxyFiles, gitProxyLeadDir, readLeadTokens } from './git-proxy-lead.ts';
-import { addNoThin, basicPassword, parseReceivePack, parseRepoRequest } from './git-proxy-lib.ts';
+import {
+  addNoThin,
+  basicPassword,
+  headSymref,
+  parseReceivePack,
+  parseRepoRequest,
+} from './git-proxy-lib.ts';
 import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
 
 const A = 'a'.repeat(40);
@@ -109,6 +115,19 @@ describe('addNoThin', () => {
     expect(out?.toString()).toContain('report-status delete-refs no-thin\n');
     expect(out?.subarray(out.length - rest.length).equals(rest)).toBe(true);
     expect(addNoThin(Buffer.from('<html>'))).toBeNull();
+  });
+});
+
+describe('headSymref', () => {
+  it("reads HEAD's target from an upload-pack advertisement, and nothing from one without it", () => {
+    const advert = (first: string) =>
+      Buffer.concat([pkt('# service=git-upload-pack\n'), FLUSH, pkt(first), FLUSH]);
+    expect(
+      headSymref(advert(`${A} HEAD\0multi_ack symref=HEAD:refs/heads/trunk agent=git\n`)),
+    ).toBe('refs/heads/trunk');
+    expect(headSymref(advert(`${A} refs/heads/main\0report-status delete-refs\n`))).toBeNull();
+    expect(headSymref(advert(`${A} HEAD\0symref=FOO:refs/heads/x\n`))).toBeNull();
+    expect(headSymref(Buffer.from('<html>'))).toBeNull();
   });
 });
 

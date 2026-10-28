@@ -7,7 +7,8 @@
  * What it answers, in order: a path that is not one repo's smart-HTTP
  * endpoint, 404; no token or an unknown one, 401; a repo the lead's list
  * does not name, 403; a push that deletes a ref or moves one other than
- * forward, 403. Everything else goes upstream.
+ * forward on the repo's default branch, 403. Any other branch may be
+ * force-pushed: a rebase needs it. Everything else goes upstream.
  *
  * The credential is held in memory only. It is sent upstream and nowhere
  * else: a client's headers are never echoed, the upstream's are filtered to
@@ -25,6 +26,7 @@ import {
   basicHeader,
   basicPassword,
   credentialForms,
+  headSymref,
   isZero,
   parseReceivePack,
   parseRepoRequest,
@@ -94,7 +96,7 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
 
   /** One request upstream, with the owner's credential and the headers git needs, nothing else. */
   const upstream = (
-    req: http.IncomingMessage,
+    given: http.IncomingHttpHeaders,
     r: RepoRequest,
     body: Buffer | http.IncomingMessage | null,
   ): Promise<http.IncomingMessage> => {
@@ -104,17 +106,17 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
         : `/${r.repo}.git/${r.service}`;
     const headers: Record<string, string> = {
       authorization: basicHeader(opts.credential),
-      'user-agent': String(req.headers['user-agent'] ?? 'git/claude-workspaces-git-proxy'),
+      'user-agent': String(given['user-agent'] ?? 'git/claude-workspaces-git-proxy'),
       'accept-encoding': 'identity',
     };
     for (const h of ['accept', 'content-type'])
-      if (typeof req.headers[h] === 'string') headers[h] = req.headers[h] as string;
+      if (typeof given[h] === 'string') headers[h] = given[h] as string;
     // Protocol v2 is a fetch thing; a push stays on v0, where the check reads it.
-    if (r.service === 'git-upload-pack' && typeof req.headers['git-protocol'] === 'string')
-      headers['git-protocol'] = req.headers['git-protocol'];
+    if (r.service === 'git-upload-pack' && typeof given['git-protocol'] === 'string')
+      headers['git-protocol'] = given['git-protocol'];
     if (Buffer.isBuffer(body)) headers['content-length'] = String(body.length);
-    else if (body && typeof req.headers['content-encoding'] === 'string')
-      headers['content-encoding'] = req.headers['content-encoding'];
+    else if (body && typeof given['content-encoding'] === 'string')
+      headers['content-encoding'] = given['content-encoding'];
     return new Promise((resolve, reject) => {
       const up = client.request(
         new URL(path, base),
@@ -167,20 +169,49 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
     return 200;
   };
 
-  /** Null if every update may go; otherwise why not. */
-  const refusePush = async (repo: string, body: Buffer): Promise<string | null> => {
+  /**
+   * The repo's default branch, from upstream's HEAD symref, or null when it
+   * cannot be read. Asked in protocol v0 (no `Git-Protocol` header), whose
+   * first line carries `symref=HEAD:<ref>`.
+   */
+  const defaultBranch = async (req: http.IncomingMessage, repo: string): Promise<string | null> => {
+    const r: RepoRequest = { repo, kind: 'refs', service: 'git-upload-pack' };
+    const up = await upstream({ 'user-agent': req.headers['user-agent'] }, r, null);
+    const parts: Buffer[] = [];
+    for await (const d of up) parts.push(d as Buffer);
+    if (up.statusCode !== 200) return null;
+    let body: Buffer = Buffer.concat(parts);
+    if (up.headers['content-encoding'] === 'gzip')
+      body = gunzipSync(body, { maxOutputLength: maxPush });
+    return headSymref(body);
+  };
+
+  /**
+   * Null if every update may go; otherwise why not. A delete is refused
+   * anywhere; a move other than forward only on the default branch, and on
+   * every branch when the default cannot be read.
+   */
+  const refusePush = async (
+    req: http.IncomingMessage,
+    repo: string,
+    body: Buffer,
+  ): Promise<string | null> => {
     const parsed = parseReceivePack(body);
     if (!parsed.ok) return parsed.error;
-    const commits = parsed.updates.some((u) => !isZero(u.old) && !isZero(u.new))
-      ? await packCommits(parsed.pack)
-      : new Map<string, string[]>();
-    const ancestry = ancestryFor(repo);
-    for (const u of parsed.updates) {
+    for (const u of parsed.updates)
       if (isZero(u.new)) return `deleting ${u.ref} is refused by the proxy`;
-      if (isZero(u.old)) continue;
+    const moves = parsed.updates.filter((u) => !isZero(u.old));
+    if (moves.length === 0) return null;
+    const head = await defaultBranch(req, repo);
+    const guarded = moves.filter((u) => head === null || u.ref === head);
+    if (guarded.length === 0) return null;
+    const commits = await packCommits(parsed.pack);
+    const ancestry = ancestryFor(repo);
+    for (const u of guarded)
       if (!(await isFastForward(u.old, u.new, commits, ancestry)))
-        return `${u.ref}: only a fast-forward is allowed through the proxy (no force-push)`;
-    }
+        return head === null
+          ? `${u.ref}: the default branch could not be read, so only a fast-forward is allowed`
+          : `${u.ref} is the default branch: only a fast-forward is allowed through the proxy`;
     return null;
   };
 
@@ -200,12 +231,12 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
       return answer(res, 403, `${r.repo} is not in ${lead.name}'s githubRepos`);
     }
     if (r.kind === 'refs') {
-      const up = await upstream(req, r, null);
+      const up = await upstream(req.headers, r, null);
       const status = await relay(res, up, r.service === 'git-receive-pack' ? addNoThin : undefined);
       return log(`${status} ${who} refs`);
     }
     if (r.service === 'git-upload-pack') {
-      const up = await upstream(req, r, req);
+      const up = await upstream(req.headers, r, req);
       return log(`${await relay(res, up)} ${who}`);
     }
     let body = await readBody(req, maxPush);
@@ -215,12 +246,12 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
     }
     if (req.headers['content-encoding'] === 'gzip')
       body = gunzipSync(body, { maxOutputLength: maxPush });
-    const why = await refusePush(r.repo, body);
+    const why = await refusePush(req, r.repo, body);
     if (why) {
       log(`403 ${who}: ${why}`);
       return answer(res, 403, why);
     }
-    const up = await upstream(req, r, body);
+    const up = await upstream(req.headers, r, body);
     log(`${await relay(res, up)} ${who}`);
   };
 

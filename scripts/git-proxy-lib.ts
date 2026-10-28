@@ -176,3 +176,24 @@ export function addNoThin(advert: Buffer): Buffer | null {
     advert.subarray(refs.end),
   ]);
 }
+
+/**
+ * The ref `HEAD` points at, from the `info/refs` answer for
+ * `git-upload-pack` in protocol v0: its first line's `symref=HEAD:<ref>`
+ * capability. `git-receive-pack`'s answer names no HEAD, so the proxy asks
+ * for this one. Null for an empty repo or an answer it cannot read.
+ */
+export function headSymref(advert: Buffer): string | null {
+  const first = readPkt(advert, 0);
+  if (typeof first === 'string' || first.payload === null) return null;
+  const flush = readPkt(advert, first.end);
+  if (typeof flush === 'string' || flush.payload !== null) return null;
+  const refs = readPkt(advert, flush.end);
+  if (typeof refs === 'string' || refs.payload === null) return null;
+  const line = refs.payload.toString('utf8').replace(/\n$/, '');
+  const nul = line.indexOf('\0');
+  if (nul < 0) return null;
+  for (const cap of line.slice(nul + 1).split(' '))
+    if (cap.startsWith('symref=HEAD:refs/')) return cap.slice('symref=HEAD:'.length);
+  return null;
+}

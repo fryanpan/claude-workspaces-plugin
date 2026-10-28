@@ -1,5 +1,6 @@
 /**
- * Whether a pushed ref update is a fast-forward, for the GitHub proxy.
+ * Whether a pushed ref update is a fast-forward, for the GitHub proxy's
+ * guard on a repo's default branch.
  *
  * The client's old sha cannot decide it: git sends the ref's current value
  * as old for a force-push too. So the proxy asks whether old is an ancestor

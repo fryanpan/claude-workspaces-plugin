@@ -195,7 +195,7 @@ describe.skipIf(!HAVE_GIT)('the GitHub proxy, with a real git client', () => {
     expect(github.seen.some((s) => s.url.includes('/compare/'))).toBe(true);
   });
 
-  it('refuses a force-push, and the upstream keeps its commit', async () => {
+  it('refuses a force-push to the default branch, and the upstream keeps its commit', async () => {
     const work = join(root, 'work');
     const before = upstreamRef('Harborlight/notes', 'main');
     expect(git(work, ['commit', '-q', '--amend', '-m', 'rewritten']).status).toBe(0);
@@ -212,7 +212,72 @@ describe.skipIf(!HAVE_GIT)('the GitHub proxy, with a real git client', () => {
     ]);
     expect(back.status).not.toBe(0);
     expect(upstreamRef('Harborlight/notes', 'main')).toBe(before);
-    expect(logs.filter((l) => l.includes('only a fast-forward'))).toHaveLength(2);
+    expect(logs.filter((l) => l.includes('is the default branch'))).toHaveLength(2);
+  });
+
+  it('lets a force-push to any other branch through, as a rebase needs', async () => {
+    const work = join(root, 'work');
+    const feature = upstreamRef('Harborlight/notes', 'feature');
+    // feature rebuilt from its parent: a sibling of its tip, as a rebase leaves it.
+    const rewritten = git(work, [
+      'commit-tree',
+      'HEAD^{tree}',
+      '-p',
+      `${feature}~1`,
+      '-m',
+      'rebased',
+    ]).stdout.trim();
+    expect(
+      git(work, ['merge-base', '--is-ancestor', feature, rewritten]).status,
+      'the fixture must be a real non-fast-forward',
+    ).not.toBe(0);
+    const push = await lead(work, [
+      'push',
+      '-q',
+      '--force',
+      'origin',
+      `${rewritten}:refs/heads/feature`,
+    ]);
+    expect(push.status, push.stderr).toBe(0);
+    expect(upstreamRef('Harborlight/notes', 'feature')).toBe(rewritten);
+  });
+
+  it("reads the default branch from upstream's HEAD, not from its name", async () => {
+    const work = join(root, 'work');
+    const gitDir = join(repos, 'Harborlight/notes.git');
+    const head = (ref: string) =>
+      expect(git(root, ['--git-dir', gitDir, 'symbolic-ref', 'HEAD', ref]).status).toBe(0);
+    head('refs/heads/feature');
+    try {
+      const main = upstreamRef('Harborlight/notes', 'main');
+      const feature = upstreamRef('Harborlight/notes', 'feature');
+      // main goes back to feature's commit, which does not hold main's tip: allowed now.
+      const toMain = await lead(work, [
+        'push',
+        '-q',
+        '--force',
+        'origin',
+        `${feature}:refs/heads/main`,
+      ]);
+      expect(toMain.status, toMain.stderr).toBe(0);
+      expect(upstreamRef('Harborlight/notes', 'main')).toBe(feature);
+      // feature is the default now, so moving it back is refused.
+      const toFeature = await lead(work, [
+        'push',
+        '-q',
+        '--force',
+        'origin',
+        `${feature}~1:refs/heads/feature`,
+      ]);
+      expect(toFeature.status).not.toBe(0);
+      expect(upstreamRef('Harborlight/notes', 'feature')).toBe(feature);
+      // Put main back where the later cases expect it.
+      expect(
+        (await lead(work, ['push', '-q', '--force', 'origin', `${main}:refs/heads/main`])).status,
+      ).toBe(0);
+    } finally {
+      head('refs/heads/main');
+    }
   });
 
   it('refuses a branch delete, and the branch is still there', async () => {
