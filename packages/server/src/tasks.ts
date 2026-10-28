@@ -1184,6 +1184,10 @@ export interface DecisionAnsweredEvent {
    * out. A bare option label is not a decision.
    */
   headline?: string;
+  /** The answered task's title, so the one frame an answer wakes its filer
+   *  with names the row without a lookup. On the legacy path it equals
+   *  `headline`. */
+  title?: string;
   /** Set when the answer was sent from inside a mock page — see `WriteVia`. */
   via?: WriteVia;
   /**
@@ -1251,6 +1255,11 @@ export interface DecisionInfoRequestedEvent {
    *  `requestMoreInfoOnReview` on a real row. Absent on the legacy path, for
    *  the same reason as on `decision.answered`. */
   reviewItemId?: string;
+  /** The comment thread the question was asked on, when it was asked on one.
+   *  That thread's own frame carries the words to the filer, so the MCP
+   *  child does not wake for this one (`bookkeeping-events.ts`). Absent for
+   *  the typed "tell me more", where this event is the only signal. */
+  threadId?: string;
   actor: TaskActor;
   links: Ref[];
   ts: number;

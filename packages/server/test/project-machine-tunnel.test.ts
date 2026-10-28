@@ -30,7 +30,7 @@ import {
 const SHA = 'a'.repeat(40);
 const cfg = projectConfig({ project: 'riverbend', imageLabel: SHA, tunnel: 'named' });
 const ZONE = 'harborlight.test';
-const names = tunnelNames(cfg, { zone: ZONE, oneAddress: `board.${ZONE}` });
+const names = tunnelNames(cfg, { zone: ZONE, oneAddress: `workspaces.${ZONE}` });
 const TUNNEL_ID = '11111111-2222-4333-8444-555555555555';
 const TARGET = `${TUNNEL_ID}.cfargotunnel.com`;
 
@@ -63,7 +63,7 @@ const configAnswer = {
   config: {
     ingress: [
       {
-        hostname: 'riverbend.board.harborlight.test',
+        hostname: 'riverbend-workspaces.harborlight.test',
         service: 'http://localhost:8787',
         originRequest: {},
       },
@@ -92,8 +92,14 @@ describe('tunnel names', () => {
       zone: ZONE,
       tunnel: 'cw-riverbend',
       origin: 'riverbend-origin.harborlight.test',
-      publicHost: 'riverbend.board.harborlight.test',
+      publicHost: 'riverbend-workspaces.harborlight.test',
     });
+  });
+
+  it('puts the public host one level under the zone, apart from the origin', () => {
+    // One level is what the zone's Universal SSL certificate covers.
+    expect(names.publicHost.slice(names.publicHost.indexOf('.') + 1)).toBe(ZONE);
+    expect(names.publicHost).not.toBe(names.origin);
   });
 });
 
@@ -165,7 +171,7 @@ describe('planTunnel', () => {
       {
         id: 'a1',
         name: 'Riverbend board',
-        domain: 'riverbend.board.harborlight.test',
+        domain: 'riverbend-workspaces.harborlight.test',
         type: 'self_hosted',
       },
       { id: 'a2', name: 'Whole zone', domain: '*.harborlight.test/', type: 'self_hosted' },
@@ -202,13 +208,16 @@ describe("reading Cloudflare's answers", () => {
     const [app] = parseAccessApps([
       {
         name: 'Riverbend board',
-        domain: 'riverbend.board.harborlight.test/workspaces',
-        self_hosted_domains: ['riverbend.board.harborlight.test', 'saltmarsh.harborlight.test'],
+        domain: 'riverbend-workspaces.harborlight.test/workspaces',
+        self_hosted_domains: [
+          'riverbend-workspaces.harborlight.test',
+          'saltmarsh.harborlight.test',
+        ],
         destinations: [{ type: 'public', uri: 'https://riverbend-origin.harborlight.test/' }],
       },
     ]);
     expect(app?.hosts).toEqual([
-      'riverbend.board.harborlight.test',
+      'riverbend-workspaces.harborlight.test',
       'saltmarsh.harborlight.test',
       'riverbend-origin.harborlight.test',
     ]);
@@ -217,7 +226,7 @@ describe("reading Cloudflare's answers", () => {
   it('matches a wildcard Access hostname against subdomains only', () => {
     expect(coversHost('*.harborlight.test', names.origin)).toBe(true);
     expect(coversHost('*.harborlight.test', 'harborlight.test')).toBe(false);
-    expect(coversHost('*.board.harborlight.test', names.origin)).toBe(false);
+    expect(coversHost('*.workspaces.harborlight.test', names.origin)).toBe(false);
     expect(coversHost('Riverbend-Origin.harborlight.test', names.origin)).toBe(true);
   });
 
@@ -244,7 +253,7 @@ describe('what goes to Cloudflare', () => {
     expect(tunnelConfigBody(names)).toEqual({
       config: {
         ingress: [
-          { hostname: 'riverbend.board.harborlight.test', service: 'http://localhost:8787' },
+          { hostname: 'riverbend-workspaces.harborlight.test', service: 'http://localhost:8787' },
           { service: 'http_status:404' },
         ],
       },

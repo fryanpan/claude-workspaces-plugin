@@ -18,6 +18,11 @@ export interface DecisionAnsweredPayload {
   /** What was asked — the item's headline, or the legacy decision's title.
    *  Absent from a server older than the field. */
   headline?: string;
+  /** The answered task's title. On the legacy path it equals `headline`. */
+  title?: string;
+  /** Which of the task's review items was answered; absent on the legacy
+   *  path, where the task's own decision is the item. */
+  reviewItemId?: string;
   /** Set when the answer was sent from inside a mock page. */
   via?: string;
   /** The item's questions this answer left open. Absent when it closed. */
@@ -87,5 +92,38 @@ export function decisionAnsweredLine(p: DecisionAnsweredPayload): string {
     Array.isArray(p.links) && p.links.length > 0
       ? ' — walk its links as the propagation checklist'
       : '';
-  return `[decision.answered] ${p.taskId}${by}: "${truncate(p.answer ?? '', 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+  return `[decision.answered] ${p.taskId}${rowClause(p)}${by}: "${truncate(p.answer ?? '', 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+}
+
+/**
+ * The row's name and the item's id, after the task id. This is the one frame
+ * an answer wakes its filer with, so it carries what the lead's
+ * `review_answered` nudge and the filer's `review_item.answered` notice used
+ * to carry beside it. A title equal to the headline is not printed twice.
+ */
+function rowClause(p: { title?: string; headline?: string; reviewItemId?: string }): string {
+  const title = p.title && p.title !== p.headline ? ` "${truncate(p.title, 80)}"` : '';
+  const item = p.reviewItemId ? ` item ${p.reviewItemId}` : '';
+  return `${title}${item}`;
+}
+
+/** The fields `decision.info_requested` carries that its line reads. */
+export interface InfoRequestedPayload {
+  taskId?: string;
+  question?: string;
+  reviewItemId?: string;
+  actor?: { name?: string };
+}
+
+/**
+ * Render a typed "tell me more" — the person wants more context before
+ * deciding. Only the threadless kind reaches here: one asked on a thread is
+ * dropped in `bookkeeping-events.ts`, because the thread's frame carried the
+ * words.
+ */
+export function infoRequestedLine(p: InfoRequestedPayload): string {
+  const by = p.actor?.name ? ` by ${p.actor.name}` : '';
+  const item = p.reviewItemId ? ` item ${p.reviewItemId}` : '';
+  const q = p.question ? `: "${truncate(p.question, 120)}"` : '';
+  return `[decision.info_requested] ${p.taskId ?? '?'}${item}${by} wants more context before deciding${q}`;
 }

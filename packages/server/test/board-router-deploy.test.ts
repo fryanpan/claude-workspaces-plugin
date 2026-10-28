@@ -1,6 +1,6 @@
 /**
  * The router deploy's decisions (infra/board-router-worker/deploy-plan.ts):
- * which config it accepts, when it creates the wildcard record, when it
+ * which config it accepts, when it creates a project's record, when it
  * refuses to deploy, and the wrangler config it renders. Nothing here reaches
  * Cloudflare; the runner (deploy.ts) only feeds these functions what the API
  * answered.
@@ -10,24 +10,28 @@ import {
   type Observed,
   parseRouterConfig,
   plan,
+  projectHostsOf,
+  projectRecord,
   renderWranglerToml,
   versionIdOf,
-  wildcardRecord,
 } from '../../../infra/board-router-worker/deploy-plan.ts';
 
 const ZONE = 'harborlight.test';
 const ONE = `workspaces.${ZONE}`;
 const RIVERBEND = `riverbend-origin.${ZONE}`;
 const MAC = `mac-origin.${ZONE}`;
+/** Riverbend's own hostname: one level under the zone, beside the one address. */
+const RIVERBEND_HOST = `riverbend-workspaces.${ZONE}`;
 const BASE = { zone: ZONE, oneAddress: ONE, projects: { riverbend: RIVERBEND } };
 const cfg = (over: Record<string, unknown> = {}) =>
   parseRouterConfig(JSON.stringify({ ...BASE, ...over }));
 
 const proxied = (name: string) => ({ type: 'CNAME', name, content: 't.test', proxied: true });
+/** What a zone on Universal SSL alone answers: the apex and one level under it. */
 const healthy = (): Observed => ({
-  wildcard: [],
+  hosts: {},
   origins: { [RIVERBEND]: [proxied(RIVERBEND)] },
-  certificateHosts: [ONE, `*.${ONE}`],
+  certificateHosts: [ZONE, `*.${ZONE}`],
 });
 
 describe('parseRouterConfig', () => {
@@ -47,8 +51,21 @@ describe('parseRouterConfig', () => {
       'an origin outside the zone',
       JSON.stringify({ ...BASE, projects: { r: 'r.saltmarsh.test' } }),
     ],
-    ['an origin under the one address', JSON.stringify({ ...BASE, projects: { r: `r.${ONE}` } })],
-    // At the apex `*.<zone>/*` would take every other name in the zone.
+    [
+      'an origin with the shape of a project hostname',
+      JSON.stringify({ ...BASE, projects: { r: `saltmarsh-workspaces.${ZONE}` } }),
+    ],
+    ['an origin that is the one address', JSON.stringify({ ...BASE, projects: { r: ONE } })],
+    // `origin.<zone>` would make every `<project>-origin.<zone>` a project hostname.
+    ['a one address named origin', JSON.stringify({ ...BASE, oneAddress: `origin.${ZONE}` })],
+    [
+      'a one address two levels down',
+      JSON.stringify({ ...BASE, oneAddress: `workspaces.board.${ZONE}` }),
+    ],
+    [
+      'a project hostname past the 63-character label limit',
+      JSON.stringify({ ...BASE, projects: { ['r'.repeat(60)]: RIVERBEND } }),
+    ],
     ['a one address at the zone apex', JSON.stringify({ ...BASE, oneAddress: ZONE })],
     ['the apex and no projects', JSON.stringify({ zone: ZONE, oneAddress: ZONE, projects: {} })],
     ['an upper-case one address', JSON.stringify({ ...BASE, oneAddress: `Workspaces.${ZONE}` })],
@@ -59,19 +76,36 @@ describe('parseRouterConfig', () => {
   });
 });
 
+describe('project hostnames', () => {
+  it('are `<project>-<first label of the one address>.<zone>`, one level under the zone', () => {
+    const c = cfg({ projects: { riverbend: RIVERBEND, saltmarsh: `saltmarsh-origin.${ZONE}` } });
+    expect(projectHostsOf(c)).toEqual([RIVERBEND_HOST, `saltmarsh-workspaces.${ZONE}`]);
+  });
+});
+
 describe('plan', () => {
-  it('creates the wildcard record when there is none', () => {
-    expect(plan(cfg(), healthy())).toEqual({ ok: true, createWildcard: true });
+  it("creates a project's record when there is none, on Universal SSL alone", () => {
+    expect(plan(cfg(), healthy())).toEqual({ ok: true, create: [RIVERBEND_HOST] });
   });
 
-  it('leaves a proxied wildcard record alone, so a second run changes nothing', () => {
-    const obs = { ...healthy(), wildcard: [wildcardRecord(ONE)] };
-    expect(plan(cfg(), obs)).toEqual({ ok: true, createWildcard: false });
+  it('leaves a proxied project record alone, so a second run changes nothing', () => {
+    const obs = { ...healthy(), hosts: { [RIVERBEND_HOST]: [projectRecord(RIVERBEND_HOST)] } };
+    expect(plan(cfg(), obs)).toEqual({ ok: true, create: [] });
   });
 
-  it('refuses a wildcard record Cloudflare does not proxy', () => {
-    const obs = { ...healthy(), wildcard: [{ ...wildcardRecord(ONE), proxied: false }] };
+  it('refuses a project record Cloudflare does not proxy', () => {
+    const obs = {
+      ...healthy(),
+      hosts: { [RIVERBEND_HOST]: [{ ...projectRecord(RIVERBEND_HOST), proxied: false }] },
+    };
     expect(plan(cfg(), obs).ok).toBe(false);
+  });
+
+  it('refuses a config with nothing to bind', () => {
+    const verdict = plan(cfg({ projects: {} }), healthy());
+    expect(verdict.ok ? [] : verdict.problems).toEqual([
+      expect.stringContaining('nothing to bind'),
+    ]);
   });
 
   it('refuses an origin with no proxied record', () => {
@@ -84,25 +118,26 @@ describe('plan', () => {
     expect(plan(cfg(), unproxied).ok).toBe(false);
   });
 
-  it('refuses when no certificate covers the project subdomains', () => {
-    // Universal SSL on the zone covers `*.harborlight.test`, one level only.
-    const obs = { ...healthy(), certificateHosts: [ZONE, `*.${ZONE}`] };
+  it('refuses when no certificate covers the project hostname', () => {
+    // A certificate for the one address alone, or for names two levels down,
+    // does not cover a name beside the one address.
+    const obs = { ...healthy(), certificateHosts: [ZONE, ONE, `*.${ONE}`] };
     const verdict = plan(cfg(), obs);
     expect(verdict.ok).toBe(false);
-    expect(verdict.ok ? [] : verdict.problems.join(' ')).toContain(`*.${ONE}`);
+    expect(verdict.ok ? [] : verdict.problems.join(' ')).toContain(RIVERBEND_HOST);
   });
 
-  it('CONTROL: a certificate for the project subdomains lets the same config deploy', () => {
-    const obs = { ...healthy(), certificateHosts: [ZONE, `*.${ZONE}`, `*.${ONE}`] };
-    expect(plan(cfg(), obs)).toEqual({ ok: true, createWildcard: true });
+  it('CONTROL: the exact hostname on a certificate lets the same config deploy', () => {
+    const obs = { ...healthy(), certificateHosts: [ZONE, ONE, `*.${ONE}`, RIVERBEND_HOST] };
+    expect(plan(cfg(), obs)).toEqual({ ok: true, create: [RIVERBEND_HOST] });
   });
 });
 
-describe('the wildcard record', () => {
+describe("a project's record", () => {
   it('is a proxied placeholder only the Worker answers', () => {
-    expect(wildcardRecord(ONE)).toEqual({
+    expect(projectRecord(RIVERBEND_HOST)).toEqual({
       type: 'AAAA',
-      name: `*.${ONE}`,
+      name: RIVERBEND_HOST,
       content: '100::',
       proxied: true,
     });
@@ -112,14 +147,14 @@ describe('the wildcard record', () => {
 describe('renderWranglerToml', () => {
   const routesOf = (toml: string) => [...toml.matchAll(/pattern = "([^"]+)"/g)].map((m) => m[1]);
 
-  it('binds only the project subdomains until board paths are bound', () => {
-    expect(routesOf(renderWranglerToml(cfg(), '/w/worker.js'))).toEqual([`*.${ONE}/*`]);
+  it('binds one route per project hostname, and nothing else, until board paths are bound', () => {
+    expect(routesOf(renderWranglerToml(cfg(), '/w/worker.js'))).toEqual([`${RIVERBEND_HOST}/*`]);
   });
 
   it('binds the board paths too once asked, so the one address is never bound by accident', () => {
     const bound = cfg({ boards: { [MAC]: ['w-mac1'] }, bindBoardPaths: true });
     expect(routesOf(renderWranglerToml(bound, '/w/worker.js'))).toEqual([
-      `*.${ONE}/*`,
+      `${RIVERBEND_HOST}/*`,
       `${ONE}/workspaces/*`,
     ]);
   });

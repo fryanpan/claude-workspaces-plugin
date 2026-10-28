@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Deploy the router Worker and the wildcard DNS record its subdomains need.
+ * Deploy the router Worker and the DNS record each project's hostname needs.
  *
  *   bun run router:deploy [--dry-run] [--config <path>]
  *
@@ -9,8 +9,9 @@
  *
  *   finds the zone and its account
  *   checks every origin hostname has a proxied record, and that a certificate
- *     covers `*.<one address>`, and stops naming what is missing if not
- *   creates the proxied `*.<one address>` record when there is none
+ *     covers every project hostname `<project>-<first label>.<zone>` (the
+ *     zone's Universal SSL does), and stops naming what is missing if not
+ *   creates the proxied record for each project hostname that has none
  *   runs `wrangler deploy` and prints the version it deployed
  *
  * A second run changes nothing but the Worker's code and vars. With
@@ -33,9 +34,10 @@ import {
   originsOf,
   parseRouterConfig,
   plan,
+  projectHostsOf,
+  projectRecord,
   renderWranglerToml,
   versionIdOf,
-  wildcardRecord,
 } from './deploy-plan.ts';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
@@ -45,12 +47,14 @@ async function observe(api: CloudflareApi, zoneId: string, cfg: RouterConfig): P
     api<DnsRecord[]>('GET', `/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`);
   const origins: Record<string, DnsRecord[]> = {};
   for (const origin of originsOf(cfg)) origins[origin] = await records(origin);
+  const hosts: Record<string, DnsRecord[]> = {};
+  for (const host of projectHostsOf(cfg)) hosts[host] = await records(host);
   const packs = await api<Array<{ hosts?: string[] }>>(
     'GET',
     `/zones/${zoneId}/ssl/certificate_packs?status=all`,
   );
   return {
-    wildcard: await records(wildcardRecord(cfg.oneAddress).name),
+    hosts,
     origins,
     certificateHosts: packs.flatMap((p) => p.hosts ?? []),
   };
@@ -105,16 +109,16 @@ async function main(args: string[]): Promise<void> {
     for (const p of decided.problems) console.error(`  - ${p}`);
     throw new Error('not deployed; nothing was changed');
   }
-  const record = wildcardRecord(cfg.oneAddress);
-  console.log(`${record.name}: ${decided.createWildcard ? 'create' : 'exists'}`);
-  console.log(`routes: *.${cfg.oneAddress}/*${cfg.bindBoardPaths ? ' and the board paths' : ''}`);
-  console.log(`projects: ${Object.keys(cfg.projects).join(', ') || 'none'}`);
+  for (const host of projectHostsOf(cfg)) {
+    console.log(`${host}/*: ${decided.create.includes(host) ? 'create record' : 'record exists'}`);
+  }
+  if (cfg.bindBoardPaths) console.log(`${cfg.oneAddress}/workspaces/*: bound`);
   if (dryRun) return;
 
-  if (decided.createWildcard) {
+  for (const host of decided.create) {
     await api('POST', `/zones/${zone.id}/dns_records`, {
-      ...record,
-      comment: 'Project subdomains, answered by the board-router Worker',
+      ...projectRecord(host),
+      comment: "A project's own hostname, answered by the board-router Worker",
     });
   }
   const version = wrangler(cfg, viaKeeper ? null : cloudflareApiToken(), zone.account.id);

@@ -239,3 +239,47 @@ describe('a gap in the event history wakes nobody', () => {
     ]);
   });
 });
+
+/**
+ * A question asked on a review item's thread arrives twice: as the thread's
+ * `thread.created`, with the words, and as `decision.info_requested`. The
+ * second wakes nobody. A typed "tell me more" has no thread, so its
+ * `decision.info_requested` is the only signal and still wakes, with words.
+ */
+describe('a question on a review item wakes once', () => {
+  const ASKED = {
+    workspaceId: 'w-riverbend',
+    taskId: 't1',
+    reviewItemId: 'r1',
+    question: 'Does the fresh key break old bookmarks?',
+    actor: { id: PERSON, name: 'Reviewer' },
+    links: [],
+    ts: FIXED_MS,
+  };
+
+  const render = async (payload: unknown): Promise<ChannelNotification['params'][]> => {
+    const out: ChannelNotification['params'][] = [];
+    const messages = createChannelMessages({
+      notify: async (n) => {
+        out.push(n.params);
+      },
+      http: async () => ({}),
+      authorId: SELF,
+    });
+    await messages.emitChannelMessage('decision.info_requested', payload);
+    return out;
+  };
+
+  it('drops the one asked on a thread', async () => {
+    expect(await render({ ...ASKED, threadId: 'th1' })).toEqual([]);
+  });
+
+  it('delivers the threadless one, with the question and the item', async () => {
+    const out = await render(ASKED);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.content).toBe(
+      '[decision.info_requested] t1 item r1 by Reviewer wants more context before deciding: "Does the fresh key break old bookmarks?"',
+    );
+    expect(out[0]?.meta.review_item_id).toBe('r1');
+  });
+});

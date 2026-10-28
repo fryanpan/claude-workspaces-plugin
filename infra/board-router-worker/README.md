@@ -1,11 +1,20 @@
 # Board router Worker
 
-Each project's boards answer on their own subdomain of the one address,
-`<project>.<one-address>`, wherever that project's server runs. This Worker
-reads the subdomain, sends the request down that project's tunnel and no
-other, and cuts the request's cookies down to the ones a project server set
-for its own host. A subdomain the table does not list gets a 404 from the
-Worker, and there is no default server.
+Each project's boards answer on a hostname of their own, wherever that
+project's server runs: `<project>-<first label of the one address>.<zone>`.
+With the one address `workspaces.<zone>`, Riverbend's boards are at
+`riverbend-workspaces.<zone>`. This Worker reads the hostname, sends the
+request down that project's tunnel and no other, and cuts the request's
+cookies down to the ones a project server set for its own host. A project
+the table does not list gets a 404 from the Worker, and there is no default
+server.
+
+The name is one level under the zone, beside the one address rather than
+under it, so the zone's free Universal SSL certificate covers it
+("Certificate"). It cannot collide with an origin hostname
+(`<project>-origin.<zone>`): the deploy refuses a one address whose first
+label is `origin`, and any origin shaped like a project hostname. Nor with
+the frame domain's names, which carry no `-<first label>` suffix.
 
 The one address itself keeps working as it does today: there the board id in
 the path (`/workspaces/<id>/…`) picks the server. Boards stay on those paths
@@ -19,12 +28,12 @@ with no stamp, or a forged one, is refused there.
 
 ## How a request travels
 
-1. The browser asks `https://<project>.<one-address>/…`.
+1. The browser asks `https://<project>-<first label>.<zone>/…`.
 2. Access checks the sign-in and stamps the request (once that project has an
    Access application; until then the server refuses it for want of a stamp).
 3. The Worker looks `<project>` up in `PROJECT_ORIGINS` and calls `fetch` with
    `cf.resolveOverride` set to that project's origin hostname. The Host header
-   stays `<project>.<one-address>`, so pages stay same-origin.
+   stays `<project>-<first label>.<zone>`, so pages stay same-origin.
 4. The origin hostname's DNS record points at the project's tunnel, which
    delivers the request to the server on loopback.
 
@@ -35,7 +44,7 @@ nothing.
 
 ## The tables
 
-`PROJECT_ORIGINS` maps each project's subdomain label to its origin:
+`PROJECT_ORIGINS` maps each project's label to its origin:
 
 ```json
 {"riverbend": "<riverbend-origin-hostname>", "harborlight": "<mac-origin-hostname>"}
@@ -48,14 +57,17 @@ nothing.
  "<project-origin-hostname>": ["<board-id>"]}
 ```
 
-`ONE_ADDRESS` names the one address. A host that is neither it nor one label
-in front of it gets a 404. With `ONE_ADDRESS` unset there are no subdomains,
-and every request is routed by board, as before subdomains existed.
+`ONE_ADDRESS` names the one address, and the project hostnames follow from
+it: the Worker strips `-<first label>.<rest>` from the hostname and looks up
+what is left. A host that is neither the one address nor `<label>-<first
+label>.<rest>` gets a 404, and so does a deeper name such as
+`a.riverbend-workspaces.<zone>`. With `ONE_ADDRESS` unset there are no project
+hostnames, and every request is routed by board, as before they existed.
 
 `ONE_ADDRESS_ORIGIN` names the origin that owns the one address's Access
 application (`oneAddressOrigin` in `router.local.json`). Set, the one address
 forwards a board only to that origin, and answers a board any other origin
-holds with a 308 to `<its project>.<one address>`, path and query kept. A
+holds with a 308 to `<its project>-<first label>.<zone>`, path and query kept. A
 board on an origin with no project label, or with two, gets a 404. So Bryan's
 stamp for the one address never reaches another machine, which could replay
 it to the Mac. Unset, every board is forwarded, as before each project had an
@@ -65,7 +77,7 @@ application of its own; malformed, the one address routes nothing.
 address's, where each project's mocks and app doors run on
 `<project>.<frame domain>` (`packages/server/src/frame-host.ts`). The Worker
 sends that hostname to the project's origin from `PROJECT_ORIGINS`, exactly as
-it sends the project's subdomain. A frame domain that is the one address, sits
+it sends the project's own hostname. A frame domain that is the one address, sits
 under it, or holds it routes no frame, because the frames would be back on the
 board's site. Unset, no frame hostname is routed.
 
@@ -104,7 +116,14 @@ never travel to a frame hostname, and nor does anything a frame's page set.
 
 On the way back, a `Set-Cookie` that names a Domain is removed from the
 server's response, so one project's server cannot set a cookie that every
-other project's subdomain would receive. No server sets one today.
+other project's hostname would receive. No server sets one today.
+
+The project hostnames and the one address are siblings under the zone. A
+cookie set for the zone (`Domain=<zone>`) is sent to all of them, which is
+why the filter above runs on every request; a cookie set for the one address
+reaches none of the projects. `board-router-subdomains.test.ts` ("a cookie not
+set by a project server for its own host is stripped") sends zone cookies to
+`riverbend-workspaces.<zone>` and checks only the kept names arrive.
 
 ## Deploying
 
@@ -127,34 +146,41 @@ stay out of the public repo):
 }
 ```
 
-Then it finds the zone, checks what the Worker needs, creates the proxied
-wildcard record `*.<one-address>` (AAAA `100::`, the placeholder for a name
-only a Worker answers) when there is none, and runs `wrangler deploy`. It
-prints the version it deployed. A second run changes only the Worker's code
-and tables.
+`oneAddress` must be one level under `zone`, so the project hostnames are
+too. Then it finds the zone, checks what the Worker needs, creates a proxied
+record for each project hostname that has none (AAAA `100::`, the placeholder
+for a name only a Worker answers; one per project, because a DNS wildcard
+covers whole labels only), and runs `wrangler deploy`. It prints the version
+it deployed. A second run changes only the Worker's code and tables, and adds
+a record and a route for a project added to `projects`.
 
 It stops, changing nothing, when an origin hostname has no proxied record,
-when `*.<one-address>` exists unproxied, or when no certificate covers
-`*.<one-address>`.
+when a project hostname's record exists unproxied, when no certificate covers
+a project hostname, or when there is nothing to bind.
 
 **The token.** It reads the `cloudflare-api-token` Keychain entry into its own
 environment and wrangler's, never an argument or a file. The token needs Zone
 Read, DNS Edit, SSL and Certificates Read, Workers Routes Edit on the zone,
 and Workers Scripts Edit on the account.
 
-**Certificate.** Universal SSL covers the zone and one level under it. The
-one address is a name under the zone (the deploy refuses the apex, whose
-`*.<zone>/*` route would take every other name in the zone), so
-`<project>.<one-address>` is two levels down and needs an advanced
-certificate for `*.<one-address>` (Advanced Certificate Manager). That is a
-purchase, so it is Bryan's call; the deploy refuses until one exists.
+**Certificate.** Universal SSL covers the zone and `*.<zone>`, one level
+under it, at no cost. Every project hostname is one level under the zone, so
+Universal SSL covers it and no certificate needs buying. The deploy still
+reads the zone's certificate packs and refuses a hostname none covers, which
+catches Universal SSL switched off. The earlier scheme,
+`<project>.<one-address>`, was two levels down and needed an advanced
+certificate, which is why it was replaced.
 
-**What it binds.** Only `*.<one-address>/*`, so the one address keeps reaching
-the Mac's tunnel exactly as today. `bindBoardPaths: true` adds
-`<one-address>/workspaces/*`, which sends board paths through the Worker too.
-Set it only once `boards` lists every board the one address serves: a board
-missing from the table would get a 404. `workers_dev` is off, so the Worker
-has no address outside these routes.
+**What it binds.** One route per project, `<project>-<first label>.<zone>/*`,
+so the one address keeps reaching the Mac's tunnel exactly as today and no
+other name in the zone reaches the Worker. A pattern like
+`*-workspaces.<zone>/*` would save the per-project routes, but a route's
+wildcard also matches dots, so it would take `a.b-workspaces.<zone>` as well;
+listing each project keeps what the Worker answers equal to the table.
+`bindBoardPaths: true` adds `<one-address>/workspaces/*`, which sends board
+paths through the Worker too. Set it only once `boards` lists every board the
+one address serves: a board missing from the table would get a 404.
+`workers_dev` is off, so the Worker has no address outside these routes.
 
 ## Each project's side
 
@@ -165,25 +191,25 @@ for a Fly project machine (docs/process/project-machine.md, "The tunnel").
   machine's tunnel, with no Access application on it. A visitor who types it
   directly is refused by the server, because the hostname is on none of its
   lists.
-- **The tunnel's ingress names the subdomain.** cloudflared matches the Host
-  header, which is `<project>.<one-address>`, so the tunnel needs an ingress
-  rule for that name to the local server.
-- **The server trusts the subdomain.** `CW_PROXIED_TRUSTED_HOSTS` lists
-  `<project>.<one-address>` (and the one address, while boards are still
-  reached there), with `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` and sharing
+- **The tunnel's ingress names the project hostname.** cloudflared matches
+  the Host header, which is `<project>-<first label>.<zone>`, so the tunnel
+  needs an ingress rule for that name to the local server.
+- **The server trusts the project hostname.** `CW_PROXIED_TRUSTED_HOSTS`
+  lists `<project>-<first label>.<zone>` (and the one address, while boards
+  are still reached there), with `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` and sharing
   configured, as on the Mac today.
-- **An Access application on the subdomain.** One per project, generated by
+- **An Access application on the project hostname.** One per project, generated by
   `infra/access-apps/` and not yet created. The server admits only that
-  application's audience on the subdomain (`CF_ACCESS_AUD`, or the host's
+  application's audience on that hostname (`CF_ACCESS_AUD`, or the host's
   entry in `CF_ACCESS_HOST_AUDS` on a server that also answers the one
-  address). Until it exists, a request to the subdomain carries no stamp and
+  address). Until it exists, a request to the hostname carries no stamp and
   the server refuses it, so an empty or early `projects` table exposes
   nothing.
 
 ## Not covered yet
 
 - The frame domain is routed but not deployed. `router:deploy` binds only
-  `*.<one-address>/*`; the frame domain is its own zone, which needs buying,
+  the project hostnames and the board paths; the frame domain is its own zone, which needs buying,
   a proxied wildcard record, a certificate for `*.<frame domain>` and a
   route for `*.<frame domain>/*`. Each project's tunnel needs an ingress rule
   for `<project>.<frame domain>`, and its server `CW_FRAME_ORIGIN` set to
@@ -201,8 +227,8 @@ for a Fly project machine (docs/process/project-machine.md, "The tunnel").
   the one address otherwise. With `ONE_ADDRESS_ORIGIN` set, only the first
   works.
 
-Tests: `packages/server/test/board-router-subdomains.test.ts` (subdomains,
-cookies, today's board paths, `ONE_ADDRESS_ORIGIN`),
+Tests: `packages/server/test/board-router-subdomains.test.ts` (project
+hostnames, cookies, today's board paths, `ONE_ADDRESS_ORIGIN`),
 `board-router-frames.test.ts` (the frame domain),
 `access-per-project.test.ts` (three Access applications over two servers), `board-router-worker.test.ts` (board routing),
 `board-router-two-servers.test.ts` (two real servers) and

@@ -153,6 +153,7 @@ export class TaskDecisionStore {
       ...(opts.optionId !== undefined ? { optionId: opts.optionId } : {}),
       // A legacy decision row IS its question: the title asks it.
       headline: task.title,
+      title: task.title,
       ...(replaces ? { replaces } : {}),
       actor,
       links: task.links,
@@ -259,6 +260,7 @@ export class TaskDecisionStore {
       workspaceId: task.workspaceId,
       taskId: task.id,
       question,
+      ...(opts.threadId !== undefined ? { threadId: opts.threadId } : {}),
       actor,
       links: task.links,
       ts,

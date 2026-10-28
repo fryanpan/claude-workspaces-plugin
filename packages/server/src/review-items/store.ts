@@ -188,8 +188,7 @@ export class ReviewItemStore {
       name: opts.actor.name,
       kind: classifyActor(opts.actor),
     };
-    // Read before the superseded answer moves aside: the words already
-    // recorded are user content, never written over.
+    // Read before the superseded answer moves aside: recorded words are kept.
     const replaces = replacedItemAnswer(item);
     const record = {
       text,
@@ -218,6 +217,7 @@ export class ReviewItemStore {
       ...(opts.answeredWith !== undefined ? { optionId: opts.answeredWith } : {}),
       reviewItemId,
       headline: item.review.headline,
+      title: task.title,
       ...(opts.via ? { via: opts.via } : {}),
       ...(openParts.length > 0 ? { openParts } : {}),
       ...(replaces && openParts.length === 0 ? { replaces } : {}),
@@ -302,6 +302,7 @@ export class ReviewItemStore {
       taskId: task.id,
       question,
       reviewItemId,
+      ...(opts.threadId !== undefined ? { threadId: opts.threadId } : {}),
       actor,
       links: task.links,
       ts,

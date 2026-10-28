@@ -8,16 +8,18 @@
  * README, "Each project's side"):
  *
  *   the tunnel `cw-<project>`, configured from Cloudflare (not from a file on
- *     the machine), whose one ingress rule sends `<project>.<one address>` to
- *     the server on `http://localhost:8787`, and everything else to a 404
+ *     the machine), whose one ingress rule sends the project's own hostname
+ *     `<project>-<first label of the one address>.<zone>` to the server on
+ *     `http://localhost:8787`, and everything else to a 404
  *   the origin hostname `<project>-origin.<zone>`: a proxied CNAME to the
  *     tunnel, with no Access application on it, which the router Worker
- *     resolves the project's subdomain to
+ *     resolves the project's hostname to
  *   the tunnel's token, which the machine holds as CLOUDFLARE_TUNNEL_TOKEN
  *
  * A run over a project whose tunnel is complete plans nothing. A run that
  * finds something it did not make in the way stops before changing anything.
  */
+import { projectHost } from '../board-router-worker/worker.js';
 import type { ProjectConfig } from './deploy-plan.ts';
 
 /** Where the server listens on the machine (entrypoint.sh). */
@@ -30,7 +32,7 @@ export interface TunnelNames {
   tunnel: string;
   /** The proxied CNAME to the tunnel; the router's `PROJECT_ORIGINS` value. */
   origin: string;
-  /** `<project>.<one address>`: the Host every routed request carries. */
+  /** `<project>-<first label>.<zone>`: the Host every routed request carries. */
   publicHost: string;
 }
 
@@ -42,7 +44,7 @@ export function tunnelNames(
     zone: router.zone,
     tunnel: cfg.app,
     origin: `${cfg.project}-origin.${router.zone}`,
-    publicHost: `${cfg.project}.${router.oneAddress}`,
+    publicHost: projectHost(cfg.project, router.oneAddress),
   };
 }
 
@@ -52,7 +54,7 @@ export interface IngressRule {
   service: string;
 }
 
-/** The tunnel's whole ingress: the one subdomain to the server, then a 404. */
+/** The tunnel's whole ingress: the project's hostname to the server, then a 404. */
 export function desiredIngress(names: TunnelNames): IngressRule[] {
   return [{ hostname: names.publicHost, service: TUNNEL_SERVICE }, { service: 'http_status:404' }];
 }

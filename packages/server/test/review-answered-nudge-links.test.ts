@@ -1,18 +1,14 @@
 /**
- * The `workspace.review_answered` wake, rendered from the frames the SERVER
- * really sends rather than from hand-written fixtures.
+ * A ticket answer reaches the lead as ONE frame, `decision.answered`, and that
+ * frame sends its reader to links only when the row has them.
  *
- * Same lesson as `decision-answered-line.test.ts` next door, one hop further
- * out. That suite could read its rows back from `events.jsonl`; this one
- * cannot, because a nudge is a DELIVERY rather than a change and deliberately
- * never reaches the audit log (see ready-nudge.ts). So the read-back surface
- * here is the wire itself: an attached lead holding its SSE stream, and the
- * addressed frame that arrives on it.
- *
- * That distinction is the whole reason this test exists. The clause under
- * test is about a field — `links` — that the frame did not carry at all until
- * now, and a fixture asserting `links: []` would have proved the renderer
- * guards a key nobody sends. Only the real frame can tell those apart.
+ * This file used to read the lead's `workspace.review_answered` nudge. That
+ * nudge said the same thing as the `decision.answered` already on the lead's
+ * stream and cost a second turn per answer (Bryan, 2026-10-27), so the ticket
+ * path no longer sends it; `one-wake-per-answer.test.ts` counts the wakes.
+ * What this file kept is the reason it existed: the clause under test is
+ * about a field — `links` — and only the real frame can tell an empty list
+ * from a key nobody sends.
  *
  * All fixtures are synthetic. The repo is public.
  */
@@ -20,8 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type NudgePayload, reviewAnsweredLine } from '../../mcp/src/nudge-line.ts';
-import { REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
+import { type DecisionAnsweredPayload, decisionAnsweredLine } from '../../mcp/src/decision-line.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type Frame, listenFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
@@ -37,7 +32,7 @@ const settle = (ms = 80) => new Promise((r) => setTimeout(r, ms));
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
 
-describe('the review_answered wake only sends its reader to links that exist', () => {
+describe('the decision.answered wake only sends its reader to links that exist', () => {
   let handle: ServerHandle;
   let dataDir: string;
   let base: string;
@@ -93,7 +88,7 @@ describe('the review_answered wake only sends its reader to links that exist', (
   /** File a decision row carrying `links`, have a person answer it, and hand
    *  back the frame the lead's stream actually received. */
   async function answeredFrame(links: unknown[]): Promise<Frame> {
-    const before = lead.frames.filter((f) => f.event === REVIEW_ANSWERED_EVENT).length;
+    const before = lead.frames.filter((f) => f.event === 'decision.answered').length;
     const { task } = await jj<{ task: { id: string } }>(
       await post(`/workspaces/${workspaceId}/tasks`, {
         title: 'Rebuild the index now or after the freeze?',
@@ -115,13 +110,13 @@ describe('the review_answered wake only sends its reader to links that exist', (
     // macOS the server held a frame written from inside a request ~100ms
     // (see sse-writer.ts) — longer than the 80ms this used to wait.
     await waitFor(
-      () => lead.frames.filter((f) => f.event === REVIEW_ANSWERED_EVENT).length > before,
-      { describe: 'the review_answered frame' },
+      () => lead.frames.filter((f) => f.event === 'decision.answered').length > before,
+      { describe: 'the decision.answered frame' },
     ).catch(() => undefined);
-    const got = lead.frames.filter((f) => f.event === REVIEW_ANSWERED_EVENT);
+    const got = lead.frames.filter((f) => f.event === 'decision.answered');
     // A wake that never arrived would render nothing, which makes every
     // assertion below vacuous.
-    expect(got.length, 'no review_answered frame reached the lead').toBe(before + 1);
+    expect(got.length, 'no decision.answered frame reached the lead').toBe(before + 1);
     const frame = got[before] as Frame;
     expect(frame.data?.taskId).toBe(task.id);
     return frame;
@@ -131,15 +126,16 @@ describe('the review_answered wake only sends its reader to links that exist', (
     const frame = await answeredFrame([{ kind: 'doc', docId: 'search-plan' }]);
     expect(frame.data?.links).toEqual([{ kind: 'doc', docId: 'search-plan' }]);
 
-    const line = reviewAnsweredLine(frame.data as NudgePayload);
+    const line = decisionAnsweredLine(frame.data as DecisionAnsweredPayload);
     // Positive control: the line renders at all, naming the row it is about.
-    expect(line).toContain('[workspace.review_answered]');
+    expect(line).toContain('[decision.answered]');
     expect(line).toContain('Rebuild the index now or after the freeze?');
-    expect(line).toContain('read it and act on it now');
+    expect(line).toContain('"After the freeze."');
     expect(line).toContain(CLAUSE);
     // The frame says what was asked, not only which row: on a decision row
     // the question is the title, and the field carries it on its own.
     expect(frame.data?.headline).toBe('Rebuild the index now or after the freeze?');
+    expect(frame.data?.title).toBe('Rebuild the index now or after the freeze?');
   });
 
   it('carries an empty list and says nothing about links when the row has none', async () => {
@@ -148,11 +144,11 @@ describe('the review_answered wake only sends its reader to links that exist', (
     // case rather than a server that simply never sent the key.
     expect(frame.data?.links).toEqual([]);
 
-    const line = reviewAnsweredLine(frame.data as NudgePayload);
+    const line = decisionAnsweredLine(frame.data as DecisionAnsweredPayload);
     // Same positive control, so "no clause" cannot be "no line".
-    expect(line).toContain('[workspace.review_answered]');
+    expect(line).toContain('[decision.answered]');
     expect(line).toContain('Rebuild the index now or after the freeze?');
-    expect(line).toContain('read it and act on it now');
+    expect(line).toContain('"After the freeze."');
     expect(line).not.toContain(CLAUSE);
     // …and nothing is left dangling where the clause used to sit.
     expect(line.trimEnd()).toBe(line);
