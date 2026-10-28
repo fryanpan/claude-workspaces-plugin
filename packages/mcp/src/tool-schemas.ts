@@ -2887,6 +2887,37 @@ export const TOOL_LIST: ListToolsResult = {
       },
     },
     {
+      name: 'set_github_subscriptions',
+      description:
+        "Set which GitHub events this board hears. Replaces the board's whole list; pass [] to hear none. Each event arrives as a workspace.github_event channel line on every agent attached to the board, pushed by the Mac's GitHub relay, so a board on another machine needs no GitHub token. Works only from the machine the board's server runs on. The reply is the stored list.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string' },
+          subscriptions: {
+            type: 'array',
+            description:
+              'At most 50 entries of {repo, kinds}. repo is owner/name spelled as GitHub spells it. kinds is a non-empty list from: ci, review, mention, merge, issue, deploy.',
+            items: {
+              type: 'object',
+              properties: {
+                repo: { type: 'string' },
+                kinds: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: ['ci', 'review', 'mention', 'merge', 'issue', 'deploy'],
+                  },
+                },
+              },
+              required: ['repo', 'kinds'],
+            },
+          },
+        },
+        required: ['workspaceId', 'subscriptions'],
+      },
+    },
+    {
       name: 'set_board_embeds',
       description:
         'Set which doc lines show a live app frame on this board. A doc paragraph whose whole text is `::<name>{block="<block>"}` shows the mapped page beneath it, sandboxed and read-only; the line itself stays plain text in the doc. An entry loads either from an app on this board or from an https origin on the server embed allowlist (an array the owner writes to embed-origins.json in the server data dir; none by default); use an origin when the page needs its own origin, e.g. for a referrer-restricted map key. Replaces the whole mapping; pass {} to clear it. Only `block` (lowercase letters, digits, hyphens) reaches the URL.',
