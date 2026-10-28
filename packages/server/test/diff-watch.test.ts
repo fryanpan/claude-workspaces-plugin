@@ -52,10 +52,20 @@ describe('diff watch, through the server', () => {
   };
   const changes = (page: { names: () => string[] }) =>
     page.names().filter((n) => n === 'attachments.changed').length;
-  /** Save the way an editor does: a temp file renamed over the old one. */
+  /**
+   * Save the way an editor does: a temp file renamed over the old one.
+   *
+   * The temp file sits BESIDE the repo, not in it. A working-tree diff lists
+   * untracked files, and a pass's `git ls-files --others` runs in a child
+   * process alongside this one, so a temp inside the repo could be listed in
+   * the instant before its rename — one more listing change, and one more
+   * frame than the save sent. CI on 22 Oct read 2 where the case expects 1:
+   * the first-edit `waitFor` below re-saves every poll while a pass runs.
+   */
   const save = (rel: string, text: string) => {
-    writeFileSync(join(repo, `${rel}.tmp`), text);
-    renameSync(join(repo, `${rel}.tmp`), join(repo, rel));
+    const tmp = `${repo}-${rel.replaceAll('/', '_')}.tmp`;
+    writeFileSync(tmp, text);
+    renameSync(tmp, join(repo, rel));
   };
   /** The diff file list's row for a path, as the sidebar reads it. */
   const row = (relPath: string) =>
