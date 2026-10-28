@@ -152,7 +152,7 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
         return status;
       }
       const { 'content-encoding': encoding, ...plain } = headers;
-      if (encoding === 'gzip') body = gunzipSync(body);
+      if (encoding === 'gzip') body = gunzipSync(body, { maxOutputLength: maxPush });
       const rewritten = rewrite?.(body) ?? null;
       if (!rewritten) {
         answer(res, 502, 'the upstream did not answer with a ref advertisement');
@@ -213,7 +213,8 @@ export function createGitProxy(opts: GitProxyOptions): http.Server {
       log(`413 ${who}: over ${maxPush} bytes`);
       return answer(res, 413, `a push over ${maxPush} bytes is refused`);
     }
-    if (req.headers['content-encoding'] === 'gzip') body = gunzipSync(body);
+    if (req.headers['content-encoding'] === 'gzip')
+      body = gunzipSync(body, { maxOutputLength: maxPush });
     const why = await refusePush(r.repo, body);
     if (why) {
       log(`403 ${who}: ${why}`);
