@@ -10,6 +10,9 @@ build/
 .claude/discord/
 .claude/scheduled_tasks.lock
 .claude/claude-workspaces.local.json
+# The GitHub relay's board list (github-relay/relay-config.ts). It names
+# Keychain entries, not values, but it is this machine's, not the repo's.
+.claude/github-relay.local.json
 .envrc
 .worktrees/
 __pycache__/

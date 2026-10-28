@@ -107,6 +107,14 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['home-feed', '/workspaces/:ws/home-feed', 'GET'],
     ['home-feed', '/workspaces/:ws/home-feed/events:stream', 'GET'],
   ]),
+  // GitHub events for a board that holds no GitHub token: the key and the
+  // list are set on this machine; the Mac's relay reads the list and pushes.
+  ...family('routes/github-hub.ts', [
+    ['loopback-only', '/api/github-push-keys', 'POST'],
+    ['loopback-only', '/workspaces/:ws/github-subscriptions', 'GET PUT'],
+    ['github-push', '/workspaces/:ws/github/subscriptions', 'GET'],
+    ['github-push', '/workspaces/:ws/github/events', 'POST'],
+  ]),
   // ElevenLabs' agent asking for setup 4's reply: the callback host's third
   // address, armed only while setup 4 is configured; its own bearer secret.
   ...family('routes/voice-agent-llm.ts', [

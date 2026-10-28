@@ -52,6 +52,7 @@ const chain = (admit: (req: Request) => Admission) => {
     j,
     requestAddress: () => '127.0.0.1',
     homeFeedCtx: { j },
+    githubHubCtx: { j },
     admit: async (req: Request) => {
       seen.admitted.push(new URL(req.url).pathname);
       return admit(req);

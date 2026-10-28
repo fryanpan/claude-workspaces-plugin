@@ -196,6 +196,10 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   // A board's review items for Home on another machine (routes/home-feed.ts).
   ['workspaces', ':id', 'home-feed'],
   ['workspaces', ':id', 'home-feed', 'events:stream'],
+  // A board's GitHub subscriptions and the relay's push (routes/github-hub.ts).
+  ['workspaces', ':id', 'github-subscriptions'],
+  ['workspaces', ':id', 'github', 'subscriptions'],
+  ['workspaces', ':id', 'github', 'events'],
   ['workspaces', ':id', 'tasks'],
   ['workspaces', ':id', 'tasks', 'batch'],
   ['workspaces', ':id', 'activity'],
@@ -260,6 +264,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'board-tokens'],
   ['api', 'board-tokens', 'refresh'],
   ['api', 'board-tokens', ':id', 'revoke'],
+  ['api', 'github-push-keys'],
   ['api', 'attachments'],
   ['api', 'calendar', 'events'],
   ['api', 'calendar', 'google', 'callback'],

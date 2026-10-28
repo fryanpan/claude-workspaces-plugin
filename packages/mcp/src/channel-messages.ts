@@ -24,6 +24,7 @@ import {
   openPartsClause,
 } from './decision-line.ts';
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
+import { githubEventLine } from './github-event-line.ts';
 import {
   type HeldRowPayload,
   type StalledRowPayload,
@@ -422,6 +423,10 @@ async function emitBoardChannelMessage(
     // addressed to whoever can start it again.
     case 'workspace.app_unreachable':
       body = appUnreachableLine(rawPayload as Parameters<typeof appUnreachableLine>[0]);
+      break;
+    // A GitHub event the board subscribed to, pushed by the Mac's relay.
+    case 'workspace.github_event':
+      body = githubEventLine(rawPayload as Parameters<typeof githubEventLine>[0]);
       break;
     // A builder's closing report. Counts and ids only: the reader's next act
     // is to open the record, and the frame's job is to say that there is one
