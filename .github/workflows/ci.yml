@@ -110,6 +110,11 @@ jobs:
       # shipped as `import type`, which nothing else in CI can see.
       - name: Import direction holds
         run: bun run check:imports
+      # Every request the server makes goes through outbound-fetch.ts, which
+      # refuses loopback, private, link-local and Fly-internal addresses. A
+      # bare fetch elsewhere in packages/server/src is a request that skipped it.
+      - name: Every server request goes through the outbound guard
+        run: bun run check:outbound-fetch
       # No runtime import cycle in packages/core/src or packages/workspaces-app/src.
       # A cycle is not an error in ESM — it just makes correctness depend on
       # evaluation order, and the bundler orders differently from vitest and
@@ -254,7 +259,11 @@ jobs:
         with:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
+      # The keeper's store is read as `nobody` here, which takes a sudo that
+      # only this runner may use without a password (keeper-store-other-user.test.ts).
       - name: Test (server)
+        env:
+          CW_KEEPER_SUDO_TESTS: '1'
         run: bun run test:server --jobs 8 --coverage --coverage-dir .coverage/server
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}

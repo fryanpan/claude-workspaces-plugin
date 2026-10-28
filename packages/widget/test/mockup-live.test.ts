@@ -350,6 +350,23 @@ describe('the live loop', () => {
     expect(document.querySelectorAll('[data-cw-mock-versions] button').length).toBe(2);
   });
 
+  it("keeps the widget's pin stylesheet through a round, and takes round one's", async () => {
+    // The widget puts its pin sheet in the head before this script starts.
+    const pins = document.createElement('style');
+    pins.id = 'cfw-light-styles';
+    pins.setAttribute('data-feedback-widget', '');
+    document.head.appendChild(pins);
+    const { startMockupLive } = await importLive();
+    startMockupLive({ docId: 'd-1', workspaceId: 'w-1', version: 1, versions: [1] });
+    listeners['mockup.updated']?.({ data: JSON.stringify({ version: 2 }) });
+    await settle();
+    // CONTROL: the round landed and its stylesheet replaced round one's.
+    expect(document.querySelector('#hero')?.textContent).toBe('Round two');
+    expect(document.getElementById('r1')).toBeNull();
+    expect(document.getElementById('r2')).not.toBeNull();
+    expect(pins.isConnected).toBe(true);
+  });
+
   it('asks for the pinned round by number when the reader steps back', async () => {
     const { startMockupLive } = await importLive();
     startMockupLive({ docId: 'd-1', workspaceId: 'w-1', version: 3, versions: [1, 2, 3] });

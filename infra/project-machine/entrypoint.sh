@@ -4,23 +4,61 @@
 # backup loop. If any of them exits, everything stops and the machine exits,
 # and Fly's restart policy starts it again.
 #
-# Runs as root only long enough to give the volume to the `cw` user (a fresh
-# Fly volume mounts owned by root), then re-executes itself as `cw`.
+# This shell stays root and supervises; each child runs as its own user and
+# gets only the secrets it uses:
+#
+#   cw        the board server. Never holds the tunnel token or the bucket
+#             credential.
+#   cwtunnel  cloudflared, with the tunnel token and nothing else.
+#   cwbackup  the backup upload, with the bucket credential and nothing else
+#             (backup-once.sh).
+#
+# A user's processes can read each other's environment (/proc/<pid>/environ),
+# so a secret kept from the server has to live under another uid, not merely
+# in another process. Root's environment, which holds every secret, is
+# readable by no other user. Every secret is passed in the environment, never
+# as an argument, because any user can read any process's arguments.
 set -euo pipefail
 
-DATA_ROOT=/data
+# The volume. Overridable only so a test can run this off a machine.
+DATA_ROOT="${CW_MACHINE_DATA_ROOT:-/data}"
 export CW_DATA_DIR="${CW_DATA_DIR:-$DATA_ROOT/cw}"
 PORT=8787
 APP=/app
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
-if [ "$(id -u)" = 0 ]; then
-  mkdir -p "$CW_DATA_DIR"
-  chown cw:cw "$DATA_ROOT" "$CW_DATA_DIR"
-  exec setpriv --reuid=cw --regid=cw --init-groups -- "$0" "$@"
+TRANSCRIPTS="${BACKUP_TRANSCRIPTS_DIR:-$DATA_ROOT/claude-projects}"
+
+if [ "$(id -u)" != 0 ]; then
+  echo "[machine] entrypoint.sh must start as root, to run each child as its own user" >&2
+  exit 2
 fi
 
-# setpriv keeps root's environment; give the server cw's own home.
-export HOME=/home/cw USER=cw
+# Root never changes the owner of a path cw could have swapped for a link.
+# The volume's root is root's and only root writes it, so cw cannot rename
+# or replace the names in it while root works; the directories cw is given
+# are checked for a link before root touches them. Nothing runs as cw yet:
+# a machine that stops stops every process, so none survives into this boot.
+# A volume from before this rule had /data owned by cw; this takes it back.
+chown root:root "$DATA_ROOT"
+chmod 0755 "$DATA_ROOT"
+for d in "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude; do
+  if [ -L "$d" ]; then
+    echo "[machine] $d is a symlink; refusing to start" >&2
+    exit 2
+  fi
+done
+mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
+# Claude Code writes session transcripts to ~/.claude/projects. The home
+# directory is the image's and does not survive a restart, so that one
+# folder is a link onto the volume, where backup.ts snapshots it. The
+# rest of ~/.claude (credentials among it) stays off the volume and out
+# of every backup.
+ln -sfn "$TRANSCRIPTS" /home/cw/.claude/projects
+chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
+
+# shellcheck source=run-as.sh
+. "$HERE/run-as.sh"
 
 log() { echo "[machine] $(date -u +%FT%TZ) $*"; }
 
@@ -32,33 +70,44 @@ if [ -e "$DATA_ROOT/maintenance" ]; then
   exec sleep infinity
 fi
 
-: "${CLOUDFLARE_TUNNEL_TOKEN:?set it with fly secrets set}"
+: "${CW_TUNNEL_MODE:=named}"
+if [ "$CW_TUNNEL_MODE" != quick ]; then
+  : "${CLOUDFLARE_TUNNEL_TOKEN:?set it with fly secrets set}"
+fi
 if [ -z "${BACKUP_RECIPIENT:-}" ] || [ -z "${BACKUP_S3_BUCKET:-}" ]; then
   log "BACKUP_RECIPIENT or BACKUP_S3_BUCKET unset: NO BACKUPS WILL RUN"
 fi
 
-# Each child gets only the secrets it uses. The server never sees the tunnel
-# token or the bucket credential.
-SECRETS=(CLOUDFLARE_TUNNEL_TOKEN BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY)
-without_secrets() {
-  local unset=()
-  for s in "${SECRETS[@]}"; do unset+=(-u "$s"); done
-  env "${unset[@]}" "$@"
-}
-
 pids=()
 
-without_secrets bun run "$APP/packages/server/src/bin.ts" \
-  --port "$PORT" --host 127.0.0.1 --no-port-walk \
-  --data-dir "$CW_DATA_DIR" \
-  --widget-dist "$APP/packages/widget/dist" \
-  --workspaces-app-dist "$APP/packages/workspaces-app/dist" &
+(
+  drop_secrets
+  run_as cw bun run "$APP/packages/server/src/bin.ts" \
+    --port "$PORT" --host 127.0.0.1 --no-port-walk \
+    --data-dir "$CW_DATA_DIR" \
+    --widget-dist "$APP/packages/widget/dist" \
+    --workspaces-app-dist "$APP/packages/workspaces-app/dist"
+) &
 pids+=($!)
 
 # cloudflared reads TUNNEL_TOKEN from its environment; ingress (the one
 # address to http://localhost:8787) is set on the tunnel in Cloudflare.
-env -i PATH="$PATH" HOME="$HOME" TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN" \
-  cloudflared tunnel --no-autoupdate run &
+# A quick tunnel (CW_TUNNEL_MODE=quick) needs no Cloudflare account: it gets
+# a random trycloudflare.com address, printed in the machine's logs, and is
+# for a test machine only. Its visitors carry cf-ray and no Access identity,
+# so the server treats them as the internet and lets them reach nothing.
+if [ "$CW_TUNNEL_MODE" = quick ]; then
+  (
+    only_env PATH
+    run_as cwtunnel cloudflared tunnel --no-autoupdate --url "http://localhost:$PORT"
+  ) &
+else
+  (
+    export TUNNEL_TOKEN="$CLOUDFLARE_TUNNEL_TOKEN"
+    only_env PATH TUNNEL_TOKEN
+    run_as cwtunnel cloudflared tunnel --no-autoupdate run
+  ) &
+fi
 pids+=($!)
 
 # The health check. Fly's own checks reach a machine over its private
@@ -91,7 +140,7 @@ if [ -n "${BACKUP_RECIPIENT:-}" ] && [ -n "${BACKUP_S3_BUCKET:-}" ]; then
     interval=$((${BACKUP_INTERVAL_HOURS:-6} * 3600))
     sleep 3600
     while :; do
-      env -u CLOUDFLARE_TUNNEL_TOKEN bun run "$APP/infra/project-machine/backup.ts" ||
+      bash "$HERE/backup-once.sh" ||
         log "backup failed; next attempt in ${BACKUP_INTERVAL_HOURS:-6}h"
       sleep "$interval"
     done

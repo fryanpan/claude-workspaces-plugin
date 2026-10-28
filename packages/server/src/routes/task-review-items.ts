@@ -27,7 +27,11 @@ import {
 } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
-import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
+import {
+  type TaskRouteRequest,
+  type TaskRoutesContext,
+  taskUrlFor,
+} from './task-routes-context.ts';
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
 export async function handleTaskReviewItems(
@@ -119,9 +123,11 @@ export async function handleTaskReviewItems(
     // with. The divergent `shapeGaps` vocabulary stays exactly where it
     // is for the callers that already read it — this is a new door, and
     // a new door has no old callers to keep.
+    const url = taskUrlFor(ctx, workspaceId, taskId, Boolean(visitor));
     return j(200, {
       task: res.task,
       item: gate.item,
+      ...(url !== undefined ? { url } : {}),
       ...(res.advice !== undefined ? { reviewAdvice: res.advice } : {}),
       ...heldFields(gate),
     });

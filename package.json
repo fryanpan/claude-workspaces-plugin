@@ -6,8 +6,13 @@
   "scripts": {
     "postinstall": "bash scripts/check-hooks.sh || true",
     "bootstrap": "bun run scripts/bootstrap.ts",
-    "dev": "bun run scripts/serve.ts",
+    "dev": "bun run scripts/serve.ts --data-dir data",
     "dev:bare": "bun run packages/server/src/bin.ts",
+    "machine:deploy": "bun run infra/project-machine/deploy.ts",
+    "machine:restore": "bun run infra/project-machine/restore-machine.ts",
+    "machine:drill": "bun run infra/project-machine/drill.ts",
+    "router:deploy": "bun run infra/board-router-worker/deploy.ts",
+    "access:plan": "bun run infra/access-apps/plan.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "routes:table": "bun run scripts/routes-table.ts",
     "verify": "bun run scripts/verify.ts",
@@ -32,6 +37,7 @@
     "check:hooks": "bash scripts/check-hooks.sh",
     "check:architecture": "bun run scripts/architecture-freshness.ts",
     "check:imports": "bun run scripts/import-direction.ts",
+    "check:outbound-fetch": "bun run scripts/outbound-fetch-audit.ts",
     "check:import-cycles": "bun run scripts/import-cycles.ts",
     "check:client-boot": "bun run scripts/client-boot-check.ts",
     "check:meeting-smoke": "bun run scripts/meeting-smoke-check.ts",
@@ -67,7 +73,7 @@
     "@types/bun": "^1.1.14",
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^4.1.11",
-    "happy-dom": "^20.8.9",
+    "happy-dom": "^20.11.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
   }

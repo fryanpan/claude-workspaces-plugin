@@ -40,6 +40,7 @@ import {
   parseEffortEstimateResponse,
 } from '@claude-workspaces/core/effort-estimate-prompt';
 import { readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, resolveKeySlotFrom } from './summarize.ts';
 
@@ -106,7 +107,7 @@ export function haikuEffortEstimator(opts: HaikuEffortEstimatorOpts = {}): Effor
   const resolved = resolveKeySlotFrom('effort-estimate', opts.apiKey, readKeychainPassword);
   if (!resolved) return null;
   const key = resolved.key;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const timeoutMs = opts.timeoutMs ?? EFFORT_ESTIMATE_TIMEOUT_MS;
   return async (input) => {
     const { system, user } = buildEffortEstimatePrompt(input.prompt, input.ticket);

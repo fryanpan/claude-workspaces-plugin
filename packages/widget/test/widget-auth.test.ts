@@ -331,7 +331,10 @@ describe('a page on the tailnet widget door', () => {
     expect(socketProtocols).toEqual([boardToken('w-1')]);
   });
 
-  it('never offers a session token on the socket, so a localhost embed opens as it did', async () => {
+  // The server ignores the reader's cookie on a socket from another origin, so
+  // the session token is what the localhost embed's socket proves itself with.
+  // A dead one is retried without (core/test/ws-client-reconnect.test.ts).
+  it('offers its session token on the socket', async () => {
     localStorage.setItem('cfw:authToken', 'wt1.stored-token');
     localStorage.setItem('cfw:authUser', JSON.stringify(user));
     const mod = await importWidget();
@@ -340,7 +343,7 @@ describe('a page on the tailnet widget door', () => {
       el.shadowRoot!.querySelector('.auth-signout'),
       'CONTROL: the token is held',
     ).toBeTruthy();
-    expect(socketProtocols).toEqual([undefined]);
+    expect(socketProtocols).toEqual(['wt1.stored-token']);
   });
 
   it("does not hold another board's token that a page on this origin stored", async () => {

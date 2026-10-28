@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { emailIdentityId } from '@claude-workspaces/core';
 import {
+  HOST_SESSION_COOKIE,
+  PLAIN_SESSION_OVER_HTTPS_UNTIL,
   SESSION_COOKIE,
   SESSION_COOKIE_MAX_AGE_SECONDS,
   SESSION_REFRESH_AFTER_MS,
-  clearedSessionCookieHeader,
+  clearedSessionCookieHeaders,
   mintSession,
+  readSessionCookie,
   refreshedSession,
   sessionCookieHeader,
   sessionKey,
@@ -153,7 +156,69 @@ describe('the Set-Cookie header', () => {
     expect(header).toContain('HttpOnly');
     expect(header).toContain('Path=/');
     expect(header).toContain('SameSite=Lax');
-    expect(header.startsWith(`${SESSION_COOKIE}=`)).toBe(true);
+    expect(header.startsWith(`${HOST_SESSION_COOKIE}=`)).toBe(true);
+  });
+
+  it('is named __Host- over https, and keeps the plain name over http', () => {
+    const claims = mintSession(ID, NOW);
+    const https = sessionCookieHeader(claims, KEY, { secure: true, now: NOW });
+    const http = sessionCookieHeader(claims, KEY, { secure: false, now: NOW });
+    // The browser keeps a __Host- cookie only with Secure, Path=/ and no Domain.
+    expect(https.startsWith('__Host-cw_session=')).toBe(true);
+    expect(https).toContain('; Secure');
+    expect(https).toContain('Path=/');
+    expect(https).not.toContain('Domain');
+    expect(http.startsWith(`${SESSION_COOKIE}=`)).toBe(true);
+  });
+
+  it('reads the __Host- cookie first and the plain one for a reader signed in before it', () => {
+    const before = { secure: true, now: PLAIN_SESSION_OVER_HTTPS_UNTIL - 1 };
+    expect(readSessionCookie(`${SESSION_COOKIE}=old; ${HOST_SESSION_COOKIE}=new`, before)).toEqual({
+      value: 'new',
+      name: HOST_SESSION_COOKIE,
+    });
+    expect(readSessionCookie(`other=1; ${SESSION_COOKIE}=old`, before)).toEqual({
+      value: 'old',
+      name: SESSION_COOKIE,
+    });
+    expect(readSessionCookie('other=1', before)).toBeUndefined();
+  });
+
+  it('stops reading a plain cw_session over https on the named date', () => {
+    const after = { secure: true, now: PLAIN_SESSION_OVER_HTTPS_UNTIL };
+    // A plain cookie a sibling subdomain could have planted signs nobody in.
+    expect(readSessionCookie(`other=1; ${SESSION_COOKIE}=planted`, after)).toBeUndefined();
+    // POSITIVE CONTROL: the __Host- cookie still reads beside it, and over
+    // http the plain name is the only one there is.
+    expect(
+      readSessionCookie(`${SESSION_COOKIE}=planted; ${HOST_SESSION_COOKIE}=mine`, after),
+    ).toEqual({
+      value: 'mine',
+      name: HOST_SESSION_COOKIE,
+    });
+    expect(
+      readSessionCookie(`${SESSION_COOKIE}=mine`, {
+        secure: false,
+        now: PLAIN_SESSION_OVER_HTTPS_UNTIL,
+      }),
+    ).toEqual({ value: 'mine', name: SESSION_COOKIE });
+  });
+
+  it('names a cutoff no later than a month after the __Host- name shipped', () => {
+    // PR 1353 shipped the name on 21 October 2026. A later date is a decision
+    // to leave login CSRF open longer, and has to change this line to make it.
+    expect(PLAIN_SESSION_OVER_HTTPS_UNTIL).toBeLessThanOrEqual(Date.parse('2026-11-21T00:00:00Z'));
+  });
+
+  it('fails the build once the date has passed, until the fallback is deleted', () => {
+    // A date gate, not a timing assertion. After the cutoff the fallback is
+    // dead code, and so is the migration case in auth-routes.test.ts ("moves
+    // a reader signed in before it across"). Delete both, and this case.
+    if (Date.now() >= PLAIN_SESSION_OVER_HTTPS_UNTIL) {
+      throw new Error(
+        'PLAIN_SESSION_OVER_HTTPS_UNTIL has passed: delete the plain cw_session fallback in readSessionCookie (auth/session.ts) and its tests',
+      );
+    }
   });
 
   it('asks the browser to keep a revocable session as long as browsers allow', () => {
@@ -169,9 +234,13 @@ describe('the Set-Cookie header', () => {
     expect(header).toContain('Max-Age=50');
   });
 
-  it('clears with an empty value and Max-Age=0', () => {
-    const header = clearedSessionCookieHeader({ secure: false });
-    expect(header).toContain(`${SESSION_COOKIE}=;`);
-    expect(header).toContain('Max-Age=0');
+  it('clears with an empty value and Max-Age=0, under both names over https', () => {
+    const [http, ...rest] = clearedSessionCookieHeaders({ secure: false });
+    expect(rest).toEqual([]);
+    expect(http).toContain(`${SESSION_COOKIE}=;`);
+    expect(http).toContain('Max-Age=0');
+    const https = clearedSessionCookieHeaders({ secure: true });
+    expect(https.map((h) => h.split('=')[0])).toEqual([HOST_SESSION_COOKIE, SESSION_COOKIE]);
+    for (const h of https) expect(h).toContain('Max-Age=0');
   });
 });

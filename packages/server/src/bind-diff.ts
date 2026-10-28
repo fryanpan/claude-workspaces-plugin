@@ -9,7 +9,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join, relative, resolve as resolvePath, sep } from 'node:path';
-import { type DocMeta, type DocType, attachmentIdOf } from '@claude-workspaces/core';
+import { type DocMeta, type DocType, attachmentIdOf, mediaTypeOf } from '@claude-workspaces/core';
 import {
   type BindHost,
   DEFAULT_MAX_FILES,
@@ -31,7 +31,7 @@ import {
 } from './diff-groups.ts';
 import { isReservedDocId } from './doc-ids.ts';
 import { canonicalRepoRoot, findWorktreeRoot } from './doc-origin-repo.ts';
-import { scanFolder } from './fs-scan.ts';
+import { MAX_SKIPPED, browseEntry, landsOnListed, scanFolderReport } from './fs-scan.ts';
 import {
   type DiffFileEntry,
   diffFilesAsync,
@@ -61,9 +61,15 @@ export interface BindDiffOpts {
    *  intro. */
   groups?: Array<{ title: string; paths: string[]; details?: string }>;
   maxFiles?: number;
+  /** Browse mode only: files to list although the repository ignores them,
+   *  by name (`admitIncluded`). Each one it cannot admit is in `skipped`. */
+  include?: string[];
   owner?: string;
   producedBy?: { agentId?: string; sessionId?: string };
 }
+
+/** At most this many paths are named in a browse answer's `listed`. */
+export const MAX_LISTED = 500;
 
 export type BindDiffResult =
   | {
@@ -77,7 +83,19 @@ export type BindDiffResult =
       /** True when this is a browse-mode workspace (no diff members). */
       browse?: boolean;
       fileCount: number;
+      /** Every file the bind left out, with why. Browse mode names at most
+       *  `MAX_SKIPPED`; `skippedTotal` is present when it named fewer. */
       skipped: Array<{ path: string; reason: string }>;
+      skippedTotal?: number;
+      /** Browse mode: every file the bind listed, sorted, at most
+       *  `MAX_LISTED` (`fileCount` is the total). `files` names only the
+       *  entry doc, the one doc a browse bind opens; it is what the bind
+       *  opened, and callers count it as such. */
+      listed?: string[];
+      /** Browse mode: one row per `listed` file, same order, with the docId
+       *  its doc has or will have. A file nobody opened is not a doc yet;
+       *  the first request to its id opens it (`openListedMember`). */
+      links?: Array<{ relPath: string; docId: string }>;
       files: Array<{
         docId: string;
         relPath: string;
@@ -103,6 +121,8 @@ export type BindDiffResult =
         | 'review-exists-different-range';
       detail?: string;
       fileCount?: number;
+      /** Browse mode's left-out files, on an `empty-diff` answer. */
+      skipped?: Array<{ path: string; reason: string }>;
     };
 
 /**
@@ -201,16 +221,31 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
   if (opts.base === undefined) {
     const reviewId = opts.reviewId ?? deriveWorkspaceId(setIdRootFor(root));
     const excludes = normalizeExcludes(opts.exclude);
-    const scanned = scanFolder(root)
-      .map((abs) => relative(root, abs).split(sep).join('/'))
-      .filter((rel) => !isExcluded(rel, excludes))
-      .sort();
-    if (scanned.length === 0) return { ok: false, error: 'empty-diff' };
-    const entryRel =
-      scanned.find((r) => r.toLowerCase() === 'readme.md') ??
-      scanned.find((r) => r.toLowerCase().endsWith('.md')) ??
-      scanned[0];
-    if (!entryRel) return { ok: false, error: 'empty-diff' };
+    const report = scanFolderReport(root, opts.include ?? []);
+    const skipped: Array<{ path: string; reason: string }> = [...report.skipped];
+    let skippedTotal = report.skippedTotal;
+    let scanned: string[] = [];
+    for (const rel of report.files.map((abs) => relative(root, abs).split(sep).join('/'))) {
+      if (!isExcluded(rel, excludes)) {
+        scanned.push(rel);
+        continue;
+      }
+      skippedTotal++;
+      if (skipped.length < MAX_SKIPPED) skipped.push({ path: rel, reason: 'excluded' });
+    }
+    scanned.sort();
+    // The entry binds before any request reaches `resolveSetFile`, so it takes
+    // the same symlink rule there: `README.md -> .env` bound `.env` for every
+    // share visitor (security review, 2026-10-19). A refused one is left out.
+    const { entry: entryRel, refused } = browseEntry(root, scanned, excludes, opts.include);
+    for (const rel of refused) {
+      skippedTotal++;
+      if (skipped.length < MAX_SKIPPED) skipped.push({ path: rel, reason: 'symlink-target' });
+    }
+    const dropped = new Set(refused);
+    if (dropped.size > 0) scanned = scanned.filter((r) => !dropped.has(r));
+    // A folder whose every file was left out still says which, and why.
+    if (!entryRel) return { ok: false, error: 'empty-diff', skipped };
     const opened = await host.openContextFile(reviewId, entryRel);
     // First open must create workspace meta from nothing — openContextFile
     // derives root from members, so seed the entry doc directly here.
@@ -218,9 +253,11 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       const docId = memberDocId(reviewId, entryRel);
       const abs = join(root, entryRel);
       const isMd = entryRel.toLowerCase().endsWith('.md');
+      // A video or image entry is never bound: `openContextFile` says why.
+      const media = mediaTypeOf(entryRel) !== undefined;
       host.getOrCreate(docId, {
         type: isMd ? 'markdown' : 'code',
-        sourceUrl: abs,
+        ...(media ? {} : { sourceUrl: abs }),
         setId: reviewId,
         owner: opts.owner,
         workspaceId: reviewId,
@@ -230,7 +267,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
         producedBy: opts.producedBy,
       });
       if (isMd) await host.attachFileAsync(docId, abs);
-      else await host.attachReadonlyFileAsync(docId, abs);
+      else if (!media) await host.attachReadonlyFileAsync(docId, abs);
     }
     const entryDocId = memberDocId(reviewId, entryRel);
     // The workspace has no registry — its members ARE the record, so the
@@ -244,7 +281,13 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
       target: null,
       browse: true,
       fileCount: scanned.length,
-      skipped: [],
+      skipped,
+      ...(skippedTotal > skipped.length ? { skippedTotal } : {}),
+      listed: scanned.slice(0, MAX_LISTED),
+      links: scanned.slice(0, MAX_LISTED).map((relPath) => ({
+        relPath,
+        docId: relPath === entryRel ? entryDocId : memberDocId(reviewId, relPath),
+      })),
       files: [
         {
           docId: entryDocId,
@@ -311,9 +354,17 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
         // to do it. A file that will not answer is skipped like an unreadable
         // one and the review is built from the rest; `keep: false` because
         // these bytes are this loop's, not a later hydrate's.
-        const read = await boundFiles.read(join(root, entry.relPath), { keep: false });
+        const abs = join(root, entry.relPath);
+        const read = await boundFiles.read(abs, { keep: false });
         if (read.status !== 'ok' || !read.exists) {
           skipped.push({ path: entry.relPath, reason: 'read-failed' });
+          continue;
+        }
+        // The read followed any symlink, so judge the file it landed on
+        // (security review, 2026-10-19). After the read, so a folder that has
+        // stopped answering is never touched on the main thread.
+        if (landsOnListed(root, entry.relPath, abs, excludes) !== 'ok') {
+          skipped.push({ path: entry.relPath, reason: 'symlink-target' });
           continue;
         }
         text = read.text;

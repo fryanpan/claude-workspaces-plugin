@@ -1,7 +1,9 @@
 /**
  * The project machine's backup is only worth what a restore gives back. This
- * builds a real data dir the way a board server writes one — a board and two
- * docs, through the REST routes — snapshots it with the machine's own
+ * builds a real data dir the way a board server writes one — a board, two
+ * docs, a task and an agent note, through the REST routes, so the board's
+ * event log and agent-note log are on disk — plus a Claude Code transcripts
+ * dir, snapshots them with the machine's own
  * `backup.ts --out` (the upload swapped for a local file), restores it with
  * `restore.ts` into a fresh dir, boots a real loopback server there and reads
  * the board and both docs back.
@@ -16,8 +18,10 @@ import { afterAll, describe, expect, it } from 'bun:test';
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -145,7 +149,31 @@ describe('project machine backup and restore', () => {
       timeout: 15_000,
       describe: 'both docs persisted to .ydoc',
     });
+    // A task writes the board's event log; an agent note with no claimed row
+    // lands in its unplaced-note log.
+    await call('POST', `/workspaces/${workspaceId}/tasks`, {
+      assignee: 'Alice',
+      title: 'File the Saltmarsh survey',
+    });
+    await call('POST', `/workspaces/${workspaceId}/agents/riverbend-agent/notes`, {
+      kind: 'status',
+      text: 'The Saltmarsh survey is filed.',
+    });
+    const events = join(source, 'workspaces', `${workspaceId}.events.jsonl`);
+    const notesLog = join(source, 'workspaces', `${workspaceId}.agent-notes.jsonl`);
+    await waitFor(() => (existsSync(events) && existsSync(notesLog) ? true : null), {
+      timeout: 15_000,
+      describe: 'the board event log and agent-note log on disk',
+    });
     await stop(first.child);
+    const eventsBefore = readFileSync(events, 'utf8');
+    const notesBefore = readFileSync(notesLog, 'utf8');
+
+    // The machine's Claude Code transcripts, kept outside the data dir.
+    const transcripts = join(scratch, 'claude-projects');
+    mkdirSync(join(transcripts, '-data-harborlight'), { recursive: true });
+    const session = '{"type":"user","message":{"content":"Riverbend timetable"}}\n';
+    writeFileSync(join(transcripts, '-data-harborlight', 'session-1.jsonl'), session);
 
     // Snapshot to a local file, exactly as the machine's loop would before
     // uploading.
@@ -157,7 +185,12 @@ describe('project machine backup and restore', () => {
     const backup = spawnSync('bun', [join(machineDir, 'backup.ts'), '--out', snapshot], {
       cwd: repoRoot,
       encoding: 'utf8',
-      env: { ...process.env, CW_DATA_DIR: source, BACKUP_RECIPIENT: keys.recipient },
+      env: {
+        ...process.env,
+        CW_DATA_DIR: source,
+        BACKUP_RECIPIENT: keys.recipient,
+        BACKUP_TRANSCRIPTS_DIR: transcripts,
+      },
     });
     expect(backup.stderr).toBe('');
     expect(backup.status).toBe(0);
@@ -165,6 +198,7 @@ describe('project machine backup and restore', () => {
     // A new machine: no source files, an empty data dir.
     renameSync(notes, join(scratch, 'notes-gone'));
     const restored = join(scratch, 'restored-data');
+    const restoredTranscripts = join(scratch, 'restored-claude-projects');
     const restore = spawnSync(
       'bun',
       [
@@ -175,11 +209,25 @@ describe('project machine backup and restore', () => {
         identityFile,
         '--data-dir',
         restored,
+        '--transcripts-dir',
+        restoredTranscripts,
       ],
       { cwd: repoRoot, encoding: 'utf8' },
     );
     expect(restore.stderr).toBe('');
     expect(restore.status).toBe(0);
+
+    // The analytics logs and the transcripts come back byte for byte, read
+    // before the second server boots and could append to them.
+    expect(readFileSync(join(restored, 'workspaces', `${workspaceId}.events.jsonl`), 'utf8')).toBe(
+      eventsBefore,
+    );
+    expect(
+      readFileSync(join(restored, 'workspaces', `${workspaceId}.agent-notes.jsonl`), 'utf8'),
+    ).toBe(notesBefore);
+    expect(
+      readFileSync(join(restoredTranscripts, '-data-harborlight', 'session-1.jsonl'), 'utf8'),
+    ).toBe(session);
 
     const second = await boot(restored);
     const read = api(second.base);

@@ -1,5 +1,6 @@
 export * from './types.ts';
 export * from './schema.ts';
+export * from './anchor/refresh.ts';
 export * from './comment-receipt.ts';
 export * from './comment-delivery.ts';
 export * from './identity.ts';
@@ -57,3 +58,4 @@ export * as anchors from './anchor/index.ts';
 export * as prose from './prose.ts';
 export * as suggestOps from './suggest-ops.ts';
 export * from './event-origin.ts';
+export * from './media-types.ts';

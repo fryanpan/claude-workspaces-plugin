@@ -69,11 +69,15 @@ export interface RequestAttributionContext {
    *  `provenIdentityFor` ranks; the other is the Access email admission
    *  already verified. */
   sessionIdentityFor: (req: Request) => IdentityRecord | null;
-  /** The widget popup-token presented on this request, if any. */
+  /** The widget board token (`wt2`) presented on this request, if any. */
   widgetBearerOf: (req: Request) => string | null;
-  /** That token resolved against the origin it is bound to. Null means the
-   *  token is invalid, which refuses the whole request. */
-  widgetTokenIdentityFor: (token: string, origin: string | null) => IdentityRecord | null;
+  /** That token resolved against the origin it is bound to: who it names
+   *  and the one board it reaches. Null means the token is invalid, which
+   *  refuses the whole request. */
+  widgetTokenGrantFor: (
+    token: string,
+    origin: string | null,
+  ) => { identity: IdentityRecord; workspaceId: string } | null;
   /** The JSON responder, so a refusal here is spelled as a route's. */
   j: (status: number, body: unknown) => Response;
 }
@@ -91,7 +95,7 @@ export type Attribution =
   | { attributed: false; response: Response }
   | {
       attributed: true;
-      /** The identity a widget popup-token proved, or null when none was
+      /** The identity a widget token proved, or null when none was
        *  presented. Handed back because `routes/auth-share.ts` reads it too:
        *  it is resolved once for the whole request, and a second resolution
        *  there would be a second chance to disagree with `authorFor`. */
@@ -119,9 +123,19 @@ export interface RequestAttribution {
   attributeRequest: (req: Request, admitted: AttributableRequest) => Attribution;
 }
 
+/** The board a `/workspaces/<id>/…` path names, decoded, or null. */
+function boardInPath(pathname: string): string | null {
+  const m = pathname.match(/^\/workspaces\/([^/]+)/);
+  if (!m?.[1]) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
 export function createRequestAttribution(ctx: RequestAttributionContext): RequestAttribution {
-  const { identities, taskStore, sessionIdentityFor, widgetBearerOf, widgetTokenIdentityFor, j } =
-    ctx;
+  const { identities, taskStore, sessionIdentityFor, widgetBearerOf, widgetTokenGrantFor, j } = ctx;
 
   const attributeRequest = (req: Request, admitted: AttributableRequest): Attribution => {
     // Read up front rather than closed over from a later `const`, which is
@@ -212,7 +226,7 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
       if (tokenAgent) return tokenAgent;
       /**
        * Rung -1, and it exists ONLY on a share surface: the identity the
-       * boundary itself proved outranks a widget popup-token.
+       * boundary itself proved outranks a widget token.
        *
        * Everywhere else rung 0 below is right — a token is a stronger
        * proof than a cookie for the page that holds it. On a share or
@@ -234,7 +248,7 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
         const provenHere = provenIdentityFor();
         if (provenHere) return userForIdentity(provenHere);
       }
-      // Rung 0: a verified widget popup-token. NOT behind the flag,
+      // Rung 0: a verified widget token. NOT behind the flag,
       // unlike the cookie rung — no request carries this header by
       // accident, so presenting the token is itself the opt-in, and the
       // whole point of the handshake is attribution on a surface the
@@ -313,7 +327,7 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
     };
 
     /**
-     * The identity a widget popup-token proved, resolved once below the
+     * The identity a widget token proved, resolved once below the
      * host gate and read by `authorFor` (rung 0). Stays null when no
      * token was presented; a presented-but-invalid token never gets this
      * far — the gate answers 401 for the whole request.
@@ -334,8 +348,16 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
       {
         const rawWidgetToken = widgetBearerOf(req);
         if (rawWidgetToken !== null) {
-          widgetIdentity = widgetTokenIdentityFor(rawWidgetToken, req.headers.get('origin'));
-          if (widgetIdentity === null) return j(401, { error: 'widget_token_invalid' });
+          const grant = widgetTokenGrantFor(rawWidgetToken, req.headers.get('origin'));
+          if (grant === null) return j(401, { error: 'widget_token_invalid' });
+          // One board, on every host: a path naming another board is refused
+          // rather than attributed. The widget door asks the same question
+          // for its own host before this runs (request-admission.ts).
+          const board = boardInPath(new URL(req.url).pathname);
+          if (board !== null && board !== grant.workspaceId) {
+            return j(403, { error: 'out_of_widget_scope' });
+          }
+          widgetIdentity = grant.identity;
         }
       }
       return null;
@@ -345,7 +367,7 @@ export function createRequestAttribution(ctx: RequestAttributionContext): Reques
     /**
      * `true` when this request comes from a browser that has proven
      * nobody. The three proofs, in the order `authorFor` ranks them: a
-     * widget popup-token, a Cloudflare Access claim, a session cookie —
+     * widget token, a Cloudflare Access claim, a session cookie —
      * the last two both resolved by `provenIdentityFor`.
      *
      * Shared by the write gate below and by the `/y/` upgrade, which is

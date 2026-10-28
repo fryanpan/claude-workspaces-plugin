@@ -7,8 +7,9 @@
  * check `ok` themselves.
  *
  * Tests pass `fetchImpl` to inject a fake — the production path uses
- * the global `fetch`.
+ * `fixedHostFetch`.
  */
+import { fixedHostFetch } from '../outbound-fetch.ts';
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4';
 
@@ -59,7 +60,7 @@ export class CfApi {
   constructor(opts: CfApiOptions) {
     this.accountId = opts.accountId;
     this.token = opts.token;
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = opts.fetchImpl ?? fixedHostFetch;
     this.apiBase = opts.apiBase ?? CF_API_BASE;
   }
 

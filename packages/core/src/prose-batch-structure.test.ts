@@ -270,3 +270,46 @@ describe('a block with no words in it', () => {
     expect(res.outcomes[0]).toMatchObject({ status: 'suggested' });
   });
 });
+
+describe('an image or a rule nobody marked as the agent’s', () => {
+  // Read from the file, so unowned: an edit became a proposal, and a
+  // proposal strikes words these blocks do not have (2026-10-21).
+  const idOfNode = (doc: Y.Doc, nodeName: string): string => {
+    const found = readOutline(doc).find((e) => e.nodeName === nodeName);
+    if (!found) throw new Error(`no ${nodeName} in the outline`);
+    return found.id;
+  };
+
+  it('an image is replaced in place with a new src and alt', () => {
+    const doc = docOf('Riverbend\n\n![old](a.png)\n\nEnd\n');
+    const res = apply(doc, [
+      { op: 'replace_block', blockId: idOfNode(doc, 'image'), markdown: '![new](b.png)' },
+    ]);
+    expect(res.outcomes[0]).toMatchObject({ status: 'applied' });
+    expect(md(doc)).toBe('Riverbend\n\n![new](b.png)\n\nEnd');
+  });
+
+  it('an image and a rule are deleted', () => {
+    const doc = docOf('Riverbend\n\n![old](a.png)\n\n---\n\nEnd\n');
+    const res = apply(doc, [
+      { op: 'delete_block', blockId: idOfNode(doc, 'image') },
+      { op: 'delete_block', blockId: idOfNode(doc, 'horizontalRule') },
+    ]);
+    expect(res.applied).toBe(2);
+    expect(md(doc)).toBe('Riverbend\n\nEnd');
+  });
+
+  it('an asked-for proposal on an image changes nothing', () => {
+    const doc = docOf('Riverbend\n\n![old](a.png)\n');
+    const res = apply(doc, [
+      {
+        op: 'replace_block',
+        blockId: idOfNode(doc, 'image'),
+        markdown: '![new](b.png)',
+        propose: true,
+      },
+    ]);
+    expect(res.outcomes[0]).toMatchObject({ status: 'failed' });
+    expect(md(doc)).toBe('Riverbend\n\n![old](a.png)');
+  });
+});

@@ -194,9 +194,11 @@ describe('spoken reply over the converse socket', () => {
       visitorShareId: 's1',
       visitorMemberKey: null,
       ownerProven: () => false,
+      anyoneProven: () => false,
       browserProvedNobody: () => true,
       provenAuthor: () => null,
       widgetDoorGrant: null,
+      widgetTokenProved: false,
     });
     expect(out?.kind).toBe('response');
     expect(out && out.kind === 'response' ? out.response.status : 0).toBe(403);

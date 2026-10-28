@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'bun:test';
-import { mintSession } from '../src/auth/session.ts';
+import { mintToken } from '../src/auth/signed-token.ts';
 import {
-  WIDGET_TOKEN_TTL_MS,
-  mintWidgetToken,
-  verifyWidgetToken,
+  BOARD_WIDGET_TOKEN_TTL_MS,
+  boardWidgetToken,
+  mintBoardWidgetToken,
+  verifyBoardWidgetToken,
   widgetTokenKey,
 } from '../src/auth/widget-token.ts';
 
 const KEY = widgetTokenKey('test-cookie-key');
 /** The dev-server origin a token is minted for — the only page that may use it. */
 const ORIGIN = 'http://127.0.0.1:5173';
+const BOARD = 'w-harbor';
+const now = 1_700_000_000_000;
 
 describe('widgetTokenKey', () => {
   it('is domain-separated from the raw cookie key', () => {
@@ -19,83 +22,89 @@ describe('widgetTokenKey', () => {
   });
 });
 
-describe('mintWidgetToken', () => {
-  it('mints a verifiable token carrying the session it came from', () => {
-    const now = 1_700_000_000_000;
-    const session = mintSession('user-abc123', now);
-    const token = mintWidgetToken(session, ORIGIN, KEY, now);
-    expect(token).not.toBeNull();
-    const claims = verifyWidgetToken(token as string, KEY, now);
-    expect(claims).toEqual({
-      identityId: 'user-abc123',
-      sessionId: session.sessionId as string,
-      sessionIssuedAt: now,
-      expiresAt: now + WIDGET_TOKEN_TTL_MS,
-      origin: ORIGIN,
+describe('mintBoardWidgetToken', () => {
+  it('from a session: carries the board, the origin and the session, for one day', () => {
+    const grant = { identityId: 'user-abc123', workspaceId: BOARD, origin: ORIGIN };
+    const token = mintBoardWidgetToken({ ...grant, sessionId: 'sid_1-x' }, KEY, now);
+    expect(verifyBoardWidgetToken(token, KEY, now)).toEqual({
+      ...grant,
+      sessionId: 'sid_1-x',
+      issuedAt: now,
+      expiresAt: now + BOARD_WIDGET_TOKEN_TTL_MS,
     });
+    // The board stays the fifth field, where the widget reads it.
+    expect(token.split('.')[4]).toBe(Buffer.from(BOARD).toString('base64url'));
   });
 
-  it('refuses to mint from a session with no session id (surviving v1 cookie)', () => {
-    // A v1 session cannot be individually revoked, so a token tied to it
-    // could not die with a logout. The daily sliding refresh upgrades those
-    // cookies; until then the popup answers "sign in again".
-    const token = mintWidgetToken(
-      { identityId: 'user-abc123', sessionId: null, issuedAt: 1, expiresAt: null },
-      ORIGIN,
+  it('from Access: names no session, in the six-field shape tokens already out there carry', () => {
+    const token = mintBoardWidgetToken(
+      { identityId: 'user-abc123', workspaceId: BOARD, origin: ORIGIN },
       KEY,
+      now,
     );
-    expect(token).toBeNull();
+    expect(token.slice(0, token.lastIndexOf('.')).split('.')).toHaveLength(6);
+    expect(verifyBoardWidgetToken(token, KEY, now)?.sessionId).toBeNull();
   });
 });
 
-describe('verifyWidgetToken', () => {
-  const now = 1_700_000_000_000;
-  const session = mintSession('user-abc123', now);
-  const token = mintWidgetToken(session, ORIGIN, KEY, now) as string;
+describe('verifyBoardWidgetToken', () => {
+  const token = mintBoardWidgetToken(
+    { identityId: 'user-abc123', workspaceId: BOARD, origin: ORIGIN, sessionId: 'sid1' },
+    KEY,
+    now,
+  );
 
   it('carries the recipient origin intact, dots and port included', () => {
-    // The payload is dot-delimited and an origin is full of dots — the
-    // origin must round-trip exactly, never be split into fields.
-    expect(verifyWidgetToken(token, KEY, now)?.origin).toBe(ORIGIN);
-    const https = mintWidgetToken(session, 'https://app.example.com', KEY, now) as string;
-    expect(verifyWidgetToken(https, KEY, now)?.origin).toBe('https://app.example.com');
-  });
-
-  it('refuses a token whose origin was swapped — the origin is signed too', () => {
-    const other = mintWidgetToken(session, 'http://localhost:3000', KEY, now) as string;
-    const [payloadA, macA] = [
-      token.slice(0, token.lastIndexOf('.')),
-      token.slice(token.lastIndexOf('.') + 1),
-    ];
-    const payloadB = other.slice(0, other.lastIndexOf('.'));
-    expect(payloadA).not.toBe(payloadB);
-    expect(verifyWidgetToken(`${payloadB}.${macA}`, KEY, now)).toBeNull();
+    expect(verifyBoardWidgetToken(token, KEY, now)?.origin).toBe(ORIGIN);
+    const https = mintBoardWidgetToken(
+      { identityId: 'u', workspaceId: BOARD, origin: 'https://app.example.com' },
+      KEY,
+      now,
+    );
+    expect(verifyBoardWidgetToken(https, KEY, now)?.origin).toBe('https://app.example.com');
   });
 
   it('refuses an expired token', () => {
-    expect(verifyWidgetToken(token, KEY, now + WIDGET_TOKEN_TTL_MS - 1)).not.toBeNull();
-    expect(verifyWidgetToken(token, KEY, now + WIDGET_TOKEN_TTL_MS)).toBeNull();
+    expect(verifyBoardWidgetToken(token, KEY, now + BOARD_WIDGET_TOKEN_TTL_MS - 1)).not.toBeNull();
+    expect(verifyBoardWidgetToken(token, KEY, now + BOARD_WIDGET_TOKEN_TTL_MS)).toBeNull();
   });
 
-  it('refuses a tampered token', () => {
-    // Flip the identity while keeping the mac — every field is signed.
+  it('refuses a tampered token, and one signed with a different key', () => {
     const swapped = token.replace('user-abc123', 'user-evil99');
     expect(swapped).not.toBe(token);
-    expect(verifyWidgetToken(swapped, KEY, now)).toBeNull();
+    expect(verifyBoardWidgetToken(swapped, KEY, now)).toBeNull();
+    expect(verifyBoardWidgetToken(token, widgetTokenKey('other-cookie-key'), now)).toBeNull();
   });
 
-  it('refuses a token signed with a different key', () => {
-    expect(verifyWidgetToken(token, widgetTokenKey('other-cookie-key'), now)).toBeNull();
+  it('refuses a session id that is not one', () => {
+    const odd = mintToken(
+      boardWidgetToken,
+      {
+        identityId: 'u',
+        workspaceId: BOARD,
+        origin: ORIGIN,
+        sessionId: 'has space',
+        issuedAt: now,
+        expiresAt: now + 1000,
+      },
+      KEY,
+    );
+    expect(verifyBoardWidgetToken(odd, KEY, now)).toBeNull();
   });
 
-  it('refuses a session cookie value — the formats never cross', () => {
-    // A widget token is narrower than the session; a captured cookie value
-    // must not double as one (and vice versa — different derived keys AND
-    // different formats).
-    expect(verifyWidgetToken('v2.user-abc123.sid.123.mac', KEY, now)).toBeNull();
-    expect(verifyWidgetToken('', KEY, now)).toBeNull();
-    expect(verifyWidgetToken('wt1', KEY, now)).toBeNull();
-    expect(verifyWidgetToken(null, KEY, now)).toBeNull();
-    expect(verifyWidgetToken(undefined, KEY, now)).toBeNull();
+  it('refuses the retired wt1 and a session cookie value — the formats never cross', () => {
+    // A genuine wt1 value: the retired payload, signed under the same key.
+    const raw = {
+      keyDomain: null,
+      tags: null,
+      encode: (p: string) => p,
+      decode: (p: string) => p,
+      expiresAt: () => null,
+    };
+    const wt1 = mintToken(raw, `wt1.user-abc123.sid.1.${now + 1000}.b3JpZ2lu`, KEY);
+    expect(verifyBoardWidgetToken(wt1, KEY, now)).toBeNull();
+    expect(verifyBoardWidgetToken('v2.user-abc123.sid.123.mac', KEY, now)).toBeNull();
+    expect(verifyBoardWidgetToken('', KEY, now)).toBeNull();
+    expect(verifyBoardWidgetToken(null, KEY, now)).toBeNull();
   });
 });

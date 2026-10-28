@@ -13772,7 +13772,9 @@ var CONNECTOR_INSTRUCTIONS = [
   "",
   "CREATE: call attach_markdown(docId, path) to bring a .md under review.",
   "The server reads the file, parses it into the live editor, sets up the",
-  "fs.watch + write-back, and returns a reviewUrl you can hand to a human.",
+  "fs.watch + write-back, and returns a url you can hand to a human. Every",
+  "tool that makes or attaches something returns `url`, the absolute link to",
+  "what it made; hand that on, never the board home link.",
   "",
   "EDIT: never use Write/Edit/str_replace on the .md while it is under review",
   "— direct filesystem edits race against the live doc’s own ~1s flush, and if",
@@ -13814,7 +13816,7 @@ var CONNECTOR_INSTRUCTIONS = [
   'unlisted files land in "Other". Pass target only to pin a review to a',
   "finished range. Re-run the tool after touching files that were not in",
   "the diff before (idempotent; refreshes the file list; keeps your groups",
-  "unless you pass new ones). Share the returned entryUrl with the human",
+  "unless you pass new ones). Share the returned url with the human",
   "(bare URL on its own line); the file tree navigates the rest. Thread",
   "events arrive per file via the auto-watch; resolve threads as you address",
   "them; refresh_attachment_set(setId) to re-sync membership and diffs as",
@@ -14175,6 +14177,12 @@ function isBookkeepingEvent(event, payload) {
       return false;
     return mayCarryAnOpenAsk(payload.thread) === false;
   }
+  if (event === "decision.info_requested") {
+    if (!payload || typeof payload !== "object")
+      return false;
+    const threadId = payload.threadId;
+    return typeof threadId === "string" && threadId !== "";
+  }
   return false;
 }
 
@@ -14252,7 +14260,9 @@ function sessionLines(p, timeZone) {
       return [];
     const n = (count, one) => `${count ?? 0} ${one}${count === 1 ? "" : "s"}`;
     const said = (s.activity ?? []).flatMap((a) => a.summary ? [
-      `  -${clock2(a.at, timeZone)} ${a.kind === "turn" ? "session" : "he asked"}: ${a.summary}`
+      `  -${clock2(a.at, timeZone)} ${a.kind === "turn" ? "session" : "he asked"}: ${a.summary}`,
+      ...a.text && a.text !== a.summary ? [`    ${a.text.replace(/\n/g, `
+    `)}`] : []
     ] : []);
     return [
       `- ${s.repo}, on board "${s.board ?? s.boardId}": ${s.minutes ?? 0} min, ${n(s.prompts, "typed prompt")}, ${n(s.turns, "turn end")}`,
@@ -14260,7 +14270,10 @@ function sessionLines(p, timeZone) {
     ];
   });
   const head = lines.length > 0 ? ["Claude Code sessions (active minutes):", ...lines] : ["Claude Code sessions: none counted."];
-  return [...head, ...p.sessionsNote ? [p.sessionsNote] : []];
+  const cut = p.textDropped ? [
+    `The ${p.textDropped} oldest line${p.textDropped === 1 ? "" : "s"} came without ${p.textDropped === 1 ? "its" : "their"} words in full: the digest had no room.`
+  ] : [];
+  return [...head, ...cut, ...p.sessionsNote ? [p.sessionsNote] : []];
 }
 function digestLine(p, timeZone) {
   const lines = (p.items ?? []).flatMap((i) => digestItemLine(i, timeZone) ?? []);
@@ -14338,7 +14351,18 @@ function decisionAnsweredLine(p) {
   const by = `${p.actor?.name ? ` by ${p.actor.name}` : ""}${fromMockNote(p.via)}`;
   const asked = p.headline ? ` to "${truncate2(p.headline, 100)}"` : "";
   const walk = Array.isArray(p.links) && p.links.length > 0 ? " — walk its links as the propagation checklist" : "";
-  return `[decision.answered] ${p.taskId}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+  return `[decision.answered] ${p.taskId}${rowClause(p)}${by}: "${truncate2(p.answer ?? "", 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+}
+function rowClause(p) {
+  const title = p.title && p.title !== p.headline ? ` "${truncate2(p.title, 80)}"` : "";
+  const item = p.reviewItemId ? ` item ${p.reviewItemId}` : "";
+  return `${title}${item}`;
+}
+function infoRequestedLine(p) {
+  const by = p.actor?.name ? ` by ${p.actor.name}` : "";
+  const item = p.reviewItemId ? ` item ${p.reviewItemId}` : "";
+  const q = p.question ? `: "${truncate2(p.question, 120)}"` : "";
+  return `[decision.info_requested] ${p.taskId ?? "?"}${item}${by} wants more context before deciding${q}`;
 }
 
 // packages/mcp/src/done-when-ready-line.ts
@@ -14753,10 +14777,9 @@ function reviewItemHeldLine(p) {
 var TASK_REVIEW_ITEM_EVENTS = new Set([
   "review_item.added",
   "review_item.revised",
-  "review_item.withdrawn",
-  "review_item.answered"
+  "review_item.withdrawn"
 ]);
-var FILER_ADDRESSED_EVENTS = new Set(["review_item.withdrawn", "review_item.answered"]);
+var FILER_ADDRESSED_EVENTS = new Set(["review_item.withdrawn"]);
 function isTaskReviewItemEvent(event, payload) {
   if (!TASK_REVIEW_ITEM_EVENTS.has(event))
     return false;
@@ -14790,9 +14813,6 @@ function reviewItemTaskLine(event, p) {
   if (event === "review_item.revised") {
     const after = p.threadId ? ` — after a question on thread ${p.threadId}` : "";
     return `[review item revised] ${where}${by}${after}`;
-  }
-  if (event === "review_item.answered") {
-    return `[review item answered] ${where} — the ask you filed has an answer`;
   }
   if (p.reinstated === true) {
     return `[review item reinstated] ${where}${by} — the ask is back on the ticket`;
@@ -15058,6 +15078,9 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
     case "decision.answered":
       body = decisionAnsweredLine(p);
       break;
+    case "decision.info_requested":
+      body = infoRequestedLine(p);
+      break;
     case "workspace.lead_changed":
       body = p.leadAgentId === deps.authorId ? `[workspace.lead_changed]${by}: you are now the lead agent — this board's asks are addressed to you` : `[workspace.lead_changed]${by}: lead agent is now ${p.leadAgentId ?? "?"}`;
       break;
@@ -15132,6 +15155,7 @@ async function emitBoardChannelMessage(deps, event, rawPayload) {
         workspace_id: p.workspaceId ?? "unknown",
         ...p.taskId ? { task_id: p.taskId } : {},
         ...p.docId ? { doc_id: p.docId } : {},
+        ...p.reviewItemId ? { review_item_id: p.reviewItemId } : {},
         event,
         ...p.actor?.name ? { author: p.actor.name } : {}
       }
@@ -15151,6 +15175,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
     return;
   }
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId))
+    return;
+  if (event === "review_item.answered")
     return;
   if (isTaskReviewItemEvent(event, rawPayload)) {
     const r = rawPayload;
@@ -15970,7 +15996,7 @@ var SHAPE = {
 var WHITEBOARD_TOOLS = [
   {
     name: "create_whiteboard",
-    description: "Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you.",
+    description: "Create a live whiteboard on a board and watch it. Returns {docId, url}; share the url. People draw on it in the browser and you draw with draw_on_whiteboard. When a person finishes a change, you get one whiteboard.changed event about 1.5s after their pen rests, naming the shapes they changed; your own drawing never comes back to you. Returns `url`, the absolute link to the whiteboard. Give that link to a person.",
     inputSchema: {
       type: "object",
       properties: { workspaceId: WORKSPACE_ID, title: { type: "string" } },
@@ -16196,7 +16222,7 @@ var TOOL_LIST = {
     },
     {
       name: "post_reply",
-      description: "Reply to a thread. Pass review when the reply asks a person to decide or look. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
+      description: "Reply to a thread. Pass review when the reply asks a person to decide or look. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread. Returns `url`, the absolute link to the page that shows this thread. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16363,7 +16389,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_thread",
-      description: "Open a comment thread on a doc. Pass find to anchor the thread to a phrase, or omit find for a thread about the whole doc. On an app or a mock, find is words the page shows, and suggest proposes new words the reader accepts or rejects on the page; an accepted one reaches you as page_edits on a new thread. Pass review when you ask a person to decide or to look. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread.",
+      description: "Open a comment thread on a doc. Pass find to anchor the thread to a phrase, or omit find for a thread about the whole doc. On an app or a mock, find is words the page shows, and suggest proposes new words the reader accepts or rejects on the page; an accepted one reaches you as page_edits on a new thread. Pass review when you ask a person to decide or to look. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread. Returns `url`, the absolute link to the page that shows this thread. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16482,7 +16508,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_markdown",
-      description: "Attach a markdown file to a board as a live doc. The server parses the file into the editor and keeps file and doc in sync both ways. The file must already exist, and path should be absolute. After the bind, edit only through these tools, because the next flush overwrites a direct file write. Returns the minted docId and the review URL.",
+      description: "Attach a markdown file to a board as a live doc. The server parses the file into the editor and keeps file and doc in sync both ways. The file must already exist, and path should be absolute. After the bind, edit only through these tools, because the next flush overwrites a direct file write. Returns the minted docId and the review URL. Returns `url`, the absolute link to the page of the doc. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16566,7 +16592,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_mockup",
-      description: "Serve an HTML mockup at /workspaces/<workspaceId>/mockups/<docId> and bind it for comments. The server re-reads sourceHtmlPath on each request, so an edit appears on reload. An unreadable path fails this call instead of the reviewer's. Single-file mockups only, because relative CSS and JS siblings do not resolve. Hand meta.reviewUrl to a person.",
+      description: "Serve an HTML mockup at /workspaces/<workspaceId>/mockups/<docId> and bind it for comments. The server re-reads sourceHtmlPath on each request, so an edit appears on reload. An unreadable path fails this call instead of the reviewer's. Single-file mockups only, because relative CSS and JS siblings do not resolve. Hand meta.reviewUrl to a person. Returns `url`, the absolute link to the page of the mockup. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16587,7 +16613,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_app",
-      description: "Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Reusing a docId repoints that app. Hand reviewUrl to a person.",
+      description: "Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16610,7 +16636,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_folder",
-      description: "Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing.",
+      description: "Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing. Returns `url`, the absolute link to the page the folder opens on. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -16651,7 +16677,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_diff_review",
-      description: "Review a git diff the way a pull request reads: one doc per changed file, with line-anchored comments. By default it diffs base against the working tree and re-renders as you edit. Pass target to pin it to a commit, or omit base to browse the folder. Hand entryUrl to the reviewer.",
+      description: "Review a git diff the way a pull request reads: one doc per changed file, with line-anchored comments. By default it diffs base against the working tree and re-renders as you edit. Pass target to pin it to a commit, or omit base to browse the folder. Hand entryUrl to the reviewer. Returns `url`, the absolute link to the page the review opens on, the same value as entryUrl. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17118,7 +17144,7 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion. Markdown in each edit is parsed either way.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. Markdown in each edit is parsed either way.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17315,7 +17341,7 @@ var TOOL_LIST = {
     },
     {
       name: "share_workspace",
-      description: "Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL.",
+      description: "Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17453,7 +17479,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_workspace",
-      description: "Create a board: its goals, its tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals, so write them with set_goal_list.",
+      description: "Create a board: its goals, its tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals, so write them with set_goal_list. Returns `url`, the absolute link to the board. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17526,7 +17552,7 @@ var TOOL_LIST = {
     },
     {
       name: "attach_doc",
-      description: "File an existing doc, diff review or folder bind onto a board, so its open comment threads reach that board's Home queue. It is a link only, so the doc keeps its own URL and nothing moves. docId also takes a review id, which attaches the whole review as one unit. Idempotent.",
+      description: "File an existing doc, diff review or folder bind onto a board, so its open comment threads reach that board's Home queue. It is a link only, so the doc keeps its own URL and nothing moves. docId also takes a review id, which attaches the whole review as one unit. Idempotent. Returns `url`, the absolute link to the doc on this board. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17538,7 +17564,7 @@ var TOOL_LIST = {
     },
     {
       name: "create_tasks",
-      description: "File work on a board. This is the only create verb. It always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced in Backlog. New tasks stay in triage until task_transition releases them. A bad task returns in failures by index, not rejecting the batch. `held: true` means it waits off the queue until revise_review_item closes `heldReason`.",
+      description: "File work on a board. This is the only create verb. It always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced in Backlog. New tasks stay in triage until task_transition releases them. A bad task returns in failures by index, not rejecting the batch. `held: true` means it waits off the queue until revise_review_item closes `heldReason`. Each created row returns `url`, the absolute link to its task. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17634,7 +17660,7 @@ var TOOL_LIST = {
     },
     {
       name: "spin_off_task",
-      description: "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. It takes no done-when list, so send the criteria straight after, in rewrite_task's `doneWhen` field. Use create_tasks for an ask that did not come from a thread.",
+      description: "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. It takes no done-when list, so send the criteria straight after, in rewrite_task's `doneWhen` field. Use create_tasks for an ask that did not come from a thread. Returns `url`, the absolute link to the new task. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -18046,7 +18072,7 @@ var TOOL_LIST = {
     },
     {
       name: "add_review_item",
-      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere. To run commands only the owner may allow, file ONE \`review_type: 'grant'\` item before the work starts, listing every rule in \`allowRules\`; the owner approves it in the browser, the rules are written to their settings, and they are removed when the task closes.`,
+      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand("<service>")}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere. To run commands only the owner may allow, file ONE \`review_type: 'grant'\` item before the work starts, listing every rule in \`allowRules\`; the owner approves it in the browser, the rules are written to their settings, and they are removed when the task closes. Returns \`url\`, the absolute link to the task that holds the item. Give that link to a person.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -18279,7 +18305,7 @@ var TOOL_LIST = {
     },
     {
       name: "import_tasks_markdown",
-      description: "Move a hand-maintained markdown tracker, headings plus status tables, onto a board. It defaults to a dry run that returns the mapping and creates nothing, so review that with the person, then call again with apply: true. Apply stamps the source file with a banner and a link, and a stamped file refuses re-import.",
+      description: "Move a hand-maintained markdown tracker, headings plus status tables, onto a board. It defaults to a dry run that returns the mapping and creates nothing, so review that with the person, then call again with apply: true. Apply stamps the source file with a banner and a link, and a stamped file refuses re-import. With apply: true, it returns `url`, the absolute link to the board. Give that link to a person.",
       inputSchema: {
         type: "object",
         properties: {
@@ -19871,6 +19897,7 @@ function projectQueueRows(rows, fields) {
 function taskCreatedSummary(task, ignoredLinks, shapeGaps, placed) {
   return {
     taskId: task.id,
+    ...task.url !== undefined ? { url: task.url } : {},
     goal: task.goal,
     order: task.order,
     status: task.status,
@@ -19973,7 +20000,7 @@ async function handleTaskTool(name, a, ctx) {
         author: AUTHOR
       });
       return ok2({
-        ...taskCreatedSummary(res.task, res.ignoredLinks, undefined, res.placement?.placed),
+        ...taskCreatedSummary(res.url !== undefined ? { ...res.task, url: res.url } : res.task, res.ignoredLinks, undefined, res.placement?.placed),
         ...res.placement?.goals !== undefined ? { goals: res.placement.goals } : {},
         title: res.task.title,
         quote: res.task.quote
@@ -20260,6 +20287,7 @@ async function handleTaskTool(name, a, ctx) {
       return ok2({
         taskId,
         reviewItemId: res.item?.id,
+        ...res.url !== undefined ? { url: res.url } : {},
         ...res.reviewAdvice !== undefined ? { reviewAdvice: res.reviewAdvice } : {},
         ...heldResult(res)
       });
@@ -20686,7 +20714,8 @@ async function handleWorkspaceTool(name, a, ctx) {
       return ok2({
         workspaceId: res.workspace.id,
         name: res.workspace.name,
-        leadAgentId: res.workspace.leadAgentId
+        leadAgentId: res.workspace.leadAgentId,
+        ...res.url !== undefined ? { url: res.url } : {}
       });
     }
     case "rename_workspace": {
@@ -20746,7 +20775,12 @@ async function handleWorkspaceTool(name, a, ctx) {
       const res = await http("POST", `/workspaces/${encodeURIComponent(workspaceId)}/docs:attach`, {
         docId
       });
-      return ok2({ ok: true, workspaceId, docIds: res.workspace?.docIds ?? [] });
+      return ok2({
+        ok: true,
+        workspaceId,
+        docIds: res.workspace?.docIds ?? [],
+        ...res.url !== undefined ? { url: res.url } : {}
+      });
     }
     case "get_workspace": {
       const { workspaceId } = a;
@@ -21541,7 +21575,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.314";
+var PLUGIN_VERSION = "0.1.323";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

@@ -16,9 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decisionAnsweredLine } from '../../mcp/src/decision-line.ts';
-import { type NudgePayload, reviewAnsweredLine } from '../../mcp/src/nudge-line.ts';
 import type { AnswerCoverageInput } from '../src/answer-coverage.ts';
-import { REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { eventsLogPath } from '../src/tasks.ts';
 import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
@@ -203,10 +201,12 @@ describe('an answer that covers only some of an item’s questions', () => {
     try {
       verdict = { open: ['Who gets the failure alert?'] };
       await answer(ws, taskId, itemId, { text: 'Run it at 04:00; include archived rows.' });
-      const wake = () => lead.frames.find((f) => f.event === REVIEW_ANSWERED_EVENT);
-      await waitFor(() => wake() !== undefined, { describe: 'the review_answered frame' });
+      // The lead's one wake for a ticket answer is `decision.answered`
+      // (`one-wake-per-answer.test.ts` counts them).
+      const wake = () => lead.frames.find((f) => f.event === 'decision.answered');
+      await waitFor(() => wake() !== undefined, { describe: 'the decision.answered frame' });
       expect(wake()?.data?.openParts).toEqual(['Who gets the failure alert?']);
-      expect(reviewAnsweredLine(wake()?.data as NudgePayload)).toContain(
+      expect(decisionAnsweredLine(wake()?.data ?? {})).toContain(
         'PARTIAL: still open on the reader\'s queue: "Who gets the failure alert?"',
       );
     } finally {

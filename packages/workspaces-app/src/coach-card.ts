@@ -15,9 +15,12 @@
  *
  * Only the owner has a coach. Anyone else's first POST gets an empty 204,
  * and the page then stops: no more beacons, and the stream is never opened.
- * The front page names no board, so it sends nothing about where he is and
- * opens the stream at once; the server draws that page's coach section only
- * for the owner, and it mounts the card only when the section is there.
+ * The front page and the review walk name no board, so each says which page
+ * it is (`page`) and nothing more: no heading, no passage. They are where he
+ * answers review items, most of all from his phone, and a page that said
+ * nothing left those stays out of every digest. The server draws the front
+ * page's coach section only for the owner, and the front page mounts the
+ * card only when the section is there.
  *
  * The card: calm by default. It sits in the bottom-left corner of every
  * page he has open, does not move or pulse, and stays until he answers it in
@@ -61,8 +64,10 @@ const OFF_HERE = 'Coach is off for this board';
 const TURN_OFF = 'Coach off for this board';
 
 export interface CoachCardOptions {
-  /** The board, or none on the front page. */
+  /** The board, or none on the front page and the review walk. */
   workspaceId?: string;
+  /** A page that names no board: the front page or the review walk. */
+  page?: 'home' | 'review';
   docId?: string;
   /** The doc's editor, whose headings say which part he is reading. */
   root?: HTMLElement;
@@ -98,6 +103,9 @@ async function defaultPost(url: string, body: unknown): Promise<number> {
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      // A phone freezes a page as it hides, and the `left` it sends then has
+      // to outlive the page, or the stay runs on as if he were still there.
+      keepalive: true,
     });
     return res.status;
   } catch {
@@ -178,7 +186,10 @@ export function mountCoachCard(opts: CoachCardOptions): CoachCard {
   });
 
   const view = (): Promise<number> => {
-    if (!opts.workspaceId) return Promise.resolve(200);
+    if (!opts.workspaceId) {
+      if (!opts.page) return Promise.resolve(200);
+      return post(HERE_URL, { kind: 'view', page: opts.page, visible: !hidden(), timeZone });
+    }
     const heading = root ? headingInView(root) : undefined;
     const text = root ? passageInView(root) : undefined;
     return post(HERE_URL, {
@@ -223,15 +234,16 @@ export function mountCoachCard(opts: CoachCardOptions): CoachCard {
   // A tab in the background says nothing about where he is: on another
   // device he may be reading something else, and its view would close the
   // moment there.
+  // A page with no board has no passage to report, so scrolling says nothing.
   const onScroll = () => {
-    if (stopped || hidden()) return;
+    if (stopped || hidden() || !opts.workspaceId) return;
     clearTimeout(settle);
     settle = setTimeout(() => {
       if (!hidden()) void view();
     }, SCROLL_SETTLE_MS);
   };
   const onVisibility = () => {
-    if (stopped || !opts.workspaceId) return;
+    if (stopped || (!opts.workspaceId && !opts.page)) return;
     if (document.visibilityState === 'hidden') sendWriting();
     void view();
   };

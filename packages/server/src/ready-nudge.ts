@@ -488,9 +488,11 @@ export class ReadyWorkNudger {
   }
 
   /**
-   * A review item was answered. The lead acts on answers immediately, so
-   * this does not wait for the idle window — and it is activity, so it also
-   * disarms the idle nudge rather than being followed by one.
+   * A review item on a doc thread was answered. The lead acts on answers
+   * immediately, so this does not wait for the idle window — and it is
+   * activity, so it also disarms the idle nudge rather than being followed
+   * by one. A ticket answer goes to `answerOnBoard` instead, because
+   * `decision.answered` already carries it to the lead.
    *
    * An answer the LEAD wrote wakes nobody: the same author-suppression rule
    * every other addressed delivery applies.
@@ -518,22 +520,9 @@ export class ReadyWorkNudger {
     actorId?: string;
   }): void {
     const ts = this.now();
-    this.noteActivity(input.workspaceId, ts);
-    let board: ReadyWorkSnapshot | undefined;
-    try {
-      board = this.opts.lookup(input.workspaceId);
-    } catch {
-      return;
-    }
-    if (!board || board.retired) return;
-    const lead = board.leadAgentId;
-    if (lead === undefined || lead === input.actorId) return;
-    // The answer itself has re-armed the idle nudge via `noteActivity`; the
-    // lead is being woken right now, so drop the arming rather than let a
-    // second frame follow this one fifteen minutes from now over the same
-    // fact. It re-arms on the next real activity.
-    this.armed.set(input.workspaceId, this.stampFor(board, ts));
-    this.saveStamps();
+    const settled = this.settleAnswer(input.workspaceId, input.actorId, ts);
+    if (!settled) return;
+    const { board, lead } = settled;
     if (!this.reachable(board.workspaceId, lead)) return;
     this.emit(board.workspaceId, lead, {
       event: REVIEW_ANSWERED_EVENT,
@@ -548,6 +537,51 @@ export class ReadyWorkNudger {
       ...(input.via !== undefined ? { via: input.via } : {}),
       ts,
     });
+  }
+
+  /**
+   * A ticket's review item was answered, and the lead already has the news.
+   *
+   * Every ticket answer emits `decision.answered`, which rides the board
+   * channel to every agent on it, the lead included, carrying the words, the
+   * row's title, the item's id and its links. A `review_answered` frame
+   * beside it said the same thing a second time and cost the lead a second
+   * turn per answer (Bryan, 2026-10-27: "Why did you get three separate
+   * events?"). So this does everything `reviewAnswered` does except send:
+   * the answer still counts as activity, and still disarms the idle nudge.
+   *
+   * `reviewAnswered` stays the wake for an answer on a doc thread, which
+   * moves no task row and so emits no `decision.answered`.
+   */
+  answerOnBoard(input: { workspaceId: string; actorId?: string }): void {
+    this.settleAnswer(input.workspaceId, input.actorId, this.now());
+  }
+
+  /**
+   * What both answer paths share: the answer is activity, and the lead is
+   * hearing of it now, so the idle nudge is disarmed rather than left to
+   * follow fifteen minutes later over the same fact. It re-arms on the next
+   * real activity. Returns the board and its lead when the lead is somebody
+   * other than the answerer — an answer the LEAD wrote wakes nobody.
+   */
+  private settleAnswer(
+    workspaceId: string,
+    actorId: string | undefined,
+    ts: number,
+  ): { board: ReadyWorkSnapshot; lead: string } | undefined {
+    this.noteActivity(workspaceId, ts);
+    let board: ReadyWorkSnapshot | undefined;
+    try {
+      board = this.opts.lookup(workspaceId);
+    } catch {
+      return undefined;
+    }
+    if (!board || board.retired) return undefined;
+    const lead = board.leadAgentId;
+    if (lead === undefined || lead === actorId) return undefined;
+    this.armed.set(workspaceId, this.stampFor(board, ts));
+    this.saveStamps();
+    return { board, lead };
   }
 
   /**

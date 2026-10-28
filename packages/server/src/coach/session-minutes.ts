@@ -12,37 +12,66 @@
  * summary of each: what he asked, and what the session answered (the owner,
  * 2026-10-16: the digest shows what he did, not just minutes). The summary
  * is made from the prompt's text and the turn's closing message
- * (`coach/summary.ts`); the text itself, the session id and the rest of the
- * path stay here.
+ * (`coach/summary.ts`). Since 2026-10-18 the text goes too, whole up to the
+ * wiring's per-mark cap, beside its summary: Bryan found the summaries cut
+ * off and asked for the detail. The session id and the rest of the path
+ * stay here.
  *
  * Who counts: any attached session he types into. A typed prompt starts a
- * run, and the turn ends that follow it count until the next prompt the
- * harness injected (a channel event, a teammate message). Turns that only a
- * channel woke never count, so a lead working alone all day adds nothing.
+ * run, and every mark after it counts while the run lasts: the turn ends,
+ * and the prompts the harness injects (a channel event, a teammate
+ * message). An injected prompt used to end the run, so on a busy lead the
+ * turn ends after one counted nothing, and nine prompts in an hour came out
+ * as one minute. A run lasts `RUN_IDLE_MS` past his last typed prompt, so a
+ * lead working alone all day adds nothing, and turns only a channel woke
+ * never open one.
  *
- * Active minutes. Each turn end in a run adds the time since the run's
- * previous mark, its typed prompt or its last turn end, at most
- * `TURN_CAP_MS`. Five minutes is about one read-and-reply; a longer gap is
- * time the session worked alone or he was elsewhere, and counting it whole
- * is what would overstate. A session with a typed prompt and no turn end
- * yet shows one minute.
+ * Active minutes. Every counted mark adds the time since the session's
+ * previous mark, of any kind, capped:
+ *  - a typed prompt adds at most `READ_CAP_MS`. That gap is him reading the
+ *    last reply and writing the next prompt, which used to count nothing;
+ *  - a turn end or an injected prompt adds at most `TURN_CAP_MS`, the agent
+ *    working while he watches.
+ * The caps are what keep a session left overnight from counting: the prompt
+ * he types the next morning adds `READ_CAP_MS` at most, and nothing between
+ * counts, because the run ended `RUN_IDLE_MS` after his last prompt. A mark
+ * outside a run still moves the session's previous mark, so the reading
+ * time a typed prompt adds is measured from the agent's last word. A
+ * session's first mark has no gap and adds nothing; one with a typed prompt
+ * and nothing else shows one minute.
  *
  * Pure apart from `SessionRuns`'s memory; every time is handed in.
  */
 import { basename } from 'node:path';
+import type { CoverageSource } from './coverage.ts';
 
-/** The most one turn end adds. */
+/** The most a turn end or an injected prompt adds. */
 export const TURN_CAP_MS = 5 * 60_000;
+/** The most a typed prompt adds: reading the reply and writing the prompt. */
+export const READ_CAP_MS = 10 * 60_000;
+/** How long a run lasts past his last typed prompt. */
+export const RUN_IDLE_MS = 30 * 60_000;
 /** Sessions whose run is remembered before the oldest is forgotten. */
 const SESSIONS_CAP = 500;
 const REPO_MAX = 100;
 
+/**
+ * The most full text one digest carries, summed over every mark in it. A
+ * digest is one turn of a session that runs all week, so this is about its
+ * context, not the transport: about 10k tokens, under the 25k Claude Code
+ * allows one MCP tool result by default, with room for the rest of the
+ * digest. Twenty marks at the 2,000-character cap fit; a digest held over a
+ * long absence does not, and its oldest marks keep only their summary.
+ */
+export const DIGEST_TEXT_CHARS = 40_000;
+
 export const SESSIONS_NOT_COUNTED =
   'Claude Code sessions that never joined a board are not counted, nor are headless runs (claude -p, the SDK), nor turns only a channel or another agent started.';
 
-/** One counted mark: a typed prompt, or a turn end in its run with the time it adds. */
+/** One counted mark in a run, with the time it adds: a typed prompt, an
+ *  injected one, or a turn end. */
 export interface SessionTurn {
-  kind: 'prompt' | 'turn';
+  kind: 'prompt' | 'injected' | 'turn';
   at: number;
   boardId: string;
   board?: string;
@@ -50,8 +79,10 @@ export interface SessionTurn {
   session: string;
   repo: string;
   creditMs: number;
+  /** Where he typed, for the coverage report (`coach/coverage.ts`); never sent. */
+  source?: CoverageSource;
   /** The prompt he typed, or the turn's closing message, as the hook
-   *  reduced it. Summarised before a digest goes; never sent whole. */
+   *  reduced it. Sent beside its summary, within the digest's budget. */
   text?: string;
 }
 
@@ -60,6 +91,8 @@ export interface SessionActivity {
   at: number;
   kind: 'prompt' | 'turn';
   summary: string;
+  /** The mark's text in full, as the session's hook sent it. */
+  text?: string;
 }
 
 /** One session's line in a digest. */
@@ -88,28 +121,51 @@ export function repoOfCwd(cwd: unknown): string | undefined {
   return name === '' || name.length > REPO_MAX ? undefined : name;
 }
 
-/** Each session's open run: when its last mark was, from a typed prompt on. */
-export class SessionRuns {
-  private readonly last = new Map<string, number>();
+/** What a session's mark is, to its run. */
+export type MarkKind = 'typed' | 'injected' | 'turn';
 
-  /** A typed prompt opens a run; an injected one closes it. */
-  prompt(session: string, at: number, typed: boolean): void {
-    this.last.delete(session);
-    if (!typed) return;
-    this.last.set(session, at);
-    while (this.last.size > SESSIONS_CAP) {
-      const oldest = this.last.keys().next().value;
-      if (oldest === undefined) break;
-      this.last.delete(oldest);
+interface Run {
+  /** The session's previous mark, of any kind. */
+  last: number;
+  /** His last typed prompt, if any. */
+  typedAt?: number;
+  source?: CoverageSource;
+}
+
+/** Each session's run: its previous mark and his last typed prompt. */
+export class SessionRuns {
+  private readonly runs = new Map<string, Run>();
+
+  /** The time this mark adds, or null when it is outside a run. */
+  mark(session: string, at: number, kind: MarkKind, source?: CoverageSource): number | null {
+    const run = this.runs.get(session);
+    // Most recent last, so the oldest is the one forgotten.
+    this.runs.delete(session);
+    const next: Run = { last: Math.max(run?.last ?? at, at) };
+    if (run?.typedAt !== undefined) next.typedAt = run.typedAt;
+    if (run?.source) next.source = run.source;
+    if (source) next.source = source;
+    let credit: number | null;
+    const gap = run ? Math.max(0, at - run.last) : 0;
+    if (kind === 'typed') {
+      next.typedAt = Math.max(run?.typedAt ?? at, at);
+      credit = Math.min(gap, READ_CAP_MS);
+    } else {
+      const live = next.typedAt !== undefined && at - next.typedAt <= RUN_IDLE_MS;
+      credit = live ? Math.min(gap, TURN_CAP_MS) : null;
     }
+    this.runs.set(session, next);
+    while (this.runs.size > SESSIONS_CAP) {
+      const oldest = this.runs.keys().next().value;
+      if (oldest === undefined) break;
+      this.runs.delete(oldest);
+    }
+    return credit;
   }
 
-  /** The time this turn end adds, or null outside a run. */
-  turnEnd(session: string, at: number): number | null {
-    const prev = this.last.get(session);
-    if (prev === undefined) return null;
-    this.last.set(session, Math.max(prev, at));
-    return Math.min(Math.max(0, at - prev), TURN_CAP_MS);
+  /** Where the session's last prompt was typed, if it said. */
+  sourceOf(session: string): CoverageSource | undefined {
+    return this.runs.get(session)?.source;
   }
 }
 
@@ -133,14 +189,47 @@ export function sessionMinutesOf(
     };
     line.repo = t.repo;
     if (t.kind === 'prompt') line.prompts += 1;
-    else line.turns += 1;
+    else if (t.kind === 'turn') line.turns += 1;
     line.ms += t.creditMs;
-    const summary = summaryOf(i);
-    if (summary) line.activity = [...(line.activity ?? []), { at: t.at, kind: t.kind, summary }];
+    // An injected prompt adds time, never a line: he did not write it.
+    const kind = t.kind;
+    const summary = kind === 'injected' ? undefined : summaryOf(i);
+    if (summary && kind !== 'injected') {
+      const text = t.text ? { text: t.text } : {};
+      line.activity = [...(line.activity ?? []), { at: t.at, kind, summary, ...text }];
+    }
     bySession.set(key, line);
   }
   return [...bySession.values()].map(({ ms, ...line }) => ({
     ...line,
     minutes: Math.max(1, Math.round(ms / 60_000)),
   }));
+}
+
+/** The sessions with full text dropped from the oldest marks until the rest
+ *  fit `budget`, and how many marks lost it. Every summary stays. */
+export function fitActivityText(
+  sessions: readonly SessionMinutes[],
+  budget: number = DIGEST_TEXT_CHARS,
+): { sessions: SessionMinutes[]; textDropped: number } {
+  const oldestFirst = sessions
+    .flatMap((s) => s.activity ?? [])
+    .filter((a) => a.text !== undefined)
+    .sort((a, b) => a.at - b.at);
+  let total = oldestFirst.reduce((n, a) => n + (a.text?.length ?? 0), 0);
+  const cut = new Set<SessionActivity>();
+  for (const a of oldestFirst) {
+    if (total <= budget) break;
+    total -= a.text?.length ?? 0;
+    cut.add(a);
+  }
+  if (cut.size === 0) return { sessions: [...sessions], textDropped: 0 };
+  const fitted = sessions.map((s) =>
+    s.activity ? { ...s, activity: s.activity.map((a) => (cut.has(a) ? withoutText(a) : a)) } : s,
+  );
+  return { sessions: fitted, textDropped: cut.size };
+}
+
+function withoutText({ text: _text, ...a }: SessionActivity): SessionActivity {
+  return a;
 }

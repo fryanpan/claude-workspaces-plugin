@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -72,6 +72,19 @@ describe('key file', () => {
       expect(loadCookieKey(dir)).toBe(first); // reused, not regenerated
       const mode = statSync(join(dir, 'share-cookie.key')).mode & 0o777;
       expect(mode).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tightens a key file someone loosened, on the next load', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-cookie-key-'));
+    try {
+      const first = loadCookieKey(dir);
+      const path = join(dir, 'share-cookie.key');
+      chmodSync(path, 0o644);
+      expect(loadCookieKey(dir)).toBe(first);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

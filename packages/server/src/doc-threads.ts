@@ -1,6 +1,8 @@
 import {
   type Anchor,
+  type AnchorRefresh,
   type DeliveryStamp,
+  type ElementAnchor,
   type PageEdit,
   type PageSuggestion,
   type ReviewAnswerUndone,
@@ -19,6 +21,7 @@ import {
   reviewAnswered,
   reviewPayloadVersion,
   postReply as schemaPostReply,
+  refreshAnchor as schemaRefreshAnchor,
   replaceAnchor as schemaReplaceAnchor,
   setStatus as schemaSetStatus,
   setCommentDelivered,
@@ -908,6 +911,14 @@ export class DocThreads {
     const doc = this.p.doc(docId);
     if (!doc) return null;
     return schemaReplaceAnchor(doc.ydoc, threadId, anchor);
+  }
+
+  /** A page's report of what the thread's element says now; the first anchor
+   *  is kept beside it (`core/anchor/refresh.ts`). */
+  refreshAnchor(docId: string, threadId: string, seen: ElementAnchor): AnchorRefresh {
+    const doc = this.p.doc(docId);
+    if (!doc) return { ok: false, reason: 'not-found' };
+    return schemaRefreshAnchor(doc.ydoc, threadId, seen);
   }
 
   listThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {

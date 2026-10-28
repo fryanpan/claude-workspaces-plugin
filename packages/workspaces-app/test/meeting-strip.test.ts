@@ -317,7 +317,11 @@ function mount(
     speakers?: number;
     room?: RoomAudioProcessing;
     engine?: 'assemblyai' | 'soniox';
-    listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
+    listEngines?: () => Promise<{
+      engines: string[];
+      default: string | null;
+      off?: string;
+    } | null>;
     loadSpeakers?: () => Promise<DocSpeakers | null>;
     onMeetingChange?: (meetingId: string | null) => void;
     onMeetingEnded?: (meetingId: string) => void;
@@ -2054,6 +2058,45 @@ describe('what the strip tells the microphone and the server about the room', ()
     // the press, not to the mount.
     const got = await press({ mode: 'solo' }, 'Multiple Speakers');
     expect(got.call?.mode).toBe('conversation');
+  });
+});
+
+describe('a server whose profile turned transcription off', () => {
+  const OFF = 'Transcription is off on this server.';
+  const offServer = () => Promise.resolve({ engines: [], default: null, off: OFF });
+
+  it('disables the Record button and gives it the reason', async () => {
+    const h = mount(undefined, { listEngines: offServer });
+    await settle();
+    expect(h.record().disabled).toBe(true);
+    expect(h.record().querySelector('.meeting-record-setting')?.textContent).toBe(
+      'Off on this server',
+    );
+    expect(h.record().title).toBe(OFF);
+    expect(h.record().getAttribute('aria-label')).toContain(OFF);
+    expect(h.options().hidden).toBe(true);
+  });
+
+  it('opens no socket and no mic when pressed', async () => {
+    const capture = vi.fn();
+    const h = mount(capture, { listEngines: offServer, alone: () => true });
+    await settle();
+    h.record().click();
+    await settle();
+    expect(h.sockets).toHaveLength(0);
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('leaves the button as it was on a server that turned nothing off', async () => {
+    const h = mount(undefined, {
+      listEngines: () => Promise.resolve({ engines: ['soniox'], default: 'soniox' }),
+    });
+    await settle();
+    expect(h.record().querySelector('.meeting-record-setting')?.textContent).not.toBe(
+      'Off on this server',
+    );
+    expect(h.record().title).not.toBe(OFF);
+    expect(h.record().disabled).toBe(false);
   });
 });
 

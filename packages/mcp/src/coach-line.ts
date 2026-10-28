@@ -11,7 +11,8 @@
  * through `coach_moment`; what to do with each line is the
  * `claude-workspaces:coaching` skill. A digest then lists
  * the owner's Claude Code sessions, repo and active minutes, with a line for
- * each prompt he typed and each turn end, and ends with this week's plan
+ * each prompt he typed and each turn end and, below it, its words in full
+ * where the server had room for them, and ends with this week's plan
  * goals in plan order, or says there is no current plan. A digest that
  * waited while the session was away says how many windows it covers.
  *
@@ -51,6 +52,8 @@ export interface CoachPayload {
   windows?: number;
   /** Windows dropped while it was away. */
   dropped?: number;
+  /** The oldest marks sent with their summary only, past the server's room. */
+  textDropped?: number;
 }
 
 /** One Claude Code session's line in a digest. */
@@ -61,8 +64,9 @@ export interface CoachSessionMinutes {
   minutes?: number;
   prompts?: number;
   turns?: number;
-  /** What he asked and what the session answered, a few words each. */
-  activity?: { at?: number; kind?: string; summary?: string }[];
+  /** What he asked and what the session answered, a few words each, and
+   *  the words in full where the digest had room for them. */
+  activity?: { at?: number; kind?: string; summary?: string; text?: string }[];
 }
 
 /** One line of a digest: a stay in one place, or one thing done. */
@@ -160,6 +164,7 @@ function sessionLines(p: CoachPayload, timeZone?: string): string[] {
       a.summary
         ? [
             `  -${clock(a.at, timeZone)} ${a.kind === 'turn' ? 'session' : 'he asked'}: ${a.summary}`,
+            ...(a.text && a.text !== a.summary ? [`    ${a.text.replace(/\n/g, '\n    ')}`] : []),
           ]
         : [],
     );
@@ -172,7 +177,12 @@ function sessionLines(p: CoachPayload, timeZone?: string): string[] {
     lines.length > 0
       ? ['Claude Code sessions (active minutes):', ...lines]
       : ['Claude Code sessions: none counted.'];
-  return [...head, ...(p.sessionsNote ? [p.sessionsNote] : [])];
+  const cut = p.textDropped
+    ? [
+        `The ${p.textDropped} oldest line${p.textDropped === 1 ? '' : 's'} came without ${p.textDropped === 1 ? 'its' : 'their'} words in full: the digest had no room.`,
+      ]
+    : [];
+  return [...head, ...cut, ...(p.sessionsNote ? [p.sessionsNote] : [])];
 }
 
 function digestLine(p: CoachPayload, timeZone?: string): string | null {

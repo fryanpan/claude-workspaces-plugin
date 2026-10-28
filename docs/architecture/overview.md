@@ -51,14 +51,14 @@ flowchart TB
   plug["plugin<br/>skills · hooks · bundled mcp"]
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
-    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution<br/>socket-handlers · server-options · feature-module<br/>connector/ (hosted MCP at /mcp)"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
-    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts"]
+    ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
   core["core — pure shared library"]
   disk[("data dir<br/>.ydoc · JSONL · JSON")]
@@ -238,12 +238,29 @@ guard would say otherwise. What the table still cannot see is whether an
 `owner-in-handler` route really carries its refusal — that one is the
 reviewer's, and the routes that have it carry their own tests.
 
-Dispatch stays with the ordered chain in `server.ts` on purpose. Bun matches
-by specificity; this router's order is behaviour in eight documented places,
-among them the Recall status webhook immediately above the `/recall/` upgrade
-and every `…/docs/:docId/meetings…` pattern above the doc resource catch-all.
-So every mounted entry's handler is the same front door an unmatched address
-reaches through `fetch`, and the table is the registry rather than the router.
+Dispatch stays with the ordered chain on purpose, and the chain is
+`routes/request-chain.ts` with its two lower thirds, `request-chain-board.ts`
+and `request-chain-tail.ts` (shared shapes in `request-chain-context.ts`).
+`createServer` builds its context once and matches no route itself. Bun
+matches by specificity; this router's order is behaviour in eight documented
+places, among them the Recall status webhook immediately above the
+`/recall/` upgrade and every `…/docs/:docId/meetings…` pattern above the doc
+resource catch-all. So every mounted entry's handler is the same front door an
+unmatched address reaches through `fetch`, and the table is the registry
+rather than the router.
+
+**How a family wires itself in.** `feature-module.ts` is the shape: a family's
+`start` takes the long-lived values it reads and returns its routes, its
+`stop` and any values other families read. A family whose routes claim a
+prefix nothing else answers is registered in `routes/features.ts`: the chain
+tries every registered family at one position (where Incoming Messages sat,
+below the voice API and above the coach) and shutdown stops them at one
+position, so adding one is a module plus a line in that list, with no edit to
+`server.ts`. `routes/inbox-feature.ts` is the first; what a registered family
+may read is `routes/feature-routes-context.ts`. A family whose construction
+others read, or whose teardown has a fixed place, is started by hand from
+where its block sat: `meeting-wiring.ts` (in the Meetings group) builds every
+meeting relay before the doc store and is disposed after the sockets close.
 
 **What runs on a clock.** Three loops in the server tick rather than answer a
 request, and all three take an injected `now` so a test moves the clock
@@ -383,6 +400,21 @@ flag copied onto each one could be missed. `server.ts` asks it once per
 request, right after admission and before the websocket upgrades, so no
 file route has to remember to.
 
+**A folder says what it left out, and plays what it holds.** `fs-scan.ts`
+lists a set's folder with `git ls-files -z` (a name with a byte above 0x7f is
+otherwise C-quoted and names no file), and `scanFolderReport` adds every file
+the listing left out and why, for a bind's `skipped`; a bind's `include`
+admits ignored files by name (`admitIncluded`), and its answer's `listed`
+names every file it listed and `links` gives each its page link. A link to a
+file nobody has opened yet opens its doc on the first request
+(`openListedMember`); `files` stays the docs the bind opened, only the entry.
+`folder-file-types.ts`
+names the binaries no surface can show, which the listing leaves out. A video
+or raster image (`core/src/media-types.ts`, read by server and page alike)
+becomes a member with no binding; `routes/review-raw.ts` streams its bytes
+with range requests, and `workspaces-app/src/media/` mounts the player in
+place of the code view.
+
 Three more modules put the documents that already exist onto that identity,
 and none of them runs on the server's own clock. `doc-identity-plan.ts` is a
 pure planner — it takes the corpus as an io parameter and says which key each
@@ -480,17 +512,24 @@ page". Nothing else changes in the data flow: the calls are the same routes
 and sockets, made from a different page. The rule and its limits are in
 [security.md](security.md).
 
-**The frame can live on a hostname of its own.** `frame-host.ts` (server, top
-level, beside `mockup-frame.ts`) is off unless `CW_FRAME_ORIGIN` names a
-frame-only hostname, a subdomain of the board's own domain. Set, a host page
-on one of the board hostnames (`CW_FRAME_BOARD_HOSTS`, default the operator's
-proxied hostnames) points its frame at the same path on that hostname, and
-the frame gets a real origin that is never the board's: storage of its own,
-and its own subresource requests carry that hostname's cookie. A share or
+**The frame can live on its project's own frame hostname.** `frame-host.ts`
+(server, top level, beside `mockup-frame.ts`) is off unless `CW_FRAME_ORIGIN`
+names the project's frame hostname, `<project>.<frame domain>`, on a domain
+that is not the board's. Set, a host page on one of the board hostnames
+(`CW_FRAME_BOARD_HOSTS`, default the operator's proxied hostnames) points its
+frame at the same path on that hostname, and the frame gets a real origin on
+another site: storage of its own, and no way to read or set the board's
+cookies. The host page writes a frame ticket into the frame's address
+(`frame-ticket.ts`), which the frame hostname trades for a partitioned cookie,
+because Safari sends a frame on another site no Access cookie. The ticket and
+the cookie are two signed formats, so a cookie cannot be redeemed for another
+one, and the cookie ends twelve hours after its ticket was minted. A share or
 collaboration visitor's page keeps the opaque frame. Request admission checks
 the frame hostname before any other kind, and answers there only a mock's
 frame, an app door's paths and the widget's public scripts, each only as the
-fetch type it is loaded as; everything else is a 404 before a route runs. The
+fetch type it is loaded as, and an app's files only to a page on the same
+frame hostname; everything else is a 404 before a route runs. The board
+router sends `<project>.<frame domain>` to that project's server. The
 bridge learns the host page's origin from the frame's seed and relays every
 call by path, so the host still resolves it against the board's hostname.
 
@@ -642,6 +681,22 @@ controls set gets a dimmed pin. Tapping it loads that address through
 `widget-goto.ts`, which leaves the thread's id in session storage for the next
 render to show. `widget-thread-text.ts` holds the snippet and receipt markup
 that the popover and the list share. No new route and no new fetch.
+
+**A pin follows an element whose words change a little each round.** The
+resolver in core's `anchor/element.ts` takes the element of the anchor's tag
+that says most of its words, over half of them, and none when two are equally
+close. Over three rounds of a rewritten mock that is not enough, so the page
+reports what each pinned element says now: `widget-anchor-refresh.ts`, called
+from the page list's `listHook` in `mic.js` and `mockup-live.js`, posts the
+element's fresh description to the thread's existing `…/reanchor` route with
+`refresh: true`. It reports only an element that says over half of the
+anchor's words with no other element of its tag as close, on the page state
+the thread was made in, and not while a mock shows an older round. The server
+(`core/anchor/refresh.ts`) moves only the fingerprint and snippet, keeps the
+thread's context and tap spot, and stores the anchor as first made under
+`firstAnchor`, once. The write lands in the doc's Yjs map, so every open page
+redraws from it. A share visitor's report is refused unless the visitor is
+the board's owner.
 
 **A comment that never reached the server says so, on the comment.** Every
 composer on every surface already handed the words back when a post was
@@ -841,6 +896,22 @@ one model per agent, a voice token of its own, and the same addressed row
 and `answer_voice` wait underneath. Its contract is
 [voice-conversation-api](voice-conversation-api.md).
 
+**A mock or app that talks.** A page served in a board's frame can speak,
+listen and post to its own dev server through
+`WS /workspaces/<ws>/docs/<docId>/app-voice`. Its wire is `core/app-voice.ts`
+(a new top-level core module). The client is `widget/src/app-voice/` (a new
+top-level widget directory), built as its own `/widget/app-voice.js` and kept
+out of `widget.iife.js`. The server half is `app-voice/` (a new top-level
+server directory). `token.ts` signs a token naming the doc and the board,
+`seed.ts` writes it into the frame for the owner when the frame's HTML names
+the client, and `gate.ts` decides who is handed one and who may open the
+socket. `session.ts` runs one socket on the spoken reply's engines, and
+`say.ts` makes the write to the app. `routes/upgrade-stream.ts` checks the
+token. `relay.ts` is called from `socket-handlers.ts`, the same way as the
+other socket kinds. Inside the opaque frame, the socket goes through the host
+page's relay, like the widget's own sockets. The design is
+[app-voice](app-voice.md).
+
 **The planning voice** rides the same socket, and is always on in a doc:
 nobody says "interview me" any more (it still works). The doc's Talk button
 (`doc/doc-interview.ts`, its markup in `doc-interview-view.ts`; mounted with
@@ -970,8 +1041,10 @@ always delivered, because an agent cannot detect silence. Rules in
 
 *An analytics event.* `review_item.viewed` records that a person opened a card
 and changes nothing, so the server keeps it off the fan-out while the audit log
-still gets the row. `review_item.answered` stays on the stream, because an
-answer is the wake an agent waits for. The list is in
+still gets the row. `review_item.answered` is kept off too: a ticket answer
+reaches its filer and the lead as `decision.answered`, which carries the
+words, the task's title and the item's id, so one answer is one wake. The
+list is in
 `packages/server/src/review-items/analytics.ts`.
 
 *An act with no words.* A resolve is a status flip and carries no text, so the
@@ -982,13 +1055,21 @@ thread, so a resolve that closed an unanswered ask still wakes: it is the only
 report that reaches the agent who asked. Rule in
 `packages/mcp/src/bookkeeping-events.ts`.
 
-*An act with one reader.* A review item WITHDRAWN or ANSWERED on a ticket does
-carry a request, but only for the agent that RAISED the ask: its question went
-away, or the answer it stopped for arrived. Nobody else on the board has
-anything to do, and everybody else is the common case — any agent may retire a
-stale ask, and the server's own auto-withdrawals fire as a board actor that the
-self-echo rule suppresses for no one. So the store stamps the filer's id on
-those two events and the child delivers to that session alone
+*A second frame for one act.* A question asked on a review item's thread
+arrives as the thread's `thread.created`, with the words, and as
+`decision.info_requested`. The board page reads the second, so the server
+sends it, and the child drops it when it carries a `threadId`. A typed "tell
+me more" has no thread, so its `decision.info_requested` still wakes. Rule in
+`packages/mcp/src/bookkeeping-events.ts`; `packages/server/test/one-wake-per-answer.test.ts`
+counts the wakes for an answer and for a comment.
+
+*An act with one reader.* A review item WITHDRAWN on a ticket does carry a
+request, but only for the agent that RAISED the ask: its question went away.
+Nobody else on the board has anything to do, and everybody else is the common
+case — any agent may retire a stale ask, and the server's own auto-withdrawals
+fire as a board actor that the self-echo rule suppresses for no one. So the
+store stamps the filer's id on that event and the child delivers to that
+session alone
 (`readsThisReviewItemEvent` in `packages/mcp/src/review-item-line.ts`). A
 filing and a revision are not addressed this way: those are news to the board.
 The id is stripped from a visitor's copy with every other id
@@ -1015,9 +1096,35 @@ CLOSED task out in slim form: `task-row-slim.ts` drops the six fields only the
 open panel renders, and `routes/task-detail.ts` hands the whole task back to the
 one reader who opens it. `board-doc-compaction.ts` sheds the doc's delete set
 at hydrate, which is safe for a `ws:` doc and nothing else because the sidecar
-is the record and the projection is reasserted after load. `slow-load-alarm.ts`
-reports a board load that crossed its budget. Measured together on the live
-board: 1.53 MB on the wire before, 0.22 MB after.
+is the record and the projection is reasserted after load. Measured together
+on the live board: 1.53 MB on the wire before, 0.22 MB after.
+**Every page reports its own load, and a slow one raises.** The board, Home,
+the review page, a doc, a mock, a diff and a folder each post one report per
+page load naming the page type and the ms to its main content
+(`workspaces-app/src/page-load-report.ts`; the doc bundle's three page types
+are told apart in `doc/doc-load-report.ts`, and the mock's host page reports
+from `widget/src/mock-host.ts`). A page on a board posts to that board's
+`/workspaces/:ws/load-reports`; Home and `/review` post to `/api/load-reports`
+(`routes/load-reports.ts`). `slow-load-alarm.ts` judges every report against
+2,000 ms, raises through Sentry once per page type per board per five minutes,
+and `page-loads.ts` keeps one server-wide log that
+`GET /api/load-reports/slowest` reads back as the slowest load per page type
+over 24 h for the daily health check. These reports are the only record of
+load time: the browser's Sentry bundle (`sentry-boot.ts`) reports errors and
+console logs, with no tracing, so `sentry-page.ts` and the measurements it fed
+onto a pageload span are gone. That bundle loads `async`, and an inline buffer
+in each shell (`server/src/browser-sentry.ts`) holds boot errors until it runs.
+**A doc's text paints before its editor loads.** The doc entry carries only
+the router, the socket and Yjs. When the doc syncs, `doc/prose-paint.ts` draws
+the prose fragment as plain DOM with the editor's own classes, and
+`doc/markdown-mount.ts` (the editor, the panels, the margin) loads behind it;
+the editor then takes the painted element over in place
+(`editor.ts`, Tiptap's `element: { mount }`), so nothing re-flows. The code,
+media, redline and coach surfaces are each an `import()` for the same reason:
+CodeMirror alone was ~720 KB of the doc entry, minified. `doc-image-path.ts` holds the
+image-path helpers the paint and the editor share. The build strips comments
+from the stylesheets it copies (`scripts/strip-css-comments.ts`), which took
+`board.css` from 81 KB gzipped to 16 KB.
 **An edit re-projects the rows it names, not the board.** The projection runs on
 the server's one thread, so a whole-board pass per store event taxed every
 request on a busy board. `board-row-sync.ts` writes only the rows an event or a
@@ -1476,9 +1583,17 @@ absent rather than asking the note-taker to judge what is carried — the
 judgement that let the reason of an "X because Y" line go while its point
 stood.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `owner-ask.ts`, `stall-gate.ts`, `unanswered-thread.ts`, `waiting-unfiled.ts`, `waiting-unfiled-review.ts`, `waiting-unfiled-frame.ts`, `ui-review-gate.ts`, `blockage-lift.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-missed-words.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-dictation.ts`, `notes-reason-ask.ts`, `notes-inversions.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
-| **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `settings-allow-file.ts`, `git-diff.ts`, `sentry.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
-| *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `owner-ask.ts`, `stall-gate.ts`, `unanswered-thread.ts`, `waiting-unfiled.ts`, `waiting-unfiled-review.ts`, `waiting-unfiled-frame.ts`, `ui-review-gate.ts`, `blockage-lift.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-missed-words.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-dictation.ts`, `notes-reason-ask.ts`, `notes-inversions.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts`, `project-profile.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+| **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `settings-allow-file.ts`, `git-diff.ts`, `sentry.ts`, `outbound-fetch.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
+| *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts`, `start-contract.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. `start-contract.ts` is the supervisor's half: the port, the data dir (required, no default) and whether a busy port is waited for (prod) or refuses the start; no start moves to another port. |
+
+`outbound-fetch.ts` joins the adapters as the one facility every other adapter
+reaches the network through. Each module that calls out still takes an
+injectable fetch; its default is now one of the guard's three ways out — the
+public path for an address from content, the fixed-host path for a vendor or
+configured host, the loopback path for an attached dev server or this server
+itself — and `check:outbound-fetch` fails on a bare `fetch` anywhere else in
+the server. The rule is in [security.md](security.md).
 
 `answer-coverage.ts` (server) and `answer-coverage-prompt.ts` (core) join
 the Board group beside the review judge, split the same way and moving no
@@ -1522,7 +1637,7 @@ helper, importing nothing from the subsystems it watches: a lag monitor that
 reports a turn which held the single JS thread past a threshold and names the
 requests in flight at the time, and `timeSlice`, the budget a long pass uses to
 hand the loop back. `server.ts` registers each request at the front door and
-arms the monitor beside the other running-board timers; `doc-edit-ops.ts` is
+arms the monitor beside the other running-board timers; `doc-suggest-ops.ts` is
 its first `timeSlice` caller. The reason it exists is that the 2026-09-16
 outages were legible only as a 404 that took 56 seconds — the block itself was
 recorded nowhere, and whether a stall was a synchronous pass or the OS
@@ -1533,7 +1648,9 @@ flight is that second thing, and the line says so.
 write the `[doc-store] mem` line: the footprint macOS counts, read every 30
 seconds through `bun:ffi`, printed on a 64 MB move or every five minutes, with
 the window's requests by route family and its busiest doc-store activator.
-`doc-store.ts` owns the sampler and `server.ts` counts each request at the
+Each line also carries the JS heap, and every ten minutes one carries the
+heap's commonest object types and biggest growers, so heap growth can be told
+from native growth. `doc-store.ts` owns the sampler and `server.ts` counts each request at the
 front door; neither module imports a subsystem.
 
 `doc-residency.ts` joins the doc-store group and moves no boundary. It is the
@@ -1552,6 +1669,11 @@ opening it — the listing rows, the alias table and the `.ydoc` mtimes a listin
 reports as activity — moved out of `doc-store.ts` whole, behind a host of
 thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
 and the rest as one-line forwarders, so no caller changed.
+
+`doc-create-conflict.ts` joins the doc-store group and moves no boundary; the
+`doc-*.ts` glob draws it. It decides whether a create naming an existing doc
+would repoint that doc to another file or type, which `POST
+/workspaces/<ws>/docs` then refuses with 409 `doc_exists`.
 
 `server-starts.ts` joins Ops and moves no boundary. `bin.ts` records every
 start of the process in `server-starts.json` beside the deploy log: once at
@@ -1578,6 +1700,14 @@ environment carries the prod launchd job's label in `XPC_SERVICE_NAME`, and
 the eval item everywhere else. `summarize.ts`'s `resolveKeyFrom`, which every
 Claude adapter already calls, asks it; `scripts/eval-credential.ts` asks it with
 the marker stripped. The environment and the Keychain reader are parameters.
+
+`project-profile.ts` joins the DOMAIN row and moves no boundary. It decides
+whether this process is a project server (a Fly machine, or one naming
+`CW_PROJECT_PROFILE`), which features its profile turns off, and which
+credential names it must not hold. On one, `summarize.ts`'s lookup reads only
+`CW_ORG_ANTHROPIC_API_KEY`, `share/keychain.ts` runs no `security`, and
+`server-deps.ts` strips the other names from the environment before building
+anything. On the Mac every answer is "nothing changes".
 
 `claude-key-slot.ts` joins the SERVICES row and moves no boundary, because
 it holds one piece of process state the domain row's purity bar would not
@@ -1704,7 +1834,12 @@ Four top-level modules keep a doc page readable with no network, and none of
 them changes a layer. `doc-cache.ts` is a store adapter: the browser's
 IndexedDB copy of each opened markdown doc, written only once a server sync
 has given it a state vector to check against, tagged with the session's
-identity and cleared when another identity answers. `doc-cache-boot.ts` is
+identity and cleared when another identity answers. Each edit made on the
+page is appended to a second database (`cw-doc-cache-updates`) as it happens,
+in a transaction committed at once (one left to auto-commit was measured
+lost to a reload on a slowed CPU),
+and the full copy written 800ms later drops the edits it covers, so a reload
+loses at most the keystroke in flight. `doc-cache-boot.ts` is
 the controller tier between the router's two hooks and that store: with a
 copy, the doc's meta comes from it and the socket's doc is seeded from it
 before the socket opens; core's `connect` takes an `acceptServerState` option
@@ -1778,7 +1913,14 @@ pasted, dropped or picked image file to that route's POST, which stores it in
 the `doc-*.ts` the diagram draws), then inserts the path it answers.
 `doc-image-retry.ts`, which that block image installs, asks again for an
 image whose file was not there yet, so it appears once the file lands without
-a reload; it changes the DOM's `src` only. `comment-delete-guard.ts` and
+a reload; it changes the DOM's `src` only. `doc-image-versions.ts`, which it
+also installs, points each such image at `?v=<mtime>` from the doc's
+`imageVersions` map, so an overwritten file is a new address no cache can
+answer with the old bytes, and an open page shows it without a reload. The
+server's `doc-image-versions.ts` (a `doc-*.ts` the diagram draws) writes that
+map from a sweep over docs with a page open, and core's `image-versions.ts`
+holds the map's name and key, so the two sides cannot disagree about either.
+`comment-delete-guard.ts` and
 `mass-delete-undo.ts` join the editor tier and change none of the picture:
 two extensions in `editor.ts`'s base list. The first refuses Delete over a
 selection spanning blocks right after a tap on a comment, which is how a
@@ -2001,7 +2143,11 @@ which proposes whole blocks rather than a run of text: the target's words
 struck, the replacement offered as real blocks beside it under the same sid,
 so `suggest-ops.ts` resolves it with no new code and a replacement that is
 itself a heading, a list or a fence is accepted as one rather than as
-characters. `prose-batch-structure.ts` holds what an applied edit must leave
+characters. `prose-batch-write.ts` is the writer under the batch: it turns
+markdown into elements at a position — growing a list rather than starting a
+second one, rewriting one bullet as several, keeping a rewritten block's id —
+and knows nothing about ops, outcomes or who owns a block.
+`prose-batch-structure.ts` holds what an applied edit must leave
 standing around itself: the notes nested under a bullet it replaces, the
 editor's trailing blank line kept at the end rather than stranded above an
 insert, and a block with no words, which applies directly whoever owns it.
@@ -2024,6 +2170,10 @@ and refuses rather than carry a line a person owns. Server-side they are reached
 `doc-outline-ops.ts`, which sits beside `doc-edit-ops.ts` in the services tier
 for the reason that module already gives: `doc-edit-ops.ts` was at the
 500-line bar, and the outline verbs are a family of their own.
+`doc-suggest-ops.ts` joins them on the same terms: the suggestion verbs
+(list, propose, accept, reject, resolve-all) moved out of `doc-edit-ops.ts`
+because they are the only ones that announce and the only async one, and they
+resolve docs through `DocEditOps.live` so a dry run's copy is what they see.
 
 The scoped edit verbs — find_and_replace, rewrite_thread_region, the anchor
 inserts and the block deletes — run through `DocEditOps.guardScopedEdit`, the
@@ -2111,9 +2261,13 @@ and a person moving a task after the rank voids it. `POST
 agent token (MCP verb `rank_review_item`). The lead hears what to rank from
 `ask-feed.ts`: every new review item on another board, batched over a
 10-minute window into one addressed `workspace.new_asks` frame carrying board,
-row, key, headline and filing time, never the detail. A board the coach is
-off for (`coach/exclusion.ts`) is excluded from the feed and from the ranks.
-A board with members or a share link is not off.
+row, key, headline and filing time, never the detail. The feed and the
+ranks cover every board, including one that is private or that the coach is
+off for: the lead sees what the owner sees (the owner, 2026-10-23), and
+`coach/exclusion.ts` applies to the coach alone. A lead stream opened off this
+machine (through the tunnel, or from a peer that is not loopback) gets the
+frame without the asks from local-only boards and docs (`offBoxAskView`,
+which `routes/upgrade-stream.ts` hands both stream kinds as their transform).
 The window is `held-window.ts`, which the coach's session feed uses too, and
 `lead-rank-wiring.ts` composes the three against the stores.
 
@@ -2217,7 +2371,8 @@ page's section (`coach/section.ts`, `coach/landing.ts`) lists the goals, offers 
 how-readily setting, and says how many events the session read today.
 (B) *Observe*: board and doc pages send what he is looking at, and each
 paragraph he writes when he pauses, to `/coach/here`
-(`workspaces-app/src/coach-card.ts`); `coach/stream.ts` turns that and his
+(`workspaces-app/src/coach-card.ts`); the front page and the review walk,
+which name no board, send which page they are (`PAGE_PLACES`); `coach/stream.ts` turns that and his
 own comment, reply and open rows (through `onActivity` in `activity.ts`)
 into one event per thing he does, dropping repeats. `coach/exclusion.ts`
 drops everything from a board that is local-only, sharing-locked, or that he
@@ -2235,13 +2390,17 @@ possibly stale past eight days, or says there is no current week plan
 (`coach/week-plan.ts`). It also lists his Claude Code time per attached session, the repo and its
 active minutes, counted from each prompt he typed (the plugin's
 UserPromptSubmit hook posts typed-or-not, and a typed prompt's reduced text,
-to `routes/prompt-marks.ts`) through the Stop hook's turn notes after it, never
-for the coach (`coach/session-minutes.ts`). One Haiku call per digest says
-each prompt and turn in a line (`coach/summary.ts`); the text stays on the
+to `routes/prompt-marks.ts`) through the turn notes and injected prompts after
+it, each crediting the gap since the session's previous mark, capped, never
+for the coach (`coach/session-minutes.ts`). Haiku says each prompt and turn
+in a line, 40 marks a call (`coach/summary.ts`); the text stays on the
 server. A hook in a session launched with no board posts to the one board
 where that session holds a stream (`plugin/hooks/lib/joined-board.ts`), and a
 `claude -p` or SDK run counts as nobody typing. A typed prompt opens a window as
-a board event does; a turn end never does. A quiet stretch sends nothing,
+a board event does, and so does any mark in his run after it; a mark outside a
+run never does. `coach/coverage.ts` counts, per hour, what he sent by source
+(desktop, iPad, phone, Remote Control, terminal), what the coach let go and
+why, and what the digests carried, for the loopback `GET /coach/coverage`. A quiet stretch sends nothing,
 and answers and the setting go at once. With no session holding a stream
 the windows wait in `coach/backlog.json` (`coach/backlog.ts`, bounded to 96
 windows and 48 hours, across a restart) and go as one digest when its stream
@@ -2311,6 +2470,7 @@ the client module is chrome-free measurement with no UI of its own.
   `stall-frame-news.ts`'s `withoutPersonBlocked` — a filter, not a module, so
   the picture is unchanged there.
 - [stall-detection.md](stall-detection.md) — gains three top-level modules and no new edge, all three answering ONE question: does this frame tell its reader anything it does not already have? A week of the fleet's transcripts put repeat or empty reminders at 11% of all model spend, and a wake is the reader's whole turn. `wake-sent-sets.ts` is the memory — per board, per session, the tokens of the last frame actually delivered, persisted beside the armed stamps so a deploy does not re-send what the previous process sent; both nudgers own one. `stall-frame-news.ts` is the three readings the stall wake takes of a built frame: the tokens the stamp does not already carry, whether every task the frame would name moved inside the moved-within window, and the person-blocked rows that come off the board before the lead is woken at all. `waiting-unfiled-routing.ts` is which rung of the unfiled-ask ladder a row belongs on, split out of `waiting-unfiled-escalation.ts` when the two buckets stopped sharing an addressee. All three are pure — no clock, no store, no socket — so they join the domain tier beside `stall-gate.ts`, and their callers are the two nudgers and the escalation that already sat in the keep-moving box.
+- [app-voice.md](app-voice.md) — how a sandboxed mock or app proves it is one doc on one board, and the socket that lets it speak, listen and write to its dev server. It adds `core/app-voice.ts`, `widget/src/app-voice/` and `server/src/app-voice/`, drawn beside the spoken reply above.
 - [security.md](security.md) — the boundaries, and which gate decides each one.
 - [routes.md](routes.md) — every front-door path pattern and the gate it sits behind, generated from `routes/route-table-rows.ts`.
 - [glossary.md](glossary.md) — the nouns, once each; [exceptions.md](exceptions.md) — every file over 500 lines, split or excepted, with [split-plan.md](split-plan.md) as its queue.

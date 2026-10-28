@@ -45,9 +45,13 @@ import {
 } from '@claude-workspaces/core/review-hold';
 import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import {
+  DESTRUCTIVE_STEP_PASS_REASON,
+  HUMAN_ONLY_COMMIT_PASS_REASON,
   REFUSAL_DENIAL_PASS_REASON,
   REVIEW_REFUSAL_RULES,
   type ReviewRefusalKind,
+  namesDestructiveGitStep,
+  namesHumanOnlyCommit,
 } from '@claude-workspaces/core/review-refusal';
 import type { DocStore } from './doc-store.ts';
 import { taskDeepLink } from './home-brief.ts';
@@ -592,23 +596,24 @@ export function createReviewGate(ctx: ReviewGateContext) {
      * report that says the check was refused, by the one path the guard below
      * does not sit on.
      */
-    const priorHeldFor = priorJudgement?.heldFor ?? [];
-    const heldFor = target.refusedCheck
-      ? priorHeldFor.filter(
-          // The disavowed hold, whichever of the two shapes it is stored in.
-          //
-          // `isGetItAnywayHold` reads the judge's sentence, but a hold whose
-          // sentence named a figure the item never stated was replaced whole
-          // by `REVIEW_HOLD_UNUSABLE_REASON` before it was recorded — and the
-          // lead's real holds were exactly that, because both named
-          // `/v1/models`. So on this path the laundering words are already
-          // gone and the text filter finds nothing to drop. What is left is a
-          // hold the gate itself could not put into words, carried onto a
-          // check the gate has now disavowed: it goes too, for the same
-          // reason its sibling does.
-          (r) => !isGetItAnywayHold(r) && r !== REVIEW_HOLD_UNUSABLE_REASON,
-        )
-      : priorHeldFor;
+    const countedHolds = (history: string[]): string[] =>
+      target.refusedCheck
+        ? history.filter(
+            // The disavowed hold, whichever of the two shapes it is stored in.
+            //
+            // `isGetItAnywayHold` reads the judge's sentence, but a hold whose
+            // sentence named a figure the item never stated was replaced whole
+            // by `REVIEW_HOLD_UNUSABLE_REASON` before it was recorded — and the
+            // lead's real holds were exactly that, because both named
+            // `/v1/models`. So on this path the laundering words are already
+            // gone and the text filter finds nothing to drop. What is left is a
+            // hold the gate itself could not put into words, carried onto a
+            // check the gate has now disavowed: it goes too, for the same
+            // reason its sibling does.
+            (r) => !isGetItAnywayHold(r) && r !== REVIEW_HOLD_UNUSABLE_REASON,
+          )
+        : history;
+    const heldFor = countedHolds(priorJudgement?.heldFor ?? []);
     // How the item got to the reader, when it did not get there by passing.
     // Carried forward on every later verdict for the same reason `heldFor`
     // is: an item that reached the reader unjudged is still one that reached
@@ -761,6 +766,17 @@ export function createReviewGate(ctx: ReviewGateContext) {
      * Never on an item that reports a permission denial either: a denial is
      * final, the reader is the one person left to ask, and a refusal there
      * would push the agent to get past it.
+     *
+     * Never on an item that asks about a destructive git step (a force-push,
+     * a history rewrite, a branch or tag deletion, a hard reset), for every
+     * rule but "self-check": no consent covers one, and a refusal tells the
+     * agent to go ahead. On 2026-10-17 the judge refused an ask to approve a
+     * force-push under "ship" although its prompt named the exception, so
+     * this does not rely on the judge. "self-check" stays: it tells the
+     * agent to read a fact, never to take the step.
+     *
+     * Never "ship" on an item that says agents may not commit or push on its
+     * repo (`namesHumanOnlyCommit`): there is no consent to use.
      */
     let refusal: ReviewRefusalKind | undefined;
     if (verdict !== null && !verdict.ok && !target.ownerCheck) {
@@ -768,6 +784,16 @@ export function createReviewGate(ctx: ReviewGateContext) {
       if (refusal !== undefined && namesPermissionRefusal(judgedText(words))) {
         refusal = undefined;
         verdict = { ok: true, reason: REFUSAL_DENIAL_PASS_REASON };
+      } else if (
+        refusal !== undefined &&
+        refusal !== 'self-check' &&
+        namesDestructiveGitStep(judgedText(words))
+      ) {
+        refusal = undefined;
+        verdict = { ok: true, reason: DESTRUCTIVE_STEP_PASS_REASON };
+      } else if (refusal === 'ship' && namesHumanOnlyCommit(judgedText(words))) {
+        refusal = undefined;
+        verdict = { ok: true, reason: HUMAN_ONLY_COMMIT_PASS_REASON };
       }
     } else if (verdict !== null && !verdict.ok && verdict.refuse !== undefined) {
       // The owner line's hold. The judge is told a refusal needs no reason,
@@ -807,9 +833,17 @@ export function createReviewGate(ctx: ReviewGateContext) {
      * So a failure keeps the standing verdict, stamp and history exactly as
      * they were — the hold's own clock does not restart either, or a judge
      * failing repeatedly would hide the item from the stall monitor forever.
+     *
+     * Not once the cap is used up. The hold that used it told the filer the
+     * next revision reaches the reader whatever it says, and a failed call
+     * kept that item held for as long as the judge stayed down (2026-10-18).
+     * A third hold or a refusal is admitted there, so a failure is too.
      */
+    const capUsed = heldFor.length >= REVIEW_GATE_MAX_HOLDS;
     const restoredHold =
-      verdict === null && priorJudgement?.verdict === 'held' ? priorJudgement : undefined;
+      verdict === null && priorJudgement?.verdict === 'held' && !capUsed
+        ? priorJudgement
+        : undefined;
     // The cap. A third hold is not placed: the item goes to the reader with
     // the concern the gate has been making all along, and the reader decides
     // whether it is answerable. Two rounds is a check; a third is the wall
@@ -836,38 +870,43 @@ export function createReviewGate(ctx: ReviewGateContext) {
       gapKey !== undefined &&
       carriedAdmission.lessSpecificFor !== undefined &&
       gapKey === carriedAdmission.lessSpecificFor;
-    // Never a refusal: the cap ends a hold the filer keeps rewording, and a
-    // refused ask is not a wording problem. Its way out is the appeal.
+    // After the last hold, a refusal too. The hold that used up the cap told
+    // the filer the next revision reaches the reader whatever it says, and a
+    // refusal there broke that promise for good: a refusal is not a hold, so
+    // the cap never fired and the item could never reach the reader
+    // (2026-10-17). Before the cap, a refusal is still not admitted — it is
+    // not a round of the count, and its way out is the appeal. The
+    // less-specific note answers a hold's gap, so it never admits a refusal.
+    // A failed judge call on a held item is admitted after the last hold too.
     const admitAfterHolds =
-      refusal === undefined &&
-      verdict !== null &&
-      !verdict.ok &&
-      (heldFor.length >= REVIEW_GATE_MAX_HOLDS || answeredAgain);
+      verdict === null
+        ? capUsed && priorJudgement?.verdict === 'held'
+        : !verdict.ok && (capUsed || (refusal === undefined && answeredAgain));
     const judgement: ReviewItemJudgement =
       restoredHold !== undefined
         ? { ...restoredHold }
-        : verdict === null
+        : admitAfterHolds
           ? {
               at,
-              verdict: 'unavailable' as const,
-              reason: 'the judge could not answer',
+              verdict: 'ok' as const,
+              reason: admittedReason(heldFor),
               ...carried,
+              // Not "passed": nobody judged these words good, the gate
+              // simply stopped asking. The message the filer gets back says
+              // which; the reader's card deliberately does not (Bryan,
+              // 2026-09-16). An item already admitted
+              // keeps HOW it got through: running out of holds afterwards
+              // does not rewrite the filer's note into a wall they hit.
+              admitted: answeredAgain
+                ? ('less-specific' as const)
+                : (carriedAdmission.admitted ?? ('holds' as const)),
             }
-          : admitAfterHolds
+          : verdict === null
             ? {
                 at,
-                verdict: 'ok' as const,
-                reason: admittedReason(heldFor),
+                verdict: 'unavailable' as const,
+                reason: 'the judge could not answer',
                 ...carried,
-                // Not "passed": nobody judged these words good, the gate
-                // simply stopped asking. The message the filer gets back says
-                // which; the reader's card deliberately does not (Bryan,
-                // 2026-09-16). An item already admitted
-                // keeps HOW it got through: running out of holds afterwards
-                // does not rewrite the filer's note into a wall they hit.
-                admitted: answeredAgain
-                  ? ('less-specific' as const)
-                  : (carriedAdmission.admitted ?? ('holds' as const)),
               }
             : refusal !== undefined
               ? // The rule's sentence, never the judge's, and not added to
@@ -922,7 +961,7 @@ export function createReviewGate(ctx: ReviewGateContext) {
                   target.address,
                   reason,
                   standing?.quote,
-                  standing?.heldFor?.length ?? 0,
+                  countedHolds(standing?.heldFor ?? []).length,
                 ),
         };
       }
@@ -1013,7 +1052,11 @@ export function createReviewGate(ctx: ReviewGateContext) {
               address,
               judgement.reason,
               judgement.quote,
-              judgement.heldFor?.length ?? 0,
+              // The count the cap will read on the next revision, not the
+              // stored history: a refused check's history keeps holds the cap
+              // no longer counts, and a hold quoting that total would promise
+              // an admission the next revision does not get.
+              countedHolds(judgement.heldFor ?? []).length,
             )),
     };
   }

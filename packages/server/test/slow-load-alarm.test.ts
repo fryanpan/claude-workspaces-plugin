@@ -11,6 +11,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PageLoadLog } from '../src/page-loads.ts';
 import { handleWorkspaceNext } from '../src/routes/workspace-next.ts';
 import type {
   WorkspaceRouteRequest,
@@ -18,7 +19,7 @@ import type {
 } from '../src/routes/workspace-routes-context.ts';
 import {
   ALARM_COOLDOWN_MS,
-  LIST_PAINT_BUDGET_MS,
+  PAGE_LOAD_BUDGET_MS,
   SlowLoadAlarm,
   slowLoadVerdict,
 } from '../src/slow-load-alarm.ts';
@@ -34,17 +35,16 @@ function alarm(cooldownMs = ALARM_COOLDOWN_MS) {
 
 describe('reading one report', () => {
   it('says nothing about a load inside the budget', () => {
-    expect(
-      slowLoadVerdict({ msToBoot: 300, msToFirstProjection: LIST_PAINT_BUDGET_MS }),
-    ).toBeNull();
+    expect(slowLoadVerdict({ msToBoot: 300, msToFirstProjection: PAGE_LOAD_BUDGET_MS })).toBeNull();
   });
 
   it('calls a load over the budget over-budget, and carries the reading', () => {
     const verdict = slowLoadVerdict({ msToBoot: 1_065, msToFirstProjection: 5_260 });
     expect(verdict).toEqual({
+      page: 'board',
       reason: 'over-budget',
-      msToFirstProjection: 5_260,
-      budgetMs: LIST_PAINT_BUDGET_MS,
+      msToContent: 5_260,
+      budgetMs: PAGE_LOAD_BUDGET_MS,
     });
   });
 
@@ -54,8 +54,8 @@ describe('reading one report', () => {
     // regression was found. Reading that as "nothing to judge" would make the
     // loudest failure the silent one.
     const verdict = slowLoadVerdict({ msToBoot: 901 });
-    expect(verdict?.reason).toBe('never-synced');
-    expect(verdict?.msToFirstProjection).toBeNull();
+    expect(verdict?.reason).toBe('never-arrived');
+    expect(verdict?.msToContent).toBeNull();
   });
 
   it('judges nothing without a boot stamp', () => {
@@ -73,8 +73,9 @@ describe('raising it', () => {
     expect(raised[0]?.message).toContain('5260');
     expect(raised[0]?.extra).toMatchObject({
       workspaceId: 'w-1',
+      page: 'board',
       reason: 'over-budget',
-      msToFirstProjection: '5260',
+      msToContent: '5260',
     });
   });
 
@@ -111,6 +112,7 @@ describe('the load-report route raises it', () => {
       const ctx = {
         dataDir,
         slowLoadAlarm: alarm,
+        pageLoads: new PageLoadLog(dataDir),
         j: (status: number, payload: unknown) => new Response(JSON.stringify(payload), { status }),
         safeJson: async () => body,
       } as unknown as WorkspaceRoutesContext;

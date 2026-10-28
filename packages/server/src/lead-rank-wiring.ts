@@ -4,15 +4,14 @@
  *
  *  - `ranks` (`review-ranks.ts`) holds the lead's rank per item and the
  *    person moves that void one. `leadRank` is what the cross-board queue
- *    reads; a rank on a board the lead may not hear from never counts.
+ *    reads.
  *  - `feed` (`ask-feed.ts`) hears every new review item, on a ticket through
  *    the task store's `review_item.added` and on a doc thread through the
  *    live-doc event hook (`onDocEvent`), and sends them to the lead in
  *    batches.
- *  - `isOff` is the exclusion for both the feed and a rank or tag: the
- *    coach's (`coach/exclusion.ts`), including the boards the owner turned
- *    the coach off for, and every board while the coach's state cannot be
- *    read.
+ *  - Neither skips a board. The lead sees every board the owner does (the
+ *    owner, 2026-10-23), so the coach's exclusion (`coach/exclusion.ts`)
+ *    does not apply here.
  */
 import type { WebhookPayload } from '@claude-workspaces/core';
 import {
@@ -35,7 +34,6 @@ export interface LeadRankWiringDeps {
   boardName: (workspaceId: string) => string | undefined;
   /** A goal's title, for the goal a blocking ask stops (`ask-feed.ts`). */
   goalTitle?: GoalTitleOf;
-  isOff: (place: { workspaceId: string; docId?: string }) => boolean;
   /** Where a doc's threads sit (`threadHomes`). */
   taskWorkspace: (taskId: string) => string | undefined;
   goalWorkspace: (rowId: string) => string | undefined;
@@ -43,6 +41,8 @@ export interface LeadRankWiringDeps {
   onTaskEvent: (listener: (event: TaskStoreEvent) => void) => () => void;
   sendToAgent: (workspaceId: string, agentId: string, frame: AskFrame) => number;
   agentConnected: (workspaceId: string, agentId: string) => boolean;
+  /** The feed's window (`AskFeedDeps.windowMs`). A test seam. */
+  askWindowMs?: number;
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => () => void;
 }
@@ -60,11 +60,6 @@ export interface LeadRankWiring {
 const taskOfItem = (item: CrossReviewItem): string | undefined =>
   item.kind === 'task-review' || item.kind === 'task-thread' ? item.taskId : undefined;
 
-const placeOfItem = (item: CrossReviewItem): { workspaceId: string; docId?: string } => {
-  const docId = item.kind === 'task-review' ? `task:${item.taskId}` : item.docId;
-  return { workspaceId: item.workspaceId, docId };
-};
-
 export function wireLeadRanks(deps: LeadRankWiringDeps): LeadRankWiring {
   const ranks = new ReviewRanks(deps.dataDir, deps.now);
   const feed = new AskFeed({
@@ -73,9 +68,9 @@ export function wireLeadRanks(deps: LeadRankWiringDeps): LeadRankWiring {
       const agentId = ws ? deps.leadOf(ws) : undefined;
       return ws && agentId ? { workspaceId: ws, agentId } : null;
     },
-    isOff: deps.isOff,
     send: deps.sendToAgent,
     connected: deps.agentConnected,
+    ...(deps.askWindowMs === undefined ? {} : { windowMs: deps.askWindowMs }),
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.schedule ? { schedule: deps.schedule } : {}),
   });
@@ -114,24 +109,11 @@ export function wireLeadRanks(deps: LeadRankWiringDeps): LeadRankWiring {
     }
   });
 
-  /** Whether an item may carry the lead's opinion at all. Only an item with
-   *  something stored pays for the privacy check. */
-  const counts = (item: CrossReviewItem): boolean => {
-    if (!ranks.has(item.key)) return false;
-    try {
-      return !deps.isOff(placeOfItem(item));
-    } catch {
-      return false;
-    }
-  };
-
   return {
     ranks,
     feed,
-    leadRank: (item) =>
-      counts(item) ? ranks.rankOf(item.key, item.workspaceId, taskOfItem(item)) : undefined,
-    leadGoal: (item) =>
-      counts(item) ? ranks.goalOf(item.key, item.workspaceId, taskOfItem(item)) : undefined,
+    leadRank: (item) => ranks.rankOf(item.key, item.workspaceId, taskOfItem(item)),
+    leadGoal: (item) => ranks.goalOf(item.key, item.workspaceId, taskOfItem(item)),
     onDocEvent: (docId, payload) => {
       if (payload.event !== 'thread.created' && payload.event !== 'thread.replied') return;
       guarded('ask feed', () => {

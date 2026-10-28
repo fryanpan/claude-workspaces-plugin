@@ -142,6 +142,7 @@ import {
 } from './meeting-reconnect.ts';
 import {
   RECORD_LABEL,
+  RECORD_OFF_SETTING,
   type RecordSource,
   SOURCE_GLYPH,
   VOICES_GLYPH,
@@ -358,8 +359,13 @@ export interface MeetingStripOpts {
    * Injectable so a test drives it without a server; absent, the strip asks
    * `/api/meeting-engines`. Null (an old server, a failed fetch) leaves the
    * frame without an engine and the chooser without an Advanced panel.
+   * `off` is the server's sentence when its profile turned transcription off.
    */
-  listEngines?: () => Promise<{ engines: string[]; default: string | null } | null>;
+  listEngines?: () => Promise<{
+    engines: string[];
+    default: string | null;
+    off?: string;
+  } | null>;
   /**
    * Ask the person what to call a speaker; `current` is what the row says
    * now. Null or blank means leave it. Defaults to `window.prompt` — the
@@ -537,15 +543,20 @@ function defaultPromptName(current: string): string | null {
 async function defaultListEngines(): Promise<{
   engines: string[];
   default: string | null;
+  off?: string;
 } | null> {
   try {
     const res = await fetch('/api/meeting-engines');
     if (!res.ok) return null;
-    const body = (await res.json()) as { engines?: unknown; default?: unknown };
+    const body = (await res.json()) as { engines?: unknown; default?: unknown; off?: unknown };
     const engines = Array.isArray(body.engines)
       ? body.engines.filter((e): e is string => typeof e === 'string')
       : [];
-    return { engines, default: typeof body.default === 'string' ? body.default : null };
+    return {
+      engines,
+      default: typeof body.default === 'string' ? body.default : null,
+      ...(typeof body.off === 'string' && body.off ? { off: body.off } : {}),
+    };
   } catch {
     // An old server has no such route, and a strip on one behaves exactly as
     // it always did: no chooser, the server's one engine.
@@ -1084,8 +1095,15 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     reconcileNotesMethod();
   }
 
+  /** The server's sentence when its profile turned transcription off, or
+   *  null. Set once, from the engines answer; the button wears it. */
+  let transcriptionOff: string | null = null;
   const listEngines = opts.listEngines ?? defaultListEngines;
   void listEngines().then((info) => {
+    if (!disposed && info?.off) {
+      transcriptionOff = info.off;
+      render();
+    }
     if (disposed || !info || info.engines.length === 0) {
       // No answer (an old server, a failed fetch) or nothing configured: no
       // chooser and no Advanced panel — the address's own engine ask stands
@@ -1497,6 +1515,17 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     record.classList.toggle('is-live', isRecording);
     record.title = face.title;
     record.setAttribute('aria-label', face.ariaLabel);
+    // Transcription off by this server's profile: the button is disabled
+    // and wears one short reason, at the width it always has (the sizer holds
+    // this line too). Only ever set, never cleared: the write gate may have
+    // disabled it for its own reason, and the profile cannot change live.
+    if (transcriptionOff && !isRecording) {
+      record.disabled = true;
+      recordSettingEl.textContent = RECORD_OFF_SETTING;
+      record.title = transcriptionOff;
+      record.setAttribute('aria-label', `${face.label} — ${transcriptionOff}`);
+      options.hidden = true;
+    }
     stripSetting.textContent = face.setting;
     stripSetting.hidden = !isRecording;
     switch (state.kind) {

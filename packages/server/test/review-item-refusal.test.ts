@@ -1,9 +1,10 @@
 /**
  * The gate REFUSES an ask a fleet rule already answers, through the real
  * routes: the five kinds never reach the board's Home rows or the cross-board
- * queue, a refusal is not admitted by the two-hold cap or the one-hour
- * release, an appeal is judged again, and an ask reporting a permission
- * denial is never refused.
+ * queue, a refusal is not admitted by the one-hour release nor counted toward
+ * the two-hold cap, a refusal AFTER the last hold still reaches the reader, an
+ * appeal is judged again, and an ask reporting a permission denial is never
+ * refused.
  *
  * The judge is a STUB — no live call. It refuses only when the system turn
  * it is handed names the rule, so a prompt that lost a rule turns a refusal
@@ -68,6 +69,12 @@ const DENIED = {
   detail: 'The permission classifier denied my push to the shared branch.',
 };
 
+/** The human-only ask: the repo forbids agents to commit or push. */
+const HUMAN_ONLY = {
+  headline: 'Did you commit and push the Riverbend caret fix?',
+  detail: 'Riverbend’s AGENTS.md says the human pushes and commits code changes themselves.',
+};
+
 const kindOf = (headline: string): ReviewRefusalKind | undefined =>
   (Object.keys(REFUSABLE) as ReviewRefusalKind[]).find((k) => REFUSABLE[k].headline === headline);
 
@@ -75,7 +82,10 @@ const kindOf = (headline: string): ReviewRefusalKind | undefined =>
  *  overrule it. Passes everything else. Swappable per test. */
 let judge = async (input: ReviewJudgeInput): Promise<ReviewJudgeVerdict> => {
   const { system } = buildReviewJudgePrompt(input.criteria, input.item);
-  const kind = input.item.headline === DENIED.headline ? 'ship' : kindOf(input.item.headline);
+  const kind =
+    input.item.headline === DENIED.headline || input.item.headline === HUMAN_ONLY.headline
+      ? 'ship'
+      : kindOf(input.item.headline);
   if (kind !== undefined && system.includes(`- "${kind}":`)) {
     return { ok: false, reason: LAUNDERING, refuse: kind };
   }
@@ -262,7 +272,7 @@ describe('an ask a fleet rule answers is refused', () => {
     expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).not.toContain(itemId);
   });
 
-  it('is not admitted when it follows two wording holds that used up the cap', async () => {
+  it('reaches the reader when it follows two wording holds, as the last hold promised', async () => {
     boot();
     const { workspaceId, taskId } = await board();
     // Two rounds held for wording, which is what the cap counts…
@@ -276,13 +286,19 @@ describe('an ask a fleet rule answers is refused', () => {
           ...question(REFUSABLE.spend.headline, detail),
         }),
       );
-    expect((await revise('Second wording.')).item?.judge?.heldFor).toHaveLength(2);
-    // …and then the judge sees the rule. The cap would admit a third hold.
+    const second = await revise('Second wording.');
+    expect(second.item?.judge?.heldFor).toHaveLength(2);
+    // …and the hold said so: the next revision goes to the reader whatever it says.
+    expect(second.message).toContain('This is the last hold');
+    // Then the judge sees the rule. A refusal is not a third hold, but the
+    // promise covers it: the revision reaches the reader, unjudged.
     judge = defaultJudge;
     const res = await revise('Third wording.');
-    expect(res.held).toBe(true);
-    expect(res.refused).toBe('spend');
-    expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).not.toContain(itemId);
+    expect(res.held).not.toBe(true);
+    expect(res.refused).toBeUndefined();
+    expect(res.item?.judge?.refused).toBeUndefined();
+    expect(res.message).toContain('UNJUDGED');
+    expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).toContain(itemId);
   });
 
   it('an appeal is judged again, told which rule refused it, and lands when it passes', async () => {
@@ -333,6 +349,15 @@ describe('an ask a fleet rule answers is refused', () => {
     expect(res.held).toBeUndefined();
     expect(res.item?.judge?.refused).toBeUndefined();
     expect(JSON.stringify(res)).not.toContain('separate agent');
+    expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).toContain(res.item?.id);
+  });
+
+  it('never refuses under "ship" an ask on a repo where only a person commits', async () => {
+    boot();
+    const { workspaceId, taskId } = await board();
+    const res = await fileItem(workspaceId, taskId, HUMAN_ONLY.headline, HUMAN_ONLY.detail);
+    expect(res.held).toBeUndefined();
+    expect(res.item?.judge?.refused).toBeUndefined();
     expect((await homeRows(workspaceId)).map((r) => r.reviewItemId)).toContain(res.item?.id);
   });
 });

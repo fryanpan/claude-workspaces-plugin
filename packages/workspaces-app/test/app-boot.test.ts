@@ -14,7 +14,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as Y from 'yjs';
 import { type AppBootEnv, bootApp } from '../src/app.ts';
 import { SIGN_IN_REQUIRED } from '../src/signin/write-gate.ts';
 import {
@@ -96,8 +97,41 @@ async function boot(url: string, seed: Record<string, string> = {}): Promise<Boo
   };
   await start(env);
   await settle();
+  // The server answers the socket: a markdown doc paints its text at this
+  // first sync and only then loads its editor (app.ts, mountMarkdownAfterPaint).
+  sockets.opened[0]?.sync();
   return { sockets, storage, location };
 }
+
+/** Until `check` holds. Every surface is an `import()`, so it mounts some
+ *  turns after the boot has returned. */
+async function eventually(check: () => void): Promise<void> {
+  await vi.waitFor(check, { timeout: 5000, interval: 5 });
+}
+
+/** The markdown editor itself, as against the paint drawn before it. */
+const EDITOR = '#editor > .ProseMirror[contenteditable]';
+
+async function editorMounted(): Promise<void> {
+  await eventually(() => expect(document.querySelector(EDITOR)).not.toBeNull());
+}
+
+/**
+ * Load every surface `mountSurface` can `import()` before any case runs. The
+ * first case to mount one used to pay that module's transform inside its own
+ * 5s: the markdown editor's chunk is the whole Tiptap stack, 513ms on an idle
+ * Mac against ~40ms for every later mount, and on 21 Oct a loaded CI shard
+ * took "a markdown doc mounts the prose editor" past 5000ms. The load gets its
+ * own budget here, so each case's 5s covers only the boot it is about.
+ */
+beforeAll(async () => {
+  await Promise.all([
+    import('../src/doc/markdown-mount.ts'),
+    import('../src/code/code-app.ts'),
+    import('../src/media/media-app.ts'),
+    import('../src/redline/redline-app.ts'),
+  ]);
+}, 60_000);
 
 beforeEach(() => {
   server.reset();
@@ -182,14 +216,14 @@ function reviewOf(workspaceId: string, relPath: string): void {
 describe('the surface that mounts matches what the doc IS', () => {
   it('a markdown doc mounts the prose editor', async () => {
     await boot('https://docs.test/workspaces/w-1/docs/d-notes');
-    expect(document.querySelector('#editor .ProseMirror')).not.toBeNull();
+    await editorMounted();
     expect(document.body.classList.contains('code-mode')).toBe(false);
   });
 
   it('a code doc mounts the source surface instead', async () => {
     server.on(`/workspaces/${WS}/docs/`, { meta: { type: 'code', relPath: 'server.ts' } });
     await boot('https://docs.test/workspaces/w-1/docs/d-code');
-    expect(document.body.classList.contains('code-mode')).toBe(true);
+    await eventually(() => expect(document.body.classList.contains('code-mode')).toBe(true));
     expect(document.querySelector('#editor .ProseMirror')).toBeNull();
   });
 
@@ -205,7 +239,7 @@ describe('the surface that mounts matches what the doc IS', () => {
     await boot('https://docs.test/workspaces/w-1/docs/rev-1%3AREADME.md');
     // The redline surface is the prose one; the point of the branch is that a
     // `.md` in a diff is NOT sent to the code surface.
-    expect(document.body.classList.contains('redline-mode')).toBe(true);
+    await eventually(() => expect(document.body.classList.contains('redline-mode')).toBe(true));
     expect(document.body.classList.contains('code-mode')).toBe(false);
   });
 
@@ -218,8 +252,8 @@ describe('the surface that mounts matches what the doc IS', () => {
       baseText: null,
     });
     await boot('https://docs.test/workspaces/w-1/docs/rev-1%3AREADME.md');
+    await eventually(() => expect(document.body.classList.contains('code-mode')).toBe(true));
     expect(document.body.classList.contains('redline-mode')).toBe(false);
-    expect(document.body.classList.contains('code-mode')).toBe(true);
   });
 
   it('a non-markdown file inside a diff review goes to the source surface', async () => {
@@ -228,14 +262,49 @@ describe('the surface that mounts matches what the doc IS', () => {
     });
     reviewOf('rev-1', 'src/server.ts');
     await boot('https://docs.test/workspaces/w-1/docs/rev-1%3Asrc~server.ts');
-    expect(document.body.classList.contains('code-mode')).toBe(true);
+    await eventually(() => expect(document.body.classList.contains('code-mode')).toBe(true));
   });
 
   it('falls back to prose when the meta read fails outright', async () => {
     server.on(`/workspaces/${WS}/docs/`, {}, 500);
     await boot('https://docs.test/workspaces/w-1/docs/d-notes');
-    expect(document.querySelector('#editor .ProseMirror')).not.toBeNull();
+    await editorMounted();
     expect(document.body.classList.contains('code-mode')).toBe(false);
+  });
+});
+
+describe('a markdown doc shows its text before its editor', () => {
+  it('paints the synced prose at once, and the editor then mounts on that same element', async () => {
+    document.body.innerHTML = SHELL;
+    history.replaceState(null, '', `/workspaces/${WS}/docs/d-notes`);
+    const sockets = fakeSockets();
+    await start({
+      document,
+      location: fakeLocation('https://docs.test/workspaces/w-1/docs/d-notes'),
+      localStorage: fakeStorage({ [NAME_KEY]: 'Ada' }),
+      window: new EventTarget(),
+      connect: sockets.connect,
+    });
+    await settle();
+    // Control: before the sync there is nothing to show, and no editor yet.
+    expect(document.querySelector('#editor .ProseMirror')).toBeNull();
+
+    const client = sockets.first();
+    const heading = new Y.XmlElement('heading');
+    heading.setAttribute('level', 2 as unknown as string);
+    heading.insert(0, [new Y.XmlText('Harborlight tide table')]);
+    client.ydoc.getXmlFragment('prose').insert(0, [heading]);
+    client.sync();
+
+    // Synchronously at the sync: the words are on screen, read-only.
+    const painted = document.querySelector('#editor > .ProseMirror');
+    expect(painted?.querySelector('h2')?.textContent).toBe('Harborlight tide table');
+    expect(painted?.hasAttribute('contenteditable')).toBe(false);
+
+    await editorMounted();
+    expect(document.querySelector(EDITOR)).toBe(painted);
+    expect(document.querySelectorAll('#editor > .ProseMirror')).toHaveLength(1);
+    expect(painted?.textContent).toBe('Harborlight tide table');
   });
 });
 
@@ -268,6 +337,7 @@ describe('the shell the boot wires once', () => {
 describe('identity and the write gate are settled before anything connects', () => {
   it('takes the stored name rather than prompting, and stamps it on awareness', async () => {
     const { sockets } = await boot('https://docs.test/workspaces/w-1/docs/d-notes');
+    await editorMounted();
     expect(document.querySelector('.identity-prompt')).toBeNull();
     const state = sockets.first().awareness.getLocalState() as { user?: { name?: string } } | null;
     expect(state?.user?.name).toBe('Ada');
@@ -277,6 +347,7 @@ describe('identity and the write gate are settled before anything connects', () 
     // Review URLs get pasted around and the server emits `?as=` links; the
     // stored name is this browser's own answer and outranks both.
     const { sockets } = await boot('https://docs.test/workspaces/w-1/docs/d-notes?as=Grace');
+    await editorMounted();
     const state = sockets.first().awareness.getLocalState() as { user?: { name?: string } } | null;
     expect(state?.user?.name).toBe('Ada');
   });
@@ -294,6 +365,8 @@ describe('identity and the write gate are settled before anything connects', () 
       connect: sockets.connect,
     });
     await settle();
+    sockets.first().sync();
+    await editorMounted();
     // A name prompt here collects an answer the server will refuse anyway.
     expect(document.querySelector('.identity-prompt')).toBeNull();
     const state = sockets.first().awareness.getLocalState() as { user?: { name?: string } } | null;
@@ -370,6 +443,7 @@ describe('identity and the write gate are settled before anything connects', () 
   it('raises the sign-in bar and locks the doc when the server refuses writes', async () => {
     server.on('/api/auth/session', { authenticated: false, canWrite: false });
     await boot('https://docs.test/workspaces/w-1/docs/d-notes');
+    await editorMounted();
     expect(document.querySelector('.signin-bar')).not.toBeNull();
     // No toggle to disable any more: the doc simply mounts read-only, which
     // `body.view-mode` is what says on the page.
@@ -406,12 +480,14 @@ describe('the boot hands back an end for what it started', () => {
     try {
       // Control: left running, the debounce lands and makes the read.
       await boot('https://docs.test/workspaces/w-1/docs/d-notes');
+      await editorMounted();
       spy.mockClear();
       await past(250);
       expect(spy.mock.calls.flat()).toContain(READ);
 
       // The same boot, ended: the debounce never lands.
       await boot('https://docs.test/workspaces/w-1/docs/d-notes');
+      await editorMounted();
       for (const stop of booted.splice(0)) stop();
       spy.mockClear();
       await past(250);

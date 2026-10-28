@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { LOAD_REPORT_MAX_BYTES, loadReportRefusal } from '../page-loads.ts';
 import { isReviewItemMeasurementEvent } from '../review-items/analytics.ts';
 /**
  * What to work on next, the load reports behind it, and the board's event feed.
@@ -15,30 +16,12 @@ import { isReviewItemMeasurementEvent } from '../review-items/analytics.ts';
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
 import { redactBoardEventForVisitor } from '../share/redact-board-events.ts';
-import type { LoadReportReading } from '../slow-load-alarm.ts';
+import { BOARDLESS_PAGES, type LoadReportReading, pageTypeOf } from '../slow-load-alarm.ts';
 import { buildQueue } from '../task-queue.ts';
 import { eventsLogPath, isRetired, retiredNotice } from '../tasks.ts';
 import { SERVER_TICK_EVENT, analyzeUptime } from '../uptime.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
-/**
- * What a board load report may be.
- *
- * `POST …/load-reports` is on the share-member route table, so every call is
- * a write to a file on the OWNER's machine by anybody holding a link to the
- * board. It used to append whatever JSON parsed — no shape, no ceiling — so
- * a telemetry endpoint doubled as somewhere to park arbitrary data on
- * somebody else's disk.
- *
- * The shape below is what the board client actually sends: a flat handful of
- * numbers (`board-app.ts`, `sendLoadReport`). Flat is the load-bearing part —
- * a nested value is where an unbounded payload hides — and the limits sit
- * an order of magnitude above the real thing so a field added to the client
- * lands without anyone having to come back here.
- */
-const LOAD_REPORT_MAX_BYTES = 2_000;
-const LOAD_REPORT_MAX_FIELDS = 24;
-const LOAD_REPORT_MAX_STRING = 400;
 /**
  * How large a board's log may get before the oldest rows are dropped.
  *
@@ -49,33 +32,6 @@ const LOAD_REPORT_MAX_STRING = 400;
  */
 const LOAD_REPORT_LOG_MAX_BYTES = 256_000;
 const LOAD_REPORT_LOG_KEEP_LINES = 100;
-
-/** Why this body is not a load report, or null when it is one. */
-function loadReportRefusal(body: unknown): string | null {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return 'report must be a JSON object';
-  }
-  const entries = Object.entries(body as Record<string, unknown>);
-  if (entries.length > LOAD_REPORT_MAX_FIELDS) {
-    return `report may hold at most ${LOAD_REPORT_MAX_FIELDS} fields`;
-  }
-  for (const [key, value] of entries) {
-    if (value === null || typeof value === 'boolean') continue;
-    if (typeof value === 'number') {
-      if (!Number.isFinite(value)) return `${key} must be a finite number`;
-      continue;
-    }
-    if (typeof value === 'string') {
-      if (value.length > LOAD_REPORT_MAX_STRING) {
-        return `${key} is over ${LOAD_REPORT_MAX_STRING} characters`;
-      }
-      continue;
-    }
-    // Objects and arrays, which is where an unbounded payload would live.
-    return `${key} must be a number, string, boolean or null — a report is flat`;
-  }
-  return null;
-}
 
 /** Drop the oldest rows once the log has outgrown its ceiling. */
 function trimLoadReportLog(logPath: string): void {
@@ -241,6 +197,12 @@ export async function handleWorkspaceNext(
       if (body === undefined || body === null) return j(400, { error: 'report required' });
       const refusal = loadReportRefusal(body);
       if (refusal) return j(400, { error: refusal });
+      // Home and the review page are on no board; filing one under a board
+      // would put a load the board never had into its record.
+      const page = pageTypeOf((body as LoadReportReading).page);
+      if (page && BOARDLESS_PAGES.includes(page)) {
+        return j(400, { error: `a ${page} page is on no board; post it to /api/load-reports` });
+      }
       // Body first, stamps last: ts and ua are the server's own record
       // of when the report arrived and what sent it, and a body that
       // claims its own must not be able to overwrite them.
@@ -265,6 +227,7 @@ export async function handleWorkspaceNext(
       // a raise that throws cannot cost the reading that caused it, and after
       // the size refusal, so nothing gets to page somebody with a body the
       // route would not store.
+      ctx.pageLoads.record(workspaceId, body as LoadReportReading, row.ts);
       ctx.slowLoadAlarm.consider(workspaceId, body as LoadReportReading, row.ts);
       return j(200, { ok: true });
     }

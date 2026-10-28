@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ElementAnchor, User } from '@claude-workspaces/core';
 import { decideReconcile } from '../src/doc-store.ts';
+import { createPublicFetch } from '../src/outbound-fetch.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { waitFor, waitForFile } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -47,7 +48,13 @@ describe('server REST', () => {
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'feedback-test-'));
-    handle = createServer({ port: 0, dataDir });
+    // The webhook test's sink listens on 127.0.0.1, which the production
+    // guard refuses; permit loopback here and nothing else.
+    handle = createServer({
+      port: 0,
+      dataDir,
+      webhookFetch: createPublicFetch({ permit: new Set(['loopback']) }),
+    });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
   });

@@ -196,6 +196,51 @@ describe('coachLine', () => {
     ]);
   });
 
+  it('gives each line its words in full below it, once', () => {
+    const prompt = `${'Chart the Riverbend tides '.repeat(36)}\nand the berths.`;
+    const line = coachLine(
+      'coach.digest',
+      {
+        items: [],
+        sessions: [
+          {
+            boardId: 'w-1',
+            repo: 'riverbend',
+            activity: [
+              { at: Date.UTC(2026, 9, 16, 9, 5), kind: 'prompt', summary: 'Asked', text: prompt },
+              { at: Date.UTC(2026, 9, 16, 9, 6), kind: 'turn', summary: 'Done.', text: 'Done.' },
+            ],
+          },
+        ],
+      },
+      'UTC',
+    );
+    const [first, second] = prompt.split('\n');
+    expect(line?.split('\n').slice(3, 7)).toEqual([
+      '  - 09:05 he asked: Asked',
+      `    ${first}`,
+      `    ${second}`,
+      '  - 09:06 session: Done.',
+    ]);
+  });
+
+  it('says how many of the oldest lines came without their words', () => {
+    const digest = (textDropped?: number) =>
+      coachLine(
+        'coach.digest',
+        {
+          items: [],
+          sessions: [{ boardId: 'w-1', repo: 'riverbend', minutes: 1 }],
+          ...(textDropped === undefined ? {} : { textDropped }),
+        },
+        'UTC',
+      );
+    expect(digest(3)).toContain(
+      'The 3 oldest lines came without their words in full: the digest had no room.',
+    );
+    expect(digest()).not.toContain('without');
+  });
+
   it('reads an answer, with what a thumbs down wrote, and a preference as things to remember', () => {
     const moment = {
       momentId: 'cm-aaaaaaaaaaaa',

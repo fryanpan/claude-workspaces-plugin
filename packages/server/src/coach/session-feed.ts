@@ -21,9 +21,13 @@
  * (`coach/week-plan.ts`), so the session ranks by the plan, not by titles,
  * and his Claude Code time per attached session (`coach/session-minutes.ts`).
  * A prompt he typed opens a window as a board event does, so terminal work
- * with no board page open still reaches the coach. A turn end never opens
- * one: it joins a window already open, so agents working alone overnight
- * wake nobody.
+ * with no board page open still reaches the coach, and so does any mark in
+ * his run after it: a turn end that came after the window closed used to be
+ * dropped. A mark outside a run opens nothing, so agents working alone
+ * overnight wake nobody.
+ *
+ * What each delivered digest held is counted per hour for the coverage
+ * report (`coach/coverage.ts`), and so is each mark this lets go.
  *
  * Once a local day the session also gets a morning wake-up
  * (`coach.morning`, `coach/morning.ts`), so it can check what has not moved.
@@ -41,16 +45,22 @@
  *
  * Each prompt and turn end that carried text is said in a few words before
  * the digest goes (`coach/summary.ts`); that call never holds a digest back.
+ * The text goes too, beside its line, until the digest's budget for it is
+ * spent (`DIGEST_TEXT_CHARS`); past it the oldest marks go as their line
+ * alone, and the digest says how many (`textDropped`).
  */
 import { HeldWindow } from '../held-window.ts';
 import type { CoachBacklog, HeldDigest, HeldMark } from './backlog.ts';
-import { type DigestItem, digestOf } from './digest.ts';
+import { type CarriedCount, type CoachCoverage, hourOf } from './coverage.ts';
+import type { CoverageSource } from './coverage.ts';
+import { type DigestItem, digestOf, withoutSource } from './digest.ts';
 import type { MorningNews } from './morning.ts';
 import {
   SESSIONS_NOT_COUNTED,
   type SessionMinutes,
   SessionRuns,
   type SessionTurn,
+  fitActivityText,
   sessionMinutesOf,
 } from './session-minutes.ts';
 import type { CoachEventKind } from './stream.ts';
@@ -76,6 +86,8 @@ export type SessionFrame = Addressed &
         doc?: string;
         heading?: string;
         text?: string;
+        /** Where he was, for the coverage report; held, never sent. */
+        source?: CoverageSource;
       }
     | {
         event: 'coach.answer';
@@ -109,6 +121,9 @@ export type SessionFrame = Addressed &
         windows?: number;
         /** Windows dropped while it was away, past the backlog's bounds. */
         dropped?: number;
+        /** Marks sent with their summary only, the oldest first, because
+         *  the digest's full text ran past `DIGEST_TEXT_CHARS`. */
+        textDropped?: number;
       }
   );
 
@@ -141,6 +156,8 @@ export interface SessionFeedDeps {
   backlog?: CoachBacklog;
   /** Says each prompt and turn in a few words; none uses their own words. */
   summarizer?: CoachSummarizer | null;
+  /** Where what reached the coach and what it let go are counted. */
+  coverage?: Pick<CoachCoverage, 'carried' | 'dropped'>;
   /** How long a window stays open; defaults to `DIGEST_WINDOW_MS`. */
   windowMs?: number;
   now?: () => number;
@@ -196,7 +213,10 @@ export class SessionFeed {
    *  now; anything else goes now. True when it was held or taken. */
   send(news: SessionNews, at: number): boolean {
     if (news.event !== 'coach.event') return this.deliver(news, at);
-    if (this.paused(at)) return false;
+    if (this.paused(at)) {
+      this.deps.coverage?.dropped(at, 'paused');
+      return false;
+    }
     const { event: _event, ...e } = news;
     this.hold({ event: { ...e, at } });
     return true;
@@ -210,22 +230,45 @@ export class SessionFeed {
     return true;
   }
 
-  /** A prompt in an attached session. A typed one opens a run and joins
-   *  the window, opening one; an injected one ends the run. */
+  /** A prompt in an attached session. A typed one opens a run; it and an
+   *  injected one inside a run join the window, opening one. */
   prompt(news: SessionTurnNews, typed: boolean): boolean {
-    this.runs.prompt(news.session, news.at, typed);
-    if (!typed || this.paused(news.at)) return false;
-    this.hold({ turn: { ...news, kind: 'prompt', creditMs: 0 } });
-    return true;
+    const creditMs = this.runs.mark(
+      news.session,
+      news.at,
+      typed ? 'typed' : 'injected',
+      news.source,
+    );
+    return this.count(news, typed ? 'prompt' : 'injected', creditMs);
   }
 
-  /** A turn end counts only inside a run, and only joins a window already
-   *  open. The run moves either way, so a later gap is still right. */
+  /** A turn end counts only inside a run, and then joins the window,
+   *  opening one. The run moves either way, so a later gap is still right. */
   turn(news: SessionTurnNews): boolean {
-    const creditMs = this.runs.turnEnd(news.session, news.at);
-    if (creditMs === null || !this.window.open()) return false;
-    if (this.paused(news.at)) return false;
-    this.hold({ turn: { ...news, kind: 'turn', creditMs } });
+    const creditMs = this.runs.mark(news.session, news.at, 'turn');
+    const source = this.runs.sourceOf(news.session);
+    return this.count({ ...news, ...(source ? { source } : {}) }, 'turn', creditMs);
+  }
+
+  /** Where the session's last prompt was typed, if it said. */
+  sessionSource(session: string): CoverageSource | undefined {
+    return this.runs.sourceOf(session);
+  }
+
+  private count(
+    news: SessionTurnNews,
+    kind: SessionTurn['kind'],
+    creditMs: number | null,
+  ): boolean {
+    if (creditMs === null) {
+      this.deps.coverage?.dropped(news.at, 'outside-run');
+      return false;
+    }
+    if (this.paused(news.at)) {
+      this.deps.coverage?.dropped(news.at, 'paused');
+      return false;
+    }
+    this.hold({ turn: { ...news, kind, creditMs } });
     return true;
   }
 
@@ -281,7 +324,9 @@ export class SessionFeed {
     const { digests, dropped } = this.waiting(this.now());
     if (digests.length === 0) return Promise.resolve();
     const turns = digests.flatMap((d) => d.turns);
-    const marked = turns.flatMap((t, i) => (t.text ? [{ i, kind: t.kind, text: t.text }] : []));
+    const marked = turns.flatMap((t, i) =>
+      t.text && t.kind !== 'injected' ? [{ i, kind: t.kind, text: t.text }] : [],
+    );
     const summarizer = this.deps.summarizer;
     if (!summarizer || marked.length === 0) {
       if (this.sendDigest(digests, dropped, turns, new Map())) return this.trySend();
@@ -306,19 +351,24 @@ export class SessionFeed {
   ): boolean {
     if (this.stopped) return false;
     const at = this.now();
+    const { sessions, textDropped } = fitActivityText(
+      sessionMinutesOf(turns, (i) => summaryAt.get(i)),
+    );
     const digest: SessionNews = {
       event: 'coach.digest',
       from: digests[0]?.from ?? at,
       to: digests[digests.length - 1]?.to ?? at,
-      items: digests.flatMap((d) => d.items),
+      items: digests.flatMap((d) => d.items.map(withoutSource)),
       plan: weekPlanOf(this.deps.planBoard(), at, this.deps.timeZone()),
-      sessions: sessionMinutesOf(turns, (i) => summaryAt.get(i)),
+      sessions,
       sessionsNote: SESSIONS_NOT_COUNTED,
       ...(digests.length > 1 ? { windows: digests.length } : {}),
       ...(dropped > 0 ? { dropped } : {}),
+      ...(textDropped > 0 ? { textDropped } : {}),
     };
     if (!this.deliver(digest, at)) return false;
     this.deps.countTurn(at);
+    this.deps.coverage?.carried(carriedBy(digests), at);
     if (this.deps.backlog) this.deps.backlog.delivered(digests);
     else {
       const gone = new Set(digests);
@@ -335,4 +385,34 @@ export class SessionFeed {
     const frame = { ...news, workspaceId: lead.workspaceId, at } as SessionFrame;
     return this.deps.send(lead.workspaceId, lead.agentId, frame) > 0;
   }
+}
+
+/** What these windows held, per hour, source and kind. A page stay counts
+ *  once, with all its minutes, in the hour it began. */
+export function carriedBy(digests: readonly HeldDigest[]): CarriedCount[] {
+  const counts = new Map<string, CarriedCount>();
+  const add = (
+    at: number,
+    source: CoverageSource | undefined,
+    kind: CarriedCount[2],
+    n: number,
+  ) => {
+    const hour = hourOf(at);
+    const s = source ?? 'other';
+    const key = `${hour}|${s}|${kind}`;
+    const c = counts.get(key);
+    if (c) c[3] += n;
+    else counts.set(key, [hour, s, kind, n]);
+  };
+  for (const d of digests) {
+    for (const item of d.items) {
+      add(item.at, item.source, item.kind, 1);
+      if (item.kind === 'view') add(item.at, item.source, 'view-ms', item.minutes * 60_000);
+    }
+    for (const t of d.turns) {
+      add(t.at, t.source, t.kind, 1);
+      if (t.creditMs > 0) add(t.at, t.source, 'session-ms', t.creditMs);
+    }
+  }
+  return [...counts.values()];
 }

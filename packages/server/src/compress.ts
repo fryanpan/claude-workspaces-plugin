@@ -142,9 +142,13 @@ export function acceptsGzip(header: string | null): boolean {
  * encoded, the same bytes plus the `Vary` header a cache needs).
  */
 export async function maybeCompress(req: Request, res: Response): Promise<Response> {
-  if (res.body === null) return res;
-  if (res.headers.get('content-encoding')) return res;
+  // The type is checked before `res.body` is read, and that order is
+  // load-bearing: reading `.body` of a Response built on a sliced file makes
+  // Bun send the WHOLE file behind the slice's Content-Length (Bun 1.3.10),
+  // which is a range answer no player can use.
   if (!COMPRESSIBLE.test(res.headers.get('content-type') ?? '')) return res;
+  if (res.headers.get('content-encoding')) return res;
+  if (res.body === null) return res;
 
   const headers = new Headers(res.headers);
   headers.set('vary', 'accept-encoding');

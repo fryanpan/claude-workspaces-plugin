@@ -1,40 +1,16 @@
 import type { User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
-import { mountCode } from './code/code-app.ts';
-import { browserDeviceEnv, syncDeviceContext } from './device-context.ts';
 import { type DocBootConnect, startDocBoot } from './doc-cache-boot.ts';
 import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
-import { el, showToast } from './doc/chrome-dom.ts';
-import { wireThreadRangeClicks } from './doc/chrome-panels.ts';
-import { marginComposerSlot } from './doc/composer-slot.ts';
-import { mountDocCoach } from './doc/doc-coach.ts';
-import { type CommentPillHandle, mountCommentPill } from './doc/doc-comment-pill.ts';
-import { mountDocFloats } from './doc/doc-floats.ts';
-import { wireDocGates } from './doc/doc-gates.ts';
-import { mountMeetingHeading } from './doc/doc-heading.ts';
-import { mountDocMargin } from './doc/doc-margin.ts';
-import { type DocMeetingMount, mountDocMeeting } from './doc/doc-meeting-mount.ts';
-import { mountPointerPillLayer } from './doc/doc-pointer-pill.ts';
-import { mountDocPreview } from './doc/doc-preview.ts';
-import { wireDocReady } from './doc/doc-ready.ts';
-import { mountDocSaveState } from './doc/doc-save-state.ts';
-import { mountDocSetNav } from './doc/doc-set-nav.ts';
-import { mountDocSpeakerMenu } from './doc/doc-speaker-menu.ts';
+import { el } from './doc/chrome-dom.ts';
+import { startDocLoadReport } from './doc/doc-load-report.ts';
 import { wireDocSwitcher } from './doc/doc-switcher.ts';
-import { mountDocVoices } from './doc/doc-voice-mount.ts';
-import { createNotesLinkRefs } from './doc/notes-link-refs.ts';
-import { wireEditViewport } from './edit-viewport.ts';
-import { type EditorHandle, createEditor } from './editor.ts';
-import { wantsHuddleStart } from './huddle-entry.ts';
+import { paintProse } from './doc/prose-paint.ts';
 import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
-import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
-import { startReadingTracker } from './reading-tracker.ts';
-import { mountRedline } from './redline/redline-app.ts';
-import { type ReviewChrome, mountReviewChrome } from './review-chrome.ts';
-import { navigateTo, remountCurrent, startRouter } from './router.ts';
+import { remountCurrent, startRouter } from './router.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
 import { registerMarkdownMount } from './surface-registry.ts';
@@ -44,8 +20,9 @@ import { registerMarkdownMount } from './surface-registry.ts';
  *
  * The page passes the real globals at the bottom of this file; a test passes a
  * throwaway document, a synthetic address, a Map-backed store and a fake
- * socket. `mountMarkdown` below is NOT part of this: it is a per-document mount
- * the router runs, and it keeps reading the ambient DOM it renders into.
+ * socket. `mountMarkdown` (`doc/markdown-mount.ts`) is NOT part of this: it is a
+ * per-document mount the router runs, and it keeps reading the ambient DOM it
+ * renders into.
  */
 export interface AppBootEnv {
   document: Document;
@@ -117,7 +94,10 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       ...(writeAccess.canWrite && !sessionUnknown ? {} : { suppressNamePrompt: true }),
     },
   );
-  registerMarkdownMount(mountMarkdown);
+  // The redline's editable File view mounts the editor straight away: its
+  // lens is already on screen, so there is no text to paint first.
+  registerMarkdownMount(async (ctx) => (await loadMarkdownMount()).mountMarkdown(ctx));
+  const reportLoad = startDocLoadReport(workspaceIdFromPath(location.pathname));
   return startRouter({
     user,
     // The answer is already in hand — every mount gets it as a value rather
@@ -130,355 +110,76 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
       installStaleClientNotice(client);
       return client;
     },
-    mountFor: (ctx) => {
-      mountDocCoach(ctx);
-      // A `.md` diff member → redline (code when the base is unavailable);
-      // other code/diff docs → CodeMirror; everything else → Tiptap.
-      if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) {
-        return mountRedline(ctx);
-      }
-      if (ctx.docType === 'code' || ctx.docType === 'diff') return mountCode(ctx);
-      return mountMarkdown(ctx);
+    mountFor: async (ctx) => {
+      // A markdown doc's text is on screen at its first sync, before its
+      // editor has loaded (mountMarkdownAfterPaint); every other surface
+      // draws its content inside its mount.
+      const paintsFirst = ctx.docType === 'markdown';
+      if (paintsFirst) reportLoad(ctx);
+      await mountSurface(ctx);
+      if (!paintsFirst) reportLoad(ctx);
+      // The coach's card is owner-only and never the page's content, so it
+      // loads after the surface rather than ahead of the doc's text.
+      void import('./doc/doc-coach.ts').then(({ mountDocCoach }) => {
+        if (!ctx.scope.disposed) mountDocCoach(ctx);
+      });
     },
   });
 }
 
-/** Per-document mount for the markdown (Tiptap) surface.
+/** The markdown surface's chunk: the editor and everything mounted with it. */
+const loadMarkdownMount = () => import('./doc/markdown-mount.ts');
+
+/** A `.md` diff member → redline (code when the base is unavailable); other
+ *  code/diff docs → CodeMirror; a folder's video or image → its own page;
+ *  everything else → Tiptap.
  *
- *  What is left here is the ORDER, and only the order: connect, editor,
- *  chrome, margin, floats, selection affordances, navigation, gates. Each
- *  phase is a module under `doc/` that takes an explicit context, so this
- *  function reads as the sequence a document boots in rather than as the
- *  sum of everything a document does.
- *
- *  Two things stay here on purpose. The forward refs — `chrome`, `pill`,
- *  `editViewport` — because the editor's callbacks can fire during the first
- *  Yjs application, before the phase that owns them has run. And the reads of
- *  the ADDRESS (`?huddle=`, `?thread=`), because the address is what this
- *  mount was opened at; the modules act on what it says.
- *
- *  Every listener is bound to `ctx.scope`; the router disposes the scope on
- *  navigation, which tears down the editor, chrome, listeners, and (via the
- *  router) the client. */
-async function mountMarkdown(ctx: MountContext): Promise<void> {
-  const { docId, client, user, scope } = ctx;
-  // Which docId the sidebar marks active — differs from `docId` only for the
-  // editable File view of a .md diff member (see MountContext.navDocId).
-  const navDocId = ctx.navDocId ?? docId;
-  const { ydoc, awareness } = client;
-  awareness.setLocalStateField('user', { name: user.name, color: user.color });
-
-  // The thread panel / composer / thread-view / drawer elements are owned
-  // by the shared review chrome; only the markdown-specific elements are here.
-  const editorMount = el<HTMLElement>('editor');
-  const composer = el<HTMLElement>('composer');
-  const commentPill = el<HTMLButtonElement>('comment-pill');
-  // The pill's markup says "Add comment" because that is all it ever did, and
-  // on a huddle doc that is now all it leads to as well. It was relabelled
-  // "Turn this line into work" here while a range selection grew a pill
-  // offering Research and Create Task (see doc/doc-pointer-pill.ts); those
-  // went on 2026-09-04, so the label goes with them rather than promising a
-  // menu of work that no longer opens.
-  const huddle = ctx.huddle === true;
-  const formatBar = el<HTMLElement>('format-bar');
-  const toggleFormat = el<HTMLButtonElement>('toggle-format');
-  /**
-   * Whether the server will accept writes from this browser.
-   *
-   * The one flag that decides whether this document mounts editable, and the
-   * one the chrome that describes what this surface IS reads. Declared this
-   * high because the save-state chip reads it, and that renders long before
-   * the gates are wired.
-   *
-   * The server's answer, carried in on the MountContext — not a hopeful
-   * `true` narrowed later. It used to start `true` and be corrected one
-   * round trip after the mount, and everything this flag guards was open
-   * for the length of that trip.
-   */
-  const canWrite = ctx.canWrite;
-
-  // Forward ref: the chrome is mounted right after the editor, but editor
-  // callbacks can fire during initial Yjs application — guard until set.
-  // biome-ignore lint/style/useConst: assigned after createEditor so its callbacks can close over it
-  let chrome: ReviewChrome | undefined;
-  // Same forward-ref shape as `chrome`: the editor's selection callback fires
-  // during the first Yjs application, before the pill phase has run.
-  // biome-ignore lint/style/useConst: assigned in the selection-affordance phase below
-  let pill: CommentPillHandle | undefined;
-  // Same shape again: the chrome's selection callback can fire before the
-  // meeting strip has mounted and the viewport is wired.
-  // biome-ignore lint/style/useConst: assigned after the meeting strip mounts
-  let editViewport: ReturnType<typeof wireEditViewport> | undefined;
-  // Forward ref like `chrome`: the zone is made where the meeting strip mounts
-  // (only on docs that can hold a meeting); the wash extension needs it now.
-  let liveZone: MeetingLiveZone | undefined;
-  // Which rows this doc is linked from, and the two writes that change it.
-  // Read once the document has synced (`wireDocReady`) — before that the
-  // notes are not on screen and there is nothing to draw a control beside.
-  const notesLinkRefs = createNotesLinkRefs(docId);
-  // Workspace members (folder binds, diff File views — ctx spreads through
-  // mountEditableFileView) get in-app navigation for relative sibling links,
-  // in the prose and in a `^[…]` note's caption alike (doc/footnote-notes.ts).
-  const docLink = ctx.workspaceId
-    ? { workspaceId: ctx.workspaceId, relPath: ctx.relPath, navigate: navigateTo }
-    : undefined;
-  const editor: EditorHandle = createEditor({
-    parent: editorMount,
-    ydoc,
-    awareness,
-    onSelectionChange: () => pill?.refreshSelection(),
-    onUpdate: () => chrome?.redrawThreads(),
-    user: { name: user.name, color: user.color },
-    docLink,
-    imageDocId: docId,
-    notesLinks: {
-      docId,
-      linkedTasks: () => notesLinkRefs.linked(),
-      link: (taskId) => notesLinkRefs.link(taskId),
-      unlink: (taskId) => notesLinkRefs.unlink(taskId),
-      onChanged: () => notesLinkRefs.refresh(),
-    },
-    // Inert until the zone exists AND a meeting is (recently) live; the
-    // zone's bot fallback rides the same signal.
-    settleWash: {
-      isLive: () => liveZone?.washActive() ?? false,
-      onNotesInsert: () => liveZone?.clearSettled(),
-    },
-  });
-  // Editor teardown runs before the client closes (LIFO — client.close was
-  // registered first by the router), so the y-prosemirror binding detaches
-  // before its ydoc is destroyed.
-  scope.onCleanup(() => editor.destroy());
-
-  chrome = mountReviewChrome({
-    docId,
-    user,
-    ydoc,
-    surface: editor,
-    whenSynced: (cb) => client.onReady(cb),
-    scope,
-    canWrite,
-    labelHint: ctx.sourceUrl || ctx.relPath || undefined,
-    selectHint: 'Select some text first to leave a comment.',
-    reanchorHint: 'Select new text first, then click Re-anchor.',
-    // The pill controller's cached selection covers iOS blurring the editor
-    // between the pill appearing and being tapped. `currentSelection` already
-    // encodes a resolved range (from PM in edit mode, or from the raw DOM
-    // selection in view mode) — don't also require a non-empty PM selection,
-    // which is always empty in view mode even with a live DOM selection and
-    // would wrongly block iOS long-press commenting.
-    getSelection: () => pill?.currentSelection() ?? editor.getSelectionRel(),
-    onComposerOpened: () => pill?.onComposerOpened(),
-    onPosted: () => {
-      // Drop focus so no caret blinks in the doc after posting.
-      editor.editor.commands.blur();
-      (document.activeElement as HTMLElement | null)?.blur?.();
-    },
-    hidePill: () => pill?.hide(),
-    // The composer opens in the balloon margin, level with the words it is
-    // about, whenever that margin is on screen (doc/composer-slot.ts). The
-    // column is mounted just below this call, so it is looked up per open
-    // rather than captured here.
-    placeComposer: () => marginComposerSlot({ editor, editorMount, composer }),
-    // The markdown surface mounts the balloon margin unconditionally below.
-    hasBalloonMargin: true,
-  });
-  const reviewChrome = chrome;
-
-  // Everything that reports on comments the reader is not looking at: the
-  // balloon margin, the doc-level suggestions badge, and the off-screen
-  // comment hints — one loop, redrawn together on every editor transaction.
-  const margin = mountDocMargin({
-    docId,
-    ydoc,
-    scope,
-    editor,
-    editorMount,
-    chrome: reviewChrome,
-    docLink,
-  });
-
-  // Interaction-bounded reading-session capture (doc_open + read_session).
-  // The #editor element is the scroll container on the markdown surface.
-  scope.onCleanup(startReadingTracker({ docId, user, scrollEl: editorMount }));
-  void syncDeviceContext(browserDeviceEnv(localStorage), { mayAsk: false });
-
-  // Opened by the Board's "Make a plan" / "Have a meeting": the address carries
-  // a flag, and the strip asks for the mic at once instead of waiting for a
-  // press. Read ONCE, here, because the strip block below takes the flag back
-  // out of the address — and the edit-mode decision that also needs it runs
-  // much later, by which time `location.search` no longer says anything.
-  const startedHuddleHere = wantsHuddleStart(location.search);
-  // The meeting surface, once one is mounted: the lead banner's read and
-  // stream (so the floats' receipts can say "no lead attached" off the same
-  // answer, on a huddle doc), and the channel a speaker rename travels on.
-  let meeting: DocMeetingMount | undefined;
-  // Live-meeting transcript strip along the bottom of the editor pane — the
-  // whole surface (strip, live zone, bot client, lead banner) mounts together
-  // in doc/doc-meeting-mount.ts. Bound to this scope, so navigating away
-  // closes the audio socket and releases the microphone.
-  //
-  // Ordinary markdown docs only. A `.md` diff member's File view mounts this
-  // same surface over a companion doc (that is what `navDocId` marks), and a
-  // review of somebody's branch is not a place a meeting is recorded.
-  const meetingStripEl = document.getElementById('meeting-strip');
-  if (meetingStripEl && ctx.docType === 'markdown' && ctx.navDocId === undefined) {
-    meeting = mountDocMeeting({
-      docId,
-      stripEl: meetingStripEl,
-      scope,
-      editor,
-      editorMount,
-      user,
-      awareness,
-      huddleStart: startedHuddleHere,
-      huddle,
-      navigate: navigateTo,
-    });
-    liveZone = meeting.liveZone;
+ *  Every surface is an `import()`. The entry used to hold all of them, 1.4 MB
+ *  of which CodeMirror was 720 KB, and a reader downloaded and parsed it all
+ *  before seeing a word of a markdown doc. */
+async function mountSurface(ctx: MountContext): Promise<void> {
+  if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) {
+    const { mountRedline } = await import('./redline/redline-app.ts');
+    return mountRedline(ctx);
   }
-
-  // The two always-in-view floats — Approve (the plan gate) and Review. Same
-  // rule as the meeting strip above: a review of somebody's branch, or a
-  // companion doc under `navDocId`, is not a plan a person approves.
-  if (ctx.docType === 'markdown' && ctx.navDocId === undefined) {
-    // A meeting's title as its page's heading, with its dates under it.
-    mountMeetingHeading({
-      ...ctx,
-      editorMount,
-      ydoc,
-      huddle,
-      whenSynced: (cb) => client.onReady(cb),
-      scope,
-    });
-    mountDocFloats({
-      docId,
-      root: editorMount,
-      ydoc,
-      user,
-      canWrite,
-      scope,
-      whenSynced: (cb) => client.onReady(cb),
-      ...(meeting?.watchLeadPresence ? { watchLeadPresence: meeting.watchLeadPresence } : {}),
-    });
-    // The agent's cursor, the voice mic and the planning voice.
-    const voice = { docId, user, editor, editorMount, presence: awareness, canWrite, scope };
-    mountDocVoices({ ...voice, ydoc, meeting });
+  if (ctx.docType === 'code') {
+    const { isMediaDoc, mountMedia } = await import('./media/media-app.ts');
+    if (isMediaDoc(ctx)) return mountMedia(ctx);
   }
+  if (ctx.docType === 'code' || ctx.docType === 'diff') {
+    const { mountCode } = await import('./code/code-app.ts');
+    return mountCode(ctx);
+  }
+  return mountMarkdownAfterPaint(ctx);
+}
 
-  mountDocSpeakerMenu({
-    docId,
-    editor,
-    scope,
-    canWrite: () => canWrite,
-    ...(meeting ? { meeting } : {}),
-  });
-
-  // Editing under an on-screen keyboard: the meeting strip gives its grid row
-  // back while a phone-width editor has focus, and the caret is kept above
-  // whatever the keyboard is covering. See edit-viewport.ts for both rules.
-  editViewport = wireEditViewport({
-    roots: () => [editorMount, composer],
-    scroller: () => editorMount,
-    strip: () => meetingStripEl,
-    caretRect: () => {
-      const view = editor.editor.view;
-      // View mode never focuses the editor; there is no caret to follow and
-      // no keyboard that could be covering one.
-      if (!view.dom.contains(document.activeElement)) return null;
-      try {
-        const c = view.coordsAtPos(view.state.selection.head);
-        return { top: c.top, bottom: c.bottom };
-      } catch {
-        // A head position that has not been rendered yet (a fresh mount, a
-        // remote edit mid-frame) throws rather than returning coordinates.
-        return null;
+/**
+ * The markdown surface, text first: the synced prose is drawn as plain DOM
+ * (doc/prose-paint.ts), and only then is the editor chunk fetched, so its
+ * download and parse do not stand between the reader and the words. The
+ * editor mounts on the painted root.
+ *
+ * A doc with no sync and no local copy (a first visit offline) paints
+ * nothing; once its socket has closed the editor mounts anyway, empty, as it
+ * always did.
+ */
+async function mountMarkdownAfterPaint(ctx: MountContext): Promise<void> {
+  const { client, scope } = ctx;
+  let editorLoading = false;
+  await new Promise<void>((resolve) => {
+    client.onReady(() => {
+      if (!scope.disposed && !editorLoading) {
+        paintProse({ docId: ctx.docId, ydoc: client.ydoc, parent: el('editor'), scope });
       }
-    },
-    listen: (t, type, h, o) => scope.listen(t, type, h, o),
-    onCleanup: (fn) => scope.onCleanup(fn),
+      resolve();
+    });
+    client.onStatus((status) => {
+      if (status === 'closed') resolve();
+    });
   });
-
-  // ---- Selection affordances ----
-  // Two modules, wired in the order they depend on each other: the pointer
-  // pill a huddle doc grows over a range (doc-pointer-pill), and the round
-  // comment pill that owns the cached selection it reads (doc-comment-pill).
-  const pointer = mountPointerPillLayer({
-    huddle,
-    editor,
-    editorMount,
-    scope,
-    getSelection: () => pill?.currentSelection() ?? null,
-    hideAll: () => pill?.hide(),
-    openComposer: () => reviewChrome.openComposer(),
-  });
-  pill = mountCommentPill({
-    huddle,
-    editor,
-    editorMount,
-    composer,
-    commentPill,
-    scope,
-    pointer,
-    openComposer: () => reviewChrome.openComposer(),
-    follow: () => editViewport?.follow(),
-  });
-
-  // Tap-on-highlight in the editor → focus the thread.
-  //   • A visible balloon for it → scroll the balloon into view.
-  //   • Mobile: full-screen thread view (Notion pattern — gives the
-  //     conversation space without the doc competing for it).
-  //   • Desktop: open the side drawer and highlight the thread.
-  wireThreadRangeClicks({
-    editorMount,
-    chrome: reviewChrome,
-    surface: editor,
-    scope,
-    revealBalloon: (id) => margin.revealThreadBalloon(id),
-  });
-
-  // The sidebar and topbar dropdown for the set this doc belongs to — a diff
-  // review, a bound folder, or a legacy hand-grouped set.
-  const setNav = mountDocSetNav({ docId, navDocId, ydoc, scope });
-
-  // `?thread=<id>` — arrive AT the comment, not at the document that contains
-  // it. The board's review queue links here, and "it drops me on the doc and I
-  // scroll looking for it" is the thing that link exists to remove. Read from
-  // the address here, like the huddle flag above, and run once on the first
-  // sync: threads don't exist before the ydoc arrives, and re-revealing on
-  // every later sync would yank the reader back mid-read.
-  function revealLinkedThread(): void {
-    const wanted = new URLSearchParams(location.search).get('thread');
-    if (!wanted) return;
-    // Only when it's really there — a stale link leaves the reader on the doc
-    // rather than pulsing at nothing, and SAYS so: threads all ride the ydoc
-    // that just synced, so absent now is gone (resolved away, or a stale
-    // paste), not still loading. A silent nothing reads as a broken link.
-    if (!reviewChrome.collectThreads().some((t) => t.id === wanted)) {
-      showToast('That comment thread is gone from this doc — the link may be outdated.');
-      return;
-    }
-    reviewChrome.revealThread(wanted);
-  }
-
-  // What every meta tick redraws, and what only the first sync may do.
-  wireDocReady({
-    client,
-    ydoc,
-    scope,
-    chrome: reviewChrome,
-    editor,
-    workspaceId: ctx.workspaceId,
-    notesLinkRefs,
-    renderSetNav: () => setNav.render(),
-    onFirstSync: revealLinkedThread,
-  });
-
-  // The #save-state chip, and the app preview pane beside the editor.
-  mountDocSaveState({ client, ydoc, canWrite, scope });
-  mountDocPreview({ docId, ydoc, scope });
-
-  // Last, because it speaks for the whole surface: the format bar, and whether
-  // this browser may write at all, which alone decides if the doc mounts editable.
-  wireDocGates({ editor, scope, els: { formatBar, toggleFormat }, canWrite });
+  if (scope.disposed) return;
+  editorLoading = true;
+  const { mountMarkdown } = await loadMarkdownMount();
+  if (scope.disposed) return;
+  return mountMarkdown(ctx);
 }

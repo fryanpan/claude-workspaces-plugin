@@ -274,7 +274,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'post_reply',
       description:
-        'Reply to a thread. Pass review when the reply asks a person to decide or look. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread.',
+        'Reply to a thread. Pass review when the reply asks a person to decide or look. Without it the reply is an ordinary comment and stays off the queue. A comment is an ask, a decision, or a reply to a person, and where the work stands goes through post_status instead. `held: true` means the item waits for a revision. Use revise_review_item for the next round, not a new thread. Returns `url`, the absolute link to the page that shows this thread. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -461,7 +461,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'create_thread',
       description:
-        'Open a comment thread on a doc. Pass find to anchor the thread to a phrase, or omit find for a thread about the whole doc. On an app or a mock, find is words the page shows, and suggest proposes new words the reader accepts or rejects on the page; an accepted one reaches you as page_edits on a new thread. Pass review when you ask a person to decide or to look. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread.',
+        'Open a comment thread on a doc. Pass find to anchor the thread to a phrase, or omit find for a thread about the whole doc. On an app or a mock, find is words the page shows, and suggest proposes new words the reader accepts or rejects on the page; an accepted one reaches you as page_edits on a new thread. Pass review when you ask a person to decide or to look. `held: true` in the result means the item waits for a revision. Use revise_review_item for the next round, not a new thread. Returns `url`, the absolute link to the page that shows this thread. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -595,7 +595,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_markdown',
       description:
-        'Attach a markdown file to a board as a live doc. The server parses the file into the editor and keeps file and doc in sync both ways. The file must already exist, and path should be absolute. After the bind, edit only through these tools, because the next flush overwrites a direct file write. Returns the minted docId and the review URL.',
+        'Attach a markdown file to a board as a live doc. The server parses the file into the editor and keeps file and doc in sync both ways. The file must already exist, and path should be absolute. After the bind, edit only through these tools, because the next flush overwrites a direct file write. Returns the minted docId and the review URL. Returns `url`, the absolute link to the page of the doc. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -690,7 +690,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_mockup',
       description:
-        "Serve an HTML mockup at /workspaces/<workspaceId>/mockups/<docId> and bind it for comments. The server re-reads sourceHtmlPath on each request, so an edit appears on reload. An unreadable path fails this call instead of the reviewer's. Single-file mockups only, because relative CSS and JS siblings do not resolve. Hand meta.reviewUrl to a person.",
+        "Serve an HTML mockup at /workspaces/<workspaceId>/mockups/<docId> and bind it for comments. The server re-reads sourceHtmlPath on each request, so an edit appears on reload. An unreadable path fails this call instead of the reviewer's. Single-file mockups only, because relative CSS and JS siblings do not resolve. Hand meta.reviewUrl to a person. Returns `url`, the absolute link to the page of the mockup. Give that link to a person.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -714,7 +714,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_app',
       description:
-        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Reusing a docId repoints that app. Hand reviewUrl to a person.',
+        'Attach a running dev server to a board so members open it at /workspaces/<workspaceId>/apps/<docId>/ and comment on it with the widget, as on a mockup. origin must be http://127.0.0.1:<port> or http://localhost:<port>; anything else is refused. The server proxies <prefix><path> to <origin>/<path>, including the reload event stream, and rewrites nothing in the pages, so the site must build every link under the returned prefix. Attaching the same docId and origin again returns that app; a docId already used for another origin, or by a doc of another kind, is refused with 409 doc_exists, so a new port needs a new docId. Hand reviewUrl to a person. Returns `url`, the absolute link to the page of the app. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -740,7 +740,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_folder',
       description:
-        'Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing.',
+        'Attach a folder or worktree as a browsable review. The reviewer picks files from the menu under the filename in the topbar, and a markdown file opens editable. Prefer create_diff_review, which adds the changed-files diff on top of browsing. Returns `url`, the absolute link to the page the folder opens on. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -787,7 +787,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'create_diff_review',
       description:
-        'Review a git diff the way a pull request reads: one doc per changed file, with line-anchored comments. By default it diffs base against the working tree and re-renders as you edit. Pass target to pin it to a commit, or omit base to browse the folder. Hand entryUrl to the reviewer.',
+        'Review a git diff the way a pull request reads: one doc per changed file, with line-anchored comments. By default it diffs base against the working tree and re-renders as you edit. Pass target to pin it to a commit, or omit base to browse the folder. Hand entryUrl to the reviewer. Returns `url`, the absolute link to the page the review opens on, the same value as entryUrl. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1311,7 +1311,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'apply_block_edits',
       description:
-        'Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion. Markdown in each edit is parsed either way.',
+        'Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. Markdown in each edit is parsed either way.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1527,7 +1527,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'share_workspace',
       description:
-        'Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL.',
+        'Mint a share link for a board. Anyone you send it to signs in once with their email, and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1679,7 +1679,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'create_workspace',
       description:
-        'Create a board: its goals, its tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals, so write them with set_goal_list.',
+        'Create a board: its goals, its tasks, and the docs and attachments filed on it, opened at /workspaces/<id>. You become its lead agent unless you pass leadAgentId. A board starts with no goals, so write them with set_goal_list. Returns `url`, the absolute link to the board. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1761,7 +1761,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'attach_doc',
       description:
-        "File an existing doc, diff review or folder bind onto a board, so its open comment threads reach that board's Home queue. It is a link only, so the doc keeps its own URL and nothing moves. docId also takes a review id, which attaches the whole review as one unit. Idempotent.",
+        "File an existing doc, diff review or folder bind onto a board, so its open comment threads reach that board's Home queue. It is a link only, so the doc keeps its own URL and nothing moves. docId also takes a review id, which attaches the whole review as one unit. Idempotent. Returns `url`, the absolute link to the doc on this board. Give that link to a person.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1774,7 +1774,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'create_tasks',
       description:
-        'File work on a board. This is the only create verb. It always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced in Backlog. New tasks stay in triage until task_transition releases them. A bad task returns in failures by index, not rejecting the batch. `held: true` means it waits off the queue until revise_review_item closes `heldReason`.',
+        'File work on a board. This is the only create verb. It always takes a list, so one task is a one-item list. Omit assignee and you own it. Omit goal and it lands unplaced in Backlog. New tasks stay in triage until task_transition releases them. A bad task returns in failures by index, not rejecting the batch. `held: true` means it waits off the queue until revise_review_item closes `heldReason`. Each created row returns `url`, the absolute link to its task. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1895,7 +1895,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'spin_off_task',
       description:
-        "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. It takes no done-when list, so send the criteria straight after, in rewrite_task's `doneWhen` field. Use create_tasks for an ask that did not come from a thread.",
+        "Turn a comment thread into a task. It captures the backlink and the latest human comment as the verbatim quote, and drafts a title and body when you do not supply them. It takes no done-when list, so send the criteria straight after, in rewrite_task's `doneWhen` field. Use create_tasks for an ask that did not come from a thread. Returns `url`, the absolute link to the new task. Give that link to a person.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -2363,7 +2363,7 @@ export const TOOL_LIST: ListToolsResult = {
     },
     {
       name: 'add_review_item',
-      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand('<service>')}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere. To run commands only the owner may allow, file ONE \`review_type: 'grant'\` item before the work starts, listing every rule in \`allowRules\`; the owner approves it in the browser, the rules are written to their settings, and they are removed when the task closes.`,
+      description: `Hang a question on a task that already exists, so the ask stays attached to the work. A task carries several at once, each answered on its own, so the task title keeps naming the work. When you file work and question together, use \`review\` on a create_tasks entry. Every item passes the board's quality gate: \`held: true\` means it is OFF the reader's queue until revise_review_item closes \`heldReason\`. To ask for a value you must never see — an account name, a signing value, anything you would otherwise ask a person to paste into chat — file \`review_type: 'secret'\` with one \`secrets\` field per value. The reader types them into the card and they go straight to this machine's store; you are told only that they were saved and under which names. Read one back with \`${secretReadCommand('<service>')}\` (the stored name carries that prefix; the card shows the bare one), use it in the command that needs it, and never write it anywhere. To run commands only the owner may allow, file ONE \`review_type: 'grant'\` item before the work starts, listing every rule in \`allowRules\`; the owner approves it in the browser, the rules are written to their settings, and they are removed when the task closes. Returns \`url\`, the absolute link to the task that holds the item. Give that link to a person.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -2640,7 +2640,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'import_tasks_markdown',
       description:
-        'Move a hand-maintained markdown tracker, headings plus status tables, onto a board. It defaults to a dry run that returns the mapping and creates nothing, so review that with the person, then call again with apply: true. Apply stamps the source file with a banner and a link, and a stamped file refuses re-import.',
+        'Move a hand-maintained markdown tracker, headings plus status tables, onto a board. It defaults to a dry run that returns the mapping and creates nothing, so review that with the person, then call again with apply: true. Apply stamps the source file with a banner and a link, and a stamped file refuses re-import. With apply: true, it returns `url`, the absolute link to the board. Give that link to a person.',
       inputSchema: {
         type: 'object',
         properties: {

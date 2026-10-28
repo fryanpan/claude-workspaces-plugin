@@ -95,6 +95,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/events:stream', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/audio', 'GET'],
     ['trusted-local', '/workspaces/:ws/docs/:docId/voice', 'GET'],
+    ['trusted-local', '/workspaces/:ws/docs/:docId/app-voice', 'GET'],
     ['trusted-local', '/workspaces/:ws/voice/converse', 'GET'],
     ['share-scope', '/workspaces/:ws/docs/:docId/y', 'GET'],
     ['collab-scope', '/workspaces/:ws/y', 'GET'],
@@ -187,12 +188,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/voice/tokens/:id/revoke', 'POST'],
   ]),
 
-  // The coach session's moment is refused through the edge, from off this
-  // machine and from a page (`refuseNonLocalAgentCaller`); it carries no
-  // token. The page routes are trusted-local and then refuse every caller but
+  // The coach session's moment and the coverage report are refused through
+  // the edge, from off this machine and from a page
+  // (`refuseNonLocalAgentCaller`); neither carries a token. The page routes are trusted-local and then refuse every caller but
   // the owner's own signed-in pages.
   ...family('routes/coach.ts', [
     ['loopback-only', '/coach/moments', 'POST'],
+    ['loopback-only', '/coach/coverage', 'GET'],
     ['trusted-local', '/coach/setup', 'POST'],
     ['trusted-local', '/coach/review', 'POST'],
     ['trusted-local', '/coach/prefs', 'POST'],
@@ -211,6 +213,13 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/inbox/rows/:id/reply', 'POST'],
   ]),
 
+  // Home's and the review page's load reports take those pages' own gate; the
+  // slowest-load read is the daily health check's, on the box.
+  ...family('routes/load-reports.ts', [
+    ['trusted-local', '/api/load-reports', 'POST'],
+    ['loopback-only', '/api/load-reports/slowest', 'GET'],
+  ]),
+
   ...family('routes/mcp-connector.ts', [['loopback-only', '/mcp', 'GET POST DELETE']]),
 
   ...family('routes/agent-identity.ts', [
@@ -226,9 +235,16 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
   // Mint, list and revoke `at2`: refused through the edge, from off this
   // machine, from a page, and to every visitor, `at2` holders included.
+  // Refresh is the holder's own, and needs the live token it renews.
   ...family('routes/board-tokens.ts', [
     ['loopback-only', '/api/board-tokens', 'GET POST'],
     ['loopback-only', '/api/board-tokens/:id/revoke', 'POST'],
+    [
+      'trusted-local',
+      '/api/board-tokens/refresh',
+      'POST',
+      'Answers only a live `at2` the board-token door admitted, with a fresh value for that same record (`middleware/board-agent-door.ts`).',
+    ],
   ]),
 
   ...family('routes/workspaces-create-read.ts', [
@@ -447,6 +463,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/attachments/:setId/context-file', 'POST'],
     ['share-scope', '/workspaces/:ws/attachments/:setId/editable-file', 'POST'],
     ['share-scope', '/workspaces/:ws/attachments/:setId/tree', 'GET'],
+    ['share-scope', '/workspaces/:ws/attachments/:setId/raw', 'GET HEAD'],
   ]),
 
   ...family('routes/meetings-calendar.ts', [

@@ -153,6 +153,12 @@ describe('cutsIn', () => {
     expect(cutsIn('…', '')).toBe(false);
     expect(cutsIn('So', '')).toBe(true);
   });
+
+  it('does not count the Soniox tags leading a line as words the voice says', () => {
+    const line = '[calm] [warm] Riverbend is ahead.';
+    expect(cutsIn('Calm, warm.', line)).toBe(true);
+    expect(echoOf('Riverbend is ahead', line)).toBe(true);
+  });
 });
 
 describe('the planning voice never talks over the meeting', () => {

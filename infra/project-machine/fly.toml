@@ -1,18 +1,25 @@
-# One project machine. The app name is per project: pass it as
-# `fly deploy -a <app>`; the value below is a placeholder.
+# One project machine. Deploy it with `bun run machine:deploy`, which writes
+# the project's app name, region and size into a copy of this file; the
+# values below are placeholders.
 #
-# Secrets (`fly secrets set`, never in this file):
-#   CLOUDFLARE_TUNNEL_TOKEN       the machine's own tunnel (required)
-#   BACKUP_S3_ACCESS_KEY_ID       create-only credential for the project's bucket
+# Secrets (set by deploy.ts with `fly secrets import`, never in this file):
+#   CLOUDFLARE_TUNNEL_TOKEN       the machine's own named tunnel, or
+#   CW_TUNNEL_MODE=quick          a trycloudflare.com quick tunnel, for a test machine
+#   BACKUP_S3_ACCESS_KEY_ID       write-only credential for the project's bucket
 #   BACKUP_S3_SECRET_ACCESS_KEY
 #   CW_SENTRY_SERVER_DSN          optional
+#   CW_ORG_ANTHROPIC_API_KEY      this org's own Anthropic key; without it every
+#                                 Claude call is refused (project-profile.ts)
 # Per-project settings, also set with `fly secrets set` so no project's values
 # are committed: BACKUP_RECIPIENT, BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET,
 # CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CW_PROXIED_TRUSTED_HOSTS,
-# CW_PROXIED_TRUSTED_EMAILS, CW_OWNER_EMAIL, CW_PUBLIC_BASE_URL.
+# CW_PROXIED_TRUSTED_EMAILS, CW_OWNER_EMAIL, CW_PUBLIC_BASE_URL, and
+# CW_PROJECT_PROFILE (`standard` unless set; `claude-only` turns off
+# transcription, ElevenLabs and Gemini).
 #
-# Claude features (summaries, the review judge) stay off here: the server
-# spends prod's key only under the Mac's launchd label (claude-key-source.ts).
+# Claude calls spend CW_ORG_ANTHROPIC_API_KEY and nothing else: never a Mac
+# Keychain item, another org's key or a gh login. The server removes any such
+# variable from its environment at boot (packages/server/src/project-profile.ts).
 #
 # The runbook is docs/process/project-machine.md.
 
@@ -21,6 +28,9 @@ primary_region = "sjc"
 
 [env]
   CW_DATA_DIR = "/data/cw"
+  # Claude Code's session transcripts: entrypoint.sh points the cw user's
+  # ~/.claude/projects here, so they live on the volume and are backed up.
+  BACKUP_TRANSCRIPTS_DIR = "/data/claude-projects"
   BACKUP_S3_PREFIX = "snapshots/"
   BACKUP_S3_REGION = "auto"
   BACKUP_INTERVAL_HOURS = "6"
@@ -42,6 +52,9 @@ primary_region = "sjc"
 [[restart]]
   policy = "always"
 
+# deploy.ts rewrites everything from here down with the project's size
+# (`--memory`, 512 MB unless told otherwise), because `fly deploy` lets this
+# block win over its --vm-* flags. Keep [[vm]] the last block in the file.
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "2gb"
+  memory = "512mb"

@@ -15,7 +15,7 @@ import { contextMatches, samePage } from '@claude-workspaces/core/anchor/context
 import { resolve as resolveElement } from '@claude-workspaces/core/anchor/element';
 import { clipAudio, composerNote } from './widget-auth.ts';
 import { goTo } from './widget-goto.ts';
-import { IGNORE_ATTR } from './widget-picker.ts';
+import { IGNORE_ATTR, submitOnEnter } from './widget-picker.ts';
 import { receipt, threadSnippet } from './widget-thread-text.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -264,19 +264,17 @@ function showThreadPopoverForThread(el: FeedbackWidgetEl, t: Thread): void {
       return;
     }
   }
-  showThreadPopover(el, t, window.innerWidth / 2, 80);
+  showThreadPopover(el, t, innerWidth / 2, 80);
 }
 
 export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, cy: number): void {
-  const existing = el.shadow.querySelector('.thread-popover');
-  existing?.remove();
+  el.shadow.querySelector('.thread-popover')?.remove();
   const pop = document.createElement('div');
   pop.className = 'thread-popover';
   // The screen's right edge: `innerWidth` is the page's, past it when the
   // page is wider than a phone.
   const vv = window.visualViewport;
   pop.style.left = `${Math.min(cx + 6, (vv ? vv.offsetLeft + vv.width : innerWidth) - 340)}px`;
-  pop.style.top = `${Math.min(cy + 6, window.innerHeight - 240)}px`;
   const snippet = threadSnippet(t.anchor);
   const status = t.anchor.kind === 'orphan' ? 'orphan' : t.status;
   pop.innerHTML =
@@ -309,6 +307,17 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
     cList.appendChild(row);
   }
   el.shadow.appendChild(pop);
+  // Below the spot, unless that runs it past the bottom: then it ends 8px
+  // above the bottom edge, with its reply box and Reply button on screen. The
+  // comment list scrolls a thread's element to the middle, and one on a
+  // page's last lines stays near the bottom. Measured once, in the microtask
+  // after the page's own observers have added an ask or a suggestion to it
+  // (`widget-ask.ts`, `edit/edit-suggest.ts`): theirs was queued by the
+  // append above, so it runs first. Nothing else sees the popover before it
+  // has its place, and it does not move after.
+  queueMicrotask(() => {
+    pop.style.top = `${Math.min(cy + 6, innerHeight - pop.offsetHeight - 8)}px`;
+  });
   pop.querySelector('.close')?.addEventListener('click', () => pop.remove());
   cList.addEventListener('click', (ev) => {
     const clip = (ev.target as Element).closest('[data-clip]')?.getAttribute('data-clip');
@@ -318,8 +327,8 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
         .catch(() => {});
     }
   });
-  pop.querySelector('.submit')?.addEventListener('click', async () => {
-    const ta = pop.querySelector('textarea') as HTMLTextAreaElement;
+  const ta = pop.querySelector('textarea') as HTMLTextAreaElement;
+  const send = async (): Promise<void> => {
     const text = ta.value.trim();
     if (!text) return;
     // A rejected fetch (server unreachable) is a refused reply like any
@@ -337,7 +346,10 @@ export function showThreadPopover(el: FeedbackWidgetEl, t: Thread, cx: number, c
       return;
     }
     pop.remove();
-  });
+  };
+  pop.querySelector('.submit')?.addEventListener('click', send);
+  // The rule the new-comment box keeps: Enter sends, Shift+Enter is a line.
+  submitOnEnter(ta, send);
   pop.querySelector('.resolve')?.addEventListener('click', async () => {
     await el.setStatus(t.id, 'resolved');
     pop.remove();

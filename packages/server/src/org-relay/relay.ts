@@ -33,6 +33,9 @@
  * A delivery that fails in transit gets no verdict and is tried again on the
  * next pass, so a recipient server that is down loses nothing.
  */
+import { BOARD_AGENT_TOKEN_TTL_MS } from '../auth/board-agent-token.ts';
+import { configuredHostFetch } from '../outbound-fetch.ts';
+import { createBearerKeeper } from './relay-bearers.ts';
 import {
   type OutboxThread,
   type RelayFetch,
@@ -65,6 +68,9 @@ export interface RelayOptions {
   filterTimeoutMs?: number;
   now?: () => number;
   log?: (line: string) => void;
+  /** Where renewed board tokens are kept (`relay-bearers.ts`); null keeps
+   *  them in memory. */
+  stateDir?: string | null;
 }
 
 export interface Relay {
@@ -97,7 +103,8 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 export function createRelay(opts: RelayOptions): Relay {
   const { config, store } = opts;
-  const fetchFn: RelayFetch = opts.fetch ?? ((input, init) => fetch(input, init));
+  const fetchFn: RelayFetch =
+    opts.fetch ?? configuredHostFetch(Array.from(config.servers.values(), (s) => s.baseUrl));
   const now = opts.now ?? Date.now;
   const log = opts.log ?? ((line: string) => console.error(line));
   const filterTimeoutMs = opts.filterTimeoutMs ?? 15_000;
@@ -107,6 +114,14 @@ export function createRelay(opts: RelayOptions): Relay {
   /** Ids the filter passed whose delivery failed: a retry is not judged again. */
   const passed = new Set<string>();
   let polling = false;
+  const bearers = createBearerKeeper({
+    fetch: fetchFn,
+    config,
+    stateDir: opts.stateDir ?? null,
+    ttlMs: BOARD_AGENT_TOKEN_TTL_MS,
+    now,
+    log,
+  });
 
   const record = (
     m: RelayMessage,
@@ -253,6 +268,7 @@ export function createRelay(opts: RelayOptions): Relay {
       if (polling) return;
       polling = true;
       try {
+        await bearers.run();
         for (const seat of config.seats.values()) await pollSeat(seat);
       } finally {
         polling = false;

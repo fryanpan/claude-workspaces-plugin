@@ -16,7 +16,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createFrameHost, frameGate, parseFrameOrigin } from '../src/frame-host.ts';
+import { createFrameHost, frameGate, parseFrameOrigin, sameSiteHosts } from '../src/frame-host.ts';
+import { FRAME_COOKIE, checkFrameTicket } from '../src/frame-ticket.ts';
 import { FRAME_HOST_SANDBOX, MOCK_FRAME_CSP } from '../src/mockup-frame.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
@@ -52,30 +53,51 @@ describe('the frame hostname setting', () => {
 
   it('frames on it only for a board hostname, never for a visitor or on itself', () => {
     const fh = createFrameHost({
-      origin: 'https://frames.harborlight.test',
-      boardHosts: ['board.harborlight.test', 'frames.harborlight.test'],
+      origin: 'https://harborlight.frames.test',
+      boardHosts: ['harborlight.board.test', 'harborlight.frames.test'],
+      keys: () => ({ ticket: 'k', cookie: 'c' }),
     });
     const on = (host: string) => new Request('http://x/', { headers: { host } });
-    expect(fh.frameOriginFor(on('board.harborlight.test'), false)).toBe(
-      'https://frames.harborlight.test',
+    const target = fh.frameFor(on('harborlight.board.test'), false, 'w-harbor');
+    expect(target?.origin).toBe('https://harborlight.frames.test');
+    // The ticket opens this board on this frame hostname, and nothing else.
+    expect(checkFrameTicket('k', target?.ticket, 'harborlight.frames.test', 'w-harbor').ok).toBe(
+      true,
     );
-    expect(fh.frameOriginFor(on('board.harborlight.test:443'), false)).toBe(
-      'https://frames.harborlight.test',
+    expect(checkFrameTicket('k', target?.ticket, 'riverbend.frames.test', 'w-harbor')).toEqual({
+      ok: false,
+      reason: 'other_frame_host',
+    });
+    expect(fh.frameFor(on('harborlight.board.test:443'), false, 'w-harbor')?.origin).toBe(
+      'https://harborlight.frames.test',
     );
-    expect(fh.frameOriginFor(on('board.harborlight.test'), true)).toBeNull();
-    expect(fh.frameOriginFor(on('share.harborlight.test'), false)).toBeNull();
-    expect(fh.frameOriginFor(on('frames.harborlight.test'), false)).toBeNull();
-    expect(fh.isFrameHost(on('Frames.Harborlight.test:8443'))).toBe(true);
+    expect(fh.frameFor(on('harborlight.board.test'), true, 'w-harbor')).toBeNull();
+    expect(fh.frameFor(on('share.board.test'), false, 'w-harbor')).toBeNull();
+    expect(fh.frameFor(on('harborlight.frames.test'), false, 'w-harbor')).toBeNull();
+    expect(fh.isFrameHost(on('Harborlight.Frames.test:8443'))).toBe(true);
     // Framed by the board alone: the frame hostname itself is not an
     // ancestor, so one attachment cannot frame another and read it.
     expect(fh.frameCsp).toBe(
-      `sandbox ${FRAME_HOST_SANDBOX}; frame-ancestors https://board.harborlight.test http://board.harborlight.test:*`,
+      `sandbox ${FRAME_HOST_SANDBOX}; frame-ancestors https://harborlight.board.test http://harborlight.board.test:*`,
     );
+    expect(fh.sameSiteBoardHosts).toEqual([]);
   });
 
   it('is framed by nobody when no board hostname is named', () => {
-    const fh = createFrameHost({ origin: 'https://frames.harborlight.test', boardHosts: [] });
+    const fh = createFrameHost({
+      origin: 'https://harborlight.frames.test',
+      boardHosts: [],
+      keys: () => ({ ticket: 'k', cookie: 'c' }),
+    });
     expect(fh.frameCsp.endsWith("frame-ancestors 'none'")).toBe(true);
+  });
+
+  it('names a board hostname the frame hostname shares a domain with', () => {
+    expect(sameSiteHosts('frames.board.test', ['harborlight.board.test', '127.0.0.1'])).toEqual([
+      'harborlight.board.test',
+    ]);
+    expect(sameSiteHosts('harborlight.frames.test:8443', ['harborlight.board.test'])).toEqual([]);
+    expect(sameSiteHosts('frames.localhost', ['127.0.0.1', 'localhost'])).toEqual([]);
   });
 });
 
@@ -105,6 +127,19 @@ describe('what the frame hostname answers', () => {
       expect(verdict(`${APP}/assets/tides.js`, dest)).toEqual({ ok: false, status: 404 });
     }
     expect(verdict(`${APP}/?cw-frame=1`, 'document')).toEqual({ ok: false, status: 404 });
+  });
+
+  it("answers an app's files only to a page on this same frame hostname", () => {
+    const asked = (site: string) => {
+      const path = `${APP}/assets/tides.js`;
+      const r = req(path, { headers: { 'sec-fetch-dest': 'script', 'sec-fetch-site': site } });
+      return frameGate(r, path, new URLSearchParams());
+    };
+    expect(asked('same-origin')).toEqual({ ok: true });
+    // Another project's frame hostname is the same site under the frame domain.
+    for (const site of ['same-site', 'cross-site', 'none']) {
+      expect(asked(site)).toEqual({ ok: false, status: 404 });
+    }
   });
 
   it("answers the widget's own scripts as scripts only", () => {
@@ -159,7 +194,8 @@ describe('a server with the frame hostname configured', () => {
     return res.json() as Promise<Record<string, unknown>>;
   };
   const onFrames = (path: string, headers: Record<string, string> = {}, method = 'GET') =>
-    fetch(`${base}${path}`, { method, headers: { ...FRAMES(), ...headers } });
+    // `manual`: the ticket's redirect is the answer under test, as a frame sees it.
+    fetch(`${base}${path}`, { method, headers: { ...FRAMES(), ...headers }, redirect: 'manual' });
 
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'frame-host-'));
@@ -197,12 +233,28 @@ describe('a server with the frame hostname configured', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it("points the board's frame at the frame hostname, with that hostname's origin", async () => {
+  /** A host page's frame address, as the board hands it to the reader. */
+  const frameSrc = async (): Promise<URL> => {
+    const html = await (
+      await fetch(`${base}/workspaces/${ws}/mockups/${mock}?v=1`, { headers: BOARD() })
+    ).text();
+    const src = /data-src="([^"]+)"/.exec(html)?.[1]?.replace(/&amp;/g, '&') ?? '';
+    return new URL(src);
+  };
+  /** The frame's address traded for the cookie, as a browser's frame does. */
+  const redeem = async () => {
+    const src = await frameSrc();
+    const res = await onFrames(`${src.pathname}${src.search}`, { 'sec-fetch-dest': 'iframe' });
+    return { res, cookie: (res.headers.get('set-cookie') ?? '').split(';')[0] ?? '' };
+  };
+  const FRAME = () => `/workspaces/${ws}/mockups/${mock}?cw-frame=1`;
+
+  it("points the board's frame at the frame hostname, with a ticket for this board", async () => {
     const host = await fetch(`${base}/workspaces/${ws}/mockups/${mock}?v=1`, { headers: BOARD() });
     const html = await host.text();
     expect(host.status).toBe(200);
     expect(html).toContain(
-      `data-src="${frameOrigin}/workspaces/${ws}/mockups/${mock}?v=1&amp;cw-frame=1"`,
+      `data-src="${frameOrigin}/workspaces/${ws}/mockups/${mock}?v=1&amp;cw-frame=1&amp;cw-ft=`,
     );
     expect(html).toContain(`sandbox="${FRAME_HOST_SANDBOX}"`);
   });
@@ -216,10 +268,27 @@ describe('a server with the frame hostname configured', () => {
     expect(html).not.toContain('allow-same-origin');
   });
 
+  it('trades the ticket for a partitioned cookie and drops it from the address', async () => {
+    const { res } = await redeem();
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe(`/workspaces/${ws}/mockups/${mock}?v=1&cw-frame=1`);
+    const set = res.headers.get('set-cookie') ?? '';
+    expect(set.startsWith(`${FRAME_COOKIE}=`)).toBe(true);
+    for (const attr of [
+      `Path=/workspaces/${ws}/`,
+      'HttpOnly',
+      'Secure',
+      'SameSite=None',
+      'Partitioned',
+    ]) {
+      expect(set).toContain(attr);
+    }
+    expect(set.toLowerCase()).not.toContain('domain=');
+  });
+
   it('serves the frame there with an origin of its own, framed only by the board', async () => {
-    const frame = await onFrames(`/workspaces/${ws}/mockups/${mock}?cw-frame=1`, {
-      'sec-fetch-dest': 'iframe',
-    });
+    const { cookie } = await redeem();
+    const frame = await onFrames(FRAME(), { 'sec-fetch-dest': 'iframe', cookie });
     expect(frame.status).toBe(200);
     const csp = frame.headers.get('content-security-policy') ?? '';
     expect(csp).toContain('allow-same-origin');
@@ -231,6 +300,44 @@ describe('a server with the frame hostname configured', () => {
       headers: BOARD(),
     });
     expect(opaque.headers.get('content-security-policy')).toBe(MOCK_FRAME_CSP);
+  });
+
+  it('refuses a browser with no ticket, a forged one, and a cookie for another board', async () => {
+    const bare = await onFrames(FRAME(), { 'sec-fetch-dest': 'iframe' });
+    expect(bare.status).toBe(403);
+    expect(((await bare.json()) as { error: string }).error).toBe('frame_ticket_required');
+    const src = await frameSrc();
+    const forged = new URLSearchParams(src.search);
+    forged.set('cw-ft', `${forged.get('cw-ft')?.slice(0, -2)}xx`);
+    const bad = await onFrames(`${src.pathname}?${forged}`, { 'sec-fetch-dest': 'iframe' });
+    expect(bad.status).toBe(404);
+    const { cookie } = await redeem();
+    const other = await onFrames('/workspaces/w-riverbend/mockups/d-berths?cw-frame=1', {
+      'sec-fetch-dest': 'iframe',
+      cookie,
+    });
+    expect(other.status).toBe(403);
+  });
+
+  it('refuses a cookie value sent back as a ticket, so a cookie cannot renew itself', async () => {
+    const { cookie } = await redeem();
+    const value = cookie.slice(`${FRAME_COOKIE}=`.length);
+    // CONTROL: the same value, sent as the cookie, holds the frame.
+    expect((await onFrames(FRAME(), { 'sec-fetch-dest': 'iframe', cookie })).status).toBe(200);
+    const res = await onFrames(`${FRAME()}&cw-ft=${encodeURIComponent(value)}`, {
+      'sec-fetch-dest': 'iframe',
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('drops a ticket from the redirect when its name is percent-encoded', async () => {
+    const src = await frameSrc();
+    const encoded = src.search.replace('cw-ft=', 'cw%2Dft=');
+    expect(encoded).toContain('cw%2Dft=');
+    const res = await onFrames(`${src.pathname}${encoded}`, { 'sec-fetch-dest': 'iframe' });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe(`/workspaces/${ws}/mockups/${mock}?v=1&cw-frame=1`);
   });
 
   it('refuses the host page, the API, the board and a write on the frame hostname', async () => {
@@ -252,12 +359,72 @@ describe('a server with the frame hostname configured', () => {
     expect(write.status).toBe(405);
   });
 
-  it('refuses a request through the tunnel when no Access verifier is configured', async () => {
-    const res = await onFrames(`/workspaces/${ws}/mockups/${mock}?cw-frame=1`, {
-      'sec-fetch-dest': 'iframe',
-      'cf-ray': '8f0000000000-SJC',
-    });
+  it('admits a ticket through the tunnel with no Access cookie, and nothing else', async () => {
+    const tunnel = { 'sec-fetch-dest': 'iframe', 'cf-ray': '8f0000000000-SJC' };
+    const { cookie } = await redeem();
+    const held = await onFrames(FRAME(), { ...tunnel, cookie });
+    expect(held.status).toBe(200);
+    const res = await onFrames(FRAME(), tunnel);
     expect(res.status).toBe(503);
     expect(((await res.json()) as { error: string }).error).toBe('access_not_configured');
+  });
+
+  it('refuses a held ticket through the tunnel while external access is off', async () => {
+    const offDir = mkdtempSync(join(tmpdir(), 'frame-host-off-'));
+    const off = createServer({
+      port: 0,
+      dataDir: offDir,
+      frameOrigin,
+      frameBoardHosts: ['127.0.0.1'],
+      sharingEnvLocked: true,
+    });
+    try {
+      const at = `http://127.0.0.1:${off.port}`;
+      const make = async (path: string, body: unknown) =>
+        (await (
+          await fetch(`${at}${path}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        ).json()) as Record<string, unknown>;
+      const board = (
+        (await make('/workspaces', { name: 'Tide table', author: AGENT })) as {
+          workspace: { id: string };
+        }
+      ).workspace.id;
+      const file = join(offDir, 'tides.html');
+      writeFileSync(file, '<!doctype html><html><body><h1>Saltmarsh tides</h1></body></html>');
+      const doc = String(
+        (
+          await make(`/workspaces/${board}/docs`, {
+            docId: 'tides',
+            type: 'mockup',
+            sourceUrl: file,
+          })
+        ).docId,
+      );
+      await make(`/workspaces/${board}/docs:attach`, { docId: doc });
+      const html = await (await fetch(`${at}/workspaces/${board}/mockups/${doc}`)).text();
+      const src = new URL(/data-src="([^"]+)"/.exec(html)?.[1]?.replace(/&amp;/g, '&') ?? '');
+      const framesOff = { host: `frames.localhost:${off.port}`, 'sec-fetch-dest': 'iframe' };
+      const traded = await fetch(`${at}${src.pathname}${src.search}`, {
+        headers: framesOff,
+        redirect: 'manual',
+      });
+      expect(traded.status).toBe(303);
+      const cookie = (traded.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+      const frame = `${at}/workspaces/${board}/mockups/${doc}?cw-frame=1`;
+      // CONTROL: the box's own browser holds its frame with the cookie.
+      expect((await fetch(frame, { headers: { ...framesOff, cookie } })).status).toBe(200);
+      const tunnelled = await fetch(frame, {
+        headers: { ...framesOff, cookie, 'cf-ray': '8f0000000000-SJC' },
+      });
+      expect(tunnelled.status).toBe(403);
+      expect(((await tunnelled.json()) as { error: string }).error).toBe('sharing_disabled');
+    } finally {
+      await off.stop();
+      rmSync(offDir, { recursive: true, force: true });
+    }
   });
 });

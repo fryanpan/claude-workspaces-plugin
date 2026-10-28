@@ -344,7 +344,7 @@ export class FeedbackWidgetEl extends HTMLElement {
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => {
-      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const overlap = Math.max(0, innerHeight - vv.height - vv.offsetTop);
       this.style.setProperty('--cw-vv-bottom', `${Math.round(overlap) + pageBarHeight(vv)}px`);
       // The screen's edges, for --cw-edge in styles.ts.
       this.style.setProperty('--cw-vv-left', `${vv.offsetLeft}px`);
@@ -444,8 +444,7 @@ export class FeedbackWidgetEl extends HTMLElement {
       'color:#7a271a;font:13px/1.45 system-ui,sans-serif';
     box.textContent =
       `claude-workspaces widget: missing \`${attribute}\`. ` +
-      'Add it to the <claude-feedback-widget> tag (or the init() call) — a doc is ' +
-      'addressed under the board that owns it, and this embed names no board.';
+      'Add it to the <claude-feedback-widget> tag or the init() call: a doc is found by its board.';
     this.shadow.appendChild(box);
     console.error(`[claude-workspaces] widget embed is missing \`${attribute}\``);
   }
@@ -461,12 +460,14 @@ export class FeedbackWidgetEl extends HTMLElement {
       sourceUrl: location.href,
     });
     const url = `${this.opts.serverUrl}${this.docPath()}/y?${qs.toString()}`;
-    // Only a BOARD token rides the socket: the tailnet door needs it, and a
-    // localhost socket never asked for one — a session token that died there
-    // would turn a read-only socket into a refused one.
-    this.client = connect(url, () =>
-      this.authToken?.startsWith('wt2.') ? this.authToken : undefined,
-    );
+    // The token rides the socket as its one subprotocol. The tailnet door
+    // refuses a socket without a board token, and the server ignores the
+    // reader's cookie on any socket from another origin, so on a localhost
+    // dev server the board token is what lets the first socket create a
+    // new page's doc where sign-in is required. A dead token gets the
+    // handshake refused; `connect` then tries once without it, which opens
+    // read-only as a socket with no token always has.
+    this.client = connect(url, () => this.authToken ?? undefined);
     this.client.onStatus((s) => {
       if (this.statusEl) {
         this.statusEl.textContent =

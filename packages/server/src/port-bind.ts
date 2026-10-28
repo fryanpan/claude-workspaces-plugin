@@ -15,7 +15,7 @@
  *
  *   classifyBindError  — in-use vs. host-unavailable vs. a real bug
  *   bindRetryDelayMs   — the backoff schedule
- *   shouldWalkPorts    — whether moving to the next port is even legal
+ *   waitsForItsPort    — whether a busy port is waited for or refused
  *
  * `acquirePort` composes them against injected probe/sleep functions.
  */
@@ -99,16 +99,27 @@ export function bindRetryDelayMs(
 }
 
 /**
- * Walking to the next port is a DEV convenience — it keeps two agents on one
- * machine from fighting over 8787. Under launchd the port is part of the
- * contract: peers, the discovery file, the Cloudflare tunnel and the
- * supervisor's own bind-health watchdog all name it. A prod server that
- * quietly moved to 8788 is invisible to every one of them, and on 2026-08-29
- * that invisibility is what let the watchdog restart a perfectly healthy
- * server nine times in a row while its predecessors stayed alive.
+ * No start moves to another port. A server that quietly moved to 8788 is
+ * invisible to everything that names its port — peers, the discovery file,
+ * the Cloudflare tunnel, the supervisor's bind-health watchdog — and on
+ * 2026-08-29 that invisibility is what let the watchdog restart a healthy
+ * server nine times in a row while its predecessors stayed alive. Dev used to
+ * walk anyway, to keep two agents on one machine off each other's port; a
+ * dev start that landed on another server's port then served the wrong data
+ * to whoever asked for that port.
+ *
+ * So the only choice left is what a busy port does. Under launchd
+ * (`--no-watch`), or wherever `--no-port-walk` pins it, the port is the
+ * contract and the start WAITS for it: exiting would put launchd into a
+ * relaunch loop. Every other start exits and says which port was busy.
  */
-export function shouldWalkPorts(argv: readonly string[]): boolean {
-  return !(argv.includes('--no-watch') || argv.includes('--no-port-walk'));
+export function waitsForItsPort(argv: readonly string[]): boolean {
+  return argv.includes('--no-watch') || argv.includes('--no-port-walk');
+}
+
+/** What a start that does not wait prints when its port is busy. */
+export function portTakenMessage(port: number): string {
+  return `port ${port} is in use. Pass --port <n> for a free one; the server does not move to another port.`;
 }
 
 /**

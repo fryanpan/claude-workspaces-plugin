@@ -6,11 +6,12 @@ named gap.
 
 ## File size: 500 lines
 
-Every `.ts` / `.css` file over 500 lines is split, or has a row in
+Every `.ts` / `.tsx` / `.mjs` / `.css` file over 500 lines is split, or has a row in
 [docs/architecture/exceptions.md](../../docs/architecture/exceptions.md)
 naming a verdict and a reason. A `Split` row is queued work and still passes —
 the gate exists so a **new** god file cannot appear with nobody having written
-down why.
+down why. A row whose line count is more than 20% off the file also fails; the
+fix is the number in the row.
 
 *Enforced by:* `bun run loc:audit` (CI).
 

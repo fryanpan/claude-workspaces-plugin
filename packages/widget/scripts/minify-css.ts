@@ -18,6 +18,9 @@
  * descendant combinator followed by a pseudo-class (`.a :first-child`), which
  * is the one selector shape where dropping the space around `:` would change
  * meaning. `css-minify.test.ts` pins those.
+ *
+ * A fraction loses its leading zero (`0.18` to `.18`) only after `:`, `,`, `(`
+ * or a space, so `10.5px` and a selector are left alone.
  */
 export function minifyCss(css: string): string {
   const holes: string[] = [];
@@ -30,6 +33,7 @@ export function minifyCss(css: string): string {
     .replace(/\s+/g, ' ')
     .replace(/\s*([{}:;,>])\s*/g, '$1')
     .replace(/;\}/g, '}')
+    .replace(/([:,( ])0\.(\d)/g, '$1.$2')
     .trim();
   return min.replace(/__CSSHOLE(\d+)__/g, (_m, i) => holes[Number(i)]);
 }

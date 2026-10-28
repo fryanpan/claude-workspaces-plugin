@@ -12,14 +12,15 @@
  *  1. A PERSON views the item, and an AGENT holds the stream. Nothing about
  *     self-authorship can explain the silence (`self-authored.ts` is the
  *     other half of this rule, and it would suppress the agent's own act).
- *  2. `review_item.answered` is posted after the view and must ARRIVE. It is
- *     built by the same file, on the same row shape, and it is the wake an
- *     agent waits for. A drop that took it too would fail here. Frames on one
- *     channel keep their order, so an answer that arrived proves a view that
- *     was never sent rather than one still in flight.
- *  3. The audit log still holds the viewed row. The measurement is the reason
- *     the event exists, and it is written by `TaskEventBus.emit` before any
- *     listener runs, so keeping the frame off the wire costs it nothing.
+ *  2. The answer is posted after the view, and its `decision.answered` must
+ *     ARRIVE: it is the wake an agent waits for, and a drop that took it too
+ *     would fail here. Frames on one channel keep their order, so an answer
+ *     that arrived proves a view that was never sent rather than one still in
+ *     flight. Its measurement twin, `review_item.answered`, is kept off the
+ *     wire by the same rule (Bryan, 2026-10-27: one answer, one wake).
+ *  3. The audit log still holds both measurement rows. The measurement is the
+ *     reason the events exist, and it is written by `TaskEventBus.emit` before
+ *     any listener runs, so keeping the frames off the wire costs it nothing.
  *
  * All fixtures are invented. Port 0, temp data dir.
  */
@@ -145,11 +146,27 @@ describe('an analytics event stays off every stream', () => {
       author: PERSON,
     });
 
-    await waitFor(() => agentStream.frames.some((f) => f.event === 'review_item.answered'));
-    await waitFor(() => pageStream.frames.some((f) => f.event === 'review_item.answered'));
-
-    expect(agentStream.frames.map((f) => f.event)).not.toContain('review_item.viewed');
-    expect(pageStream.frames.map((f) => f.event)).not.toContain('review_item.viewed');
+    // `review_item.answered` is emitted after `decision.answered`, so a
+    // later act's frame bounds the window: once it is here, the answered
+    // row would have been too.
+    await post(`/workspaces/${WS}/tasks`, {
+      title: 'Sentinel',
+      body: 'Bob can see where the window ends so that an absence is an absence.',
+      author: PERSON,
+    });
+    for (const stream of [agentStream, pageStream]) {
+      await waitFor(() => stream.frames.some((f) => f.event === 'decision.answered'));
+      await waitFor(() =>
+        stream.frames.some(
+          (f) =>
+            f.event === 'task.created' &&
+            (f.data.task as { title?: string } | undefined)?.title === 'Sentinel',
+        ),
+      );
+      const events = stream.frames.map((f) => f.event);
+      expect(events).not.toContain('review_item.viewed');
+      expect(events).not.toContain('review_item.answered');
+    }
 
     // The measurement the event exists for is still written.
     const log = readFileSync(join(dataDir, 'workspaces', `${WS}.events.jsonl`), 'utf8');
@@ -158,6 +175,7 @@ describe('an analytics event stays off every stream', () => {
       .filter((line) => line.trim() !== '')
       .map((line) => (JSON.parse(line) as { event?: string }).event);
     expect(types).toContain('review_item.viewed');
+    expect(types).toContain('review_item.answered');
 
     agentStream.stop();
     pageStream.stop();

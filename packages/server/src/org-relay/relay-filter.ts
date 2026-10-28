@@ -1,3 +1,4 @@
+import { fixedHostFetch } from '../outbound-fetch.ts';
 /**
  * The relay's classifier: a Haiku call that asks whether a message from
  * outside the recipient's organization, or from an untrusted seat, is safe
@@ -88,7 +89,7 @@ export function haikuRelayFilter(opts: HaikuRelayFilterOpts = {}): RelayFilter |
   const resolved = resolveKeySlotFrom('relay-filter', opts.apiKey, readKeychainPassword);
   if (!resolved) return null;
   const key = resolved.key;
-  const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const fetchImpl = opts.fetchImpl ?? fixedHostFetch;
   const timeoutMs = opts.timeoutMs ?? RELAY_FILTER_TIMEOUT_MS;
   return async (input) => {
     const { system, user } = buildRelayFilterPrompt(input);

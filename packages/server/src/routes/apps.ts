@@ -36,6 +36,7 @@
  * it is read once, to draw the host page's link back to the board.
  */
 import type { DocMeta, DocType } from '@claude-workspaces/core';
+import type { AppVoiceSeed } from '@claude-workspaces/core/app-voice';
 import { assetHref } from '@claude-workspaces/core/asset-manifest';
 import { EMBED_PARAM } from '@claude-workspaces/core/board-embeds';
 import type { AppOutages } from '../app-outage.ts';
@@ -47,6 +48,7 @@ import {
   upstreamRequestHeaders,
   upstreamUrl,
 } from '../app-proxy.ts';
+import { withAppVoiceSeed } from '../app-voice/seed.ts';
 import { APP_DOWN_HEADER, renderAppWaiting } from '../app-waiting-page.ts';
 import type { BrowserSentryConfig } from '../browser-sentry.ts';
 import { injectSentryHead } from '../browser-sentry.ts';
@@ -63,6 +65,7 @@ import {
 } from '../mockup-frame.ts';
 import { appLinkWarning, linksOutsidePrefix, rootRelativePageLinks } from '../mockup-page-links.ts';
 import { injectWidget } from '../mockup-widget.ts';
+import { loopbackFetch } from '../outbound-fetch.ts';
 import { readAppAssetManifest, renderAppNotFound } from '../shells.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
 
@@ -87,6 +90,8 @@ export interface AppRoutesContext {
   agentName: (agentId: string) => string | undefined;
   /** The frame-only hostname (`frame-host.ts`), or null when not configured. */
   frameHost: FrameHost | null;
+  /** The app voice socket's path and a fresh token for one doc (`app-voice/`). */
+  appVoiceSeed: (workspaceId: string, docId: string) => AppVoiceSeed;
 }
 
 export interface AppRouteRequest {
@@ -96,6 +101,9 @@ export interface AppRouteRequest {
   /** A share visitor, admitted above; read only to draw the host page's
    *  link back to the board, never to decide access. */
   visitor: boolean;
+  /** Whether the frame served to this reader carries an app voice token
+   *  (`app-voice/gate.ts`). */
+  mayMintAppVoice: boolean;
 }
 
 /** `apps/<id>` and whatever follows it, off the scope's remainder. */
@@ -155,13 +163,28 @@ async function attachApp(
   if (!ctx.isValidDocId(name)) return j(400, { error: 'bad docId' });
   const origin = parseLoopbackOrigin(body?.origin, ctx.ownPort());
   if (!origin.ok) return j(400, { error: 'origin_not_loopback', message: origin.error });
-  // A name already held by a doc of another kind stays that doc. Turning a
-  // markdown doc into an app would strand its content behind a proxy.
+  // A name already held by a doc stays that doc, as a create through the
+  // docs route does (`doc-create-conflict.ts`). Turning a markdown doc into
+  // an app would strand its content behind a proxy, and pointing an app at
+  // another port would put the doc's comments on a page somebody else
+  // serves. Attaching the same origin again is a no-op and passes.
   const held = docStore.peekMeta(name);
-  if (held && held.type !== 'app') {
+  const conflict = !held
+    ? null
+    : held.type !== 'app'
+      ? 'type'
+      : held.sourceUrl !== origin.origin
+        ? 'source'
+        : null;
+  if (held && conflict) {
     return j(409, {
-      error: 'name_held_by_other_kind',
-      message: `"${name}" is already a ${held.type} doc. Pick another name for the app.`,
+      error: 'doc_exists',
+      docId: held.docId,
+      conflict,
+      message:
+        conflict === 'type'
+          ? `"${name}" is already a ${held.type ?? 'doc'}. Pick another name for the app.`
+          : `"${name}" is already attached to ${held.sourceUrl ?? 'another origin'}. Pick another name for this origin.`,
     });
   }
   const producedBy = producedByOf(body?.producedBy);
@@ -194,6 +217,7 @@ async function attachApp(
     origin: origin.origin,
     reachable: root.reachable,
     reviewUrl: meta.reviewUrl,
+    url: meta.reviewUrl,
     meta,
   });
 }
@@ -258,6 +282,9 @@ function waitingResponse(
   });
 }
 
+/** The app's origin was checked as loopback when it was attached. */
+const attachedAppFetch = loopbackFetch('attached-app');
+
 /** The most of the root page the link check reads. */
 const PROBE_HTML_MAX = 2 * 1024 * 1024;
 
@@ -267,7 +294,7 @@ const PROBE_HTML_MAX = 2 * 1024 * 1024;
 async function probe(origin: string): Promise<{ reachable: boolean; html: string | null }> {
   let r: Response;
   try {
-    r = await fetch(`${origin}/`, {
+    r = await attachedAppFetch(`${origin}/`, {
       redirect: 'manual',
       signal: AbortSignal.timeout(PROBE_MS),
     });
@@ -313,7 +340,7 @@ async function serveApp(
 
   let up: Response;
   try {
-    up = await fetch(target, {
+    up = await attachedAppFetch(target, {
       method: req.method,
       headers: upstreamRequestHeaders(req.headers),
       redirect: 'manual',
@@ -343,7 +370,10 @@ async function serveApp(
     const dest = req.headers.get('sec-fetch-dest');
     const onFrameHost = ctx.frameHost?.isFrameHost(req) === true;
     if (isMockFrameRequest(url)) {
-      return frameResponse(ctx, page, url, workspaceId, meta, up.status, onFrameHost);
+      const voiced = withAppVoiceSeed(page, () =>
+        rq.mayMintAppVoice ? ctx.appVoiceSeed(workspaceId, meta.docId) : null,
+      );
+      return frameResponse(ctx, voiced, url, workspaceId, meta, up.status, onFrameHost);
     }
     // A person opening the address gets the host page. A fetch of HTML from
     // inside the app (a partial, relayed through the host) gets the bytes.
@@ -360,7 +390,7 @@ async function serveApp(
           items: [],
           visitor: rq.visitor,
           coachHref: assetHref(assets, 'coach.js'),
-          frameOrigin: ctx.frameHost?.frameOriginFor(req, rq.visitor) ?? null,
+          frame: ctx.frameHost?.frameFor(req, rq.visitor, workspaceId) ?? null,
         }),
         ctx.browserSentry,
         'mockup',

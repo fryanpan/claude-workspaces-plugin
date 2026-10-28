@@ -26,11 +26,12 @@ import {
   redactWorkspaceTreeForVisitor,
 } from '../share/redact-meta.ts';
 import type { BoardWorkspace } from '../tasks.ts';
+import { serveReviewRaw } from './review-raw.ts';
 
 /**
  * ===== A review is addressed under the board that holds it. =====
  *
- * These eight used to answer at `/api/reviews/<setId>/…`, and before that at
+ * These used to answer at `/api/reviews/<setId>/…`, and before that at
  * a `/workspaces/<id>/…` alias meaning something else entirely — the review's
  * own id in the board's slot, from when a review WAS called a workspace. Both
  * spellings are gone. What is left is the canonical one:
@@ -42,7 +43,7 @@ import type { BoardWorkspace } from '../tasks.ts';
  * else's board" was not a shape a request could have — and every route below
  * therefore had to be trusted rather than checked. Now the board is in the
  * path, the shape exists, and `middleware/workspace-scope.ts` refuses it once
- * for all eight.
+ * for all of them.
  *
  * Matched against the SCOPE's remainder rather than the pathname, so a route
  * here is unreachable until that middleware has run — see `matchRest`.
@@ -61,6 +62,7 @@ const REVIEW_REST = {
   tree: reviewRest('tree'),
   contextFile: reviewRest('context-file'),
   editableFile: reviewRest('editable-file'),
+  raw: reviewRest('raw'),
 } as const;
 
 /** The long-lived collaborators these routes need, built once per server. */
@@ -100,7 +102,7 @@ export interface ReviewFileRouteRequest {
 }
 
 /**
- * The eight review-file routes, tried in source order. `undefined` means none
+ * The review-file routes, tried in source order. `undefined` means none
  * of them matched and the caller's chain continues.
  */
 export async function handleReviewFileRoutes(
@@ -224,6 +226,12 @@ export async function handleReviewFileRoutes(
       return j(status, res);
     }
     return j(200, { docId: res.docId, meta: metaFor(res.meta) });
+  }
+  // A video or image in the set, as bytes, with range requests — what a
+  // folder's video page plays from. See review-raw.ts.
+  const wsRawMatch = matchRest(scope, REVIEW_REST.raw);
+  if (wsRawMatch) {
+    return serveReviewRaw(docStore, j, decodeURIComponent(wsRawMatch[1] ?? ''), req, url);
   }
   const wsTreeMatch = matchRest(scope, REVIEW_REST.tree);
   if (wsTreeMatch && req.method === 'GET') {

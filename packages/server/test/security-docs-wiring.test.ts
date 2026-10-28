@@ -58,6 +58,12 @@ describe('security docs are wired together', () => {
       'isListedFile',
       'classifyHost',
       'authorizeAgentCaller',
+      // One Access application per project: the per-host audience and the
+      // Worker rule that keeps the one address's stamp on its own machine.
+      'hostAudiences',
+      'CF_ACCESS_HOST_AUDS',
+      'keepOneAddressStampHome',
+      'ONE_ADDRESS_ORIGIN',
     ]) {
       expect(doc).toContain(gate);
     }

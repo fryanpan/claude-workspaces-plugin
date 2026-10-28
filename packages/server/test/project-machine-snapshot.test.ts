@@ -201,4 +201,128 @@ describe('backup upload', () => {
       bucket.stop(true);
     }
   }, 30_000);
+
+  it('--upload puts a snapshot --out wrote, and refuses a symlink in its place', async () => {
+    const keys = generateSnapshotKeys();
+    const objects = new Map<string, Uint8Array>();
+    const bucket = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(req) {
+        if (req.method !== 'PUT') return new Response('AccessDenied', { status: 403 });
+        objects.set(new URL(req.url).pathname, new Uint8Array(await req.arrayBuffer()));
+        return new Response('', { status: 200, headers: { etag: '"x"' } });
+      },
+    });
+    // Only the bucket's settings: --upload needs no data dir and no recipient.
+    const bucketEnv = {
+      PATH: process.env.PATH ?? '',
+      BACKUP_S3_ENDPOINT: `http://127.0.0.1:${bucket.port}`,
+      BACKUP_S3_BUCKET: 'harborlight-backups',
+      // Obviously fake: the stand-in bucket checks no signature.
+      BACKUP_S3_ACCESS_KEY_ID: 'test-access-key',
+      BACKUP_S3_SECRET_ACCESS_KEY: 'test-secret-key',
+    };
+    const run = async (file: string) => {
+      const child = Bun.spawn(
+        ['bun', join(repoRoot, 'infra', 'project-machine', 'backup.ts'), '--upload', file],
+        { stdout: 'pipe', stderr: 'pipe', env: bucketEnv },
+      );
+      return { status: await child.exited, stderr: await new Response(child.stderr).text() };
+    };
+    try {
+      const dir = fresh('outbox');
+      const snap = join(dir, 'snapshot.cwsnap');
+      await snapshotDataDir(sampleDataDir(), keys.recipient, snap);
+      const ok = await run(snap);
+      expect(ok.stderr).toBe('');
+      expect(ok.status).toBe(0);
+      const [body] = [...objects.values()];
+      const downloaded = join(fresh('dl'), 'downloaded.cwsnap');
+      writeFileSync(downloaded, body ?? new Uint8Array());
+      const target = join(scratch, `restored-${n++}`);
+      restoreSnapshot(downloaded, keys.identity, target);
+      expect(readFileSync(join(target, 'riverbend.ydoc'), 'utf8')).toBe('riverbend survey');
+
+      // The outbox is written by another user: a link there must not make
+      // the uploader send a file only it can read.
+      const secretFile = join(fresh('uploader-only'), 'environ');
+      writeFileSync(secretFile, 'BACKUP_S3_SECRET_ACCESS_KEY=test-secret-key');
+      const link = join(dir, 'linked.cwsnap');
+      symlinkSync(secretFile, link);
+      const refused = await run(link);
+      expect(refused.status).toBe(1);
+      expect(objects.size).toBe(1);
+    } finally {
+      bucket.stop(true);
+    }
+  }, 30_000);
+});
+
+/** A transcripts dir as Claude Code lays one out: a folder per project. */
+function sampleTranscripts(): string {
+  const dir = fresh('transcripts');
+  mkdirSync(join(dir, '-data-riverbend'));
+  writeFileSync(
+    join(dir, '-data-riverbend', 'session-1.jsonl'),
+    '{"type":"user","text":"Harborlight"}\n',
+  );
+  return dir;
+}
+
+describe('transcripts and the first format', () => {
+  const keys = generateSnapshotKeys();
+
+  it('restores the data dir and the transcripts each onto its own dir', async () => {
+    const out = join(fresh('snap'), 'snapshot.cwsnap');
+    await snapshotDataDir(sampleDataDir(), keys.recipient, out, sampleTranscripts());
+    const data = join(scratch, `data-${n++}`);
+    const transcripts = join(scratch, `transcripts-${n++}`);
+    expect(restoreSnapshot(out, keys.identity, data, transcripts)).toEqual({ transcripts: true });
+    expect(readFileSync(join(data, 'riverbend.ydoc'), 'utf8')).toBe('riverbend survey');
+    expect(readFileSync(join(transcripts, '-data-riverbend', 'session-1.jsonl'), 'utf8')).toBe(
+      '{"type":"user","text":"Harborlight"}\n',
+    );
+    // The parts never leak into the data dir.
+    expect(readdirSync(data).sort()).toEqual(['meetings', 'riverbend.ydoc']);
+  });
+
+  it('restores the data dir alone when no transcripts dir is named, and says it held some', async () => {
+    const out = join(fresh('snap'), 'snapshot.cwsnap');
+    await snapshotDataDir(sampleDataDir(), keys.recipient, out, sampleTranscripts());
+    const data = join(scratch, `data-${n++}`);
+    expect(restoreSnapshot(out, keys.identity, data)).toEqual({ transcripts: true });
+    expect(readdirSync(data).sort()).toEqual(['meetings', 'riverbend.ydoc']);
+  });
+
+  it('refuses a transcripts dir that holds anything, before touching the data dir', async () => {
+    const out = join(fresh('snap'), 'snapshot.cwsnap');
+    await snapshotDataDir(sampleDataDir(), keys.recipient, out, sampleTranscripts());
+    const data = join(scratch, `data-${n++}`);
+    const transcripts = fresh('transcripts');
+    writeFileSync(join(transcripts, 'kept.jsonl'), '{}\n');
+    expect(() => restoreSnapshot(out, keys.identity, data, transcripts)).toThrow(RestoreRefused);
+    expect(existsSync(data)).toBe(false);
+    expect(readdirSync(transcripts)).toEqual(['kept.jsonl']);
+  });
+
+  it('still restores a snapshot in the first format, a bare tar of the data dir', async () => {
+    const tarFile = join(fresh('tar'), 'v1.tar.gz');
+    expect(spawnSync('tar', ['-czf', tarFile, '-C', sampleDataDir(), '.']).status).toBe(0);
+    const snapshot = join(fresh('snap'), 'v1.cwsnap');
+    await encryptToFile(createReadStream(tarFile), keys.recipient, snapshot);
+    const data = join(scratch, `data-${n++}`);
+    expect(restoreSnapshot(snapshot, keys.identity, data)).toEqual({ transcripts: false });
+    expect(readFileSync(join(data, 'riverbend.ydoc'), 'utf8')).toBe('riverbend survey');
+  });
+
+  it('refuses a part that holds a symlink', async () => {
+    const hostile = fresh('hostile');
+    symlinkSync('/etc', join(hostile, 'escape'));
+    const out = join(fresh('snap'), 'snapshot.cwsnap');
+    await snapshotDataDir(sampleDataDir(), keys.recipient, out, hostile);
+    expect(() =>
+      restoreSnapshot(out, keys.identity, join(scratch, `d-${n++}`), join(scratch, `t-${n++}`)),
+    ).toThrow(/not a file or dir/);
+  });
 });

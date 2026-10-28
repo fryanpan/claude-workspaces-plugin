@@ -3,10 +3,18 @@
  * server's review items here.
  *
  * **Pull, not push.** The Mac calls out to every other server; no server
- * ever calls the Mac. Each request goes to the one address, under
- * `/workspaces/<board>/home-feed`, so the board router Worker sends it to the
- * server that holds that board, and Access admits it on the service token
- * this file sends for that server (one token per server, never shared).
+ * ever calls the Mac. Each request goes to `/workspaces/<board>/home-feed`,
+ * at that server's own project address when `addresses` names one and at the
+ * one address otherwise, so the board router Worker sends it to the server
+ * that holds that board, and Access admits it on the service token this file
+ * sends for that server (one token per server, never shared).
+ *
+ * **One audience per project.** Once a project has its own Access
+ * application, its server admits only that application's stamp, so the feed
+ * must be asked for at the project's own address: there Access stamps the
+ * service token with the project's audience. Asked at the one address, the
+ * stamp would carry the one address's audience, which the project's server
+ * refuses, and the Worker redirects it anyway (`ONE_ADDRESS_ORIGIN`).
  *
  * **One table.** Which server holds which board is the Worker's own
  * `BOARD_ORIGINS`, read with the Worker's own parser (`parseBoardOrigins`).
@@ -26,6 +34,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { parseBoardOrigins } from '../../../infra/board-router-worker/worker.js';
 import { type HomeFeedRow, readHomeFeed } from './home-feed.ts';
+import { configuredHostFetch } from './outbound-fetch.ts';
 
 export interface ServiceToken {
   clientId: string;
@@ -41,6 +50,8 @@ export interface HomeRemotesConfig {
   table: Map<string, string>;
   /** Origin hostname → the Access service token the Mac sends it. */
   tokens: Map<string, ServiceToken>;
+  /** Origin hostname → its project's own address, as an https origin. */
+  addresses: Map<string, string>;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -75,8 +86,12 @@ const FEED_TIMEOUT_MS = 10_000;
  * {"address": "https://<one address>",
  *  "self": "<this machine's origin hostname>",
  *  "boardOrigins": {"<origin hostname>": ["<board id>", ...]},
- *  "serviceTokens": {"<origin hostname>": {"clientId": "…", "clientSecret": "…"}}}
+ *  "serviceTokens": {"<origin hostname>": {"clientId": "…", "clientSecret": "…"}},
+ *  "addresses": {"<origin hostname>": "https://<its project's host>"}}
  * ```
+ *
+ * `addresses` is optional, and so is each entry: an origin it does not name is
+ * pulled through the one address.
  */
 export function parseHomeRemotesConfig(raw: string): HomeRemotesConfig | { error: string } {
   let parsed: unknown;
@@ -121,7 +136,31 @@ export function parseHomeRemotesConfig(raw: string): HomeRemotesConfig | { error
     }
     tokens.set(origin, { clientId, clientSecret });
   }
-  return { address: address.origin, self, table, tokens };
+  const addresses = new Map<string, string>();
+  const rawAddresses = c.addresses ?? {};
+  if (rawAddresses === null || typeof rawAddresses !== 'object' || Array.isArray(rawAddresses)) {
+    return { error: 'addresses must be an object' };
+  }
+  const origins = new Set(table.values());
+  for (const [origin, value] of Object.entries(rawAddresses)) {
+    if (!origins.has(origin)) return { error: `addresses names ${origin}, which holds no board` };
+    const own = bareHttpsOrigin(value);
+    if (!own) return { error: `the address for ${origin} must be a bare https origin` };
+    addresses.set(origin, own);
+  }
+  return { address: address.origin, self, table, tokens, addresses };
+}
+
+/** The value as an https origin with nothing after it, or null. */
+function bareHttpsOrigin(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return url.protocol === 'https:' && url.origin === value.replace(/\/$/, '') ? url.origin : null;
 }
 
 /**
@@ -179,7 +218,8 @@ export function createHomeRemotes(opts: {
   maxRetryMs?: number;
 }): HomeRemotes {
   const { config, onChange } = opts;
-  const fetchFn: FetchLike = opts.fetch ?? ((input, init) => fetch(input, init));
+  const fetchFn: FetchLike =
+    opts.fetch ?? configuredHostFetch([config.address, ...config.addresses.values()]);
   const retryMs = opts.retryMs ?? 1000;
   const maxRetryMs = opts.maxRetryMs ?? 30_000;
   const held = boardsByOrigin(config.table);
@@ -209,7 +249,8 @@ export function createHomeRemotes(opts: {
     };
   };
   const feedUrl = (boardId: string, tail = ''): string =>
-    `${config.address}/workspaces/${encodeURIComponent(boardId)}/home-feed${tail}`;
+    `${config.addresses.get(config.table.get(boardId) ?? '') ?? config.address}` +
+    `/workspaces/${encodeURIComponent(boardId)}/home-feed${tail}`;
 
   const keep = (boardId: string, next: RemoteBoardView): void => {
     const was = views.get(boardId);

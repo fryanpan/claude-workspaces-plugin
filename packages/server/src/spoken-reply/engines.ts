@@ -85,6 +85,9 @@ export interface SpokenKeySources {
   /** Keychain reads; a test passes one that answers nothing. */
   readSoniox: (service: string) => string | null;
   readCard?: KeychainRunner;
+  /** Features this server's profile turned off (`project-profile.ts`). An
+   *  off feature's key is never read, so its setups never appear. */
+  off?: { transcription?: boolean; voice?: boolean; gemini?: boolean };
 }
 
 export function createSpokenEngines(
@@ -93,29 +96,35 @@ export function createSpokenEngines(
   keys: SpokenKeySources = { env: process.env, readSoniox: readKeychainPassword },
 ): SpokenEngines {
   const { env } = keys;
-  const soniox = resolveSonioxKey(undefined, env, keys.readSoniox);
-  const eleven = readCardSecret(ELEVENLABS_SECRET, ELEVENLABS_ENV_VAR, env, keys.readCard);
-  const gemini = readCardSecret(GEMINI_SECRET, GEMINI_ENV_VAR, env, keys.readCard);
+  // Soniox is a transcription vendor: setup 1 listens and speaks through it.
+  const soniox =
+    keys.off?.transcription === true ? null : resolveSonioxKey(undefined, env, keys.readSoniox);
+  const voiceOff = keys.off?.voice === true;
+  const eleven = voiceOff
+    ? null
+    : readCardSecret(ELEVENLABS_SECRET, ELEVENLABS_ENV_VAR, env, keys.readCard);
+  const gemini =
+    keys.off?.gemini === true
+      ? null
+      : readCardSecret(GEMINI_SECRET, GEMINI_ENV_VAR, env, keys.readCard);
   const cleared = elevenLabsTrainingOff(env);
-  const agentId = readCardSecret(
-    ELEVENLABS_AGENT_ID_SECRET,
-    ELEVENLABS_AGENT_ID_ENV_VAR,
-    env,
-    keys.readCard,
-  );
-  const llmSecret = readCardSecret(
-    ELEVENLABS_AGENT_LLM_SECRET,
-    ELEVENLABS_AGENT_LLM_ENV_VAR,
-    env,
-    keys.readCard,
-  );
-  const agentMissing = agentMissingLine({
-    elevenLabsKey: eleven !== null,
-    agentId: validAgentId(agentId),
-    llmSecret: validAgentLlmSecret(llmSecret),
-    callbackHost: normalizeRecallCallbackHost(env.CW_RECALL_CALLBACK_HOST) !== null,
-    trainingOff: cleared,
-  });
+  const agentId = voiceOff
+    ? null
+    : readCardSecret(ELEVENLABS_AGENT_ID_SECRET, ELEVENLABS_AGENT_ID_ENV_VAR, env, keys.readCard);
+  const llmSecret = voiceOff
+    ? null
+    : readCardSecret(ELEVENLABS_AGENT_LLM_SECRET, ELEVENLABS_AGENT_LLM_ENV_VAR, env, keys.readCard);
+  // Setup 4 is ElevenLabs too: with voice off it is not offered at all,
+  // rather than listed as waiting on cards this org will never hold.
+  const agentMissing = voiceOff
+    ? null
+    : agentMissingLine({
+        elevenLabsKey: eleven !== null,
+        agentId: validAgentId(agentId),
+        llmSecret: validAgentLlmSecret(llmSecret),
+        callbackHost: normalizeRecallCallbackHost(env.CW_RECALL_CALLBACK_HOST) !== null,
+        trainingOff: cleared,
+      });
   const agent =
     !agentMissing && eleven && validAgentId(agentId) && validAgentLlmSecret(llmSecret)
       ? { live: createElevenLabsAgent({ apiKey: eleven, agentId }), llmSecret }
@@ -139,10 +148,14 @@ export function createSpokenEngines(
   log(
     `[spoken-reply] setups available: ${on.length > 0 ? on.join(', ') : 'none'}` +
       (listener ? '' : ' (no Soniox listener)') +
-      (eleven ? '' : ' (no ElevenLabs card)') +
+      (voiceOff ? " (voice off in this server's profile)" : eleven ? '' : ' (no ElevenLabs card)') +
       (eleven && !cleared ? ` (setup 2 held until ${ELEVENLABS_TRAINING_OFF_VAR}=1)` : '') +
-      (gemini ? '' : ' (no Gemini card)') +
-      (agent ? '' : ' (setup 4 not configured)'),
+      (keys.off?.gemini === true
+        ? " (Gemini off in this server's profile)"
+        : gemini
+          ? ''
+          : ' (no Gemini card)') +
+      (agent || voiceOff ? '' : ' (setup 4 not configured)'),
   );
   return engines;
 }

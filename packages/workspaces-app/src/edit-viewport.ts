@@ -317,6 +317,9 @@ export function wireEditViewport(opts: EditViewportOpts): EditViewport {
   };
   opts.listen(document, 'focusin', schedule);
   opts.listen(document, 'focusout', schedule);
+  // A reply box grows as it is typed into, and its new line can be the one
+  // under the keyboard.
+  opts.listen(document, 'input', () => follow());
 
   const vv = window.visualViewport;
   if (vv) {

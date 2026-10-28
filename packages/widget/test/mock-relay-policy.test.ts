@@ -136,6 +136,21 @@ describe('what a frame may open through the host', () => {
     expect(ok('ws', 'GET', `${DOC}/audio`)).toBe(false);
   });
 
+  it("allows this doc's app voice socket with its token, and no other doc's", () => {
+    const voice = relayTarget(SCOPE, 'ws', 'GET', `${DOC}/app-voice?token=av1.x.y`);
+    expect(voice?.pathname).toBe('/workspaces/w-stand/docs/d-price/app-voice');
+    expect(voice?.searchParams.get('token')).toBe('av1.x.y');
+    expect(voice?.searchParams.getAll('cw-via')).toEqual(['mock-frame']);
+
+    expect(ok('ws', 'GET', 'http://board.test/workspaces/w-stand/docs/d-menu/app-voice')).toBe(
+      false,
+    );
+    expect(ok('ws', 'GET', 'http://board.test/workspaces/w-other/docs/d-price/app-voice')).toBe(
+      false,
+    );
+    expect(ok('ws', 'GET', `${DOC}/app-voice/x`)).toBe(false);
+  });
+
   it("allows this doc's event stream and no other", () => {
     expect(ok('sse', 'GET', `${DOC}/events:stream`)).toBe(true);
     expect(ok('sse', 'GET', 'http://board.test/workspaces/w-stand/events:stream')).toBe(false);

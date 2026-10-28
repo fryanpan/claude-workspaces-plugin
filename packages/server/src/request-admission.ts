@@ -177,13 +177,13 @@ export function createOriginPolicy(ctx: OriginPolicyContext): {
   const applyCors = (req: Request, res: Response): Response => {
     const headers = corsHeadersFor(req.headers.get('origin'), policyFor(req));
     if (!headers) return res;
-    const merged = new Headers(res.headers);
-    for (const [k, v] of Object.entries(headers)) merged.set(k, v);
-    return new Response(res.body, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: merged,
-    });
+    // Set on the route's own Response, never re-wrapped: `new Response(res.body)`
+    // turns a sized body (a file, a file slice) into a stream, which Bun sends
+    // chunked, and for a sliced file sends past the slice's end. Safari will
+    // not play a 206 that arrives chunked. Bun's Response headers are
+    // mutable, even on a `fetch` result.
+    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+    return res;
   };
 
   return { policyFor, applyCors };
@@ -255,7 +255,7 @@ export interface RequestAdmissionContext {
   boardWidgetGrantFor: (
     raw: string,
     origin: string | null,
-  ) => { identity: { id: string }; workspaceId: string } | null;
+  ) => { identity: { id: string }; workspaceId: string; sessionBound: boolean } | null;
   /** A doc's type, or undefined for a doc this server does not hold. */
   docTypeOf: (docId: string) => string | undefined;
   /** The peer address of a request. A forward reference on purpose: the Bun
@@ -504,16 +504,34 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       // operator alone. Ahead of every other kind, so nothing else this
       // server answers is reachable on it, whatever the lists say.
       if (frameHost?.isFrameHost(req)) {
-        const verdict = frameGate(req, pathname, new URL(req.url).searchParams);
+        const search = new URL(req.url).searchParams;
+        const verdict = frameGate(req, pathname, search);
         if (!verdict.ok) return frameGateRefusal(verdict.status);
-        // Off the tunnel: a caller on this machine, as the box's own pages are.
-        if (!req.headers.has('cf-ray')) {
-          return isLoopbackAddress(requestAddress(req)) ? null : j(403, { error: 'unknown_host' });
+        const viaTunnel = req.headers.has('cf-ray');
+        // Through the tunnel is external reach, so the master switch covers
+        // it, a frame ticket included.
+        if (viaTunnel && !sharingGate.isEnabled()) return j(403, { error: 'sharing_disabled' });
+        // Off the tunnel, this machine only, before any ticket is read: a
+        // ticket or cookie must not open the frames to the LAN or tailnet,
+        // where the master switch above does not apply.
+        if (!viaTunnel && !isLoopbackAddress(requestAddress(req))) {
+          return j(403, { error: 'unknown_host' });
         }
-        // Through it: external reach, so the master switch covers it, and the
-        // operator's own token and allowlisted email exactly as on their
-        // proxied hostname. A member's token opens nothing here.
-        if (!sharingGate.isEnabled()) return j(403, { error: 'sharing_disabled' });
+        // The board's frame ticket (frame-ticket.ts), on or off the tunnel:
+        // the one proof a frame on another domain can carry in Safari.
+        const proof = frameHost.prove(req, pathname, search);
+        if (proof.kind === 'redeem') return proof.response;
+        if (proof.kind === 'bad_ticket') return frameGateRefusal(404);
+        if (proof.kind === 'public' || proof.kind === 'held') return null;
+        // Off the tunnel: a caller on this machine that is not a browser. A
+        // browser's frame came from a host page, which handed it a ticket.
+        if (!viaTunnel) {
+          if (req.headers.has('sec-fetch-dest')) return j(403, { error: 'frame_ticket_required' });
+          return null;
+        }
+        // Through it, without a ticket: the operator's own token and
+        // allowlisted email exactly as on their proxied hostname. A member's
+        // token opens nothing here.
         if (!proxiedTrustedVerifier) return j(503, { error: 'access_not_configured' });
         const result = await proxiedTrustedVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
@@ -785,15 +803,18 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // The bundle is the one request with no token: the widget cannot ask
         // for one before it has run, and the bytes are the same for everyone.
         if (route.kind === 'bundle') return null;
-        // Every other route needs a live BOARD token presented from the page
-        // origin it was minted for. No token, a session token (`wt1`), a
+        // Every other route needs a live BOARD token that Access minted,
+        // presented from the page origin it was minted for. No token, a
+        // retired `wt1`, one a session cookie minted for another page, a
         // forged, expired or revoked one, or one from another origin all get
         // the same answer — the widget's cue to offer sign-in, and where —
         // because telling them apart would hand a caller a decision tree.
         const raw = widgetBearerOf(req);
         const origin = req.headers.get('origin');
         const grant = raw && origin ? boardWidgetGrantFor(raw, origin) : null;
-        if (!grant || !raw || !origin) return j(401, widgetDoorSignInBody(widgetSignInOrigin));
+        if (!grant || grant.sessionBound || !raw || !origin) {
+          return j(401, widgetDoorSignInBody(widgetSignInOrigin));
+        }
         if (route.kind === 'doc') {
           // One board: exactly the one the token names. The workspace scope
           // middleware then refuses a doc that board does not hold.

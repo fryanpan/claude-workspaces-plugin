@@ -118,6 +118,7 @@ export async function refreshWorkspace(
   // newly-changed file lands in a heuristic bucket, so a sidebar the caller
   // organized by hand decays a little on each refresh.
   const exclude = members.find((m) => m.workspaceExclude)?.workspaceExclude;
+  const include = members.find((m) => m.workspaceInclude)?.workspaceInclude ?? [];
   const groups = members.find((m) => m.workspaceGroups)?.workspaceGroups;
   const maxFiles = members.find((m) => m.workspaceMaxFiles !== undefined)?.workspaceMaxFiles;
   // Which relPaths the DIFF currently covers. Null for a browse workspace,
@@ -158,7 +159,7 @@ export async function refreshWorkspace(
     }
   } else {
     const excludes = normalizeExcludes(exclude);
-    fileCount = scanFolder(root)
+    fileCount = scanFolder(root, include)
       .map((abs) => relative(root, abs).split(sep).join('/'))
       .filter((rel) => !isExcluded(rel, excludes)).length;
   }

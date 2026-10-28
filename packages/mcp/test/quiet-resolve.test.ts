@@ -223,22 +223,21 @@ describe('a resolve wakes nobody', () => {
 describe('nothing else stopped waking', () => {
   it('still delivers an answer on a review item', async () => {
     // Kept deliberately: an answer is the outcome the filer is blocked on.
-    // It is ids-only, like the analytics rows the server drops, which is
-    // exactly why it is named here rather than left to a family prefix. It is
-    // now addressed to that filer rather than broadcast, so the frame names
-    // this session as the one that raised the ask — see `review-item-line.ts`.
+    // It reaches the filer as `decision.answered`, which carries the words;
+    // its ids-only twin `review_item.answered` is kept off the stream by the
+    // server and dropped by name here (`one-wake-per-answer.test.ts`).
     const { frames, messages } = harness();
-    await messages.emitChannelMessage('review_item.answered', {
+    await messages.emitChannelMessage('decision.answered', {
       workspaceId: 'w1',
-      reviewItemId: 'ri-1',
       taskId: 't1',
-      actorId: PERSON,
-      filedById: SELF,
-      isOwner: true,
+      reviewItemId: 'ri-1',
+      answer: 'A fresh key',
+      actor: { id: PERSON, name: 'Reviewer' },
+      links: [],
       ts: Date.UTC(2026, 8, 17, 11, 0, 0),
     });
     expect(frames).toHaveLength(1);
-    expect(frames[0]?.meta.event).toBe('review_item.answered');
+    expect(frames[0]?.meta.event).toBe('decision.answered');
   });
 
   it('still delivers a person moving a task', async () => {

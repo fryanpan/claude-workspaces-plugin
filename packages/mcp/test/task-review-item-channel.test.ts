@@ -275,14 +275,13 @@ describe('review_item.withdrawn is addressed to the filer', () => {
 });
 
 /**
- * `review_item.answered` had the same defect in a milder form: it carries
- * `workspaceId`, `taskId`, `reviewItemId` and `actorId`, no `docId`, and was
- * rendering through the doc fallback as a bare slug with `doc_id: "unknown"`.
- * It is a measurement row, but it is NOT on the server's analytics list —
- * only `viewed` is — deliberately, because an answer is the thing an agent
- * waits for. Same line, same filer rule.
+ * `review_item.answered` used to wake the filer here, beside the
+ * `decision.answered` that already carried the answer's words, so one answer
+ * cost two turns (Bryan, 2026-10-27). The server now keeps it off the stream
+ * (`ANALYTICS_ONLY_EVENTS`); the child drops an older server's copy by name,
+ * for the filer and for a doc-thread answer alike.
  */
-describe('review_item.answered is addressed to the filer', () => {
+describe('review_item.answered wakes nobody', () => {
   const ANSWERED = {
     workspaceId: 'w-DRa',
     taskId: 't-ZOz',
@@ -293,31 +292,19 @@ describe('review_item.answered is addressed to the filer', () => {
     ts: FIXED_MS,
   };
 
-  it('wakes the filer, naming the item and the task rather than a doc', async () => {
+  it('does not wake the filer', async () => {
     const { frames, messages } = harness('agent-riverbend');
     await messages.emitChannelMessage('review_item.answered', ANSWERED);
-    const f = only(frames);
-    expect(f.content).toBe(
-      '[review item answered] item ri-4 on task t-ZOz — the ask you filed has an answer',
-    );
-    expect(f.meta).toMatchObject({
-      workspace_id: 'w-DRa',
-      task_id: 't-ZOz',
-      review_item_id: 'ri-4',
-      event: 'review_item.answered',
-    });
-    expect('doc_id' in f.meta).toBe(false);
-  });
-
-  it('wakes no other agent on the board', async () => {
-    const { frames, messages } = harness('agent-harborlight');
-    await messages.emitChannelMessage('review_item.answered', ANSWERED);
     expect(frames).toHaveLength(0);
+    // Positive control: the same harness does wake the filer for a withdrawal.
+    await messages.emitChannelMessage('review_item.withdrawn', {
+      ...ANSWERED,
+      reason: 'answered elsewhere',
+    });
+    expect(frames).toHaveLength(1);
   });
 
-  // A doc-thread answer names no task, so it keeps the doc path — the same
-  // branch, proved on the event this describe is about.
-  it('leaves a doc-thread answer on the doc path', async () => {
+  it('does not wake anybody for a doc-thread answer', async () => {
     const { frames, messages } = harness('agent-riverbend');
     await messages.emitChannelMessage('review_item.answered', {
       workspaceId: 'w-DRa',
@@ -326,7 +313,7 @@ describe('review_item.answered is addressed to the filer', () => {
       isOwner: true,
       ts: FIXED_MS,
     });
-    expect(only(frames).meta.doc_id).toBe('unknown');
+    expect(frames).toHaveLength(0);
   });
 });
 
@@ -340,12 +327,11 @@ describe('isTaskReviewItemEvent', () => {
     expect(isTaskReviewItemEvent('review_item.added', { taskId: 't-1' })).toBe(true);
   });
 
-  // `viewed` is the one review-item row the server really does keep off the
-  // fan-out, so no child sees one; `answered` is deliberately not on that
-  // list and is claimed here.
-  it('declines the one row the server keeps off the stream, and claims the answer', () => {
+  // The server keeps both measurement rows off the fan-out, so neither is
+  // claimed here.
+  it('declines the rows the server keeps off the stream', () => {
     expect(isTaskReviewItemEvent('review_item.viewed', { taskId: 't-1' })).toBe(false);
-    expect(isTaskReviewItemEvent('review_item.answered', { taskId: 't-1' })).toBe(true);
+    expect(isTaskReviewItemEvent('review_item.answered', { taskId: 't-1' })).toBe(false);
   });
 
   it('declines an event with no task to name, rather than inventing one', () => {

@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { meetingPlatformOf } from '@claude-workspaces/core';
+import { fixedHostFetch } from './outbound-fetch.ts';
 import {
   type FetchLike,
   type RecallRegion,
@@ -79,7 +80,7 @@ export function createRecallCalendarClient(
   const rawRegion = env.RECALL_REGION?.trim() ?? '';
   const region: RecallRegion = isRecallRegion(rawRegion) ? rawRegion : 'us-east-1';
   const base = recallApiBase(region);
-  const doFetch = opts.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
+  const doFetch = opts.fetch ?? fixedHostFetch;
 
   /**
    * One request. `Token <key>` — the v2 reference's documented header shape,

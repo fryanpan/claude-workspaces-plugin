@@ -35,9 +35,27 @@
  * - The mockup surface is somebody else's HTML with the widget injected into
  *   it. It has no bundle of ours to put an import inside.
  *
+ * ## Why it is `async`, and what holds errors until it arrives
+ *
+ * It was a plain module script ahead of the page's own, and module scripts
+ * run in document order: every page's script waited for the SDK to download.
+ * At 157 KB gzipped that was a 5.5 s Home load on the owner's iPad (20 Oct
+ * 2026) for HTML the server answered in under 400 ms. `async` takes it out of
+ * the order — it runs whenever it arrives, before or after the page's script
+ * — and `fetchpriority="low"` keeps it from competing with the page's own
+ * bundle for a slow link.
+ *
+ * Loading late would lose the errors that matter most, the ones thrown while
+ * a page boots. So the shell carries `EARLY_ERROR_BUFFER` inline, ahead of
+ * every script: it holds each uncaught error and rejection until the SDK has
+ * initialised, and `sentry-boot.ts` files them. Inline because it must run
+ * before anything else and cost no request; a few hundred bytes. Console
+ * lines from before the SDK loads are not held — they are logs, not errors.
+ *
  * The DSN itself is box config (`CW_SENTRY_DSN`), never the repo.
  */
 import { type AssetManifest, assetHref } from '@claude-workspaces/core/asset-manifest';
+import { SWAP_SCOPE_KEYS } from '@claude-workspaces/core/mock-swap-noise';
 
 /**
  * The kinds of page whose load times are compared. One value per surface a
@@ -66,6 +84,19 @@ export interface BrowserSentryConfig {
   environment?: string | null;
 }
 
+/**
+ * Holds the page's uncaught errors until `/app/sentry.js` has initialised.
+ *
+ * The global name is read by `drainEarlyErrors` in
+ * `packages/workspaces-app/src/sentry-boot.ts`, which sets `done` and files
+ * what was held. Each entry keeps a copy of the mock swap's window as it stood
+ * when the error was raised (`SWAP_SCOPE_KEYS`), so a redeclaration a mock
+ * round recovered from is dropped even when it was held here rather than seen
+ * by the SDK. Capped at 20, so a page throwing in a loop on a device where the
+ * SDK never arrives cannot grow it without bound.
+ */
+export const EARLY_ERROR_BUFFER = `(function(w){if(w.__cwSentryEarly)return;var q=w.__cwSentryEarly=[],k=${JSON.stringify(SWAP_SCOPE_KEYS)};function keep(kind,error){if(q.done||q.length>=20)return;var s={};for(var i=0;i<k.length;i++)s[k[i]]=w[k[i]];q.push({kind:kind,error:error,scope:s})}w.addEventListener('error',function(e){keep('onerror',e.error||e.message)});w.addEventListener('unhandledrejection',function(e){keep('onunhandledrejection',e.reason)})})(window);`;
+
 const escapeAttr = (v: string): string =>
   v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -90,11 +121,13 @@ export function sentryHeadTags(
     ...(environment
       ? [`<meta name="sentry-environment" content="${escapeAttr(environment)}" />`]
       : []),
-    // Content-addressed like every other asset a shell names, so a deploy
-    // cannot leave a page reporting from last week's monitoring bundle.
-    // No manifest (unbuilt dist, or one from before hashing) falls back to
-    // the plain name, which is still served.
-    `<script type="module" src="${assetHref(assets, 'sentry.js')}"></script>`,
+    `<script>${EARLY_ERROR_BUFFER}</script>`,
+    // `async`: nothing on the page waits for it — see the header. Content-
+    // addressed like every other asset a shell names, so a deploy cannot
+    // leave a page reporting from last week's monitoring bundle. No manifest
+    // (unbuilt dist, or one from before hashing) falls back to the plain
+    // name, which is still served.
+    `<script type="module" async fetchpriority="low" src="${assetHref(assets, 'sentry.js')}"></script>`,
   ].join('\n    ');
 }
 

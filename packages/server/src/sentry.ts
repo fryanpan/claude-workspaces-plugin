@@ -178,8 +178,8 @@ export async function initServerSentry(opts: {
     // Sentry's defaults, stated so a future SDK cannot silently flip them:
     // logs and metrics are product features Bryan asked for by name
     // (2026-09-08). Profiling is deliberately absent — @sentry/bun has no
-    // profiler (the Node one needs a native addon Bun cannot load), so the
-    // browser is the only side that profiles; see sentry-boot.ts.
+    // profiler (the Node one needs a native addon Bun cannot load). The
+    // browser stopped profiling too, with tracing; see sentry-boot.ts.
     enableLogs: true,
     enableMetrics: true,
     // Floor, not a substitute for the above: disabling BunServer closes the

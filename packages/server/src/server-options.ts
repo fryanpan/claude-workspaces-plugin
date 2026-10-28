@@ -30,6 +30,7 @@ import type { ReplyTransport } from './inbox/send-transport.ts';
 import type { MeetingNotesOptions } from './meeting-notes.ts';
 import type { CfAccessOptions } from './middleware/cf-access.ts';
 import type { PluginRefresher } from './plugin-refresh.ts';
+import type { FeaturesOff } from './project-profile.ts';
 import type { PromptStore } from './prompt-store.ts';
 import type { PushFetch } from './push-notify.ts';
 import type { RecallCalendarClient } from './recall-calendar.ts';
@@ -409,6 +410,9 @@ export interface ServerOptions {
   /** How long a coach digest window stays open (default 15 minutes). A test
    *  seam, like `stallNudgeQuietMs`. */
   coachDigestWindowMs?: number;
+  /** How long the plan lead's feed of new asks holds a window open (default
+   *  10 minutes, `ask-feed.ts`). A test seam, like `coachDigestWindowMs`. */
+  askFeedWindowMs?: number;
   /**
    * How long a held review item may stand before the stall loop complains
    * (default `HELD_ITEM_DEFAULT_MS`, five minutes; `CW_HELD_ITEM_MINUTES`
@@ -464,6 +468,11 @@ export interface ServerOptions {
   artifactCheckFetch?: typeof fetch;
   /** Per-link budget for that check (default 5s). Tests only. */
   artifactCheckTimeoutMs?: number;
+  /** Makes webhook deliveries. Default `publicFetch`, which refuses a
+   *  webhook URL on loopback or a private network. Tests only: a test's sink
+   *  listens on 127.0.0.1, so it passes `createPublicFetch` permitting
+   *  `loopback` and keeps every other check. */
+  webhookFetch?: typeof fetch;
   /**
    * How the dispatch registry watches builder worktrees (default: recursive
    * fs.watch). A test seam for the same reason `stallNudgeQuietMs` is one —
@@ -625,10 +634,12 @@ export interface ServerOptions {
    * the board's (`frame-host.ts`). Unset — every deployment that has not
    * opted in — keeps every frame opaque, exactly as before.
    *
-   * It must be the same SITE as the board hostnames (a subdomain of the same
-   * domain), and behind the same Access application as the operator's
-   * proxied hostname: the frame hostname admits the operator alone, by the
-   * same verifier and allowlist.
+   * One per project, `<project>.<frame domain>`, on a domain that is not the
+   * board's, so an attachment's script cannot set a cookie any board
+   * receives. A browser is admitted there by the board's frame ticket
+   * (`frame-ticket.ts`), since Safari sends a frame on another domain no
+   * Access cookie; through the tunnel the operator's Access token still
+   * admits, by the same verifier and allowlist as their proxied hostname.
    */
   frameOrigin?: string;
   /**
@@ -737,6 +748,12 @@ export interface ServerOptions {
    * offers no setup and the board keeps its plain mic.
    */
   spokenReply?: SpokenEngines;
+  /**
+   * The features this server's profile turned off, as the lines the pages
+   * show (`project-profile.ts`). Built by `server-deps.ts`; absent on the Mac
+   * and in tests, where nothing is off by profile.
+   */
+  featuresOff?: FeaturesOff;
   /** How long a planning meeting is heard before its voice asks anything
    *  unprompted (`MEETING_WARMUP_MS`). Tests pass 0. */
   planWarmupMs?: number;

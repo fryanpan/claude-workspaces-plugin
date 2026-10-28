@@ -18,8 +18,9 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
-import { dataDirFromArgs } from './data-dir.ts';
-import { parseFrameOrigin } from './frame-host.ts';
+import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
+import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
+import { parseHostAudiences } from './middleware/cf-access.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -36,10 +37,11 @@ export function resolveServerConfig(opts: {
 }) {
   const { env, repoRoot, arg } = opts;
   const requestedPort = Number(arg('port', env.PORT ?? '8787'));
-  // Always a path: the flag wins, else the resolver's answer. It used to be
-  // `string | undefined`, which every later reader repeated the resolver call
-  // to work around.
-  const dataDir = dataDirFromArgs(env, repoRoot, arg);
+  // Always a path: the flag wins, else CW_DATA_DIR, else no start at all.
+  // bin.ts refuses a start with neither before it gets here, so the throw is
+  // for any other caller.
+  const dataDir = dataDirFromArgs(env, arg);
+  if (!dataDir) throw new Error(MISSING_DATA_DIR);
 
   // The bind address. Deliberately `undefined` unless a caller passes
   // `--host` — Bun's own default (the wildcard, every interface) is what
@@ -223,7 +225,7 @@ export function resolveServerConfig(opts: {
    * no way to sign in, so flipping the gate would have refused every comment
    * from every mockup and dev page with nothing on screen that could fix it.
    * The widget now asks `GET /api/auth/session` on load and offers the
-   * popup-token handshake whenever the answer is `signInToWrite:true` — and
+   * sign-in popup handshake whenever the answer is `signInToWrite:true` — and
    * again as the backstop when a write comes back `sign_in_required` — so the
    * refusal always arrives with the control that lifts it. The board app has
    * carried its own prompt since the gate shipped. Agents are untouched: the
@@ -325,8 +327,22 @@ export function resolveServerConfig(opts: {
   // placeholder answered yes — leaving every fail-closed host rule depending on
   // this file remembering to empty the lists. Absent, the verifier refuses every
   // token on its own, and the shares registry still overrides it per hostname.
+  // One Access application per project: a host named here is checked against
+  // its own application's audience only (`CfAccessOptions.hostAudiences`).
+  // FATAL when malformed, because the fallback for an unnamed host is
+  // `CF_ACCESS_AUD`, so a dropped entry would quietly accept the wrong stamp.
+  const rawHostAuds = env.CF_ACCESS_HOST_AUDS?.trim() ?? '';
+  const hostAudiences = rawHostAuds ? parseHostAudiences(rawHostAuds) : undefined;
+  if (hostAudiences && !(hostAudiences instanceof Map)) {
+    console.error(`[feedback] CF_ACCESS_HOST_AUDS refused: ${hostAudiences.error}.`);
+    process.exit(1);
+  }
   const cfAccess = cfAccessTeam
-    ? { teamDomain: cfAccessTeam, ...(cfAccessAud ? { audience: cfAccessAud } : {}) }
+    ? {
+        teamDomain: cfAccessTeam,
+        ...(cfAccessAud ? { audience: cfAccessAud } : {}),
+        ...(hostAudiences instanceof Map && hostAudiences.size > 0 ? { hostAudiences } : {}),
+      }
     : undefined;
 
   /**
@@ -438,10 +454,11 @@ export function resolveServerConfig(opts: {
   if (
     shareLinkHosts.length &&
     cfAccessShareAud &&
-    cfAccessShareAud === (cfAccessAud ?? '').trim()
+    (cfAccessShareAud === (cfAccessAud ?? '').trim() ||
+      [...(cfAccess?.hostAudiences?.values() ?? [])].includes(cfAccessShareAud))
   ) {
     console.error(
-      '[feedback] CF_ACCESS_SHARE_AUD equals CF_ACCESS_AUD: the share hostname and the ' +
+      '[feedback] CF_ACCESS_SHARE_AUD equals CF_ACCESS_AUD or a CF_ACCESS_HOST_AUDS entry: the share hostname and the ' +
         "owner's hostname would be one Access application, so a token minted by anyone " +
         "who typed an email at the share sign-in would verify on the owner's hostname. " +
         'Create a SEPARATE Access application for the share hostname and use its audience.',
@@ -533,6 +550,16 @@ export function resolveServerConfig(opts: {
     .map((h) => h.trim())
     .filter((h) => h !== '');
   const frameBoardHosts = frameBoardHostsRaw.length > 0 ? frameBoardHostsRaw : undefined;
+  const sharesDomain = frameOrigin
+    ? sameSiteHosts(new URL(frameOrigin).host, frameBoardHosts ?? proxiedTrustedHosts)
+    : [];
+  if (sharesDomain.length > 0) {
+    console.error(
+      `[feedback] CW_FRAME_ORIGIN (${frameOrigin}) shares a domain with ${sharesDomain.join(', ')}: ` +
+        "a mock's script there can set a cookie every board on that domain receives. " +
+        'Put the frame hostname on a domain of its own.',
+    );
+  }
   const alsoCollab = proxiedTrustedHosts.filter((h) =>
     accessTunnelHosts.some((c) => c.toLowerCase() === h.toLowerCase()),
   );

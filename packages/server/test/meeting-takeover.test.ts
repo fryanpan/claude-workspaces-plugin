@@ -240,9 +240,11 @@ describe('the audio upgrade', () => {
       visitorShareId: null,
       visitorMemberKey: null,
       ownerProven: () => false,
+      anyoneProven: () => false,
       browserProvedNobody: () => author === null,
       provenAuthor: () => author,
       widgetDoorGrant: null,
+      widgetTokenProved: false,
     });
     expect(out?.kind).toBe('upgraded');
     return data;

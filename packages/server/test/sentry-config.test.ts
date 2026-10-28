@@ -135,7 +135,12 @@ describe('the served shells carry the Sentry DSN and page type only when configu
       expect(html).toContain(`<meta name="sentry-page-type" content="${pageType}" />`);
       expect(html).toContain(`<meta name="sentry-release" content="${FAKE_RELEASE}" />`);
       expect(html).toContain(`<meta name="sentry-environment" content="${FAKE_ENVIRONMENT}" />`);
-      expect(html).toContain('<script type="module" src="/app/sentry.js"></script>');
+      expect(html).toContain(
+        '<script type="module" async fetchpriority="low" src="/app/sentry.js"></script>',
+      );
+      // The buffer that holds boot errors until that script arrives, ahead of it.
+      expect(html.indexOf('__cwSentryEarly')).toBeGreaterThan(-1);
+      expect(html.indexOf('__cwSentryEarly')).toBeLessThan(html.indexOf('/app/sentry.js'));
     });
 
     it(`unconfigured: ${what} carries no Sentry anything`, async () => {

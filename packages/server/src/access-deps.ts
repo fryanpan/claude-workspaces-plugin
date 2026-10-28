@@ -140,7 +140,7 @@ export function createAccessDeps(ctx: AccessDepsContext) {
   });
 
   // Root HMAC key for this server's own tokens — the email session cookie and
-  // the widget popup token derive from it. Generated on first use, mode 600.
+  // the widget token derive from it. Generated on first use, mode 600.
   // It used to sign share session cookies too; link-mode shares are retired
   // and a share visitor is now proven by Cloudflare Access instead.
   let cookieKeyCache: string | null = null;

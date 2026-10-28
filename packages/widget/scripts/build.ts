@@ -123,6 +123,29 @@ const threadReaderCuts: BunPlugin = {
   },
 };
 
+/**
+ * Yjs warns on the console when a second copy of it loads in the same page.
+ * The check guards `instanceof` across copies, and the widget's copy never
+ * shares a Y object with anything else on the host page, so on a host that
+ * runs Yjs itself (or a page with a widget in a frame of its own) the warning
+ * is always a false alarm in somebody else's console. Dropping its 120-byte
+ * message pays for the widget's socket falling back from a refused token
+ * (`core/src/ws-client.ts`). Throws rather than ship if the line moves.
+ */
+const yjsDuplicateWarning: BunPlugin = {
+  name: 'widget-yjs-duplicate-warning',
+  setup(build) {
+    build.onLoad({ filter: /[/\\]yjs[/\\]dist[/\\]yjs\.mjs$/ }, (args) => {
+      const src = readFileSync(args.path, 'utf8');
+      const contents = src.replace(/console\.error\('Yjs was already imported\.[^']*'\);/, '');
+      if (contents === src) {
+        throw new Error(`widget-yjs-duplicate-warning: the warning is gone from ${args.path}`);
+      }
+      return { contents, loader: 'js' };
+    });
+  },
+};
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
@@ -134,7 +157,7 @@ async function build(format: 'esm' | 'iife', name: string, entry: string) {
     format: format === 'iife' ? 'iife' : 'esm',
     minify: true,
     sourcemap: 'external',
-    plugins: [guestShims, cssMinify, threadReaderCuts],
+    plugins: [guestShims, cssMinify, threadReaderCuts, yjsDuplicateWarning],
     naming: {
       entry: name,
     },
@@ -198,6 +221,9 @@ await build('iife', 'edit.js', 'edit/edit-entry.ts');
 // Both only ever run on a mock, so neither is on the budgeted bundle.
 await build('iife', 'mock-bridge.js', 'mock-bridge.ts');
 await build('iife', 'mock-host.js', 'mock-host.ts');
+// The app voice client (`app-voice/`): loaded only by a mock or app that
+// speaks, so it is on none of the budgeted bundle's bytes either.
+await build('iife', 'app-voice.js', 'app-voice/app-voice-entry.ts');
 
 writeFileSync(join(dist, 'BUILD_INFO.txt'), `built ${new Date().toISOString()}\n`);
 

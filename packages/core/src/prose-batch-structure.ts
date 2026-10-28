@@ -20,6 +20,7 @@
  *   decides direct-vs-proposal to protect somebody's words, and a blank block
  *   has none. A proposal is a strike-through on text, so on a blank block it
  *   could only answer `no-range`, and an agent had no way to remove one.
+ *   An image or a rule is the same case (`isTextlessLeaf`, 2026-10-21).
  */
 import * as Y from 'yjs';
 import { isUnclaimedBlankParagraph } from './prose-fragment.ts';
@@ -64,6 +65,19 @@ export function holdsNoWords(el: Y.XmlElement): boolean {
     if (!(child instanceof Y.XmlElement) || !holdsNoWords(child)) return false;
   }
   return true;
+}
+
+/**
+ * Blocks that are content without being text: an image, a rule. A proposal
+ * strikes a block's words, and these have none, so an edit of one could only
+ * answer `no-range` and an agent had no way to change or remove the line.
+ * Such an edit applies directly. Nothing is lost for good: the `.md` line is
+ * the only thing written, never the image file it names.
+ */
+const TEXTLESS_LEAVES = new Set(['image', 'horizontalRule']);
+
+export function isTextlessLeaf(el: Y.XmlElement): boolean {
+  return TEXTLESS_LEAVES.has(el.nodeName);
 }
 
 /**

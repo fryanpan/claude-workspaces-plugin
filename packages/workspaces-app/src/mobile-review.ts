@@ -1,8 +1,9 @@
 import { type Thread, threadRenderKey } from '@claude-workspaces/core';
 import { type KeptAnswerField, keptAnswerFields, restoreAnswerFields } from './composer-keep.ts';
 import { anchoredThreads } from './doc/resolved-visibility.ts';
+import { focusMarkdownComposer } from './md-composer.ts';
 import type { InlineThreadCard, ReviewSurface } from './review-surface.ts';
-import { prefersReducedMotion, sizeThreadSlots } from './thread-morph.ts';
+import { isFoldingTap, prefersReducedMotion, sizeThreadSlots } from './thread-morph.ts';
 
 /**
  * Mobile review navigation.
@@ -72,6 +73,8 @@ export interface MobileReviewOpts {
   openSheet: () => void;
   closeSheet: () => void;
   isSheetOpen: () => boolean;
+  /** Lift the focused reply box clear of the on-screen keyboard. */
+  followCaret?: () => void;
   onCleanup?: (fn: () => void) => void;
 }
 
@@ -83,9 +86,16 @@ export interface MobileReview {
   /** Focus one thread the mobile way. Returns true when it had an inline
    *  card to jump to, false when the sheet was opened instead. */
   showThread: (id: string) => boolean;
+  /** A tap on a thread's inline card: unfold it where it is, keep its top
+   *  in view and put the caret in its reply box. Returns false when the
+   *  thread has no inline card on screen, so the caller takes its own path. */
+  openInline: (id: string) => boolean;
   /** Open threads with a resolvable anchor, in document order. */
   inlineThreads: () => Thread[];
 }
+
+/** Clear space kept above a card whose top is scrolled into view. */
+const CARD_TOP_MARGIN = 12;
 
 /**
  * What a card DISPLAYS. Rebuild only on a change to this — never on expansion,
@@ -156,6 +166,14 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
         // nothing stops native editing INSIDE the injected DOM unless the
         // widget opts out itself (same rule live-markup.ts's chip follows).
         el.contentEditable = 'false';
+        // ...and a tap on the card's own chrome would still hand focus to the
+        // document's editing host around it: on a phone that raises the
+        // keyboard on the doc's caret and scrolls to it, which is the jump
+        // Bryan saw on closing a comment. Touch only, so a mouse can still
+        // drag out a selection of a comment's words.
+        el.addEventListener('pointerdown', (ev) => {
+          if (ev.pointerType !== 'mouse' && isFoldingTap(ev.target)) ev.preventDefault();
+        });
         entry = { key, el };
         built.set(t.id, entry);
       }
@@ -190,6 +208,34 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     } else {
       sc.scrollTop = top;
     }
+  }
+
+  function openInline(id: string): boolean {
+    const el = built.get(id)?.el;
+    if (!opts.inlineVisible() || opts.isSheetOpen() || !el?.isConnected) return false;
+    // The class flip lands the card at its final height synchronously, so
+    // the measurement below is of the open card.
+    opts.setActive(id);
+    // Without scrolling: the reader's place is decided here, not by the
+    // browser's focus scroll. The keyboard this raises is followed by
+    // edit-viewport.ts, which lifts the reply box clear of it.
+    const ta = el.querySelector<HTMLTextAreaElement>('.thread-reply textarea');
+    if (ta && !ta.disabled) focusMarkdownComposer(ta, null, { scroll: false });
+    // The fold is still animating, so the keyboard's arrival can measure the
+    // reply box short of where it comes to rest. Follow it again once it has.
+    const moving =
+      typeof el.getAnimations === 'function' ? el.getAnimations({ subtree: true }) : [];
+    if (moving.length > 0) {
+      void Promise.allSettled(moving.map((a) => a.finished)).then(() => opts.followCaret?.());
+    }
+    // The card is where the reader tapped, so it moves only when its top is
+    // above the scroller's top edge.
+    const sc = scrollContainerOf(el);
+    if (sc) {
+      const top = el.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+      if (top < CARD_TOP_MARGIN) sc.scrollTop += top - CARD_TOP_MARGIN;
+    }
+    return true;
   }
 
   function showThread(id: string): boolean {
@@ -228,5 +274,5 @@ export function mountMobileReview(opts: MobileReviewOpts): MobileReview {
     opts.surface.setInlineCards?.([]);
   });
 
-  return { refresh, showThread, inlineThreads };
+  return { refresh, showThread, openInline, inlineThreads };
 }

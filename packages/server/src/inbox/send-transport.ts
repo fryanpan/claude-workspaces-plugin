@@ -1,3 +1,4 @@
+import { fixedHostFetch } from '../outbound-fetch.ts';
 /**
  * The one seam between Bryan's Send and the outside world: is this target's
  * credential in place, and send these words to it. The server composes the
@@ -20,7 +21,7 @@ export function systemTransport(
   deps: { keychain?: SendKeychain; fetch?: FetchLike } = {},
 ): ReplyTransport {
   const keychain = deps.keychain ?? systemKeychain();
-  const fetch = deps.fetch ?? ((url, init) => globalThis.fetch(url, init));
+  const fetch = deps.fetch ?? fixedHostFetch;
   const gmail = gmailSender({ keychain, fetch });
   const slack = slackSender({ keychain, fetch });
   return {

@@ -19,6 +19,7 @@
  * A check that throws counts as off: the question is what may leave the
  * machine, and "could not tell" is not a yes.
  */
+import { parseDocKey } from '../doc-key.ts';
 
 export type CoachOffReason = 'local-only' | 'locked' | 'turned-off' | 'unknown';
 
@@ -87,8 +88,9 @@ export interface BoardPrivacySources {
   /** An attachment set (a board is one too) that keeps its files here. */
   isLocalOnlySet: (setId: string | undefined) => boolean;
   setOfDoc: (docId: string) => string | undefined;
-  /** The project a doc's file is in, if any, and that project's privacy. */
-  repoKeyOf: (docId: string) => string | undefined;
+  /** The doc's key (`repoKey\0relPath`), if its file is in a project, and
+   *  that project's privacy, which is asked by the key's repo half. */
+  docKeyOf: (docId: string) => string | undefined;
   projectIsLocalOnly: (repoKey: string) => boolean;
   docIdsOf: (workspaceId: string) => readonly string[];
   isBoardLocked: (workspaceId: string) => boolean;
@@ -97,8 +99,11 @@ export interface BoardPrivacySources {
 
 export function boardPrivacyFrom(src: BoardPrivacySources): BoardPrivacy {
   const localOnlyDoc = (docId: string): boolean => {
-    if (src.isLocalOnlySet(src.setOfDoc(docId))) return true;
-    const repoKey = src.repoKeyOf(docId);
+    // A board lists a filed folder bind by the SET's id, not its members',
+    // so an id on the board can be a local-only set itself.
+    if (src.isLocalOnlySet(docId) || src.isLocalOnlySet(src.setOfDoc(docId))) return true;
+    const docKey = src.docKeyOf(docId);
+    const repoKey = docKey === undefined ? undefined : parseDocKey(docKey)?.repoKey;
     return repoKey !== undefined && src.projectIsLocalOnly(repoKey);
   };
   return {

@@ -35,6 +35,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/auth/widget-token` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/board-tokens` | GET, POST | `routes/board-tokens.ts` | loopback-only |  |
 | `/api/board-tokens/:id/revoke` | POST | `routes/board-tokens.ts` | loopback-only |  |
+| `/api/board-tokens/refresh` | POST | `routes/board-tokens.ts` | trusted-local | Answers only a live `at2` the board-token door admitted, with a fresh value for that same record (`middleware/board-agent-door.ts`). |
 | `/api/calendar` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/calendar/events` | GET | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/api/calendar/google` | DELETE | `routes/meetings-calendar.ts` | trusted-local |  |
@@ -52,6 +53,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/docs/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/goals` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
+| `/api/load-reports/slowest` | GET | `routes/load-reports.ts` | loopback-only |  |
 | `/api/meeting-engines` | GET | `routes/meetings-calendar.ts` | share-scope |  |
 | `/api/metrics` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/mounts` | GET, POST, DELETE | `routes/mounts.ts` | loopback-only |  |
@@ -107,6 +110,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/app/*` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/apple-touch-icon.png` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/coach/boards` | POST | `routes/coach.ts` | trusted-local |  |
+| `/coach/coverage` | GET | `routes/coach.ts` | loopback-only |  |
 | `/coach/here` | POST | `routes/coach.ts` | trusted-local |  |
 | `/coach/moments` | POST | `routes/coach.ts` | loopback-only |  |
 | `/coach/moments/:id/answer` | POST | `routes/coach.ts` | trusted-local |  |
@@ -172,6 +176,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/attachments/:setId/files` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/grouped` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/groups` | POST | `routes/review-files.ts` | trusted-local |  |
+| `/workspaces/:ws/attachments/:setId/raw` | GET, HEAD | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/refresh` | POST | `routes/review-files.ts` | trusted-local |  |
 | `/workspaces/:ws/attachments/:setId/threads` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/tree` | GET | `routes/review-files.ts` | share-scope |  |
@@ -192,6 +197,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId` | DELETE | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/edit` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/agent_anchors/:anchorId/insert_blocks` | POST | `routes/doc-edit-routes.ts` | trusted-local |  |
+| `/workspaces/:ws/docs/:docId/app-voice` | GET | `routes/upgrade-stream.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/archive` | POST | `routes/archive.ts` | trusted-local |  |
 | `/workspaces/:ws/docs/:docId/assets` | POST | `routes/doc-assets.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/assets/*` | GET, HEAD | `routes/doc-assets.ts` | share-scope |  |

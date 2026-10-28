@@ -1419,28 +1419,11 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // the board did not need it. `task.noted` — a turn ending — is the same
     // class.
     if (isBoardActivity(ev.type)) readyNudger.noteActivity(ev.workspaceId, ev.ts);
-    // …and an answer is not merely activity. The lead is the party who acts
-    // on answers, and making it wait out an idle window would deliver the
-    // point of the feature fifteen minutes late.
+    // An answer also disarms the lead's idle nudge. It sends no wake of its
+    // own: `decision.answered` is on the lead's stream already, with the
+    // words, the title and the links (`answerOnBoard` says why).
     if (ev.type === 'decision.answered') {
-      // Resolved HERE rather than inside the nudger: the nudger's snapshot
-      // carries the ready set, and an answered row is usually not in it —
-      // being blocked on that very answer is why it was asked. The title is
-      // what makes the wake readable without a lookup on the far end, and the
-      // links are what decide whether the line may offer a propagation
-      // checklist — sent as they stand, empty included, because the renderer
-      // has to tell an empty list from a frame that carries no row at all.
-      const answered = ev.taskId ? taskStore.getTask(ev.taskId) : undefined;
-      readyNudger.reviewAnswered({
-        workspaceId: ev.workspaceId,
-        taskId: ev.taskId,
-        ...(answered?.title !== undefined ? { taskTitle: answered.title } : {}),
-        ...(answered?.links !== undefined ? { taskLinks: answered.links } : {}),
-        ...(ev.headline !== undefined ? { headline: ev.headline } : {}),
-        ...(ev.via !== undefined ? { via: ev.via } : {}),
-        ...(ev.openParts !== undefined ? { openParts: ev.openParts } : {}),
-        actorId: ev.actor?.id,
-      });
+      readyNudger.answerOnBoard({ workspaceId: ev.workspaceId, actorId: ev.actor?.id });
     }
   });
   // A task's discussion lives in its body doc, but an agent working a board

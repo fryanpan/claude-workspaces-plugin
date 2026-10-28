@@ -59,8 +59,8 @@ export type BoardAgentDoorVerdict =
 const WATCHES_PATH = /^\/api\/agents\/([^/]+)\/watches$/;
 
 /**
- * May this token reach this path? Its own watch set, or what a member of its
- * one board may reach on that board. A path naming no board — the app shell,
+ * May this token reach this path? Its own watch set, its own renewal, or what
+ * a member of its one board may reach on that board. A path naming no board — the app shell,
  * the session probe — is refused: a process has no page to render.
  */
 export function boardAgentScopeAllows(
@@ -69,6 +69,9 @@ export function boardAgentScopeAllows(
   grant: BoardAgentClaims,
   workspacesOf: (id: string) => string[],
 ): boolean {
+  // Renewing itself: the route answers a fresh value for this token's own
+  // record and nothing else (`routes/board-tokens.ts`).
+  if (pathname === '/api/board-tokens/refresh') return method.toUpperCase() === 'POST';
   const watches = pathname.match(WATCHES_PATH);
   if (watches) {
     const m = method.toUpperCase();

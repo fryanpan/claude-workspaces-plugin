@@ -37,7 +37,44 @@ export async function handleWorkspaceCreateRead(
     parallelismCapView,
     fileUnderBoardWorkspace,
     attachmentPrivacy,
+    externalBaseUrl,
   } = ctx;
+  /**
+   * The page a review opens on: its meatiest member, or — when it has no
+   * member to land on — the review's own address, which the shell redirects
+   * to whichever member it holds by the time a person clicks.
+   */
+  const reviewEntryUrl = (
+    boardWorkspaceId: string,
+    setId: string,
+    files: ReadonlyArray<{ reviewUrl?: string; additions?: number; deletions?: number }>,
+  ): string => {
+    const weight = (f: { additions?: number; deletions?: number }) =>
+      (f.additions ?? 0) + (f.deletions ?? 0);
+    const entry = files.reduce<(typeof files)[number] | undefined>(
+      (best, f) => (best === undefined || weight(f) > weight(best) ? f : best),
+      undefined,
+    );
+    return (
+      entry?.reviewUrl ??
+      `${externalBaseUrl()}/workspaces/${encodeURIComponent(boardWorkspaceId)}/attachments/${encodeURIComponent(setId)}`
+    );
+  };
+  /**
+   * A folder bind's `links` with each file's page link as `url`. Most are not
+   * docs yet, so there is no doc for `withReviewUrl` to place: the link is
+   * minted under the board the set was just filed on, the address an opened
+   * member has, and the first request to it opens the doc
+   * (`openListedMember`).
+   */
+  const withLinkUrls = (
+    boardWorkspaceId: string,
+    links: ReadonlyArray<{ relPath: string; docId: string }>,
+  ) =>
+    links.map((l) => ({
+      ...l,
+      url: `${externalBaseUrl()}/workspaces/${encodeURIComponent(boardWorkspaceId)}/docs/${encodeURIComponent(l.docId)}`,
+    }));
   const { req, pathname, url, scope, visitor, authorFor } = rq;
   // --- REST: workspaces (board create OR folder bind) ---
   // One resource, two shapes: `folderPath` binds a folder of files
@@ -80,7 +117,10 @@ export async function handleWorkspaceCreateRead(
       // workspace that doesn't exist yet), so the route brings the
       // board doc up itself.
       taskProjection.ensureWorkspace(workspace.id);
-      return j(200, { workspace });
+      return j(200, {
+        workspace,
+        url: `${externalBaseUrl()}/workspaces/${encodeURIComponent(workspace.id)}`,
+      });
     }
     if (!folderPath || typeof folderPath !== 'string') {
       return j(400, { error: 'folderPath (folder bind) or name (board workspace) required' });
@@ -137,6 +177,12 @@ export async function handleWorkspaceCreateRead(
       res.workspaceId,
       body?.hubWorkspaceId as string | undefined,
     );
+    // Minted AFTER the filing: a doc no board holds has no address.
+    const files = res.files.map((f) => ({
+      ...f,
+      reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,
+    }));
+    const entryUrl = reviewEntryUrl(boardWorkspaceId, res.workspaceId, files);
     return j(200, {
       ...res,
       // The review's id, under the name the CRDT already stores it as.
@@ -149,10 +195,10 @@ export async function handleWorkspaceCreateRead(
       // the flag is told its folder is shareable rather than left to assume.
       privacy,
       privacyNote: privacyNote(privacy),
-      files: res.files.map((f) => ({
-        ...f,
-        reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,
-      })),
+      files,
+      links: withLinkUrls(boardWorkspaceId, res.links),
+      entryUrl,
+      url: entryUrl,
     });
   }
   // --- REST: diff attachments — POST /workspaces/<ws>/attachments ---
@@ -167,7 +213,7 @@ export async function handleWorkspaceCreateRead(
   // Default mode diffs base → the WORKING TREE (live: docs bind to the
   // files on disk and re-render as the agent edits); pass `target` for a
   // review pinned to a commit. Returns per-file reviewUrls plus an
-  // entryUrl (first changed file) the agent can hand to a human.
+  // entryUrl (= `url`) that always opens the review, for a human.
   if (restIs(scope, 'attachments') && req.method === 'POST') {
     // `repo` is a host path this server will read and serve — the same
     // class as the folder bind above, and refused on the same terms.
@@ -217,6 +263,18 @@ export async function handleWorkspaceCreateRead(
             : 409;
       return j(status, res);
     }
+    // One row per REVIEW on the board, never one per changed file — the
+    // members are reachable through the review's own tree. Idempotent, so
+    // a re-run cannot sweep a live review out of the board a reviewer
+    // already filed it on.
+    // The board comes from the PATH now — `hubWorkspaceId` in the body is
+    // gone with the old address, and is not read as a fallback: two ways to
+    // say where a review is filed is one way for them to disagree.
+    //
+    // FILED BEFORE any URL is minted. A doc is addressed under the board
+    // holding it, so minting first gave a first bind's members no URL at
+    // all, and `entryUrl` went missing on every review except a re-run.
+    const boardWorkspaceId = fileUnderBoardWorkspace(res.reviewId, scope?.workspaceId);
     const files = res.files.map((f) => ({
       ...f,
       reviewUrl: withReviewUrl({ docId: f.docId, type: f.type }).reviewUrl,
@@ -224,21 +282,7 @@ export async function handleWorkspaceCreateRead(
     // Land the reviewer on the MEATIEST change, not the first file
     // alphabetically (which is usually dotfile/config noise on a big
     // review). The in-page tree navigates to everything else.
-    const entry = files.reduce(
-      (best, f) =>
-        (f.additions ?? 0) + (f.deletions ?? 0) > (best.additions ?? 0) + (best.deletions ?? 0)
-          ? f
-          : best,
-      files[0],
-    );
-    // One row per REVIEW on the board, never one per changed file — the
-    // members are reachable through the review's own tree. Idempotent, so
-    // a re-run that omits `hubWorkspaceId` cannot sweep a live review out
-    // of the board a reviewer already filed it on.
-    // The board comes from the PATH now — `hubWorkspaceId` in the body is
-    // gone with the old address, and is not read as a fallback: two ways to
-    // say where a review is filed is one way for them to disagree.
-    const boardWorkspaceId = fileUnderBoardWorkspace(res.reviewId, scope?.workspaceId);
+    const entryUrl = reviewEntryUrl(boardWorkspaceId, res.reviewId, files);
     // `setId` is the same value as `reviewId`, under the name the CRDT
     // stores it as — both stay, and neither changes meaning.
     return j(200, {
@@ -246,7 +290,9 @@ export async function handleWorkspaceCreateRead(
       setId: res.reviewId,
       hubWorkspaceId: boardWorkspaceId,
       files,
-      entryUrl: entry?.reviewUrl,
+      ...(res.links ? { links: withLinkUrls(boardWorkspaceId, res.links) } : {}),
+      entryUrl,
+      url: entryUrl,
     });
   }
   // List bound workspaces with rolled-up triage signals (fileCount,

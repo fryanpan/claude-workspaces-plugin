@@ -22,7 +22,7 @@
  * `POST …/suggestions/resolve_all` logged **114,650 ms**. The next request took
  * 553 ms. The server recovered the instant that handler returned.
  *
- * That one is fixed at its source (`DocEditOps.resolveAllSuggestions` now
+ * That one is fixed at its source (`DocSuggestOps.resolveAllSuggestions` now
  * yields). This module exists because finding it cost a day of reading a log
  * that never said "blocked" — the only trace a wedge leaves today is that some
  * 404 took a minute, and you have to already suspect it to notice. Two pieces:
@@ -257,7 +257,7 @@ export interface ProcessSample {
  * Node, where `bun:jsc` does not exist.
  */
 let heapBytes: (() => number) | undefined;
-function readHeap(): number {
+export function readHeap(): number {
   if (!heapBytes) {
     heapBytes =
       typeof (globalThis as { Bun?: unknown }).Bun === 'undefined'

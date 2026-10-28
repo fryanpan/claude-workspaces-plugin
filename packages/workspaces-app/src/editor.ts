@@ -27,6 +27,7 @@ import { docImagePaste, pickDocImages } from './doc-image-upload.ts';
 import { workspaceIdFromPath } from './doc-path.ts';
 import { boardEmbedFramesFor } from './doc/board-embed-frames.ts';
 import { FootnoteDecorations } from './doc/footnote-decorations.ts';
+import { FIRST_PAINT_CLASS } from './doc/prose-paint.ts';
 import { resolveDocLink, safeLinkHref } from './link-open.ts';
 import { ListBehavior } from './list-behavior.ts';
 import { MassDeleteUndo } from './mass-delete-undo.ts';
@@ -163,8 +164,11 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
 
   const fragmentName = opts.fragmentName ?? 'prose';
 
+  // The doc page's first paint (doc/prose-paint.ts), when there is one: the
+  // editor mounts ON it, so the scroll position and the root element survive.
+  const painted = opts.parent.querySelector<HTMLElement>(`:scope > .${FIRST_PAINT_CLASS}`);
   const editor = new Editor({
-    element: opts.parent,
+    element: painted ? { mount: painted } : opts.parent,
     editable: opts.editable ?? true,
     extensions: [
       StarterKit.configure({
@@ -197,7 +201,7 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
       // prose.ts) emits/consumes `image` nodes for `![alt](src)` lines; without
       // this extension the schema has no `image` node and sync would drop them.
       // A relative path is fetched from the doc's own folder (doc-image-src.ts).
-      docImageExtension(opts.imageDocId ? docAssetsBase(opts.imageDocId) : undefined),
+      docImageExtension(opts.imageDocId ? docAssetsBase(opts.imageDocId) : undefined, opts.ydoc),
       // A pasted or dropped image file is stored beside the doc first
       // (doc-image-upload.ts); there is nowhere to store it without a doc.
       ...(opts.imageDocId ? [docImagePaste(opts.imageDocId)] : []),
@@ -278,6 +282,8 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     onSelectionUpdate: () => opts.onSelectionChange?.(),
     onUpdate: () => opts.onUpdate?.(),
   });
+  // The editor has drawn the prose over it; the paint stops following.
+  painted?.classList.remove(FIRST_PAINT_CLASS);
 
   // Content arrives via Yjs sync from the server (which loaded it from the
   // bound .md file). The editor never seeds locally — that would race the
@@ -476,6 +482,8 @@ export function createEditor(opts: CreateEditorOpts): EditorHandle {
     destroy() {
       editor.view.dom.removeEventListener('click', onLinkClick);
       editor.destroy();
+      // A mounted-on root is left in place, empty, by ProseMirror.
+      painted?.remove();
     },
   };
 }

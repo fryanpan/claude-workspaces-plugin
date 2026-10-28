@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { Footprint } from '../src/memory-footprint.ts';
 import {
+  HEAP_TYPES_COST_MULTIPLE,
+  HEAP_TYPES_EVERY_MS,
+  type HeapTypeCounts,
   MEMORY_PRINT_MAX_GAP_MS,
   MemoryLog,
   type MemoryLogStats,
@@ -28,6 +31,10 @@ function rig() {
   let now = 1_000_000;
   let mb = 200;
   let stats = baseStats();
+  let heapBytes = 96 * 1024 * 1024;
+  let types: HeapTypeCounts | null = { string: 900, Object: 400 };
+  let perf = 0;
+  let censusMs = 12;
   const lines: string[] = [];
   const log = new MemoryLog({
     stats: () => stats,
@@ -38,6 +45,12 @@ function rig() {
     }),
     now: () => now,
     write: (l) => lines.push(l),
+    readHeapBytes: () => heapBytes,
+    readHeapTypes: () => {
+      perf += censusMs;
+      return types;
+    },
+    perfNow: () => perf,
   });
   return {
     log,
@@ -50,6 +63,15 @@ function rig() {
     },
     setStats: (s: MemoryLogStats) => {
       stats = s;
+    },
+    setHeap: (mbHeap: number) => {
+      heapBytes = mbHeap * 1024 * 1024;
+    },
+    setTypes: (t: HeapTypeCounts | null) => {
+      types = t;
+    },
+    setCensusMs: (ms: number) => {
+      censusMs = ms;
     },
   };
 }
@@ -153,7 +175,8 @@ describe('the line', () => {
       '[doc-store] mem rss=150MB residentDocs=2600 bindings=580 activeBindings=12 awareness=3 ' +
         'timers=9 top=routes/docs.ts:120x45 footprint=400MB peak=400MB reason=delta window=30s ' +
         'windowTop=mcp-watch.ts:88+30 activations=+35 requests=3 ' +
-        'routes=GET:/api/workspaces/:id/tasks*2,POST:/api/workspaces/:id/docs/:id/threads*1',
+        'routes=GET:/api/workspaces/:id/tasks*2,POST:/api/workspaces/:id/docs/:id/threads*1 ' +
+        'heap=96MB',
     );
   });
 
@@ -180,5 +203,97 @@ describe('the line', () => {
       write: () => {},
     });
     expect(log.sample()).toBeNull();
+  });
+});
+
+describe('the heap', () => {
+  it('prints the live heap on every line', () => {
+    const r = rig();
+    expect(r.log.sample()).toContain(' heap=96MB ');
+    r.setHeap(1700);
+    r.setMb(2200);
+    r.advance(30_000);
+    expect(r.log.sample()).toEndWith(' heap=1700MB');
+  });
+
+  it('takes the type census on the first line and then once per census interval', () => {
+    const r = rig();
+    const first = r.log.sample();
+    expect(first).toEndWith(' heap=96MB heapTypes=string:900,Object:400 heapStatsMs=12');
+    r.setTypes({ string: 950, Object: 380, Map: 5000, Structure: 1 });
+    r.advance(MEMORY_PRINT_MAX_GAP_MS);
+    expect(r.log.sample()).toEndWith(' heap=96MB');
+    r.advance(HEAP_TYPES_EVERY_MS - MEMORY_PRINT_MAX_GAP_MS);
+    expect(r.log.sample()).toEndWith(
+      ' heap=96MB heapTypes=Map:5000+5000,string:950+50,Object:380-20,Structure:1+1 ' +
+        'heapGrowth=Map:+5000,string:+50,Structure:+1 heapStatsMs=12',
+    );
+  });
+
+  it('names the five commonest types and the three biggest growers', () => {
+    const r = rig();
+    r.setTypes({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 });
+    expect(r.log.sample()).toContain(' heapTypes=f:6,e:5,d:4,c:3,b:2 ');
+    r.setTypes({ a: 101, b: 2, c: 3, d: 4, e: 5, f: 6, g: 50 });
+    r.advance(HEAP_TYPES_EVERY_MS);
+    const line = r.log.sample() ?? '';
+    expect(line).toContain(' heapTypes=a:101+100,g:50+50,f:6+0,e:5+0,d:4+0 ');
+    expect(line).toContain(' heapGrowth=a:+100,g:+50 ');
+  });
+
+  it('waits longer after a census that blocked for longer', () => {
+    const r = rig();
+    r.setCensusMs(900);
+    expect(r.log.sample()).toContain(' heapStatsMs=900');
+    const waitMs = 900 * HEAP_TYPES_COST_MULTIPLE;
+    expect(waitMs).toBeGreaterThan(HEAP_TYPES_EVERY_MS);
+    r.advance(waitMs - 1);
+    expect(r.log.sample()).toEndWith(' heap=96MB');
+    r.advance(1);
+    r.setMb(400);
+    expect(r.log.sample()).toContain(' heapTypes=');
+  });
+
+  it('says none grew when nothing did', () => {
+    const r = rig();
+    r.log.sample();
+    r.setTypes({ string: 800, Object: 400 });
+    r.advance(HEAP_TYPES_EVERY_MS);
+    expect(r.log.sample()).toContain(' heapGrowth=none ');
+  });
+
+  it('still prints the line when the heap readers fail', () => {
+    const lines: string[] = [];
+    const log = new MemoryLog({
+      stats: () => baseStats(),
+      readFootprint: () => null,
+      now: () => 0,
+      write: (l) => lines.push(l),
+      readHeapBytes: () => {
+        throw new Error('no heap');
+      },
+      readHeapTypes: () => {
+        throw new Error('no census');
+      },
+    });
+    expect(log.sample()).toEndWith(' heap=unavailable');
+  });
+
+  it('reads the real heap and census under Bun by default', () => {
+    const lines: string[] = [];
+    const log = new MemoryLog({
+      stats: () => baseStats(),
+      readFootprint: () => null,
+      now: () => 0,
+      write: (l) => lines.push(l),
+    });
+    // Which types lead the census depends on what else this process has
+    // loaded (strings and functions led it on one CI shard), so hold enough
+    // plain objects that `Object` is among the top five wherever it runs.
+    const held = Array.from({ length: 200_000 }, (_, i) => ({ i }));
+    const line = log.sample() ?? '';
+    expect(held.length).toBe(200_000);
+    expect(line).toMatch(/ heap=\d+MB heapTypes=(\w+:\d+,){4}\w+:\d+ heapStatsMs=\d+$/);
+    expect(line).toContain('Object:');
   });
 });

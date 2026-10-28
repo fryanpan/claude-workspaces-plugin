@@ -17,7 +17,12 @@ import { appUnreachableLine } from './app-unreachable-line.ts';
 import { type AsksPayload, asksLine } from './asks-line.ts';
 import { isBookkeepingEvent } from './bookkeeping-events.ts';
 import { type CoachPayload, coachLine } from './coach-line.ts';
-import { decisionAnsweredLine, fromMockNote, openPartsClause } from './decision-line.ts';
+import {
+  decisionAnsweredLine,
+  fromMockNote,
+  infoRequestedLine,
+  openPartsClause,
+} from './decision-line.ts';
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
 import {
   type HeldRowPayload,
@@ -177,6 +182,8 @@ export interface BoardEventPayload {
   fromGoal?: string;
   toGoal?: string;
   answer?: string;
+  /** `decision.info_requested`: the person's question, verbatim. */
+  question?: string;
   /** `decision.answered` and `workspace.review_answered`: the answered task's
    *  links, which decide whether the line offers a propagation checklist.
    *  See decision-line.ts and nudge-line.ts. */
@@ -360,6 +367,9 @@ async function emitBoardChannelMessage(
     case 'decision.answered':
       body = decisionAnsweredLine(p);
       break;
+    case 'decision.info_requested':
+      body = infoRequestedLine(p);
+      break;
     case 'workspace.lead_changed':
       // Worth forwarding even though it is not a task: it changes WHO the
       // board's lead-addressed asks go to, including when that is you.
@@ -470,6 +480,7 @@ async function emitBoardChannelMessage(
         // (`workspace.review_item_held`, for a hold filed on a doc thread)
         // wants it delivered for the same reason.
         ...(p.docId ? { doc_id: p.docId } : {}),
+        ...(p.reviewItemId ? { review_item_id: p.reviewItemId } : {}),
         event,
         ...(p.actor?.name ? { author: p.actor.name } : {}),
       },
@@ -523,6 +534,11 @@ async function emitChannelMessage(
   // where it cannot affect a browser, which must still watch its own comment
   // appear. Fails OPEN on any ambiguity; see self-authored.ts.
   if (isSelfAuthoredEvent(event, rawPayload, deps.authorId)) return;
+  // An answer's measurement row. The server keeps it off the stream
+  // (`ANALYTICS_ONLY_EVENTS`); this is the belt to that suspender, so an
+  // older server's frame still costs no turn. The filer hears of the answer
+  // from `decision.answered`, or from the thread's reply on a doc thread.
+  if (event === 'review_item.answered') return;
   // A review item on a TICKET, before anything reads `docId`. These events
   // carry `taskId` and no doc at all, so every field the doc-shaped tail
   // below reads is absent on them and the frame that reached a reader named

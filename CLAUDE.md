@@ -40,7 +40,10 @@ prod's server is dead, why its budget is 75s and a first bind's is 240s, the
 three-per-hour restart limit, and the 16 September outage worked through),
 [voice-conversation-api](docs/architecture/voice-conversation-api.md) (the
 OpenAI-format protocol any app uses to talk to one agent, its token, and why
-it streams with a 180s bound) and
+it streams with a 180s bound),
+[app-voice](docs/architecture/app-voice.md) (how a sandboxed mock or app
+proves it is one doc on one board, so it can speak, listen and write through
+its own socket) and
 [security](docs/architecture/security.md) (trust boundaries, the gates that
 enforce them, where secrets live, the deploy and webhook surfaces). Read the
 relevant one before touching its subsystem.

@@ -70,6 +70,8 @@ interface TaskPayload {
   archivedAt?: number;
   archivedBy?: string;
   archiveReason?: string;
+  /** The absolute link that opens the task; absent for a share visitor. */
+  url?: string;
 }
 
 /** Trimmed create/promote result (§3.10: an edit returns ids + status, not
@@ -82,6 +84,8 @@ function taskCreatedSummary(
 ) {
   return {
     taskId: task.id,
+    // What to hand a person: the same `url` every make-or-attach tool returns.
+    ...(task.url !== undefined ? { url: task.url } : {}),
     goal: task.goal,
     order: task.order,
     status: task.status,
@@ -344,9 +348,15 @@ export async function handleTaskTool(
         task: TaskPayload;
         ignoredLinks?: unknown[];
         placement?: { placed: boolean; goals?: unknown[] };
+        url?: string;
       };
       return ok({
-        ...taskCreatedSummary(res.task, res.ignoredLinks, undefined, res.placement?.placed),
+        ...taskCreatedSummary(
+          res.url !== undefined ? { ...res.task, url: res.url } : res.task,
+          res.ignoredLinks,
+          undefined,
+          res.placement?.placed,
+        ),
         ...(res.placement?.goals !== undefined ? { goals: res.placement.goals } : {}),
         title: res.task.title,
         quote: res.task.quote,
@@ -860,6 +870,7 @@ export async function handleTaskTool(
         },
       )) as {
         item?: { id?: string };
+        url?: string;
         reviewAdvice?: string;
         held?: boolean;
         heldReason?: string;
@@ -868,6 +879,7 @@ export async function handleTaskTool(
       return ok({
         taskId,
         reviewItemId: res.item?.id,
+        ...(res.url !== undefined ? { url: res.url } : {}),
         // The gaps the server found in the shape. Dropping it here is the
         // "one layer away from where it's consumed" failure: the server
         // computed the advice, and the only party that can still act on it

@@ -208,9 +208,14 @@ async function main(): Promise<void> {
       const t = await text();
       return t.includes('tide table') ? t : null;
     });
-    const labelOffline = String(
-      await cdp.evaluate(`document.getElementById('doc-title')?.textContent ?? ''`),
-    );
+    // The doc's text paints before the chrome mounts, and the label holds the
+    // page's placeholder until then: read it once it has been filled.
+    const label = async () =>
+      String(await cdp.evaluate(`document.getElementById('doc-title')?.textContent ?? ''`));
+    const labelOffline = await until('the doc named offline', async () => {
+      const t = await label();
+      return t !== '' && t !== '—' ? t : null;
+    }).catch(label);
     const commentsOffline = Number(
       await until('the comment offline', async () => {
         const n = Number(

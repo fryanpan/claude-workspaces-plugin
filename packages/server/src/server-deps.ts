@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { haikuAnswerCoverage } from './answer-coverage.ts';
 /**
  * The other half of the composition root: the ONE place a real adapter is
@@ -26,16 +28,25 @@ import {
   createKeychainRefreshTokenVault,
   resolveGoogleOauthCreds,
 } from './google-oauth.ts';
+import { KEEPER_URL_ENV, keeperFetch } from './keeper/keeper-client.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
 import { createNotesMethodComposer } from './notes-method-composer.ts';
 import { readNotesMethod } from './notes-method-store.ts';
 import { createPluginRefresher } from './plugin-refresh.ts';
+import {
+  describeProjectServer,
+  featureOn,
+  featuresOff,
+  ghHostsPath,
+  scrubForeignCredentials,
+} from './project-profile.ts';
 import { createPromptStore } from './prompt-store.ts';
 import { createRecallCalendarClient } from './recall-calendar.ts';
 import { createRecallClient, recallStatusWebhookUrl } from './recall.ts';
 import { haikuReviewJudge, reviewGateEnabled } from './review-judge.ts';
 import type { ServerConfig } from './server-config.ts';
+import { CfApi } from './share/cf-api.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { createSpokenEngines } from './spoken-reply/engines.ts';
 import { ThreadSummarizer } from './summarize.ts';
@@ -61,15 +72,31 @@ export function createServerDeps(
   },
 ) {
   const { deployEnabled, busyDocs } = opts;
+  // FIRST, before any credential is read: a project server drops every other
+  // org's key and every gh login from its environment, so neither an adapter
+  // below nor a child it spawns can find one (`project-profile.ts`). On the
+  // Mac this removes nothing and prints nothing.
+  const removed = scrubForeignCredentials(process.env);
+  const ghHosts = ghHostsPath(process.env, homedir());
+  for (const line of describeProjectServer(
+    process.env,
+    removed,
+    existsSync(ghHosts) ? ghHosts : null,
+  )) {
+    console.log(stamped(line));
+  }
+  const transcriptionOn = featureOn(process.env, 'transcription');
   const share = cfg.shareConfig
     ? {
         config: cfg.shareConfig,
         // Only read the Keychain when Access mode is actually configured —
         // the reader throws when the entry is missing, and a link-only
         // deployment has no reason to hold a Cloudflare token at all.
-        ...(cfg.accessShareConfigured
-          ? { cfApiToken: readKeychainPassword('cloudflare-api-token') }
-          : {}),
+        //
+        // Once the keeper holds the token (`CW_KEEPER_URL`), the server reads
+        // none: its Access calls are asked of the keeper, and creating an
+        // application waits there for Bryan's passkey (`keeper/`).
+        ...(cfg.accessShareConfigured ? shareCloudflare(cfg.shareConfig.cfAccountId) : {}),
       }
     : undefined;
 
@@ -140,18 +167,31 @@ export function createServerDeps(
   // and here it is also the difference between a test suite that is free and one
   // that opens a metered streaming session per server it spins up. No key → null
   // → the meeting socket answers `not_configured` and the strip says so.
-  const assemblyAi = createAssemblyAiEngine();
+  // A profile with transcription off builds none of them, key or no key.
+  const assemblyAi = transcriptionOn ? createAssemblyAiEngine() : null;
   // The same key opens the pro model, so the two appear and disappear together.
-  const assemblyAiPro = createAssemblyAiProEngine();
-  const soniox = createSonioxEngine();
+  const assemblyAiPro = transcriptionOn ? createAssemblyAiProEngine() : null;
+  const soniox = transcriptionOn ? createSonioxEngine() : null;
   // Default first — Soniox (Bryan, 2026-09-01). The ordering itself lives in
   // `orderedEngines`, where a test holds it still.
   const engines = orderedEngines({ soniox, assemblyAi, assemblyAiPro });
   // The board mic's spoken reply — Soniox's listener again, plus the voices
   // and Gemini Live, each built only when its key is here.
-  const spokenReply = createSpokenEngines(soniox);
+  const spokenReply = createSpokenEngines(soniox, undefined, {
+    env: process.env,
+    readSoniox: readKeychainPassword,
+    off: {
+      transcription: !transcriptionOn,
+      voice: !featureOn(process.env, 'voice'),
+      gemini: !featureOn(process.env, 'gemini'),
+    },
+  });
   const transcription = engines.length > 0 ? engines : null;
-  if (!transcription) {
+  if (!transcriptionOn) {
+    console.log(
+      "[meetings] transcription is off in this server's profile; meetings and bots are off.",
+    );
+  } else if (!transcription) {
     console.log(
       '[meetings] no transcription key; live meetings answer "not configured". ' +
         `Add one with: security add-generic-password -a "$USER" -s ${ASSEMBLYAI_KEYCHAIN_SERVICE} -w`,
@@ -179,7 +219,9 @@ export function createServerDeps(
   // by anything that merely spins a server up would be a meter attached to a
   // test suite. No key → null → the invite route answers `not_configured` and
   // the doc says meeting bots are not set up.
-  const meetingBot = createRecallClient({ publicBaseUrl: cfg.publicBaseUrlOverride });
+  const meetingBot = transcriptionOn
+    ? createRecallClient({ publicBaseUrl: cfg.publicBaseUrlOverride })
+    : null;
   if (meetingBot && !meetingBot.config.publicWsBase) {
     // Worth saying out loud rather than discovering at invite time: the server
     // binds to localhost and Recall dials in from the public internet, so it
@@ -239,7 +281,7 @@ export function createServerDeps(
   // OAuth app (Keychain service `claude-workspaces-google-oauth`, accounts
   // `client-id` / `client-secret`) gates only the CONNECT flow, so a calendar
   // connected earlier keeps syncing even if those entries go missing.
-  const calendarClient = createRecallCalendarClient({});
+  const calendarClient = transcriptionOn ? createRecallCalendarClient({}) : null;
   const googleOauthCreds = calendarClient ? resolveGoogleOauthCreds(process.env) : null;
   // The redirect URI is registered at Google verbatim, so it is stated rather
   // than guessed: the env override wins, else it derives from the same public
@@ -385,6 +427,8 @@ export function createServerDeps(
       })
     : null;
   return {
+    // What the pages say about the features this server's profile turned off.
+    featuresOff: featuresOff(process.env),
     share,
     promptStore,
     summarizer,
@@ -408,3 +452,22 @@ export function createServerDeps(
 
 /** What the boot has to work with — inferred, so the two cannot drift. */
 export type ServerDeps = ReturnType<typeof createServerDeps>;
+
+/**
+ * How the share module reaches Cloudflare: through the keeper when
+ * `CW_KEEPER_URL` names one, else with the Keychain's token. A held call
+ * waits under the board server's 120s idle timeout for the tap.
+ */
+function shareCloudflare(accountId: string | undefined): { cfApi: CfApi } | { cfApiToken: string } {
+  const keeper = process.env[KEEPER_URL_ENV]?.trim();
+  if (!keeper || !accountId) return { cfApiToken: readKeychainPassword('cloudflare-api-token') };
+  const fetchImpl = keeperFetch(keeper, {
+    requester: 'board server (sharing)',
+    waitMs: 100_000,
+    onHeld: (held) =>
+      console.log(stamped(`[keeper] ${held.summary} waits for a passkey: ${held.approveUrl}`)),
+  });
+  return {
+    cfApi: new CfApi({ accountId, token: '', apiBase: `${keeper}/v1/cloudflare`, fetchImpl }),
+  };
+}

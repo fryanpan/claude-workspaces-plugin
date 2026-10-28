@@ -23,6 +23,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const LINE_LIMIT = 500;
+/** How far a file may move from its row's line count before the gate fails. */
+export const DRIFT_LIMIT = 0.2;
 
 // `import.meta.url`, not Bun's `import.meta.dir`: the colocated test runs under
 // vitest, where `import.meta.dir` is undefined and module load throws.
@@ -30,8 +32,13 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_ROOT = 'packages';
 const EXCEPTIONS_DOC = join('docs', 'architecture', 'exceptions.md');
 
-/** Extensions the bar applies to. Markdown and JSON are data, not code. */
-const EXTENSIONS = ['.ts', '.css'];
+/**
+ * Extensions the bar applies to. Markdown and JSON are data, not code. `.tsx`
+ * and `.mjs` were missing until 17 Oct 2026, which left twelve files of 500+
+ * lines (four board islands, the schedule editor, `plot-spec.mjs` and six
+ * `.tsx` tests) with no row and nobody told.
+ */
+export const EXTENSIONS = ['.ts', '.tsx', '.mjs', '.css'];
 
 /**
  * Directories never worth counting, and the one generated artifact that lives
@@ -65,9 +72,25 @@ export function isScannable(repoRelPath: string): boolean {
  */
 export function listedPaths(markdown: string): Set<string> {
   const found = new Set<string>();
-  const re = /packages\/[A-Za-z0-9._/-]+\.(?:ts|css)/g;
+  // `tsx` before `ts`: the alternation takes the first that fits, and `ts`
+  // would stop a `.tsx` path one letter short of the file it names.
+  const re = /packages\/[A-Za-z0-9._/-]+\.(?:tsx|ts|mjs|css)/g;
   for (const m of markdown.matchAll(re)) found.add(m[0]);
   return found;
+}
+
+/**
+ * The Lines cell of every row, by path. Exact agreement would fail nearly any
+ * PR that touches a listed file; on 17 Oct 2026, 184 of 215 rows were off and
+ * `server.ts` read 2525 against 4638, so the gate fails only past
+ * `DRIFT_LIMIT`, which is the size of drift that changes what a reason means.
+ */
+export function rowCounts(markdown: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const m of markdown.matchAll(/^\| `(packages\/[^`]+)` \| (\d[\d,]*) \|/gm)) {
+    counts.set(m[1] as string, Number((m[2] as string).replaceAll(',', '')));
+  }
+  return counts;
 }
 
 export function walk(dir: string, root: string, out: string[] = []): string[] {
@@ -99,7 +122,13 @@ export function oversizedFiles(root: string): Offender[] {
   return found.sort((a, b) => b.lines - a.lines || a.path.localeCompare(b.path));
 }
 
-export type AuditResult = { unlisted: Offender[]; stale: string[]; total: number };
+export type Drift = Offender & { listed: number };
+export type AuditResult = {
+  unlisted: Offender[];
+  stale: string[];
+  drifted: Drift[];
+  total: number;
+};
 
 export function audit(root: string): AuditResult {
   const docPath = join(root, EXCEPTIONS_DOC);
@@ -108,12 +137,18 @@ export function audit(root: string): AuditResult {
       `${EXCEPTIONS_DOC} is missing. It is the record of which over-${LINE_LIMIT}-line files are deliberate; without it this gate cannot pass.`,
     );
   }
-  const listed = listedPaths(readFileSync(docPath, 'utf8'));
+  const doc = readFileSync(docPath, 'utf8');
+  const listed = listedPaths(doc);
+  const counts = rowCounts(doc);
   const over = oversizedFiles(root);
   const overPaths = new Set(over.map((f) => f.path));
   return {
     unlisted: over.filter((f) => !listed.has(f.path)),
     stale: [...listed].filter((p) => !overPaths.has(p)).sort(),
+    drifted: over.flatMap((f) => {
+      const c = counts.get(f.path);
+      return c && Math.abs(f.lines - c) / c > DRIFT_LIMIT ? [{ ...f, listed: c }] : [];
+    }),
     total: over.length,
   };
 }
@@ -132,7 +167,12 @@ function main(): number {
     for (const p of result.stale) console.log(`  ${p}`);
   }
 
+  for (const f of result.drifted) {
+    console.error(`❌ ${f.path} is ${f.lines} lines; its row says ${f.listed}. Update the row.`);
+  }
+
   if (result.unlisted.length === 0) {
+    if (result.drifted.length > 0) return 1;
     console.log('\n✅ every file over the limit has a written verdict.');
     return 0;
   }

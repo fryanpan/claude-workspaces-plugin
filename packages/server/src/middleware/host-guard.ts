@@ -760,6 +760,8 @@ const MEMBER_ADMIN_ROUTES: Readonly<Record<string, readonly string[]>> = {
  *   files            the review's file list
  *   context-file     open a member lazily, read-only
  *   editable-file    open a member lazily, editable
+ *   raw              a listed video or image's bytes, for the page that
+ *                    plays it — the same files `context-file` would open
  *
  * The last two matter because members bind LAZILY: `bind_folder` binds only
  * the entry doc, and everything else in the tree comes into being through
@@ -787,6 +789,7 @@ const REVIEW_MEMBER_ROUTES: Readonly<Record<string, readonly string[]>> = {
   files: ['GET'],
   'context-file': ['POST'],
   'editable-file': ['POST'],
+  raw: ['GET', 'HEAD'],
 };
 
 /**

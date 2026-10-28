@@ -23,21 +23,36 @@ export const SHARE_COOKIE = 'lf_share';
 const KEY_FILENAME = 'share-cookie.key';
 
 /**
- * Load the HMAC key, generating it on first use. Mode 600 — anyone who can
- * read it can mint a session for any share.
+ * This server's signing key, generated on its first start. Every signed value
+ * the server mints — cookies, widget tokens, agent tokens — is signed with it
+ * or with a key derived from it, so it is this server's alone: it lives in
+ * this server's data dir, is never read from anywhere else, and a value
+ * minted by another server, with another key, verifies as nothing here. A
+ * copy of a data dir must leave this file behind (docs/architecture/
+ * security.md), or the copy can mint for the original.
+ *
+ * Mode 600, re-applied on every load, because anyone who can read it can mint
+ * any of those values.
  */
 export function loadCookieKey(dataDir: string): string {
   const path = join(dataDir, KEY_FILENAME);
   if (existsSync(path)) {
     const existing = readFileSync(path, 'utf8').trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) {
+      ownerOnly(path);
+      return existing;
+    }
   }
   const key = randomBytes(32).toString('hex');
   writeFileSync(path, key, { mode: 0o600 });
-  try {
-    chmodSync(path, 0o600); // pre-existing file keeps its old mode otherwise
-  } catch {}
+  ownerOnly(path); // a pre-existing file keeps its old mode otherwise
   return key;
+}
+
+function ownerOnly(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {}
 }
 
 /**

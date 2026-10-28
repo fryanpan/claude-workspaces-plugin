@@ -24,8 +24,25 @@
  * Pure: the caller hands in the time and labels the event.
  */
 import type { Event } from '../activity.ts';
+import type { CoverageSource } from './coverage.ts';
 
 export const PASSAGE_CHARS = 600;
+
+/**
+ * The pages that name no board, as the place a view of one is: the front
+ * page and the review walk, where he answers review items. A board's id is
+ * `w-…` and never holds a colon, so neither can be taken for one. Each reads
+ * to the coach session as a board with this name.
+ */
+export const PAGE_PLACES: Readonly<Record<'home' | 'review', { id: string; name: string }>> = {
+  home: { id: 'page:home', name: 'Home' },
+  review: { id: 'page:review', name: 'Review walk' },
+};
+
+/** A page place's name, if `workspaceId` is one. */
+export function pagePlaceName(workspaceId: string): string | undefined {
+  return Object.values(PAGE_PLACES).find((p) => p.id === workspaceId)?.name;
+}
 export const TEXT_CHARS = 1_500;
 const HEADING_CHARS = 120;
 
@@ -41,6 +58,8 @@ export interface HereSignal {
   heading?: string;
   /** The text in view, for a view; what he wrote, for a wrote. */
   text?: string;
+  /** Which device sent it (`coach/coverage.ts`); the stream ignores it. */
+  source?: CoverageSource;
 }
 
 export interface CoachEvent {

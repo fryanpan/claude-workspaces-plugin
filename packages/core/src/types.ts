@@ -253,6 +253,9 @@ export interface DocMeta {
    * buckets when the caller had organized the sidebar by hand.
    */
   workspaceExclude?: string[];
+  /** Files listed although the repository ignores them, by name. A folder
+   *  bind's `include`; the share rule reads it back (`isListedFile`). */
+  workspaceInclude?: string[];
   workspaceGroups?: Array<{ title: string; paths: string[]; details?: string }>;
   workspaceMaxFiles?: number;
   /**
