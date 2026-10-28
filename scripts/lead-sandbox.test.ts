@@ -17,6 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { escapeRows } from './lead-sandbox-escapes.ts';
 import {
   type LeadSandboxConfig,
   type Machine,
@@ -118,12 +119,27 @@ describe('buildProfile', () => {
     expect(lines.some((l) => l.includes(transcriptSlug(`${TWIN}/dev/riverbend`)))).toBe(false);
   });
 
-  it('writes the wall itself and the prod root after every other rule', () => {
-    const lookups = lines.filter((l) => l.includes('file-read-metadata')).length;
-    expect(lines.slice(-2 - lookups, lines.length - lookups)).toEqual([
+  it('writes the wall itself, the prod root and the tmux sockets after every other rule', () => {
+    const files = lines.filter((l) => /^\((allow|deny) file-(read|write)/.test(l));
+    const metadata = files.filter((l) => l.includes('file-read-metadata')).length;
+    expect(files.slice(-4 - metadata, files.length - metadata)).toEqual([
       '(deny file-read* file-write* (subpath "/etc/lead-sandbox.json"))',
       `(deny file-read* file-write* (subpath "${HOME}/Library/Application Support/claude-workspaces"))`,
+      '(deny file-read* file-write* (subpath "/tmp/tmux-501"))',
+      '(deny file-read* file-write* (subpath "/private/tmp/tmux-501"))',
     ]);
+  });
+
+  it('refuses the tmux socket at both spellings, open and Apple events', () => {
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '(deny network-outbound (remote unix-socket (subpath "/tmp/tmux-501")))',
+        '(deny network-outbound (remote unix-socket (subpath "/private/tmp/tmux-501")))',
+        '(deny lsopen)',
+        '(deny appleevent-send)',
+        '(deny mach-lookup (global-name "com.apple.siri.VoiceShortcuts.xpc"))',
+      ]),
+    );
   });
 
   it('refuses writes to what runs outside the sandbox, after every grant', () => {
@@ -189,6 +205,7 @@ describe('buildProfile', () => {
 });
 
 const HAVE_SANDBOX = process.platform === 'darwin' && existsSync(SANDBOX_EXEC);
+const HAVE_TMUX = spawnSync('tmux', ['-V'], { stdio: 'ignore' }).status === 0;
 if (!HAVE_SANDBOX)
   console.warn(`lead-sandbox: ${SANDBOX_EXEC} is missing, so the real-sandbox cases skip.`);
 
@@ -334,6 +351,41 @@ describe.skipIf(!HAVE_SANDBOX)('the profile under the real sandbox-exec', () => 
     expect(sh(`ls '${sibling}'`).status).not.toBe(0);
     expect(sh(`cat '${sibling}/notes.md'`).status).not.toBe(0);
   });
+
+  // The tmux row needs this user's own socket folder, so its uid is the real one.
+  const escapesProfile = (drop?: RegExp) => {
+    const text = buildProfile(lead, parsed.config, { ...m, uid: process.getuid?.() ?? 0 }, []);
+    const file = join(root, `escapes-${drop ? 'mutated' : 'full'}.sb`);
+    writeFileSync(
+      file,
+      text
+        .split('\n')
+        .filter((l) => !drop?.test(l))
+        .join('\n'),
+    );
+    return escapeRows(file, harborlight, process.getuid?.() ?? 0);
+  };
+
+  it('cannot start a process outside the wall through tmux, open, osascript, shortcuts or launchd', () => {
+    const rows = escapesProfile();
+    expect(rows.filter((r) => !r.ok).map((r) => r.says)).toEqual([]);
+    expect(rows).toHaveLength(5);
+  }, 60_000);
+
+  it('fails the row of each escape whose rule is removed (the mutation control)', () => {
+    for (const [drop, row] of [
+      [/network-outbound.*tmux/, 0],
+      [/file-read\* file-write\* \(subpath "[^"]*tmux-/, 0],
+      [/\(deny lsopen\)/, 1],
+      [/\(deny appleevent-send\)/, 2],
+      [/VoiceShortcuts/, 3],
+    ] as const) {
+      if (row === 0 && !HAVE_TMUX) continue;
+      const rows = escapesProfile(drop);
+      expect(rows[row]?.ok, `${drop}: ${rows[row]?.says}`).toBe(false);
+      expect(rows.filter((r, i) => i !== row && !r.ok).map((r) => r.says)).toEqual([]);
+    }
+  }, 120_000);
 
   it('cannot read or rewrite the config or its own profile', () => {
     expect(sh(`cat '${configFile}'`).status).not.toBe(0);

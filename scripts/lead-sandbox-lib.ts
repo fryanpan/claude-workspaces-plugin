@@ -96,6 +96,42 @@ export const CLAUDE_CODE_FOLDERS = [
   'session-env',
 ];
 
+/**
+ * The tmux server's socket folder, at both spellings: `/tmp` is a symlink
+ * to `/private/tmp`, and a rule on one end alone matches nothing (measured).
+ * A lead that reached the socket could `tmux send-keys` into an unsandboxed
+ * session and run anything there.
+ */
+export function tmuxSocketDirs(uid: number): string[] {
+  return [`/tmp/tmux-${uid}`, `/private/tmp/tmux-${uid}`];
+}
+
+/**
+ * Rules that refuse a way to start a process outside the wall, each probed
+ * on 28 October 2026 from inside a generated profile. Connecting to the tmux
+ * socket is a `network-outbound`, not a file read, so the file deny on its
+ * folder alone still let `tmux ls` answer. `open` asks LaunchServices, which
+ * starts the app (Terminal running a `.command` file) outside the sandbox;
+ * `osascript` can ask Terminal or iTerm to run a script. `shortcuts run`
+ * has the Shortcuts helper run a shortcut, which may run a shell script
+ * there; the CLI reaches it only through `SHORTCUTS_SERVICE`. launchd, `crontab`
+ * and `at` need no rule: launchd refuses a job from a sandboxed caller, and
+ * the sandbox refuses to exec a setuid binary.
+ */
+export function escapeRules(m: Machine): string[] {
+  return [
+    ...tmuxSocketDirs(m.uid).map(
+      (d) => `(deny network-outbound (remote unix-socket (subpath ${sbString(d)}))) ; tmux`,
+    ),
+    '(deny lsopen) ; open: LaunchServices starts apps outside the wall',
+    '(deny appleevent-send) ; osascript: another app runs what it is sent',
+    `(deny mach-lookup (global-name ${sbString(SHORTCUTS_SERVICE)})) ; shortcuts run`,
+  ];
+}
+
+/** The Shortcuts helper the `shortcuts` CLI talks to (found by denying names until `list` failed). */
+export const SHORTCUTS_SERVICE = 'com.apple.siri.VoiceShortcuts.xpc';
+
 type Access = 'deny' | 'read' | 'write' | 'nowrite' | 'list';
 
 interface Rule {
@@ -246,6 +282,9 @@ function rulesFor(
     why: 'prod',
     last: true,
   });
+  // So no second name for a socket in it can be made from inside.
+  for (const d of tmuxSocketDirs(m.uid))
+    rules.push({ access: 'deny', filter: { subpath: d }, why: 'tmux', last: true });
   return rules;
 }
 
@@ -355,6 +394,8 @@ export function buildProfile(
     '(allow default)',
     // A rule named from both ends of a symlink can come out twice.
     ...new Set(lines.map((l) => l.text)),
+    ';; Starting a process outside the wall.',
+    ...escapeRules(m),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',
