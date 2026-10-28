@@ -271,7 +271,11 @@ export function dedupeNotesEdits(
   const headings = new Set<string>();
   for (const e of outline) {
     if (e.kind === 'heading') headings.add(e.id);
-    if (!section.blocks.has(e.id) || e.kind !== 'heading') continue;
+    // AND ANY HEADING OF ITS OWN OUTSIDE THE WALK. A section walk stops at
+    // a heading it cannot claim, and a topic this meeting opened past that
+    // point was invisible here, so it was opened a second time.
+    const ours = section.blocks.has(e.id) || ctx.ownedElsewhere?.has(e.id) === true;
+    if (!ours || e.kind !== 'heading') continue;
     lastHeading = e.id;
     // THE SECTION HEADING IS A TOPIC LIKE THE REST. It was skipped here while
     // the section was a `## Meeting notes` CONTAINER, which named no topic and
@@ -418,7 +422,9 @@ export function dedupeNotesEdits(
       }
       const key = topicKey(seg.heading.text);
       const known = topics.find((t) => sameTopic(t.text, seg.heading?.text ?? ''));
-      if (known && known.level === seg.heading.level) {
+      // AT ANY LEVEL. A topic the doc already heads at `##` and the model
+      // opens again at `###` is still one topic headed twice to its reader.
+      if (known) {
         notes.push(`reused the topic heading already in the section (${known.id})`);
         const lines = keepLines(seg.lines, known.id);
         if (hasWords(lines)) {
@@ -432,9 +438,7 @@ export function dedupeNotesEdits(
       }
       const opening = `new:${key}`;
       const heading = seg.heading;
-      const again = opened.find(
-        (o) => o.level === heading.level && sameTopic(o.text, heading.text),
-      );
+      const again = opened.find((o) => sameTopic(o.text, heading.text));
       const lines = keepLines(seg.lines, opening);
       if (atEnd) target = opening;
       if (again) {
