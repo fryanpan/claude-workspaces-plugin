@@ -39,6 +39,7 @@ import {
   refuseNonLocalAgentCaller,
 } from './auth/agent-token.ts';
 import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/board-agent-token.ts';
+import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
 import { createBoardSummaries } from './board-summary.ts';
@@ -61,6 +62,7 @@ import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-
 import { createFrameHost } from './frame-host.ts';
 import { frameKeys } from './frame-ticket.ts';
 import { taskDeepLink } from './home-brief.ts';
+import { GithubHub, githubHubPath } from './github-hub.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { createHomeRemotes } from './home-remotes.ts';
@@ -121,6 +123,7 @@ import { type CoachRoutesContext } from './routes/coach.ts';
 import { type DocMoveRoutesContext } from './routes/doc-move.ts';
 import type { DocRoutesContext } from './routes/docs-routes-context.ts';
 import { startServerFeatures } from './routes/features.ts';
+import { type GithubHubRoutesContext } from './routes/github-hub.ts';
 import { type HomeFeedRoutesContext } from './routes/home-feed.ts';
 import { type LoadReportRoutesContext } from './routes/load-reports.ts';
 import { type MeetingCalendarRoutesContext } from './routes/meetings-calendar.ts';
@@ -2105,6 +2108,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     j,
   };
 
+  /** GitHub events for boards that hold no GitHub token — routes/github-hub.ts. */
+  const githubHubCtx: GithubHubRoutesContext = {
+    hub: new GithubHub(githubHubPath(dataDir), () => githubPushKeyKey(cookieKey())),
+    boardExists: (id) => taskStore.getWorkspace(id) !== undefined,
+    caller: homeFeedCtx,
+    deliver: (boardId, frame) => {
+      let reached = 0;
+      for (const agentId of sse.agentsOn(`ws~${boardId}`)) {
+        reached += sse.sendToAgent(`ws~${boardId}`, agentId, { ...frame });
+      }
+      return reached;
+    },
+    j,
+    safeJson,
+  };
+
   /**
    * The requests that end in a connection rather than a body — see
    * routes/upgrade-stream.ts. Composed HERE because `requireSignInToWrite` comes out
@@ -2972,6 +2991,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     j,
     requestAddress: (req) => server.requestIP(req)?.address,
     homeFeedCtx,
+    githubHubCtx,
     admit,
     localOnlyGate,
     attributeRequest,

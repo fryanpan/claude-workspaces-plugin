@@ -31,6 +31,7 @@ import type { ChatAuditRoutesContext } from './chat-audit-routes.ts';
 import type { CoachRoutesContext } from './coach.ts';
 import type { DocMoveRoutesContext } from './doc-move.ts';
 import type { DocRoutesContext } from './docs-routes-context.ts';
+import type { GithubHubRoutesContext } from './github-hub.ts';
 import type { HomeFeedRoutesContext } from './home-feed.ts';
 import type { LoadReportRoutesContext } from './load-reports.ts';
 import type { MeetingCalendarRoutesContext } from './meetings-calendar.ts';
@@ -67,6 +68,7 @@ export interface RequestChainContext {
 
   // ── The gates, in chain order ──
   homeFeedCtx: HomeFeedRoutesContext;
+  githubHubCtx: GithubHubRoutesContext;
   admit: RequestAdmission['admit'];
   localOnlyGate: Parameters<typeof addressesLocalOnlySet>[1];
   attributeRequest: RequestAttribution['attributeRequest'];
