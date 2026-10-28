@@ -268,10 +268,10 @@ export class ShareLinks {
   /**
    * Is this email a member of this workspace?
    *
-   * The ONLY question the per-request gate asks, and it reads the membership
-   * rows rather than the links: that is what "from then on the membership,
-   * not the link, grants access" means in code. A revoked link's members
-   * still answer true here, and that is the intended behaviour, not a gap.
+   * The ONLY question the per-request gate asks. The membership row grants
+   * access, and the link it came through is read for one thing only: its
+   * audience, which must still admit the row. A revoked link's members still
+   * answer true here, and that is the intended behaviour, not a gap.
    */
   isMember(workspaceId: string, email: string | null | undefined): boolean {
     const who = email ? normalizeEmail(email) : '';
@@ -286,13 +286,17 @@ export class ShareLinks {
    */
   private admittedRow(workspaceId: string, who: string): ShareLinkMember | null {
     const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
-    if (!row) return null;
-    return audienceAdmits(this.get(row.viaLinkId)?.allowDomains, who) ? row : null;
+    return row && this.admitted(row) ? row : null;
+  }
+
+  /** Lists show who is in, so a row the gate refuses is not listed. */
+  private admitted(row: ShareLinkMember): boolean {
+    return audienceAdmits(this.get(row.viaLinkId)?.allowDomains, row.email);
   }
 
   /** Every member of a workspace, in the order they arrived. */
   membersOf(workspaceId: string): ShareLinkMember[] {
-    return this.members.filter((m) => m.workspaceId === workspaceId);
+    return this.members.filter((m) => m.workspaceId === workspaceId && this.admitted(m));
   }
 
   /**
@@ -320,7 +324,7 @@ export class ShareLinks {
   setMemberRole(workspaceId: string, email: string, role: BoardRole): boolean {
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
-    const row = this.members.find((m) => m.workspaceId === workspaceId && m.email === who);
+    const row = this.admittedRow(workspaceId, who);
     if (!row) return false;
     if ((row.role ?? DEFAULT_BOARD_ROLE) === role) return true;
     // Rebuilt rather than mutated, so a demotion REMOVES the key instead of
@@ -349,7 +353,7 @@ export class ShareLinks {
    * twice, and a member whose link was deleted would not list at all.
    */
   allMembers(): ShareLinkMember[] {
-    return this.members.slice();
+    return this.members.filter((m) => this.admitted(m));
   }
 
   /**
@@ -397,13 +401,11 @@ export class ShareLinks {
     role?: BoardRole,
   ): boolean {
     if (this.isMember(workspaceId, email)) return false;
-    // A row the audience of its own link no longer admits: this link does, so
-    // it becomes the provenance. Its role stays — that was set on the person.
-    const stale = this.members.find((m) => m.workspaceId === workspaceId && m.email === email);
-    if (stale) {
-      this.members = this.members.map((m) => (m === stale ? { ...m, viaLinkId } : m));
-      return true;
-    }
+    // A row the audience of its own link no longer admits is replaced, so the
+    // person arrives as this link says, exactly as a first redemption would.
+    this.members = this.members.filter(
+      (m) => !(m.workspaceId === workspaceId && m.email === email),
+    );
     // `member` is written as ABSENT, not as the string: the field's whole
     // contract is that a row which does not name a role is a regular user, and
     // two spellings of the default are two things a later reader can disagree

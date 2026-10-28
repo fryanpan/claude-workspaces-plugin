@@ -138,6 +138,15 @@ describe('a share link with an audience', () => {
     expect(await opensBoard(ALICE)).toBe(200);
   });
 
+  it('names the signed-in address on the refusal page, escaped', async () => {
+    const linkId = await mint([ALICE]);
+    const r = await onShareHost(`/s/${linkId}`, '"<b>x</b>"@riverbend.example');
+    expect(r.status).toBe(403);
+    const html = await r.text();
+    expect(html).not.toContain('<b>x</b>');
+    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
+  });
+
   it('for @domain, admits the domain only — not a lookalike, not a subdomain', async () => {
     const linkId = await mint(['@harborlight.example']);
     for (const outsider of [

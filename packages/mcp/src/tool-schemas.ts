@@ -1546,7 +1546,7 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Optional audience. Each entry is one address ("someone@partner.example") or one exact domain ("@partner.example"; subdomains are not included). Only a matching sign-in can join, and a member stops getting in once the audience no longer names them. Omit it and anyone who opens the link and signs in joins.',
+              'Optional audience. Each entry is one address ("someone@partner.example") or one exact domain ("@partner.example"; subdomains are not included). Only a matching sign-in can join, checked on every request. The audience is set when the link is minted; to change it, mint a new link, unshare the old one, and remove_share_member anyone who should lose access. Omit it and anyone who opens the link and signs in joins.',
           },
           role: {
             type: 'string',

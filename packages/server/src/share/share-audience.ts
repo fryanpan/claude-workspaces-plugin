@@ -19,8 +19,10 @@
  * The parser is stricter than the matcher on purpose. The matcher has to read
  * records already on disk; the parser decides what a new record may say, and
  * a permissive parse is how a typo becomes a board open to the wrong people.
- * So a bare `partner.example` (no `@`), a wildcard, whitespace, a second `@`
- * and an `@` with nothing after it are all refused rather than guessed at.
+ * So a wildcard, whitespace, a second `@` and an `@` with nothing after it are
+ * all refused rather than guessed at. A bare `partner.example` is read as
+ * `@partner.example`, as the matcher reads it, because older callers send
+ * that shape and their ask did not change.
  */
 import { audienceEntryAdmits } from './shares.ts';
 
@@ -36,14 +38,15 @@ const DOMAIN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
 export type ParsedAudience = { ok: true; audience: string[] } | { ok: false; hint: string };
 
 const HINT =
-  'allowDomains must be a non-empty array of addresses ("someone@partner.example") or domains ("@partner.example"). No wildcards, spaces, bare domains or second "@".';
+  'allowDomains must be a non-empty array of addresses ("someone@partner.example") or domains ("@partner.example"). No wildcards, spaces or second "@".';
 
 /** One entry, lower-cased, or null when it is not one of the two shapes. */
 function parseEntry(raw: unknown): string | null {
   if (typeof raw !== 'string' || raw === '' || raw.length > MAX_ENTRY_LENGTH) return null;
-  const entry = raw.toLowerCase();
+  const lowered = raw.toLowerCase();
+  const entry = lowered.includes('@') ? lowered : `@${lowered}`;
   const at = entry.indexOf('@');
-  if (at < 0 || at !== entry.lastIndexOf('@')) return null;
+  if (at !== entry.lastIndexOf('@')) return null;
   const local = entry.slice(0, at);
   if (local !== '' && !LOCAL_PART.test(local)) return null;
   return DOMAIN.test(entry.slice(at + 1)) ? entry : null;

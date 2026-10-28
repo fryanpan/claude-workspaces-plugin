@@ -32,7 +32,7 @@ describe('parseShareAudience', () => {
     '*@harborlight.example',
     '@*.harborlight.example',
     'alice@bob@harborlight.example',
-    'harborlight.example',
+    '*.harborlight.example',
     '@harborlight',
     '@-harborlight.example',
     '@harborlight..example',
@@ -41,6 +41,13 @@ describe('parseShareAudience', () => {
       expect(parseShareAudience([ALICE, bad]).ok).toBe(false);
     });
   }
+
+  it('reads a bare domain as @domain, the shape older callers send', () => {
+    expect(parseShareAudience(['Harborlight.Example'])).toEqual({
+      ok: true,
+      audience: ['@harborlight.example'],
+    });
+  });
 
   it('refuses an empty list, a non-list and a non-string entry', () => {
     expect(parseShareAudience([]).ok).toBe(false);
@@ -118,6 +125,39 @@ describe('the store applies the audience', () => {
     const open = reloaded.create({ workspaceId: 'w-board', createdBy: 'Test Agent' });
     expect(reloaded.redeem(open.linkId, ALICE)).toMatchObject({ ok: true, added: true });
     expect(reloaded.isMember('w-board', ALICE)).toBe(true);
+  });
+
+  const narrowOnDisk = (audience: string[]) => {
+    const path = join(dataDir, 'share-links.json');
+    const disk = JSON.parse(readFileSync(path, 'utf8'));
+    disk.links[0].allowDomains = audience;
+    writeFileSync(path, JSON.stringify(disk));
+    return new ShareLinks({ dataDir });
+  };
+
+  it('lists only the members the audience still admits, and will not re-role the rest', () => {
+    const link = mint([ALICE, BOB]);
+    links.redeem(link.linkId, ALICE);
+    links.redeem(link.linkId, BOB);
+    const reloaded = narrowOnDisk([BOB]);
+    expect(reloaded.membersOf('w-board').map((m) => m.email)).toEqual([BOB]);
+    expect(reloaded.allMembers().map((m) => m.email)).toEqual([BOB]);
+    expect(reloaded.setMemberRole('w-board', ALICE, 'owner')).toBe(false);
+    expect(reloaded.setMemberRole('w-board', BOB, 'owner')).toBe(true);
+  });
+
+  it('gives a refused member the role of the second link they redeem', () => {
+    const link = mint([ALICE]);
+    links.redeem(link.linkId, ALICE);
+    const reloaded = narrowOnDisk([BOB]);
+    const owners = reloaded.create({
+      workspaceId: 'w-board',
+      createdBy: 'Test Agent',
+      role: 'owner',
+    });
+    expect(reloaded.redeem(owners.linkId, ALICE)).toMatchObject({ ok: true, added: true });
+    expect(reloaded.roleOf('w-board', ALICE)).toBe('owner');
+    expect(reloaded.membersOf('w-board')).toHaveLength(1);
   });
 
   it('leaves a link with no audience exactly as it was', () => {
