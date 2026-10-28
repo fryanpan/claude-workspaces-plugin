@@ -224,6 +224,33 @@ changed inputs still refuse and back off (`dependency-install.ts`). A restart wh
 survives now logs that pid and its `ps` state (`supervisor-reap.ts`), because past that point the
 kernel, not the supervisor, is what keeps the port held.
 
+## What a hang restart records first
+
+A hang used to leave one line, `no reply within 10000ms`. The server's own
+`[loop] blocked` line is written when a block ends, and the restart kills the
+process before that. Two hangs on 27 October left nothing else.
+
+So before a `no-answer` restart, after the ledger has recorded it, the
+supervisor runs `captureHang` (`supervisor-hang-capture.ts`) and writes its
+lines to the err log:
+
+| Line | Where it comes from |
+| --- | --- |
+| a stack sample's path | `sample <pid> 2 -mayDie`, written to `supervisor-hang/sample-<time>-pid<pid>.txt` in the data directory; the newest 10 are kept |
+| swap used and total, memory free % | `sysctl vm.swapusage`, `memory_pressure -Q` |
+| the child's RSS, `ps` state, page-ins and faults | `ps -o rss=,stat=`, `top -l 1 -pid` |
+
+What the main thread was running is not among them. The in-flight requests
+live in the server's memory, and only the stuck thread could hand them out;
+the last line says so and points at the sample.
+
+The capture runs every command at once, and the watchdog races it against
+`HANG_CAPTURE_BUDGET_MS` = **6s**. A capture that hangs or throws costs the
+restart 6s at most, and never the restart itself. An unbound restart takes no
+capture: there is no hang to sample, and a boot's stack is not the question.
+A restart the limiter holds takes none either. The budgets and the limit above
+are unchanged.
+
 ## Worked example: 16 September 2026
 
 Two outages the same day, about ten minutes each. They are split here by which
@@ -385,6 +412,7 @@ serious of the two faults the invisible one.
 | What | Where |
 | --- | --- |
 | Probe, verdicts, fail-counting, watchdog | `packages/server/src/supervisor-health.ts` |
+| What a hang restart records first | `packages/server/src/supervisor-hang-capture.ts` |
 | Restart limit, ledger, first-bind grace and its backoff | `packages/server/src/supervisor-restarts.ts` |
 | The `liveness` field on `GET /api/deploy` | `packages/server/src/liveness.ts` |
 | `GRACE_MS` / `CHECK_MS` / `MAX_FAILS`, and arming the ticks | `scripts/serve.ts` |

@@ -46,6 +46,7 @@
  */
 import { connect as netConnect } from 'node:net';
 import { classifyConnectError } from './port-bind.ts';
+import { HANG_CAPTURE_BUDGET_MS } from './supervisor-hang-capture.ts';
 import {
   FIRST_BIND_GRACE_MS,
   type RestartLedger,
@@ -273,6 +274,18 @@ export interface HealthWatchdogOptions {
   /** The ceiling the backoff doubles up to. Defaults to
    *  `FIRST_BIND_GRACE_MAX_MS`. */
   firstBindGraceMaxMs?: number;
+  /**
+   * Runs before a restart of a server that is listening and not answering
+   * (`no-answer` only), so the hang names its cause — `captureHang` in prod.
+   * Raced against `captureBudgetMs`: a capture that hangs or throws costs
+   * the restart that budget at most, and never the restart itself.
+   */
+  captureBeforeRestart?: () => Promise<void>;
+  /** Defaults to `HANG_CAPTURE_BUDGET_MS`. */
+  captureBudgetMs?: number;
+  /** Resolves after `ms`. Injected so a test can bound a capture without
+   *  waiting out the budget. */
+  wait?: (ms: number) => Promise<void>;
 }
 
 export type WatchdogTick = 'ok' | 'wait' | 'booting' | 'held' | 'restart' | 'skipped';
@@ -280,6 +293,35 @@ export type WatchdogTick = 'ok' | 'wait' | 'booting' | 'held' | 'restart' | 'ski
 function describe(result: HealthProbeResult): string {
   const why = result.detail ? ` (${result.detail})` : '';
   return result.verdict === 'no-answer' ? `not answering${why}` : `not listening${why}`;
+}
+
+const defaultWait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    t.unref?.();
+  });
+
+/** The capture, or its budget, whichever ends first. Never rejects. */
+async function boundedCapture(
+  capture: () => Promise<void>,
+  opts: Pick<HealthWatchdogOptions, 'captureBudgetMs' | 'wait'>,
+  log: (line: string) => void,
+): Promise<void> {
+  const budgetMs = opts.captureBudgetMs ?? HANG_CAPTURE_BUDGET_MS;
+  const running = (async () => capture())().then(
+    () => 'done' as const,
+    (err) => {
+      log(`[supervisor] hang capture failed (${codeOf(err)}); restarting anyway`);
+      return 'done' as const;
+    },
+  );
+  const outcome = await Promise.race([
+    running,
+    (opts.wait ?? defaultWait)(budgetMs).then(() => 'late' as const),
+  ]);
+  if (outcome === 'late') {
+    log(`[supervisor] hang capture still running after ${budgetMs}ms; restarting without it`);
+  }
 }
 
 /**
@@ -420,6 +462,9 @@ export function createHealthWatchdog(opts: HealthWatchdogOptions): {
       log(`[supervisor] health: could not record this restart (${codeOf(err)}); restarting anyway`);
     }
     done = true;
+    if (result.verdict === 'no-answer' && opts.captureBeforeRestart) {
+      await boundedCapture(opts.captureBeforeRestart, opts, log);
+    }
     // An unbound port means two different faults, and the log should say
     // which: a server that bound and then LOST the port (the --watch reload
     // wedge this watchdog was built for), or a first bind that never arrived

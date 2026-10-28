@@ -130,6 +130,9 @@ const { FIRST_BIND_GRACE_MS, fileRestartLedger, restartLedgerPath } = await impo
   '../packages/server/src/supervisor-restarts.ts'
 );
 const { reapChildren } = await import('../packages/server/src/supervisor-reap.ts');
+const { captureHang, spawnCommand } = await import(
+  '../packages/server/src/supervisor-hang-capture.ts'
+);
 
 // What this deploy source is parked on, stamped into the release so the served
 // client can say what it was built from. `-dirty` is NOT `git describe
@@ -499,6 +502,13 @@ if (noWatch) {
     // difference between surviving one slow boot and surviving a machine on
     // which no boot finishes — 23:12Z on 16 September was the second.
     firstBindGraceMs: FIRST_BIND_GRACE_MS,
+    // A hang leaves no line of its own: the server logs `[loop] blocked` when
+    // a block ENDS, and this restart ends the process first. So before a
+    // no-answer restart, record a stack sample and the machine's memory state
+    // (supervisor-hang-capture.ts), bounded so the restart is late by a few
+    // seconds at most.
+    captureBeforeRestart: () =>
+      captureHang({ pid: server.pid, dataDir, run: spawnCommand, log: note }),
   });
   setTimeout(() => {
     const timer = setInterval(() => {
