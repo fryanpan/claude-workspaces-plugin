@@ -17,12 +17,14 @@
  * `--check` lists each lead's own projects (they must list: the control)
  * and each protected folder (it must refuse) from inside that lead's
  * profile, asks `bun` there for its environment (it must not be empty),
- * and exits 1 on any failure.
+ * tries each way out of the wall (`lead-sandbox-escapes.ts`: tmux, `open`,
+ * `osascript`, `shortcuts`, launchd), and exits 1 on any failure.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { escapeRows } from './lead-sandbox-escapes.ts';
 import {
   type Lead,
   type LeadSandboxConfig,
@@ -173,6 +175,11 @@ function main(argv: string[]): number {
       say(
         `${vars > 0 ? 'ok  ' : 'FAIL'} ${lead.name}  bun sees ${vars} env vars  in ${cwd}  (must be more than 0)`,
       );
+      for (const row of escapeRows(profile, cwd, machine.uid)) {
+        total++;
+        if (!row.ok) bad++;
+        say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
+      }
     }
     say(bad === 0 ? `All ${total} checks hold.` : `${bad} of ${total} checks failed.`);
     return bad === 0 ? 0 : 1;
