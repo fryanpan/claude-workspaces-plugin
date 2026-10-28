@@ -179,7 +179,7 @@ function main(argv: string[]): number {
       const keychain = lead.allowKeychain
         ? { ok: true, says: 'keychain: left readable, as the config asks (allowKeychain)' }
         : keychainRow(profile, cwd);
-      for (const row of [...escapeRows(profile, cwd, machine.uid), keychain]) {
+      for (const row of [...escapeRows(profile, cwd, machine.uid, lead.allowTmux), keychain]) {
         total++;
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
