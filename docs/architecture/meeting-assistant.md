@@ -232,16 +232,16 @@ so `onSessionStart` runs again in full. The answer, so nobody has to ask twice
   in the input marks the seam. The per-leg state that goes with it —
   `priorRaw`, the offered-suggestion set, `lastTickNo`, the speaker `names`
   map, the idea/coverage ledger, the tick cadence — starts again too.
-- **Reset, and the expensive one: authorship.** `onSessionStart` calls
-  `releaseNotesAuthorship(docStore, docId)`, which drops the note-taker's claim
-  on every block in the doc. So the bullets the meeting wrote BEFORE the drop
-  come back to it as a person's lines: they arrive in `humanNotes`, the outline
-  shows no block of its own, and an edit naming one of them lands as a
-  SUGGESTION rather than a rewrite. That is the safe direction — the same one a
-  restarted server lands in, and the reason the release exists — but on a
-  five-reconnect meeting it means most of the minutes stop being editable by
-  the hand that wrote them. **Left as measured; changing it is a separate
-  decision, not a bug fix.**
+- **Kept, since 2026-10-28: authorship of the meeting's own notes.**
+  `onSessionStart` still calls `releaseNotesAuthorship`, but passes the blocks
+  this same meeting id wrote on earlier legs (`written.read(ids)`) as `keep`.
+  Until then every reconnect turned the minutes written so far into a person's
+  lines: revisions became suggestions or `not-yours` refusals, and every topic
+  read as the doc's own and was opened again. Replayed over four recorded
+  meetings, topics headed twice tracked the reconnect count, 0 with one leg
+  and 20 with twenty-one. A DIFFERENT recording on the doc still releases
+  everything, which is what stops meeting two deleting meeting one's bullets
+  (`notes-second-meeting.test.ts`).
 - **Held, since 2026-09-16: the meeting's quality item.** The at-stop quality
   pass runs at every leg's stop, because `end()` is what runs it — so a
   reconnecting meeting used to put a "the notes came out badly" item in front
@@ -1701,6 +1701,26 @@ rates ever come back from that half: an example line is a line of somebody's
 meeting restated, so the harness withholds every example — lost ideas and
 failed bullets alike — whenever the corpus resolves outside this repo.
 
+**The report reads the meaning once the meeting is over** (2026-10-28). The
+lexical check read 0-3% uncovered on four replayed meetings where a judge
+found 11-24% of the ideas missing, so a meeting that lost ideas was never
+reported. Matching against one bullet rather than the whole notes did not
+help: a model-written list of each meeting's ideas scored worse than the notes
+themselves. So the quality filer's `amend` step runs `notes-coverage-judge.ts`
+at its commit, after the last leg: one Haiku call per ~3,000 characters of
+speech lists the points that stretch made and says which no note carries, and
+its share replaces the lexical one on the item, with the `coverage` flag at
+the goal's one-in-twenty. It runs once per meeting, not per leg; on the four
+replays it cost under three cents a meeting. `CW_NOTES_COVERAGE_JUDGE=0` turns
+it off.
+
+**A tick sees the speech just before its own** (`notes-recent-speech.ts`,
+2026-10-28). The ceiling cuts a long answer into slices, and the third slice
+of a status round-up read alone is fragments with no subject: replays showed
+a finished item noted as pending and the second half of an answer filed as a
+new topic. The previous tick's speech, cut from its end to 600 characters,
+rides each prompt after the outline, marked as already noted.
+
 **CI runs the smoke slice once a day, not once a push.** It is the only
 thing in this repo's CI that spends money, and Bryan's bar is a dollar a
 day — a per-PR job cannot promise that, because it costs whatever the day's
@@ -2783,6 +2803,37 @@ about $0.035 to $0.04:
 | --- | --- | --- | --- |
 | Before the change | 0 of 6 | 5 of 9 | $0.10 |
 | After the change | 6 of 6 | 9 of 9 | $0.11 |
+
+### Does a recorded meeting meet the goal? `bun run notes:replay`
+
+`notes:eval` runs AMI excerpts. A real meeting is checked by replaying it:
+`scripts/notes-replay.ts <meeting folder> --out <dir> --spend-usd <max>`
+feeds the settled turns of a copied meeting directory through the shipped
+note-taker. It does not re-transcribe the audio. It uses the wiring
+`meeting-wiring.ts` builds (`withServerNotesSinks` over a data dir, the
+at-stop quality pass and its filer) and writes the notes, the timing file
+and the quality rows to `<out>/<docId>/`. Each reconnect in the index is
+its own notes session, as it was live. `--one-leg` runs a meeting as one
+session, which is the control for what reconnects cost the notes.
+`--method <id>` runs the meeting on a named note-taker (as if a person had
+picked it for the doc), and `--log-edits` writes every edit the model
+answered, before the guards, to `edits.jsonl`. That log is how a lost idea
+is told apart as never written or written and then removed.
+
+The clock is virtual while no model call is in flight and real while one
+is (`ReplayClock`, `notes-replay-lib.ts`). An hour of talk replays in the
+time its composes take, and a note's settled-to-written wait still includes
+the reply it waited on. The partials between settled turns are modelled as
+`notes-latency-check.ts --replay` models them.
+
+`scripts/notes-replay-score.ts <run dir>... --truth <dir> --spend-usd <max>`
+scores a run on the five goal metrics. These are repeats and doubled
+headings, the lost-idea share, latency (median at most 10s and under 10%
+of notes over 10s), unknown speakers, and whether the filed quality item
+named every miss. Ideas are listed once per doc from the transcript into
+`--truth`, so every later run is judged against the same list. Both
+commands refuse an output path inside the repository and use the eval key
+only. Neither is in `bun run verify`: each run costs money.
 
 ### Cost
 

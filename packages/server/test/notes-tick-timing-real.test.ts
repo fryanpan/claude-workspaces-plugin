@@ -68,16 +68,16 @@ describe('the reader over the writer’s own output', () => {
     expect(lateness.medianMs).toBe(stated.medianMs);
   });
 
-  it('counts the ticks that crossed the late bar, and does not flag this meeting', () => {
+  it('counts the ticks that crossed the late bar, and that is this whole meeting', () => {
     const { dataDir, docId, meetingId } = meetingWithRealTiming();
     const lateness = latenessFrom(readTickWaits(dataDir, docId, meetingId) ?? []);
-    // Nine of seventy-one waits are over a minute. Recorded rather than
-    // asserted loosely, because this is the only real measurement of this
-    // bar that exists: a meeting whose worst note landed four minutes late
-    // still comes out UNDER the one-in-five share, so the share bar catches a
-    // meeting that is late throughout and not one that is late in a tail.
-    expect(lateness.late).toBe(9);
-    expect(lateness.lateShare ?? 0).toBeLessThan(0.2);
+    // Seventy of seventy-one waits are over the goal's ten seconds. This
+    // fixture was recorded on the first-frame clock with a 15s ceiling, a 21s
+    // median: under the old bar (a minute, one in five) it raised nothing;
+    // under the goal's it is late throughout, which is what it was.
+    expect(LATE_NOTE_MS).toBe(10_000);
+    expect(lateness.late).toBe(70);
+    expect(lateness.lateShare ?? 0).toBeGreaterThan(0.9);
     expect(lateness.maxMs ?? 0).toBeGreaterThan(4 * LATE_NOTE_MS);
   });
 

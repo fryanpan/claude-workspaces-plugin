@@ -132,17 +132,19 @@ describe('what a reconnect resets in the note-taker', () => {
     expect(said).toContain('slipway');
     expect(said).not.toContain('ferry');
 
-    // RESET 3, the expensive one: authorship. Starting a notes session
-    // releases the note-taker's claim on the whole doc, so the bullet the
-    // FIRST leg wrote comes back to the resuming one as a person's line.
-    expect(after.outline.filter((e) => e.author !== undefined)).toEqual([]);
-    expect(after.humanNotes ?? []).toContain(FIRST_LEG_NOTE);
+    // KEPT, and it used to be RESET 3: authorship. Starting a notes session
+    // releases the note-taker's claim on the doc, but not on the blocks this
+    // SAME meeting wrote on an earlier leg — a reconnect resumes a recording,
+    // it does not start one. The first leg's bullet is still the note-taker's.
+    const bullet = after.outline.find((e) => e.text.includes('ferry runs hourly'));
+    expect(bullet?.author).toBeDefined();
+    expect(after.humanNotes ?? []).not.toContain(FIRST_LEG_NOTE);
   });
 
-  it('costs the resuming leg direct edits on its own earlier notes', async () => {
-    // What RESET 3 means in the doc: the resuming leg revises the bullet the
-    // dropped one wrote, and the revision lands as a SUGGESTION rather than a
-    // rewrite, because the doc no longer records that bullet as its own.
+  it('keeps the resuming leg direct edits on its own earlier notes', async () => {
+    // The resuming leg revises the bullet the dropped one wrote, and the
+    // revision lands as a rewrite. It used to land as a SUGGESTION, which is
+    // how a live meeting's own corrections went unapplied after a reconnect.
     const { ydoc, after } = await droppedAndResumed((input) => {
       const bullet = input.outline.find((e) => e.kind !== 'heading');
       return bullet === undefined
@@ -157,6 +159,7 @@ describe('what a reconnect resets in the note-taker', () => {
     });
 
     expect(after.outline.some((e) => e.kind !== 'heading')).toBe(true);
-    expect(suggestOps.listSuggestions(ydoc).length).toBeGreaterThan(0);
+    expect(suggestOps.listSuggestions(ydoc)).toEqual([]);
+    expect(prose.readOutline(ydoc).some((e) => e.text.includes('until five'))).toBe(true);
   });
 });

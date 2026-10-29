@@ -86,10 +86,22 @@ export const MAX_UNKNOWN_SPEAKERS = 0;
  */
 
 /**
+ * THE BARS BELOW ARE THE BOARD GOAL'S, since 2026-10-28 (goal "a good
+ * meeting"): under 5% of ideas lost, each note within 10s of its turn
+ * settling, under 10% of notes later than that. A meeting that misses the
+ * goal is reported rather than silent, so a bar looser than the goal is a
+ * meeting the goal fails and nobody hears about. The older bars (half the
+ * ideas, a minute, a fifth) were set from a corpus distribution; three of
+ * four replayed meetings missed the goal with no flag at all. What each bar
+ * is measured from is unchanged and written beside it.
+ */
+export const GOAL_LOST_IDEA_SHARE = 0.05;
+
+/**
  * The share of spoken ideas the notes may leave unaccounted for.
  *
- * Half, and the number is a GAP in the measured distribution rather than a
- * round figure. Scored over every meeting this server has recorded, the
+ * The goal's 5% since 2026-10-28. It WAS half, a GAP in the measured
+ * distribution rather than a round figure: Scored over every meeting this server has recorded, the
  * meetings whose notes a reader would call complete run from 3% to 36%
  * uncovered; the ones that were visibly thin — including one that recorded a
  * full hour of speech and wrote no notes at all, which scores 100% — run from
@@ -102,7 +114,7 @@ export const MAX_UNKNOWN_SPEAKERS = 0;
  * miss rate a healthy meeting scores rather than near the rate a perfect one
  * would.
  */
-export const MAX_UNCOVERED_IDEA_SHARE = 0.5;
+export const MAX_UNCOVERED_IDEA_SHARE = GOAL_LOST_IDEA_SHARE;
 
 /**
  * The fewest ideas a meeting must have before its coverage share is judged.
@@ -152,7 +164,8 @@ export const REVISE_RATIO_BAND = 0.1;
 /**
  * How long after a turn settles its note may land before the wait is late.
  *
- * A minute. The notes clocks are held at four seconds of quiet and a
+ * The goal's ten seconds since 2026-10-28; it WAS a minute, reasoned as
+ * follows. The notes clocks are held at four seconds of quiet and a
  * six-second cadence ceiling (Bryan, 2026-09-10, and
  * `DEFAULT_NOTES_QUIET_MS` / `DEFAULT_NOTES_CADENCE_MS` are where they live),
  * so a healthy turn reaches a note inside one cadence window plus the compose
@@ -161,9 +174,10 @@ export const REVISE_RATIO_BAND = 0.1;
  * threshold is the point at which the notes are a topic behind the room,
  * which is a fact about the conversation rather than about the ceiling.
  *
- * WHAT THE NUMBER IS MEASURED FROM, which the four-windows reasoning above
- * understates. `settledToWrittenMs` is charged from the OLDEST turn on a
- * tick, so a tick carrying three turns is timed from the first of them. It is
+ * WHAT THE NUMBER IS MEASURED FROM. `settledToWrittenMs` is charged from the
+ * OLDEST turn on a tick, from the moment that turn SETTLED (since 2026-10-28;
+ * before, from its first frame), so a tick carrying three turns is timed from
+ * the first of them to settle. It is
  * therefore "how long the oldest idea went unwritten", not "how long one turn
  * waited", and it runs higher than a per-turn figure — measured at 21s median
  * against the same replay's 7.5s per-turn median. That is the right number
@@ -171,12 +185,12 @@ export const REVISE_RATIO_BAND = 0.1;
  * anyone comparing it to a per-turn latency elsewhere is comparing two
  * denominators.
  */
-export const LATE_NOTE_MS = 60_000;
+export const LATE_NOTE_MS = 10_000;
 
 /**
  * The share of a meeting's turns that may land late before it is reported.
  *
- * One in five. A single late note is one slow call to a model; a fifth of the
+ * The goal's one in ten since 2026-10-28; it WAS one in five. A single late note is one slow call to a model; a fifth of the
  * meeting arriving a minute behind is the notes not keeping up, which is the
  * shape `refusedTooLong` already reports from the other side.
  *
@@ -190,7 +204,7 @@ export const LATE_NOTE_MS = 60_000;
  * judgement nobody has enough meetings to make yet, and one file is not a
  * distribution. Deliberately left alone rather than tuned to it.
  */
-export const MAX_LATE_NOTE_SHARE = 0.2;
+export const MAX_LATE_NOTE_SHARE = 0.1;
 
 /**
  * How far back the rollup the daily health check reads looks.

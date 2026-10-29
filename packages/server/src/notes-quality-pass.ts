@@ -39,6 +39,7 @@
  */
 
 import { listMeetings, readTranscript } from './meetings.ts';
+import { type NotesCoverageJudge, withJudgedCoverage } from './notes-coverage-judge.ts';
 import type { NotesDocStore } from './notes-doc-access.ts';
 import {
   type MeetingVoices,
@@ -252,4 +253,49 @@ export function passLine(
     filing,
     workspaceId,
   )}`;
+}
+
+/**
+ * The filer's `amend` for a meeting that is over: the model's reading of what
+ * its notes left out, in place of the lexical one (`notes-coverage-judge.ts`).
+ *
+ * It reads the notes and the transcript the way the pass does, so the two
+ * readings are of the same words. Anything it cannot read — no data dir, no
+ * notes, a judge that did not answer — leaves the reading as the pass left
+ * it, and the stored record is rewritten only when the judge answered.
+ */
+export async function amendWithJudgedCoverage(
+  deps: Pick<
+    NotesQualityPassDeps,
+    'docStore' | 'dataDir' | 'headingIdOf' | 'priorBlocks' | 'writtenBlocks' | 'now'
+  >,
+  judge: NotesCoverageJudge,
+  ids: { docId: string; meetingId: string },
+  input: NotesQualityFileInput,
+): Promise<NotesQualityFileInput> {
+  const { docId, meetingId } = ids;
+  if (deps.dataDir === undefined) return input;
+  const notes = readMeetingNotes(
+    deps.docStore(),
+    docId,
+    deps.headingIdOf(docId, meetingId),
+    deps.priorBlocks?.(docId, meetingId),
+    undefined,
+    deps.writtenBlocks?.(docId, meetingId),
+  );
+  if (notes.source !== 'notes') return input;
+  let transcript: SpokenTurn[];
+  try {
+    transcript = readTranscript(deps.dataDir, docId, meetingId);
+  } catch {
+    return input;
+  }
+  const judged = await judge({ transcript, notes: notes.markdown });
+  if (!judged) return input;
+  const report = withJudgedCoverage(input.report, judged);
+  writeNotesQuality(
+    deps.dataDir,
+    notesQualityRecord(docId, meetingId, report, deps.now?.() ?? Date.now()),
+  );
+  return { ...input, report };
 }

@@ -70,6 +70,7 @@ import { topicHeadingLine, topicRoutingLines } from './notes-heading-level.ts';
 import { missedBlock } from './notes-missed-words.ts';
 import { DEFAULT_NOTES_INSTRUCTIONS, withoutSpeakerAttribution } from './notes-prompt-store.ts';
 import { reasonDirective } from './notes-reason-ask.ts';
+import { recentBlock } from './notes-recent-speech.ts';
 import { regroupDirective } from './notes-regroup-ask.ts';
 
 /**
@@ -298,6 +299,8 @@ export function buildNotesPrompt(
   }
 
   if (input.extraPrompt) parts.push(input.extraPrompt);
+  const recent = recentBlock(input.recent ?? [], speakerPrefix);
+  if (recent) parts.push(recent);
   parts.push(
     `${input.transcriptLabel ?? DEFAULT_TRANSCRIPT_LABEL}:\n${input.tick.turns
       .map((t) => `- ${speakerPrefix(t)}${t.text}${turnSuffix(t, input.tick.reason)}`)
@@ -461,11 +464,8 @@ function renderOutline(input: NotesComposeInput): { chunks: string[]; tail: stri
  *
  * Either way it is the engine's raw text: no punctuation, no sentence
  * casing, sometimes cut mid-word. Saying so is what stops the note-taker
- * rendering a fragment as a finished point. It used to be the wire half of a
- * prompt rule that asked for an unsure note to end `(unconfirmed)`; that rule
- * is gone (see `notes-prompt-store.ts`), and this label matters MORE without
- * it. The instruction now is to write the smaller point you are sure of, and
- * a note-taker can only do that if it is told which words are unfinished.
+ * rendering a fragment as a finished point, and lets it write the smaller
+ * point it is sure of (`notes-prompt-store.ts`).
  */
 const PARTIAL_SUFFIX = ' [unfinished — the recording stopped mid-sentence]';
 const STILL_SPEAKING_SUFFIX = ' [unfinished — they are still saying it]';

@@ -116,9 +116,14 @@ import {
   dropLegacyTranscriptSection,
 } from './notes-legacy-transcript.ts';
 import { readNotesMethod } from './notes-method-store.ts';
+import { stripPendingClauses } from './notes-pending-clauses.ts';
 import { createNotesQualityFiledFileStore } from './notes-quality-filed-store.ts';
 import { type NotesQualityFiler, createNotesQualityFiler } from './notes-quality-filing.ts';
-import { type NotesQualityPassResult, runNotesQualityPass } from './notes-quality-pass.ts';
+import {
+  type NotesQualityPassResult,
+  amendWithJudgedCoverage,
+  runNotesQualityPass,
+} from './notes-quality-pass.ts';
 import type { NotesQualityBoard } from './notes-quality-review.ts';
 import { type NoteReference, referenceDate } from './notes-references.ts';
 import { appendResearchPlaceholder } from './notes-research-placeholder.ts';
@@ -721,7 +726,10 @@ export function applyNotesUpdate(
   );
   // EVERY NOTE A BULLET, before the guard and the dedupe read the batch, so
   // both judge the notes in the shape they will land in (`notes-edit-bullets.ts`).
-  const bulleted = bulletNotesEdits(update.edits, { outline: full }).edits;
+  // And no note left saying its point is unfinished (`notes-pending-clauses.ts`).
+  const bulleted = stripPendingClauses(
+    bulletNotesEdits(update.edits, { outline: full }).edits,
+  ).edits;
   // A detail about a dictated page's last item nests INTO it (`notes-dictation.ts`).
   const shaped = foldDetailsIntoItem(bulleted, full, update.dictation, NOTES_AUTHOR_ID, (id) =>
     itemFirstLine(doc.ydoc, id),
@@ -1338,9 +1346,24 @@ export function withServerNotesSinks(
   // sessions of one recording. Backed by the data dir when there is one, so
   // where the item WENT outlives the process too — a restart mid-meeting used
   // to leave the item it filed standing after the meeting read clean.
+  // What the quality pass and the filer's `amend` read the notes through.
+  const qualityReads = {
+    docStore,
+    ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
+    headingIdOf: (docId: string, meetingId: string) =>
+      heading.headingId({ docId, meetingId }, readNotesOutline(docStore(), docId)),
+    priorBlocks: (docId: string, meetingId: string) => heading.priorIn({ docId, meetingId }),
+    writtenBlocks: (docId: string, meetingId: string) => written.read({ docId, meetingId }),
+  };
+  const coverageJudge = options.coverageJudge;
   const qualityFiler =
     deps.qualityFiler ??
     createNotesQualityFiler({
+      ...(coverageJudge
+        ? {
+            amend: (ids, input) => amendWithJudgedCoverage(qualityReads, coverageJudge, ids, input),
+          }
+        : {}),
       ...(deps.qualityBoard ? { board: deps.qualityBoard } : {}),
       ...(deps.dataDir !== undefined
         ? { filedStore: createNotesQualityFiledFileStore(deps.dataDir) }
@@ -1389,15 +1412,10 @@ export function withServerNotesSinks(
       recordMarkedBlocks(written, docStore(), summary);
       return runNotesQualityPass(
         {
-          docStore,
+          ...qualityReads,
           file: (input) =>
             qualityFiler.file({ docId: summary.docId, meetingId: summary.meetingId }, input),
           boardOf,
-          ...(deps.dataDir !== undefined ? { dataDir: deps.dataDir } : {}),
-          headingIdOf: (docId, meetingId) =>
-            heading.headingId({ docId, meetingId }, readNotesOutline(docStore(), docId)),
-          priorBlocks: (docId, meetingId) => heading.priorIn({ docId, meetingId }),
-          writtenBlocks: (docId, meetingId) => written.read({ docId, meetingId }),
           actor: deps.qualityActor ?? { id: NOTES_AUTHOR_ID, name: 'Meeting Assistant' },
         },
         {
@@ -1627,8 +1645,13 @@ export function withServerNotesSinks(
       // meeting's still-marked notes read as minutes rather than as the
       // person's own writing.
       targets.begin(ids);
-      releaseNotesAuthorship(deps.docStore(), ids.docId);
-      if (targets.targetOf(ids.docId) !== ids.docId) releaseNotesAuthorship(docStore(), ids.docId);
+      // EXCEPT WHAT THIS SAME MEETING WROTE on an earlier leg: a reconnect
+      // resumes the recording rather than starting one (`releaseNotesAuthorship`).
+      const own = written.read(ids);
+      releaseNotesAuthorship(deps.docStore(), ids.docId, own);
+      if (targets.targetOf(ids.docId) !== ids.docId) {
+        releaseNotesAuthorship(docStore(), ids.docId, own);
+      }
       heading.beginMeeting(ids);
       // A leg of this meeting is running again. Whatever reading the drop
       // left is about half a meeting, and the grace that would have filed it

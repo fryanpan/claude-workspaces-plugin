@@ -96,6 +96,19 @@ describe('unknown voices', () => {
     expect(unknownVoices(notes, voices)).toEqual([]);
   });
 
+  it('leaves a two-stream placeholder alone — the notes write it for an unnamed voice', () => {
+    // `speakerPlaceholderName` renders "Room Speaker A" / "Remote Speaker C"
+    // on a mic+system meeting. Reading those as invented names filed
+    // "speakers the meeting never had" on every such meeting.
+    const twoStream = { labels: ['room:A', 'remote:C'], names: [] };
+    const notes =
+      '- [@Room Speaker A](speaker:room:A) books the crane\n' +
+      '- [@Remote Speaker C](speaker:remote:C) checks the tide';
+    expect(unknownVoices(notes, twoStream)).toEqual([]);
+    // Control: a name nobody gave is still reported on the same labels.
+    expect(unknownVoices('- [@Bob](speaker:room:A) books the crane', twoStream)).toHaveLength(1);
+  });
+
   it('leaves a name the meeting record gave that voice alone', () => {
     const notes = '- [@Priya Raman](speaker:A) wants the winter crew kept';
     expect(unknownVoices(notes, voices)).toEqual([]);
@@ -199,6 +212,22 @@ describe('the thresholds', () => {
   it('flags nothing on a meeting whose notes came out fine', () => {
     const report = buildNotesQualityReport({ notes: cleanNotes, transcript });
     expect(report.flags).toEqual([]);
+  });
+
+  it('flags lateness at the goal: a median past 10s, or a tenth of notes past it', () => {
+    const kinds = (waits: number[]) =>
+      buildNotesQualityReport({
+        notes: cleanNotes,
+        transcript,
+        waits: waits.map((waitMs) => ({ waitMs })),
+      }).flags.map((f) => f.kind);
+    const onTime = Array(10).fill(2_000);
+    // Under the goal: nine on time and none late.
+    expect(kinds(onTime)).not.toContain('late');
+    // One in ten past 10s is the share half; it used to take a minute.
+    expect(kinds([...onTime.slice(1), LATE_NOTE_MS + 1])).toContain('late');
+    // A median past 10s with no note past a minute: the median half.
+    expect(kinds(Array(10).fill(LATE_NOTE_MS + 500))).toContain('late');
   });
 
   it('flags a meeting once the repeats pass the bar and not before', () => {

@@ -68,6 +68,7 @@
 
 import { SUGGEST_DELETE_MARK, SUGGEST_INSERT_MARK, prose } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { samePart } from './notes-edit-dedupe.ts';
 import { topicKey } from './notes-quality.ts';
 import { endsMeetingNotes } from './notes-section-fit.ts';
 
@@ -158,7 +159,7 @@ export function tidyNotesSection(
   // The last topic heading kept — its words and its level — so a repeat is
   // compared with the heading it would be folded into rather than with any
   // earlier one.
-  let lastTopic: { key: string; level: number } | undefined;
+  let lastTopic: { key: string; text: string; level: number } | undefined;
   // WHERE THE MEETING'S NOTES END IS AUTHORSHIP, NOT LEVEL (2026-09-17).
   //
   // This walk used to stop at the first heading at the section's own level or
@@ -185,12 +186,17 @@ export function tidyNotesSection(
     const id = prose.readBlockId(el);
     const commentedHere = (): boolean => id !== undefined && commentedNow().has(id);
     if (level !== undefined) {
-      const key = topicKey(textOf(el));
+      const text = textOf(el);
+      const key = topicKey(text);
       // AND AT THE SAME LEVEL. `### Ferry timetable` followed by `#### Ferry
       // timetable` is a sub-topic somebody nested, not a topic opened twice,
       // and dropping the deeper one flattens a hierarchy rather than folding
       // a repeat.
-      if (key.length > 0 && key === lastTopic?.key && level === lastTopic.level) {
+      // A REWORDED REPEAT IS ONE TOO: "Ferry timetable changes" straight
+      // after "Ferry timetable" is one topic headed twice to a reader.
+      const repeat =
+        lastTopic !== undefined && (key === lastTopic.key || samePart(text, lastTopic.text));
+      if (key.length > 0 && repeat && level === lastTopic?.level) {
         if (!commentedHere()) {
           drop.push(i);
           merged++;
@@ -213,7 +219,7 @@ export function tidyNotesSection(
         emptied++;
         continue;
       }
-      lastTopic = { key, level };
+      lastTopic = { key, text, level };
       continue;
     }
     if (dropBlanks && el.nodeName === 'paragraph' && textOf(el).length === 0 && !commentedHere()) {
