@@ -15,6 +15,8 @@ import {
   constants,
   closeSync,
   fstatSync,
+  lstatSync,
+  mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
@@ -56,9 +58,9 @@ export function redactBoundPath(path: string): string {
  * resolved off the main thread.
  */
 export interface PathGuard {
-  covers(path: string, setId?: string): boolean;
-  admits(path: string, setId?: string): boolean;
-  landsInside(path: string, real: string, setId?: string): boolean;
+  covers(path: string): boolean;
+  admits(path: string): boolean;
+  landsInside(path: string, real: string): boolean;
   /** Whether a folder it guards sits at or below `dir`, for a caller that
    *  must not act on anything holding one (`git-hardening.ts`). */
   holdsRoot?(dir: string): boolean;
@@ -303,10 +305,9 @@ export function writeCheckedSync(
 }
 
 /**
- * The guards installed on the bound-file reader, asked together. Every
- * method takes the set the path is read for, when the caller knows it, so a
- * guard can hold one set's files and leave another set on the same folder
- * alone; a caller that cannot name the set is held to every guard.
+ * The guards installed on the bound-file reader, asked together. A guard
+ * holds every bound file under its folders, whoever bound it and for
+ * whichever set.
  */
 export class PathGuards {
   private readonly set = new Set<PathGuard>();
@@ -318,13 +319,13 @@ export class PathGuards {
     };
   }
 
-  allows(path: string, setId?: string): boolean {
-    for (const guard of this.set) if (!guard.admits(path, setId)) return false;
+  allows(path: string): boolean {
+    for (const guard of this.set) if (!guard.admits(path)) return false;
     return true;
   }
 
-  covers(path: string, setId?: string): boolean {
-    for (const guard of this.set) if (guard.covers(path, setId)) return true;
+  covers(path: string): boolean {
+    for (const guard of this.set) if (guard.covers(path)) return true;
     return false;
   }
 
@@ -333,66 +334,100 @@ export class PathGuards {
     return false;
   }
 
-  private landsAll(path: string, real: string, setId?: string): boolean {
-    for (const guard of this.set) if (!guard.landsInside(path, real, setId)) return false;
+  private landsAll(path: string, real: string): boolean {
+    for (const guard of this.set) if (!guard.landsInside(path, real)) return false;
     return true;
   }
 
-  landsAllowedSync(path: string, setId?: string): boolean {
-    if (!this.allows(path, setId)) return false;
-    if (!this.covers(path, setId)) return true;
+  landsAllowedSync(path: string): boolean {
+    if (!this.allows(path)) return false;
+    if (!this.covers(path)) return true;
     const real = nearestRealpathSync(path);
-    return real !== null && this.landsAll(path, real, setId);
+    return real !== null && this.landsAll(path, real);
   }
 
   /** The check a covered path's real location must pass, for a caller
    *  doing its own guarded open; null when no guard covers it. Throws
    *  `GuardRefused` when a guard refuses the path outright. */
-  landsFor(path: string, setId?: string): ((real: string) => boolean) | null {
-    if (!this.covers(path, setId)) return null;
-    if (!this.allows(path, setId)) throw new GuardRefused(path);
-    return (real) => this.landsAll(path, real, setId);
+  landsFor(path: string): ((real: string) => boolean) | null {
+    if (!this.covers(path)) return null;
+    if (!this.allows(path)) throw new GuardRefused(path);
+    return (real) => this.landsAll(path, real);
   }
 
   /** Read a bound file, checked where a guard covers it. */
-  read(path: string, setId?: string): ReturnType<typeof readChecked> {
-    if (!this.allows(path, setId)) return Promise.reject(new GuardRefused(path));
-    const lands = (real: string) => this.landsAll(path, real, setId);
-    return readChecked(path, this.covers(path, setId) ? lands : null);
+  read(path: string): ReturnType<typeof readChecked> {
+    if (!this.allows(path)) return Promise.reject(new GuardRefused(path));
+    const lands = (real: string) => this.landsAll(path, real);
+    return readChecked(path, this.covers(path) ? lands : null);
   }
 
   /** A byte range of a covered file, judged as `read` judges one; null
    *  when no guard covers it, for the caller's own unguarded read. */
-  readRange(
-    path: string,
-    start: number,
-    end: number,
-    setId?: string,
-  ): Promise<Uint8Array<ArrayBuffer>> | null {
-    if (!this.covers(path, setId)) return null;
-    if (!this.allows(path, setId)) return Promise.reject(new GuardRefused(path));
-    return readRangeChecked(path, start, end, (real) => this.landsAll(path, real, setId));
+  readRange(path: string, start: number, end: number): Promise<Uint8Array<ArrayBuffer>> | null {
+    if (!this.covers(path)) return null;
+    if (!this.allows(path)) return Promise.reject(new GuardRefused(path));
+    return readRangeChecked(path, start, end, (real) => this.landsAll(path, real));
   }
 
   /** `read` on the calling thread; throws `GuardRefused` where a guard
    *  refuses the path. */
-  readSync(path: string, setId?: string): string {
-    if (!this.allows(path, setId)) throw new GuardRefused(path);
-    const lands = (real: string) => this.landsAll(path, real, setId);
-    return readCheckedSync(path, this.covers(path, setId) ? lands : null);
+  readSync(path: string): string {
+    if (!this.allows(path)) throw new GuardRefused(path);
+    const lands = (real: string) => this.landsAll(path, real);
+    return readCheckedSync(path, this.covers(path) ? lands : null);
+  }
+
+  /**
+   * `mkdir -p` for a covered folder, one folder at a time: the folder it
+   * is made in is judged first, and each new folder after, so a link on the
+   * way stops the walk rather than carrying it outside. Uncovered folders
+   * are made as `mkdirSync` makes them.
+   */
+  mkdirSync(dir: string): void {
+    if (!this.covers(dir)) {
+      mkdirSync(dir, { recursive: true });
+      return;
+    }
+    if (!this.allows(dir)) throw new GuardRefused(dir);
+    const lands = (real: string) => this.landsAll(dir, real);
+    const missing: string[] = [];
+    let at = dir;
+    for (;;) {
+      let exists = true;
+      try {
+        lstatSync(at);
+      } catch {
+        exists = false;
+      }
+      if (exists) break;
+      missing.unshift(at);
+      const up = dirname(at);
+      if (up === at) break;
+      at = up;
+    }
+    if (!lands(realpathSync(at))) throw new GuardRefused(dir);
+    for (const folder of missing) {
+      try {
+        mkdirSync(folder);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+      if (!lands(realpathSync(folder))) throw new GuardRefused(dir);
+    }
   }
 
   /** `write` on the calling thread, through `lane`'s own temp file. */
-  writeSync(path: string, text: string, lane: 'flush' | 'export', setId?: string): void {
-    if (!this.allows(path, setId)) throw new GuardRefused(path);
-    const lands = (real: string) => this.landsAll(path, real, setId);
-    writeCheckedSync(path, text, lane, this.covers(path, setId) ? lands : null);
+  writeSync(path: string, text: string, lane: 'flush' | 'export'): void {
+    if (!this.allows(path)) throw new GuardRefused(path);
+    const lands = (real: string) => this.landsAll(path, real);
+    writeCheckedSync(path, text, lane, this.covers(path) ? lands : null);
   }
 
   /** Write a bound file, checked where a guard covers it. */
-  write(path: string, text: string, setId?: string): Promise<BigIntStats> {
-    if (!this.allows(path, setId)) return Promise.reject(new GuardRefused(path));
-    const lands = (real: string) => this.landsAll(path, real, setId);
-    return writeChecked(path, text, this.covers(path, setId) ? lands : null);
+  write(path: string, text: string): Promise<BigIntStats> {
+    if (!this.allows(path)) return Promise.reject(new GuardRefused(path));
+    const lands = (real: string) => this.landsAll(path, real);
+    return writeChecked(path, text, this.covers(path) ? lands : null);
   }
 }

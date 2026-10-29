@@ -2641,7 +2641,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
   };
-  /** The folders each board's lead may bind (routes/board-socket-roots.ts). */
+  /** The folders each board's walled lead can write (routes/board-socket-roots.ts). */
   const boardSocketRootsRoutesCtx: BoardSocketRootsRoutesContext = {
     roots: boardSocketRoots,
     boardExists: boardTokenRoutesCtx.boardExists,

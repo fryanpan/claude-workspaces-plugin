@@ -39,12 +39,20 @@ export type RootsWrite = { ok: true; roots: string[] } | { ok: false; error: str
 
 export class BoardSocketRoots {
   private boards: Record<string, string[]> | null = null;
+  /** Every board's roots together, kept beside `boards`. */
+  private flat: string[] = [];
   /** Set when the file exists and cannot be read: see `load`. */
   private broken = false;
+  /** The broken file's mtime, and when it was last asked: see `load`. */
+  private brokenStamp = { mtimeMs: 0, askedAt: 0 };
+
+  /** How often a broken file is asked whether it has changed. */
+  static readonly BROKEN_RECHECK_MS = 1_000;
 
   constructor(
     private readonly path: string,
     private readonly realpath: (p: string) => string = realpathSync.native,
+    private readonly now: () => number = Date.now,
   ) {}
 
   /** Whether the file exists and cannot be read; loads it first. */
@@ -53,7 +61,28 @@ export class BoardSocketRoots {
     return this.broken;
   }
 
+  private mtimeOfFile(): number {
+    try {
+      return statSync(this.path).mtimeMs;
+    } catch {
+      return -1;
+    }
+  }
+
   private load(): Record<string, string[]> {
+    if (this.boards && this.broken) {
+      // A broken file is asked again at most once a second, and re-read when
+      // it has changed, so one bad write does not refuse every board until a
+      // restart. A good file is only ever written by `set`, in this process.
+      const now = this.now();
+      if (now - this.brokenStamp.askedAt >= BoardSocketRoots.BROKEN_RECHECK_MS) {
+        this.brokenStamp.askedAt = now;
+        if (this.mtimeOfFile() !== this.brokenStamp.mtimeMs) {
+          this.boards = null;
+          this.broken = false;
+        }
+      }
+    }
     if (this.boards) return this.boards;
     const boards: Record<string, string[]> = Object.create(null);
     try {
@@ -72,16 +101,19 @@ export class BoardSocketRoots {
     } catch {
       // Unreadable, nobody can say which folders a lead can write. So every
       // path counts as one: each bound read and write is refused and no git
-      // runs, until the file reads again. Nothing is written over it, since
-      // it may be mid-edit or misread.
+      // runs, until the file changes and reads (above). Nothing is written
+      // over it, since it may be mid-edit or misread.
       if (existsSync(this.path)) {
         this.broken = true;
+        this.brokenStamp = { mtimeMs: this.mtimeOfFile(), askedAt: this.now() };
         console.error(
-          `[board-socket-roots] ${this.path} could not be read; refusing every bound file and every git read until it can`,
+          `[board-socket-roots] ${this.path} could not be read; refusing every bound file and every git read until it is fixed`,
         );
       }
     }
     this.boards = boards;
+    this.flat = Object.values(boards).flat();
+    this.spellings.clear();
     return boards;
   }
 
@@ -91,7 +123,8 @@ export class BoardSocketRoots {
 
   /** Every board's roots together. */
   private allRoots(): string[] {
-    return Object.values(this.load()).flat();
+    this.load();
+    return this.flat;
   }
 
   /**
@@ -123,6 +156,7 @@ export class BoardSocketRoots {
     const boards = this.load();
     if (this.broken) return { ok: false, error: 'the roots file cannot be read' };
     boards[boardId] = resolved;
+    this.flat = Object.values(boards).flat();
     this.verdicts.clear();
     this.spellings.clear();
     this.save();
@@ -135,22 +169,34 @@ export class BoardSocketRoots {
   static readonly ROOT_VERDICT_MS = 1_000;
   private verdicts = new Map<string, { at: number; ok: boolean }>();
 
-  /** How long a folder's resolved spelling is kept by `spelled`. */
-  static readonly SPELLING_MS = 1_000;
-  private static readonly SPELLINGS_MAX = 4_096;
-  private spellings = new Map<string, { at: number; real: string | null }>();
+  /** The most folder spellings `realOf` keeps, least recently used out. */
+  static readonly SPELLINGS_MAX = 4_096;
+  private spellings = new Map<string, string | null>();
 
-  private realOf(dir: string, now: number): string | null {
-    const hit = this.spellings.get(dir);
-    if (hit && now - hit.at < BoardSocketRoots.SPELLING_MS) return hit.real;
+  /**
+   * A folder resolved, kept until the roots change. Only folders at or
+   * above a root, or off every root, are ever asked (`spelled` stops at
+   * the first that lands under one), and those are the owner's, not the
+   * lead's, so they do not move under the guard.
+   */
+  private realOf(dir: string): string | null {
+    if (this.spellings.has(dir)) {
+      const real = this.spellings.get(dir) ?? null;
+      this.spellings.delete(dir);
+      this.spellings.set(dir, real);
+      return real;
+    }
     let real: string | null;
     try {
       real = this.realpath(dir);
     } catch {
       real = null;
     }
-    if (this.spellings.size >= BoardSocketRoots.SPELLINGS_MAX) this.spellings.clear();
-    this.spellings.set(dir, { at: now, real });
+    if (this.spellings.size >= BoardSocketRoots.SPELLINGS_MAX) {
+      const oldest = this.spellings.keys().next().value;
+      if (oldest !== undefined) this.spellings.delete(oldest);
+    }
+    this.spellings.set(dir, real);
     return real;
   }
 
@@ -162,15 +208,17 @@ export class BoardSocketRoots {
    * resolves at or under a root gives the spelling: that root followed by
    * the rest of the path as typed. Resolving the whole path instead would
    * follow a link the lead put below the root, and report it outside.
+   * The last name is not resolved: for a file that would be one blocking
+   * call per bound file, and a folder is bound resolved already.
    */
-  private spelled(path: string, now = Date.now()): string {
+  private spelled(path: string): string {
     const roots = this.allRoots();
     const under = (p: string) => roots.some((r) => p === r || p.startsWith(`${r}/`));
     if (roots.length === 0 || under(path)) return path;
     const parts = path.split('/');
-    for (let i = 2; i <= parts.length; i++) {
+    for (let i = 2; i < parts.length; i++) {
       const prefix = parts.slice(0, i).join('/');
-      const real = this.realOf(prefix, now);
+      const real = this.realOf(prefix);
       if (real && under(real)) return [real, ...parts.slice(i)].join('/');
     }
     return path;
@@ -184,7 +232,7 @@ export class BoardSocketRoots {
 
   /** Whether `path` is under a lead's root: the guard's business. With the
    *  file unreadable, every path is. */
-  covers(path: string, _setId?: string): boolean {
+  covers(path: string): boolean {
     if (this.isBroken()) return true;
     return this.rootsOver(path).length > 0;
   }
@@ -195,9 +243,10 @@ export class BoardSocketRoots {
     if (this.isBroken()) return true;
     const roots = this.allRoots();
     if (roots.length === 0) return false;
-    const holds = (d: string) => roots.some((root) => root === d || root.startsWith(`${d}/`));
+    const holds = (d: string) =>
+      d === '/' || roots.some((root) => root === d || root.startsWith(`${d}/`));
     if (holds(dir)) return true;
-    const real = this.realOf(dir, Date.now());
+    const real = this.realOf(dir);
     return real !== null && holds(real);
   }
 
@@ -207,9 +256,9 @@ export class BoardSocketRoots {
    * so no link has been swapped in for it, and no `node_modules` folder on
    * its way below the root, the one place a walled lead may make links.
    */
-  admits(path: string, _setId?: string, now = Date.now()): boolean {
+  admits(path: string, now = Date.now()): boolean {
     if (this.isBroken()) return false;
-    const p = this.spelled(path, now);
+    const p = this.spelled(path);
     const over = this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
     for (const root of over) {
       // Lower-cased: the disk ignores case, so `Node_Modules` is the same folder.
@@ -236,7 +285,7 @@ export class BoardSocketRoots {
    * file not there yet, `real` is its nearest existing folder, resolved, so
    * a write cannot create a file through a linked parent.
    */
-  landsInside(path: string, real: string, _setId?: string): boolean {
+  landsInside(path: string, real: string): boolean {
     if (this.isBroken()) return false;
     const over = this.rootsOver(path);
     return over.every((root) => real === root || real.startsWith(`${root}/`));

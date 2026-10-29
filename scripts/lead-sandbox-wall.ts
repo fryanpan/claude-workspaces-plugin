@@ -15,13 +15,13 @@
  * reach another board's socket nor link one in under its own name. Its other
  * local sockets are not touched.
  *
- * In its own projects, the folders it may bind (`board-socket-roots.ts`),
+ * In its own projects (`board-socket-roots.ts` holds the server to them),
  * it may make no new symlink or hard link outside a `node_modules` folder,
  * since the server reads and writes through what it finds there. A package
  * manager needs links in `node_modules`; the server refuses every path
  * through one, and a `node_modules` folder may not be renamed or removed,
- * so nothing made in it moves out. The server runs no git in a folder a
- * lead bound (`packages/server/src/git-hardening.ts`), so git's settings
+ * so nothing made in it moves out. The server runs no git in a repository
+ * holding one of its projects (`packages/server/src/git-hardening.ts`), so git's settings
  * files are left writable.
  *
  * Off unless a lead's config sets `boardWall`. A walled lead is launched with

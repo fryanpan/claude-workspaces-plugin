@@ -1,5 +1,6 @@
 /**
- * The folders a board's lead may bind (`board-socket-roots.ts`):
+ * The folders a board's walled lead can write, its projects
+ * (`board-socket-roots.ts`):
  *
  *   GET /api/board-sockets/<board>/roots   the list
  *   PUT /api/board-sockets/<board>/roots   replace it: `{ roots: string[] }`
@@ -44,7 +45,7 @@ export async function handleBoardSocketRootsRoutes(
   if (notLocal) {
     return j(notLocal.status, {
       error: notLocal.body.error.replace('agent-stream-', 'board-socket-roots-'),
-      message: 'A lead’s bind folders are set from this machine only (loopback).',
+      message: 'A walled lead’s project folders are set from this machine only (loopback).',
     });
   }
   let boardId: string;

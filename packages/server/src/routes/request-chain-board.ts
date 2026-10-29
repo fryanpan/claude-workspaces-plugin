@@ -266,7 +266,7 @@ export async function serveBoardRoutes(
     });
     if (handled) return handled;
   }
-  // --- REST: the folders a board's lead may bind --- see
+  // --- REST: the folders a board's walled lead can write --- see
   // ./routes/board-socket-roots.ts. One exact family of paths.
   {
     const handled = await handleBoardSocketRootsRoutes(boardSocketRootsRoutesCtx, {

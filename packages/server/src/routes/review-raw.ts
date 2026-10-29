@@ -27,8 +27,8 @@ import { boundFiles } from '../slow-fs.ts';
  * under `attachments/<setId>/` is.
  *
  * Streamed from `Bun.file`, never read whole: a recording is megabytes and a
- * mounted run directory can be gigabytes. The exception is a set a walled
- * lead bound (`boundFiles.guards`): its bytes come from the descriptor that
+ * mounted run directory can be gigabytes. The exception is a file under a
+ * walled lead's project (`boundFiles.guards`): its bytes come from the descriptor that
  * was judged, so a folder link swapped in after the check serves nothing,
  * and at most {@link GUARDED_RAW_MAX} bytes are read for one answer.
  */
@@ -68,7 +68,7 @@ export async function serveReviewRaw(
       headers: { ...headers, 'content-range': `bytes */${size}` },
     });
   }
-  const guarded = await guardedBytes(res.abs, setId, range, size);
+  const guarded = await guardedBytes(res.abs, range, size);
   if (guarded === 'too-large') {
     return j(413, { error: 'ask for a byte range: this file is too large to serve whole' });
   }
@@ -135,24 +135,23 @@ export function parseByteRange(header: string | null, size: number): ByteRange {
 }
 
 /**
- * The bytes for a set a walled lead bound, read from the judged descriptor,
+ * The bytes for a file under a walled lead's project, read from the judged descriptor,
  * or null for any other set. A range longer than {@link GUARDED_RAW_MAX} is
  * shortened (the answer's `content-range` says so, and a player asks again);
  * a whole file longer than that is refused.
  */
 async function guardedBytes(
   abs: string,
-  setId: string,
   range: Exclude<ByteRange, { kind: 'unsatisfiable' }>,
   size: number,
 ): Promise<{ bytes: Uint8Array<ArrayBuffer> } | 'too-large' | 'refused' | null> {
-  if (!boundFiles.guards.covers(abs, setId)) return null;
+  if (!boundFiles.guards.covers(abs)) return null;
   if (range.kind === 'full' && size > GUARDED_RAW_MAX) return 'too-large';
   const start = range.kind === 'full' ? 0 : range.start;
   const end = range.kind === 'full' ? size - 1 : Math.min(range.end, start + GUARDED_RAW_MAX - 1);
   if (end < start) return { bytes: new Uint8Array(0) };
   try {
-    const read = boundFiles.guards.readRange(abs, start, end, setId);
+    const read = boundFiles.guards.readRange(abs, start, end);
     return read ? { bytes: await read } : null;
   } catch {
     return 'refused';

@@ -355,7 +355,7 @@ export async function bindDiff(host: BindHost, opts: BindDiffOpts): Promise<Bind
         // one and the review is built from the rest; `keep: false` because
         // these bytes are this loop's, not a later hydrate's.
         const abs = join(root, entry.relPath);
-        const read = await boundFiles.read(abs, { keep: false, setId: reviewId });
+        const read = await boundFiles.read(abs, { keep: false });
         if (read.status !== 'ok' || !read.exists) {
           skipped.push({ path: entry.relPath, reason: 'read-failed' });
           continue;

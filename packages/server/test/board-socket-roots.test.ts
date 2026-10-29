@@ -14,6 +14,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -65,21 +66,21 @@ describe('BoardSocketRoots', () => {
 
     // The controls: a file inside reads, and a file outside is no guard's business.
     expect(roots.covers(file)).toBe(true);
-    expect(roots.admits(file, 's-owner', later())).toBe(true);
+    expect(roots.admits(file, later())).toBe(true);
     expect(roots.landsInside(file, file)).toBe(true);
     expect(roots.covers(join(riverbend, 'x.md'))).toBe(false);
     expect(roots.holdsRoot(root)).toBe(true);
     expect(roots.holdsRoot(riverbend)).toBe(false);
 
     // A path through node_modules, where the lead may make links, is refused.
-    expect(roots.admits(join(lead, 'node_modules', 'pkg', 'x.md'), undefined, later())).toBe(false);
+    expect(roots.admits(join(lead, 'node_modules', 'pkg', 'x.md'), later())).toBe(false);
     // A file that really lands outside is refused.
     expect(roots.landsInside(file, join(riverbend, 'plan.md'))).toBe(false);
 
     // Swapping the root for a link stops every file under it.
     renameSync(lead, `${lead}.moved`);
     symlinkSync(`${lead}.moved`, lead);
-    expect(roots.admits(file, 's-owner', later())).toBe(false);
+    expect(roots.admits(file, later())).toBe(false);
   });
 
   it('guards a path spelled through a link above the root, or in another case', () => {
@@ -106,6 +107,45 @@ describe('BoardSocketRoots', () => {
     renameSync(join(lead, 'docs'), join(lead, 'docs.moved'));
     symlinkSync(riverbend, join(lead, 'docs'));
     expect(roots.covers(viaLink)).toBe(true);
+  });
+
+  it('resolves no file and no folder twice, for a path off every root', () => {
+    const asked: string[] = [];
+    const counted = (p: string) => {
+      asked.push(p);
+      return realpathSync.native(p);
+    };
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'n')), counted);
+    roots.set('w-harbor', [harborlight]);
+    asked.length = 0;
+    const off = join(riverbend, 'notes', 'plan.md');
+    expect(roots.covers(off)).toBe(false);
+    // The folders on the way, once each, and never the file itself.
+    expect(asked).not.toContain(off);
+    expect(asked.length).toBeGreaterThan(0);
+    const first = asked.length;
+    for (let i = 0; i < 5; i++) roots.covers(off);
+    expect(asked.length).toBe(first);
+    // The control: a path spelled as the root is asked nothing.
+    asked.length = 0;
+    expect(roots.covers(join(harborlight, 'docs', 'x.md'))).toBe(true);
+    expect(asked).toEqual([]);
+  });
+
+  it('reads a broken file again once it changes', () => {
+    let now = 1_000_000;
+    const path = boardSocketRootsPath(join(root, 'o'));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '{ not json');
+    const roots = new BoardSocketRoots(path, realpathSync.native, () => now);
+    expect(roots.covers(join(riverbend, 'x.md'))).toBe(true);
+    writeFileSync(path, JSON.stringify({ boards: { 'w-harbor': [harborlight] } }));
+    utimesSync(path, new Date(), new Date(Date.now() + 5_000));
+    // Asked again only after the recheck window.
+    expect(roots.covers(join(riverbend, 'x.md'))).toBe(true);
+    now += BoardSocketRoots.BROKEN_RECHECK_MS;
+    expect(roots.covers(join(riverbend, 'x.md'))).toBe(false);
+    expect(roots.covers(join(harborlight, 'x.md'))).toBe(true);
   });
 
   it('reads a file of the wrong shape as unreadable, not as no roots', () => {

@@ -42,8 +42,9 @@
  * dialling that socket (packages/plugin/bin/claude-workspaces-mcp.sh) and it
  * holds no board token: the server keeps the one its calls carry. The
  * plugin's hooks post over the same socket. Before the lead starts, the
- * launch tells the server which folders it may bind onto its board: its
- * projects (`lead-sandbox-roots.ts`). Prod serves board sockets by default.
+ * launch tells the server which folders it can write, its projects
+ * (`lead-sandbox-roots.ts`), and starts nothing if the server does not
+ * take them. Prod serves board sockets by default.
  */
 import { spawnSync } from 'node:child_process';
 import {

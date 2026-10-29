@@ -265,7 +265,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
       'Answers only a live `at2` the board-token door admitted, with a fresh value for that same record (`middleware/board-agent-door.ts`).',
     ],
   ]),
-  // The folders a board's lead may bind: set from this machine, never by
+  // The folders a board's walled lead can write: set from this machine, never by
   // the lead it bounds.
   ...family('routes/board-socket-roots.ts', [
     ['loopback-only', '/api/board-sockets/:ws/roots', 'GET PUT'],

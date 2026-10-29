@@ -64,9 +64,7 @@ import { boundFiles } from './slow-fs.ts';
 function liveRoot(members: DocMeta[]): string | undefined {
   const member = members.find((m) => m.workspaceRoot);
   const root = member?.workspaceRoot;
-  return member && root && boundFiles.guards.allows(root, attachmentIdOf(member))
-    ? root
-    : undefined;
+  return member && root && boundFiles.guards.allows(root) ? root : undefined;
 }
 
 /**
@@ -345,8 +343,8 @@ export class DocStoreWorkspaces {
     // A media file is stat'ed rather than read: its bytes never enter a doc,
     // and a recording is too large to pull through the pool for a yes or no.
     const found = opts.media
-      ? await boundFiles.statMtime(abs, setId)
-      : await boundFiles.read(abs, { keep: false, setId });
+      ? await boundFiles.statMtime(abs)
+      : await boundFiles.read(abs, { keep: false });
     if (found.status !== 'ok') return { ok: false, error: 'unavailable' };
     if (!found.exists) return { ok: false, error: 'not-found' };
     // The guard above is lexical, so a symlink INSIDE the root that points
@@ -507,7 +505,7 @@ export class DocStoreWorkspaces {
     // Off the main thread, for the reason openContextFile spells out. A diff
     // member's path is git-derived rather than typed by the caller, which
     // says nothing about whether the folder holding it still answers.
-    const read = await boundFiles.read(abs, { keep: false, setId });
+    const read = await boundFiles.read(abs, { keep: false });
     if (read.status !== 'ok') return { ok: false, error: 'unavailable' };
     if (!read.exists) return { ok: false, error: 'not-found' };
     // Same symlink escape as openContextFile — see the note there. A member's
@@ -602,11 +600,7 @@ export class DocStoreWorkspaces {
     const byRel = new Map<string, { meta: DocMeta; openCount: number; threadCount: number }>();
     for (const meta of this.p.list()) {
       if (attachmentIdOf(meta) !== setId) continue;
-      if (
-        !workspaceRoot &&
-        meta.workspaceRoot &&
-        boundFiles.guards.allows(meta.workspaceRoot, setId)
-      )
+      if (!workspaceRoot && meta.workspaceRoot && boundFiles.guards.allows(meta.workspaceRoot))
         workspaceRoot = meta.workspaceRoot;
       const key = meta.relPath ?? meta.docId;
       const { open, total } = this.p.threadCounts(meta.docId);

@@ -196,4 +196,22 @@ describe('PathGuards', () => {
     expect(guards.landsAllowedSync(join(inside, 'linked', 'new.md'))).toBe(true);
     expect((await guards.read(join(inside, 'linked', 'keys.md'))).text).toBe('riverbend secret\n');
   });
+
+  it('makes covered folders one at a time, and none through a link', () => {
+    const guards = new PathGuards();
+    // The root itself counts as inside, as `board-socket-roots.ts` has it.
+    const remove = guards.add({
+      ...guard,
+      landsInside: (_path, real) => real === inside || under(inside)(real),
+    });
+    try {
+      // The control: folders inside the root are made.
+      guards.mkdirSync(join(inside, 'made', 'deeper'));
+      expect(existsSync(join(inside, 'made', 'deeper'))).toBe(true);
+      expect(() => guards.mkdirSync(join(inside, 'linked', 'new', 'deeper'))).toThrow(GuardRefused);
+      expect(existsSync(join(outside, 'new'))).toBe(false);
+    } finally {
+      remove();
+    }
+  });
 });

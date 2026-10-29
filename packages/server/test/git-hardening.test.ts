@@ -15,6 +15,7 @@ import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-root
 import { readOriginUrl } from '../src/doc-key.ts';
 import { checkoutBranch, gitCommonDir } from '../src/doc-origin-repo.ts';
 import { scanFolderPaths } from '../src/fs-scan.ts';
+import { diffFiles } from '../src/git-diff.ts';
 import { gitBarred, hardenedGitArgs, readLine, repoOf } from '../src/git-hardening.ts';
 import { classifyExternalContent, gitConflictHint } from '../src/git-provenance.ts';
 import { boundFiles } from '../src/slow-fs.ts';
@@ -236,34 +237,66 @@ describe('the server reads none of a barred repository’s own files', () => {
   });
 });
 
-describe('a .git that leads somewhere planted', () => {
-  test('refuses a gitdir file git did not write, and a link; keeps a worktree and a folder', () => {
+describe('repositories git itself would read', () => {
+  test('finds a folder, a worktree, a separate git folder and a linked .git', () => {
     const main = repoWithCommit(join(dir, 'main'));
-    expect(repoOf(main)).toEqual({ top: main, common: join(main, '.git') });
+    expect(repoOf(main)).toEqual({ top: main, gitDirs: [join(main, '.git')] });
     const wt = join(dir, 'wt');
     git(main, ['worktree', 'add', '-q', wt, '-b', 'wt']);
-    expect(repoOf(wt)).toEqual({ top: wt, common: join(main, '.git') });
-    expect(repoOf(join(wt, 'deeper'))).toEqual({ top: wt, common: join(main, '.git') });
-
-    const planted = join(dir, 'planted');
-    mkdirSync(planted);
-    writeFileSync(join(planted, '.git'), `gitdir: ${join(dir, 'elsewhere')}\n`);
-    expect(repoOf(planted)).toBe('refused');
-    expect(gitBarred(join(planted, 'notes.md'))).toBe(true);
-
-    // Shaped like a worktree's git folder, but not one git registered.
-    const fake = join(dir, 'fake', '.git', 'worktrees', 'w');
-    mkdirSync(fake, { recursive: true });
-    writeFileSync(join(fake, 'commondir'), '../..\n');
-    writeFileSync(join(fake, 'gitdir'), `${join(dir, 'somewhere', '.git')}\n`);
-    const shaped = join(dir, 'shaped');
-    mkdirSync(shaped);
-    writeFileSync(join(shaped, '.git'), `gitdir: ${fake}\n`);
-    expect(repoOf(shaped)).toBe('refused');
-
+    expect(repoOf(join(wt, 'deeper'))).toEqual({
+      top: wt,
+      gitDirs: [join(main, '.git', 'worktrees', 'wt'), join(main, '.git')],
+    });
     const linked = join(dir, 'linked');
     mkdirSync(linked);
     symlinkSync(join(main, '.git'), join(linked, '.git'));
-    expect(repoOf(linked)).toBe('refused');
+    expect(repoOf(linked)).toEqual({ top: linked, gitDirs: [join(main, '.git')] });
+    // A .git that is a pipe, or names nothing, is refused.
+    const planted = join(dir, 'planted');
+    mkdirSync(planted);
+    writeFileSync(join(planted, '.git'), `gitdir: ${join(dir, 'nowhere')}\n`);
+    expect(repoOf(planted)).toBe('refused');
+  });
+
+  test('an ordinary repository still diffs, a separate git folder included, while a lead’s is barred', () => {
+    const work = join(dir, 'separate');
+    const store = join(dir, 'separate-store.git');
+    mkdirSync(work);
+    git(work, ['init', '-q', `--separate-git-dir=${store}`]);
+    writeFileSync(join(work, 'a.md'), '# a\n');
+    git(work, ['add', '.']);
+    git(work, [
+      '-c',
+      'user.name=Alice',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-qm',
+      'a',
+    ]);
+    writeFileSync(join(work, 'a.md'), '# a, edited\n');
+    const leadRoot = repoWithCommit(join(dir, 'harbor-lead'));
+    // A worktree outside the root whose git folder is the lead's.
+    const leadWt = join(dir, 'harbor-lead-wt');
+    git(leadRoot, ['worktree', 'add', '-q', leadWt, '-b', 'wt']);
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(dir, 'data-separate')));
+    roots.set('w-harbor', [leadRoot]);
+    const remove = boundFiles.guards.add(roots);
+    try {
+      expect(gitBarred(work)).toBe(false);
+      const diffed = diffFiles(work, 'HEAD', null);
+      expect(diffed.ok, JSON.stringify(diffed)).toBe(true);
+      expect(diffed.ok && diffed.files.map((f) => f.relPath)).toEqual(['a.md']);
+      expect(gitBarred(leadRoot)).toBe(true);
+      expect(gitBarred(leadWt)).toBe(true);
+      const linkedIn = join(dir, 'linked-in');
+      mkdirSync(linkedIn);
+      symlinkSync(join(leadRoot, '.git'), join(linkedIn, '.git'));
+      expect(gitBarred(linkedIn)).toBe(true);
+    } finally {
+      remove();
+    }
+    // With no project registered nothing is barred.
+    expect(gitBarred(leadRoot)).toBe(false);
   });
 });
