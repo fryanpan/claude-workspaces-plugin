@@ -1265,6 +1265,9 @@ export async function handleAuthShareRoutes(
  * would make the redirect above an open one, and browsers read `\` as `/`.
  */
 export function sameOriginPath(raw: string | null): string {
-  if (!raw || !/^\/(?![/\\])/.test(raw) || /[\r\n]/.test(raw)) return '/';
+  // Whitespace and control characters too: a browser drops a tab from a
+  // Location, so `/\t/evil.example` would arrive as `//evil.example`.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing them is the point
+  if (!raw || !/^\/(?![/\\])/.test(raw) || /[\s\x00-\x1f\x7f\\]/.test(raw)) return '/';
   return raw;
 }

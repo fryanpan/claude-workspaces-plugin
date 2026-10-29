@@ -69,6 +69,7 @@ export function personProofOf(
   admitted: { accessEmail: string | null; accessIssuedAt: number | null; boardAgent: unknown },
   sessionIdentity: IdentityRecord | null,
   sessionSignedInAt: number | null,
+  widgetIdentity: IdentityRecord | null = null,
 ): PersonProof | null {
   if (admitted.boardAgent) return null;
   if (admitted.accessEmail) {
@@ -76,6 +77,9 @@ export function personProofOf(
     return { signedInAtMs: iat === null ? null : iat * 1000 };
   }
   if (sessionIdentity) return { signedInAtMs: sessionSignedInAt };
+  // A widget popup token names a person but carries no sign-in time, so it
+  // is never fresh: a copied one cannot delete or widen anything.
+  if (widgetIdentity) return { signedInAtMs: null };
   return null;
 }
 
@@ -112,10 +116,12 @@ async function bodyOf(req: Request): Promise<Record<string, unknown> | null> {
 /** The counted action this request is, or null for one that stays instant. */
 export async function countedActionOf(
   req: Request,
-  pathname: string,
+  rawPathname: string,
   ctx: CountedActionContext,
 ): Promise<string | null> {
   const method = req.method;
+  // The routers answer `/docs/<id>/` as `/docs/<id>`, so the list must too.
+  const pathname = rawPathname.length > 1 ? rawPathname.replace(/\/+$/, '') : rawPathname;
   for (const [m, pattern, action] of PATH_ONLY) {
     if (m === method && pattern.test(pathname)) return action;
   }

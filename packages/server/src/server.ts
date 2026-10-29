@@ -3082,11 +3082,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     localOnlyGate,
     attributeRequest,
     requireSignInToWrite,
-    freshSignInGate: (req, pathname, admitted) =>
+    freshSignInGate: (req, pathname, admitted, widgetIdentity) =>
       refuseStaleSignIn(
         req,
         pathname,
-        personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req)),
+        personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
         { shares, now: Date.now() },
       ),
     authShareRoutesCtx,

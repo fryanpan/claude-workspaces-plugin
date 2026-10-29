@@ -12,6 +12,7 @@ import type { addressesLocalOnlySet } from '../attachment-privacy.ts';
 import type { ConnectorHost } from '../connector/host.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { FeatureRoutes } from '../feature-module.ts';
+import type { IdentityRecord } from '../identities.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { RequestAdmission } from '../request-admission.ts';
@@ -80,6 +81,7 @@ export interface RequestChainContext {
     req: Request,
     pathname: string,
     admitted: AttributableRequest,
+    widgetIdentity: IdentityRecord | null,
   ) => Promise<Response | null>;
   authShareRoutesCtx: AuthShareRoutesContext;
   voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;

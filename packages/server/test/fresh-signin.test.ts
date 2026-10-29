@@ -59,6 +59,11 @@ describe('personProofOf', () => {
     expect(personProofOf(none, null, null)).toBeNull();
   });
 
+  it('reads a widget popup token as a person whose sign-in is never fresh', () => {
+    expect(personProofOf(none, null, null, person)).toEqual({ signedInAtMs: null });
+    expect(personProofOf(none, person, NOW, person)).toEqual({ signedInAtMs: NOW });
+  });
+
   it('is null for a board agent token, whatever else the request carries', () => {
     const agent = { accessEmail: 'alice@example.test', accessIssuedAt: 1, boardAgent: {} };
     expect(personProofOf(agent, person, null)).toBeNull();
@@ -99,6 +104,16 @@ describe('countedActionOf', () => {
       'add-member',
     );
     expect(await action('POST', ACCESS_CARD, { decision: 'approve' })).toBe('approve-access');
+  });
+
+  it('counts a path the router reads the same way with trailing slashes', async () => {
+    expect(await action('DELETE', '/workspaces/w-1/docs/d-1/')).toBe('delete-doc');
+    expect(await action('DELETE', '/workspaces/w-1//')).toBe('delete-workspace');
+    expect(await action('POST', '/workspaces/w-1/docs/d-1/archive/')).toBe('archive-doc');
+    expect(await action('POST', '/api/share/link/')).toBe('share-link');
+    expect(await action('POST', '/workspaces/w-1/audience/', { add: ['a@b.test'] })).toBe(
+      'add-member',
+    );
   });
 
   it('counts a body it cannot read rather than waving it through', async () => {
@@ -180,7 +195,16 @@ describe("the session cookie's sign-in time", () => {
 describe('sameOriginPath', () => {
   it('keeps a same-origin path and turns anything else into the root', () => {
     expect(sameOriginPath('/workspaces/w-1/docs/d-1?x=1')).toBe('/workspaces/w-1/docs/d-1?x=1');
-    for (const bad of [null, '', 'https://evil.example', '//evil.example', '/\\evil.example']) {
+    for (const bad of [
+      null,
+      '',
+      'https://evil.example',
+      '//evil.example',
+      '/\\evil.example',
+      '/\t/evil.example',
+      '/ /evil.example',
+      '/x\u0000',
+    ]) {
       expect(sameOriginPath(bad)).toBe('/');
     }
   });

@@ -120,7 +120,8 @@ export async function resumeHeld(
   } catch {}
   if (!held?.request || held.page !== hereOf(deps)) return null;
   storage.removeItem(HELD_KEY);
-  if ((deps.now ?? Date.now)() - held.at > HELD_MAX_AGE_MS) return null;
+  const age = (deps.now ?? Date.now)() - held.at;
+  if (!(age >= 0 && age <= HELD_MAX_AGE_MS) || !isHeldRequest(held.request)) return null;
   const req = held.request;
   const doc = deps.doc ?? document;
   const note = doc.createElement('p');
@@ -131,6 +132,23 @@ export async function resumeHeld(
   }
   const response = await sendCounted(req, deps);
   return response ? { request: req, response } : null;
+}
+
+const METHODS: readonly unknown[] = ['POST', 'PUT', 'DELETE'];
+
+/**
+ * Whether a stored value is a request this page could have held: one of the
+ * three verbs, to a same-origin path, with string words. Anything else in
+ * sessionStorage was planted, and is dropped without asking.
+ */
+function isHeldRequest(r: CountedRequest): boolean {
+  return (
+    METHODS.includes(r.method) &&
+    typeof r.url === 'string' &&
+    /^\/(?![/\\])/.test(r.url) &&
+    !/[\s\\]/.test(r.url) &&
+    [r.verb, r.gerund, r.noun, r.name].every((w) => typeof w === 'string')
+  );
 }
 
 /** One card in the identity prompt's frame. True for the primary button. */

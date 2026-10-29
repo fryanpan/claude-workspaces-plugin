@@ -171,6 +171,32 @@ describe('resumeHeld', () => {
     );
   });
 
+  it('drops a held action dated ahead of the clock, or aimed off this origin or at another verb, unasked', async () => {
+    const planted = [
+      { request: ARCHIVE, page: PAGE, at: 9_000_000 },
+      { request: { ...ARCHIVE, url: 'https://evil.example/x' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, url: '//evil.example/x' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, method: 'PATCH' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, verb: 7 }, page: PAGE, at: 1_000 },
+    ];
+    for (const held of planted) {
+      const storage = memoryStorage();
+      storage.setItem('cw-held-action', JSON.stringify(held));
+      const fetchImpl = vi.fn(async () => ok());
+      const res = await resumeHeld({
+        toast: vi.fn(),
+        fetchImpl,
+        storage,
+        here: () => PAGE,
+        now: () => 2_000,
+      });
+      expect(res).toBeNull();
+      expect(card()).toBeNull();
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(storage.size()).toBe(0);
+    }
+  });
+
   it('"Not now" sends nothing', async () => {
     const storage = memoryStorage();
     holdFor(storage, PAGE, 1_000);
