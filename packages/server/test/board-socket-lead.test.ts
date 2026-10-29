@@ -201,6 +201,20 @@ describe('A. the tools a member is refused work for the lead on its own board', 
     expect(await river.text()).not.toContain('Overwritten.');
   }, 30_000);
 
+  it('set_doc_content over the socket is still refused after a human edit', async () => {
+    const call = await session(harborlight);
+    h.docStore.noteHumanEdit(harborDoc);
+    const refused = await call('set_doc_content', {
+      workspaceId: harborlight,
+      docId: harborDoc,
+      markdown: '# harbor-plan\n\nOver a person’s edit.\n',
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('stale-write');
+    const read = await tcp(`/workspaces/${harborlight}/docs/${harborDoc}/content`);
+    expect(await read.text()).not.toContain('Over a person’s edit.');
+  }, 30_000);
+
   it('attach_folder binds a registered root onto its board, and nowhere else', async () => {
     const call = await session(harborlight);
     const own = await call('attach_folder', {

@@ -159,6 +159,8 @@ export async function handleWorkspaceCreateRead(
         hint: 'attachment-privacy.json in the data directory cannot be read, so every attachment set is served as local-only and none can be changed until it is fixed.',
       });
     }
+    // Recorded before the scan, so even the bind's own reads are guarded.
+    if (lead) ctx.recordLeadBind(lead.setId, lead.board, lead.root);
     const res = await docStore.bindFolder({
       // A lead's bind is by the resolved root, never the path it sent.
       folderPath: lead?.root ?? folderPath,
@@ -420,6 +422,9 @@ export async function handleWorkspaceCreateRead(
   return undefined;
 }
 
+/** The most files a lead's bind may ask the scan for. */
+const LEAD_MAX_FILES = 5_000;
+
 interface LeadBind {
   board: string;
   /** The registered root the folder resolved to: what is bound. */
@@ -455,6 +460,16 @@ function refuseLeadBind(
     return refuse('A lead binds a folder onto its own board only.');
   if (body?.setId !== undefined || body?.workspaceId !== undefined)
     return refuse('A lead may not re-file an attachment set by id.');
+  const { maxFiles } = body;
+  if (
+    maxFiles !== undefined &&
+    !(
+      Number.isInteger(maxFiles) &&
+      (maxFiles as number) > 0 &&
+      (maxFiles as number) <= LEAD_MAX_FILES
+    )
+  )
+    return refuse(`A lead’s maxFiles is a whole number from 1 to ${LEAD_MAX_FILES}.`);
   const root = leadBindRoot(leadBoard, folderPath);
   if (root === null)
     return refuse(

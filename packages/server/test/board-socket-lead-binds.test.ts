@@ -1,0 +1,173 @@
+/**
+ * A walled lead's folder bind stays held to its roots after the bind, not
+ * only at it (`board-socket-roots.ts` `pathAllowed`, installed as a
+ * `slow-fs.ts` path guard):
+ *
+ * - a bound root swapped for a link to a folder outside the roots serves
+ *   nothing from it, neither a file nor a name;
+ * - a root dropped from the board's list stops serving;
+ * - a lead's bind never lands on a set another board holds;
+ * - a lead's `maxFiles` is bounded.
+ *
+ * Each refusal has its positive control: the same read before the change.
+ * The bind is posted on Harborlight's socket; reads are over TCP from this
+ * machine, which is any reader the server answers. Fixtures synthetic.
+ */
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { boardSocketPath } from '../src/board-sockets.ts';
+import { type ServerHandle, createServer } from '../src/server.ts';
+
+let h: ServerHandle;
+let dataDir: string;
+let workDir: string;
+let socketRoot: string;
+let socketDir: string;
+let base: string;
+let harborlight: string;
+let riverbend: string;
+let secrets: string;
+
+const json = { 'content-type': 'application/json' };
+const tcp = (path: string, init: RequestInit = {}) =>
+  fetch(`${base}${path}`, { ...init, headers: { ...json, ...(init.headers ?? {}) } });
+const onSocket = (path: string, init: RequestInit = {}) =>
+  fetch(`http://board${path}`, {
+    ...init,
+    unix: boardSocketPath(socketDir, harborlight),
+    headers: { ...json, ...(init.headers ?? {}) },
+  });
+
+async function board(name: string): Promise<string> {
+  const res = await tcp('/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
+  return ((await res.json()) as { workspace: { id: string } }).workspace.id;
+}
+
+/** A project folder with two notes in it. */
+function project(name: string): string {
+  const dir = join(workDir, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'notes.md'), `# ${name} notes\n`);
+  writeFileSync(join(dir, 'later.md'), `# ${name} later\n`);
+  return dir;
+}
+
+async function setRoots(roots: string[]): Promise<void> {
+  const res = await tcp(`/api/board-sockets/${harborlight}/roots`, {
+    method: 'PUT',
+    body: JSON.stringify({ roots }),
+  });
+  expect(res.status, await res.clone().text()).toBe(200);
+}
+
+async function leadBind(folderPath: string, extra: Record<string, unknown> = {}) {
+  return onSocket('/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ folderPath, hubWorkspaceId: harborlight, ...extra }),
+  });
+}
+
+/** Open one file of a set for context, the all-files sidebar's click. */
+async function openFile(setId: string, relPath: string): Promise<Response> {
+  return tcp(`/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}/context-file`, {
+    method: 'POST',
+    body: JSON.stringify({ relPath }),
+  });
+}
+
+async function treeNames(setId: string): Promise<string> {
+  const res = await tcp(`/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}/tree`);
+  return res.text();
+}
+
+beforeAll(async () => {
+  dataDir = mkdtempSync(join(tmpdir(), 'bs-lead-binds-'));
+  workDir = realpathSync(mkdtempSync(join(tmpdir(), 'bs-lead-binds-work-')));
+  socketRoot = mkdtempSync(
+    process.platform === 'darwin' ? '/private/tmp/bslb-' : join(tmpdir(), 'bslb-'),
+  );
+  socketDir = join(socketRoot, 'boards');
+  h = createServer({ port: 0, dataDir, boardSocketDir: socketDir });
+  base = `http://127.0.0.1:${h.port}`;
+  harborlight = await board('Harborlight');
+  riverbend = await board('Riverbend');
+  // What the lead's profile keeps from it, with a file of the same name.
+  secrets = join(workDir, 'riverbend-keys');
+  mkdirSync(secrets, { recursive: true });
+  writeFileSync(join(secrets, 'later.md'), 'riverbend secret\n');
+  writeFileSync(join(secrets, 'only-here.md'), 'riverbend secret\n');
+});
+
+afterAll(async () => {
+  await h.stop();
+  for (const d of [dataDir, workDir, socketRoot]) rmSync(d, { recursive: true, force: true });
+});
+
+describe('a lead’s bind after the bind', () => {
+  it('serves nothing through a root swapped for a link out of the roots', async () => {
+    const root = project('harbor-swap');
+    await setRoots([root]);
+    const bound = await leadBind(root);
+    expect(bound.status, await bound.clone().text()).toBe(200);
+    const { setId } = (await bound.json()) as { setId: string };
+    // The control: before the swap the root's own file opens.
+    expect((await openFile(setId, 'notes.md')).status).toBe(200);
+
+    renameSync(root, `${root}.moved`);
+    symlinkSync(secrets, root);
+    const opened = await openFile(setId, 'later.md');
+    expect(opened.status).not.toBe(200);
+    expect(await opened.text()).not.toContain('riverbend secret');
+    expect((await openFile(setId, 'only-here.md')).status).not.toBe(200);
+    expect(await treeNames(setId)).not.toContain('only-here.md');
+  }, 30_000);
+
+  it('stops serving a root dropped from the board’s list', async () => {
+    const root = project('harbor-dropped');
+    await setRoots([root]);
+    const bound = await leadBind(root);
+    expect(bound.status, await bound.clone().text()).toBe(200);
+    const { setId } = (await bound.json()) as { setId: string };
+    expect((await openFile(setId, 'notes.md')).status).toBe(200);
+    await setRoots([]);
+    expect((await openFile(setId, 'later.md')).status).not.toBe(200);
+  }, 30_000);
+});
+
+describe('a lead’s bind is held to its own board', () => {
+  it('is refused when its set is filed on another board', async () => {
+    const root = project('harbor-shared');
+    await setRoots([root]);
+    const first = await leadBind(root);
+    expect(first.status, await first.clone().text()).toBe(200);
+    const { setId } = (await first.json()) as { setId: string };
+    // An operator files the same set on Riverbend too.
+    const filed = await tcp(`/workspaces/${riverbend}/docs:attach`, {
+      method: 'POST',
+      body: JSON.stringify({ docId: setId }),
+    });
+    expect(filed.status, await filed.clone().text()).toBe(200);
+    const again = await leadBind(root, { exclude: ['notes.md'] });
+    expect(again.status).toBe(403);
+    expect(await again.text()).toContain('another board');
+  }, 30_000);
+
+  it('bounds maxFiles', async () => {
+    const root = project('harbor-max');
+    await setRoots([root]);
+    expect((await leadBind(root, { maxFiles: 1_000_000_000 })).status).toBe(403);
+    expect((await leadBind(root, { maxFiles: 'all' })).status).toBe(403);
+    const ok = await leadBind(root, { maxFiles: 100 });
+    expect(ok.status, await ok.clone().text()).toBe(200);
+  }, 30_000);
+});

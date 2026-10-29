@@ -156,6 +156,7 @@ import { collabMembershipEnded } from './share/collab-member-key.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
 import { SHARING_NOTICE_ACTOR, SharingNotice, rankFallbackBoards } from './sharing-notice.ts';
+import { boundFiles } from './slow-fs.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
@@ -1954,8 +1955,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * above, and that setup takes `policyFor` as an input: the two halves of
    * this one subject sit on either side of it.
    */
-  /** Board agent tokens (`at2`) and their revocation record. */
+  /** The folders each board's lead may bind, and the sets it bound; every
+   *  bound read, stat and write under those is re-checked against it. */
   const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
+  const removeLeadBindGuard = boundFiles.addPathGuard((p) => boardSocketRoots.pathAllowed(p));
+  /** Board agent tokens (`at2`) and their revocation record. */
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
@@ -2934,6 +2938,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
+    recordLeadBind: (setId, boardId, root) => boardSocketRoots.recordBind(setId, boardId, root),
     chatAudit,
     shareLinks,
     taskStore,
@@ -3484,6 +3489,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // nowhere left to land.
       server.stop(true);
       unwatchBoardList();
+      removeLeadBindGuard();
       boardSockets?.stop();
       // Who the connector was hosting, for the next process to subscribe
       // before its first request; then its subscriptions come down with the

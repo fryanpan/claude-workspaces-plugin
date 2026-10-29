@@ -16,6 +16,11 @@
  * subfolder instead. For the same reason one root may not sit inside
  * another. With no list for a board, every lead bind is refused.
  *
+ * And a root can still be swapped by whoever CAN write its parent, or
+ * dropped from the list at the next launch, so every set a lead bound is
+ * recorded here (`recordBind`) and every read, stat and write under it is
+ * re-checked (`pathAllowed`, installed as a `slow-fs.ts` path guard).
+ *
  * `scripts/lead-sandbox.ts` writes the list when it launches a walled lead,
  * from the projects that lead's profile already opens to it, through
  * `PUT /api/board-sockets/<board>/roots` (`routes/board-socket-roots.ts`),
@@ -36,8 +41,15 @@ export function boardSocketRootsPath(dataDir: string): string {
 
 export type RootsWrite = { ok: true; roots: string[] } | { ok: false; error: string };
 
+/** A set a lead bound: its board and the root it was bound by. */
+export interface LeadBindRecord {
+  board: string;
+  root: string;
+}
+
 export class BoardSocketRoots {
   private boards: Record<string, string[]> | null = null;
+  private binds: Record<string, LeadBindRecord> = {};
 
   constructor(
     private readonly path: string,
@@ -54,6 +66,14 @@ export class BoardSocketRoots {
         for (const [id, roots] of Object.entries(listed as Record<string, unknown>)) {
           if (Array.isArray(roots))
             boards[id] = roots.filter((r): r is string => typeof r === 'string' && isAbsolute(r));
+        }
+      }
+      const binds: unknown = raw?.binds;
+      if (binds && typeof binds === 'object') {
+        for (const [setId, b] of Object.entries(binds as Record<string, unknown>)) {
+          const { board, root } = (b ?? {}) as Record<string, unknown>;
+          if (typeof board === 'string' && typeof root === 'string' && isAbsolute(root))
+            this.binds[setId] = { board, root };
         }
       }
     } catch {
@@ -111,10 +131,50 @@ export class BoardSocketRoots {
     return this.rootsOf(boardId).includes(real) ? real : null;
   }
 
+  /** Remember a set a lead bound, so every later use of it is re-checked. */
+  recordBind(setId: string, board: string, root: string): void {
+    this.load();
+    const had = this.binds[setId];
+    if (had?.board === board && had.root === root) return;
+    this.binds[setId] = { board, root };
+    this.save();
+  }
+
+  /**
+   * Whether a bound read, stat or write of `path` may go ahead
+   * (`slow-fs.ts` `addPathGuard`). A path under no lead's bind is not this
+   * list's business. One under a lead's bind needs the root still registered
+   * for that board, still resolving to itself (no link swapped in for it),
+   * and the path, where it exists, still landing inside it.
+   */
+  pathAllowed(path: string): boolean {
+    this.load();
+    for (const { board, root } of Object.values(this.binds)) {
+      if (path !== root && !path.startsWith(`${root}/`)) continue;
+      if (!this.rootsOf(board).includes(root)) return false;
+      try {
+        if (this.realpath(root) !== root) return false;
+      } catch {
+        return false;
+      }
+      if (path === root) continue;
+      let real: string | null = null;
+      try {
+        real = this.realpath(path);
+      } catch {
+        // Not there yet: a write that creates it lands under the root.
+      }
+      if (real !== null && real !== root && !real.startsWith(`${root}/`)) return false;
+    }
+    return true;
+  }
+
   private save(): void {
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ boards: this.load() }, null, 2), { mode: 0o600 });
+    writeFileSync(tmp, JSON.stringify({ boards: this.load(), binds: this.binds }, null, 2), {
+      mode: 0o600,
+    });
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
   }

@@ -117,12 +117,12 @@ export const BOUND_READ_FRESH_MS = 5_000;
 export type BoundReadResult =
   | { status: 'ok'; exists: false }
   | { status: 'ok'; exists: true; text: string; mtimeMs: number; size: number }
-  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' };
+  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' | 'refused' };
 
 export type BoundStatResult =
   | { status: 'ok'; exists: false }
   | { status: 'ok'; exists: true; mtimeMs: number; size: number }
-  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' };
+  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' | 'refused' };
 
 function isEnoent(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | undefined)?.code;
@@ -168,6 +168,29 @@ class BoundFileReader {
    * deadline and back down if the call ever does land.
    */
   private leaked = 0;
+  /** Rules every read, stat and write must pass: see `addPathGuard`. */
+  private readonly pathGuards = new Set<(path: string) => boolean>();
+
+  /**
+   * Refuse any bound read, stat or write `guard` answers false for, until
+   * the returned function removes it. The server installs one for the
+   * folders a walled lead bound (`board-socket-roots.ts`): the lead can
+   * write inside them, so each use re-checks that the folder still resolves
+   * to itself and is still one it may bind, rather than trusting the check
+   * made at the bind.
+   */
+  addPathGuard(guard: (path: string) => boolean): () => void {
+    this.pathGuards.add(guard);
+    return () => {
+      this.pathGuards.delete(guard);
+    };
+  }
+
+  allows(path: string): boolean {
+    for (const guard of this.pathGuards) if (!guard(path)) return false;
+    return true;
+  }
+
   /** The poll's stat. A field only so a test can hold one pending. */
   private statFile = (path: string): Promise<BigIntStats> => stat(path, { bigint: true });
   /** Just-completed reads, waiting to be consumed by the hydrate that asked. */
@@ -381,7 +404,10 @@ class BoundFileReader {
     this.statFile = fn ?? ((path) => stat(path, { bigint: true }));
   }
 
-  private gate(path: string): { status: 'unavailable'; reason: 'backoff' | 'busy' } | undefined {
+  private gate(
+    path: string,
+  ): { status: 'unavailable'; reason: 'backoff' | 'busy' | 'refused' } | undefined {
+    if (!this.allows(path)) return { status: 'unavailable', reason: 'refused' };
     if (this.quarantined(path)) return { status: 'unavailable', reason: 'backoff' };
     if (this.leaked >= BOUND_READ_MAX_OVERDUE) return { status: 'unavailable', reason: 'busy' };
     return undefined;

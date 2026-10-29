@@ -1391,7 +1391,7 @@ export class FileBindings {
     // the filesystem again here would put the blocking call straight back.
     const absent = opts.preread ? !opts.preread.exists : !existsSync(absPath);
     let attachOpts = opts;
-    if (absent) {
+    if (absent && boundFiles.allows(absPath)) {
       const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
       try {
         mkdirSync(dirname(absPath), { recursive: true });
@@ -2413,7 +2413,13 @@ export class FileBindings {
       // is also the state that leaves no mark on the path, so the quarantine
       // check alone cannot see it — a merely slow file reaches the sync
       // write with nothing to stop it.
-      if (boundFiles.quarantined(binding.path) || boundFiles.busy()) {
+      // A path the bound-file guard refuses (a walled lead's folder that no
+      // longer resolves to itself) is never written, here or on the pool.
+      if (
+        boundFiles.quarantined(binding.path) ||
+        boundFiles.busy() ||
+        !boundFiles.allows(binding.path)
+      ) {
         this.failedWrites.add(doc.docId);
         return;
       }
