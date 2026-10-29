@@ -111,6 +111,12 @@ import {
 } from './meeting-capture-set.ts';
 import { type ChooserState, createMeetingChooser } from './meeting-chooser.ts';
 import { type MeetingFeed, createMeetingFeed } from './meeting-feed.ts';
+import {
+  type MeetingLink,
+  type MeetingSocket,
+  createMeetingLink,
+  defaultOpenSocket,
+} from './meeting-link.ts';
 import type { MeetingLiveZone } from './meeting-live-zone.ts';
 import { type MeetingMenu, createMeetingMenu } from './meeting-menu.ts';
 import {
@@ -132,14 +138,7 @@ import {
   parseMeetingServerMessage,
   rollTranscript,
 } from './meeting-protocol.ts';
-import {
-  type AudioHold,
-  RECONNECTING_NOTE,
-  RESUME_FAILED_NOTE,
-  type ReconnectPlan,
-  createAudioHold,
-  createReconnectPlan,
-} from './meeting-reconnect.ts';
+import { RECONNECTING_NOTE, RESUME_FAILED_NOTE, type ReconnectPlan } from './meeting-reconnect.ts';
 import {
   RECORD_LABEL,
   RECORD_OFF_SETTING,
@@ -193,16 +192,9 @@ export type StripState =
   | { kind: 'blocked'; message: string }
   | { kind: 'error'; message: string };
 
-/** The slice of a WebSocket the strip uses — injectable so every state above
- *  can be driven in a test without a server. */
-export interface MeetingSocket {
-  send(data: string | ArrayBufferView): void;
-  close(): void;
-  onopen: (() => void) | null;
-  onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: (() => void) | null;
-  onerror: (() => void) | null;
-}
+/** The slice of a WebSocket the strip uses — `meeting-link.ts` owns it now,
+ *  and it is re-exported here for the tests that have always imported it. */
+export type { MeetingSocket };
 
 export interface MeetingStripOpts {
   docId: string;
@@ -509,12 +501,6 @@ function unavailableFallback(reason: MeetingUnavailableReason): string {
   }
 }
 
-function defaultOpenSocket(url: string): MeetingSocket {
-  const ws = new WebSocket(url);
-  ws.binaryType = 'arraybuffer';
-  return ws as unknown as MeetingSocket;
-}
-
 function defaultInterval(fn: () => void, ms: number): () => void {
   const id = setInterval(fn, ms);
   return () => clearInterval(id);
@@ -688,7 +674,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * the flag, so it cannot crowd the feed.
    */
   const timing: TimingSession | null = opts.timing
-    ? createTimingSession({ now, send: (json) => socket?.send(json) })
+    ? createTimingSession({ now, send: (json) => link.send(json) })
     : null;
 
   root.classList.add('meeting-strip');
@@ -726,8 +712,98 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * carries. Empty for every ordinary microphone meeting.
    */
   let startNote = '';
-  let socket: MeetingSocket | null = null;
-  let socketOpen = false;
+  /**
+   * The audio socket, the bank of audio held across a drop, and the backoff
+   * that asks for the same meeting back (`meeting-link.ts`). The capture is
+   * already running when it connects and stays running across a retry: the
+   * microphone is what makes the two halves of an interrupted meeting one
+   * recording.
+   */
+  const link: MeetingLink = createMeetingLink({
+    // The board this surface is on. Reading it from the URL rather than
+    // taking it as a prop keeps it the same board every other request from
+    // this page names — the strip is mounted on a doc page, which is always
+    // under one.
+    url: () => meetingSocketUrl(currentWorkspaceId() ?? '', docId),
+    openSocket,
+    now,
+    schedule,
+    // A read that failed while everything was down gets its retry here.
+    beforeStart: () => reconcileNotesMethod(),
+    // Opening the socket IS starting the meeting; this frame only tells the
+    // server what shape the audio behind it will be.
+    startFrame: (c) => ({
+      type: 'start',
+      sampleRate: MEETING_SAMPLE_RATE,
+      encoding: MEETING_AUDIO_ENCODING,
+      mode,
+      // Absent for the microphone, so an older server's frame is what it
+      // was. `mic+system` is the one value that also changes the AUDIO
+      // frames behind this one — each carries a stream byte — so it names
+      // what actually opened, never what was asked for.
+      ...(liveSource !== 'mic' ? { source: liveSource } : {}),
+      // Absent unless somebody said, so the server's default stays the
+      // one place the room size is guessed.
+      ...(opts.speakers !== undefined ? { speakers: opts.speakers } : {}),
+      // Who is on this socket, for the raw transcript's attribution of
+      // turns the engine gives no label. Absent when nobody is signed in.
+      ...(opts.participantName ? { participant: opts.participantName } : {}),
+      // The server's default, or the address's preference — never a pick
+      // made here. A server that has never heard of engines never
+      // receives the field, and this frame is byte-for-byte what an
+      // older strip sent.
+      ...(choose.chooseEngine !== undefined ? { engine: choose.chooseEngine } : {}),
+      // The Advanced Options — modified knobs only, and PRESENT even
+      // when empty: sending the field is what hands the speaker cap to
+      // the panel (default uncapped) instead of the legacy fallback.
+      // Absent when the engine is unknown, which keeps an old server's
+      // frame byte-for-byte what it was.
+      ...(choose.chooseEngine !== undefined && advancedControls(choose.chooseEngine).length > 0
+        ? { tuning: tuningPayload(choose.chooseEngine, advFor(choose.chooseEngine)) }
+        : {}),
+      ...(timing ? { timing: true } : {}),
+      // Only on a retry, and only ever the meeting this mount is still
+      // in. Absent is a new recording, which is what every first start
+      // is — see the field's note in the wire contract.
+      ...(c.resume !== undefined ? { resume: c.resume } : {}),
+      // How many milliseconds of the outage the frames below cover.
+      // Absent when nothing was held, which is what an older server and
+      // an ordinary first start both read as zero.
+      ...(c.heldMs > 0 ? { heldMs: c.heldMs } : {}),
+      // This page can open the notes doc and record there. A first start
+      // only, and a microphone only: the Mac-audio share picker needs a
+      // press the next page cannot replay, so that meeting records here
+      // and the server sends its notes to the notes doc itself.
+      ...(opts.onNotesDoc && c.resume === undefined && liveSource === 'mic'
+        ? { handoff: true }
+        : {}),
+    }),
+    // After the start frame: the server reads the flag off it, and a ping
+    // that overtook it would be answered by a connection not yet measuring.
+    afterStart: () => timing?.begin(),
+    // Counted only when it actually goes out, so this ordinal is the same
+    // ordinal the server's ledger gives the chunk it receives.
+    frameSent: () => timing?.frameSent(),
+    opened: (sock) => armNoAudioWatch(sock),
+    message: (data, at) => handle(parseMeetingServerMessage(data), at),
+    dropped: () => {
+      // Whatever this drop turns into — a reconnect, or a meeting that never
+      // opened saying so — a pick this socket was carrying has just lost the
+      // only thing that could answer it. `closeSocket` says the same for the
+      // deliberate ends, and asking twice queues one read.
+      strandSocketPicks();
+      // A deliberate close detaches the handlers first, so reaching here at
+      // all means the connection went away on its own.
+      if (state.kind === 'recording' && liveMeetingId) {
+        retryConnection();
+        return;
+      }
+      releaseAudio();
+      opts.liveZone?.end();
+      announceEnded();
+      setState({ kind: 'error', message: 'The connection to the meeting was lost.' });
+    },
+  });
   /**
    * Frames of the FIRST stream — the one the tap's context went to — that
    * went out on a socket this meeting. Not every frame: in a mic + Mac audio
@@ -803,18 +879,6 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * conversation to a recording that is over.
    */
   let liveMeetingId: string | null = null;
-  /** The reconnect backoff, reset by every landed connection. */
-  const reconnect: ReconnectPlan = createReconnectPlan({ now });
-  /**
-   * A bounded few seconds of audio, banked while the socket is down.
-   *
-   * Mount-level for the same reason the microphone is kept open across a
-   * drop: the frames arriving during an outage belong to the meeting on the
-   * other side of it, and a hold that lived on the connection would be thrown
-   * away by the very event it exists for. Emptied by the reconnect that
-   * replays it, and by any start or stop that is not one.
-   */
-  const audioHold: AudioHold = createAudioHold();
   /**
    * The captures that have stopped delivering audio, in the order they died.
    *
@@ -836,22 +900,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * capture never came back when it did — see `tellServerAboutStream`.
    */
   const heldRestored = new Set<MeetingStreamId>();
-  /**
-   * Whether the server has a meeting for a gap to hang on.
-   *
-   * `socketOpen` is not the same question. Between the socket opening and
-   * `ready` coming back there is a connection with no meeting behind it, and a
-   * `stream_state` sent into that window is dropped by the server with nothing
-   * said — so the strip would count it as delivered and never re-send it.
-   */
-  let serverHasMeeting = false;
   /** The "it is back" line, until `RESTORED_NOTE_MS` takes it down. */
   let restoredLine = '';
   let cancelRestoredLine: (() => void) | null = null;
-  /** Cancels the retry that is waiting, or null when none is. */
-  let cancelRetry: (() => void) | null = null;
-  /** Whether the socket now open sent a `start` asking to resume. */
-  let resuming = false;
   /**
    * The one sentence the strip carries over the words: reconnecting, or the
    * resume that could not be taken. Cleared when the meeting ends and when a
@@ -1144,8 +1195,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     onStartPressed,
     systemAudioOffered: opts.systemAudioOffered ?? (() => systemAudioOffered()),
     isChooserView: () => view === 'chooser',
-    socketOpen: () => socketOpen,
-    sendSocket: (data) => socket?.send(data),
+    socketOpen: () => link.open,
+    sendSocket: (data) => link.send(data),
     onNotesMethodPicked: (method) => pickNotesMethod(method),
   });
 
@@ -1158,7 +1209,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
   function pickNotesMethod(method: NotesMethod): void {
     // WHICH WAY THIS ONE GOES, decided once: the row records it, because who
     // is able to answer a pick is what a dropped socket changes.
-    const live = socketOpen ? socket : null;
+    const live = link.open ? link.socket : null;
     // Optimistic, because the fold is a preference and the sheet must not
     // sit on a spinner: the row moves now, and the two ways of asking below
     // are what make it true. A failure puts it back.
@@ -1322,8 +1373,8 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     const hadName = label in names;
     names[label] = answer;
     paintNames(label);
-    if (socketOpen) {
-      socket?.send(JSON.stringify({ type: 'name_speaker', speaker: label, name: answer }));
+    if (link.open) {
+      link.send(JSON.stringify({ type: 'name_speaker', speaker: label, name: answer }));
       return Promise.resolve(true);
     }
     const revert = (): void => {
@@ -1614,8 +1665,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     state: 'lost' | 'restored',
     reason?: TrackLossReason,
   ): boolean {
-    if (!socketOpen || !serverHasMeeting) return false;
-    socket?.send(
+    // `open` is not the same question as `hasMeeting`. Between the socket
+    // opening and `ready` there is a connection with no meeting behind it,
+    // and a `stream_state` sent into that window is dropped by the server
+    // with nothing said — so it would count as delivered and never re-send.
+    if (!link.open || !link.hasMeeting) return false;
+    link.send(
       JSON.stringify({ type: 'stream_state', stream, state, ...(reason ? { reason } : {}) }),
     );
     return true;
@@ -1681,12 +1736,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     const before = framesSent;
     cancelNoAudio = captureWatch(() => {
       cancelNoAudio = null;
-      if (disposed || socket !== sock || framesSent > before) return;
+      if (disposed || link.socket !== sock || framesSent > before) return;
       const health = capture?.health() ?? null;
       // `interrupted` is iOS taking the audio session away; resume is the ask.
       if (health && health.contextState !== 'running') void capture?.resumeAudio();
       noAudio = true;
-      if (socketOpen) {
+      if (link.open) {
         sock.send(
           JSON.stringify({
             type: 'no_audio',
@@ -1838,21 +1893,9 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // here, a drop under a live meeting included, and a pick it was carrying
     // has just lost the only thing that could answer it.
     strandSocketPicks();
-    const sock = socket;
-    socket = null;
-    socketOpen = false;
-    resuming = false;
     cancelNoAudio?.();
     cancelNoAudio = null;
-    if (!sock) return;
-    // Handlers first: closing is a deliberate end, and an onclose that still
-    // fired would report it as a dropped connection.
-    sock.onopen = null;
-    sock.onmessage = null;
-    sock.onclose = null;
-    sock.onerror = null;
-    serverHasMeeting = false;
-    sock.close();
+    link.close();
   }
 
   function handle(msg: MeetingServerMessage | null, recvMs: number): void {
@@ -1887,16 +1930,12 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
           }
           opts.liveZone?.setNames({ ...names });
         };
-        const wasResuming = resuming;
-        resuming = false;
-        reconnect.succeeded();
+        // The handshake landed, so whatever this connection replayed and
+        // banked during it is the server's problem now.
+        const wasResuming = link.ready();
         // A capture that died while the socket was down — or during the
         // handshake that just finished: the server answering now has heard
         // nothing about it.
-        serverHasMeeting = true;
-        // The handshake landed, so whatever this connection replayed and
-        // banked during it is the server's problem now.
-        audioHold.clear();
         announceStreamState();
         if (msg.meetingId) liveMeetingId = msg.meetingId;
         // The meeting now has a name, so anything keyed to one can hold
@@ -2011,7 +2050,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
         // it can outlast the drop by a moment — and the doc is locked until
         // it lands. Waiting is the whole point of the backoff; the mic stays
         // open and the next attempt asks again.
-        if (resuming && msg.reason === 'already_recording' && state.kind === 'recording') {
+        if (link.resuming && msg.reason === 'already_recording' && state.kind === 'recording') {
           retryConnection();
           break;
         }
@@ -2125,7 +2164,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     // Whatever the last meeting left banked is that meeting's. This one gets
     // its own id, its own section and its own bill, and the words before it
     // belong to the recording they were spoken in.
-    audioHold.clear();
+    link.clearHold();
     tapToStart = false;
     framesSent = 0;
     // Before anything is awaited: this is still the Record tap, and Safari
@@ -2142,37 +2181,19 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
       onFirstStreamFrame: () => {
         // The Recording dot stays a steady red: Bryan asked for no pulsing
         // (2026-09-13). A dead microphone is named by the no-audio line.
-        if (!socketOpen) return;
+        if (!link.open) return;
         framesSent += 1;
         if (noAudio) {
           noAudio = false;
           render();
         }
       },
-      onFrame: (pcm) => {
-        if (!socketOpen) {
-          // The socket is down. Banked rather than dropped, up to the cap —
-          // `AUDIO_HOLD_MS` in `meeting-reconnect.ts` carries the whole
-          // reasoning, including why the drop past it is still right.
-          audioHold.push(pcm, now());
-          return;
-        }
-        // OPEN BUT NOT YET ANSWERED. The frame goes out, and it is ALSO
-        // banked: a handshake that never finishes — the server refusing a
-        // resume with `already_recording` while the old socket's teardown
-        // still holds the doc, or another drop — takes everything sent on
-        // this connection with it, and the retry has to be able to say it
-        // again. The hold is emptied on `ready`, so the duplicate only ever
-        // exists inside a handshake nobody completed. Worst case if the
-        // server did record these and then died before answering: a couple
-        // of seconds said twice, which is the better side of the trade
-        // against a couple of seconds lost.
-        if (!serverHasMeeting) audioHold.push(pcm, now());
-        socket?.send(pcm);
-        // Counted only when it actually goes out, so this ordinal is the same
-        // ordinal the server's ledger gives the chunk it receives.
-        timing?.frameSent();
-      },
+      // Down, it is banked up to the cap (`AUDIO_HOLD_MS` in
+      // `meeting-reconnect.ts`); open but not yet answered, it is sent AND
+      // banked, because a handshake that never finishes — a resume refused
+      // with `already_recording` while the old socket's teardown still holds
+      // the doc — takes everything sent on it. `meeting-link.ts`.
+      onFrame: (pcm) => link.audio(pcm),
       onStreamLost,
       // Read HERE rather than at mount: the chooser can change it between
       // meetings, and the constraints belong to the microphone this press is
@@ -2235,126 +2256,7 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    * between the person and their own sentence.
    */
   function connect(resume?: string): void {
-    // The board this surface is on. Reading it from the URL rather than
-    // taking it as a prop keeps it the same board every other request from
-    // this page names — the strip is mounted on a doc page, which is always
-    // under one.
-    const sock = openSocket(meetingSocketUrl(currentWorkspaceId() ?? '', docId));
-    socket = sock;
-    resuming = resume !== undefined;
-    sock.onopen = () => {
-      socketOpen = true;
-      // Taken HERE, before the start frame is built, because the frame has to
-      // carry how much of the outage this connection is about to cover — the
-      // server subtracts it from the gap it would otherwise record as lost.
-      // A FIRST start takes nothing and empties the hold: audio banked
-      // against a meeting nobody is resuming belongs to no recording.
-      // A resume the server then REFUSES is the other case, and its frames
-      // have already gone — they land at the head of the new recording the
-      // refusal opens. Deliberately: they are the last few seconds of the
-      // same room, and the alternative is holding the replay until `ready`,
-      // which the ordering note below rules out.
-      // READ AND KEPT, not taken: this socket can still die before `ready`,
-      // and the retry after that needs the same frames. The hold is emptied
-      // where the resume is confirmed instead.
-      const held = resume !== undefined ? audioHold.peek(now()) : { frames: [], heldMs: 0 };
-      if (resume === undefined) audioHold.clear();
-      // A read that failed while everything was down gets its retry here.
-      reconcileNotesMethod();
-      // Opening the socket IS starting the meeting; this frame only tells the
-      // server what shape the audio behind it will be.
-      sock.send(
-        JSON.stringify({
-          type: 'start',
-          sampleRate: MEETING_SAMPLE_RATE,
-          encoding: MEETING_AUDIO_ENCODING,
-          mode,
-          // Absent for the microphone, so an older server's frame is what it
-          // was. `mic+system` is the one value that also changes the AUDIO
-          // frames behind this one — each carries a stream byte — so it names
-          // what actually opened, never what was asked for.
-          ...(liveSource !== 'mic' ? { source: liveSource } : {}),
-          // Absent unless somebody said, so the server's default stays the
-          // one place the room size is guessed.
-          ...(opts.speakers !== undefined ? { speakers: opts.speakers } : {}),
-          // Who is on this socket, for the raw transcript's attribution of
-          // turns the engine gives no label. Absent when nobody is signed in.
-          ...(opts.participantName ? { participant: opts.participantName } : {}),
-          // The server's default, or the address's preference — never a pick
-          // made here. A server that has never heard of engines never
-          // receives the field, and this frame is byte-for-byte what an
-          // older strip sent.
-          ...(choose.chooseEngine !== undefined ? { engine: choose.chooseEngine } : {}),
-          // The Advanced Options — modified knobs only, and PRESENT even
-          // when empty: sending the field is what hands the speaker cap to
-          // the panel (default uncapped) instead of the legacy fallback.
-          // Absent when the engine is unknown, which keeps an old server's
-          // frame byte-for-byte what it was.
-          ...(choose.chooseEngine !== undefined && advancedControls(choose.chooseEngine).length > 0
-            ? { tuning: tuningPayload(choose.chooseEngine, advFor(choose.chooseEngine)) }
-            : {}),
-          ...(timing ? { timing: true } : {}),
-          // Only on a retry, and only ever the meeting this mount is still
-          // in. Absent is a new recording, which is what every first start
-          // is — see the field's note in the wire contract.
-          ...(resume !== undefined ? { resume } : {}),
-          // How many milliseconds of the outage the frames below cover.
-          // Absent when nothing was held, which is what an older server and
-          // an ordinary first start both read as zero.
-          ...(held.heldMs > 0 ? { heldMs: held.heldMs } : {}),
-          // This page can open the notes doc and record there. A first start
-          // only, and a microphone only: the Mac-audio share picker needs a
-          // press the next page cannot replay, so that meeting records here
-          // and the server sends its notes to the notes doc itself.
-          ...(opts.onNotesDoc && resume === undefined && liveSource === 'mic'
-            ? { handoff: true }
-            : {}),
-        }),
-      );
-      // After the start frame: the server reads the flag off it, and a ping
-      // that overtook it would be answered by a connection not yet measuring.
-      timing?.begin();
-      // And before ANY live frame can go out, which is why the replay is here
-      // rather than on `ready`: the server holds everything that arrives
-      // during the handshake and delivers it in order, so a live frame sent
-      // while the handshake was still out would reach the transcript ahead of
-      // the sentence it interrupted. Counted through `frameSent` like any
-      // other, so this end's ordinals still name the chunks the server's
-      // ledger is numbering.
-      for (const frame of held.frames) {
-        sock.send(frame);
-        timing?.frameSent();
-      }
-      armNoAudioWatch(sock);
-    };
-    sock.onmessage = (ev) => {
-      // The receive mark comes before the parse — the downlink ends when the
-      // bytes land, not when we have finished reading them.
-      const at = now();
-      handle(parseMeetingServerMessage(ev.data), at);
-    };
-    sock.onclose = () => {
-      socketOpen = false;
-      serverHasMeeting = false;
-      // Whatever this drop turns into — a reconnect, or a meeting that never
-      // opened saying so — a pick this socket was carrying has just lost the
-      // only thing that could answer it. `closeSocket` says the same for the
-      // deliberate ends, and asking twice queues one read.
-      strandSocketPicks();
-      // A deliberate close detaches these handlers first, so reaching here at
-      // all means the connection went away on its own.
-      if (state.kind === 'recording' && liveMeetingId) {
-        retryConnection();
-        return;
-      }
-      releaseAudio();
-      opts.liveZone?.end();
-      announceEnded();
-      setState({ kind: 'error', message: 'The connection to the meeting was lost.' });
-    };
-    // `error` is always followed by `close`; reporting both would overwrite the
-    // message with itself.
-    sock.onerror = null;
+    link.connect(resume);
   }
 
   /**
@@ -2371,8 +2273,11 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
    */
   function retryConnection(): void {
     closeSocket();
-    const step = reconnect.dropped();
-    if (step.kind === 'give-up') {
+    const step = link.retry(
+      liveMeetingId ?? undefined,
+      () => !disposed && state.kind === 'recording',
+    );
+    if (step === 'give-up') {
       releaseAudio();
       opts.liveZone?.end();
       announceEnded();
@@ -2381,12 +2286,6 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
     }
     standingNote = RECONNECTING_NOTE;
     render();
-    const resume = liveMeetingId ?? undefined;
-    cancelRetry = schedule(() => {
-      cancelRetry = null;
-      if (disposed || state.kind !== 'recording') return;
-      connect(resume);
-    }, step.delayMs);
   }
 
   /**
@@ -2419,17 +2318,15 @@ export function mountMeetingStrip(opts: MeetingStripOpts): MeetingStripHandle {
 
   /** Whatever retry is waiting, called off — a stop, a dispose, a new start. */
   function cancelReconnect(): void {
-    cancelRetry?.();
-    cancelRetry = null;
-    reconnect.succeeded();
+    link.cancelRetry();
   }
 
   function stop(): void {
     cancelReconnect();
-    if (socketOpen) socket?.send(JSON.stringify({ type: 'stop' }));
+    if (link.open) link.send(JSON.stringify({ type: 'stop' }));
     // Nothing banked survives a meeting that is over: the only connection
     // that could have replayed it was this one's.
-    audioHold.clear();
+    link.clearHold();
     releaseAudio();
     closeSocket();
     opts.liveZone?.end();
