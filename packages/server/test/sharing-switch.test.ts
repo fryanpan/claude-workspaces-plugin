@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
+import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { STAMP_PATTERN } from '../src/log-stamp.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
@@ -84,6 +85,43 @@ describe('the sharing switch, for one board and for all of them', () => {
     req(path, OWNER_HOST, {
       headers: { ...CF_RAY, 'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL) },
     });
+  /** The owner's own request, through the tunnel: what proves the owner. */
+  const postOwner = async (path: string, body: unknown) =>
+    req(path, OWNER_HOST, {
+      method: 'POST',
+      headers: {
+        ...CF_RAY,
+        'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  /**
+   * Turn the master switch back on the only way left: the owner answering
+   * "Turn back on" on the notice it filed (Bryan, 29 Oct: an agent's call
+   * cannot open the doors again).
+   */
+  const turnBackOn = async (): Promise<void> => {
+    const r = await req('/workspaces?format=json', `localhost:${handle.port}`);
+    const boards = ((await r.json()) as { boardWorkspaces: Array<{ id: string }> }).boardWorkspaces;
+    for (const { id } of boards) {
+      const items = (await (
+        await req(`/workspaces/${id}/review-items`, `localhost:${handle.port}`)
+      ).json()) as { items: Array<{ askedBy: string; taskId: string; reviewItemId: string }> };
+      for (const row of items.items.filter((i) => i.askedBy === 'Sharing switch')) {
+        const answered = await postLocal(
+          `/workspaces/${id}/tasks/${row.taskId}/review-items/${row.reviewItemId}/answer`,
+          {
+            text: 'Turn back on',
+            answeredWith: 'turn-back-on',
+            author: { id: 'known-bryan', name: 'Bryan', kind: 'person' },
+          },
+        );
+        expect(answered.status).toBe(200);
+      }
+    }
+    expect((await status()).enabled).toBe(true);
+  };
   const boardPath = (id: string) => `/workspaces/${encodeURIComponent(id)}?format=json`;
   const status = async () =>
     (
@@ -113,6 +151,8 @@ describe('the sharing switch, for one board and for all of them', () => {
       shareLinkAudience: SHARE_AUD,
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
+      // So a request Access proves as this address proves the owner.
+      ownerEmail: OWNER_EMAIL,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
       // The quality gate, stubbed to pass and to record what it was shown, so
       // the notice block can see the server's own item went through it.
@@ -135,6 +175,7 @@ describe('the sharing switch, for one board and for all of them', () => {
   afterAll(async () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
+    resetOwnerIdentities();
   });
 
   it('CONTROL: the member reaches both boards and the owner reaches its own hostname', async () => {
@@ -189,8 +230,15 @@ describe('the sharing switch, for one board and for all of them', () => {
       expect(await status()).toEqual({ enabled: true, locked: false, closedBoards: [closing] });
     });
 
-    it('reopens that board', async () => {
+    it("does not reopen it for an agent: that is the owner's, and needs a task for the card", async () => {
       const r = await postLocal('/api/share/enabled', { workspaceId: closing, enabled: true });
+      expect(r.status).toBe(400);
+      expect(((await r.json()) as { error: string }).error).toBe('task-required');
+      expect((await status()).closedBoards).toEqual([closing]);
+    });
+
+    it('reopens that board for the owner', async () => {
+      const r = await postOwner('/api/share/enabled', { workspaceId: closing, enabled: true });
       expect(r.status).toBe(200);
       expect((await onShareHost(boardPath(closing), MEMBER)).status).toBe(200);
       expect(await status()).toEqual({ enabled: true, locked: false });
@@ -221,8 +269,11 @@ describe('the sharing switch, for one board and for all of them', () => {
           actor: { id: 'agent-harborlight', name: 'Harborlight Agent' },
         });
         expect(off.status).toBe(200);
-        const on = await postLocal('/api/share/enabled', { enabled: true });
-        expect(on.status).toBe(200);
+        // An agent cannot turn it back on, and a refusal writes no line.
+        const refused = await postLocal('/api/share/enabled', { enabled: true });
+        expect(refused.status).toBe(403);
+        expect(flipLines(spy)).toHaveLength(1);
+        await turnBackOn();
         const lines = flipLines(spy);
         expect(lines).toHaveLength(2);
         const [offLine, onLine] = lines as [string, string];
@@ -233,9 +284,7 @@ describe('the sharing switch, for one board and for all of them', () => {
         expect(offLine).toContain('reason="security review"');
         expect(onLine).toMatch(STAMP_PATTERN);
         expect(onLine).toContain('master switch ON');
-        expect(onLine).toContain('"unattributed"');
-        expect(onLine).toMatch(/ from (::ffff:)?127\.0\.0\.1 /);
-        expect(onLine).toContain('reason=none given');
+        expect(onLine).toContain('"owner Bryan (known-bryan)"');
       } finally {
         spy.mockRestore();
       }
@@ -245,7 +294,7 @@ describe('the sharing switch, for one board and for all of them', () => {
       const spy = spyOn(console, 'error');
       try {
         await postLocal('/api/share/enabled', { workspaceId: other, enabled: false, reason: 'x' });
-        await postLocal('/api/share/enabled', { workspaceId: other, enabled: true });
+        await postOwner('/api/share/enabled', { workspaceId: other, enabled: true });
         const lines = flipLines(spy);
         expect(lines).toHaveLength(2);
         expect(lines[0]).toContain(`board "${other}" closed to outside visitors`);
@@ -296,7 +345,7 @@ describe('the sharing switch, for one board and for all of them', () => {
     it('files nothing when one board is closed', async () => {
       expect(await notices()).toHaveLength(0);
       await postLocal('/api/share/enabled', { workspaceId: other, enabled: false });
-      await postLocal('/api/share/enabled', { workspaceId: other, enabled: true });
+      await postOwner('/api/share/enabled', { workspaceId: other, enabled: true });
       expect(await notices()).toHaveLength(0);
     });
 
@@ -332,8 +381,10 @@ describe('the sharing switch, for one board and for all of them', () => {
       expect(rows[0]?.review.detail).toContain('second look');
     });
 
-    it('withdraws the item when the switch is turned back on', async () => {
-      await postLocal('/api/share/enabled', { enabled: true });
+    it('keeps the item when an agent asks to turn it back on, and withdraws it when the owner does', async () => {
+      expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(403);
+      expect(await notices()).toHaveLength(1);
+      await turnBackOn();
       expect(await notices()).toHaveLength(0);
     });
 
@@ -378,7 +429,10 @@ describe('the sharing switch, for one board and for all of them', () => {
       );
       expect(answered.status).toBe(200);
       expect(await masterEnabled()).toBe(false);
-      await postLocal('/api/share/enabled', { enabled: true });
+      // The agent's answer closed the notice; going off again files a fresh
+      // one for the owner to answer.
+      await postLocal('/api/share/enabled', { enabled: false, reason: 'for the owner' });
+      await turnBackOn();
     });
 
     it('files on a live board nobody outside can reach when the catch-all board is retired', async () => {
@@ -408,7 +462,7 @@ describe('the sharing switch, for one board and for all of them', () => {
         const items = ((await shared.json()) as { items: Row[] }).items;
         expect(items.filter((row) => row.askedBy === 'Sharing switch')).toHaveLength(0);
       }
-      await postLocal('/api/share/enabled', { enabled: true });
+      await turnBackOn();
     });
   });
 });

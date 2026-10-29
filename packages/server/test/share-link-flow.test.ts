@@ -548,7 +548,8 @@ describe('share links over HTTP', () => {
         expect(r.status).toBe(403);
         expect(await r.json()).toEqual({ error: 'sharing_disabled' });
       } finally {
-        expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(200);
+        // Only the owner turns it back on; the test sets the gate directly.
+        handle.sharingGate.setEnabled(true);
       }
       // Positive control: back on, the same member reaches the board again.
       expect(
@@ -1346,7 +1347,9 @@ describe('share links over HTTP', () => {
       // Redeeming is shut too, not merely the board behind it.
       expect((await visit(`/s/${link.linkId}`)).status).toBe(403);
 
-      expect((await flip(true)).status).toBe(200);
+      // An agent cannot open it again; the owner's answer does.
+      expect((await flip(true)).status).toBe(403);
+      probe.sharingGate.setEnabled(true);
       expect((await visit(boardPath)).status).toBe(200);
       await probe.stop();
     });
@@ -1542,7 +1545,8 @@ describe('share links over HTTP', () => {
         expect(await memberClosed).toBe(1008);
         expect(owner.ws.readyState).toBe(WebSocket.OPEN);
       } finally {
-        expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(200);
+        // Only the owner turns it back on; the test sets the gate directly.
+        handle.sharingGate.setEnabled(true);
         owner.ws.close();
       }
     });
@@ -1662,6 +1666,8 @@ describe('share links over HTTP', () => {
       const created = await post('/workspaces', { name: 'Board shared the old way' });
       expect(created.status).toBe(200);
       oldBoard = ((await created.json()) as { workspace: { id: string } }).workspace.id;
+      // Bryan lets the domain in first: a mint can only name people the board admits.
+      before.shareLinks.addToAudience(oldBoard, ['@partner.example'], 'Bryan');
       const minted = await post('/api/share/link', {
         workspaceId: oldBoard,
         allowDomains: ['@partner.example'],

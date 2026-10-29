@@ -57,7 +57,7 @@ import {
   storedAudiences,
 } from './board-audience.ts';
 import { type BoardRole, DEFAULT_BOARD_ROLE, normalizeBoardRole } from './board-role.ts';
-import { audienceAdmits, storedAudience } from './share-audience.ts';
+import { audienceAdmits, parseShareAudience, storedAudience } from './share-audience.ts';
 import type { ShareLanding } from './share-landing.ts';
 
 const SECRET_MODE = 0o600;
@@ -168,6 +168,9 @@ interface Persisted {
 export class ShareLinks {
   private readonly dataDir: string;
   private links: ShareLinkRecord[] = [];
+  /** Set when this load gave the registry its first audiences, so the
+   *  older Cloudflare shares can be seeded in the same boot. */
+  private migratedThisBoot = false;
   private members: ShareLinkMember[] = [];
   private audiences: BoardAudience[] = [];
 
@@ -333,6 +336,34 @@ export class ShareLinks {
   /** Every board's audience. */
   allAudiences(): BoardAudience[] {
     return this.audiences.slice();
+  }
+
+  /**
+   * Seed the audiences from the older Cloudflare shares' allow lists, once:
+   * only on the load that ran the migration. Those shares admit on the
+   * collaboration hostname, which now also checks the board's audience, so
+   * without this the upgrade would shut out the people they let in.
+   */
+  seedFromOlderShares(
+    shares: ReadonlyArray<{ workspaceId: string; allowDomains?: readonly string[] }>,
+  ): void {
+    if (!this.migratedThisBoot) return;
+    this.migratedThisBoot = false;
+    const now = Date.now();
+    for (const share of shares) {
+      const parsed = parseShareAudience(share.allowDomains ?? []);
+      const entries = parsed.ok ? (parsed.audience ?? []) : [];
+      if (entries.length === 0) continue;
+      const current = this.audienceOf(share.workspaceId) ?? {
+        workspaceId: share.workspaceId,
+        entries: [],
+      };
+      const list = current.entries.slice();
+      for (const match of entries) {
+        if (!list.some((e) => e.match === match)) list.push({ match, addedAt: now });
+      }
+      this.putAudience({ workspaceId: share.workspaceId, entries: list });
+    }
   }
 
   /** Let these entries in. Already parsed by `parseShareAudience`. */
@@ -588,6 +619,7 @@ export class ShareLinks {
    * changes who is in is Bryan's alone now (29 Oct).
    */
   private migrateToAudiences(): void {
+    this.migratedThisBoot = true;
     const now = Date.now();
     const admitted = this.members.filter((m) =>
       audienceAdmits(this.get(m.viaLinkId)?.allowDomains, m.email),
@@ -602,6 +634,9 @@ export class ShareLinks {
       now,
     );
     this.members = this.members.map(({ role: _role, ...rest }) => rest);
+    // And the links: a live link minted as an Owner's would otherwise make
+    // its next redeemer an Owner again.
+    this.links = this.links.map(({ role: _role, ...rest }) => rest);
     this.save();
   }
 

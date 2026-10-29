@@ -313,7 +313,8 @@ describe('a member at the main address', () => {
         const open = await page(ALICE, `/workspaces/${saltmarsh}/home`);
         expect(open.status).toBe(403);
       } finally {
-        await postLocal('/api/share/enabled', { workspaceId: saltmarsh, enabled: true });
+        // Reopening is the owner's: an agent's call files a card instead.
+        handle.sharingGate.setBoardEnabled(saltmarsh, true);
       }
       expect(await (await page(ALICE, '/')).text()).toContain('Saltmarsh site');
     });
@@ -325,7 +326,8 @@ describe('a member at the main address', () => {
         expect(r.status).toBe(403);
         expect(await r.json()).toEqual({ error: 'sharing_disabled' });
       } finally {
-        expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(200);
+        // Only the owner turns it back on; the test sets the gate directly.
+        handle.sharingGate.setEnabled(true);
       }
     });
   });

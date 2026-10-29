@@ -387,7 +387,12 @@ describe('POST /workspaces/:id/huddles and the empty task', () => {
 
   describe('share members', () => {
     it('starts a huddle on the board, and is told nothing about the machine', async () => {
-      const visitor = await mintAccessShare(base, access, workspaceId, { label: 'board share' });
+      const visitor = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        workspaceId,
+        { label: 'board share' },
+      );
       const visitorHeaders = { ...visitor.headers, 'content-type': 'application/json' };
       // Presence: the cookie DOES reach the board page.
       const page = await fetch(`${base}/workspaces/${workspaceId}?format=json`, {

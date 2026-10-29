@@ -129,7 +129,7 @@ export async function handleWorkspaceMembers(
         role,
         before,
       };
-      const actor = rq.authorFor(body?.author) ?? proposingAgent(body?.createdBy);
+      const actor = proposingAgent(body?.author ?? body?.createdBy);
       return proposalReply(
         j,
         accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
@@ -192,7 +192,7 @@ export async function handleWorkspaceMembers(
     const widening = accessProposals.widening(workspaceId, add);
     if (widening.length > 0 && !proven()) {
       const change = { op: 'add-audience' as const, workspaceId, entries: widening };
-      const actor = rq.authorFor(body?.author) ?? proposingAgent(body?.createdBy);
+      const actor = proposingAgent(body?.author ?? body?.createdBy);
       const res = accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor });
       if (remove.length === 0) return proposalReply(j, res);
       // The removals above already landed; say so beside the proposal.

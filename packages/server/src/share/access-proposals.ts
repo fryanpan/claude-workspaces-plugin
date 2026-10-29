@@ -21,8 +21,9 @@
  * the member still being in — because an approval is for the change as it
  * would land now, not as it would have landed then.
  */
-import { type TaskReviewItem, type User, agentIdForName } from '@claude-workspaces/core';
+import { type TaskReviewItem, type User, agentIdForName, agentSlug } from '@claude-workspaces/core';
 import {
+  ACCESS_LABEL_MAX,
   type ReviewAccessChange,
   accessChangeLine,
   readAccessChange,
@@ -44,6 +45,10 @@ export interface AccessProposalDeps {
   /** The share hostname links are minted on; empty when none is set. */
   shareLinkBaseHost: string;
   isBoardLocked: (workspaceId: string) => boolean;
+  /** Reopen one board, or clear its lock, when the owner approves it. Absent
+   *  where the server has no sharing gate; the change is then refused. */
+  setBoardEnabled?: (workspaceId: string) => { ok: boolean; error?: string };
+  setBoardUnlocked?: (workspaceId: string) => { ok: boolean; error?: string };
   /** Re-project the task and tell the queue, as the review-item route does. */
   announce: (task: Task, item: TaskReviewItem, author: User) => void;
   /** Told after a proposal is filed or answered, for the access page. */
@@ -55,7 +60,7 @@ export type ProposeResult =
   | {
       ok: false;
       status: 400 | 404;
-      error: 'task-required' | 'task-not-on-board' | 'why-required';
+      error: 'task-required' | 'task-not-on-board' | 'why-required' | 'label-too-long';
       message: string;
     };
 
@@ -110,6 +115,14 @@ export class AccessProposals {
         message: 'taskId must name a task on the board being shared',
       };
     }
+    if (change.op === 'share-link' && (change.link.label?.length ?? 0) > ACCESS_LABEL_MAX) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'label-too-long',
+        message: `label must be ${ACCESS_LABEL_MAX} characters or fewer; the owner reads it on the card`,
+      };
+    }
     const why = typeof input.why === 'string' ? input.why.trim() : '';
     if (why === '' || why.length > ACCESS_WHY_MAX) {
       return {
@@ -150,6 +163,27 @@ export class AccessProposals {
   apply(change: ReviewAccessChange, by: string): ApplyResult {
     const { shareLinks } = this.deps;
     const ws = change.workspaceId;
+    if (change.op === 'unlock-board' || change.op === 'open-board') {
+      if (change.op === 'open-board' && this.deps.isBoardLocked(ws)) {
+        return {
+          ok: false,
+          error: 'board-locked',
+          message: 'this board is locked against sharing; unlock it first',
+        };
+      }
+      const set =
+        change.op === 'open-board' ? this.deps.setBoardEnabled : this.deps.setBoardUnlocked;
+      const res = set?.(ws) ?? { ok: false, error: 'no_sharing_gate' };
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: res.error ?? 'refused',
+          message:
+            'sharing is fixed in the environment (CW_SHARING_DISABLED), so this board cannot change',
+        };
+      }
+      return { ok: true, text: `Approved. ${accessChangeLine(change)}` };
+    }
     if (change.op !== 'set-role' && this.deps.isBoardLocked(ws)) {
       return {
         ok: false,
@@ -158,9 +192,17 @@ export class AccessProposals {
       };
     }
     switch (change.op) {
-      case 'add-audience':
-        shareLinks.addToAudience(ws, change.entries, by);
-        return { ok: true, text: `Approved. ${accessChangeLine(change)}` };
+      case 'add-audience': {
+        const before = JSON.stringify(shareLinks.audienceOf(ws)?.entries ?? []);
+        const after = JSON.stringify(shareLinks.addToAudience(ws, change.entries, by).entries);
+        return {
+          ok: true,
+          text:
+            before === after
+              ? 'Approved. Nothing changed: the board already lets them sign in.'
+              : `Approved. ${accessChangeLine(change)}`,
+        };
+      }
       case 'set-role': {
         if (shareLinks.roleOf(ws, change.email) === null) {
           return {
@@ -238,11 +280,23 @@ export class AccessProposals {
   }
 }
 
-/** The agent a loopback share call speaks for: its `createdBy`, or "agent". */
-export function proposingAgent(createdBy: unknown): User {
-  const name =
-    typeof createdBy === 'string' && createdBy.trim() !== '' ? createdBy.trim() : 'agent';
-  return { id: agentIdForName(name), name, kind: 'known', color: '#888888' };
+/**
+ * The agent a loopback share call speaks for: the name it gives, or "agent".
+ * Always an AGENT, whatever name it claims: a body cannot file a card as a
+ * person, and a name that is a person's is marked as an agent's on the card.
+ */
+export function proposingAgent(claimed: unknown): User {
+  const raw =
+    claimed && typeof claimed === 'object' ? (claimed as { name?: unknown }).name : claimed;
+  const name = typeof raw === 'string' && raw.trim() !== '' ? raw.trim().slice(0, 80) : 'agent';
+  const known = agentIdForName(name);
+  const isAgentId = known.startsWith('agent-') || known === 'known-agent';
+  return {
+    id: isAgentId ? known : `agent-${agentSlug(name)}`,
+    name: isAgentId ? name : `${name} (agent)`,
+    kind: 'known',
+    color: '#888888',
+  };
 }
 
 /** The reply a call that became a proposal gets: 202, and what to tell the person. */

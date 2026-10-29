@@ -232,7 +232,7 @@ describe('ending share access closes an open meeting socket', () => {
     ownerMic.hangUp();
 
     // Put the switch back, so this file leaves the fixture as it found it.
-    const on = await postLocal('/api/share/enabled', { enabled: true });
-    expect(on.status).toBe(200);
+    // Only the owner turns it back on, so the test sets the gate directly.
+    handle.sharingGate.setEnabled(true);
   });
 });

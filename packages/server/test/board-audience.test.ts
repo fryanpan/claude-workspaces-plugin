@@ -66,6 +66,19 @@ describe('a board audience', () => {
     expect(removeFromAudience(a, '@harborlight.example').entries).toEqual([]);
   });
 
+  it('lets back the people a domain kept out when the domain itself is added again', () => {
+    const kept = removeFromAudience(
+      audience([{ match: '@harborlight.example', addedAt: 1 }]),
+      ALICE,
+    );
+    // Re-adding it is a widening, so an agent's request still files a card…
+    expect(entriesWidenAudience(kept, ['@harborlight.example'])).toEqual(['@harborlight.example']);
+    // …and approving it does what the card said: everyone at the domain.
+    const back = addAudienceEntries(kept, ['@harborlight.example'], 'Bryan', 2);
+    expect(boardAudienceAdmits(back, ALICE)).toBe(true);
+    expect(back.entries).toEqual([{ match: '@harborlight.example', addedAt: 1 }]);
+  });
+
   it('does not add an entry twice', () => {
     const a = addAudienceEntries(audience([{ match: ALICE, addedAt: 1 }]), [ALICE], 'Bryan', 2);
     expect(a.entries).toHaveLength(1);

@@ -84,7 +84,11 @@ export function entriesWidenAudience(
   });
 }
 
-/** Add entries, once each. Already-parsed by `parseShareAudience`. */
+/**
+ * Add entries, once each. Already-parsed by `parseShareAudience`. Adding a
+ * domain the audience already holds clears its exceptions: the add says
+ * "everyone at", so the people once removed from it come back.
+ */
 export function addAudienceEntries(
   audience: BoardAudience,
   matches: readonly string[],
@@ -93,7 +97,13 @@ export function addAudienceEntries(
 ): BoardAudience {
   const entries = audience.entries.slice();
   for (const match of matches) {
-    if (entries.some((e) => e.match === match)) continue;
+    const i = entries.findIndex((e) => e.match === match);
+    const held = i >= 0 ? entries[i] : undefined;
+    if (held?.except?.length) {
+      const { except: _except, ...rest } = held;
+      entries[i] = rest;
+    }
+    if (held) continue;
     entries.push({ match, addedAt: at, addedBy });
   }
   return { workspaceId: audience.workspaceId, entries };

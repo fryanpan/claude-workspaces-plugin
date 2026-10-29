@@ -26,8 +26,10 @@
  * otherwise keep syncing and keep receiving comments on a doc that is no
  * longer reachable. Same lesson as share revocation.
  */
+import { isOwnerActor } from '../actor-identity.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { IdentityRecord } from '../identities.ts';
+import { type AccessProposals, proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { memberKeyOnBoard } from '../share/collab-member-key.ts';
 import type { Shares } from '../share/shares.ts';
 import {
@@ -55,12 +57,47 @@ export interface ShareSwitchContext {
   onSharingFlip: (flip: SharingFlip) => void;
   /** The clock, for the log line. */
   now?: () => number;
+  /** Files the card an agent's request to open a board becomes. */
+  accessProposals?: AccessProposals;
 }
 
 export interface ShareSwitchRequest {
   req: Request;
   /** The identity this request proved, or null. */
   provenIdentityFor: () => IdentityRecord | null;
+}
+
+/** Did this request prove it is the machine's owner? A loopback agent proves nobody. */
+export function provedOwner(rq: ShareSwitchRequest): boolean {
+  const proven = rq.provenIdentityFor();
+  return proven !== null && isOwnerActor({ id: proven.id });
+}
+
+/**
+ * Opening a door is the owner's (Bryan, 29 Oct: only he changes who is in);
+ * closing one never waits. An agent asking to open a board files a card for
+ * the owner on `taskId` instead, and answers 202.
+ */
+export function openingNeedsOwner(
+  ctx: Pick<ShareSwitchContext, 'accessProposals' | 'j'>,
+  change: { op: 'open-board' | 'unlock-board'; workspaceId: string },
+  body: { taskId?: string; why?: string; actor?: { name?: string } },
+): Response {
+  if (!ctx.accessProposals) {
+    return ctx.j(403, {
+      error: 'owner-only',
+      message: "Only the machine's owner opens a board to sharing.",
+    });
+  }
+  return proposalReply(
+    ctx.j,
+    ctx.accessProposals.propose({
+      change,
+      taskId: body.taskId,
+      why: body.why,
+      actor: proposingAgent(body.actor?.name),
+    }),
+  );
 }
 
 /** Answer `POST /api/share/enabled`. The caller has already matched the path. */
@@ -72,6 +109,19 @@ export async function handleShareSwitch(
   const parsed = parseFlipRequest(await ctx.safeJson(rq.req));
   if (!parsed.ok) return j(400, { error: parsed.error });
   const { enabled, workspaceId, reason, actor } = parsed.value;
+  if (enabled && !provedOwner(rq)) {
+    if (!workspaceId) {
+      return j(403, {
+        error: 'owner-only',
+        message:
+          'Only the owner turns sharing back on: they answer "Turn back on" on the card filed on their queue when it went off.',
+      });
+    }
+    if (!taskStore.getWorkspace(workspaceId)) {
+      return j(404, { error: 'unknown_workspace', workspaceId });
+    }
+    return openingNeedsOwner(ctx, { op: 'open-board', workspaceId }, parsed.value);
+  }
 
   const flip: SharingFlip = {
     ...(workspaceId ? { workspaceId } : {}),

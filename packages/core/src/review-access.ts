@@ -32,13 +32,52 @@ export type ReviewAccessChange =
   /** Change what one member may do. */
   | { op: 'set-role'; workspaceId: string; email: string; role: AccessRole; before: AccessRole }
   /** Name `entries` in the audience (possibly none), then mint a link. */
-  | { op: 'share-link'; workspaceId: string; entries: string[]; link: AccessLinkRequest };
+  | { op: 'share-link'; workspaceId: string; entries: string[]; link: AccessLinkRequest }
+  /** Turn this board's sharing back on after it was closed. */
+  | { op: 'open-board'; workspaceId: string }
+  /** Clear this board's never-shareable lock. */
+  | { op: 'unlock-board'; workspaceId: string };
 
 const ROLE_WORD: Record<AccessRole, string> = { owner: 'Owner', member: 'Regular User' };
 
 function entryWords(entries: readonly string[]): string {
   return entries.map((e) => (e.startsWith('@') ? `everyone at ${e}` : e)).join(', ');
 }
+
+/** Longest label a card quotes. */
+export const ACCESS_LABEL_MAX = 60;
+
+/**
+ * A label as a card quotes it: no control characters or quote marks, so it
+ * cannot close its own quotes and add words of its own, and capped.
+ */
+export function quotedLabel(label: string): string {
+  const clean = label
+    .replace(/[\p{Cc}"“”'‘’`]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean.length > ACCESS_LABEL_MAX ? `${clean.slice(0, ACCESS_LABEL_MAX - 1)}…` : clean;
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** "3 days", "2 hours", "45 minutes": the largest whole unit. */
+export function ttlWords(seconds: number): string {
+  if (seconds >= 86_400 && seconds % 86_400 === 0) return plural(seconds / 86_400, 'day');
+  if (seconds >= 3_600 && seconds % 3_600 === 0) return plural(seconds / 3_600, 'hour');
+  return plural(Math.max(1, Math.round(seconds / 60)), 'minute');
+}
+
+const LANDING_WORD: Record<string, string> = {
+  home: "the board's Home",
+  board: 'the board',
+  task: 'a task',
+  doc: 'a doc',
+  mockup: 'a mock',
+  app: 'a dev server',
+};
 
 /** One plain sentence saying what approving does. */
 export function accessChangeLine(change: ReviewAccessChange): string {
@@ -48,13 +87,28 @@ export function accessChangeLine(change: ReviewAccessChange): string {
     case 'set-role':
       return `Makes ${change.email} ${ROLE_WORD[change.role]} (now ${ROLE_WORD[change.before]}).`;
     case 'share-link': {
+      const { link } = change;
       const who =
         change.entries.length > 0
           ? `Lets ${entryWords(change.entries)} sign in, and mints`
           : 'Mints';
-      const role = change.link.role === 'owner' ? ' that makes everyone who opens it an Owner' : '';
-      return `${who} a share link${change.link.label ? ` "${change.link.label}"` : ''}${role}.`;
+      const label = link.label ? quotedLabel(link.label) : '';
+      const head = `${who} a share link${label ? ` "${label}"` : ''}${link.role === 'owner' ? ' that makes everyone who opens it an Owner' : ''}`;
+      const parts = [
+        head,
+        link.ttlSeconds !== undefined
+          ? `open for ${ttlWords(link.ttlSeconds)}`
+          : 'open until it is revoked',
+        link.landing
+          ? `opening on ${LANDING_WORD[link.landing.kind] ?? 'one thing on the board'}${link.landing.id ? ` (${link.landing.id})` : ''}`
+          : '',
+      ].filter((p) => p !== '');
+      return `${parts.join(', ')}.`;
     }
+    case 'open-board':
+      return 'Turns sharing back on for this board, so the people it names can sign in again.';
+    case 'unlock-board':
+      return 'Unlocks this board, so it can be shared again.';
   }
 }
 
@@ -91,6 +145,7 @@ export function readAccessChange(raw: unknown): ReviewAccessChange | undefined {
   if (r.op === 'set-role' && typeof r.email === 'string' && isRole(r.role) && isRole(r.before)) {
     return { op: 'set-role', workspaceId, email: r.email, role: r.role, before: r.before };
   }
+  if (r.op === 'open-board' || r.op === 'unlock-board') return { op: r.op, workspaceId };
   if (r.op === 'share-link' && isStrings(r.entries) && r.link && typeof r.link === 'object') {
     const l = r.link as Record<string, unknown>;
     const link: AccessLinkRequest = {};

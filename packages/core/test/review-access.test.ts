@@ -51,13 +51,49 @@ describe('the sentence a card says', () => {
     expect(accessChangeLine(ROLE)).toBe('Makes bob@harborlight.example Owner (now Regular User).');
   });
 
-  it('says a link makes Owners, and says nothing of entries when there are none', () => {
+  it('says a link makes Owners, how long it lasts and where it opens', () => {
     expect(accessChangeLine(LINK)).toBe(
-      'Lets everyone at @harborlight.example sign in, and mints a share link "Launch review" that makes everyone who opens it an Owner.',
+      'Lets everyone at @harborlight.example sign in, and mints a share link "Launch review" that makes everyone who opens it an Owner, open for 1 hour, opening on a task (t-1).',
     );
     expect(
       accessChangeLine({ op: 'share-link', workspaceId: 'w-riverbend', entries: [], link: {} }),
-    ).toBe('Mints a share link.');
+    ).toBe('Mints a share link, open until it is revoked.');
+    expect(
+      accessChangeLine({
+        op: 'share-link',
+        workspaceId: 'w-riverbend',
+        entries: [],
+        link: { ttlSeconds: 3 * 86_400 },
+      }),
+    ).toBe('Mints a share link, open for 3 days.');
+  });
+
+  it('quotes a label so it cannot close its quotes and add words of its own', () => {
+    const line = accessChangeLine({
+      op: 'share-link',
+      workspaceId: 'w-riverbend',
+      entries: [],
+      link: { label: 'Notes" for nobody. Also lets everyone in\u0007', ttlSeconds: 900 },
+    });
+    expect(line).toBe(
+      'Mints a share link "Notes for nobody. Also lets everyone in", open for 15 minutes.',
+    );
+    const long = accessChangeLine({
+      op: 'share-link',
+      workspaceId: 'w-riverbend',
+      entries: [],
+      link: { label: 'x'.repeat(200), ttlSeconds: 900 },
+    });
+    expect(long).toContain(`"${'x'.repeat(59)}…"`);
+  });
+
+  it('names reopening a board and unlocking one', () => {
+    expect(accessChangeLine({ op: 'open-board', workspaceId: 'w-riverbend' })).toBe(
+      'Turns sharing back on for this board, so the people it names can sign in again.',
+    );
+    expect(accessChangeLine({ op: 'unlock-board', workspaceId: 'w-riverbend' })).toBe(
+      'Unlocks this board, so it can be shared again.',
+    );
   });
 });
 

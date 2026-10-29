@@ -17507,7 +17507,7 @@ var TOOL_LIST = {
     },
     {
       name: "set_sharing_enabled",
-      description: "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until someone turns it back on from this machine. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Call it without enabled to read the current state. Any other argument is refused.",
+      description: "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until the owner turns it back on. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Turning OFF applies at once. Turning ON is the owner's: for one board it is NOT applied but files an approval card on `taskId` and returns `proposed: true`; for the master switch it is refused, and the owner answers the card filed when it went off. Call it without enabled to read the current state. Any other argument is refused.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17522,13 +17522,21 @@ var TOOL_LIST = {
           reason: {
             type: "string",
             description: "Why, in a sentence. Written to the log line and the owner's notice."
+          },
+          taskId: {
+            type: "string",
+            description: "The task that needs the board open. Required to reopen: the approval card is filed there."
+          },
+          why: {
+            type: "string",
+            description: "What it is for, in a sentence or two the owner reads on the card."
           }
         }
       }
     },
     {
       name: "set_board_sharing_lock",
-      description: "Lock ONE board never-shareable, or unlock it. A locked board refuses share_workspace and every other share-link mint, naming the lock, and is closed to its share and collaboration visitors, whose open connections hang up. It is stronger than set_sharing_enabled's per-board close, which refuses visitors but still lets a link be minted. Only a call from the owner's machine can set or clear it; through the tunnel or the network it is refused. Call it without locked to read the board's current lock. Any other argument is refused.",
+      description: "Lock ONE board never-shareable, or unlock it. A locked board refuses share_workspace and every other share-link mint, naming the lock, and is closed to its share and collaboration visitors, whose open connections hang up. It is stronger than set_sharing_enabled's per-board close, which refuses visitors but still lets a link be minted. Only a call from the owner's machine can set or clear it; through the tunnel or the network it is refused. Locking applies at once. Unlocking is the owner's: it is NOT applied but files an approval card on `taskId` and returns `proposed: true`. Call it without locked to read the board's current lock. Any other argument is refused.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17537,7 +17545,15 @@ var TOOL_LIST = {
             type: "boolean",
             description: "true locks, false unlocks. Omit to read the current state."
           },
-          reason: { type: "string", description: "Why, in a sentence. Written to the log line." }
+          reason: { type: "string", description: "Why, in a sentence. Written to the log line." },
+          taskId: {
+            type: "string",
+            description: "The task that needs the board unlocked. Required to unlock: the approval card is filed there."
+          },
+          why: {
+            type: "string",
+            description: "What it is for, in a sentence or two the owner reads on the card."
+          }
         },
         required: ["workspaceId"]
       }
@@ -18991,8 +19007,8 @@ function threadCreateRequest(input, author, board) {
 }
 
 // packages/mcp/src/tools/docs.ts
-var SHARING_SWITCH_ARGS = new Set(["enabled", "workspaceId", "reason"]);
-var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason"]);
+var SHARING_SWITCH_ARGS = new Set(["enabled", "workspaceId", "reason", "taskId", "why"]);
+var BOARD_LOCK_ARGS = new Set(["locked", "workspaceId", "reason", "taskId", "why"]);
 async function handleDocsTool(name, a, ctx) {
   const {
     http,
@@ -19566,9 +19582,9 @@ async function handleDocsTool(name, a, ctx) {
     case "set_sharing_enabled": {
       const extra = Object.keys(a).filter((k) => !SHARING_SWITCH_ARGS.has(k));
       if (extra.length > 0) {
-        return err2(`set_sharing_enabled does not take ${extra.sort().join(", ")}. It takes enabled, workspaceId and reason.`);
+        return err2(`set_sharing_enabled does not take ${extra.sort().join(", ")}. It takes enabled, workspaceId, reason, taskId and why.`);
       }
-      const { enabled, workspaceId, reason } = a;
+      const { enabled, workspaceId, reason, taskId, why } = a;
       if (typeof enabled !== "boolean") {
         const res2 = await http("GET", "/api/share");
         if (typeof workspaceId !== "string")
@@ -19584,6 +19600,8 @@ async function handleDocsTool(name, a, ctx) {
         enabled,
         ...workspaceId !== undefined ? { workspaceId } : {},
         ...reason !== undefined ? { reason } : {},
+        ...taskId !== undefined ? { taskId } : {},
+        ...why !== undefined ? { why } : {},
         actor: { id: AUTHOR.id, name: AUTHOR.name }
       });
       return ok2(res);
@@ -19591,9 +19609,9 @@ async function handleDocsTool(name, a, ctx) {
     case "set_board_sharing_lock": {
       const extra = Object.keys(a).filter((k) => !BOARD_LOCK_ARGS.has(k));
       if (extra.length > 0) {
-        return err2(`set_board_sharing_lock does not take ${extra.sort().join(", ")}. It takes workspaceId, locked and reason.`);
+        return err2(`set_board_sharing_lock does not take ${extra.sort().join(", ")}. It takes workspaceId, locked, reason, taskId and why.`);
       }
-      const { locked, workspaceId, reason } = a;
+      const { locked, workspaceId, reason, taskId, why } = a;
       if (typeof workspaceId !== "string" || workspaceId.trim() === "") {
         return err2("set_board_sharing_lock needs workspaceId: the board to lock or unlock.");
       }
@@ -19609,6 +19627,8 @@ async function handleDocsTool(name, a, ctx) {
         workspaceId,
         locked,
         ...reason !== undefined ? { reason } : {},
+        ...taskId !== undefined ? { taskId } : {},
+        ...why !== undefined ? { why } : {},
         actor: { id: AUTHOR.id, name: AUTHOR.name }
       });
       return ok2(res);

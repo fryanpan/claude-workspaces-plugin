@@ -55,7 +55,7 @@ import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import { widgetAuthPage } from '../widget-auth-page.ts';
 import { BOARD_LOCK_PATH, handleBoardLock } from './board-lock.ts';
-import { handleShareSwitch } from './share-switch.ts';
+import { handleShareSwitch, provedOwner } from './share-switch.ts';
 
 /**
  * The refusal a share route gives when handed a GROUPING id.
@@ -106,6 +106,11 @@ const SHARE_LINK_ARGS: ReadonlySet<string> = new Set([
   'ttlSeconds',
   'label',
   'allowDomains',
+  // Where a mint that names somebody new files its card, and why
+  // (share/access-proposals.ts), and who is asking.
+  'taskId',
+  'why',
+  'createdBy',
 ]);
 
 /**
@@ -880,6 +885,28 @@ export async function handleAuthShareRoutes(
       maxSeconds: shares.maxTtlSeconds,
     });
     if (!linkTtl.ok) return j(400, { error: linkTtl.error, hint: linkTtl.hint });
+    // Only the owner lets somebody new in, on this older flow too. The
+    // operator's own addresses are not somebody new; anything else the
+    // board's audience does not name files a card, and once the owner
+    // approves it the same call mints. The collaboration hostname also
+    // checks the board's audience on every request (`collabMemberOf`).
+    const widening = accessProposals.widening(
+      workspaceId,
+      audience
+        .map((d) => (d.includes('@') ? d.toLowerCase() : `@${d.toLowerCase()}`))
+        .filter((d) => !defaultShareAudience.some((t) => t.toLowerCase() === d)),
+    );
+    if (widening.length > 0 && !provedOwner({ req, provenIdentityFor })) {
+      return proposalReply(
+        j,
+        accessProposals.propose({
+          change: { op: 'add-audience', workspaceId, entries: widening },
+          taskId: body?.taskId,
+          why: body?.why,
+          actor: proposingAgent(body?.createdBy),
+        }),
+      );
+    }
     try {
       const share = await shares.createShareWorkspace({
         workspaceId,
@@ -925,6 +952,20 @@ export async function handleAuthShareRoutes(
       maxSeconds: shares.maxTtlSeconds,
     });
     if (!newTtl.ok) return j(400, { error: newTtl.error, hint: newTtl.hint });
+    // Shortening applies at once. Keeping a share open longer is the owner's:
+    // it keeps people in past the time the owner agreed to.
+    const current = shares.findLive(shareId);
+    if (
+      current &&
+      Date.now() + newTtl.seconds * 1000 > current.expiresAt &&
+      !provedOwner({ req, provenIdentityFor })
+    ) {
+      return j(403, {
+        error: 'owner-only',
+        message:
+          'Only the owner keeps a share open longer. Shortening it applies at once; to extend it, mint a share for the people the board names.',
+      });
+    }
     try {
       const share = await shares.setTtl(shareId, newTtl.seconds);
       return share

@@ -56,7 +56,14 @@ export async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function startShareProofServer(name: string): Promise<ShareProofServer> {
+/**
+ * `legacyMint` leaves the share hostname out, which is the one deployment
+ * where `POST /api/share/link` still mints a per-share Access application.
+ */
+export async function startShareProofServer(
+  name: string,
+  opts: { legacyMint?: boolean } = {},
+): Promise<ShareProofServer> {
   const { publicKey, privateKey } = await generateKeyPair('RS256');
   const publicJwk = (await exportJWK(publicKey)) as JWK;
   publicJwk.kid = KID;
@@ -78,8 +85,7 @@ export async function startShareProofServer(name: string): Promise<ShareProofSer
     port: 0,
     dataDir: join(root, 'data'),
     cfAccess: { teamDomain: TEAM_DOMAIN, audience: OWNER_AUD, jwks },
-    shareLinkHosts: [SHARE_HOST],
-    shareLinkAudience: SHARE_AUD,
+    ...(opts.legacyMint ? {} : { shareLinkHosts: [SHARE_HOST], shareLinkAudience: SHARE_AUD }),
     proxiedTrustedHosts: [OWNER_HOST],
     proxiedTrustedEmails: [OWNER_EMAIL],
     ownerEmail: OWNER_EMAIL,

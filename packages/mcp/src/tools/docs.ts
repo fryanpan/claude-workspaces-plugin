@@ -77,10 +77,10 @@ export interface DocsToolContext {
 }
 
 /** The arguments `set_sharing_enabled` reads. Anything else is refused. */
-const SHARING_SWITCH_ARGS = new Set(['enabled', 'workspaceId', 'reason']);
+const SHARING_SWITCH_ARGS = new Set(['enabled', 'workspaceId', 'reason', 'taskId', 'why']);
 
 /** The arguments `set_board_sharing_lock` reads. Anything else is refused. */
-const BOARD_LOCK_ARGS = new Set(['locked', 'workspaceId', 'reason']);
+const BOARD_LOCK_ARGS = new Set(['locked', 'workspaceId', 'reason', 'taskId', 'why']);
 
 /** Answers the document tools; `undefined` means "not one of mine". */
 export async function handleDocsTool(
@@ -1023,13 +1023,15 @@ export async function handleDocsTool(
       const extra = Object.keys(a).filter((k) => !SHARING_SWITCH_ARGS.has(k));
       if (extra.length > 0) {
         return err(
-          `set_sharing_enabled does not take ${extra.sort().join(', ')}. It takes enabled, workspaceId and reason.`,
+          `set_sharing_enabled does not take ${extra.sort().join(', ')}. It takes enabled, workspaceId, reason, taskId and why.`,
         );
       }
-      const { enabled, workspaceId, reason } = a as {
+      const { enabled, workspaceId, reason, taskId, why } = a as {
         enabled?: boolean;
         workspaceId?: string;
         reason?: string;
+        taskId?: string;
+        why?: string;
       };
       // No `enabled` = read-only. GET /api/share carries the same `sharing`
       // object the POST returns, so a status check costs nothing and can't
@@ -1050,6 +1052,8 @@ export async function handleDocsTool(
         enabled,
         ...(workspaceId !== undefined ? { workspaceId } : {}),
         ...(reason !== undefined ? { reason } : {}),
+        ...(taskId !== undefined ? { taskId } : {}),
+        ...(why !== undefined ? { why } : {}),
         actor: { id: AUTHOR.id, name: AUTHOR.name },
       });
       return ok(res);
@@ -1058,13 +1062,15 @@ export async function handleDocsTool(
       const extra = Object.keys(a).filter((k) => !BOARD_LOCK_ARGS.has(k));
       if (extra.length > 0) {
         return err(
-          `set_board_sharing_lock does not take ${extra.sort().join(', ')}. It takes workspaceId, locked and reason.`,
+          `set_board_sharing_lock does not take ${extra.sort().join(', ')}. It takes workspaceId, locked, reason, taskId and why.`,
         );
       }
-      const { locked, workspaceId, reason } = a as {
+      const { locked, workspaceId, reason, taskId, why } = a as {
         locked?: boolean;
         workspaceId?: string;
         reason?: string;
+        taskId?: string;
+        why?: string;
       };
       if (typeof workspaceId !== 'string' || workspaceId.trim() === '') {
         return err('set_board_sharing_lock needs workspaceId: the board to lock or unlock.');
@@ -1083,6 +1089,8 @@ export async function handleDocsTool(
         workspaceId,
         locked,
         ...(reason !== undefined ? { reason } : {}),
+        ...(taskId !== undefined ? { taskId } : {}),
+        ...(why !== undefined ? { why } : {}),
         actor: { id: AUTHOR.id, name: AUTHOR.name },
       });
       return ok(res);

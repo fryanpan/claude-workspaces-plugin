@@ -58,6 +58,8 @@ describe('share_link arguments are honoured or refused, never dropped', () => {
     expect(board.status).toBe(200);
     boardId = ((await board.json()) as { workspace: { id: string } }).workspace.id;
     expect(boardId).toBeTruthy();
+    // Bryan lets the domain in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Bryan');
   };
 
   /** Seconds from now until the share expires, rounded. */
@@ -271,19 +273,22 @@ describe('share_link arguments are honoured or refused, never dropped', () => {
       expect(body.ttlClamped).toBeUndefined();
     });
 
-    it('set_share_ttl cannot extend a live share past the max either', async () => {
+    it('set_share_ttl from an agent cannot extend a live share at all, and can shorten it', async () => {
       const minted = await local('/api/share/link', {
         allowDomains: ['@partner.example'],
         workspaceId: boardId,
         ttl: '15m',
       });
       const { share } = (await minted.json()) as { share: Share };
-      const r = await local(`/api/share/${share.shareId}/ttl`, { ttlSeconds: 3 * 86400 });
-      expect(r.status).toBe(200);
-      const body = (await r.json()) as { share: Share; ttlClamped?: { maxSeconds: number } };
-      expect(ttlOf(body.share)).toBeLessThanOrEqual(3600);
-      expect(ttlOf(body.share)).toBeGreaterThan(3595);
-      expect(body.ttlClamped?.maxSeconds).toBe(3600);
+      // Keeping people in longer is the owner's call, whatever the max allows.
+      const longer = await local(`/api/share/${share.shareId}/ttl`, { ttlSeconds: 3 * 86400 });
+      expect(longer.status).toBe(403);
+      expect(((await longer.json()) as { error: string }).error).toBe('owner-only');
+      expect(ttlOf((await listShares())[0] as Share)).toBeLessThanOrEqual(900);
+      // Positive control: shortening applies at once.
+      const shorter = await local(`/api/share/${share.shareId}/ttl`, { ttl: '5m' });
+      expect(shorter.status).toBe(200);
+      expect(ttlOf(((await shorter.json()) as { share: Share }).share)).toBeLessThanOrEqual(300);
     });
   });
 });

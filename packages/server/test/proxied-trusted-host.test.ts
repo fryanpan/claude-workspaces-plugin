@@ -576,7 +576,9 @@ describe('E. sharing off closes the operator hostname too', () => {
       headers: { host: `localhost:${h.port}` },
     });
     expect(local.status).toBe(200);
-    expect((await setSharing(true)).status).toBe(200);
+    // Turning it back on is the owner's answer on the notice, not an agent's
+    // call; the test sets the gate the way that answer does.
+    h.sharingGate.setEnabled(true);
     const back = await get(h, docsOf(h), {
       host: PROXIED_HOST,
       ...CF_RAY,

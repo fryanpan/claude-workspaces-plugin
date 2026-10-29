@@ -2819,6 +2819,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     shareLinkBaseHost,
     isBoardLocked: (workspaceId) => sharingGate.isBoardLocked(workspaceId),
+    setBoardEnabled: (workspaceId) => sharingGate.setBoardEnabled(workspaceId, true),
+    setBoardUnlocked: (workspaceId) => sharingGate.setBoardLocked(workspaceId, false),
     announce: (task, item, author) => {
       taskProjection.refreshTask(task);
       announceTaskReview(task, item, author);

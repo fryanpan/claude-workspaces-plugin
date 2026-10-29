@@ -236,6 +236,8 @@ describe('revoking access hangs up a collaboration-hostname socket', () => {
   };
 
   const mintShare = async (boardId: string, allowDomains: string[]): Promise<MintedShare> => {
+    // Bryan lets them in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(boardId, allowDomains, 'Bryan');
     const res = await postLocal('/api/share/link', { workspaceId: boardId, allowDomains });
     expect(res.status, await res.clone().text()).toBe(200);
     return ((await res.json()) as { share: MintedShare }).share;
@@ -368,7 +370,8 @@ describe('revoking access hangs up a collaboration-hostname socket', () => {
       expect(code).toBe(1008);
       expect(owner.ws.readyState).toBe(WebSocket.OPEN);
     } finally {
-      expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(200);
+      // Only the owner turns it back on; the test puts the gate back directly.
+      handle.sharingGate.setEnabled(true);
       owner.ws.close();
     }
   });

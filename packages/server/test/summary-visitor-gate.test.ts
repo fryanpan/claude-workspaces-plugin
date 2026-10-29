@@ -132,8 +132,11 @@ describe('share visitors never spend the summary API key', () => {
     });
     expect(filed.status).toBe(200);
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId, { label: 'external review' }))
-      .headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId, {
+        label: 'external review',
+      })
+    ).headers;
   });
 
   afterAll(async () => {

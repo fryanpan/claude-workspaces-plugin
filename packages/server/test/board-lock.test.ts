@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
+import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 
@@ -113,6 +114,8 @@ describe('a board locked never-shareable', () => {
       shareLinkAudience: SHARE_AUD,
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
+      // So a request Access proves as this address proves the owner.
+      ownerEmail: OWNER_EMAIL,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
     });
     base = `http://127.0.0.1:${handle.port}`;
@@ -137,6 +140,7 @@ describe('a board locked never-shareable', () => {
     await handle.stop();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(fixtures, { recursive: true, force: true });
+    resetOwnerIdentities();
   });
 
   it('CONTROL: before the lock the visitor reads the board', async () => {
@@ -209,14 +213,51 @@ describe('a board locked never-shareable', () => {
   });
 
   it('is not undone by reopening the board with the sharing switch', async () => {
-    const r = await postLocal('/api/share/enabled', { workspaceId: board, enabled: true });
+    const r = await postOwnerHost('/api/share/enabled', { workspaceId: board, enabled: true });
     expect(r.status).toBe(200);
     expect((await mintWorkspace(board)).status).toBe(403);
     expect((await onShareHost(boardPath(board))).status).toBe(403);
   });
 
-  it('unlocks from the box, and minting works again', async () => {
-    expect((await lock(false)).status).toBe(200);
+  it("does not unlock for an agent: it files a card, and the owner's Approve unlocks it", async () => {
+    const task = (await (
+      await postLocal(`/workspaces/${board}/tasks`, {
+        title: 'Share the private folder',
+        body: 'Agent can share the folder so that Riverbend can review it.',
+        author: { id: 'agent-riverbend', name: 'Riverbend Bot', kind: 'agent' },
+      })
+    ).json()) as { task: { id: string } };
+    const filed = await postLocal('/api/share/lock', {
+      workspaceId: board,
+      locked: false,
+      taskId: task.task.id,
+      why: 'Riverbend reviews the folder this week.',
+      actor: { id: 'agent-riverbend', name: 'Riverbend Bot' },
+    });
+    expect(filed.status).toBe(202);
+    const { reviewItemId } = (await filed.json()) as { reviewItemId: string };
+    // Still locked: nothing changed until the owner answers.
+    expect((await mintWorkspace(board)).status).toBe(403);
+    const approved = await req(
+      `/workspaces/${board}/tasks/${task.task.id}/review-items/${reviewItemId}/access`,
+      OWNER_HOST,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...CF_RAY,
+          'x-forwarded-proto': 'https',
+          'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
+          'sec-fetch-site': 'same-origin',
+          origin: `https://${OWNER_HOST}`,
+        },
+        body: JSON.stringify({
+          decision: 'approve',
+          access: { op: 'unlock-board', workspaceId: board },
+        }),
+      },
+    );
+    expect(approved.status, await approved.clone().text()).toBe(200);
     expect((await mintWorkspace(board)).status).toBe(200);
     expect((await onShareHost(boardPath(board))).status).toBe(200);
   });

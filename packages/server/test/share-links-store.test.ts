@@ -346,6 +346,8 @@ describe('the share-link store', () => {
             expiresAt: null,
             revokedAt: null,
             allowDomains: ['@saltmarsh.example'],
+            // A link that made Owners: invited Owners are ordinary members now.
+            role: 'owner',
             redemptions: [],
           },
         ],
@@ -374,9 +376,27 @@ describe('the share-link store', () => {
       expect(upgraded.redeem('a'.repeat(32), 'new@partner.example').ok).toBe(false);
       // The domain a live link's own audience named was Bryan's choice, and stays.
       expect(upgraded.redeem('b'.repeat(32), 'finance@saltmarsh.example').ok).toBe(true);
+      expect(upgraded.get('b'.repeat(32))?.role).toBeUndefined();
+      expect(upgraded.roleOf(OTHER_BOARD, 'finance@saltmarsh.example')).toBe('member');
       // Written once: the next boot reads the audiences rather than re-seeding.
       const written = JSON.parse(readFileSync(path, 'utf8')) as { audiences: unknown[] };
       expect(written.audiences).toHaveLength(2);
+    });
+
+    it("seeds the older Cloudflare shares' allow lists on the upgrade, and only then", () => {
+      writeFileSync(join(dataDir, 'share-links.json'), JSON.stringify({ links: [], members: [] }));
+      const older = [{ workspaceId: BOARD, allowDomains: ['@riverbend.example', REVIEWER] }];
+      const upgraded = new ShareLinks({ dataDir });
+      upgraded.seedFromOlderShares(older);
+      expect(upgraded.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([
+        '@riverbend.example',
+        REVIEWER,
+      ]);
+      // A later boot has audiences already: the owner's edits since are not undone.
+      upgraded.removeFromAudience(BOARD, '@riverbend.example');
+      const next = new ShareLinks({ dataDir });
+      next.seedFromOlderShares(older);
+      expect(next.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([REVIEWER]);
     });
   });
 
