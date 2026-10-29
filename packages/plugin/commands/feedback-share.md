@@ -62,12 +62,20 @@ reports. Everything on that board is available to everyone the share reaches
 
 4. **Call `share_workspace`** with `{ workspaceId, allowDomains?, ttlSeconds? }`,
    where `workspaceId` is the BOARD id. Links do not expire by default — pass
-   a ttl only when the user asks for a window. `allowDomains` limits who can
-   join: each entry is an address (`someone@partner.example`) or an exact
-   domain (`@partner.example`, subdomains not included), and the server checks
-   it on every request, not only the first. Omit it and everyone who opens the
-   link and signs in through Cloudflare Access becomes a member. The reply's
-   `audience` says which applied. The call answers `410
+   a ttl only when the user asks for a window. Each `allowDomains` entry is an
+   address (`someone@partner.example`) or an exact domain
+   (`@partner.example`, subdomains not included), and the server checks it on
+   every request, not only the first.
+
+   **Only the board's owner lets somebody new in.** A board has an audience:
+   the addresses and domains the owner approved (`list_shares` shows them). A
+   link for people the audience already names is minted at once. A link that
+   names somebody new, or `role: 'owner'`, is not minted: pass `taskId` and
+   `why`, and the call files an access card on that task and returns
+   `proposed: true`. The owner approves it in their browser, and you are told
+   when they answer. `set_share_audience` changes the audience the same way:
+   `remove` applies at once, `add` files a card. The owner reads every board's
+   list, and what is waiting for them, at `/access`. The call answers `410
    grouping_sharing_removed` if you hand it a review id by mistake.
 
 5. **Share the resulting URL** with the user along with a brief instruction

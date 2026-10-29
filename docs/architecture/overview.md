@@ -221,6 +221,19 @@ not given, are answered BY the gate from the membership it just checked, so a
 board the list names always opens and one it leaves out never does. It sees a
 `Request` only to ask whether it is a navigation, and names no path of its own.
 
+Share audiences (only the machine's owner changes who is in) add no box
+either. `share/board-audience.ts` is each board's list of addresses and
+`@domain`s, checked beside every link's; `share/access-proposals.ts` turns an
+agent's widening call into an owner-only access card on a task;
+`share/owner-proof.ts` is the one test that a request came from the owner's
+own browser; `share/access-view.ts` builds what `/access` shows. The routes
+are `routes/task-access.ts` (the door that answers a card) and
+`routes/access.ts` (the owner's page and its nameless `access~` stream). In
+`review-items/`, `approver.ts` records who answered and `owner-steps.ts` makes
+an ask owner-only when its step is one the board reserves. The one new
+top-level module is `core/src/review-access.ts`: the shape of an access change
+and the sentence a card says about it, read by the server and the page alike.
+
 **And every one of those paths is written down once.** `routes/route-table.ts`
 holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
 `share-scope`, `owner-in-handler`, `collab-scope`, `recall-callback` or `open`

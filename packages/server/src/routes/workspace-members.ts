@@ -21,14 +21,12 @@
  * write. It carries no link ids and no secrets — `/api/share` is where those
  * live, and that route refuses browsers outright.
  *
- * THE TWO WRITES ARE THE OWNER'S, and the check is `requireOwner` off the
- * admission gate rather than anything local: one reading of "is this the
- * owner" for every owner-only act on this server (see `boardRoleOf` in
- * `board-membership.ts`). The PATHS are admitted to members by
- * `MEMBER_ADMIN_ROUTES` in the host guard, which is what lets a PROMOTED owner
- * reaching the board through the share hostname manage it at all; the refusal
- * is the role check here, so a member's attempt is a server-side 403 and not a
- * control the page happened not to draw.
+ * THE WRITES ARE THE OWNER'S ALONE (Bryan, 29 Oct: only he changes who is
+ * in). Every share visitor is refused, an invited Owner included; the PATHS
+ * are still admitted to members by `MEMBER_ADMIN_ROUTES` in the host guard,
+ * so the refusal is a server-side 403 here rather than a control the page
+ * happened not to draw. Off the share hostname the check is `requireOwner`,
+ * and an add needs the owner's own proof besides (`share/owner-proof.ts`).
  *
  * WHOSE SEAT IS NOT HERE. The operator's. A board is created from the local
  * surface and its owner is whoever holds that machine — `boardRoleOf` answers
