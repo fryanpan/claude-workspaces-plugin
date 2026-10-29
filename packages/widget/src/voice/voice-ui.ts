@@ -177,11 +177,13 @@ export class VoiceView {
     const where = this.live.querySelector('.vwhere') as HTMLElement;
     where.textContent = this.picking
       ? 'Tap where this belongs'
-      : s.state === 'connecting'
-        ? 'Starting…'
-        : attached
-          ? this.deps.name(target)
-          : 'Listening…';
+      : s.reconnecting
+        ? 'Reconnecting…'
+        : s.state === 'connecting'
+          ? 'Starting…'
+          : attached
+            ? this.deps.name(target)
+            : 'Listening…';
     where.classList.toggle('seeking', !this.picking && !attached);
     (this.live.querySelector('.vpol') as HTMLElement).textContent = open?.text ?? '';
     (this.live.querySelector('.vraw span') as HTMLElement).textContent = s.pending;

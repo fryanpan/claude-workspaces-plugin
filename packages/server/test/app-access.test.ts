@@ -75,7 +75,7 @@ describe('a share visitor and an attached app', () => {
     base = `http://127.0.0.1:${handle.port}`;
     mine = await boardWithApp(base, handle.port, 'Harborlight', dev.origin);
     theirs = await boardWithApp(base, handle.port, 'Riverbend', dev.origin);
-    share = await mintAccessShare(base, access, mine.ws);
+    share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, mine.ws);
   });
   afterAll(async () => {
     await handle.stop();
@@ -181,6 +181,7 @@ describe('a collaborator on the collaboration hostname and an attached app', () 
     base = `http://127.0.0.1:${handle.port}`;
     mine = await boardWithApp(base, handle.port, 'Harborlight', dev.origin);
     theirs = await boardWithApp(base, handle.port, 'Riverbend', dev.origin);
+    handle.shareLinks.addToAudience(mine.ws, ['@partner.example'], 'Bryan');
     const shared = await fetch(`${base}/api/share/link`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', host: `localhost:${handle.port}` },

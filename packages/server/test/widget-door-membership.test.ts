@@ -164,6 +164,7 @@ async function tokenOf(res: Response): Promise<string | undefined> {
 
 /** Make `email` a member of `board` the way a person becomes one: redeem a link. */
 async function redeem(s: Booted, board: string, email: string): Promise<void> {
+  s.handle.shareLinks.addToAudience(board, [email], 'Bryan');
   const minted = await fetch(`${s.base}/api/share/workspace`, {
     method: 'POST',
     headers: { host: `localhost:${s.handle.port}`, 'content-type': 'application/json' },

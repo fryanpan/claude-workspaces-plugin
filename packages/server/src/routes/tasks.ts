@@ -20,6 +20,7 @@
  * and — further down, after the agent routes — dispatches and notes.
  */
 import { handleDispatchAndNoteRoutes } from './dispatch-and-notes.ts';
+import { handleTaskAccess } from './task-access.ts';
 import { handleTaskAnswers } from './task-answers.ts';
 import { handleTaskDetail } from './task-detail.ts';
 import { handleTaskDoneWhen } from './task-done-when.ts';
@@ -58,6 +59,8 @@ export async function handleTaskRoutes(
     // Beside the secrets door and before the family, for the same reason: its
     // `/grant` suffix is a segment no other review-item route names.
     (await handleTaskGrants(ctx, rq)) ??
+    // And the access door, for the same reason: `/access` is its own suffix.
+    (await handleTaskAccess(ctx, rq)) ??
     (await handleTaskReviewItems(ctx, rq)) ??
     // After the family: `/answer/undo` is a suffix none of its patterns
     // match, since each of theirs is anchored.

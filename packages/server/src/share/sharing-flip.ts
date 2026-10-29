@@ -29,7 +29,7 @@ export const FLIP_REASON_MAX = 500;
 const ACTOR_FIELD_MAX = 200;
 
 /** The body keys this route reads. Anything else is refused. */
-const KNOWN_KEYS = new Set(['enabled', 'workspaceId', 'reason', 'actor']);
+const KNOWN_KEYS = new Set(['enabled', 'workspaceId', 'reason', 'actor', 'taskId', 'why']);
 
 export interface FlipRequest {
   enabled: boolean;
@@ -38,6 +38,9 @@ export interface FlipRequest {
   reason?: string;
   /** Who the caller says it is. The MCP tool sends its session's agent. */
   actor?: { id?: string; name?: string };
+  /** Where an agent's request to OPEN a board files its card, and why. */
+  taskId?: string;
+  why?: string;
 }
 
 export type FlipParse = { ok: true; value: FlipRequest } | { ok: false; error: string };
@@ -81,6 +84,8 @@ export function parseFlipRequest(body: Record<string, unknown> | null): FlipPars
     }
     value.actor = out;
   }
+  if (typeof body.taskId === 'string') value.taskId = body.taskId;
+  if (typeof body.why === 'string') value.why = body.why;
   return { ok: true, value };
 }
 

@@ -1,13 +1,13 @@
 import {
   type Anchor,
-  MAX_VOICE_RAW,
   type VoiceCommentFrame,
-  type VoiceNote,
   type VoiceTarget,
   parseVoiceServerMessage,
 } from '@claude-workspaces/core';
 import type { PcmCaptureOpts, PcmCaptureStart } from './voice-audio.ts';
+import { NoteWrites } from './voice-note-writes.ts';
 import type { PostedComment, VoicePoster } from './voice-post.ts';
+import { HeldAudio, Redial } from './voice-redial.ts';
 import type { QuestionSpeaker } from './voice-speak.ts';
 
 /**
@@ -33,6 +33,10 @@ import type { QuestionSpeaker } from './voice-speak.ts';
  * is, so the question is not heard back as the answer. A tapped choice goes
  * back as `answer`; a spoken one is just more words. Either way the server
  * sends the same note again, edited, and the thread is edited in place.
+ *
+ * A socket that drops mid-recording is opened again (`voice-redial.ts`) while
+ * the microphone keeps listening; what is said meanwhile is held for the new
+ * socket, and the old socket's notes are the server's to keep.
  *
  * No DOM here beyond the socket, so a test drives it with a fake socket, a
  * fake microphone and a recording poster (`voice-ui.ts` draws what it holds).
@@ -77,7 +81,7 @@ export interface SocketLike {
   readyState: number;
   onopen: (() => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((ev?: { code?: number }) => void) | null;
   onerror: (() => void) | null;
   send(data: string | ArrayBufferLike | ArrayBufferView): void;
   close(code?: number): void;
@@ -105,8 +109,7 @@ export interface VoiceSessionDeps {
   timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
 }
 
-/** Frames held while the server opens its engine — about ten seconds. */
-const MAX_BUFFERED = 200;
+const LOST = 'Voice feedback lost its connection.';
 /** How long Stop waits for the last words to be tidied before it gives up. */
 const STOP_WAIT_MS = 30_000;
 
@@ -132,21 +135,39 @@ export class VoiceSession {
   ask: VoiceAsk | null = null;
   /** The question is being said: the microphone is held. */
   speaking = false;
+  /** The socket dropped mid-recording and is being opened again. */
+  reconnecting = false;
 
   private ws: SocketLike | null = null;
   private capture: { stop(): void } | null = null;
-  private buffered: Int16Array[] = [];
+  private readonly buffered = new HeldAudio();
   private ready = false;
-  private chains = new Map<string, Promise<void>>();
-  private sent = new Map<
-    string,
-    { text: string; raw: string; clip: string; target: number | null }
-  >();
+  /** This recording's socket opened once, so a drop is worth redialling. */
+  private opened = false;
+  private readonly redial = new Redial(() => this.timers);
+  /** Takes whose socket dropped: the server keeps their notes. */
+  private readonly dropped = new Set<number>();
+  private readonly writes: NoteWrites<VoiceComment>;
   private stopTimer: unknown = null;
   /** Recordings started; the server's comment names repeat across them. */
   private take = 0;
+  private starts = 0;
 
-  constructor(private readonly deps: VoiceSessionDeps) {}
+  constructor(private readonly deps: VoiceSessionDeps) {
+    this.writes = new NoteWrites<VoiceComment>({
+      poster: deps.poster,
+      anchorFor: deps.anchorFor,
+      posted: (c, posted) => {
+        // A create that answers after its recording ended must not name a
+        // comment of the next one.
+        if (c.take === this.take) {
+          this.sendJson({ type: 'posted', key: c.wire, threadId: posted.threadId });
+        }
+        this.change();
+      },
+      refuse: (c) => this.refuse(c),
+    });
+  }
 
   /** Which recording is the current one; a comment's `take` says if it is from it. */
   get recording(): number {
@@ -171,26 +192,16 @@ export class VoiceSession {
     if (this.state !== 'idle') return;
     this.state = 'connecting';
     this.take += 1;
+    const run = ++this.starts;
     this.note = null;
     this.heard = '';
     this.pending = '';
     this.pinned = undefined;
     this.ready = false;
-    this.buffered = [];
+    this.opened = false;
+    this.buffered.clear();
     this.change();
-    const ws = this.deps.openSocket(this.deps.url);
-    this.ws = ws;
-    ws.binaryType = 'arraybuffer';
-    ws.onopen = () =>
-      this.sendJson({
-        type: 'start',
-        sampleRate: 16_000,
-        targets: this.deps.catalog(),
-        author: this.deps.author?.(),
-      });
-    ws.onmessage = (ev) => this.onMessage(ev.data);
-    ws.onerror = () => {};
-    ws.onclose = () => this.closed();
+    this.connect();
     const started = await this.deps.startCapture({
       onFrame: (pcm) => this.frame(pcm),
       ...(context ? { context } : {}),
@@ -200,11 +211,29 @@ export class VoiceSession {
       return;
     }
     // Stopped, or refused by the server, while the microphone was opening.
-    if (this.ws !== ws) {
+    if (run !== this.starts || (!this.ws && !this.reconnecting)) {
       started.capture.stop();
       return;
     }
     this.capture = started.capture;
+  }
+
+  private connect(): void {
+    const ws = this.deps.openSocket(this.deps.url);
+    this.ws = ws;
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      this.opened = true;
+      this.sendJson({
+        type: 'start',
+        sampleRate: 16_000,
+        targets: this.deps.catalog(),
+        author: this.deps.author?.(),
+      });
+    };
+    ws.onmessage = (ev) => this.onMessage(ev.data);
+    ws.onerror = () => {};
+    ws.onclose = (ev) => this.closed(ev?.code);
   }
 
   /** Stop: the microphone now, the last words once the server has tidied them. */
@@ -213,7 +242,7 @@ export class VoiceSession {
     this.capture?.stop();
     this.capture = null;
     // Nothing said yet: nothing to wait for.
-    if (!this.ready && this.buffered.length === 0) {
+    if (!this.ready && this.buffered.empty) {
       this.finish(null);
       return;
     }
@@ -276,7 +305,7 @@ export class VoiceSession {
     // A settled comment, or one from an earlier recording, is past the
     // server's reach; its thread moves here.
     if (!c.final && c.take === this.take) this.sendJson({ type: 'move', key: c.wire, target });
-    this.sync(c);
+    this.writes.sync(c);
     this.change();
   }
 
@@ -301,7 +330,7 @@ export class VoiceSession {
     for (const c of this.comments.values()) {
       if (c.refused) {
         c.refused = false;
-        this.sync(c);
+        this.writes.sync(c);
       }
     }
   }
@@ -311,13 +340,11 @@ export class VoiceSession {
   }
 
   private frame(pcm: Int16Array): void {
-    if (!this.ws || (this.state !== 'recording' && this.state !== 'connecting')) return;
+    if (!this.ws && !this.reconnecting) return;
+    if (this.state !== 'recording' && this.state !== 'connecting') return;
     if (this.speaking) return;
-    if (!this.ready) {
-      if (this.buffered.length < MAX_BUFFERED) this.buffered.push(pcm);
-      return;
-    }
-    if (this.ws.readyState === 1) this.ws.send(pcm);
+    if (!this.ready) this.buffered.push(pcm);
+    else if (this.ws?.readyState === 1) this.ws.send(pcm);
   }
 
   private onMessage(data: unknown): void {
@@ -331,8 +358,13 @@ export class VoiceSession {
       case 'ready':
         this.ready = true;
         if (this.state === 'connecting') this.state = 'recording';
-        for (const pcm of this.buffered) this.ws?.send(pcm);
-        this.buffered = [];
+        if (this.reconnecting) {
+          this.reconnecting = false;
+          this.redial.reset();
+          // A tap made while it was down still points the next words.
+          if (this.pinned !== undefined) this.sendJson({ type: 'pin', target: this.pinned });
+        }
+        for (const pcm of this.buffered.drain()) this.ws?.send(pcm);
         if (this.state === 'stopping') this.sendJson({ type: 'stop' });
         this.change();
         return;
@@ -402,59 +434,42 @@ export class VoiceSession {
     // words said before the tap made, elsewhere, leaves it waiting.
     if (!had && this.pinned !== undefined && f.target === this.pinned) this.pinned = undefined;
     this.comments.set(c.key, c);
-    this.sync(c);
+    this.writes.sync(c);
     this.change();
   }
 
-  /** One write at a time per comment, each reading the comment as it is then. */
-  private sync(c: VoiceComment): void {
-    const prev = this.chains.get(c.key) ?? Promise.resolve();
-    this.chains.set(
-      c.key,
-      prev.then(() => this.push(c)).catch(() => this.refuse(c)),
-    );
-  }
-
-  private async push(c: VoiceComment): Promise<void> {
-    if (c.refused || !c.text.trim()) return;
-    const voice: VoiceNote = { clip: c.clip, raw: c.raw.slice(-MAX_VOICE_RAW) };
-    const was = this.sent.get(c.key);
-    const now = { text: c.text, raw: voice.raw, clip: c.clip, target: c.target };
-    if (!c.posted) {
-      const posted = await this.deps.poster.create(this.deps.anchorFor(c.target), c.text, voice);
-      if (!posted) return this.refuse(c);
-      c.posted = posted;
-      this.sent.set(c.key, now);
-      // A create that answers after its recording ended must not name a
-      // comment of the next one.
-      if (c.take === this.take) {
-        this.sendJson({ type: 'posted', key: c.wire, threadId: posted.threadId });
-      }
-      this.change();
-      return;
-    }
-    if (!was) return;
-    if (was.target !== now.target) {
-      if (!(await this.deps.poster.reanchor(c.posted.threadId, this.deps.anchorFor(c.target)))) {
-        return this.refuse(c);
-      }
-      was.target = now.target;
-    }
-    if (was.text !== now.text || was.raw !== now.raw || was.clip !== now.clip) {
-      if (!(await this.deps.poster.edit(c.posted, c.text, voice))) return this.refuse(c);
-      Object.assign(was, { text: now.text, raw: now.raw, clip: now.clip });
-    }
-  }
-
   private refuse(c: VoiceComment): void {
+    // Its socket dropped, so the server keeps the note: a retry would write it twice.
+    if (this.dropped.has(c.take)) return;
     c.refused = true;
     this.note = this.deps.refusedNote?.() ?? 'A comment could not be saved. Its words are kept.';
     this.change();
   }
 
-  private closed(): void {
+  private closed(code?: number): void {
     if (this.state === 'idle') return;
-    this.finish(this.state === 'stopping' ? null : 'Voice feedback lost its connection.');
+    // Stopped with every word sent, or hung up on a grant that ended (1008): an end.
+    const done = this.state === 'stopping' && this.buffered.empty;
+    if (done || !this.opened || code === 1008) {
+      this.finish(done ? null : LOST);
+      return;
+    }
+    if (this.ws) this.ws.onopen = this.ws.onclose = this.ws.onmessage = null;
+    this.ws = null;
+    this.ready = false;
+    if (!this.reconnecting) {
+      this.reconnecting = true;
+      this.dropped.add(this.take);
+      // The next socket's server names its notes from `v1` again.
+      this.take += 1;
+      this.heard = '';
+      this.pending = '';
+      this.ask = null;
+      this.hush();
+      for (const c of this.comments.values()) c.reopening = false;
+      this.change();
+    }
+    if (!this.redial.next(() => this.connect())) this.finish(LOST);
   }
 
   private finish(note: string | null): void {
@@ -465,13 +480,14 @@ export class VoiceSession {
     const ws = this.ws;
     this.ws = null;
     if (ws) {
-      ws.onclose = null;
-      ws.onmessage = null;
+      ws.onclose = ws.onmessage = null;
       if (ws.readyState <= 1) ws.close(1000);
     }
     this.state = 'idle';
     this.ready = false;
-    this.buffered = [];
+    this.reconnecting = false;
+    this.redial.reset();
+    this.buffered.clear();
     this.pinned = undefined;
     this.pending = '';
     this.ask = null;

@@ -148,7 +148,8 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
 
   /** Mint a board share and return the headers its visitor carries. */
   const visitorFor = async (workspaceId: string): Promise<Record<string, string>> =>
-    (await mintAccessShare(base, access, workspaceId)).headers;
+    (await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, workspaceId))
+      .headers;
 
   /**
    * The visitor gets exactly what the OWNER gets on this path.
@@ -247,8 +248,11 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
     folderEntryA = fb.files[0]?.docId ?? '';
     expect(folderEntryA).not.toBe('');
 
-    visitorA = (await mintAccessShare(base, access, boardA, { label: 'board alpha share' }))
-      .headers;
+    visitorA = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardA, {
+        label: 'board alpha share',
+      })
+    ).headers;
   });
 
   afterAll(() => {
@@ -390,7 +394,11 @@ describe('a shared board reaches the reviews filed on it — and no others', () 
    */
   describe('revoking the board share hangs up the member doc it opened', () => {
     it('closes a member-doc socket and stream the board share authorized', async () => {
-      const share = await mintAccessShare(base, access, boardA);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        boardA,
+      );
       const cookie = share.headers;
 
       const client = connectDoc(

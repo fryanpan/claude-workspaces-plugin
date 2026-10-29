@@ -11,11 +11,19 @@
  * Time is passed in rather than waited on. Every state and redeem call takes a
  * `now`, so "a link that lapsed" is a number, not a sleep.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ShareLinks } from '../src/share/share-links.ts';
+import { REGISTRY_UNREADABLE, ShareLinks } from '../src/share/share-links.ts';
 
 const BOARD = 'w-board-1';
 const OTHER_BOARD = 'w-board-2';
@@ -29,6 +37,9 @@ describe('the share-link store', () => {
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'share-links-store-'));
     links = new ShareLinks({ dataDir });
+    // Both boards name the reviewers: a link only invites someone its
+    // board's audience already admits (`board-audience.ts`).
+    for (const ws of [BOARD, OTHER_BOARD]) links.addToAudience(ws, ['@partner.example'], 'Bryan');
   });
 
   afterEach(() => {
@@ -170,13 +181,13 @@ describe('the share-link store', () => {
       expect(links.removeMember(BOARD, REVIEWER)).toBe(true);
       expect(links.isMember(BOARD, REVIEWER)).toBe(false);
       expect(links.isMember(BOARD, OTHER_REVIEWER)).toBe(true);
-      // The link is still live, so they could come back through it — which is
-      // the honest behaviour, and why revoking the link is the other half.
-      expect(links.redeem(link.linkId, REVIEWER)).toEqual({
-        ok: true,
-        workspaceId: BOARD,
-        added: true,
-      });
+      // The link is still live, but the domain that let them in now records
+      // them as removed, so it cannot let them straight back in.
+      expect(links.redeem(link.linkId, REVIEWER)).toEqual({ ok: false, state: 'outside-audience' });
+      expect(links.redeem(link.linkId, 'third@partner.example').ok).toBe(true);
+      // Naming them again is how they come back.
+      links.addToAudience(BOARD, [REVIEWER], 'Bryan');
+      expect(links.redeem(link.linkId, REVIEWER).ok).toBe(true);
     });
 
     it('removing keeps the redemption history, so who was ever admitted survives', () => {
@@ -284,6 +295,177 @@ describe('the share-link store', () => {
       expect(statSync(path).mode & 0o777).toBe(0o600);
       // ...and tightening it did not cost the contents.
       expect(reopened.isMember(BOARD, REVIEWER)).toBe(true);
+    });
+  });
+
+  describe("the board's audience", () => {
+    it('refuses a link redemption from an address the audience does not admit', () => {
+      const link = mint({ workspaceId: BOARD });
+      expect(links.redeem(link.linkId, 'stranger@riverbend.example')).toEqual({
+        ok: false,
+        state: 'outside-audience',
+      });
+      expect(links.membersOf(BOARD)).toEqual([]);
+      expect(links.get(link.linkId)?.redemptions).toEqual([]);
+    });
+
+    it('ends a member when the audience stops naming them, on the next check', () => {
+      links.redeem(mint().linkId, REVIEWER);
+      expect(links.isMember(BOARD, REVIEWER)).toBe(true);
+      expect(links.removeFromAudience(BOARD, '@partner.example')).toEqual([REVIEWER]);
+      expect(links.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(links.roleOf(BOARD, REVIEWER)).toBeNull();
+      expect(links.membersOf(BOARD)).toEqual([]);
+    });
+
+    it('a board with no audience admits nobody', () => {
+      const link = mint({ workspaceId: 'w-unnamed' });
+      expect(links.redeem(link.linkId, REVIEWER).ok).toBe(false);
+    });
+  });
+
+  describe('upgrading a registry written before audiences', () => {
+    it('keeps every current member, and makes an invited Owner an ordinary member', () => {
+      const path = join(dataDir, 'share-links.json');
+      const legacy = {
+        links: [
+          {
+            linkId: 'a'.repeat(32),
+            workspaceId: BOARD,
+            createdBy: 'Agent',
+            createdAt: 1,
+            expiresAt: null,
+            revokedAt: null,
+            redemptions: [],
+          },
+          {
+            linkId: 'b'.repeat(32),
+            workspaceId: OTHER_BOARD,
+            createdBy: 'Agent',
+            createdAt: 1,
+            expiresAt: null,
+            revokedAt: null,
+            allowDomains: ['@saltmarsh.example'],
+            // A link that made Owners: invited Owners are ordinary members now.
+            role: 'owner',
+            redemptions: [],
+          },
+        ],
+        members: [
+          {
+            workspaceId: BOARD,
+            email: REVIEWER,
+            addedAt: 2,
+            viaLinkId: 'a'.repeat(32),
+            role: 'owner',
+          },
+          { workspaceId: BOARD, email: OTHER_REVIEWER, addedAt: 3, viaLinkId: 'a'.repeat(32) },
+          {
+            workspaceId: OTHER_BOARD,
+            email: 'ops@saltmarsh.example',
+            addedAt: 4,
+            viaLinkId: 'b'.repeat(32),
+          },
+        ],
+      };
+      writeFileSync(path, JSON.stringify(legacy));
+      const upgraded = new ShareLinks({ dataDir });
+      for (const m of legacy.members) expect(upgraded.isMember(m.workspaceId, m.email)).toBe(true);
+      expect(upgraded.roleOf(BOARD, REVIEWER)).toBe('member');
+      // Seeded by exact address: the open link invites nobody new.
+      expect(upgraded.redeem('a'.repeat(32), 'new@partner.example').ok).toBe(false);
+      // The domain a live link's own audience named was Bryan's choice, and stays.
+      expect(upgraded.redeem('b'.repeat(32), 'finance@saltmarsh.example').ok).toBe(true);
+      expect(upgraded.get('b'.repeat(32))?.role).toBeUndefined();
+      expect(upgraded.roleOf(OTHER_BOARD, 'finance@saltmarsh.example')).toBe('member');
+      // Written once: the next boot reads the audiences rather than re-seeding.
+      const written = JSON.parse(readFileSync(path, 'utf8')) as { audiences: unknown[] };
+      expect(written.audiences).toHaveLength(2);
+    });
+
+    it("seeds the older Cloudflare shares' allow lists on the upgrade, and only then", () => {
+      writeFileSync(join(dataDir, 'share-links.json'), JSON.stringify({ links: [], members: [] }));
+      const older = [{ workspaceId: BOARD, allowDomains: ['@riverbend.example', REVIEWER] }];
+      const upgraded = new ShareLinks({ dataDir });
+      upgraded.seedFromOlderShares(older);
+      expect(upgraded.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([
+        '@riverbend.example',
+        REVIEWER,
+      ]);
+      // A later boot has audiences already: the owner's edits since are not undone.
+      upgraded.removeFromAudience(BOARD, '@riverbend.example');
+      const next = new ShareLinks({ dataDir });
+      next.seedFromOlderShares(older);
+      expect(next.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([REVIEWER]);
+      // Emptied is still an audience: the owner's last removal stays removed.
+      next.removeFromAudience(BOARD, REVIEWER);
+      const later = new ShareLinks({ dataDir });
+      later.seedFromOlderShares(older);
+      expect(later.audienceOf(BOARD)?.entries).toEqual([]);
+    });
+
+    /** A registry `load` could not read: it admits nobody, seeds nothing, refuses writes. */
+    const expectUnreadable = (broken: ShareLinks, said: string[]) => {
+      // The seed would otherwise give the board an audience and save it.
+      broken.seedFromOlderShares([{ workspaceId: BOARD, allowDomains: [REVIEWER] }]);
+      expect(broken.audienceOf(BOARD)).toBeUndefined();
+      expect(broken.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(() => broken.addToAudience(BOARD, [REVIEWER], 'Bryan')).toThrow(REGISTRY_UNREADABLE);
+      expect(() => broken.create({ workspaceId: BOARD, createdBy: 'Test Agent' })).toThrow(
+        REGISTRY_UNREADABLE,
+      );
+      expect(said.some((l) => l.includes('could not be read'))).toBe(true);
+    };
+    const quietly = (run: (said: string[]) => void) => {
+      const said: string[] = [];
+      const spy = spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+        said.push(a.map(String).join(' '));
+      });
+      try {
+        run(said);
+      } finally {
+        spy.mockRestore();
+      }
+    };
+
+    it('admits nobody and writes nothing when the registry cannot be read', () => {
+      links.create({ workspaceId: BOARD, createdBy: 'Test Agent' });
+      const path = join(dataDir, 'share-links.json');
+      const torn = `${readFileSync(path, 'utf8').slice(0, 40)}`;
+      // Torn, and valid JSON that is not a registry: read as empty, the
+      // migration would save an empty registry over the file.
+      for (const content of [torn, 'null', '{}', '[]']) {
+        writeFileSync(path, content);
+        const before = readFileSync(path);
+        quietly((said) => expectUnreadable(new ShareLinks({ dataDir }), said));
+        expect(readFileSync(path).equals(before)).toBe(true);
+      }
+    });
+
+    it('admits nobody when the registry cannot even be looked at', () => {
+      // A data dir that is a file: the stat fails with ENOTDIR, not ENOENT,
+      // so this is not "no registry yet" and must not be seeded over.
+      const parent = mkdtempSync(join(tmpdir(), 'share-links-notdir-'));
+      const notDir = join(parent, 'data');
+      writeFileSync(notDir, 'not a directory');
+      try {
+        quietly((said) => expectUnreadable(new ShareLinks({ dataDir: notDir }), said));
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
+      }
+    });
+
+    it('seeds a board the older shares let people into when there was never a registry', () => {
+      // No share-links.json at all, so no migration runs on this boot.
+      const empty = mkdtempSync(join(tmpdir(), 'share-links-none-'));
+      try {
+        const fresh = new ShareLinks({ dataDir: empty });
+        expect(fresh.audienceOf(BOARD)).toBeUndefined();
+        fresh.seedFromOlderShares([{ workspaceId: BOARD, allowDomains: [REVIEWER] }]);
+        expect(fresh.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([REVIEWER]);
+      } finally {
+        rmSync(empty, { recursive: true, force: true });
+      }
     });
   });
 

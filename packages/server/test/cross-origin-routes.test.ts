@@ -390,7 +390,11 @@ describe('the public share host is same-origin only', () => {
       body: JSON.stringify({ docId: 'ws-shared' }),
     });
     expect(filed.status).toBe(200);
-    const minted = await mintAccessShare(base, access, boardId);
+    const minted = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      boardId,
+    );
     PUBLIC_HOST = minted.host;
     visitorHeaders = minted.headers;
   });

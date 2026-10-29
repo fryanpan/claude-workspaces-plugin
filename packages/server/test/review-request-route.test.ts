@@ -184,9 +184,14 @@ describe(`POST /workspaces/${WS}/docs/:docId/review-request`, () => {
 
   it('refuses a share visitor, whose cookie does reach the doc', async () => {
     const docId = await newHuddle('discussion');
-    const visitor = await mintAccessShare(base, access, workspaceId, {
-      label: 'review-request share',
-    });
+    const visitor = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      workspaceId,
+      {
+        label: 'review-request share',
+      },
+    );
     const visitorHeaders = { ...visitor.headers, 'content-type': 'application/json' };
     const read = await fetch(`${base}/workspaces/${WS}/docs/${docId}?format=json`, {
       headers: visitorHeaders,

@@ -25,6 +25,9 @@ const AGENT = {
   color: '#888888',
 };
 
+/** The notice is an access card, so its headline is the change it makes. */
+const HEADLINE =
+  'Turns sharing back on for every board, so the people each one names can sign in again.';
 describe('the owner notice when the gate holds it', () => {
   let handle: ServerHandle;
   let dataDir: string;
@@ -93,7 +96,7 @@ describe('the owner notice when the gate holds it', () => {
     await waitFor(() =>
       lines.some((l) => l.includes('[sharing] owner notice held by the review gate')),
     );
-    expect(judged).toContain('External sharing was turned off');
+    expect(judged).toContain(HEADLINE);
     await waitFor(() => sent.length > 0, { describe: 'a push to the enrolled device' });
 
     const boards = (await (await fetch(`${base}/workspaces?format=json`)).json()) as {
@@ -107,6 +110,6 @@ describe('the owner notice when the gate holds it', () => {
       items: Array<{ askedBy: string; review: { headline: string } }>;
     };
     const notices = queue.items.filter((i) => i.askedBy === 'Sharing switch');
-    expect(notices.map((n) => n.review.headline)).toEqual(['External sharing was turned off']);
+    expect(notices.map((n) => n.review.headline)).toEqual([HEADLINE]);
   });
 });

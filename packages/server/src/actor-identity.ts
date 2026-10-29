@@ -309,7 +309,10 @@ export function isOwnerActor(author: unknown): boolean {
 
 /**
  * How far an agent may trust a comment's words: `owner` when the author IS
- * the owner's identity, `untrusted` for everyone else.
+ * the owner's identity, `member` when the author is an admitted member of
+ * every board the comment's doc reaches (`comment-trust.ts` decides that, at
+ * stamp time), `untrusted` for everyone else. This function answers only the
+ * owner half; it never says `member`.
  *
  * By ID ALONE, as `isOwnerActor` now is too: a share visitor types whatever
  * name they like, so a name match would let an outsider's comment reach an
@@ -317,7 +320,7 @@ export function isOwnerActor(author: unknown): boolean {
  * a signed-in identity, `known-bryan`, or an `anon-*` id somebody linked on
  * purpose (see `resolveIdentityId`).
  */
-export type CommentTrust = 'owner' | 'untrusted';
+export type CommentTrust = 'owner' | 'member' | 'untrusted';
 
 export function commentTrustOf(author: unknown): CommentTrust {
   const { id } = authorFields(author);

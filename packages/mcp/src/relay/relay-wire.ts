@@ -39,7 +39,15 @@ export function neverSent(e: unknown): boolean {
   const code =
     (e as { cause?: { code?: unknown }; code?: unknown })?.cause?.code ??
     (e as { code?: unknown })?.code;
-  return code === 'ECONNREFUSED' || code === 'ConnectionRefused' || code === 'ENOTFOUND';
+  // ENOENT and EPERM: a board socket that is not there (the server is
+  // restarting) or that the sandbox refused, before any byte was written.
+  return (
+    code === 'ECONNREFUSED' ||
+    code === 'ConnectionRefused' ||
+    code === 'ENOTFOUND' ||
+    code === 'ENOENT' ||
+    code === 'EPERM'
+  );
 }
 
 export function parse(text: string): unknown {

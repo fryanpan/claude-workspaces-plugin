@@ -122,7 +122,9 @@ describe('a bind does not read through a symlink to a file the folder hides', ()
       body: JSON.stringify({ name: 'Harborlight board' }),
     }).then((r) => r.json());
     boardId = board.workspace.id as string;
-    visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+    ).headers;
   });
 
   afterAll(async () => {

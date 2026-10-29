@@ -218,6 +218,8 @@ describe('the collaboration hostname over HTTP', () => {
       return { boardId: id, mintedDocId };
     };
     shareBoard = async (boardId: string, allowDomains: string[]): Promise<void> => {
+      // Bryan lets them in first: a mint can only name people the board admits.
+      handle.shareLinks.addToAudience(boardId, allowDomains, 'Bryan');
       const res = await asOwner('/api/share/link', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -342,6 +344,20 @@ describe('the collaboration hostname over HTTP', () => {
       const { meta } = JSON.parse(raw) as { meta: Record<string, unknown> };
       expect(meta.sourceUrl).toBeUndefined();
       expect(meta.docId).toBe(docId);
+    });
+
+    it("is refused on the next request once the board's audience stops admitting them", async () => {
+      // The share's own allow list still names @partner.example. The board's
+      // audience is what Bryan approved, and the share cannot widen it.
+      const boardPath = `/workspaces/${encodeURIComponent(board)}?format=json`;
+      expect((await asCollaborator(boardPath)).status).toBe(200);
+      handle.shareLinks.removeFromAudience(board, '@partner.example');
+      try {
+        expect((await asCollaborator(boardPath)).status).toBe(403);
+      } finally {
+        handle.shareLinks.addToAudience(board, ['@partner.example'], 'Bryan');
+      }
+      expect((await asCollaborator(boardPath)).status).toBe(200);
     });
   });
 
@@ -862,6 +878,7 @@ describe('the collaboration hostname, with email identity in effect', () => {
     expect(filed.status).toBe(200);
     // Who was GIVEN this board. Without it nobody reaches the doc at all and
     // these tests would be measuring the membership gate instead of identity.
+    h.shareLinks.addToAudience(boardId, ['@example.com'], 'Bryan');
     const shared = await local('/api/share/link', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

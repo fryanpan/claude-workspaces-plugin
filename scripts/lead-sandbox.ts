@@ -37,8 +37,12 @@
  * (`lead-sandbox-token.ts`): the token of the Claude account
  * `--claude-account` names, else the one the config gives the lead.
  *
- * A lead with `boardWall` is for `--check` only: its board tools do not use
- * its board's socket yet, so the launch refuses it.
+ * A lead with `boardWall` is launched with `CW_BOARD_SOCKET` naming its own
+ * board's socket (`boardSocketEnv`), so its MCP child is the node relay
+ * dialling that socket (packages/plugin/bin/claude-workspaces-mcp.sh) and it
+ * holds no board token: the server keeps the one its calls carry. The
+ * plugin's hooks still dial TCP, which the wall refuses, so the launch says
+ * so. The server must have board sockets on (`CW_BOARD_SOCKETS=1`).
  */
 import { spawnSync } from 'node:child_process';
 import {
@@ -181,6 +185,30 @@ function otherSockets(dir: string, own: string): string[] {
     .filter((p) => p !== own && p.endsWith('.sock') && lstatSync(p).isSocket());
 }
 
+/**
+ * A walled lead's way to its board: its own board's socket, and that board
+ * as its default. Nothing for a lead without the wall.
+ */
+export function boardSocketEnv(
+  lead: { boardWall: boolean; boardId?: string },
+  config: { boardSocketDir?: string },
+  uid: number,
+): Record<string, string> {
+  if (!lead.boardWall || !lead.boardId) return {};
+  const dir = config.boardSocketDir ?? defaultBoardSocketDir(uid);
+  return { CW_BOARD_SOCKET: join(dir, `${lead.boardId}.sock`), CW_WORKSPACE_ID: lead.boardId };
+}
+
+/**
+ * The launcher's own environment, less any value that is a board server
+ * bearer (`at1.`, `at2.`): whatever shell ran this, the lead inherits none.
+ */
+export function withoutBoardBearers(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env).filter(([, value]) => !/(^|[^A-Za-z0-9])at[12]\./.test(value ?? '')),
+  );
+}
+
 /** What `main` reaches outside itself, so a test can stand in for each. */
 export interface LaunchDeps {
   platform: string;
@@ -254,12 +282,10 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say('nothing to launch: put the command after --');
       return 2;
     }
-    if (lead.boardWall) {
+    if (lead.boardWall)
       say(
-        `${lead.name} has boardWall set, which is for --check only: its board tools cannot reach its board's socket yet, so walled it would have none.`,
+        `note: ${lead.name} is walled. Its board tools go over its board's socket; the plugin's hooks still dial the board server's port, which the wall refuses, so they fail.`,
       );
-      return 2;
-    }
     const here = machine.realpath(import.meta.dirname);
     if (lead.projects.some((p) => here.startsWith(`${machine.realpath(p)}/`)))
       say(
@@ -276,7 +302,12 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       return 2;
     }
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
-    const env = { ...process.env, ...gitProxyFiles(lead, config), ...token.env };
+    const env = {
+      ...withoutBoardBearers(process.env),
+      ...gitProxyFiles(lead, config),
+      ...boardSocketEnv(lead, config, machine.uid),
+      ...token.env,
+    };
     return deps.spawn(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
       cwd: launch.cwd,
       env,

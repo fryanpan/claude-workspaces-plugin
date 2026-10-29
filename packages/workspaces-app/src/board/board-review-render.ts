@@ -21,6 +21,7 @@ import { timeAgo } from './board-presence-model.ts';
 import {
   LEGACY_REVIEW_ITEM_ID,
   type ReviewThreadItem,
+  accessRequestFor,
   decisionAskedBy,
   reviewItemThreadRequest,
 } from './board-review-model.ts';
@@ -256,6 +257,7 @@ export function panelReviewQueue(
         // ordinary answer furniture and offered a verbatim box for a value.
         ...(r.secrets ? { secrets: r.secrets } : {}),
         ...(r.allowRules ? { allowRules: r.allowRules } : {}),
+        ...(a.access ? { access: a.access } : {}),
         askedBy: a.askedBy,
         since: a.askedAt ?? a.since,
         ...(a.direct !== undefined ? { direct: a.direct } : {}),
@@ -388,6 +390,7 @@ export function panelAnswerRequest(
 ): { path: string; body: Record<string, unknown> } | null {
   if (item.source === 'task-review') {
     if (!item.reviewItemId) return null;
+    if (item.access) return accessRequestFor(task.id, item.reviewItemId, item.access, optionId);
     return {
       path: api(
         `tasks/${encodeURIComponent(task.id)}/review-items/${encodeURIComponent(item.reviewItemId)}/answer`,

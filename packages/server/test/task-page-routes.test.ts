@@ -228,7 +228,7 @@ describe('a share visitor is refused the task address, exactly as before', () =>
     });
     expect(filed.status).toBe(200);
     taskId = ((await filed.json()) as { task: { id: string } }).task.id;
-    share = await mintAccessShare(base, access, board);
+    share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, board);
   });
 
   afterAll(async () => {

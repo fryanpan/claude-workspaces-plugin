@@ -51,6 +51,7 @@ export async function serveBoardRoutes(
     taskRoutesCtx,
     policyFor,
     connectorHost,
+    boardOfSocket,
     j,
     requestAddress,
     agentTokenKeyFor,
@@ -159,6 +160,8 @@ export async function serveBoardRoutes(
       accessEmail: gate.accessEmail,
       roleFor,
       requireOwner,
+      provenIdentityFor,
+      requestOriginFor: () => policyFor(req).requestOrigin,
     });
     if (handled) return handled;
   }
@@ -231,6 +234,7 @@ export async function serveBoardRoutes(
         j,
         requestAddress,
         agentTokenKey: agentTokenKeyFor,
+        boardOfSocket,
       },
       { req, pathname, visitor },
     );

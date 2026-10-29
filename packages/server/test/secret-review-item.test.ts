@@ -173,6 +173,7 @@ describe('a secret ask, answered by the board owner', () => {
       )
     ).workspace.id;
 
+    handle.shareLinks.addToAudience(board, [REGULAR], 'Bryan');
     const link = await jj<{ link: { linkId: string } }>(
       await postLocal('/api/share/workspace', { workspaceId: board }),
     );
@@ -254,12 +255,9 @@ describe('a secret ask, answered by the board owner', () => {
     // `trusted-local` and refuses them in admission. A control that can never
     // succeed.
     //
-    // Promoted through the board's own members route, so the fixture is the
-    // product's way of making an owner rather than a hand-written record.
-    expect(
-      (await postLocal(`${scope()}/members/${encodeURIComponent(REGULAR)}/role`, { role: 'owner' }))
-        .status,
-    ).toBe(200);
+    // Promoted in the store: a loopback promotion is now a proposal only the
+    // owner's browser applies (`share-access-door.test.ts`).
+    expect(handle.shareLinks.setMemberRole(board, REGULAR, 'owner')).toBe(true);
 
     const asInvitedOwner = await jj<{ you: { role: string; canAnswerSecrets: boolean } }>(
       await req(`${scope()}/review-items`, SHARE_HOST, {

@@ -138,7 +138,11 @@ describe('a doc parked because its file would not answer', () => {
   it('does not hand the reason to a share visitor — it names a host path', async () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
     const base = `http://127.0.0.1:${handle.port}`;
-    const share = await mintAccessShare(base, access, workspaceId);
+    const share = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      workspaceId,
+    );
 
     // The owner sees it...
     const owner = (await (

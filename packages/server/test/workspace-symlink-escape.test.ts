@@ -131,7 +131,9 @@ describe('symlink escape from a shared workspace', () => {
     workspaceId = bound.workspaceId;
     expect(workspaceId).toBeTruthy();
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+    ).headers;
   });
 
   afterAll(async () => {

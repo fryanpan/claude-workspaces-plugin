@@ -29,6 +29,18 @@ export interface DecisionAnsweredPayload {
   openParts?: unknown[];
   /** The earlier answer this one replaces, when the person changed it. */
   replaces?: { answer?: string; by?: string };
+  /** Who approved, in words, when a person answered (`approver.ts`). */
+  approvalLine?: string;
+}
+
+/**
+ * What a line adds for a PERSON'S answer: the sentence the agent quotes where
+ * it acts on the approval, so the PR body, Jira comment or message names who
+ * approved rather than saying "approved" on nobody's word.
+ */
+export function approvalClause(line: unknown): string {
+  if (typeof line !== 'string' || line === '') return '';
+  return ` — approval_line: "${truncate(line, 160)}" (quote it in the PR body, Jira comment or message this approval covers)`;
 }
 
 /**
@@ -92,7 +104,7 @@ export function decisionAnsweredLine(p: DecisionAnsweredPayload): string {
     Array.isArray(p.links) && p.links.length > 0
       ? ' — walk its links as the propagation checklist'
       : '';
-  return `[decision.answered] ${p.taskId}${rowClause(p)}${by}: "${truncate(p.answer ?? '', 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${walk}`;
+  return `[decision.answered] ${p.taskId}${rowClause(p)}${by}: "${truncate(p.answer ?? '', 120)}"${asked}${replacesClause(p.replaces)}${openPartsClause(p.openParts)}${approvalClause(p.approvalLine)}${walk}`;
 }
 
 /**

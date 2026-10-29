@@ -20,6 +20,14 @@
  *    registers its sinks inside the Response constructor. That is what lets
  *    the server subscribe a restored agent before it answers its first
  *    request, rather than racing it.
+ *
+ * A session opened on a board's socket (`spec.boardId`) is built with two
+ * changes, both so that it reaches that board and no other. Every REST call
+ * carries a board agent token for that agent and board, which the server
+ * mints and keeps here, in its own process (`board-token-lease.ts`), and
+ * which the admission door holds to the board like any other `at2`. A call
+ * to any origin but the server's own is refused, so the token never leaves
+ * it. And the event stream carries only the watch keys on that board.
  */
 import { createConnectorSession } from '../../../mcp/src/connector-session.ts';
 import type { ConnectorSession } from '../../../mcp/src/connector-session.ts';
@@ -28,8 +36,23 @@ import type { HostedSessionSpec } from './host.ts';
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
-/** Opens one agent's multiplexed event stream in this process. */
-export type OpenAgentEvents = (agentId: string, lastEventId: string | null) => Response;
+/**
+ * Opens one agent's multiplexed event stream in this process: every key it
+ * watches, or with `boardId` only the keys on that board.
+ */
+export type OpenAgentEvents = (
+  agentId: string,
+  lastEventId: string | null,
+  boardId?: string,
+) => Response;
+
+/** A board agent token held for one hosted session (`board-token-lease.ts`). */
+export interface BoardTokenLease {
+  /** The current value, minted or renewed as needed. Null when none can be had. */
+  token(): string | null;
+  /** Revoke it; the session is gone. */
+  release(): void;
+}
 
 const AGENT_EVENTS_PATH = /\/events\/agent\/([^/?#]+)$/;
 
@@ -82,6 +105,34 @@ export interface SessionFactoryDeps {
   log: (...args: unknown[]) => void;
   /** The REST fetch. Defaults to the global one. */
   fetch?: Fetch;
+  /** A board token for a session opened on a board's socket. Without it such
+   *  a session's REST calls are refused, never sent without one. */
+  boardToken?: (agentId: string, boardId: string) => BoardTokenLease;
+}
+
+/**
+ * The REST fetch of a session held to one board: the board token on every
+ * call, replacing whatever authorization the connector set, and a 403 for any
+ * origin but the server's own.
+ */
+export function boardScopedFetch(
+  inner: Fetch,
+  baseUrl: () => string,
+  lease: BoardTokenLease | null,
+): Fetch {
+  const refuse = (error: string) =>
+    new Response(JSON.stringify({ error }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+  return async (url, init) => {
+    if (new URL(url).origin !== new URL(baseUrl()).origin) return refuse('board_session_origin');
+    const token = lease?.token() ?? null;
+    if (token === null) return refuse('board_session_no_token');
+    const headers = new Headers(init?.headers);
+    headers.set('authorization', `Bearer ${token}`);
+    return inner(url, { ...init, headers });
+  };
 }
 
 export function hostedSessionFactory(
@@ -89,8 +140,40 @@ export function hostedSessionFactory(
 ): (spec: HostedSessionSpec) => ConnectorSession {
   const eventsFetch = inProcessEventsFetch(deps.openAgentEvents);
   const restFetch: Fetch = deps.fetch ?? loopbackFetch('own-server');
-  return (spec) =>
-    createConnectorSession({
+  return (spec) => {
+    const boardId = spec.boardId;
+    if (boardId === undefined) {
+      return createConnectorSession({
+        ...common(spec),
+        fetch: restFetch,
+        eventsFetch,
+        ...(deps.mintAgentToken
+          ? { mintAgentToken: async () => deps.mintAgentToken?.(spec.author.id) ?? null }
+          : {}),
+      });
+    }
+    const lease = deps.boardToken?.(spec.author.id, boardId) ?? null;
+    const session = createConnectorSession({
+      ...common(spec),
+      fetch: boardScopedFetch(restFetch, deps.baseUrl, lease),
+      eventsFetch: inProcessEventsFetch((agentId, lastEventId) =>
+        deps.openAgentEvents(agentId, lastEventId, boardId),
+      ),
+      // The agent's own token is never minted for it: the board token is
+      // what every call carries.
+      mintAgentToken: async () => null,
+    });
+    return {
+      ...session,
+      stop() {
+        session.stop();
+        lease?.release();
+      },
+    };
+  };
+
+  function common(spec: HostedSessionSpec) {
+    return {
       author: spec.author,
       cwd: spec.cwd,
       defaultWorkspaceId: spec.defaultWorkspaceId,
@@ -98,12 +181,8 @@ export function hostedSessionFactory(
       processId: spec.processId,
       notify: spec.notify,
       resolveBaseUrl: deps.baseUrl,
-      fetch: restFetch,
-      eventsFetch,
       eventsNeedToken: false,
-      ...(deps.mintAgentToken
-        ? { mintAgentToken: async () => deps.mintAgentToken?.(spec.author.id) ?? null }
-        : {}),
       log: deps.log,
-    });
+    };
+  }
 }

@@ -112,6 +112,10 @@ body.settings-body {
 .settings-back.settings-back--up {
   display: flex;
 }
+/* The access page has no rail, so its back link is the only way out. */
+.access-shell .settings-back {
+  display: flex;
+}
 
 .settings-body-row {
   flex: 1;

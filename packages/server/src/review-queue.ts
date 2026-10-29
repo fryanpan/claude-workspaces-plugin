@@ -1,25 +1,3 @@
-/**
- * What is waiting on a PERSON, across every surface a workspace has.
- *
- * The board's decisions strip answers a narrower question — open decision
- * tasks — and everything else that genuinely needs Bryan has been invisible
- * from the board: an agent's question on a task discussion, a doc comment
- * nobody answered. Those are one act ("someone needs you") wearing three
- * surfaces, and splitting them across three places to look is what makes
- * coming back to the board mean scrolling a chat history instead.
- *
- * This module computes the rows: the two thread-shaped kinds, and — since a
- * ticket HAS review items rather than IS one — the rows hanging on tickets.
- * `reviewItemRows` is the whole queue in one order. The client's `reviewQueue`
- * (board-review-model) still owns the PRIORITY rule that ranks a row against the board's
- * own task rows, which is what keeps that judgement in one pure, testable place
- * instead of split across the wire.
- *
- * The server owns this half for one reason: "is this comment an agent's" is
- * `classifyActor`'s judgement, and it must not be re-decided here. A second
- * notion of who counts as an agent is exactly the drift this codebase has
- * already been bitten by.
- */
 import type {
   Comment,
   DocType,
@@ -42,6 +20,29 @@ import {
 } from '@claude-workspaces/core';
 import { withPartialNote } from '@claude-workspaces/core/answer-coverage-prompt';
 import { pageUrlOf } from '@claude-workspaces/core/page-thread-link';
+/**
+ * What is waiting on a PERSON, across every surface a workspace has.
+ *
+ * The board's decisions strip answers a narrower question — open decision
+ * tasks — and everything else that genuinely needs Bryan has been invisible
+ * from the board: an agent's question on a task discussion, a doc comment
+ * nobody answered. Those are one act ("someone needs you") wearing three
+ * surfaces, and splitting them across three places to look is what makes
+ * coming back to the board mean scrolling a chat history instead.
+ *
+ * This module computes the rows: the two thread-shaped kinds, and — since a
+ * ticket HAS review items rather than IS one — the rows hanging on tickets.
+ * `reviewItemRows` is the whole queue in one order. The client's `reviewQueue`
+ * (board-review-model) still owns the PRIORITY rule that ranks a row against the board's
+ * own task rows, which is what keeps that judgement in one pure, testable place
+ * instead of split across the wire.
+ *
+ * The server owns this half for one reason: "is this comment an agent's" is
+ * `classifyActor`'s judgement, and it must not be re-decided here. A second
+ * notion of who counts as an agent is exactly the drift this codebase has
+ * already been bitten by.
+ */
+import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 import { type ReviewGateNote, gateNoteOf } from '@claude-workspaces/core/review-hold';
 import { staleAsk } from '@claude-workspaces/core/review-stale';
 import { classifyActor } from './actor-identity.ts';
@@ -233,6 +234,9 @@ export interface ReviewTaskItem {
   question?: string;
   threadId?: string;
   revisedRange?: { start: number; end: number };
+  /** The change an ACCESS item proposes. Its card answers through the access
+   *  door (`routes/task-access.ts`) and must echo exactly this back. */
+  access?: ReviewAccessChange;
 }
 
 /** A row of the queue, whatever it hangs on. */
@@ -611,6 +615,7 @@ export function taskReviewItems(tasks: ReviewTaskRef[]): ReviewTaskItem[] {
         direct: true,
         askedAt: item.createdAt,
         ...(gateNoteOf(item.judge) ? { gate: gateNoteOf(item.judge) } : {}),
+        ...(item.access ? { access: item.access } : {}),
       });
     }
   }

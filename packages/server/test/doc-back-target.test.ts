@@ -233,7 +233,11 @@ describe('the back target a share visitor is handed', () => {
       200,
     );
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId, { label: 'a share' })).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId, {
+        label: 'a share',
+      })
+    ).headers;
   });
 
   afterAll(() => {

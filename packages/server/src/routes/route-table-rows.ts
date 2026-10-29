@@ -129,6 +129,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/auth/verify', 'POST'],
     ['share-scope', '/api/auth/session', 'GET'],
     ['trusted-local', '/api/auth/logout', 'POST'],
+    ['trusted-local', '/api/auth/reauth', 'GET'],
     ['trusted-local', '/api/auth/profile', 'POST'],
     ['trusted-local', '/api/share', 'GET'],
     ['trusted-local', '/api/share/enabled', 'POST'],
@@ -184,6 +185,17 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/voice', 'GET'],
     ['trusted-local', '/api/voice/agents', 'GET'],
     ['trusted-local', '/api/voice/events:stream', 'GET'],
+  ]),
+  // The owner's access page: every board's audience and the access cards
+  // waiting for him. A share visitor is refused; through the tunnel only on a
+  // proof naming the owner, and the reads only same-origin.
+  ...family('routes/access.ts', [
+    ['trusted-local', '/access', 'GET'],
+    ['trusted-local', '/access/:section', 'GET'],
+    ['trusted-local', '/api/access', 'GET'],
+    ['trusted-local', '/api/access/events:stream', 'GET'],
+    // While sharing is off, the one page the owner's hostname still serves.
+    ['trusted-local', '/sharing-off', 'GET'],
   ]),
   // The voice conversation API. `/v1/` takes a voice API bearer and nothing
   // else, checked in the handler. The token routes are the owner's: through
@@ -314,24 +326,26 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ]),
 
   // Who has access, and at what level. The LIST is a member's — everything in
-  // a workspace is available to everyone in it — and the two writes are the
-  // board owner's. The guard admits the paths so that a PROMOTED owner
-  // reaching the board through the share hostname can manage it at all; the
-  // role is what refuses, one layer lower.
+  // a workspace is available to everyone in it — and the writes are the
+  // machine owner's alone. The guard still admits the two `members/*` paths;
+  // the handler refuses every share visitor, an invited Owner included.
   ...family('routes/workspace-members.ts', [
     ['share-scope', '/workspaces/:ws/members', 'GET'],
     [
       'owner-in-handler',
       '/workspaces/:ws/members/:email/role',
       'POST',
-      'the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself',
+      'the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself',
     ],
     [
       'owner-in-handler',
       '/workspaces/:ws/members/:email',
       'DELETE',
-      'the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself',
+      'the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself',
     ],
+    // An agent's add files an access card instead of applying; a removal
+    // applies at once. Off the member allowlist: no share visitor reaches it.
+    ['trusted-local', '/workspaces/:ws/audience', 'POST'],
   ]),
 
   ...family('routes/workspace-content.ts', [
@@ -394,6 +408,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/secrets', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/withdraw/undo', 'POST'],
+  ]),
+  // The access door: off the member allowlist like `secrets`, so no share
+  // visitor reaches it, and the handler wants a proof naming the owner, sent
+  // same-origin. An agent files an access card and cannot answer it.
+  ...family('routes/task-access.ts', [
+    ['trusted-local', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/access', 'POST'],
   ]),
   // Off the member allowlist, so trusted-local: the voice queue's undo is
   // the owner's, and a share visitor's answers keep the ways back they had.

@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { DocMeta, Thread, User, WebhookPayload } from '@claude-workspaces/core';
 import * as Y from 'yjs';
+import { commentTrustOf } from '../src/actor-identity.ts';
 import type { FeedbackWs, LiveDoc } from '../src/doc-store.ts';
 import { EditSessionTracker } from '../src/edit-sessions.ts';
 import {
@@ -111,6 +112,8 @@ function makeHost(
       rec.docEvents.push({ docId, payload });
     },
     titleOf: (doc) => doc.meta.title,
+    trustOf: (_doc, author) => commentTrustOf(author),
+    trustBoards: () => [],
     summarizer: () => opts.summarizer,
     thread: () => null,
     memberOfCompanion: (docId) => opts.companionOf?.[docId],
