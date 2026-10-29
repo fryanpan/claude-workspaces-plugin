@@ -346,6 +346,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['voice'],
   ['access'],
   ['access', ':id'],
+  ['sharing-off'],
   ['voice-agent', 'v1', 'chat', 'completions'],
   ['workspaces', ':id', 'calendar', 'events', ':id', 'join'],
   ['workspaces', ':id', 'docs', ':id', 'home'],
