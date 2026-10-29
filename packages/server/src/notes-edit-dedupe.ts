@@ -342,14 +342,9 @@ export function dedupeNotesEdits(
       }
       if (twin && !taken.has(twin.entry.id)) {
         // A MOVE IS ONLY EVER WITHIN THIS MEETING'S OWN SECTION. A twin
-        // found through `ownedElsewhere` can be DROPPED — the note is
-        // already written, so today's minutes lose nothing — but never
-        // deleted and re-inserted here. Two recordings on one doc both mark
-        // their bullets `meeting-notes`, so without this clause the wider
-        // set let one meeting's tidy-up lift a bullet out of the other's
-        // live section and re-file it under its own topic. The move exists
-        // for a bullet of ours under the WRONG TOPIC of our own section,
-        // which is the only place the destination means anything.
+        // found through `ownedElsewhere` is DROPPED, never moved: two
+        // recordings on one doc both mark bullets `meeting-notes`, and a
+        // wider move let one meeting's tidy-up re-file the other's bullet.
         const movable =
           section.blocks.has(twin.entry.id) &&
           twin.entry.author === ctx.authorId &&
@@ -418,7 +413,13 @@ export function dedupeNotesEdits(
         notes.push('removed a Decision label the speech did not state');
         continue;
       }
-      out.push(edit);
+      // A heading opened before a block is opened by this batch too: a later
+      // edit naming it again joins it, rather than heading the topic twice.
+      const made = { ...edit };
+      out.push(made);
+      if (made.op === 'insert_before_block')
+        for (const m of made.markdown.matchAll(/^#{1,6}\s+(.*\S)\s*$/gm))
+          opened.push({ made, text: m[1] ?? '', level: 0 });
       continue;
     }
     // WHERE THE NOTES LAND, which is what tells a move from a restatement. An

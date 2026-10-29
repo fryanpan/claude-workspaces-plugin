@@ -103,4 +103,34 @@ describe('a topic heading opened again at another level', () => {
     expect(notes).toContain('Crane booked');
     expect(h.errors).toEqual([]);
   });
+
+  it('opened before a block and again at the end of one batch, is one heading', async () => {
+    const h = createNotesTickHarness({
+      compose: (input, tick) => {
+        if (tick === 1) {
+          return addNotes(
+            input,
+            '### Crew rota\n\n- Rota changes every Monday\n\n### Ferry fares\n\n- Fares rise in May',
+          );
+        }
+        const rota = input.outline.find((e) => e.kind === 'heading' && e.text === 'Ferry fares');
+        if (rota === undefined) return [];
+        return [
+          {
+            op: 'insert_before_block',
+            blockId: rota.id,
+            markdown: '### Harborlight crane\n\n- Crane booked for Tuesday',
+          },
+          { op: 'insert_at_end', markdown: '## Harborlight crane\n\n- Crane needs a driver' },
+        ];
+      },
+    });
+    await h.speak('the rota changes every Monday');
+    await h.speak('the crane is booked for Tuesday and needs a driver');
+    const notes = h.notes();
+    expect(headingLines(notes, 'Harborlight crane')).toBe(1);
+    expect(notes).toContain('Crane booked for Tuesday');
+    expect(notes).toContain('Crane needs a driver');
+    expect(h.errors).toEqual([]);
+  });
 });
