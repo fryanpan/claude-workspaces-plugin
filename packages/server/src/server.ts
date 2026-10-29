@@ -85,7 +85,13 @@ import { parseMuxCursor } from './mux-cursor.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import { PageLoadLog } from './page-loads.ts';
-import { PROMPTS_CHANNEL, VOICE_CHANNEL, createPageNudger, wirePageNudges } from './page-nudges.ts';
+import {
+  ACCESS_CHANNEL,
+  PROMPTS_CHANNEL,
+  VOICE_CHANNEL,
+  createPageNudger,
+  wirePageNudges,
+} from './page-nudges.ts';
 import {
   PARK_MIGRATION_ACTOR,
   type ParkMigrationResult,
@@ -114,6 +120,7 @@ import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import { createStaleAskNotifier } from './review-stale-notify.ts';
+import { type AccessRoutesContext } from './routes/access.ts';
 import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
@@ -150,6 +157,7 @@ import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './route
 import { captureServerError } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
+import { buildAccessView } from './share/access-view.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
 import type { ShareLinks } from './share/share-links.ts';
 import { Shares } from './share/shares.ts';
@@ -218,6 +226,7 @@ import {
   appCacheControl,
   boardLastActivity,
   readAppAssetManifest,
+  renderAccessShell,
   renderBoardShell,
   renderReviewsShell,
   renderSigninShell,
@@ -2802,7 +2811,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       taskProjection.refreshTask(task);
       announceTaskReview(task, item, author);
     },
+    onChanged: pageNudges.accessChanged,
   });
+  /** The owner's page of who can reach every board (routes/access.ts). */
+  const accessRoutesCtx: AccessRoutesContext = {
+    view: () =>
+      buildAccessView({
+        boards: taskStore.listWorkspaces(),
+        shareLinks,
+        proposals: (ids) => accessProposals.rows(ids),
+      }),
+    renderPage: () => renderAccessShell(browserSentry, readAppAssetManifest(markdownAppDist)),
+    pageHeaders: HTML_SHELL_HEADERS,
+    stream: () => openSseStream(sse, ACCESS_CHANNEL),
+    j,
+  };
 
   /**
    * What the sign-in, session and share routes read instead of this closure's
@@ -3050,6 +3073,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse,
     reviewQueueRoutesCtx,
     voicePageRoutesCtx,
+    accessRoutesCtx,
     voiceApiRoutesCtx,
     featureRoutes: features.routes,
     coachRoutesCtx,

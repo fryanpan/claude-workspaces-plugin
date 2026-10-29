@@ -16,7 +16,12 @@
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
-import { type BoardMembersView, type BoardRole, mountBoardMembers } from './board-members.ts';
+import {
+  type BoardMembersView,
+  type BoardRole,
+  accessWriteOf,
+  mountBoardMembers,
+} from './board-members.ts';
 import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
@@ -36,7 +41,11 @@ export interface BoardSettingsPanelDeps {
   /** The signed-in reader, for the push subscription's own author field. */
   user: { id: string; name: string };
   fetchJson<T>(path: string): Promise<T | null>;
-  send(path: string, method: string, body: unknown): Promise<{ ok: boolean }>;
+  send(
+    path: string,
+    method: string,
+    body: unknown,
+  ): Promise<{ ok: boolean; status?: number; data?: Record<string, unknown> | null }>;
   showToast(message: string): void;
   /** The panel's open flag, which lives on `BoardState`. Two thunks rather
    *  than the state object: this file has no other business with it. */
@@ -177,6 +186,11 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
   const members = mountBoardMembers({
     list: el('board-members-list'),
     note: el('board-members-note'),
+    form: el('board-access-add') as HTMLFormElement,
+    error: el('board-access-error'),
+    linkLabel: el('board-access-link-label'),
+    accessHref: (waiting) =>
+      `/access${waiting > 0 ? '/waiting' : ''}?ws=${encodeURIComponent(workspaceId)}`,
     read: async () => {
       const data = await fetchJson<BoardMembersView>(
         `/workspaces/${encodeURIComponent(workspaceId)}/members`,
@@ -184,26 +198,24 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       if (!data || typeof data.you?.role !== 'string' || !Array.isArray(data.members)) return null;
       return data;
     },
-    setRole: async (email, role) => {
-      const res = await send(
-        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}/role`,
-        'POST',
-        { role },
-      );
+    remove: async (match) => {
+      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/audience`, 'POST', {
+        remove: [match],
+      });
       return res.ok;
     },
-    remove: async (email) => {
-      const res = await send(
-        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}`,
-        'DELETE',
-        {},
-      );
-      return res.ok;
+    add: async (match) => {
+      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/audience`, 'POST', {
+        add: [match],
+      });
+      return accessWriteOf(res);
     },
     toast: showToast,
     onRole: (role: BoardRole | null) => {
       canEdit = role === 'owner';
       applyLevel();
+      // The access page is the owner's alone; a member would follow it to a 403.
+      el('board-access-link').classList.toggle('hidden', !canEdit);
     },
   });
 

@@ -40,6 +40,7 @@
 import { normalizeEmail } from '@claude-workspaces/core';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
+import { accessPeople } from '../share/access-view.ts';
 import { normalizeBoardRole } from '../share/board-role.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
@@ -95,14 +96,9 @@ export async function handleWorkspaceMembers(
         email: accessEmail ? normalizeEmail(accessEmail) : null,
         role: roleFor(workspaceId),
       },
-      members: shareLinks.membersOf(workspaceId).map((m) => ({
-        email: m.email,
-        // Spelled out on the wire even when the row omits it. The absent-means
-        // -member rule is this server's; a client that had to know it would be
-        // a second place the default is written down.
-        role: m.role ?? 'member',
-        addedAt: m.addedAt,
-      })),
+      // Role spelled out on the wire even when the row omits it, and each
+      // person filed under the entry that admits them (`share/access-view.ts`).
+      members: accessPeople(shareLinks, workspaceId),
       // Who may sign in at all, and the changes waiting on the owner.
       audience: shareLinks.audienceOf(workspaceId)?.entries ?? [],
       openProposals: accessProposals.rows([workspaceId]).filter((r) => !r.answer).length,

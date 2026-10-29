@@ -53,6 +53,23 @@ export function boardAudienceAdmits(audience: BoardAudience | undefined, email: 
 }
 
 /**
+ * The entry that lets this address in: its own exact entry first, else the
+ * first `@domain` that admits it. What the access page files a person under.
+ */
+export function admittingEntry(
+  audience: BoardAudience | undefined,
+  email: string,
+): string | undefined {
+  const who = normalizeEmail(email);
+  if (!audience || who === '') return undefined;
+  const exact = audience.entries.find((e) => e.match === who);
+  if (exact) return exact.match;
+  return audience.entries.find(
+    (e) => isDomain(e.match) && audienceEntryAdmits(e.match, who) && !e.except?.includes(who),
+  )?.match;
+}
+
+/**
  * The entries in `matches` this audience does not already admit — the part
  * of a request that would let someone new in. Empty means the request
  * widens nothing.

@@ -119,6 +119,7 @@ export async function handleTaskAccess(
   });
   if (!answered.ok) return j(answered.error === 'not-found' ? 404 : 400, answered);
   taskProjection.refreshTask(answered.task);
+  accessProposals?.changed();
   const filedById = reviewItemFilerId(answered.task, reviewItemId);
   taskStore.emit(
     reviewItemAnsweredEvent({

@@ -141,6 +141,11 @@ export class AccessProposals {
     };
   }
 
+  /** Tell the access page a proposal was answered. */
+  changed(): void {
+    this.deps.onChanged?.();
+  }
+
   /** Make the approved change, as it would land now. */
   apply(change: ReviewAccessChange, by: string): ApplyResult {
     const { shareLinks } = this.deps;
