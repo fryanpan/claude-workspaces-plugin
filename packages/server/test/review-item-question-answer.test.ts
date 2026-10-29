@@ -25,9 +25,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page: `beforeAll` replaces this with the signed identity. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+let RILEY: { id: string; name: string; kind?: string; color?: string } = { id: '', name: 'Bob' };
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const AGENT = {
   id: 'agent-index-keeper',
   name: 'Index Keeper',
@@ -77,7 +87,7 @@ describe('answering with a question asks back instead of closing', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -142,6 +152,18 @@ describe('answering with a question asks back instead of closing', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'review-item-question-answer-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const alice = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    const bob = signedInPerson(handle, dataDir, base, {
+      email: 'bob@harborlight.example',
+      name: 'Bob',
+    });
+    PERSON = alice.user;
+    RILEY = bob.user;
+    PROOF.set(alice.user.id, alice.headers);
+    PROOF.set(bob.user.id, bob.headers);
     WS = await seedBoard(base);
   });
   afterAll(async () => {
@@ -170,7 +192,7 @@ describe('answering with a question asks back instead of closing', () => {
       expect(item.answer).toBeUndefined();
       expect(item.infoRequests?.length).toBe(1);
       expect(item.infoRequests?.[0]?.text).toBe('Why is this important?');
-      expect(item.infoRequests?.[0]?.by).toBe('Jordan');
+      expect(item.infoRequests?.[0]?.by).toBe('Alice');
       expect(item.infoRequests?.[0]?.threadId).toBe(res.threadId);
       // About the WHOLE item — no phrase to mark.
       expect(item.infoRequests?.[0]?.range).toBeUndefined();
@@ -253,7 +275,7 @@ describe('answering with a question asks back instead of closing', () => {
 
       const stale = await answer(task.id, itemId, {
         text: 'Why is this important?',
-        author: { id: 'known-riley', name: 'Riley', kind: 'known', color: '#3a7' },
+        author: RILEY,
       });
       expect(stale.status).toBe(409);
       expect(((await stale.json()) as { error: string }).error).toBe('answered');

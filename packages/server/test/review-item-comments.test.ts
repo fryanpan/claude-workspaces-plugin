@@ -1,3 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * Doc-style commenting ON a review item, and the in-place revision that
  * answers it — through the REAL routes.
@@ -13,16 +17,17 @@
  *
  * Fixtures are synthetic: invented ids, generic personas. The repo is public.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { projectTask } from '../src/task-projection.ts';
 import type { Task } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Signed in on the board page in `beforeAll`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+const signIns = new Map<string, Record<string, string>>();
 const AGENT = {
   id: 'agent-index-keeper',
   name: 'Index Keeper',
@@ -84,7 +89,10 @@ describe('review-item comments and revisions', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -157,6 +165,12 @@ describe('review-item comments and revisions', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    const signed = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = signed.user;
+    signIns.set(PERSON.id, signed.headers);
   });
   afterAll(async () => {
     await handle.stop();
@@ -188,7 +202,7 @@ describe('review-item comments and revisions', () => {
       expect(item.answer).toBeUndefined();
       expect(item.infoRequests?.length).toBe(1);
       expect(item.infoRequests?.[0]?.text).toBe('Twice per what — per night?');
-      expect(item.infoRequests?.[0]?.by).toBe('Jordan');
+      expect(item.infoRequests?.[0]?.by).toBe('Alice');
       expect(item.infoRequests?.[0]?.threadId).toBe(threadId);
 
       // Waiting on the owner: out of the reader's queue entirely — neither as

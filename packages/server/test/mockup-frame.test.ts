@@ -31,6 +31,7 @@ import {
   writeViaOf,
 } from '../src/mockup-frame.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 describe('the frame and host helpers', () => {
@@ -167,9 +168,7 @@ describe('the frame and host helpers', () => {
     expect(visitor).toContain(
       '<a class="cw-board-link" href="/workspaces/board%20one" aria-label="Back to the board">',
     );
-    // The flag adds the pill, its style rule and the room the bar's title
-    // leaves for it, and changes nothing else on the page: take those out and
-    // the two pages are the same bytes.
+    // The pill, its rule and the title's room for it are all the flag adds.
     const stripped = visitor
       .replace(/\.cw-board-link\{[^}]*\}/, '')
       .replace('.cw-bar-title{padding-left:84px}', '')
@@ -334,11 +333,12 @@ describe('serving a mock through its host, and stamping what the frame sends', (
     );
     expect(items).toEqual([[taskId, filed.item.id]]);
 
-    // A ticket answer through the relay carries the mark; the task stores it.
+    // A signed-in reviewer's answer through the relay carries the mark; the task stores it.
+    const reviewer = signedInPerson(handle, dataDir, `localhost:${handle.port}`, PERSON);
     await post(
       `/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/answer`,
-      { author: PERSON, text: 'Readable.' },
-      RELAYED,
+      { author: reviewer.user, text: 'Readable.' },
+      { ...reviewer.headers, ...RELAYED },
     );
     const answered = handle.tasks.listReviewItems(taskId).find((r) => r.id === filed.item.id);
     expect(answered?.answer?.via).toBe('mock-frame');

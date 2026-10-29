@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type DocMeta, getMeta } from '@claude-workspaces/core';
-import type * as Y from 'yjs';
+import * as Y from 'yjs';
 
 /**
  * Doc metadata that describes the HOST MACHINE rather than the document.
@@ -131,4 +131,16 @@ export function liftPrivateMetaFromYdoc(ydoc: Y.Doc): PrivateMeta {
     for (const k of PRIVATE_META_KEYS) m.delete(k);
   }, 'private-meta-migration');
   return found as PrivateMeta;
+}
+
+/**
+ * A persisted `.ydoc`'s bytes with every private key lifted out, for a copy
+ * that leaves this machine (`machine:move-board`). Unchanged bytes when the
+ * doc holds none.
+ */
+export function withoutPrivateMeta(update: Uint8Array): Uint8Array {
+  const ydoc = new Y.Doc();
+  Y.applyUpdate(ydoc, update);
+  const found = liftPrivateMetaFromYdoc(ydoc);
+  return Object.keys(found).length === 0 ? update : Y.encodeStateAsUpdate(ydoc);
 }

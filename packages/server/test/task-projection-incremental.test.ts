@@ -26,9 +26,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { workspaceDocId } from '../src/task-projection.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-riverbend', name: 'Riverbend Reviewer', kind: 'known' };
+/** Riverbend, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Riverbend',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const BUILDER = { id: 'agent-harborlight', name: 'Harborlight Builder', kind: 'agent' };
 const SECOND = 'agent-saltmarsh';
 
@@ -53,7 +62,7 @@ describe('the board projection refreshes only the rows an edit named', () => {
   const post = (path: string, body: unknown, method = 'POST') =>
     fetch(`${base}${path}`, {
       method,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: JSON.stringify(body),
     });
   const json = async <T>(res: Response): Promise<T> => (await res.json()) as T;
@@ -67,6 +76,12 @@ describe('the board projection refreshes only the rows an edit named', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'projection-incremental-'));
     h = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${h.port}`;
+    const personSigned = signedInPerson(h, dataDir, base, {
+      email: 'riverbend@harborlight.example',
+      name: 'Riverbend',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     ws = await seedBoard(base, { name: 'Riverbend' });
     const attached = await post(`/workspaces/${ws}/agents`, {
       agentId: BUILDER.id,

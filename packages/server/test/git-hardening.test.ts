@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-roots.ts';
 import { readOriginUrl } from '../src/doc-key.ts';
 import { checkoutBranch, gitCommonDir } from '../src/doc-origin-repo.ts';
-import { scanFolderPaths } from '../src/fs-scan.ts';
+import { scanFolderPaths, scanFolderPathsAsync } from '../src/fs-scan.ts';
 import { diffFiles } from '../src/git-diff.ts';
 import { gitBarred, hardenedGitArgs, readLine, repoOf } from '../src/git-hardening.ts';
 import { classifyExternalContent, gitConflictHint } from '../src/git-provenance.ts';
@@ -123,7 +123,7 @@ function plantedRepo(name: string): string {
 }
 
 describe('no git at all under a lead’s root', () => {
-  test('a planted filter runs under plain git, and not through the listing or the conflict path', () => {
+  test('a planted filter runs under plain git, and not through the listing or the conflict path', async () => {
     const repo = plantedRepo('lead-root');
     // Positive control: a stat-dirty file makes plain git status run both.
     writeFileSync(join(repo, 'notes.md'), '# Harborlight\n\nEdited.\n');
@@ -149,14 +149,20 @@ describe('no git at all under a lead’s root', () => {
       expect(classifyExternalContent(join(repo, 'notes.md'), '# Harborlight\n').source).toBe(
         'unknown',
       );
-      // Listing falls back to a walk.
+      // Listing falls back to a walk, in the background rescan too.
       expect(scanFolderPaths(repo)).toContain('notes.md');
+      expect(await scanFolderPathsAsync(repo)).toContain('notes.md');
       expect(existsSync(spawned)).toBe(false);
       expect(existsSync(marker)).toBe(false);
       remove();
-      // The control: unguarded, the same read runs the shim's git.
+      // The controls: unguarded, the same reads run the shim's git.
       classifyExternalContent(join(repo, 'notes.md'), '# Harborlight\n');
       expect(existsSync(spawned)).toBe(true);
+      for (const listing of [() => scanFolderPaths(repo), () => scanFolderPathsAsync(repo)]) {
+        spawnSync('rm', [spawned]);
+        await listing();
+        expect(existsSync(spawned)).toBe(true);
+      }
     } finally {
       remove();
       process.env.PATH = realPath;

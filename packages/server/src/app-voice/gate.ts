@@ -9,12 +9,15 @@
  *
  * Two decisions, made at two requests:
  *
- * - **Minting**, when the frame's HTML is served. The frame's own document
- *   request carries the reader's cookie, so the server knows who it is
- *   serving. A share or collaboration visitor and a signed-in person who is
- *   not the owner get a frame with no token. With nobody proven, a server
- *   that asks browsers to sign in gives none; one that does not (loopback,
- *   the tailnet) gives one, as every owner-only page there does.
+ * - **Minting**, when the frame's HTML is served. On the board's own
+ *   hostname the frame's document request carries the reader's cookie, so
+ *   the server knows who it is serving. On the frame hostname it carries
+ *   only the frame cookie, which says what the host page decided for its
+ *   reader (`frameGrant`, `frame-ticket.ts`). A share or collaboration
+ *   visitor and a signed-in person who is not the owner get a frame with no
+ *   token. With nobody proven and no frame grant, a server that asks
+ *   browsers to sign in gives none; one that does not (loopback, the
+ *   tailnet) gives one, as every owner-only page there does.
  * - **Opening**, at the upgrade. The token is the credential: the opaque
  *   frame's own requests carry no cookie, so a socket it opens directly
  *   proves nobody, and the token is what says the owner was served this doc
@@ -40,13 +43,18 @@ export interface AppVoiceViewer {
   anyoneProven: boolean;
   /** This deployment asks a browser that proved nobody to sign in. */
   mustSignIn: boolean;
+  /** A frame cookie on the frame hostname whose host page gave its reader
+   *  this same verdict. False off the frame hostname. */
+  frameGrant: boolean;
 }
 
-/** Whether the frame served to `v` carries a token. */
+/** Whether the frame served to `v` carries a token. A person proof on the
+ *  request itself outranks the frame grant. */
 export function mayMintAppVoice(v: AppVoiceViewer): boolean {
   if (v.visitor) return false;
   if (v.ownerProven) return true;
   if (v.anyoneProven) return false;
+  if (v.frameGrant) return true;
   return !v.mustSignIn;
 }
 

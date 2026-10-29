@@ -97,7 +97,14 @@ describe('the level is enforced by the API', () => {
   const postAsVisitor = async (email: string, path: string, body: unknown) =>
     asVisitor(email, path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      // The share page's own origin, as a browser sends it on a press: an
+      // answer is recorded only when it came from the person's own page. The
+      // request carries no x-forwarded-proto, so the server reads it as http.
+      headers: {
+        'content-type': 'application/json',
+        origin: `http://${SHARE_HOST}`,
+        'sec-fetch-site': 'same-origin',
+      },
       body: JSON.stringify(body),
     });
 

@@ -1,7 +1,9 @@
+import { userForIdentity } from '../identities.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
 import { SECRET_VALUE_MAX_CHARS, isStorableSecretValue, secretValueFits } from '../secret-store.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
+import { ownerProof } from '../share/owner-proof.ts';
 import type { TaskRouteRequest, TaskRoutesContext } from './task-routes-context.ts';
 
 /**
@@ -21,7 +23,7 @@ export async function handleTaskSecrets(
   rq: TaskRouteRequest,
 ): Promise<Response | undefined> {
   const { taskStore, taskProjection, j, safeJson, secretWriter } = ctx;
-  const { req, scope, authorFor, roleFor, requireOwner } = rq;
+  const { req, scope, roleFor, requireOwner } = rq;
   /**
    * The same reading of `review.ownerOnly` the rest of the family uses, and
    * deliberately a second call to the same function rather than a shared
@@ -93,9 +95,23 @@ export async function handleTaskSecrets(
         message: 'this server is not configured to store secrets',
       });
     }
+    // The owner's own page, proven, before the body is read: a loopback
+    // caller is every agent on this machine, and one naming the owner in its
+    // body would otherwise choose the values stored under these names and
+    // close the ask as his (`share/owner-proof.ts`).
+    const proof = ownerProof(req, rq.provenIdentityFor, rq.requestOriginFor);
+    if (!proof.ok) {
+      return j(proof.status, {
+        error: proof.error,
+        message:
+          proof.error === 'owner-proof-required'
+            ? "Only the board's owner, signed in, can hand over these values. An agent cannot answer this card."
+            : "Save these values from the card on this board's own page.",
+      });
+    }
     const body = await safeJson(req);
-    const author = authorFor(body?.author);
-    if (!author) return j(400, { error: 'author required' });
+    // The answer is the proven owner's, whatever the body's author names.
+    const author = userForIdentity(proof.proven);
 
     // ALL OR NOTHING, by SERVICE NAME the item itself declared. A caller
     // cannot introduce a name: an entry naming anything the card did not show

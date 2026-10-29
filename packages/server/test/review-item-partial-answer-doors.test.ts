@@ -16,7 +16,8 @@ import { join } from 'node:path';
 import type { AnswerCoverageInput } from '../src/answer-coverage.ts';
 import { REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
+import { FILER, LEAD } from './review-judge-harness.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { listenFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -50,6 +51,9 @@ let classification = '';
 let classified = 0;
 /** When set, the check answers only once this settles. */
 let gate: Promise<void> | undefined;
+/** Alice, signed in on the board page; `boot` signs him in on each server. */
+let PERSON: { id: string; name: string } = { id: '', name: 'Alice' };
+let PERSON_PROOF: Record<string, string> = {};
 
 function boot(): void {
   dataDir = mkdtempSync(join(tmpdir(), 'partial-answer-doors-'));
@@ -72,6 +76,13 @@ function boot(): void {
     },
   });
   base = `http://127.0.0.1:${handle.port}`;
+  // Every request names a local host, so the page's origin is that host's.
+  const alice = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+    email: 'alice@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = alice.user;
+  PERSON_PROOF = alice.headers;
 }
 
 afterEach(async () => {
@@ -84,7 +95,11 @@ afterEach(async () => {
 const post = (path: string, body: unknown) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', host: `localhost:${handle?.port}` },
+    headers: {
+      'content-type': 'application/json',
+      host: `localhost:${handle?.port}`,
+      ...((body as { author?: { id?: string } }).author?.id === PERSON.id ? PERSON_PROOF : {}),
+    },
     body: JSON.stringify(body),
   });
 const jj = async <T>(res: Response | Promise<Response>): Promise<T> => {
@@ -251,7 +266,7 @@ describe('an item declared on a comment, answered on some of its questions', () 
         anchor: { kind: 'subject' },
         review: {
           ...THREE_QUESTIONS,
-          partialAnswers: [{ text: 'planted', by: 'Reader', ts: 1, open: ['anything'] }],
+          partialAnswers: [{ text: 'planted', by: 'Alice', ts: 1, open: ['anything'] }],
         },
       }),
     );

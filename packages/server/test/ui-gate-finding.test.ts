@@ -27,6 +27,7 @@ import { STALL_EVENT } from '../src/stall-nudge.ts';
 import { type BuilderWorktree, makeBuilderWorktree } from './builder-worktree-fixture.ts';
 import { type Frame, listenFrames, settle } from './doc-activity-stall-harness.ts';
 import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 /** What a builder restyling the board has written. */
@@ -44,12 +45,26 @@ describe('a row built past the UI gate is the lead’s finding', () => {
   const streams: Array<ReturnType<typeof listenFrames>> = [];
   const worktrees: BuilderWorktree[] = [];
 
-  const post = (path: string, body: unknown) =>
-    fetch(`${base}${path}`, {
+  /** The harness's PERSON stands for a reviewer signed in on the board page:
+
+   *  a person's answer is recorded only from that person's own proven request. */
+
+  let reviewer: SignedInPerson | undefined;
+
+  const post = (path: string, body: unknown) => {
+    const signed =
+      reviewer && (body as { author?: { id?: string } } | null)?.author?.id === PERSON.id
+        ? reviewer
+        : undefined;
+
+    return fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+
+      headers: { 'content-type': 'application/json', ...signed?.headers },
+
+      body: JSON.stringify(signed ? { ...(body as object), author: signed.user } : body),
     });
+  };
   const jj = async <T>(res: Response): Promise<T> => {
     if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
     return (await res.json()) as T;
@@ -61,6 +76,10 @@ describe('a row built past the UI gate is the lead’s finding', () => {
     // stand in for the finding under test.
     handle = createServer({ port: 0, dataDir, keepMovingCadenceMs: 0 });
     base = `http://127.0.0.1:${handle.port}`;
+    reviewer = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: PERSON.name,
+    });
   });
 
   afterEach(async () => {

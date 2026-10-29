@@ -31,15 +31,18 @@ import {
   BUILDER,
   type Frame,
   LEAD,
-  PERSON,
   QUIET_MS,
   listenFrames,
   settle,
   waitForFrames,
 } from './doc-activity-stall-harness.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
+/** Alice, signed in on the board page: `beforeEach` signs him in on each server. */
+let PERSON: { id: string; name: string } = { id: '', name: 'Alice' };
+let PERSON_PROOF: Record<string, string> = {};
 
 describe("a linked doc's discussion counts too", () => {
   let handle: ServerHandle;
@@ -49,7 +52,10 @@ describe("a linked doc's discussion counts too", () => {
   const post = (path: string, body: unknown): Promise<Response> =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...((body as { author?: { id?: string } }).author?.id === PERSON.id ? PERSON_PROOF : {}),
+      },
       body: JSON.stringify(body),
     });
   const jj = async <T>(res: Response): Promise<T> => {
@@ -61,6 +67,12 @@ describe("a linked doc's discussion counts too", () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-threads-stall-'));
     handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: QUIET_MS });
     base = `http://127.0.0.1:${handle.port}`;
+    const alice = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = alice.user;
+    PERSON_PROOF = alice.headers;
     WS = await seedBoard(base);
   });
 

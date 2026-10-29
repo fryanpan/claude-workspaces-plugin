@@ -42,7 +42,8 @@ import {
   readDocIndex,
 } from './doc-index.ts';
 import type { LiveDoc, WorkspaceDirNode, WorkspaceFileNode, WorkspaceTree } from './doc-store.ts';
-import { isListedFile, landsOnListed, listedFiles, scanFolderPaths } from './fs-scan.ts';
+import { isListedFile, landsOnListed, listedFiles } from './fs-listing.ts';
+import { scanFolderPaths } from './fs-scan.ts';
 import { privateMetaPath } from './private-meta.ts';
 import {
   type ArchivedDoc,

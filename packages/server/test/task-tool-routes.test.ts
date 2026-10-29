@@ -12,7 +12,7 @@
  * is asserted end-to-end: send it over HTTP, read the stored effect back.
  * Every absence assertion has a positive control beside it.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -25,9 +25,15 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { workspaceDocId } from '../src/task-projection.ts';
 import type { Task, TaskStoreEvent } from '../src/tasks.ts';
 import { type GoalIds, seedGoalsOverHttp } from './goal-seed.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: User = { id: '', name: 'Alice', kind: 'known', color: '' };
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const AGENT: User = {
   id: 'agent-search-revamp',
   name: 'Search Revamp',
@@ -70,7 +76,7 @@ describe('task tool routes (plan §3.12 commit 6)', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -149,6 +155,12 @@ describe('task tool routes (plan §3.12 commit 6)', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-tools-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     WS = await seedBoard(base);
   });
 
@@ -241,7 +253,7 @@ describe('task tool routes (plan §3.12 commit 6)', () => {
       }
       const changed = events.filter((e) => e.type === 'workspace.goals_changed');
       expect(changed.length).toBe(2);
-      expect(changed[0]?.actor).toMatchObject({ name: 'Jordan', kind: 'person' });
+      expect(changed[0]?.actor).toMatchObject({ name: 'Alice', kind: 'person' });
       expect(changed[1]?.actor).toMatchObject({ name: 'Search Revamp', kind: 'agent' });
     });
 
@@ -766,7 +778,7 @@ describe('task tool routes (plan §3.12 commit 6)', () => {
         );
         expect(res.task.answer).toMatchObject({
           text: 'Ship now — the rebuild can trail.',
-          by: 'Jordan',
+          by: 'Alice',
         });
       } finally {
         off();
@@ -776,7 +788,7 @@ describe('task tool routes (plan §3.12 commit 6)', () => {
       expect(answered[0]).toMatchObject({
         taskId: decision.id,
         answer: 'Ship now — the rebuild can trail.',
-        actor: { name: 'Jordan', kind: 'person' },
+        actor: { name: 'Alice', kind: 'person' },
         links: [{ kind: 'doc', docId: 'plan-doc' }],
       });
       // Stored effect, read back.

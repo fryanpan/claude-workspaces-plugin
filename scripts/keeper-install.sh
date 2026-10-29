@@ -192,8 +192,13 @@ fi
 step "8. Prove it answers"
 LISTEN=$($SUDO lsof -nP -iTCP:"$PORT" -sTCP:LISTEN || true)
 print -r -- "$LISTEN" | sed 's/^/   /'
-[ "$(print -r -- "$LISTEN" | awk '$1=="launchd" && $2==1' | grep -cE '127\.0\.0\.1:|\[::1\]:')" = 2 ] \
-  || stop "expected two listeners on $PORT, 127.0.0.1 and [::1], both owned by launchd (pid 1)"
+# launchd can hold each socket under more than one descriptor, so lsof may
+# print an address twice. Judge the set of addresses, and that nobody else
+# listens on the port.
+ADDRS=$(print -r -- "$LISTEN" | awk 'NR>1 && $1=="launchd" && $2==1 {print $9}' | LC_ALL=C sort -u | tr '\n' ' ')
+OTHERS=$(print -r -- "$LISTEN" | awk 'NR>1 && NF && !($1=="launchd" && $2==1)' | wc -l | tr -d ' ')
+[ "$ADDRS" = "127.0.0.1:$PORT [::1]:$PORT " ] && [ "$OTHERS" = 0 ] \
+  || stop "expected listeners on $PORT at 127.0.0.1 and [::1] only, all owned by launchd (pid 1)"
 ok "launchd holds 127.0.0.1:$PORT and [::1]:$PORT"
 seen=0
 for _ in 1 2 3 4 5 6 7 8 9 10; do
