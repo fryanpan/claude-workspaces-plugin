@@ -129,6 +129,8 @@ describe('share links over HTTP', () => {
     workspaceId: string,
     extra: Record<string, unknown> = {},
   ): Promise<{ linkId: string; url: string }> => {
+    // The board names the partner domain: a link only invites its audience.
+    handle.shareLinks.addToAudience(workspaceId, ['@partner.example'], 'Bryan');
     const r = await postLocal('/api/share/workspace', { workspaceId, ...extra });
     expect(r.status, await r.clone().text()).toBe(200);
     const body = (await r.json()) as { link: { linkId: string }; url: string };
@@ -232,6 +234,7 @@ describe('share links over HTTP', () => {
       // sends. `name` was the per-share-application mint's subdomain and is
       // ignored; `allowDomains` is the link's audience, and the reply says so.
       // Who it then admits is `share-link-audience.test.ts`.
+      handle.shareLinks.addToAudience(board, ['@partner.example'], 'Bryan');
       const r = await postLocal('/api/share/workspace', {
         workspaceId: board,
         allowDomains: ['@partner.example'],
@@ -545,7 +548,8 @@ describe('share links over HTTP', () => {
         expect(r.status).toBe(403);
         expect(await r.json()).toEqual({ error: 'sharing_disabled' });
       } finally {
-        expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(200);
+        // Only the owner turns it back on; the test sets the gate directly.
+        handle.sharingGate.setEnabled(true);
       }
       // Positive control: back on, the same member reaches the board again.
       expect(
@@ -1309,6 +1313,7 @@ describe('share links over HTTP', () => {
         body: JSON.stringify({ name: 'Switch board' }),
       });
       const probeBoard = ((await made.json()) as { workspace: { id: string } }).workspace.id;
+      probe.shareLinks.addToAudience(probeBoard, ['@partner.example'], 'Bryan');
       const minted = await fetch(`${probeBase}/api/share/workspace`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1342,7 +1347,9 @@ describe('share links over HTTP', () => {
       // Redeeming is shut too, not merely the board behind it.
       expect((await visit(`/s/${link.linkId}`)).status).toBe(403);
 
-      expect((await flip(true)).status).toBe(200);
+      // An agent cannot open it again; the owner's answer does.
+      expect((await flip(true)).status).toBe(403);
+      probe.sharingGate.setEnabled(true);
       expect((await visit(boardPath)).status).toBe(200);
       await probe.stop();
     });
@@ -1356,6 +1363,7 @@ describe('share links over HTTP', () => {
         body: JSON.stringify({ name: 'Share-link-only board' }),
       });
       const probeBoard = ((await made.json()) as { workspace: { id: string } }).workspace.id;
+      probe.shareLinks.addToAudience(probeBoard, ['@partner.example'], 'Bryan');
       const minted = await fetch(`${probeBase}/api/share/workspace`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1537,7 +1545,8 @@ describe('share links over HTTP', () => {
         expect(await memberClosed).toBe(1008);
         expect(owner.ws.readyState).toBe(WebSocket.OPEN);
       } finally {
-        expect((await postLocal('/api/share/enabled', { enabled: true })).status).toBe(200);
+        // Only the owner turns it back on; the test sets the gate directly.
+        handle.sharingGate.setEnabled(true);
         owner.ws.close();
       }
     });
@@ -1657,6 +1666,8 @@ describe('share links over HTTP', () => {
       const created = await post('/workspaces', { name: 'Board shared the old way' });
       expect(created.status).toBe(200);
       oldBoard = ((await created.json()) as { workspace: { id: string } }).workspace.id;
+      // Bryan lets the domain in first: a mint can only name people the board admits.
+      before.shareLinks.addToAudience(oldBoard, ['@partner.example'], 'Bryan');
       const minted = await post('/api/share/link', {
         workspaceId: oldBoard,
         allowDomains: ['@partner.example'],
@@ -1722,6 +1733,7 @@ describe('share links over HTTP', () => {
       // One hostname redeems, and it is not this one.
       const after = migrated();
       const port = after.port;
+      after.shareLinks.addToAudience(oldBoard, [STRANGER], 'Bryan');
       const minted = await fetch(`http://127.0.0.1:${port}/api/share/workspace`, {
         method: 'POST',
         headers: { host: `localhost:${port}`, 'content-type': 'application/json' },

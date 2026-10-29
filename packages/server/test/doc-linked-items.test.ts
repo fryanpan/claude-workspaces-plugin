@@ -124,7 +124,7 @@ describe("a doc's record and the ticket items that link it", () => {
 
     // A share visitor reads the same doc WITHOUT it: a ticket's items are not
     // something a share was a grant over.
-    const share = await mintAccessShare(base, access, ws);
+    const share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, ws);
     const visitor = await record(linkedDoc, {
       host: share.host,
       'cf-access-jwt-assertion': share.jwt,

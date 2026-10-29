@@ -269,7 +269,11 @@ describe('the handoff link is owner-only', () => {
     });
     taskId = ((await t.json()) as { task: { id: string } }).task.id;
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId, { label: 'a share' })).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId, {
+        label: 'a share',
+      })
+    ).headers;
   });
 
   afterAll(async () => {

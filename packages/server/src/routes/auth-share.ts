@@ -1,3 +1,22 @@
+import type { CodeSender } from '../auth/code-sender.ts';
+import { CODE_TTL_MS, type EmailCodes } from '../auth/email-code.ts';
+import type { SessionRevocations } from '../auth/session-revocations.ts';
+import {
+  HOST_SESSION_COOKIE,
+  SESSION_COOKIE,
+  clearedSessionCookieHeaders,
+  sessionCookieHeader as emailSessionCookieHeader,
+  mintSession,
+  readSessionCookie,
+  verifySession as verifyEmailSession,
+} from '../auth/session.ts';
+import { mintBoardWidgetToken } from '../auth/widget-token.ts';
+import type { DocStore } from '../doc-store.ts';
+import type { Identities, IdentityRecord } from '../identities.ts';
+import { userForIdentity } from '../identities.ts';
+import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
+import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 /**
  * The sign-in, session and share-link REST block, in the order it is matched.
  *
@@ -19,25 +38,7 @@
  * Dependencies arrive in an explicit context rather than captured from the
  * `createServer` closure, following `task-routes-context.ts`.
  */
-import type { CodeSender } from '../auth/code-sender.ts';
-import { CODE_TTL_MS, type EmailCodes } from '../auth/email-code.ts';
-import type { SessionRevocations } from '../auth/session-revocations.ts';
-import {
-  HOST_SESSION_COOKIE,
-  SESSION_COOKIE,
-  clearedSessionCookieHeaders,
-  sessionCookieHeader as emailSessionCookieHeader,
-  mintSession,
-  readSessionCookie,
-  verifySession as verifyEmailSession,
-} from '../auth/session.ts';
-import { mintBoardWidgetToken } from '../auth/widget-token.ts';
-import type { DocStore } from '../doc-store.ts';
-import type { Identities, IdentityRecord } from '../identities.ts';
-import { userForIdentity } from '../identities.ts';
-import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
-import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
-import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import { type AccessProposals, proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { boardLockedRefusal, lockedBoardNamedBy } from '../share/board-lock.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
@@ -54,7 +55,7 @@ import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import { widgetAuthPage } from '../widget-auth-page.ts';
 import { BOARD_LOCK_PATH, handleBoardLock } from './board-lock.ts';
-import { handleShareSwitch } from './share-switch.ts';
+import { handleShareSwitch, provedOwner } from './share-switch.ts';
 
 /**
  * The refusal a share route gives when handed a GROUPING id.
@@ -105,6 +106,11 @@ const SHARE_LINK_ARGS: ReadonlySet<string> = new Set([
   'ttlSeconds',
   'label',
   'allowDomains',
+  // Where a mint that names somebody new files its card, and why
+  // (share/access-proposals.ts), and who is asking.
+  'taskId',
+  'why',
+  'createdBy',
 ]);
 
 /**
@@ -143,6 +149,8 @@ export interface AuthShareRoutesContext {
    * a member" at the place that decides who gets in.
    */
   shareLinks: ShareLinks;
+  /** Files the proposal an agent's widening share call becomes. */
+  accessProposals: AccessProposals;
   /**
    * The hostname share URLs are built from (the first `CW_SHARE_LINK_HOSTS`
    * entry), or `''` when this deployment configured none. Empty refuses the
@@ -253,6 +261,7 @@ export async function handleAuthShareRoutes(
     taskStore,
     shares,
     shareLinks,
+    accessProposals,
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
@@ -657,6 +666,9 @@ export async function handleAuthShareRoutes(
             : l,
         ),
       members: shareLinks.allMembers(),
+      // Who each board admits at all (`board-audience.ts`). A link only
+      // invites inside its board's audience.
+      audiences: shareLinks.allAudiences(),
       sharing: sharingGate.status(),
     });
   }
@@ -898,6 +910,28 @@ export async function handleAuthShareRoutes(
       maxSeconds: shares.maxTtlSeconds,
     });
     if (!linkTtl.ok) return j(400, { error: linkTtl.error, hint: linkTtl.hint });
+    // Only the owner lets somebody new in, on this older flow too. The
+    // operator's own addresses are not somebody new; anything else the
+    // board's audience does not name files a card, and once the owner
+    // approves it the same call mints. The collaboration hostname also
+    // checks the board's audience on every request (`collabMemberOf`).
+    const widening = accessProposals.widening(
+      workspaceId,
+      audience
+        .map((d) => (d.includes('@') ? d.toLowerCase() : `@${d.toLowerCase()}`))
+        .filter((d) => !defaultShareAudience.some((t) => t.toLowerCase() === d)),
+    );
+    if (widening.length > 0 && !provedOwner({ req, provenIdentityFor })) {
+      return proposalReply(
+        j,
+        accessProposals.propose({
+          change: { op: 'add-audience', workspaceId, entries: widening },
+          taskId: body?.taskId,
+          why: body?.why,
+          actor: proposingAgent(body?.createdBy),
+        }),
+      );
+    }
     try {
       const share = await shares.createShareWorkspace({
         workspaceId,
@@ -1092,6 +1126,25 @@ export async function handleAuthShareRoutes(
         hint: "Set CW_SHARE_LINK_HOSTS to the share hostname and CF_ACCESS_SHARE_AUD to the audience of the Cloudflare Access application in front of it (its own application, not the owner hostname's), alongside CF_ACCESS_TEAM_DOMAIN.",
       });
     }
+    // Only the owner lets somebody new in (share/access-proposals.ts): a link
+    // for people the board already names mints now; one naming someone new,
+    // or making its redeemers Owners, becomes an approval card instead.
+    const widening = accessProposals.widening(workspaceId, allowDomains ?? []);
+    if (widening.length > 0 || role === 'owner') {
+      const link = {
+        ...(typeof body?.label === 'string' ? { label: body.label } : {}),
+        ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
+        ...(role !== undefined ? { role } : {}),
+        ...(landing ? { landing } : {}),
+        ...(allowDomains ? { allowDomains } : {}),
+      };
+      const change = { op: 'share-link' as const, workspaceId, entries: widening, link };
+      const actor = proposingAgent(body?.createdBy);
+      return proposalReply(
+        j,
+        accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
+      );
+    }
     try {
       const link = shareLinks.create({
         workspaceId,
@@ -1107,8 +1160,9 @@ export async function handleAuthShareRoutes(
         link,
         url,
         // Said on every reply, so the caller can tell the person who it was
-        // shared with: `anyone-who-signs-in`, or the list it applied.
-        audience: allowDomains ?? 'anyone-who-signs-in',
+        // shared with: the list it applied, or `board-audience` — a link
+        // with no audience of its own invites whoever the board names.
+        audience: allowDomains ?? 'board-audience',
       });
     } catch (err) {
       return j(400, { error: err instanceof Error ? err.message : 'create_share_link_failed' });

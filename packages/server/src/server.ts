@@ -13,7 +13,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
-import { isOwnerActor, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
+import { ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -49,6 +49,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
@@ -86,7 +87,13 @@ import { parseMuxCursor } from './mux-cursor.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import { PageLoadLog } from './page-loads.ts';
-import { PROMPTS_CHANNEL, VOICE_CHANNEL, createPageNudger, wirePageNudges } from './page-nudges.ts';
+import {
+  ACCESS_CHANNEL,
+  PROMPTS_CHANNEL,
+  VOICE_CHANNEL,
+  createPageNudger,
+  wirePageNudges,
+} from './page-nudges.ts';
 import {
   PARK_MIGRATION_ACTOR,
   type ParkMigrationResult,
@@ -115,6 +122,7 @@ import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import { createStaleAskNotifier } from './review-stale-notify.ts';
+import { type AccessRoutesContext } from './routes/access.ts';
 import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
@@ -150,10 +158,14 @@ import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/work
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
 import { captureServerError } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
+import { AccessProposals } from './share/access-proposals.ts';
+import { buildAccessView } from './share/access-view.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
+import type { ShareLinks } from './share/share-links.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
 import { SHARING_NOTICE_ACTOR, SharingNotice, rankFallbackBoards } from './sharing-notice.ts';
+import { sharingOffCardPath, sharingOffDoorAllows } from './sharing-off-door.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
@@ -217,6 +229,7 @@ import {
   appCacheControl,
   boardLastActivity,
   readAppAssetManifest,
+  renderAccessShell,
   renderBoardShell,
   renderReviewsShell,
   renderSigninShell,
@@ -310,6 +323,10 @@ export interface ServerHandle {
    *  test can count them after the last page leaves. */
   folderWatches: FolderWatches;
   shares: Shares | null;
+  /** The share-link store: links, members and each board's audience.
+   *  Exposed so a test can name who a board admits without a person's
+   *  browser, which is the only other door that may (`board-audience.ts`). */
+  shareLinks: ShareLinks;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -1977,6 +1994,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     recallCallbackHost,
     accessOnlyBrowserHosts,
     proxiedTrustedEmails,
+    // Read at request time; the notice is built further down.
+    sharingOffDoor: (method, pathname) =>
+      sharingOffDoorAllows(method, pathname, sharingNotice.openCard()),
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
@@ -2540,14 +2560,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * `/events/agent/<id>` answers with, and calls REST over loopback like the
    * stdio child did, so every REST gate sees what it always saw.
    */
+  /** Whether a watch key is on one board: the board, one of its tasks, or a doc it holds. */
+  const watchKeyOnBoard = (key: string, boardId: string): boolean => {
+    if (key === `ws:${boardId}`) return true;
+    if (key.startsWith('task:')) {
+      return taskStore.getTask(key.slice('task:'.length))?.workspaceId === boardId;
+    }
+    return shareWorkspacesOf(key).includes(boardId);
+  };
   const connectorHost = createConnectorHost({
     createSession: hostedSessionFactory({
       baseUrl: () => `http://127.0.0.1:${server.port}`,
-      openAgentEvents: (agentId, lastEventId) =>
+      // A session opened on a board's socket reads only that board's keys.
+      openAgentEvents: (agentId, lastEventId, boardId) =>
         openAgentMuxStream({
           bus: sse,
           agentId,
-          keys: () => agentWatches.list(agentId, watchKeyExists).watches.map((w) => w.key),
+          keys: () =>
+            agentWatches
+              .list(agentId, watchKeyExists)
+              .watches.map((w) => w.key)
+              .filter((key) => boardId === undefined || watchKeyOnBoard(key, boardId)),
           channelFor: (key) => channelForWatchKey(key, canonicalDocId),
           cursors: parseMuxCursor(lastEventId ?? undefined),
           onWatchSetChanged: (cb) => agentWatches.onChange(agentId, cb),
@@ -2557,6 +2590,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // identity is the one `/mcp`'s own gate already settled: it took that
       // agent's token to get in.
       mintAgentToken: (agentId) => mintAgentToken(agentId, agentTokenKeyFor()),
+      // A board socket session's REST calls carry a board token kept here,
+      // never handed to the lead (connector/board-token-lease.ts).
+      boardToken: (agentId, boardId) =>
+        boardTokenLease(boardAgentTokens, agentId, boardId, (line) => console.error(line)),
       log: (...args) => console.error('[connector]', ...args),
     }),
     fallbackPluginVersion: () => readReleasedPluginVersion() ?? '0.0.0',
@@ -2575,13 +2612,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     watchKeyExists,
     watchCoverageFor,
     canonicalDocId,
-    watchKeyOnBoard: (key, boardId) => {
-      if (key === `ws:${boardId}`) return true;
-      if (key.startsWith('task:')) {
-        return taskStore.getTask(key.slice('task:'.length))?.workspaceId === boardId;
-      }
-      return shareWorkspacesOf(key).includes(boardId);
-    },
+    watchKeyOnBoard,
     agentTokenKey: agentTokenKeyFor,
     requireAgentToken,
     warnLegacyAgentCaller,
@@ -2717,9 +2748,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ),
     getTask: (taskId) => taskStore.getTask(taskId),
     createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
-    addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
-    reviseReviewItem: (taskId, itemId, patch, o) =>
-      taskStore.reviseReviewItem(taskId, itemId, patch, o),
+    addAccessReviewItem: (taskId, change, why, o) =>
+      taskStore.addAccessReviewItem(taskId, change, why, o),
     withdrawReviewItem: (taskId, itemId, o) => taskStore.withdrawReviewItem(taskId, itemId, o),
     refresh: (taskId) => {
       const task = taskStore.getTask(taskId);
@@ -2761,8 +2791,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         color: ANONYMOUS_ACTOR.color,
       });
     },
-    isOwner: (actor) => isOwnerActor(actor),
-    turnBackOn: (who) => {
+  });
+  /** The owner approved the notice's card at the access door. */
+  const turnSharingOnFromCard = (by: string): { ok: boolean; error?: string } =>
+    sharingNotice.turnOnFromCard(() => {
       const res = applyMasterFlip(
         {
           docStore,
@@ -2771,21 +2803,66 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           sharingGate,
           onSharingFlip: (flip) => void sharingNotice.onFlip(flip),
         },
-        { enabled: true, actor: who.actor, peer: who.peer, reason: who.reason, at: Date.now() },
+        {
+          enabled: true,
+          actor: `owner ${by}`,
+          peer: 'the access door',
+          reason: 'approved the sharing notice',
+          at: Date.now(),
+        },
       );
       return res.ok ? { ok: true } : { ok: false, error: res.error };
-    },
-  });
-  taskStore.onEvent((ev) => {
-    if (ev.type !== 'decision.answered') return;
-    sharingNotice.onAnswered({
-      taskId: ev.taskId,
-      ...(ev.reviewItemId !== undefined ? { reviewItemId: ev.reviewItemId } : {}),
-      ...(ev.optionId !== undefined ? { optionId: ev.optionId } : {}),
-      answer: ev.answer,
-      actor: ev.actor,
     });
+
+  // An agent's share call that would let somebody new in files a proposal;
+  // only the owner's Approve applies it (share/access-proposals.ts).
+  const accessProposals = new AccessProposals({
+    taskStore,
+    shareLinks,
+    shareLinkBaseHost,
+    isBoardLocked: (workspaceId) => sharingGate.isBoardLocked(workspaceId),
+    setBoardEnabled: (workspaceId) => sharingGate.setBoardEnabled(workspaceId, true),
+    setBoardUnlocked: (workspaceId) => sharingGate.setBoardLocked(workspaceId, false),
+    setSharingOn: turnSharingOnFromCard,
+    announce: (task, item, author) => {
+      taskProjection.refreshTask(task);
+      announceTaskReview(task, item, author);
+    },
+    onChanged: pageNudges.accessChanged,
   });
+  /** The owner's page of who can reach every board (routes/access.ts). */
+  const accessRoutesCtx: AccessRoutesContext = {
+    view: () =>
+      buildAccessView({
+        boards: taskStore.listWorkspaces(),
+        shareLinks,
+        proposals: (ids) => accessProposals.rows(ids),
+      }),
+    renderPage: () => renderAccessShell(browserSentry, readAppAssetManifest(markdownAppDist)),
+    pageHeaders: HTML_SHELL_HEADERS,
+    stream: () => openSseStream(sse, ACCESS_CHANNEL),
+    sharingOff: () => {
+      const open = sharingNotice.openCard();
+      const item = open
+        ? taskStore.listReviewItems(open.taskId).find((r) => r.id === open.itemId)
+        : undefined;
+      const review = item?.review as { headline?: unknown; detail?: unknown } | undefined;
+      return {
+        enabled: sharingGate.isEnabled(),
+        ...(open && item && item.answer === undefined && item.access !== undefined
+          ? {
+              card: {
+                path: sharingOffCardPath(open),
+                change: item.access,
+                headline: typeof review?.headline === 'string' ? review.headline : '',
+                detail: typeof review?.detail === 'string' ? review.detail : '',
+              },
+            }
+          : {}),
+      };
+    },
+    j,
+  };
 
   /**
    * What the sign-in, session and share routes read instead of this closure's
@@ -2797,6 +2874,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     taskStore,
     shares,
     shareLinks,
+    accessProposals,
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
@@ -2837,6 +2915,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // legible in a debugger.
     ...(opts.secretWriter ? { secretWriter: opts.secretWriter } : {}),
     ...(permissionGrants ? { permissionGrants } : {}),
+    accessProposals,
     ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     taskStore,
     taskProjection,
@@ -2913,6 +2992,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     chatAudit,
     shareLinks,
+    accessProposals,
     taskStore,
     taskProjection,
     docStore,
@@ -3021,6 +3101,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspaceRoutesCtx,
     taskRoutesCtx,
     connectorHost,
+    // Forward reference: the board sockets are opened below.
+    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
     agentTokenKeyFor,
     agentIdentityRoutesCtx,
     boardTokenRoutesCtx,
@@ -3037,6 +3119,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse,
     reviewQueueRoutesCtx,
     voicePageRoutesCtx,
+    accessRoutesCtx,
     voiceApiRoutesCtx,
     featureRoutes: features.routes,
     coachRoutesCtx,
@@ -3092,9 +3175,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     websocket: socketHandlers,
   });
 
-  // One socket per live board (board-sockets.ts), only when asked for: no
-  // caller passes the folder yet but a test, until a lead's relay can use it.
-  // Kept in step with the boards as they are made, archived and deleted.
+  // One socket per live board (board-sockets.ts), only when asked for:
+  // bin.ts passes the folder when `--board-socket-dir`, `CW_BOARD_SOCKET_DIR`
+  // or `CW_BOARD_SOCKETS=1` says so (server-config.ts). Kept in step with the boards as they are made, archived and deleted.
   const boardSockets = opts.boardSocketDir
     ? openBoardSockets({ dir: opts.boardSocketDir, handle: handleWithOrigin, j })
     : null;
@@ -3396,6 +3479,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     dispatchReports,
     folderWatches,
     shares,
+    shareLinks,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
     // Exactly what the interval does, exposed for the same reason

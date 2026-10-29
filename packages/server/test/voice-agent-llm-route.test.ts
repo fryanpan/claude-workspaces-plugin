@@ -188,6 +188,7 @@ describe('setup 4: the custom-LLM route', () => {
   });
 
   it('refuses a share visitor, credential or not', async () => {
+    armed.shareLinks.addToAudience(boardId, ['reviewer@partner.example'], 'Bryan');
     const minted = await fetch(`${base}/api/share/workspace`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

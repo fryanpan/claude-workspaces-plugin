@@ -211,7 +211,7 @@ describe('serving a mock', () => {
 
     // A share visitor on the same board is served the same mock WITHOUT it:
     // the dock shows a visitor only the mock's own thread asks.
-    const share = await mintAccessShare(base, access, ws);
+    const share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, ws);
     const visitorRes = await fetch(`${base}/workspaces/${ws}/mockups/${linkedMock}?cw-frame=1`, {
       headers: { host: share.host, 'cf-access-jwt-assertion': share.jwt },
     });

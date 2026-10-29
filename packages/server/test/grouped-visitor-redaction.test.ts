@@ -112,7 +112,9 @@ describe('a share visitor’s /grouped leaks no hostname and no other board', ()
     reviewId = diff.reviewId;
     expect(reviewId).toBeTruthy();
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+    ).headers;
   });
 
   afterAll(async () => {

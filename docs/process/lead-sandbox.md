@@ -138,9 +138,18 @@ its own board's, and every write in that folder. So the lead's only way to a
 board is its own board's socket, where the server holds each request to that
 board whatever token it carries. The folder is the config's top-level
 `boardSocketDir`, or `/private/tmp/cw-<uid>-boards` when unset; a folder too
-long for a socket path is refused. The lead's own MCP child and hooks do not
-use that socket yet, so `--lead` refuses to launch a lead with `boardWall`
-set: it is for `--check`, which connects to each port at both loopbacks and
+long for a socket path is refused. The server opens the sockets only when
+started with `CW_BOARD_SOCKETS=1` (or `CW_BOARD_SOCKET_DIR` /
+`--board-socket-dir` naming the folder); it is off by default.
+
+`--lead` launches such a lead with `CW_BOARD_SOCKET` set to its own board's
+socket and `CW_WORKSPACE_ID` to its board, and with no `at1.` or `at2.` value
+in its environment. Its MCP child is then the node relay dialling that
+socket, and the server keeps the board token the relay's tools need, so the
+lead holds none. The plugin's hooks still dial the board server's port,
+which the wall refuses, so they fail; the launch says so.
+
+`--check` connects to each port at both loopbacks and
 each LAN and tailnet address from inside the profile (each must be refused
 with `EPERM`), to its own board's socket (it must not be), and to each other
 board's socket in the folder (each must be refused, and must connect without
@@ -503,9 +512,10 @@ Sandbox, a macOS user per lead, a VM) is planned for either.
   lead's own MCP child and hooks reach the same port, so the profile cannot
   simply deny it. This closes with a board agent token per lead, scoped to
   that lead's board: the same token a lead on Fly needs. The wall
-  (`boardWall`, above) and the board sockets it leaves one of open have
-  landed, for `--check` only; a real lead gets them once its tools reach its
-  board's socket.
+  (`boardWall`, above), the board sockets it leaves one of open, and the
+  relay that carries the lead's MCP calls over that socket have landed. Two
+  things are left before a real lead runs walled: the server flag must be on
+  in prod, and the plugin's hooks must reach the socket too.
 - **The keychain answers a lead with `allowKeychain`.** By default the
   profile refuses the keychain (step 1): measured 28 October, a dummy item
   read back from inside a profile before the rule was refused after it

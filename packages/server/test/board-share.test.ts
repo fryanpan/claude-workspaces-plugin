@@ -286,9 +286,18 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
     otherId = ((await other.json()) as { workspace: { id: string } }).workspace.id;
 
     // Shares: the whole board workspace, and the unrelated workspace.
-    boardShare = await mintAccessShare(base, access, boardId, { label: 'board share' });
+    boardShare = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      boardId,
+      { label: 'board share' },
+    );
     boardCookie = boardShare.headers;
-    otherCookie = (await mintAccessShare(base, access, otherId, { label: 'other share' })).headers;
+    otherCookie = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, otherId, {
+        label: 'other share',
+      })
+    ).headers;
   });
 
   afterAll(async () => {
@@ -958,7 +967,8 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
         expect(r.status).toBe(403);
         expect(await r.json()).toEqual({ error: 'sharing_disabled' });
       } finally {
-        expect((await post('/api/share/enabled', { enabled: true })).status).toBe(200);
+        // Only the owner turns it back on; the test sets the gate directly.
+        handle.sharingGate.setEnabled(true);
       }
       // Positive control: the same call lands again once it is back on.
       const again = await pub(`/workspaces/${boardId}/tasks`, boardCookie, {
@@ -1144,7 +1154,11 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
 
   describe('revocation hangs up the board, it does not just refuse', () => {
     it('closes the board doc socket and the workspace stream a share had open', async () => {
-      const share = await mintAccessShare(base, access, boardId);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        boardId,
+      );
       const cookie = share.headers;
 
       const client = connectDoc(`${wsBase}/workspaces/${boardId}/y`, { ...share.headers });

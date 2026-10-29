@@ -58,6 +58,8 @@ describe('share_link arguments are honoured or refused, never dropped', () => {
     expect(board.status).toBe(200);
     boardId = ((await board.json()) as { workspace: { id: string } }).workspace.id;
     expect(boardId).toBeTruthy();
+    // Bryan lets the domain in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Bryan');
   };
 
   /** Seconds from now until the share expires, rounded. */

@@ -116,8 +116,11 @@ describe(`GET /workspaces/${WS}/docs/:docId/status`, () => {
     expect((await post(`/workspaces/${boardId}/docs:attach`, { docId: 'status-doc' })).status).toBe(
       200,
     );
-    visitorHeaders = (await mintAccessShare(base, access, boardId, { label: 'status share' }))
-      .headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId, {
+        label: 'status share',
+      })
+    ).headers;
   });
 
   afterAll(async () => {

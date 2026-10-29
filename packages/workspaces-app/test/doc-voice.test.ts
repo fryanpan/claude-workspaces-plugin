@@ -48,6 +48,11 @@ class FakeSocket implements SocketLike {
   recv(msg: unknown): void {
     this.onmessage?.({ data: JSON.stringify(msg) });
   }
+  /** The connection went away without anyone asking — a server restart. */
+  drop(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
   json(): Array<Record<string, unknown>> {
     return this.sent
       .filter((d): d is string => typeof d === 'string')
@@ -164,7 +169,17 @@ function mount() {
   const where = (): string => voice.view.live.querySelector('.doc-voice-where')?.textContent ?? '';
   const cardText = (): string =>
     voice.view.live.querySelector('.doc-voice-text')?.textContent ?? '';
-  return { voice, clock, posts, paragraph, startRecording, anchoredWords, where, cardText };
+  return {
+    voice,
+    clock,
+    posts,
+    sockets,
+    paragraph,
+    startRecording,
+    anchoredWords,
+    where,
+    cardText,
+  };
 }
 
 const pointerUp = (el: Element): void => {
@@ -306,6 +321,30 @@ describe('voice comments on a review doc — nothing heard', () => {
     expect(t.voice.view.readout.hidden).toBe(false);
     expect(t.voice.view.readout.textContent).toBe(NOTHING_POSTED);
     expect(t.posts).toHaveLength(0);
+  });
+});
+
+describe('voice comments on a review doc — the server restarts mid-recording', () => {
+  it('shows one steady Reconnecting… and no error, then listens again on the new socket', async () => {
+    const t = mount();
+    const first = await t.startRecording();
+    first.drop();
+    expect(t.voice.session.state).toBe('recording');
+    expect(t.where()).toBe('Reconnecting…');
+    expect(t.voice.view.readout.hidden, 'no error is shown').toBe(true);
+    // Every attempt that fails while the server is down leaves the card as it was.
+    for (const ms of [250, 500, 1000]) {
+      t.clock.advance(ms);
+      t.sockets.at(-1)?.drop();
+      expect(t.where()).toBe('Reconnecting…');
+      expect(t.voice.view.readout.hidden).toBe(true);
+    }
+    t.clock.advance(2000);
+    const next = t.sockets.at(-1);
+    next?.open();
+    next?.recv({ type: 'ready', segment: 2 });
+    expect(t.where()).toBe('Listening…');
+    expect(t.voice.view.readout.hidden).toBe(true);
   });
 });
 

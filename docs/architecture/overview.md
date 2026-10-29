@@ -56,7 +56,7 @@ flowchart TB
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
-    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
+    ident["Identity and sharing<br/>auth/ · share/ · identities.ts · fresh-signin.ts<br/>sharing-notice.ts · sharing-off-door.ts<br/>org-relay/ (its own process)<br/>github-hub.ts · github-relay/ (its own process)<br/>keeper/ (its own process: Cloudflare and Fly credentials, passkey approvals)"]
     prompts["Model prompts<br/>prompt-catalog.ts · prompt-store.ts<br/>prompt-sections.ts · routes/prompts.ts"]
     ops["Ops<br/>deploy*.ts · dependency-install.ts · client-release.ts · plugin-release.ts<br/>sentry.ts · sentry-projects.ts · attach-mounts.ts<br/>supervisor-health.ts · supervisor-restarts.ts · supervisor-reap.ts · supervisor-hang-capture.ts · server-starts.ts<br/>liveness.ts · event-loop.ts · memory-log.ts · memory-footprint.ts<br/>slow-load-alarm.ts · page-loads.ts"]
   end
@@ -230,6 +230,19 @@ signed-in member sees at `/`, and the one refusal page for a board they were
 not given, are answered BY the gate from the membership it just checked, so a
 board the list names always opens and one it leaves out never does. It sees a
 `Request` only to ask whether it is a navigation, and names no path of its own.
+
+Share audiences (only the machine's owner changes who is in) add no box
+either. `share/board-audience.ts` is each board's list of addresses and
+`@domain`s, checked beside every link's; `share/access-proposals.ts` turns an
+agent's widening call into an owner-only access card on a task;
+`share/owner-proof.ts` is the one test that a request came from the owner's
+own browser; `share/access-view.ts` builds what `/access` shows. The routes
+are `routes/task-access.ts` (the door that answers a card) and
+`routes/access.ts` (the owner's page and its nameless `access~` stream). In
+`review-items/`, `approver.ts` records who answered and `owner-steps.ts` makes
+an ask owner-only when its step is one the board reserves. The one new
+top-level module is `core/src/review-access.ts`: the shape of an access change
+and the sentence a card says about it, read by the server and the page alike.
 
 **And every one of those paths is written down once.** `routes/route-table.ts`
 holds the vocabulary — a gate is `trusted-local`, `loopback-only`,
@@ -801,7 +814,9 @@ that `widget.ts` never imports — it makes only the button, the readout and
 their rules. Voice feedback itself is the widget's `voice/` directory, a third
 entry (`@claude-workspaces/widget/voice`): `voice-session.ts` streams PCM over
 `WS /workspaces/<ws>/docs/<docId>/voice` and writes the comments the server
-settles through the ordinary thread routes, `voice-ui.ts` draws the live
+settles through the ordinary thread routes (`voice-note-writes.ts`), and
+reopens a socket that dropped mid-recording on a backoff while the microphone
+keeps listening (`voice-redial.ts`), `voice-ui.ts` draws the live
 comment and the settled cards (its styles in `voice-css.ts`, the column
 layout in `voice-column.ts`), and `voice-mode.ts` glues them to the page (a
 tap sends the next words to an element, or back into that element's earlier
@@ -1238,7 +1253,7 @@ debounced snapshot of it.
 | Layer | Where it lives | Why it is its own layer |
 | --- | --- | --- |
 | **HTTP** | `server.ts`, `routes/**`, `middleware/**`, `shells.ts`, `request-admission.ts`, `request-attribution.ts`, `socket-handlers.ts`, `board-sockets.ts` | The only code that knows about HTTP. Parse, admit, call one service, format. |
-| **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `sharing-notice.ts`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts`, `permission-grants.ts` | Owns durable state and orchestrates one change across stores and adapters. |
+| **Services / stores** | `doc-store.ts`, `tasks.ts` and the `task-*` stores, `review-items/**`, `home-pane.ts`, `share/**`, `sharing-notice.ts`, `sharing-off-door.ts`, `auth/**`, the `meeting-*` and `notes-*` families, `sse.ts`, `activity.ts`, `permission-grants.ts` | Owns durable state and orchestrates one change across stores and adapters. |
 
 `permission-grants.ts` joins the services tier, and `settings-allow-file.ts`
 joins the adapters. Together they are the server's only writer of the owner's

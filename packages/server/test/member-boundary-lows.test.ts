@@ -224,7 +224,9 @@ describe('the member boundary, on the surfaces a path check cannot see', () => {
     ownTask = await createTask(board, 'A row the member holds');
     foreignTask = await createTask(otherBoard, 'A row they were never given');
 
-    // `board` by domain; `otherBoard` shared with nobody.
+    // `board` by domain; `otherBoard` shared with nobody. Bryan lets the
+    // domain in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(board, ['@partner.example'], 'Bryan');
     const shared = await asOwnerJson('/api/share/link', 'POST', {
       workspaceId: board,
       allowDomains: ['@partner.example'],

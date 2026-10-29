@@ -45,6 +45,14 @@ describe('the live comment', () => {
     expect(t.where().textContent).toBe('Starting…');
   });
 
+  it('says it is reconnecting, in the same place, while a dropped socket is opened again', () => {
+    const t = setup();
+    t.session.state = 'recording';
+    t.session.reconnecting = true;
+    t.view.render();
+    expect(t.where().textContent).toBe('Reconnecting…');
+  });
+
   it('stands beside the element the comment is about, named', () => {
     const t = setup();
     t.add(comment({ target: 2 }));

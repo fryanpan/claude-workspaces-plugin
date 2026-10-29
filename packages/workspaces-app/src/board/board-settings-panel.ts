@@ -16,12 +16,11 @@
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
-import { type CountedRequest, resumeHeld, sendCounted } from '../fresh-signin-client.ts';
 import {
   type BoardMembersView,
   type BoardRole,
+  accessWriteOf,
   mountBoardMembers,
-  roleLabel,
 } from './board-members.ts';
 import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
@@ -42,7 +41,11 @@ export interface BoardSettingsPanelDeps {
   /** The signed-in reader, for the push subscription's own author field. */
   user: { id: string; name: string };
   fetchJson<T>(path: string): Promise<T | null>;
-  send(path: string, method: string, body: unknown): Promise<{ ok: boolean }>;
+  send(
+    path: string,
+    method: string,
+    body: unknown,
+  ): Promise<{ ok: boolean; status?: number; data?: Record<string, unknown> | null }>;
   showToast(message: string): void;
   /** The panel's open flag, which lives on `BoardState`. Two thunks rather
    *  than the state object: this file has no other business with it. */
@@ -183,6 +186,12 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
   const members = mountBoardMembers({
     list: el('board-members-list'),
     note: el('board-members-note'),
+    form: el('board-access-add') as HTMLFormElement,
+    error: el('board-access-error'),
+    linkLabel: el('board-access-link-label'),
+    waiting: el('board-access-waiting-label'),
+    accessHref: (waiting) =>
+      `/access${waiting > 0 ? '/waiting' : ''}?ws=${encodeURIComponent(workspaceId)}`,
     read: async () => {
       const data = await fetchJson<BoardMembersView>(
         `/workspaces/${encodeURIComponent(workspaceId)}/members`,
@@ -190,25 +199,24 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       if (!data || typeof data.you?.role !== 'string' || !Array.isArray(data.members)) return null;
       return data;
     },
-    setRole: async (email, role) => {
-      const url = `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}/role`;
-      if (role === 'member') return (await send(url, 'POST', { role })).ok;
-      // Raising a role widens access, so a stale sign-in is asked first.
-      const res = await sendCounted(raiseRole(url, email), { toast: showToast });
-      return res === null ? null : res.ok;
-    },
-    remove: async (email) => {
-      const res = await send(
-        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}`,
-        'DELETE',
-        {},
-      );
+    remove: async (match) => {
+      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/audience`, 'POST', {
+        remove: [match],
+      });
       return res.ok;
+    },
+    add: async (match) => {
+      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/audience`, 'POST', {
+        add: [match],
+      });
+      return accessWriteOf(res);
     },
     toast: showToast,
     onRole: (role: BoardRole | null) => {
       canEdit = role === 'owner';
       applyLevel();
+      // The access page is the owner's alone; a member would follow it to a 403.
+      el('board-access-link').classList.toggle('hidden', !canEdit);
     },
   });
 
@@ -294,29 +302,9 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       () => showToast(deps.href()),
     );
   });
-  // Back from "Sign in again": offer the role change this page held.
-  void resumeHeld({ toast: showToast }).then(async (held) => {
-    if (!held) return;
-    if (held.response.ok) showToast(`${held.request.name} is now ${roleLabel('owner')}`);
-    else showToast('Could not change that role');
-    if (deps.isOpen()) await members.refresh();
-  });
   return {
     membersChanged: () => {
       if (deps.isOpen()) void members.changed();
     },
-  };
-}
-
-/** Making somebody an Owner, as the fresh-sign-in ask names it. */
-function raiseRole(url: string, email: string): CountedRequest {
-  return {
-    method: 'POST',
-    url,
-    body: { role: 'owner' },
-    verb: 'Make owner',
-    gerund: 'Making someone an Owner',
-    noun: 'role change',
-    name: email,
   };
 }

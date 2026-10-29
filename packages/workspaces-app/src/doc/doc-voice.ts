@@ -169,13 +169,15 @@ export function mountDocVoice(opts: DocVoiceOptions): DocVoice {
     const hint = silent && !heardAny;
     const where = picking
       ? 'Tap where this belongs'
-      : state === 'connecting'
-        ? 'Starting…'
-        : state === 'stopping'
-          ? 'Finishing…'
-          : passage
-            ? targets.name(target)
-            : 'Listening…';
+      : session.reconnecting
+        ? 'Reconnecting…'
+        : state === 'connecting'
+          ? 'Starting…'
+          : state === 'stopping'
+            ? 'Finishing…'
+            : passage
+              ? targets.name(target)
+              : 'Listening…';
     // The words pointed at stay marked until the note on them is said.
     const sel = target === null ? undefined : targets.selection(target);
     editor.markPending(state !== 'idle' && sel ? editor.resolveRel(sel.start, sel.end) : null);

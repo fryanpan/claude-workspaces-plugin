@@ -1,4 +1,5 @@
 import type { ReviewGateNote, ReviewPayload, ReviewShape } from '@claude-workspaces/core';
+import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 /**
  * The review queue and the walkthrough that walks it: everything waiting on a
  * person, in one list, plus the wording each row and card wears (plan §3.9).
@@ -255,6 +256,9 @@ export interface ReviewThreadItem {
   revisedAt?: number;
   question?: string;
   revisedRange?: { start: number; end: number };
+  /** On a `task-review` row: the access change it proposes, answered only
+   *  through the access door, which needs it echoed back exactly. */
+  access?: ReviewAccessChange;
   /**
    * What the quality gate did to these words before the reader saw them: how
    * many times it held them, and — when it never passed them — how they got
@@ -835,6 +839,8 @@ export function reviewReplyRequest(
   };
   if (t.kind === 'task-review') {
     if (!t.taskId || !t.reviewItemId) return null;
+    if (t.access)
+      return accessRequestFor(t.taskId, t.reviewItemId, t.access, optionId, t.workspaceId);
     return answer({ kind: 'task-review', taskId: t.taskId, reviewItemId: t.reviewItemId });
   }
   if (!t.docId || !t.threadId) return null;
@@ -913,6 +919,31 @@ export function grantRequestFor(
       workspaceId,
     ),
     body: { decision, allowRules: [...allowRules] },
+  };
+}
+
+/**
+ * Where an ACCESS item's answer goes — `/access`, never `/answer`, which the
+ * server refuses for it. Only a tapped Approve or Reject answers one: typed
+ * words are no decision about who may be in, so they go nowhere (null) and
+ * stay in the box. The body echoes the change the card showed.
+ */
+export function accessRequestFor(
+  taskId: string,
+  reviewItemId: string,
+  access: ReviewAccessChange,
+  optionId: string | undefined,
+  workspaceId?: string,
+): { path: string; body: Record<string, unknown> } | null {
+  const decision =
+    optionId === 'o-approve' ? 'approve' : optionId === 'o-reject' ? 'reject' : undefined;
+  if (!decision) return null;
+  return {
+    path: api(
+      `tasks/${encodeURIComponent(taskId)}/review-items/${encodeURIComponent(reviewItemId)}/access`,
+      workspaceId,
+    ),
+    body: { decision, access },
   };
 }
 

@@ -285,6 +285,7 @@ describe('a grouping cannot be shared on its own', () => {
       // Positive control: the board, through the same route. It mints a SHARE
       // LINK now, so the reply names `link` — the refusal above is what is
       // under test, and it is unchanged.
+      handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Bryan');
       const board = await local('/api/share/workspace', {
         workspaceId: boardId,
         allowDomains: ['@partner.example'],

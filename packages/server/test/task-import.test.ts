@@ -601,7 +601,12 @@ describe('import route (dry-run first, apply stamps the file)', () => {
   it('a board-share visitor cannot import (403), though the board page serves them (presence)', async () => {
     const workspaceId = await seedWorkspace();
     const path = trackerCopy();
-    const visitor = await mintAccessShare(base, access, workspaceId, { label: 'board share' });
+    const visitor = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      workspaceId,
+      { label: 'board share' },
+    );
     const visitorHeaders = { ...visitor.headers, 'content-type': 'application/json' };
     // Presence: the visitor's cookie DOES reach the board page.
     const page = await fetch(`${base}/workspaces/${workspaceId}`, { headers: visitorHeaders });

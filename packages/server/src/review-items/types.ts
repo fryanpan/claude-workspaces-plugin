@@ -70,7 +70,7 @@ export type AnswerTaskReviewResult =
   /** An agent answering an item filed for a done-when owner line. */
   | { ok: false; error: 'not-a-person'; message: string }
   /** A secret or grant item answered through any door but its own. */
-  | { ok: false; error: 'secret-item' | 'grant-item'; message: string }
+  | { ok: false; error: 'secret-item' | 'grant-item' | 'access-item'; message: string }
   | AnsweredByOther;
 
 export type RequestInfoOnReviewResult =
