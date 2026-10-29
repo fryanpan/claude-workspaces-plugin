@@ -538,6 +538,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // Late-bound for the same reason: it reads the roster and the board
   // membership, both built further down. Until then only the owner is trusted.
   let commentTrustFor: CommentTrustFor | null = null;
+  let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
   const docStore: DocStore = new DocStore({
     dataDir,
     sse,
@@ -553,6 +554,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // no other eviction hold can see. See `DocStoreConfig.isRecording`.
     isRecording: (docId) => meetingStore.active(docId) !== undefined,
     commentTrust: (docId, author) => commentTrustFor?.(docId, author) ?? commentTrustOf(author),
+    commentTrustBoards: (docId) => [...(trustBoardsFor?.(docId) ?? [])],
     ...(opts.editSessionIdleMs !== undefined ? { editSessionIdleMs: opts.editSessionIdleMs } : {}),
     ...(summarizer ? { summarizer } : {}),
   });
@@ -1971,6 +1973,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardsForDoc,
     memberOf: audienceMemberOf,
   });
+  trustBoardsFor = boardsForDoc;
 
   /**
    * Who may reach this server, over which hostname, and as whom — see

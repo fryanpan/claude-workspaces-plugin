@@ -14383,8 +14383,16 @@ function doneWhenReadyLine(p) {
 }
 
 // packages/mcp/src/untrusted-quote.ts
-function isTrustedStamp(stamp) {
-  return stamp === "owner" || stamp === "member";
+function isTrustedStamp(stamp, trustBoards, watchedBoards) {
+  if (stamp === "owner")
+    return true;
+  if (stamp !== "member" || !watchedBoards || !Array.isArray(trustBoards))
+    return false;
+  return trustBoards.some((b) => typeof b === "string" && watchedBoards.has(b));
+}
+function indentContinuation(text) {
+  return text.replace(/\r\n?|[\n\u2028\u2029]/g, `
+  `);
 }
 var UNTRUSTED_TAG = "untrusted-comment";
 var INVISIBLE_RANGES = [
@@ -15299,11 +15307,14 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const onDoc = text && p.docTitle ? ` on "${truncate8(p.docTitle, 60)}"` : "";
   const parentText = event === "thread.replied" ? oneLine(p.inReplyTo?.text ?? "") : "";
   const spokenBy = (p.comment ?? p.thread?.comments?.at(-1))?.author?.id;
-  const trusted = isTrustedStamp(p.commentTrust) || !!spokenBy && spokenBy === deps.authorId;
-  const parentTrusted = isTrustedStamp(p.inReplyTo?.trust) || !!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId;
+  const watched = deps.watchedBoards?.();
+  const ownWords = !!spokenBy && spokenBy === deps.authorId;
+  const asMember = !ownWords && p.commentTrust === "member";
+  const trusted = isTrustedStamp(p.commentTrust, p.trustBoards, watched) || ownWords;
+  const parentTrusted = isTrustedStamp(p.inReplyTo?.trust, p.trustBoards, watched) || !!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId;
   const toParent = !parentText ? "" : parentTrusted ? ` — to "${truncate8(parentText, 100)}"` : ` — to ${quoteUntrustedInline(truncate8(parentText, 100), p.inReplyTo?.author ?? "")}`;
   const who = `${author ? `${author}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
-  const said = trusted ? `${who ? `${who}: ` : ""}${text}` : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}
+  const said = trusted ? `${who ? `${who}: ` : ""}${asMember ? indentContinuation(text) : text}` : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}
 ${quoteUntrusted(text, author)}`;
   const body = text ? `[${action}]${onItem} ${said}${openPartsClause(p.openParts)}${editHint}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
   await deps.notify({
@@ -15321,6 +15332,7 @@ ${quoteUntrusted(text, author)}`;
         anchor_text: snippet,
         ...p.docTitle ? { doc_title: p.docTitle } : {},
         ...text && !trusted ? { trust: "untrusted" } : {},
+        ...text && trusted && asMember ? { trust: "member" } : {},
         ...parentText && parentTrusted ? { in_reply_to: parentText } : {},
         ...parentText && p.inReplyTo?.author ? { in_reply_to_author: p.inReplyTo.author } : {},
         ...pageEdits?.length ? { page_edits: JSON.stringify(pageEdits) } : {}
@@ -21592,7 +21604,12 @@ function createConnectorSession(deps) {
     keepalive: createAttachmentKeepalive()
   });
   const shouldForwardFrame = createFrameDedup();
-  const channel = createChannelMessages({ notify: deps.notify, http, authorId: AUTHOR.id });
+  const channel = createChannelMessages({
+    notify: deps.notify,
+    http,
+    authorId: AUTHOR.id,
+    watchedBoards: () => new Set([...watchers.keys()].filter((k) => k.startsWith("ws:")).map((k) => k.slice(3)))
+  });
   const handleFrame2 = createFrameHandler({
     notify: deps.notify,
     emitChannelMessage: (event, payload) => channel.emitChannelMessage(event, payload),

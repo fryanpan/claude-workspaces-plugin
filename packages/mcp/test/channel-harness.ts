@@ -26,7 +26,9 @@ export interface ChannelHarness {
   messages: ReturnType<typeof createChannelMessages>;
 }
 
-export function harness(opts: { authorId?: string } = {}): ChannelHarness {
+export function harness(
+  opts: { authorId?: string; watchedBoards?: string[] } = {},
+): ChannelHarness {
   const frames: ChannelNotification['params'][] = [];
   const sent: Sent[] = [];
   const messages = createChannelMessages({
@@ -40,6 +42,8 @@ export function harness(opts: { authorId?: string } = {}): ChannelHarness {
     },
     authorId: opts.authorId ?? SELF,
     now: () => FIXED_MS,
+    // The board a member stamp is trusted on in these fixtures.
+    watchedBoards: () => new Set(opts.watchedBoards ?? ['harborlight']),
   });
   return { frames, sent, messages };
 }

@@ -412,6 +412,9 @@ export interface DocStoreConfig {
    * on thread frames as `commentTrust`. Absent, only the owner is trusted.
    */
   commentTrust?: (docId: string, author: unknown) => CommentTrust;
+  /** The boards `commentTrust` asks about for this doc, stamped beside a
+   *  `member` stamp as `trustBoards`. */
+  commentTrustBoards?: (docId: string) => string[];
   /**
    * The clock the RESIDENCY policy reads — the idle/eviction window and the
    * file poll's fast lane, both of which are keyed on `lastTouchedAt`.
@@ -546,6 +549,7 @@ export class DocStore {
       titleOf: (doc) => this.cfg.docTitle?.(doc.docId) ?? doc.meta.title,
       trustOf: (doc, author) =>
         this.cfg.commentTrust?.(doc.docId, author) ?? commentTrustOf(author),
+      trustBoards: (doc) => this.cfg.commentTrustBoards?.(doc.docId) ?? [],
       summarizer: () => this.cfg.summarizer,
       thread: (docId, threadId) => this.getThread(docId, threadId),
       memberOfCompanion: (docId) => this.memberOfCompanion(docId),

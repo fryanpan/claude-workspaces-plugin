@@ -21,8 +21,11 @@
  *  - **Asked per comment.** Nothing is cached, so a person removed from the
  *    audience is quoted again from their next comment.
  *  - **Not the owner's name.** The rendered line names the author by the name
- *    on the comment. A member whose name reads as the owner's would put the
- *    owner's name on an unwrapped line, so that comment is quoted instead.
+ *    on the comment, and a member chooses their own. A name that holds an
+ *    owner name as a word ("Bryan Chan", "Bryan (owner)", after NFKC and
+ *    case folding), or that mixes Latin letters with another script (a
+ *    Cyrillic "В" standing in for "B"), would put the owner's name on an
+ *    unwrapped line, so that comment is quoted instead.
  *  - **Fails closed.** A throw anywhere is `untrusted`. An unreadable
  *    share-link registry already holds no audiences, which admits nobody.
  */
@@ -43,14 +46,32 @@ export interface CommentTrustContext {
   memberOf: (workspaceId: string, email: string) => boolean;
 }
 
+const words = (text: string): string[] =>
+  text
+    .normalize('NFKC')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w !== '');
+
+/** Latin letters beside letters of another script: the homoglyph shape. */
+const MIXED_SCRIPT = (name: string): boolean =>
+  /\p{Script=Latin}/u.test(name) && /(?=\p{L})\P{Script=Latin}/u.test(name);
+
+/** Could this name be read as the owner's on a channel line? */
+export function readsAsOwner(name: string): boolean {
+  const folded = name.normalize('NFKC');
+  if (MIXED_SCRIPT(folded)) return true;
+  const said = new Set(words(folded));
+  return ownerDisplayNames().some((owner) => words(owner).some((w) => said.has(w)));
+}
+
 export type CommentTrustFor = (docId: string, author: unknown) => CommentTrust;
 
 export function createCommentTrust(ctx: CommentTrustContext): CommentTrustFor {
   const memberOfDocBoards = (docId: string, author: unknown): boolean => {
     const { id, name } = authorFields(author);
     if (!id) return false;
-    const folded = (name ?? '').trim().toLowerCase();
-    if (ownerDisplayNames().some((owner) => owner.toLowerCase() === folded)) return false;
+    if (readsAsOwner(name ?? '')) return false;
     const rec = ctx.identityOf(resolveIdentityId(id));
     if (!rec || rec.kind !== 'person' || rec.status !== 'active' || !rec.email) return false;
     const boards = ctx.boardsForDoc(docId);

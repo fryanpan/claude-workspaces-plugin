@@ -60,6 +60,10 @@ describe('createCommentTrust', () => {
   it("quotes a member whose comment carries the owner's name", () => {
     expect(trust()('task:t1', { id: ALICE_ID, name: 'Bryan' })).toBe('untrusted');
     expect(trust()('task:t1', { id: ALICE_ID, name: ' bryan ' })).toBe('untrusted');
+    for (const name of ['Bryan Chan', 'Bryan (owner)', 'Bryan.', 'ＢＲＹＡＮ', '\u0412ryan']) {
+      expect(trust()('task:t1', { id: ALICE_ID, name })).toBe('untrusted');
+    }
+    expect(trust()('task:t1', { id: ALICE_ID, name: 'Alice Bryant' })).toBe('member');
   });
 
   it('fails closed when the audience cannot be read', () => {

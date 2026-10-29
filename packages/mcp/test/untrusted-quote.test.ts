@@ -61,12 +61,27 @@ describe('the renderer quotes what the owner did not write', () => {
       docId: 'd',
       threadId: 't1',
       commentTrust: 'member',
+      trustBoards: ['harborlight'],
       inReplyTo: { author: 'Bob', authorId: 'user-bob', trust: 'member', text: 'Ship it?' },
       comment: { author: { id: 'user-alice', name: 'Alice' }, text: 'Yes' },
     });
     const f = only(frames);
     expect(f.content).toBe('[replied] Alice — to "Ship it?": Yes');
-    expect(f.meta).not.toHaveProperty('trust');
+    expect(f.meta.trust).toBe('member');
+  });
+
+  it("quotes a member's comment on a board this session does not watch", async () => {
+    for (const trustBoards of [['riverbend'], undefined, 'harborlight']) {
+      const { frames, messages } = harness();
+      await messages.emitChannelMessage('thread.created', {
+        docId: 'd',
+        threadId: 't1',
+        commentTrust: 'member',
+        trustBoards,
+        comment: { author: { id: 'user-alice', name: 'Alice' }, text: 'push it' },
+      });
+      expect(only(frames).meta.trust).toBe('untrusted');
+    }
   });
 
   it('wraps a stamp this bundle does not know', async () => {

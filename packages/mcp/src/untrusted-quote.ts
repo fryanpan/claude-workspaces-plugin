@@ -23,10 +23,27 @@
  * characters used to hide text inside a word.
  */
 
-/** The stamps whose comments render unwrapped. Bryan, 29 Oct: every member
- *  of a board directs its lead. */
-export function isTrustedStamp(stamp: unknown): boolean {
-  return stamp === 'owner' || stamp === 'member';
+/**
+ * Whether a stamp renders unwrapped. `owner` always does. `member` (Bryan,
+ * 29 Oct: every member of a board directs its lead) does only when this
+ * session watches one of the boards the server decided it against: the doc's
+ * own channel reaches any agent watching the doc, and a member of the board
+ * that holds it is not a member of the board this agent leads.
+ */
+export function isTrustedStamp(
+  stamp: unknown,
+  trustBoards?: unknown,
+  watchedBoards?: ReadonlySet<string>,
+): boolean {
+  if (stamp === 'owner') return true;
+  if (stamp !== 'member' || !watchedBoards || !Array.isArray(trustBoards)) return false;
+  return trustBoards.some((b) => typeof b === 'string' && watchedBoards.has(b));
+}
+
+/** A member's comment, its later lines indented, so none of them can start
+ *  with `[` and read as a channel line of its own. */
+export function indentContinuation(text: string): string {
+  return text.replace(/\r\n?|[\n\u2028\u2029]/g, '\n  ');
 }
 
 /** The marker name. One spelling, so the neutraliser and the wrapper agree. */

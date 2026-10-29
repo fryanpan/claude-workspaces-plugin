@@ -113,6 +113,7 @@ function makeHost(
     },
     titleOf: (doc) => doc.meta.title,
     trustOf: (_doc, author) => commentTrustOf(author),
+    trustBoards: () => [],
     summarizer: () => opts.summarizer,
     thread: () => null,
     memberOfCompanion: (docId) => opts.companionOf?.[docId],

@@ -153,7 +153,14 @@ export function createConnectorSession(deps: ConnectorSessionDeps): ConnectorSes
   const shouldForwardFrame = createFrameDedup();
 
   /** The channel renderers — see channel-messages.ts. */
-  const channel = createChannelMessages({ notify: deps.notify, http, authorId: AUTHOR.id });
+  const channel = createChannelMessages({
+    notify: deps.notify,
+    http,
+    authorId: AUTHOR.id,
+    // Read per frame: a board watched or dropped mid-session counts at once.
+    watchedBoards: () =>
+      new Set([...watchers.keys()].filter((k) => k.startsWith('ws:')).map((k) => k.slice(3))),
+  });
 
   /** See frame-handler.ts for the ordering it keeps. */
   const handleFrame = createFrameHandler({

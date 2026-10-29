@@ -44,6 +44,7 @@ import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
 import {
   UNTRUSTED_LABEL,
+  indentContinuation,
   isTrustedStamp,
   quoteUntrusted,
   quoteUntrustedInline,
@@ -70,6 +71,9 @@ export interface ChannelDeps {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
   /** This session's agent id, read only to suppress its own events. */
   authorId: string;
+  /** The boards this session watches (`ws:<id>` keys). A `member` stamp is
+   *  trusted only on one of them; absent, no member is. */
+  watchedBoards?: () => ReadonlySet<string>;
   /** Injectable so a test can assert a rendered `sent_at` without a race. */
   now?: () => number;
 }
@@ -132,6 +136,8 @@ export interface ChannelPayload {
    *  when its author is a member of the board; anything else, or absent, and
    *  the line quotes it as untrusted data. */
   commentTrust?: string;
+  /** Beside a `member` stamp: the boards it was decided against. */
+  trustBoards?: unknown;
   /** A reply that answered some of a review item's questions: the ones still open. */
   openParts?: unknown[];
   /** A resolve/reopen relayed from inside a mock page. A comment event's mark
@@ -705,9 +711,12 @@ async function emitChannelMessage(
   // own, is quoted as data — and so is the comment it replies to, by the same
   // rule. See untrusted-quote.ts.
   const spokenBy = (p.comment ?? p.thread?.comments?.at(-1))?.author?.id;
-  const trusted = isTrustedStamp(p.commentTrust) || (!!spokenBy && spokenBy === deps.authorId);
+  const watched = deps.watchedBoards?.();
+  const ownWords = !!spokenBy && spokenBy === deps.authorId;
+  const asMember = !ownWords && p.commentTrust === 'member';
+  const trusted = isTrustedStamp(p.commentTrust, p.trustBoards, watched) || ownWords;
   const parentTrusted =
-    isTrustedStamp(p.inReplyTo?.trust) ||
+    isTrustedStamp(p.inReplyTo?.trust, p.trustBoards, watched) ||
     (!!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId);
   const toParent = !parentText
     ? ''
@@ -716,7 +725,7 @@ async function emitChannelMessage(
       : ` — to ${quoteUntrustedInline(truncate(parentText, 100), p.inReplyTo?.author ?? '')}`;
   const who = `${author ? `${author}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
   const said = trusted
-    ? `${who ? `${who}: ` : ''}${text}`
+    ? `${who ? `${who}: ` : ''}${asMember ? indentContinuation(text) : text}`
     : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}\n${quoteUntrusted(text, author)}`;
   const body = text
     ? `[${action}]${onItem} ${said}${openPartsClause(p.openParts)}${editHint}`
@@ -737,6 +746,7 @@ async function emitChannelMessage(
         anchor_text: snippet,
         ...(p.docTitle ? { doc_title: p.docTitle } : {}),
         ...(text && !trusted ? { trust: 'untrusted' } : {}),
+        ...(text && trusted && asMember ? { trust: 'member' } : {}),
         // An untrusted parent is quoted in the line; the meta does not repeat
         // it bare.
         ...(parentText && parentTrusted ? { in_reply_to: parentText } : {}),
