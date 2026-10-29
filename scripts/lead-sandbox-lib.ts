@@ -127,8 +127,12 @@ export function escapeRules(lead: Lead, m: Machine): string[] {
  * The Mach services every keychain read goes through. A file rule cannot
  * see a read, since `securityd` does it; denying these refuses every item
  * at once. Measured 28 October: a dummy item read back from inside a
- * profile before, refused after (exit 44), and Claude Code 2.1.312 still
- * signs in, from `~/.claude/.credentials.json`. `gh` (its token is in the
+ * profile before, refused after (exit 44). Claude Code then cannot sign in:
+ * measured 28 October, 21:20 PT, `claude -p "say ok"` inside a profile said
+ * "OAuth token revoked", and said "Ok." with only this deny removed. (Earlier
+ * that day it fell back to `~/.claude/.credentials.json`; it no longer does.)
+ * So the launcher hands the lead a token read outside the wall
+ * (`lead-sandbox-token.ts`). `gh` (its token is in the
  * keyring) and git over HTTPS (credential helper `osxkeychain`) lose their
  * credentials, so a lead that needs them sets `allowKeychain`.
  */

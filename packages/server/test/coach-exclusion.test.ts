@@ -1,116 +1,48 @@
 /**
- * Boards the coach never hears from: local-only, locked, shared, or turned
- * off by him. An event there is not sent at all, not even the board's name,
- * and a check that throws counts as off.
+ * The one kind of board the coach never hears from: one he turned off with
+ * "Coach off for this board". An event there is not sent at all, not even the
+ * board's name. Local-only, locked and shared boards are not off (the owner,
+ * 2026-10-28: "All boards.").
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AttachmentPrivacyStore } from '../src/attachment-privacy.ts';
-import {
-  type BoardPrivacy,
-  boardOffReason,
-  boardPrivacyFrom,
-  placeIsOff,
-} from '../src/coach/exclusion.ts';
+import { type DocBoards, placeIsOff } from '../src/coach/exclusion.ts';
 import { readGoalsDoc } from '../src/coach/goals-doc.ts';
 import { createCoach } from '../src/coach/moment.ts';
 import type { SessionNews } from '../src/coach/session-feed.ts';
 import { CoachStore } from '../src/coach/store.ts';
 import { CoachStream } from '../src/coach/stream.ts';
-import { makeDocKey } from '../src/doc-key.ts';
 import { GOALS_DOC, WS, ZONE, at } from './coach-fixtures.ts';
 
-const OPEN: BoardPrivacy = {
-  localOnlyBoard: () => false,
-  localOnlyDoc: () => false,
-  locked: () => false,
-  boardsOfDoc: () => [],
-};
+const NO_BOARDS: DocBoards = { boardsOfDoc: () => [] };
 const NONE = new Set<string>();
-
-describe('boardOffReason', () => {
-  it('names each reason, and null for a board only he can reach', () => {
-    expect(boardOffReason('w-a', OPEN, NONE)).toBeNull();
-    expect(boardOffReason('w-a', OPEN, new Set(['w-a']))).toBe('turned-off');
-    expect(boardOffReason('w-a', { ...OPEN, localOnlyBoard: () => true }, NONE)).toBe('local-only');
-    expect(boardOffReason('w-a', { ...OPEN, locked: () => true }, NONE)).toBe('locked');
-    const broken = {
-      ...OPEN,
-      locked: () => {
-        throw new Error('not built yet');
-      },
-    };
-    expect(boardOffReason('w-a', broken, NONE)).toBe('unknown');
-  });
-});
+const throws = (): never => {
+  throw new Error('store not ready');
+};
 
 describe('placeIsOff', () => {
-  it('is off for a local-only doc, or a doc that is also on an off board', () => {
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, OPEN, NONE)).toBe(false);
-    const localDoc = { ...OPEN, localOnlyDoc: (id: string) => id === 'd-1' };
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, localDoc, NONE)).toBe(true);
-    const alsoLocked = {
-      ...OPEN,
-      boardsOfDoc: () => ['w-a', 'w-b'],
-      locked: (id: string) => id === 'w-b',
-    };
-    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, alsoLocked, NONE)).toBe(true);
-    expect(placeIsOff({ workspaceId: 'w-a' }, alsoLocked, NONE)).toBe(false);
-    expect(placeIsOff({ workspaceId: 'w-a' }, OPEN, new Set(['w-a']))).toBe(true);
+  it('is off for a board he turned off, and for nothing else', () => {
+    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, NO_BOARDS, NONE)).toBe(false);
+    expect(placeIsOff({ workspaceId: 'w-a' }, NO_BOARDS, new Set(['w-a']))).toBe(true);
+    expect(placeIsOff({ workspaceId: 'w-a' }, NO_BOARDS, new Set(['w-b']))).toBe(false);
   });
 
-  it('counts a check that throws as off', () => {
-    const throws = () => {
-      throw new Error('store not ready');
-    };
-    expect(
-      placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, { ...OPEN, localOnlyDoc: throws }, NONE),
-    ).toBe(true);
-    expect(
-      placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, { ...OPEN, boardsOfDoc: throws }, NONE),
-    ).toBe(true);
-  });
-});
-
-describe('boardPrivacyFrom', () => {
-  it("asks the project's privacy by the repo half of the doc's key", () => {
-    const asked: string[] = [];
-    const privacy = boardPrivacyFrom({
-      isLocalOnlySet: () => false,
-      setOfDoc: () => undefined,
-      docKeyOf: (d) =>
-        d === 'd-letters' ? makeDocKey('saltmarsh-clinic', 'letters.md') : undefined,
-      projectIsLocalOnly: (repoKey) => {
-        asked.push(repoKey);
-        return repoKey === 'saltmarsh-clinic';
-      },
-      docIdsOf: (ws) => (ws === 'w-records' ? ['d-letters'] : ['d-post']),
-      isBoardLocked: () => false,
-      boardsOfDoc: () => [],
-    });
-    expect(privacy.localOnlyDoc('d-letters')).toBe(true);
-    expect(privacy.localOnlyBoard('w-records')).toBe(true);
-    expect(privacy.localOnlyDoc('d-post')).toBe(false);
-    expect(privacy.localOnlyBoard('w-launch')).toBe(false);
-    expect(new Set(asked)).toEqual(new Set(['saltmarsh-clinic']));
+  it('is off for a doc that is also on a board he turned off', () => {
+    const both: DocBoards = { boardsOfDoc: (d) => (d === 'd-1' ? ['w-a', 'w-b'] : []) };
+    const offB = new Set(['w-b']);
+    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, both, offB)).toBe(true);
+    // The control: the same board, with no doc, or another doc.
+    expect(placeIsOff({ workspaceId: 'w-a' }, both, offB)).toBe(false);
+    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-2' }, both, offB)).toBe(false);
   });
 
-  it('counts a board holding a local-only folder bind, which it lists by the set id', () => {
-    const privacy = boardPrivacyFrom({
-      isLocalOnlySet: (id) => id === 'saltmarsh-records-1a2b3c',
-      setOfDoc: () => undefined,
-      docKeyOf: () => undefined,
-      projectIsLocalOnly: () => false,
-      docIdsOf: (ws) =>
-        ws === 'w-records' ? ['saltmarsh-records-1a2b3c'] : ['harborlight-1a2b3c'],
-      isBoardLocked: () => false,
-      boardsOfDoc: () => [],
-    });
-    expect(privacy.localOnlyBoard('w-records')).toBe(true);
-    // The control: a board holding a bind that is not local-only.
-    expect(privacy.localOnlyBoard('w-launch')).toBe(false);
+  it('counts a doc whose boards cannot be read as off, once any board is turned off', () => {
+    const broken: DocBoards = { boardsOfDoc: throws };
+    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, broken, new Set(['w-b']))).toBe(true);
+    // With no board turned off, no board holding it can be off.
+    expect(placeIsOff({ workspaceId: 'w-a', docId: 'd-1' }, broken, NONE)).toBe(false);
   });
 });
 
@@ -127,23 +59,14 @@ const RECORDS_NAME = 'Saltmarsh family records';
 const RECORDS_DOC = 'd-records';
 const RECORDS_TITLE = 'Saltmarsh clinic letters';
 
-/** A coach over the real privacy store, with one medical-style board marked local-only. */
+/** A coach with one medical-style board he turned off. */
 function coachWithRecords() {
-  const attachmentPrivacy = new AttachmentPrivacyStore(dir);
-  attachmentPrivacy.set(RECORDS, 'local-only');
   const docBoard: Record<string, string> = { [RECORDS_DOC]: RECORDS, 'd-post': WS };
-  const privacy = boardPrivacyFrom({
-    isLocalOnlySet: (id) => attachmentPrivacy.isLocalOnly(id),
-    setOfDoc: () => undefined,
-    docKeyOf: () => undefined,
-    projectIsLocalOnly: () => false,
-    docIdsOf: (ws) => Object.keys(docBoard).filter((d) => docBoard[d] === ws),
-    isBoardLocked: () => false,
-    boardsOfDoc: (d) => (docBoard[d] ? [docBoard[d]] : []),
-  });
+  const docBoards: DocBoards = { boardsOfDoc: (d) => (docBoard[d] ? [docBoard[d]] : []) };
   let clock = at(9);
   const store = new CoachStore(dir, clock);
   store.noteTimeZone(ZONE);
+  store.setBoardOff(RECORDS, true);
   const told: SessionNews[] = [];
   const coach = createCoach({
     store,
@@ -152,7 +75,7 @@ function coachWithRecords() {
     label: (d) => ({ title: d === RECORDS_DOC ? RECORDS_TITLE : 'Harborlight launch post draft' }),
     boardName: (ws) => (ws === RECORDS ? RECORDS_NAME : 'Harborlight'),
     workspaceOf: (d) => docBoard[d],
-    isOff: (place) => placeIsOff(place, privacy, store.offBoards),
+    isOff: (place) => placeIsOff(place, docBoards, store.offBoards),
     tell: (news) => {
       told.push(news);
       return true;
@@ -180,7 +103,7 @@ const MOMENT = {
   line: 'Hi, I’m noticing half an hour on hover states. Back to the post?',
 };
 
-describe('a local-only board, through the whole coach', () => {
+describe('a board he turned off, through the whole coach', () => {
   it('sends nothing from it, not its name, id, title or words, and leaves the open moment open', () => {
     const h = coachWithRecords();
     h.coach.here(POST);

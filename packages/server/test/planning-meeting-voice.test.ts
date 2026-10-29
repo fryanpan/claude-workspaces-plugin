@@ -170,16 +170,26 @@ describe('the planning voice in a planning meeting', () => {
     await waitFor(() => voiceWs.frames.some((f) => f.type === 'ready'), {
       describe: 'voice ready',
     });
-    const listen = () =>
-      voiceWs.ws.send(
-        JSON.stringify({
-          type: 'start',
-          setup: 1,
-          mode: 'tap',
-          ears: 'meeting',
-          context: { surface: 'doc', docId },
-        }),
-      );
+    // `start` goes on the voice socket and the words on the audio socket, and
+    // nothing orders two sockets: words read before the `start` are the
+    // previous turn's cut-in, which withdraws the question they answer. So
+    // `listen` resolves only once the server has handled the `start`. A
+    // second `start` for setup 2, which this server does not have, is
+    // refused with an error frame and changes nothing; one socket is handled
+    // in order, so that error means the first `start` is in.
+    const listen = async () => {
+      const refusals = () => voiceWs.frames.filter((f) => f.type === 'error').length;
+      const before = refusals();
+      const start = {
+        type: 'start',
+        mode: 'tap',
+        ears: 'meeting',
+        context: { surface: 'doc', docId },
+      };
+      voiceWs.ws.send(JSON.stringify({ ...start, setup: 1 }));
+      voiceWs.ws.send(JSON.stringify({ ...start, setup: 2 }));
+      await waitFor(() => refusals() > before, { describe: 'the start handled' });
+    };
     const speak = (text: string) => {
       for (let i = 0; i < framesFor(text); i++) audio.ws.send(new Uint8Array(640));
     };
@@ -209,7 +219,7 @@ describe('the planning voice in a planning meeting', () => {
         quote: 'new pier',
       }),
     );
-    m.listen();
+    await m.listen();
     m.speak(TALK);
     // Asked at the pause, with nobody tapping Talk.
     await waitFor(() => m.replies().length === 1, { describe: 'the question' });
@@ -232,7 +242,7 @@ describe('the planning voice in a planning meeting', () => {
     await waitFor(() => m.voice.frames.some((f) => f.type === 'audio-end'), {
       describe: 'question said',
     });
-    m.listen();
+    await m.listen();
     m.speak(ANSWER);
     await waitFor(() => m.replies().length === 2, { describe: 'after the answer' });
     expect(m.replies()[1]).toMatchObject({ spoken: 'Written under Work.', asking: true });
@@ -244,7 +254,7 @@ describe('the planning voice in a planning meeting', () => {
 
     // "Any questions?" with nothing worth asking: "No.", and why written.
     readings.push(JSON.stringify({ ask: null, why: 'The plan names an owner for every step.' }));
-    m.listen();
+    await m.listen();
     m.speak(INVITE);
     await waitFor(() => m.replies().length === 3, { describe: 'the invitation answered' });
     expect(m.replies()[2]?.spoken).toBe('No.');
@@ -262,7 +272,7 @@ describe('the planning voice in a planning meeting', () => {
     const docId = await huddle('discussion');
     const m = await meeting(docId);
     const before = reads.length;
-    m.listen();
+    await m.listen();
     await waitFor(() => m.voice.frames.some((f) => f.type === 'error'), {
       describe: 'the refusal',
     });

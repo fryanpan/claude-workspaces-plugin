@@ -18,8 +18,10 @@ import {
   type OfferedAsk,
   askFromReviewItemAdded,
   asksFromThreadEvent,
+  localOnlyPlacesFrom,
   offBoxAskView,
 } from '../src/ask-feed.ts';
+import { makeDocKey } from '../src/doc-key.ts';
 
 /** A clock and a timer the test moves by hand. */
 function fakeTime(start = 1_000_000) {
@@ -238,5 +240,41 @@ describe('the ask frame off this machine', () => {
   it('passes every other frame unchanged', () => {
     const other = { event: 'task.updated', workspaceId: 'w-records' };
     expect(offBoxAskView(other, () => true)).toBe(other);
+  });
+});
+
+describe('localOnlyPlacesFrom', () => {
+  it("asks the project's privacy by the repo half of the doc's key", () => {
+    const asked: string[] = [];
+    const places = localOnlyPlacesFrom({
+      isLocalOnlySet: () => false,
+      setOfDoc: () => undefined,
+      docKeyOf: (d) =>
+        d === 'd-letters' ? makeDocKey('saltmarsh-clinic', 'letters.md') : undefined,
+      projectIsLocalOnly: (repoKey) => {
+        asked.push(repoKey);
+        return repoKey === 'saltmarsh-clinic';
+      },
+      docIdsOf: (ws) => (ws === 'w-records' ? ['d-letters'] : ['d-post']),
+    });
+    expect(places.doc('d-letters')).toBe(true);
+    expect(places.board('w-records')).toBe(true);
+    expect(places.doc('d-post')).toBe(false);
+    expect(places.board('w-launch')).toBe(false);
+    expect(new Set(asked)).toEqual(new Set(['saltmarsh-clinic']));
+  });
+
+  it('counts a board holding a local-only folder bind, which it lists by the set id', () => {
+    const places = localOnlyPlacesFrom({
+      isLocalOnlySet: (id) => id === 'saltmarsh-records-1a2b3c',
+      setOfDoc: () => undefined,
+      docKeyOf: () => undefined,
+      projectIsLocalOnly: () => false,
+      docIdsOf: (ws) =>
+        ws === 'w-records' ? ['saltmarsh-records-1a2b3c'] : ['harborlight-1a2b3c'],
+    });
+    expect(places.board('w-records')).toBe(true);
+    // The control: a board holding a bind that is not local-only.
+    expect(places.board('w-launch')).toBe(false);
   });
 });

@@ -25,7 +25,7 @@ import { appSayer } from './app-voice/say.ts';
 import { appVoiceSocketPath } from './app-voice/seed.ts';
 import { appVoiceTokenKey, checkAppVoiceToken, mintAppVoiceToken } from './app-voice/token.ts';
 import { ARTIFACT_CHECK_ACTOR, ArtifactChecker } from './artifact-check.ts';
-import { offBoxAskView } from './ask-feed.ts';
+import { localOnlyPlacesFrom, offBoxAskView } from './ask-feed.ts';
 import { type AttachMountsBrief, attachMountsBrief } from './attach-mounts.ts';
 import { backfillAttachmentFiling } from './attachment-backfill.ts';
 import { AttachmentPrivacyStore, isOnBox } from './attachment-privacy.ts';
@@ -47,7 +47,6 @@ import { openBoardSockets } from './board-sockets.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
-import { boardPrivacyFrom } from './coach/exclusion.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
@@ -1180,17 +1179,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     docStore,
     summarizer,
   });
-  // What keeps a board off the coach. Two of the stores it reads are built
-  // further down; these run only for a page's or a row's event, and a
-  // throw counts as off (`coach/exclusion.ts`).
-  const boardPrivacy = boardPrivacyFrom({
+  // Which boards and docs keep their files here, so a lead stream off this
+  // machine gets none of their asks. Two of the stores it reads are built
+  // further down; it runs only for a frame on such a stream (ask-feed.ts).
+  const localOnlyPlaces = localOnlyPlacesFrom({
     isLocalOnlySet: (setId) => attachmentPrivacy.isLocalOnly(setId),
     setOfDoc: (docId) => setOfDoc(docId),
     docKeyOf: (docId) => docStore.repos.primaryKeyFor(docStore.resolveDocId(docId)),
     projectIsLocalOnly: (repoKey) => mountStore.privacyOf(repoKey) === 'local-only',
     docIdsOf: (id) => taskStore.getWorkspace(id)?.docIds ?? [],
-    isBoardLocked: (id) => sharingGate.isBoardLocked(id),
-    boardsOfDoc: (docId) => boardsForDoc(docId),
   });
   /** The coach: the owner's learning goals, what he is doing, and the moments
    *  it raises (coach/wiring.ts). The Coach board's lead session hears every
@@ -1214,7 +1211,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       docId.startsWith('task:')
         ? taskStore.getTask(docId.slice(5))?.workspaceId
         : (taskStore.workspaceOfDoc(docId) ?? undefined),
-    privacy: boardPrivacy,
+    // Built further down; read only for a page's or a row's event.
+    docBoards: { boardsOfDoc: (docId) => [...boardsForDoc(docId)] },
     leadOf: (workspaceId) => taskStore.getWorkspace(workspaceId)?.leadAgentId,
     sendToAgent: (workspaceId, agentId, frame) =>
       sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
@@ -2188,8 +2186,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       offBoxAskView(
         payload,
         (ask) =>
-          boardPrivacy.localOnlyBoard(ask.workspaceId) ||
-          (ask.row.kind !== 'task-review' && boardPrivacy.localOnlyDoc(ask.row.docId)),
+          localOnlyPlaces.board(ask.workspaceId) ||
+          (ask.row.kind !== 'task-review' && localOnlyPlaces.doc(ask.row.docId)),
       ),
   });
   /**

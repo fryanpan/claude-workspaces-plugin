@@ -121,14 +121,15 @@ describe('builder dispatches through the server', () => {
     return res.json() as Promise<T>;
   };
 
-  beforeEach(async () => {
-    dataDir = mkdtempSync(join(tmpdir(), 'dispatch-routes-'));
-    fired = new Map();
-    failArm = new Set();
+  /** `builderSilentMultiplier`: the builder's window, in quiet windows. */
+  async function boot(builderSilentMultiplier?: number): Promise<void> {
     handle = createServer({
       port: 0,
       dataDir,
       stallNudgeQuietMs: QUIET_MS,
+      ...(builderSilentMultiplier !== undefined
+        ? { stallBuilderSilentMultiplier: builderSilentMultiplier }
+        : {}),
       dispatchWatchFactory: (path, onEvent) => {
         if (failArm.has(path)) throw new Error('arm refused (test)');
         fired.set(path, onEvent);
@@ -137,6 +138,13 @@ describe('builder dispatches through the server', () => {
     });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+  }
+
+  beforeEach(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'dispatch-routes-'));
+    fired = new Map();
+    failArm = new Set();
+    await boot();
   });
 
   afterEach(async () => {
@@ -277,7 +285,15 @@ describe('builder dispatches through the server', () => {
     }
   });
 
-  it('inside the doubled window a watching builder is not yet stalled', async () => {
+  it('inside the builder’s window a watching builder is not yet stalled', async () => {
+    // At the default two windows, "past one, inside two" left 100ms between
+    // this wait and the builder's window; a loaded CI runner spent that on
+    // the register call and a late timer, and the row read builder-silent
+    // (run 40756379991). Ten windows keep the claim — past the ordinary
+    // window, inside the builder's — with 1.3s to spare. The rule that the
+    // builder's window is a multiple is stall-gate.test.ts's.
+    await handle.stop();
+    await boot(10);
     const worktree = mkdtempSync(join(tmpdir(), 'wt-'));
     try {
       const ctx = await boardWithLead();
@@ -285,7 +301,7 @@ describe('builder dispatches through the server', () => {
       await jj(await post(`/workspaces/${WS}/dispatches`, { taskId, worktreePath: worktree }));
       // Past the ordinary window — where an undispatched row would be named
       // (the non-watching test below proves this harness fires there) — but
-      // inside the builder's doubled one.
+      // inside the builder's.
       await settle(QUIET_MS + 50);
 
       handle.nudgeStalls();
@@ -315,7 +331,7 @@ describe('builder dispatches through the server', () => {
       // watcher would have made this row `builder-silent` by now, and it
       // reads `in-progress`. The wait is the moved-within window rather than
       // the gate's own, because no frame goes out under that one any more —
-      // the not-yet-stalled case above is what still holds at the short wait.
+      // the not-yet-stalled case above is what still holds inside the builder’s window.
       await settle(2 * QUIET_MS + 150);
 
       handle.nudgeStalls();

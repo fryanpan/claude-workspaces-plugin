@@ -179,7 +179,7 @@ beforeAll(async () => {
   coachOff = await board('Riverbend ferries');
   localOnly = await board('Saltmarsh records');
   // A folder that stays on this machine, bound onto the board: the board is
-  // local-only from then on (`coach/exclusion.ts`, `localOnlyBoard`).
+  // local-only from then on (`localOnlyPlacesFrom` in `ask-feed.ts`).
   const records = join(dataDir, 'saltmarsh-records');
   mkdirSync(records, { recursive: true });
   writeFileSync(join(records, 'README.md'), '# Saltmarsh records\n\nKept on this machine.\n');

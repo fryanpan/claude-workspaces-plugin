@@ -22,7 +22,7 @@ import { agentIdForName } from '@claude-workspaces/core';
 import { type Event, onActivity } from '../activity.ts';
 import { CoachBacklog } from './backlog.ts';
 import { CoachCoverage, sessionSource } from './coverage.ts';
-import { type BoardPrivacy, placeIsOff } from './exclusion.ts';
+import { type DocBoards, placeIsOff } from './exclusion.ts';
 import { type GoalsDocReading, readGoalsDoc } from './goals-doc.ts';
 import { CoachHub } from './hub.ts';
 import { coachSectionFor } from './landing.ts';
@@ -53,8 +53,9 @@ export interface CoachWiringDeps {
   label: (docId: string) => DocLabel;
   boardName: (workspaceId: string) => string | undefined;
   workspaceOf: (docId: string) => string | undefined;
-  /** What makes a board off for the coach (`coach/exclusion.ts`). */
-  privacy: BoardPrivacy;
+  /** The boards holding a doc, so a doc on a board he turned off is off
+   *  too (`coach/exclusion.ts`). */
+  docBoards: DocBoards;
   /** The board's lead agent, if one is seated. */
   leadOf: (workspaceId: string) => string | undefined;
   sendToAgent: (workspaceId: string, agentId: string, frame: SessionFrame) => number;
@@ -131,11 +132,11 @@ const MARK_TEXT_CHARS = 2_000;
 export function wireCoach(deps: CoachWiringDeps): CoachWiring {
   const store = new CoachStore(deps.dataDir);
   // An unreadable state file means the boards he turned off are unknown.
-  // A board shared with someone else still counts: what reaches the coach
-  // from it is his own doing (the owner, 2026-10-16: "full visibility into
-  // everything I'm doing"), and nothing here reads anyone else's rows.
+  // Every other board counts, local-only, locked and shared alike (the
+  // owner, 2026-10-28: "All boards."), and nothing here reads anyone else's
+  // rows.
   const isOff = (place: { workspaceId: string; docId?: string }) =>
-    store.readFailed || placeIsOff(place, deps.privacy, store.offBoards);
+    store.readFailed || placeIsOff(place, deps.docBoards, store.offBoards);
   const hub = new CoachHub({ offAt: isOff });
   const coverage = new CoachCoverage(deps.dataDir);
   const readGoals = (): GoalsDocReading | null => {

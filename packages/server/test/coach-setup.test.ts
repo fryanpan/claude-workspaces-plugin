@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Event, appendActivity } from '../src/activity.ts';
-import type { BoardPrivacy } from '../src/coach/exclusion.ts';
+import type { DocBoards } from '../src/coach/exclusion.ts';
 import { goalsDocTemplate } from '../src/coach/goals-doc.ts';
 import {
   type CoachSetupDeps,
@@ -97,12 +97,7 @@ describe('ensureGoalsDoc', () => {
   });
 });
 
-const OPEN_PRIVACY: BoardPrivacy = {
-  localOnlyBoard: () => false,
-  localOnlyDoc: () => false,
-  locked: () => false,
-  boardsOfDoc: () => [],
-};
+const NO_BOARDS: DocBoards = { boardsOfDoc: () => [] };
 
 describe('wireCoach', () => {
   /** Digest windows the feed opened; a test closes them by hand. */
@@ -127,7 +122,7 @@ describe('wireCoach', () => {
       label: () => ({}),
       boardName: () => undefined,
       workspaceOf: () => 'w-coach',
-      privacy: OPEN_PRIVACY,
+      docBoards: NO_BOARDS,
       leadOf: () => undefined,
       sendToAgent: () => 0,
       agentConnected: () => false,

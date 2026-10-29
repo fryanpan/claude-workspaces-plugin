@@ -18,7 +18,7 @@
  * **Every board.** The lead sees every board the owner does (the owner,
  * 2026-10-23: "They should have the same visibility I do"), so a board kept
  * on this machine, locked private or with the coach turned off still sends
- * its asks here; the coach's own exclusion (`coach/exclusion.ts`) is the
+ * its asks here; the coach's own switch (`coach/exclusion.ts`) is the
  * coach's alone. Asks on the plan board itself are not sent, because
  * the lead already hears them on that board's own stream, and neither is an
  * ask the lead filed itself (code-health.md, "An agent is only woken by news
@@ -36,6 +36,7 @@
  * should not read a backlog of stale asks.
  */
 import type { ReviewBlocks, ThreadWebhookPayload } from '@claude-workspaces/core';
+import { parseDocKey } from './doc-key.ts';
 import { HeldWindow } from './held-window.ts';
 
 /** How long a window stays open before it goes as one frame. */
@@ -188,6 +189,41 @@ export function offBoxAskView<P extends { event: string }>(
   });
   if (items.length === 0) return undefined;
   return { ...payload, items };
+}
+
+/** Which boards and docs keep their files on this machine, for `offBoxAskView`. */
+export interface LocalOnlyPlaces {
+  /** The board, or a doc on it, keeps its files on this machine. */
+  board(workspaceId: string): boolean;
+  /** The doc's attachment set or project keeps its files on this machine. */
+  doc(docId: string): boolean;
+}
+
+/** The server's stores, as `localOnlyPlacesFrom` reads them. */
+export interface LocalOnlySources {
+  /** An attachment set (a board is one too) that keeps its files here. */
+  isLocalOnlySet: (setId: string | undefined) => boolean;
+  setOfDoc: (docId: string) => string | undefined;
+  /** The doc's key (`repoKey\0relPath`), if its file is in a project, and
+   *  that project's privacy, which is asked by the key's repo half. */
+  docKeyOf: (docId: string) => string | undefined;
+  projectIsLocalOnly: (repoKey: string) => boolean;
+  docIdsOf: (workspaceId: string) => readonly string[];
+}
+
+export function localOnlyPlacesFrom(src: LocalOnlySources): LocalOnlyPlaces {
+  const doc = (docId: string): boolean => {
+    // A board lists a filed folder bind by the SET's id, not its members',
+    // so an id on the board can be a local-only set itself.
+    if (src.isLocalOnlySet(docId) || src.isLocalOnlySet(src.setOfDoc(docId))) return true;
+    const docKey = src.docKeyOf(docId);
+    const repoKey = docKey === undefined ? undefined : parseDocKey(docKey)?.repoKey;
+    return repoKey !== undefined && src.projectIsLocalOnly(repoKey);
+  };
+  return {
+    doc,
+    board: (id) => src.isLocalOnlySet(id) || src.docIdsOf(id).some(doc),
+  };
 }
 
 /** A ticket's review item, from its `review_item.added` event. */
