@@ -158,27 +158,24 @@ function listen(host: string | { path: string }): Promise<Server> {
 const portOf = (s: Server) => (s.address() as { port: number }).port;
 
 describe.skipIf(!HAVE_SANDBOX)('the wall under the real sandbox-exec', () => {
-  // Under /private/tmp, not tmpdir(): a unix socket path is limited to 104
-  // bytes, and the per-user temp folder leaves too few for a board's.
-  const root = realpathSync(mkdtempSync('/private/tmp/lw-'));
-  const home = join(root, 'home');
-  const project = join(home, 'dev', 'harborlight');
-  mkdirSync(project, { recursive: true });
-  const boards = join(root, 'b');
-  mkdirSync(boards);
-  const own = join(boards, 'w-harbor.sock');
-  const other = join(boards, 'w-river.sock');
-  const m: Machine = { home, uid: 99999, realpath: (p) => p };
-  const { lead, config } = fixture(home, true, boards);
-  const walled = join(root, 'walled.sb');
-  const unwalled = join(root, 'unwalled.sb');
-  const socketPath = join(root, 'lead.sock');
+  // Every path is made in beforeAll, which a skipped suite never runs: on
+  // Linux there is no /private/tmp. Under /private/tmp, not tmpdir(): a unix
+  // socket path is limited to 104 bytes, and the per-user temp folder leaves
+  // too few for a board's.
+  let root = '';
+  let project = '';
+  let boards = '';
+  let own = '';
+  let other = '';
+  let walled = '';
+  let unwalled = '';
+  let socketPath = '';
   // Links the lead could have made in its own project, to another board's socket.
-  const symlink = join(project, 'r.sock');
-  const hardlink = join(project, 'h.sock');
+  let symlink = '';
+  let hardlink = '';
   // A lead whose own board's socket path is itself a link to Riverbend's.
-  const linkedLead = join(root, 'linked.sb');
-  const linkedOwn = join(boards, 'w-salt.sock');
+  let linkedLead = '';
+  let linkedOwn = '';
   // The board ports stand in for no listener here; `walledPort` and
   // `openPort` are this test's own listeners, at both loopbacks.
   const servers: Server[] = [];
@@ -186,6 +183,23 @@ describe.skipIf(!HAVE_SANDBOX)('the wall under the real sandbox-exec', () => {
   let openPort = 0;
 
   beforeAll(async () => {
+    root = realpathSync(mkdtempSync('/private/tmp/lw-'));
+    const home = join(root, 'home');
+    project = join(home, 'dev', 'harborlight');
+    mkdirSync(project, { recursive: true });
+    boards = join(root, 'b');
+    mkdirSync(boards);
+    own = join(boards, 'w-harbor.sock');
+    other = join(boards, 'w-river.sock');
+    const m: Machine = { home, uid: 99999, realpath: (p) => p };
+    const { lead, config } = fixture(home, true, boards);
+    walled = join(root, 'walled.sb');
+    unwalled = join(root, 'unwalled.sb');
+    socketPath = join(root, 'lead.sock');
+    symlink = join(project, 'r.sock');
+    hardlink = join(project, 'h.sock');
+    linkedLead = join(root, 'linked.sb');
+    linkedOwn = join(boards, 'w-salt.sock');
     const v4 = await listen('127.0.0.1');
     walledPort = portOf(v4);
     const v6 = await new Promise<Server>((done, fail) => {
@@ -210,7 +224,7 @@ describe.skipIf(!HAVE_SANDBOX)('the wall under the real sandbox-exec', () => {
 
   afterAll(() => {
     for (const s of servers) s.close();
-    rmSync(root, { recursive: true, force: true });
+    if (root) rmSync(root, { recursive: true, force: true });
   });
 
   const node = process.execPath;
