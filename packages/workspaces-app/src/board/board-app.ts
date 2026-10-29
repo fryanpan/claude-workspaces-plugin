@@ -741,7 +741,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   //
   // The ydoc observers, the awareness feed, the SSE listeners and the catch-up
   // are `board-live-wiring.ts`, called here so subscription order is unchanged.
-  wireBoardLive({
+  const live = wireBoardLive({
     workspaceId,
     user,
     state,
@@ -880,6 +880,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
     workspaceId,
     author,
     dock: el('board-lead-chat'),
+    stream: live.stream,
     getContext: () =>
       voiceBoardContext(state.detailTaskId, null, state.detailThreadId, state.reviewItems),
   });

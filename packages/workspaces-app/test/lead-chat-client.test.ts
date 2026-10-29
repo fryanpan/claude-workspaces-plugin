@@ -142,4 +142,31 @@ describe('the lead chat client', () => {
     client.close();
     expect(stream().closed).toBe(true);
   });
+
+  it('shares the page’s board feed rather than opening a second, and leaves it open', async () => {
+    const feed = new FakeStream('/workspaces/w-harbor/events:stream');
+    let opened = 0;
+    const fetchFake = (async () =>
+      new Response(
+        JSON.stringify({ lead: null, messages: [], canTalk: true }),
+      )) as unknown as typeof fetch;
+    const client = createLeadChatClient({
+      workspaceId: 'w-harbor',
+      fetch: fetchFake,
+      stream: feed as unknown as EventSource,
+      openStream: () => {
+        opened++;
+        return new FakeStream('x') as unknown as EventSource;
+      },
+    });
+    await settle();
+    feed.fire('lead-chat.changed', {
+      event: 'lead-chat.changed',
+      workspaceId: 'w-harbor',
+      message: msg('s', 'shared', 5),
+    });
+    expect(client.state().messages.map((m) => m.id)).toEqual(['s']);
+    client.close();
+    expect([opened, feed.closed]).toEqual([0, false]);
+  });
 });

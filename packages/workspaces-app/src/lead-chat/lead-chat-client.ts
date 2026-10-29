@@ -22,6 +22,9 @@ export interface LeadChatClientOpts {
   /** Injected by tests. */
   fetch?: typeof fetch;
   openStream?: (url: string) => EventSource;
+  /** The page's own board feed, shared rather than a second connection to
+   *  the same URL; it stays open when this client closes. */
+  stream?: EventSource;
 }
 
 export interface LeadChatState extends LeadChatRead {
@@ -75,7 +78,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     }
   };
 
-  const stream = (opts.openStream ?? ((u) => new EventSource(u)))(`${base}/events:stream`);
+  const stream =
+    opts.stream ?? (opts.openStream ?? ((u) => new EventSource(u)))(`${base}/events:stream`);
   let dropped = false;
   stream.addEventListener(LEAD_CHAT_EVENT, (ev) => {
     try {
@@ -120,6 +124,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
         return { ok: false, error: 'offline' };
       }
     },
-    close: () => stream.close(),
+    close: () => {
+      if (!opts.stream) stream.close();
+    },
   };
 }

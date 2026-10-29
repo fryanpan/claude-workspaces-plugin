@@ -38,6 +38,8 @@ export interface LeadChatMountOpts {
   /** A slot in the board's dock; omitted, the button floats bottom-left. */
   dock?: HTMLElement;
   document?: Document;
+  /** The page's open board feed, shared by the chat's client. */
+  stream?: EventSource;
   /** Injected by tests. */
   client?: LeadChatClient;
   storage?: ModeStorage | null;
@@ -69,7 +71,12 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   });
   // A floated button sits under the coach's card; this keeps the card above it.
   if (!opts.dock) doc.documentElement.style.setProperty('--lc-agent-room', '56px');
-  const client = opts.client ?? createLeadChatClient({ workspaceId: opts.workspaceId });
+  const client =
+    opts.client ??
+    createLeadChatClient({
+      workspaceId: opts.workspaceId,
+      ...(opts.stream ? { stream: opts.stream } : {}),
+    });
   const storage = opts.storage === undefined ? deviceStorage() : opts.storage;
   const reduced =
     opts.reducedMotion ?? (() => win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
