@@ -159,6 +159,9 @@ describe('the notetaking instructions', () => {
     }).user;
     expect(withMissed).toContain('STILL IN NO NOTE');
     expect(withMissed).toContain('The export dialog forgets the range.');
+    // The check that offered it is lexical, so a line it offers may already be
+    // noted in other words; offered as "in no note", it came back a repeat.
+    expect(withMissed).toMatch(/already\s+says it, write nothing for that line/);
     // And a tick with nothing outstanding is not told about a section that
     // does not apply to it.
     expect(buildNotesPrompt(emptyInput).user).not.toContain('STILL IN NO NOTE');
@@ -187,6 +190,9 @@ describe('the notetaking instructions', () => {
     // one bullet — measured in production on 2026-09-11, and reproduced in
     // `notes-sparse-meeting.test.ts`.
     expect(system).toMatch(/CONTINUES something you already noted, write a NEW note/);
+    // And a point said twice is one note: on four replayed meetings a judge
+    // found 5 to 21 notes a meeting restating one above them.
+    expect(system).toContain('only says AGAIN what a note already says');
     expect(system).toMatch(/Never grow one note into a summary of the meeting so far/);
   });
 

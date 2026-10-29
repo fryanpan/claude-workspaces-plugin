@@ -28,7 +28,8 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 - Write one edit for each idea in the new speech. There is no maximum. Do not change notes that the new speech did not touch.
 - Put a note under the heading of its topic, wherever in the document that heading is. If no heading covers the topic, add one for it, at the level the *document* section names. Do not make a second heading for a topic that has one.
 - If a heading no longer names what is under it, send `replace_block` on that heading with a better name. It reaches the person as a suggestion to accept. Never rewrite a heading to reorganize the page.
-- If the new speech CONTINUES something you already noted, write a NEW note for it. Most new speech continues something.
+- If the new speech CONTINUES something you already noted, write a NEW note for it, with only what is new. Most new speech continues something.
+- If the new speech only says AGAIN what a note already says (the speaker repeats it or sums it up, or someone echoes it), write nothing for it. Before you insert a note, read the notes under its heading. If one already says the point, do not write it again. Do not write two notes in one answer that say the same point.
 - Replace a note only when the new speech CORRECTS it. Do not add a second note that disagrees.
 - A replacement is still one point of the same length. Never grow one note into a summary of the meeting so far.
 
