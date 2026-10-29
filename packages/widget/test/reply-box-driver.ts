@@ -4,7 +4,8 @@
  * thread from the Feedback panel's list, driven in headless Chromium at
  * 1180x820 and 430x900.
  *
- * Spawned by `reply-box.test.ts`, which reads the JSON it prints. The page is
+ * Spawned by `reply-box.test.ts`, which reads the JSON it prints.
+ * `REPLY_BOX_SHOTS=<dir>` also writes a screenshot per reading. The page is
  * a long mock with three threads: one near its top, and two on the last
  * paragraphs, where a scroll to the middle cannot bring the element any
  * higher than the bottom of the screen. One of those holds an agent's reply
@@ -38,6 +39,14 @@ export interface Look {
   pop: Box | null;
   box: Box | null;
   send: Box | null;
+  /** Resolve, or Reopen: the button beside Reply. */
+  status: Box | null;
+  /** The reply box's font size in px: under 16, iOS zooms the page when it
+   *  takes focus. */
+  fieldPx: number | null;
+  /** Each line of comment text the popover shows, clipped to the list it
+   *  scrolls in; a line scrolled out of the list is not there. */
+  words: Box[];
   /** The popover again, half a second later. */
   popLater: Box | null;
   /** The commented element, after the list's scroll. */
@@ -52,6 +61,9 @@ const SIZES = [
   [430, 900],
 ] as const;
 const THREADS = ['t-top', 't-bottom', 't-ask'] as const;
+/** The window's height at 430 wide once a phone's keyboard is up. */
+const KEYBOARD_UP = 520;
+const SHADOW = `document.querySelector('${TAG}').shadowRoot`;
 
 const filler = Array.from(
   { length: 30 },
@@ -96,6 +108,13 @@ function buildWidget(dir: string): string {
   return built.stdout;
 }
 
+/** An agent's answer long enough to fill the popover's list at 430 wide. */
+const LONG_REPLY =
+  'The north pier, from the first sailing on. Here is what changes: the Riverbend timetable moves its winter ' +
+  'sailings to the north pier, the Saltmarsh map gains the new walkway, and the Harborlight notice board says ' +
+  'so from Monday. To compare the two, a switch goes at the top of the page, so you can flip between them ' +
+  'without leaving it. This goes into the same round as the fare change; I will post here when you can reload.';
+
 /** Three threads, each with an exchange, and the list and asks mounted. */
 const SEED = `(() => {
   const c = window.__core;
@@ -105,7 +124,7 @@ const SEED = `(() => {
   const agent = { id: 'agent-b', name: 'Bob', kind: 'agent', color: '#2e7dd7' };
   const put = (threadId, id) => {
     c.createThread(doc, { threadId, anchor: JSON.parse(JSON.stringify(c.createAnchor(document.getElementById(id)))), createdBy: alice, firstComment: { id: 'c0-' + threadId, text: 'Which pier does this leave from?' } });
-    c.postReply(doc, threadId, { id: 'c1-' + threadId, author: agent, text: 'The north pier, from the first sailing on.' });
+    c.postReply(doc, threadId, { id: 'c1-' + threadId, author: agent, text: threadId === 't-top' ? ${JSON.stringify(LONG_REPLY)} : 'The north pier, from the first sailing on.' });
     c.postReply(doc, threadId, { id: 'c2-' + threadId, author: alice, text: 'Then the map on the next page is wrong.' });
   };
   put('t-top', 'top');
@@ -132,8 +151,33 @@ const LOOK = `(() => {
     pop: box(pop),
     box: box(pop && pop.querySelector('.actions textarea')),
     send: box(pop && pop.querySelector('.actions .submit')),
+    status: box(pop && pop.querySelector('.actions .resolve, .actions .reopen')),
+    fieldPx: pop ? parseFloat(getComputedStyle(pop.querySelector('.actions textarea')).fontSize) : null,
+    words: (() => {
+      const list = pop && pop.querySelector('.comments');
+      if (!list) return [];
+      const v = list.getBoundingClientRect();
+      const out = [];
+      for (const body of list.querySelectorAll('.comment .body')) {
+        const range = document.createRange();
+        range.selectNodeContents(body);
+        for (const r of range.getClientRects()) {
+          const top = Math.max(r.top, v.top);
+          const bottom = Math.min(r.bottom, v.bottom);
+          if (bottom - top > 1) out.push([r.left, top, r.right, bottom].map(Math.round));
+        }
+      }
+      return out;
+    })(),
   };
 })()`;
+
+async function shot(cdp: Cdp, name: string): Promise<void> {
+  const dir = process.env.REPLY_BOX_SHOTS;
+  if (!dir) return;
+  const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as { data: string };
+  writeFileSync(join(dir, `${name}.png`), Buffer.from(png.data, 'base64'));
+}
 
 async function drive(cdp: Cdp, dir: string, bundle: string): Promise<Reading> {
   const html = join(dir, 'page.html');
@@ -168,6 +212,27 @@ async function drive(cdp: Cdp, dir: string, bundle: string): Promise<Reading> {
         return [r.left, r.top, r.right, r.bottom].map(Math.round);
       })()`)) as Box;
       reading[`${width}x${height}:${id}`] = look;
+      await shot(cdp, `${width}x${height}-${id}`);
+      if (width > 1100) continue;
+      // The reader taps the box and types, and the keyboard takes the
+      // bottom of the window.
+      await cdp.evaluate(`${SHADOW}.querySelector('.thread-popover .actions textarea').focus()`);
+      await cdp.send('Input.insertText', { text: 'Grea' });
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width,
+        height: KEYBOARD_UP,
+        deviceScaleFactor: 1,
+        mobile: true,
+      });
+      await sleep(300);
+      reading[`${width}x${height}:${id}:typed`] = (await cdp.evaluate(LOOK)) as Look;
+      await shot(cdp, `${width}x${KEYBOARD_UP}-${id}-typed`);
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor: 1,
+        mobile: true,
+      });
     }
   }
   return reading;
