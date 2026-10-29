@@ -153,7 +153,7 @@ describe('the frame and host helpers', () => {
     expect(plain).toContain('<title>Lemons &amp; limes</title>');
   });
 
-  it("draws the link back to the board for a share visitor and nothing over the owner's mock", () => {
+  it("draws the board's pages beside the owner's mock, and only the link back for a share visitor", () => {
     const args = {
       workspaceId: 'board one',
       docId: 'd-mock',
@@ -164,15 +164,21 @@ describe('the frame and host helpers', () => {
     const owner = renderMockHost({ ...args, visitor: false });
     const visitor = renderMockHost({ ...args, visitor: true });
     expect(owner).not.toContain('cw-board-link');
+    const hrefs = [...owner.matchAll(/<nav class="cw-host-nav[\s\S]*?<\/nav>/g)]
+      .flatMap((m) => [...m[0].matchAll(/href="([^"]+)"[^>]*title="([^"]+)"/g)])
+      .map((m) => [m[2], m[1]]);
+    expect(hrefs).toEqual([
+      ['Home', '/workspaces/board%20one/home'],
+      ['Tasks', '/workspaces/board%20one'],
+      ['Library', '/workspaces/board%20one/library'],
+      ['Activity', '/workspaces/board%20one/activity'],
+    ]);
+    // A share visitor reaches the board by the one link; the pages beside
+    // the frame are the board's own, which a visitor's share may not hold.
+    expect(visitor).not.toContain('cw-host-nav');
     expect(visitor).toContain(
       '<a class="cw-board-link" href="/workspaces/board%20one" aria-label="Back to the board">',
     );
-    // The flag adds the pill and its one style rule, and changes nothing
-    // else on the page: take both out and the two pages are the same bytes.
-    const stripped = visitor
-      .replace(/\.cw-board-link\{[^}]*\}/, '')
-      .replace(/<a class="cw-board-link"[^>]*>[^<]*<\/a>/, '');
-    expect(stripped).toBe(owner);
   });
 });
 

@@ -977,6 +977,24 @@ in its nav dock, the doc page floats it bottom-left, and the mock host loads
 audio reaches only this server and the listener it already uses. There is no
 browser speech recognition, because Chrome's sends the audio to Google.
 
+**The lead chat's meeting.** The chat's Start a meeting runs one meeting per
+board that belongs to the board rather than to a page.
+`lead-chat/meeting.ts` (server) is one small file per board naming the notes
+doc, the browser tab holding the microphone, who joined and the lines said,
+written whole on every change and sent to the board's pages as
+`lead-chat.meeting` / `lead-chat.meeting-line` frames. It is driven by
+`POST /workspaces/<ws>/lead-chat/meeting` in the same route file; a fresh
+line that opens with "Lead," goes to the lead as a voice turn, once per turn.
+The recording itself is the doc meeting every other surface runs. In the
+app, `meeting-link.ts` (a new top-level module, lifted out of
+`meeting-strip.ts`) is the meeting socket, its held-audio bank and its resume
+backoff with no page around it; the strip and `lead-chat/lead-chat-meeting.ts`
+both drive it. A page move is a reconnect: the next page of the recording tab
+resumes with `resume: <meetingId>`. `core/src/board-nav.ts` (a new top-level
+core module) names the board's four pages and their glyphs, so the mock host
+(`mockup-frame.ts`), which loads no app bundle, draws the same rail as the
+board.
+
 **A mock or app that talks.** A page served in a board's frame can speak,
 listen and post to its own dev server through
 `WS /workspaces/<ws>/docs/<docId>/app-voice`. Its wire is `core/app-voice.ts`
