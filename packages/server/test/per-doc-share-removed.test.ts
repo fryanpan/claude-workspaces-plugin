@@ -99,6 +99,8 @@ describe('per-doc sharing is removed', () => {
     boardId = ((await board.json()) as { workspace: { id: string } }).workspace.id;
     WS = boardId;
     expect(boardId).toBeTruthy();
+    // Bryan lets the domain in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Bryan');
 
     const bind = await local('/workspaces', { folderPath: folder, hubWorkspaceId: boardId });
     expect(bind.status).toBe(200);
@@ -320,7 +322,9 @@ describe('per-doc sharing is removed', () => {
       const { docId } = (await opened.json()) as { docId: string };
       expect(docId).toBeTruthy();
 
-      visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+      visitorHeaders = (
+        await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+      ).headers;
 
       const asVisitor = (path: string) =>
         fetch(`${base}${path}`, {

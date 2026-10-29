@@ -16,14 +16,22 @@
  * board never reaches here: it closes that board alone and locks the owner
  * out of nothing.
  *
- * - **Turned OFF again while the item is open:** the item is revised to name
- *   the latest flip, so the queue holds one item.
- * - **Turned back ON by anyone:** the open item is withdrawn, because
+ * The item is an ACCESS card (`sharing-on`, `@claude-workspaces/core/review-access`):
+ * only the access door answers it (`routes/task-access.ts`), on the owner's
+ * person proof from the board's own page, and the general answer route
+ * refuses it. A loopback caller naming the owner as its author cannot turn
+ * sharing back on. While the switch is off, the owner's Access hostname still
+ * lets the owner reach that one card (`sharing-off-door.ts`), so the way back
+ * does not depend on being at this machine.
+ *
+ * - **Turned OFF again while the item is open:** that card is withdrawn and a
+ *   new one names the latest flip, so the queue holds one item. An access
+ *   card is never reworded (`review-items/store.ts`).
+ * - **Turned back ON by anyone else:** the open item is withdrawn, because
  *   somebody has already answered it.
- * - **Answered "Turn back on" by the owner:** the server flips the switch
- *   through the same path the route uses, and that flip is logged with the
- *   owner as the actor. An answer from anyone else is recorded and does not
- *   flip anything. "Leave off" is recorded only.
+ * - **Approved at the access door:** the server flips the switch through the
+ *   same path the route uses, logged with the owner as the actor, and the
+ *   door records the answer. Reject records the answer only.
  *
  * Filed by the server and still judged: every filing and revision goes
  * through the review-item quality gate, but the owner is told whatever the
@@ -31,7 +39,7 @@
  * it (server.ts). The gate holds agent-written asks; this is a fixed
  * template, and a security notice the owner never sees is worse. The standing task and the open item are kept
  * in `sharing-notice.json`, so a restart neither files a duplicate nor
- * forgets the item it would revise or withdraw.
+ * forgets the item it would withdraw.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,7 +47,7 @@ import type { SharingFlip } from './share/sharing-flip.ts';
 
 export const SHARING_NOTICE_FILENAME = 'sharing-notice.json';
 
-/** Who files, revises and withdraws the item. Not the stall escalation's
+/** Who files and withdraws the item. Not the stall escalation's
  *  name: the stall loop treats that one as its own. */
 export const SHARING_NOTICE_ACTOR = {
   id: 'agent-workspaces-sharing',
@@ -48,20 +56,11 @@ export const SHARING_NOTICE_ACTOR = {
 } as const;
 
 export const SHARING_NOTICE_TASK_TITLE = 'Outside access to every board';
-export const SHARING_ON_OPTION = 'turn-back-on';
-export const SHARING_LEAVE_OFF_OPTION = 'leave-off';
-const TURN_BACK_ON_LABEL = 'Turn back on';
 
 type Actor = { id: string; name: string; kind?: string };
 
-/** The part of a `decision.answered` event the notice reads. */
-export interface SharingAnswer {
-  taskId: string;
-  reviewItemId?: string;
-  optionId?: string;
-  answer: string;
-  actor: Actor;
-}
+/** The change the notice's card carries. */
+export type SharingOnChange = { op: 'sharing-on'; workspaceId: string };
 
 export interface SharingNoticeDeps {
   dataDir: string;
@@ -82,17 +81,13 @@ export interface SharingNoticeDeps {
     workspaceId: string,
     opts: { title: string; body: string; goal: string; actor: Actor },
   ): { ok: true; task: { id: string } } | { ok: false; error?: string };
-  addReviewItem(
+  /** File the access card; its headline is derived from the change. */
+  addAccessReviewItem(
     taskId: string,
-    review: unknown,
+    change: SharingOnChange,
+    why: string,
     opts: { actor: Actor },
   ): { ok: true; item: { id: string } } | { ok: false; error: string };
-  reviseReviewItem(
-    taskId: string,
-    reviewItemId: string,
-    patch: { headline?: unknown; detail?: unknown; options?: unknown },
-    opts: { actor: Actor },
-  ): { ok: boolean };
   withdrawReviewItem(
     taskId: string,
     reviewItemId: string,
@@ -103,14 +98,6 @@ export interface SharingNoticeDeps {
   /** Run the quality gate over a filed or revised item, and announce it to
    *  the owner's devices only when the gate passes it. */
   gate(taskId: string, itemId: string): Promise<void>;
-  /** Whether this actor is the owner, as the rest of the server decides it. */
-  isOwner(actor: Actor): boolean;
-  /** Turn the master switch on through the route's own path, logging a flip
-   *  with this actor. */
-  turnBackOn(flip: { actor: string; peer: string; reason: string }): {
-    ok: boolean;
-    error?: string;
-  };
   /** Where a refusal is reported. Defaults to console.error. */
   say?: (line: string) => void;
 }
@@ -119,6 +106,10 @@ interface NoticeState {
   taskId?: string;
   /** The open item, while the master switch is off. */
   itemId?: string;
+  /** Which kind of item `itemId` is. An item filed before the notice became
+   *  an access card is a plain decision anyone on this machine could answer,
+   *  so a restart forgets it and the next flip files a card. */
+  card?: 'access';
 }
 
 /** A board as the fallback ranking reads it. */
@@ -188,44 +179,23 @@ function peerOnCard(peer: string): string {
   return bare === '127.0.0.1' || bare === '::1' ? `${bare}, this machine` : bare;
 }
 
-/** The item's words. Exported so a test asserts the facts it must carry. */
-export function sharingOffReview(flip: SharingFlip): {
-  review_type: 'decision';
-  headline: string;
-  detail: string;
-  options: Array<{ id: string; label: string; detail: string }>;
-} {
+/** The item's words. Exported so a test asserts the facts it must carry. The
+ *  card's own headline is the change's line; this headline leads the
+ *  notifications and the detail. */
+export function sharingOffReview(flip: SharingFlip): { headline: string; detail: string } {
   const reason = flip.reason === null ? 'They gave no reason.' : `Their reason: “${flip.reason}”.`;
   const detail = [
     `${actorOnCard(flip.actor)} turned off sharing for every board at ${timeOnCard(flip.at)}, from ${peerOnCard(flip.peer)}. ${reason}`,
     '',
-    'While it is off, every share-link, collaboration and public-hostname visitor is refused, your own hostname included.',
+    'While it is off, every share-link, collaboration and public-hostname visitor is refused, your own hostname included. Approve turns it back on; Reject leaves it off.',
     '',
     'To tell what happened, read the first line: who did it, from which address, and the reason given. Then ask that agent, or check which of your sessions called the switch last.',
     '',
-    '- **Intended, for one board:** the caller is your agent and the reason names a board. Turn back on and have that agent close that board alone.',
-    `- **A mistake:** the caller is unnamed, or your agent gave no reason. ${UNATTRIBUTED_ON_CARD} is a program on this machine running an older plugin. Turn back on.`,
-    "- **An incident:** the caller is nobody you know, or the address is not this machine. Leave off, and check each board's share list before reopening.",
+    '- **Intended, for one board:** the caller is your agent and the reason names a board. Approve, and have that agent close that board alone.',
+    `- **A mistake:** the caller is unnamed, or your agent gave no reason. ${UNATTRIBUTED_ON_CARD} is a program on this machine running an older plugin. Approve.`,
+    "- **An incident:** the caller is nobody you know, or the address is not this machine. Reject, and check each board's share list before reopening.",
   ].join('\n');
-  return {
-    review_type: 'decision',
-    headline: 'External sharing was turned off',
-    detail,
-    options: [
-      {
-        id: SHARING_ON_OPTION,
-        label: TURN_BACK_ON_LABEL,
-        detail:
-          'Every board reopens to the people it is shared with, except a board closed on its own, and the log records you as the one who reopened it. If the precaution was needed, what it guarded against is open again.',
-      },
-      {
-        id: SHARING_LEAVE_OFF_OPTION,
-        label: 'Leave off',
-        detail:
-          'Everyone outside stays refused, you included when you are away from this machine, until an agent here turns it back on.',
-      },
-    ],
-  };
+  return { headline: 'External sharing was turned off', detail };
 }
 
 export class SharingNotice {
@@ -239,10 +209,38 @@ export class SharingNotice {
     this.state = this.load();
   }
 
+  /** Set while the access door turns the switch on from this card, so the
+   *  flip that follows does not withdraw the card the door is answering. */
+  private answeringFromCard = false;
+
   /** The open item, for a test or a status read. */
   openItem(): { taskId: string; itemId: string } | undefined {
     const { taskId, itemId } = this.state;
     return taskId && itemId ? { taskId, itemId } : undefined;
+  }
+
+  /**
+   * The open card and the board it is on, for the one door the owner's Access
+   * hostname keeps open while the switch is off (`sharing-off-door.ts`).
+   */
+  openCard(): { workspaceId: string; taskId: string; itemId: string } | undefined {
+    const open = this.openItem();
+    const task = open ? this.deps.getTask(open.taskId) : undefined;
+    return open && task ? { workspaceId: task.workspaceId, ...open } : undefined;
+  }
+
+  /**
+   * Turn the switch on because the owner approved this card. `flip` runs the
+   * switch's own path, whose flip lands in `onFlip`; the card is the door's
+   * to answer, so it is let go rather than withdrawn.
+   */
+  turnOnFromCard<T extends { ok: boolean }>(flip: () => T): T {
+    this.answeringFromCard = true;
+    try {
+      return flip();
+    } finally {
+      this.answeringFromCard = false;
+    }
   }
 
   /** Called after every flip the switch route wrote. The gate runs in the
@@ -250,65 +248,32 @@ export class SharingNotice {
   onFlip(flip: SharingFlip): Promise<void> {
     if (flip.workspaceId) return Promise.resolve();
     if (flip.enabled) {
-      this.withdrawOpen(`The master switch was turned back on by ${flip.actor}.`);
+      if (this.answeringFromCard) this.state.itemId = undefined;
+      else this.withdrawOpen(`The master switch was turned back on by ${flip.actor}.`);
       this.save();
       return Promise.resolve();
     }
-    const review = sharingOffReview(flip);
-    const open = this.openItem();
-    if (open) {
-      const { review_type: _type, ...patch } = review;
-      const revised = this.deps.reviseReviewItem(open.taskId, open.itemId, patch, {
-        actor: { ...SHARING_NOTICE_ACTOR },
-      });
-      if (revised.ok) return this.settle(open.taskId, open.itemId);
-      // Answered or withdrawn by some other door: file a fresh one below.
-      this.state.itemId = undefined;
-    }
+    const { detail } = sharingOffReview(flip);
+    // Withdrawn, never reworded: an access card's words are its change's.
+    // Answered or withdrawn by some other door already, it just goes.
+    this.withdrawOpen('Replaced by a card naming the latest time it was turned off.');
     const taskId = this.ensureTask();
     if (!taskId) {
       this.save();
       return Promise.resolve();
     }
-    const res = this.deps.addReviewItem(taskId, review, { actor: { ...SHARING_NOTICE_ACTOR } });
+    const workspaceId = this.deps.getTask(taskId)?.workspaceId ?? '';
+    const res = this.deps.addAccessReviewItem(taskId, { op: 'sharing-on', workspaceId }, detail, {
+      actor: { ...SHARING_NOTICE_ACTOR },
+    });
     if (!res.ok) {
       this.say(`[sharing] owner notice refused task=${taskId}: ${res.error}`);
       this.save();
       return Promise.resolve();
     }
     this.state.itemId = res.item.id;
+    this.state.card = 'access';
     return this.settle(taskId, res.item.id);
-  }
-
-  /** Called with every `decision.answered` on the server. */
-  onAnswered(ev: SharingAnswer): void {
-    const open = this.openItem();
-    if (!open || ev.taskId !== open.taskId || ev.reviewItemId !== open.itemId) return;
-    // The item is answered either way, so it is no longer the open one: a
-    // later flip to off files a new item rather than revising this one.
-    this.state.itemId = undefined;
-    this.save();
-    const turnOn =
-      ev.optionId === SHARING_ON_OPTION ||
-      (ev.optionId === undefined &&
-        ev.answer.trim().toLowerCase() === TURN_BACK_ON_LABEL.toLowerCase());
-    if (!turnOn) return;
-    const who = `${ev.actor.name}${ev.actor.id && ev.actor.id !== ev.actor.name ? ` (${ev.actor.id})` : ''}`;
-    if (ev.actor.kind !== 'person' || !this.deps.isOwner(ev.actor)) {
-      this.say(
-        `[sharing] "${TURN_BACK_ON_LABEL}" answered by ${JSON.stringify(who)}, who is not the owner; the master switch stays off`,
-      );
-      return;
-    }
-    const res = this.deps.turnBackOn({
-      actor: `owner ${who}`,
-      peer: `review item ${open.itemId}`,
-      reason: `answered "${TURN_BACK_ON_LABEL}" on the notice`,
-    });
-    if (!res.ok)
-      this.say(
-        `[sharing] "${TURN_BACK_ON_LABEL}" could not flip the switch: ${res.error ?? 'unknown'}`,
-      );
   }
 
   private async settle(taskId: string, itemId: string): Promise<void> {
@@ -366,9 +331,12 @@ export class SharingNotice {
     if (!existsSync(this.path)) return {};
     try {
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as NoticeState;
+      const card = parsed.card === 'access';
       return {
         ...(typeof parsed.taskId === 'string' ? { taskId: parsed.taskId } : {}),
-        ...(typeof parsed.itemId === 'string' ? { itemId: parsed.itemId } : {}),
+        ...(card && typeof parsed.itemId === 'string'
+          ? { itemId: parsed.itemId, card: 'access' as const }
+          : {}),
       };
     } catch {
       // A lost record costs at most one duplicate task, never a missed notice.

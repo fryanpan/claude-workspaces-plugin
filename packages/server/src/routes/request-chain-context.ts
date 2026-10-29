@@ -22,6 +22,7 @@ import type {
 } from '../request-attribution.ts';
 import type { SseBus } from '../sse.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
+import type { AccessRoutesContext } from './access.ts';
 import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
@@ -107,6 +108,7 @@ export interface RequestChainContext {
   sse: SseBus;
   reviewQueueRoutesCtx: ReviewQueueRoutesContext;
   voicePageRoutesCtx: VoicePageRoutesContext;
+  accessRoutesCtx: AccessRoutesContext;
   voiceApiRoutesCtx: VoiceApiRoutesContext;
   /** Every registered feature's routes (`features.ts`), tried at the
    *  position the inbox routes held. */

@@ -122,6 +122,8 @@ describe('share REST endpoints', () => {
     expect(board.status).toBe(200);
     boardId = ((await board.json()) as { workspace: { id: string } }).workspace.id;
     expect(boardId).toBeTruthy();
+    // Bryan lets the domain in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(boardId, ['@partner-org.example'], 'Bryan');
 
     const bind = await fetch(`${base}/workspaces`, {
       method: 'POST',
@@ -323,6 +325,7 @@ describe('share REST endpoints', () => {
       body: JSON.stringify({ folderPath: persistFolder, hubWorkspaceId: persistBoardId }),
     });
     expect(bind.status).toBe(200);
+    handle.shareLinks.addToAudience(persistBoardId, ['@partner-org.example'], 'Bryan');
     const mk = await shareWorkspace({
       workspaceId: persistBoardId,
       allowDomains: ['@partner-org.example'],

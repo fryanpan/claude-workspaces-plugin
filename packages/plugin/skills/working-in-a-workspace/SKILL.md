@@ -63,6 +63,8 @@ Why: A question that is not on a queue gets no answer.
   - a reversible implementation choice, such as a library, naming, structure or test strategy
   - a fact you can read yourself
   - The reply says `refused` and names the rule. Act on the rule, then withdraw the item. If the rule does not apply, revise the item to say why, and the revision is judged again. A refusal does not run out after two rounds or an hour.
+- When a person approves an item, the answer line carries `approval_line`: who approved, in words. Quote it in the PR body, Jira comment or message the approval covers. Any member's answer counts. A board can reserve a step for its owner (`get_workspace`'s `requireOwnerFor`). Then pass that step as `review.step` (`push`, `jira`, `send`, `deploy`), and only the owner can answer the item.
+- Only the board's owner lets somebody new in. A share or audience change that adds a person files an access card for the owner and returns `proposed: true`. A removal applies at once.
 - How to write a good review item
   - The option label is the contract — the reviewer answers the label, not the reasoning under it. Plain words, phone-readable.
   - The item has to be actionable on its own. 

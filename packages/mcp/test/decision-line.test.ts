@@ -194,4 +194,16 @@ describe('the answer line names the row and the item', () => {
     });
     expect(line.split('Rebuild now or after the freeze?')).toHaveLength(2);
   });
+
+  it("hands the agent a person's approval line to quote, and nothing for an agent's answer", () => {
+    const line = decisionAnsweredLine({
+      ...ANSWERED,
+      approvalLine: 'Approved by Alice (alice@harborlight.example) on the board, 2026-10-29.',
+    });
+    expect(line).toContain(
+      'approval_line: "Approved by Alice (alice@harborlight.example) on the board, 2026-10-29."',
+    );
+    expect(line).toContain('PR body');
+    expect(decisionAnsweredLine(ANSWERED)).not.toContain('approval_line');
+  });
 });

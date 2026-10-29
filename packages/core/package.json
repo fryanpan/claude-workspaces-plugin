@@ -28,6 +28,7 @@
     "./page-edits": "./src/page-edits.ts",
     "./page-edits-text": "./src/page-edits-text.ts",
     "./page-thread-link": "./src/page-thread-link.ts",
+    "./review-access": "./src/review-access.ts",
     "./plot-spec": "./src/plot-spec.mjs",
     "./trace-privacy": "./src/trace-privacy.ts",
     "./types": "./src/types.ts",

@@ -200,9 +200,14 @@ describe('the settings panel at each level', () => {
     // message) — the note under each label is empty rather than explaining.
     expect(document.getElementById('board-review-criteria-note')?.textContent).toBe('');
     expect(document.getElementById('board-parallelism-cap-note')?.textContent).toBe('');
-    // The members list is theirs to read, and holds no controls.
-    expect(document.querySelector('#board-members-list .board-member-role-text')).not.toBeNull();
+    // The members list is theirs to read, and holds no controls: no Remove,
+    // no Add form, and no link to the owner's access page.
+    expect(document.querySelector('#board-members-list .board-member-who')?.textContent).toBe(
+      `${KEEPER} (you)`,
+    );
     expect(document.querySelector('#board-members-list .board-member-remove')).toBeNull();
+    expect(shown('board-access-add')).toBe(false);
+    expect(shown('board-access-link')).toBe(false);
     // The per-viewer rows are everyone's: this device's notifications and
     // which done tasks this reader sees are not the board's business.
     expect(shown('board-push-toggle')).toBe(true);

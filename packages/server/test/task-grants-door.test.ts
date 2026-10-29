@@ -146,6 +146,7 @@ describe('a grant card, answered only by the owner in the browser', () => {
       }
     ).workspace.id;
     // A share member on this board, so the member door is a real one.
+    handle.shareLinks.addToAudience(board, [MEMBER], 'Bryan');
     const link = (await (
       await postLocal('/api/share/workspace', { workspaceId: board })
     ).json()) as { link: { linkId: string } };

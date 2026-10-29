@@ -14,7 +14,7 @@
 import { stamped } from '../log-stamp.ts';
 import { FLIP_REASON_MAX, type FlipRequest } from './sharing-flip.ts';
 
-const KNOWN_KEYS = new Set(['workspaceId', 'locked', 'reason', 'actor']);
+const KNOWN_KEYS = new Set(['workspaceId', 'locked', 'reason', 'actor', 'taskId', 'why']);
 const ACTOR_FIELD_MAX = 200;
 
 export interface LockRequest {
@@ -22,6 +22,9 @@ export interface LockRequest {
   locked: boolean;
   reason?: string;
   actor?: FlipRequest['actor'];
+  /** Where an agent's request to UNLOCK files its card, and why. */
+  taskId?: string;
+  why?: string;
 }
 
 export type LockParse = { ok: true; value: LockRequest } | { ok: false; error: string };
@@ -62,6 +65,8 @@ export function parseLockRequest(body: Record<string, unknown> | null): LockPars
     }
     value.actor = out;
   }
+  if (typeof body.taskId === 'string') value.taskId = body.taskId;
+  if (typeof body.why === 'string') value.why = body.why;
   return { ok: true, value };
 }
 

@@ -160,6 +160,8 @@ export async function serveBoardRoutes(
       accessEmail: gate.accessEmail,
       roleFor,
       requireOwner,
+      provenIdentityFor,
+      requestOriginFor: () => policyFor(req).requestOrigin,
     });
     if (handled) return handled;
   }

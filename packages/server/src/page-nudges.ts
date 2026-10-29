@@ -1,10 +1,10 @@
 /**
  * The frames that tell an open page one of its REST-fed lists is stale.
  *
- * Five lists were read once, or every 30s, and so showed a change made in
+ * Six lists were read once, or every 30s, and so showed a change made in
  * another tab or by an agent late or never: a board's Library, its members,
  * a review's file list and tree (the doc page's sidebar), the voice page's
- * agents and the prompts settings. Each now hears one frame on a stream the
+ * agents, the prompts settings and the access page. Each now hears one frame on a stream the
  * page already holds, or on the one new stream it opens, and re-reads the
  * list through the same route and gate that served it the first time.
  *
@@ -37,6 +37,10 @@ export const VOICE_CHANGED = 'voice.changed';
 /** The prompts settings page's channel and frame. */
 export const PROMPTS_CHANNEL = 'prompts~';
 export const PROMPTS_CHANGED = 'prompts.changed';
+/** The `/access` page's channel and frame: an audience, a member or an
+ *  access proposal changed on some board. */
+export const ACCESS_CHANNEL = 'access~';
+export const ACCESS_CHANGED = 'access.changed';
 
 /** How long a burst gathers before its one frame goes out. */
 export const NUDGE_COALESCE_MS = 150;
@@ -169,9 +173,11 @@ export interface PageNudgeDeps {
   };
 }
 
-/** Wire every hook above; returns what tells the prompts page and an undo. */
+/** Wire every hook above; returns what tells the prompts and access pages,
+ *  and an undo. */
 export function wirePageNudges(deps: PageNudgeDeps): {
   promptsChanged: () => void;
+  accessChanged: () => void;
   dispose: () => void;
 } {
   const { nudger, docStore, taskStore, boardsHolding, shareLinks, sse } = deps;
@@ -201,6 +207,9 @@ export function wirePageNudges(deps: PageNudgeDeps): {
   const onSaved = shareLinks.onSaved;
   shareLinks.onSaved = () => {
     onSaved?.();
+    // Every save: an audience entry is written here too, and the access page
+    // lists entries nobody has signed in under yet.
+    nudger.nudge(ACCESS_CHANNEL, ACCESS_CHANGED);
     const next = memberFaces(shareLinks.allMembers());
     for (const ws of boardsWithChangedMembers(faces, next)) {
       nudger.nudge(board(ws), MEMBERS_CHANGED);
@@ -212,6 +221,10 @@ export function wirePageNudges(deps: PageNudgeDeps): {
     if (channel.startsWith('ws~') && VOICE_EVENTS.has(event)) {
       nudger.nudge(VOICE_CHANNEL, VOICE_CHANGED);
     }
+    // A withdrawn proposal leaves the access page's queue.
+    if (channel.startsWith('ws~') && event === 'review_item.withdrawn') {
+      nudger.nudge(ACCESS_CHANNEL, ACCESS_CHANGED);
+    }
   });
   const onAgentStreams = sse.onAgentStreams;
   sse.onAgentStreams = (channel, agentId) => {
@@ -221,6 +234,7 @@ export function wirePageNudges(deps: PageNudgeDeps): {
 
   return {
     promptsChanged: () => nudger.nudge(PROMPTS_CHANNEL, PROMPTS_CHANGED),
+    accessChanged: () => nudger.nudge(ACCESS_CHANNEL, ACCESS_CHANGED),
     dispose: () => {
       untap();
       nudger.dispose();

@@ -95,6 +95,11 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * decides who gets in.
    */
   const shareLinks = new ShareLinks({ dataDir });
+  // The upgrade that gave boards an audience also seeds it from the older
+  // Cloudflare shares still live, so nobody they let in loses access.
+  shareLinks.seedFromOlderShares(
+    (shares?.list() ?? []).filter((s) => s.mode !== 'link' && s.expiresAt > Date.now()),
+  );
 
   /**
    * The hostname share URLs are built from — the first configured share host.

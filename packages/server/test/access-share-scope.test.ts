@@ -166,8 +166,13 @@ describe('Access-mode shares over HTTP', () => {
     soloPath = encodeURIComponent(SOLO);
     expect(SOLO).not.toBe('');
 
-    soloShare = await mintAccessShare(base, access, soloBoardId, { label: 'solo review' });
-    wsShare = await mintAccessShare(base, access, boardId);
+    soloShare = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      soloBoardId,
+      { label: 'solo review' },
+    );
+    wsShare = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId);
   });
 
   afterAll(async () => {
@@ -554,7 +559,7 @@ describe('Access-mode shares over HTTP', () => {
      */
     let wsCookie: MintedShare;
     beforeAll(async () => {
-      wsCookie = await mintAccessShare(base, access, boardId);
+      wsCookie = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId);
     });
 
     it('refuses to mint a link scoped to one member of a workspace', async () => {
@@ -620,7 +625,11 @@ describe('Access-mode shares over HTTP', () => {
 
   describe('revocation and expiry are immediate', () => {
     it('a revoked share kills a visitor already in a browser', async () => {
-      const share = await mintAccessShare(base, access, soloBoardId);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        soloBoardId,
+      );
       expect(
         (await pub(`/workspaces/${soloBoardId}/docs/${soloPath}?format=json`, share)).status,
       ).toBe(200);
@@ -636,7 +645,12 @@ describe('Access-mode shares over HTTP', () => {
     });
 
     it('an expired share stops working without anyone touching the browser', async () => {
-      const share = await mintAccessShare(base, access, soloBoardId, { ttlSeconds: 60 });
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        soloBoardId,
+        { ttlSeconds: 60 },
+      );
       expect(
         (await pub(`/workspaces/${soloBoardId}/docs/${soloPath}?format=json`, share)).status,
       ).toBe(200);
@@ -658,7 +672,11 @@ describe('Access-mode shares over HTTP', () => {
 
   describe('an expired share cannot be resurrected', () => {
     it('refuses to extend it — a dead grant must not come back to life', async () => {
-      const share = await mintAccessShare(base, access, soloBoardId);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        soloBoardId,
+      );
       const live = handle.shares?.list().find((s) => s.shareId === share.shareId);
       if (live) live.expiresAt = Date.now() - 1000;
 
@@ -695,7 +713,11 @@ describe('Access-mode shares over HTTP', () => {
       // HTTP request, but a websocket is authorized ONCE at its upgrade.
       // Probing the deployed server showed the socket stayed open and
       // WRITABLE after unshare while HTTP correctly returned 401.
-      const share = await mintAccessShare(base, access, soloBoardId);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        soloBoardId,
+      );
 
       const ws = new WebSocket(
         `ws://127.0.0.1:${handle.port}/workspaces/${soloBoardId}/docs/${soloPath}/y`,
@@ -728,7 +750,11 @@ describe('Access-mode shares over HTTP', () => {
     it('leaves the operator’s own socket alone when a share is revoked', async () => {
       // The owner's editor is not authorized by any share and must not be
       // hung up on because someone else's invitation was revoked.
-      const share = await mintAccessShare(base, access, soloBoardId);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        soloBoardId,
+      );
 
       const ws = new WebSocket(
         `ws://127.0.0.1:${handle.port}/workspaces/${soloBoardId}/docs/${soloPath}/y`,
@@ -760,7 +786,12 @@ describe('Access-mode shares over HTTP', () => {
       // say otherwise.
       const ids: string[] = [];
       for (const label of ['first', 'second']) {
-        const share = await mintAccessShare(base, access, soloBoardId, { label });
+        const share = await mintAccessShare(
+          base,
+          { ...access, shareLinks: handle.shareLinks },
+          soloBoardId,
+          { label },
+        );
         const r = await pub(`/workspaces/${soloBoardId}/docs/${soloPath}/threads/by_find`, share, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

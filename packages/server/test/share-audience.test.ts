@@ -89,6 +89,9 @@ describe('the store applies the audience', () => {
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'share-audience-'));
     links = new ShareLinks({ dataDir });
+    // The board names both domains, so what these cases test is the LINK's
+    // own audience inside it (the board's is `board-audience.test.ts`).
+    links.addToAudience('w-board', ['@harborlight.example', '@riverbend.example'], 'Bryan');
   });
   afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
 

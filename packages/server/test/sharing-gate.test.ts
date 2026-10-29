@@ -179,7 +179,9 @@ describe('sharing gate over HTTP', () => {
     docSeg = encodeURIComponent(docId);
     expect(docId).not.toBe('');
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+    ).headers;
   });
 
   afterAll(async () => {
@@ -214,7 +216,11 @@ describe('sharing gate over HTTP', () => {
     // outside door, and the operator has to be able to prepare a share for
     // the moment they reopen it. What the switch owes is that the fresh
     // share buys nothing while it is off, which is the second half here.
-    const minted = await mintAccessShare(base, access, boardId);
+    const minted = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      boardId,
+    );
     const r = await fetch(`${base}/workspaces/${boardId}/docs/${docSeg}?format=json`, {
       redirect: 'manual',
       headers: { ...minted.headers, 'x-forwarded-proto': 'https' },
@@ -257,8 +263,12 @@ describe('sharing gate over HTTP', () => {
     expect(s.sharing).toEqual({ enabled: false, locked: false });
   });
 
-  it('restores access when switched back on', async () => {
-    expect((await setSharing(true)).status).toBe(200);
+  it('restores access when switched back on, which an agent cannot do', async () => {
+    // Only the owner turns it back on (his answer on the notice); the
+    // unproven local call is refused and the test sets the gate directly.
+    expect((await setSharing(true)).status).toBe(403);
+    expect((await local('/api/share').then((r) => r.json())).sharing.enabled).toBe(false);
+    handle.sharingGate.setEnabled(true);
     const r = await pub(`/workspaces/${boardId}/docs/${docSeg}?format=json`);
     expect(r.status).toBe(200);
   });

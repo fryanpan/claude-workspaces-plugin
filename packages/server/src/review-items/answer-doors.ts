@@ -46,17 +46,35 @@ export const GRANT_ANSWER_DENIAL = {
     "a 'grant' card is answered only by the board's owner pressing Approve or Decline on the card in the browser (POST …/review-items/<id>/grant) — an answer recorded here cannot approve it",
 } as const;
 
-/** The two doors that may answer their own shape, and nothing else. */
-export type AnswerDoor = 'grant' | 'secret';
+/**
+ * What every free-text answer door says to an ACCESS item. Approving one
+ * changes who may be in the board, so it is answered only by the owner's own
+ * Approve or Reject in the browser, through its own route.
+ */
+export const ACCESS_ANSWER_DENIAL = {
+  error: 'access-item',
+  message:
+    "an access change is answered only by the board's owner pressing Approve or Reject on the card in the browser (POST …/review-items/<id>/access) — an answer recorded here cannot approve it",
+} as const;
+
+/** The doors that may answer their own kind of item, and nothing else. */
+export type AnswerDoor = 'grant' | 'secret' | 'access';
 
 /**
  * The refusal for recording an answer on an item of `shape` through `door`
  * (undefined for every free-text door), or undefined when it may be recorded.
+ * `access` is whether the item carries an access change, whatever its shape.
  */
 export function answerDoorRefusal(
   shape: string | undefined,
   door: AnswerDoor | undefined,
-): typeof SECRET_ANSWER_DENIAL | typeof GRANT_ANSWER_DENIAL | undefined {
+  access = false,
+):
+  | typeof SECRET_ANSWER_DENIAL
+  | typeof GRANT_ANSWER_DENIAL
+  | typeof ACCESS_ANSWER_DENIAL
+  | undefined {
+  if (access) return door === 'access' ? undefined : ACCESS_ANSWER_DENIAL;
   if (shape === 'secret' && door !== 'secret') return SECRET_ANSWER_DENIAL;
   if (shape === 'grant' && door !== 'grant') return GRANT_ANSWER_DENIAL;
   return undefined;

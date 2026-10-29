@@ -104,6 +104,8 @@ describe('share mutation routes refuse browser callers', () => {
       }
     ).workspace.id;
     expect(boardId).toBeTruthy();
+    // Bryan lets the domain in first: a mint can only name people the board admits.
+    handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Bryan');
   });
 
   afterEach(async () => {
@@ -174,11 +176,14 @@ describe('share mutation routes refuse browser callers', () => {
   });
 
   describe('POST /api/share/enabled — the external-access master switch', () => {
-    it('positive control: an agent flips it off and back on', async () => {
+    it('positive control: an agent flips it off, and only the owner turns it back on', async () => {
       expect((await post('/api/share/enabled', { enabled: false })).status).toBe(200);
       expect((await state()).sharing.enabled).toBe(false);
-      expect((await post('/api/share/enabled', { enabled: true })).status).toBe(200);
-      expect((await state()).sharing.enabled).toBe(true);
+      // Not the browser guard: the agent passes it, and is refused as not the owner.
+      const on = await post('/api/share/enabled', { enabled: true });
+      expect(on.status).toBe(403);
+      expect(((await on.json()) as { error: string }).error).toBe('owner-only');
+      expect((await state()).sharing.enabled).toBe(false);
     });
 
     it('a page cannot RE-OPEN external access the operator closed', async () => {
