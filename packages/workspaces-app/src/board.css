@@ -722,17 +722,34 @@ body.board-body {
   color: var(--danger, #b42318);
   font-size: 13px;
 }
-.acc-link {
+/* A question before a wide add, not a mistake: not drawn as an error. */
+.acc-err.acc-ask {
+  color: var(--fg);
+}
+.acc-link,
+.acc-waiting {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
   min-height: 44px;
   color: var(--accent);
   text-decoration: none;
 }
-.acc-link .prompt-chev {
+.acc-link .prompt-chev,
+.acc-waiting .prompt-chev {
+  flex: none;
+  /* Beside the words on every width, never up at the line's top. */
+  align-self: center;
+  margin-top: 0;
   stroke: currentColor;
+}
+/* Changes an agent proposed, at the top of the section: the owner's next step. */
+.acc-waiting {
+  margin: 6px 0 2px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-weight: 600;
 }
 /* The /access page: proposals first, then one section per board, each set
    off by a rule and space above it (Bryan, on the mock: "make headers and
@@ -778,7 +795,18 @@ body.board-body {
   background: var(--bg);
 }
 .acc-proposals .board-decide-meta a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
   color: var(--accent);
+}
+/* Approving a whole domain lets in people nobody named, so it does not look
+   like Reject beside it. */
+.acc-proposals .board-decide-option[data-answer="approve"].acc-wide {
+  border-color: var(--danger, #b42318);
+}
+.acc-proposals .board-decide-option[data-answer="approve"].acc-wide .board-decide-option-label {
+  color: var(--danger, #b42318);
 }
 .acc-answered-head {
   margin: 16px 0 4px;

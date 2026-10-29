@@ -170,7 +170,7 @@ describe('who has access', () => {
     buttonSaying(rowFor(m.list, INVITED), 'Remove')?.click();
     await tick();
     buttonSaying(
-      rows(m.list).find((r) => text(r) === `Remove ${INVITED}?`) as Element,
+      rows(m.list).find((r) => text(r).startsWith(`Remove ${INVITED}?`)) as Element,
       'Remove',
     )?.click();
     await m.handle.settled();
@@ -178,14 +178,67 @@ describe('who has access', () => {
     expect(rows(m.list).map(text)).toEqual(['You']);
   });
 
-  it('refuses a typo and a duplicate before asking the server', async () => {
+  it('refuses a typo and a duplicate before asking the server, saying what to fix', async () => {
     const m = mount();
     await m.handle.refresh();
+    const input = m.form.elements.namedItem('match') as HTMLInputElement;
     await submit(m, 'not an address');
-    expect(m.error.textContent).toContain('Type a full address');
+    expect(m.error.textContent).toBe('Take out the spaces: one address or one domain at a time.');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    await submit(m, 'harborlight');
+    expect(m.error.textContent).toContain('Add an @');
+    await submit(m, 'ops@harborlight');
+    expect(m.error.textContent).toBe('Add the ending after harborlight, like @harborlight.com.');
+    await submit(m, '');
+    expect(m.error.textContent).toContain('Type an address');
+    // Typing again clears the message, so it never describes what is no longer there.
+    input.dispatchEvent(new Event('input'));
+    expect(m.error.textContent).toBe('');
+    expect(input.hasAttribute('aria-invalid')).toBe(false);
     await submit(m, KEEPER.toUpperCase());
     expect(m.error.textContent).toBe(`${KEEPER} is already on this board.`);
     expect(m.add).not.toHaveBeenCalled();
+  });
+
+  it('asks again before letting a whole domain in', async () => {
+    const m = mount();
+    await m.handle.refresh();
+    await submit(m, '@riverbend.example');
+    expect(m.add).not.toHaveBeenCalled();
+    expect(m.error.textContent).toBe(
+      'This lets anyone with an @riverbend.example address sign in. Press Add again to confirm.',
+    );
+    await submit(m, '@riverbend.example');
+    expect(m.add).toHaveBeenCalledWith('@riverbend.example');
+  });
+
+  it('keeps focus on the row a removal was asked from, and on its neighbour once it goes', async () => {
+    let gone = false;
+    const m = mount({
+      read: async () =>
+        gone ? { ...VIEW, audience: VIEW.audience?.filter((e) => e.match !== INVITED) } : VIEW,
+      remove: async () => {
+        gone = true;
+        return true;
+      },
+    });
+    await m.handle.refresh();
+    buttonSaying(rowFor(m.list, INVITED), 'Remove')?.click();
+    await tick();
+    const asking = () => rows(m.list).find((r) => text(r).startsWith(`Remove ${INVITED}?`));
+    expect(document.activeElement?.textContent).toBe('Cancel');
+    expect(asking()?.contains(document.activeElement)).toBe(true);
+    (document.activeElement as HTMLElement).click();
+    await tick();
+    expect(document.activeElement).toBe(buttonSaying(rowFor(m.list, INVITED), 'Remove'));
+    buttonSaying(rowFor(m.list, INVITED), 'Remove')?.click();
+    await tick();
+    buttonSaying(asking() as Element, 'Remove')?.click();
+    await m.handle.settled();
+    // The next row down is the domain's.
+    expect(document.activeElement).toBe(
+      buttonSaying(rowFor(m.list, 'Everyone at @saltmarsh.example'), 'Remove'),
+    );
   });
 
   it('says when an add was filed for approval rather than applied, and shows a refusal', async () => {
@@ -196,6 +249,7 @@ describe('who has access', () => {
     let n = 0;
     const m = mount({ add: async () => results[n++] as AccessWriteResult });
     await m.handle.refresh();
+    await submit(m, '@riverbend.example');
     await submit(m, '@riverbend.example');
     expect(m.toasts).toEqual(['Filed @riverbend.example for the owner’s approval']);
     await submit(m, 'ops@riverbend.example');
@@ -208,6 +262,33 @@ describe('who has access', () => {
     expect(m.linkLabel.textContent).toBe('2 changes an agent proposed for this board');
     expect(m.linkLabel.closest('a')?.getAttribute('href')).toBe('/access/waiting');
     expect(accessLinkLabel(0)).toBe('Everyone with access, on every board');
+  });
+
+  it('puts the waiting changes in a row at the top, shown only while there are some', async () => {
+    let waiting = 1;
+    const els = dom();
+    const top = document.createElement('a');
+    top.className = 'hidden';
+    const label = document.createElement('span');
+    top.appendChild(label);
+    els.list.before(top);
+    const handle = mountBoardMembers({
+      ...els,
+      waiting: label,
+      read: async () => ({ ...VIEW, openProposals: waiting }),
+      remove: async () => true,
+      accessHref: (n) => (n > 0 ? '/access/waiting' : '/access'),
+      toast: () => {},
+    });
+    await handle.refresh();
+    expect(top.classList.contains('hidden')).toBe(false);
+    expect(label.textContent).toBe('1 change an agent proposed for this board');
+    expect(top.getAttribute('href')).toBe('/access/waiting');
+    // The link at the bottom names the page itself.
+    expect(els.linkLabel.textContent).toBe('Everyone with access, on every board');
+    waiting = 0;
+    await handle.changed();
+    expect(top.classList.contains('hidden')).toBe(true);
   });
 
   it('says the read failed rather than drawing an empty board', async () => {

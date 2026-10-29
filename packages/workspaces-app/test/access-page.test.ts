@@ -145,6 +145,20 @@ describe('the access page', () => {
     expect(shown('[data-sec="w-riverbend"]')).toBe(true);
   });
 
+  it('opens on the board it was reached from, and marks a domain-wide Approve', async () => {
+    const { page } = mount();
+    await page.render();
+    expect(shown('[data-sec="w-riverbend"]')).toBe(true);
+    expect(shown('[data-sec="w-saltmarsh"]')).toBe(false);
+    expect(document.querySelector('#acc-subnav a[aria-current="page"]')?.textContent).toBe(
+      'Riverbend launch',
+    );
+    expect(document.querySelector('.settings-back')?.textContent).toBe('Board');
+    const approve = document.querySelector('[data-answer="approve"]') as HTMLElement;
+    expect(approve.classList.contains('acc-wide')).toBe(true);
+    expect(approve.textContent).toContain('everyone at the domain');
+  });
+
   it('says whose page it is when the read is refused', async () => {
     const { page } = mount({ reads: [null] });
     await page.render();

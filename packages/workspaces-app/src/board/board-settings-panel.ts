@@ -189,6 +189,7 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     form: el('board-access-add') as HTMLFormElement,
     error: el('board-access-error'),
     linkLabel: el('board-access-link-label'),
+    waiting: el('board-access-waiting-label'),
     accessHref: (waiting) =>
       `/access${waiting > 0 ? '/waiting' : ''}?ws=${encodeURIComponent(workspaceId)}`,
     read: async () => {

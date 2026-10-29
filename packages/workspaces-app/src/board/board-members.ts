@@ -18,6 +18,10 @@
  * module, so the two cannot drift into two designs of one list.
  */
 
+import { accessMatchProblem, readAccessMatch } from './access-match.ts';
+
+export { accessMatchProblem, readAccessMatch };
+
 /** The two levels a board has. Wire values; `roleLabel` is what a person sees. */
 export type BoardRole = 'owner' | 'member';
 
@@ -76,6 +80,9 @@ export interface BoardMembersDeps {
    *  and where the link goes given how many changes are waiting. */
   linkLabel?: HTMLElement;
   accessHref?: (openProposals: number) => string;
+  /** The label of a row at the top that names the changes waiting, shown
+   *  only while some are. With it, `linkLabel` always names the page. */
+  waiting?: HTMLElement;
   /** The board's one-line report. */
   toast: (message: string) => void;
   /** `board-btn` on the board, `prompt-btn` on the settings page. */
@@ -119,14 +126,6 @@ export function shortDay(ts: number | undefined): string {
   return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-/** A typed address or `@domain`, lower-cased, or null for anything else. */
-export function readAccessMatch(raw: string): string | null {
-  const m = raw.trim().toLowerCase();
-  if (/^@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(m)) return m;
-  if (/^[^@\s]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(m)) return m;
-  return null;
-}
-
 /** What a write's reply means for the Add form. */
 export function accessWriteOf(res: {
   ok: boolean;
@@ -163,6 +162,9 @@ interface Row {
   ask: string;
 }
 
+/** What removing a signed-in person does, said in the confirmation. */
+const LOSES = 'They lose access at once, and any page they have open closes.';
+
 function signedIn(m: BoardMemberEntry): string {
   const day = shortDay(m.addedAt);
   const when = day ? `Signed in ${day}` : 'Signed in';
@@ -188,7 +190,7 @@ export function accessRows(view: BoardMembersView): Row[] {
     const m = view.members.find((p) => p.email === e.match);
     listed.add(e.match);
     if (m) {
-      rows.push(person(m, false, signedIn(m), `Remove ${m.email}?`));
+      rows.push(person(m, false, signedIn(m), `Remove ${m.email}? ${LOSES}`));
     } else {
       rows.push({
         key: e.match,
@@ -196,7 +198,7 @@ export function accessRows(view: BoardMembersView): Row[] {
         meta: `Added ${shortDay(e.addedAt)} · not signed in yet`,
         under: false,
         remove: e.match,
-        ask: `Remove ${e.match}?`,
+        ask: `Remove ${e.match}? They will not be able to sign in.`,
       });
     }
   }
@@ -205,7 +207,7 @@ export function accessRows(view: BoardMembersView): Row[] {
   for (const m of view.members) {
     if (listed.has(m.email) || (m.entry && isDomain(m.entry))) continue;
     listed.add(m.email);
-    rows.push(person(m, false, m.addedAt ? signedIn(m) : '', `Remove ${m.email}?`));
+    rows.push(person(m, false, m.addedAt ? signedIn(m) : '', `Remove ${m.email}? ${LOSES}`));
   }
   for (const e of audience.filter((x) => isDomain(x.match))) {
     const under = view.members.filter((m) => m.entry === e.match);
@@ -224,7 +226,12 @@ export function accessRows(view: BoardMembersView): Row[] {
     });
     for (const m of under) {
       rows.push(
-        person(m, true, signedIn(m), `Remove ${m.email}? ${e.match} will not let them back in.`),
+        person(
+          m,
+          true,
+          signedIn(m),
+          `Remove ${m.email}? ${LOSES} ${e.match} will not let them back in.`,
+        ),
       );
     }
   }
@@ -239,6 +246,9 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   /** The row currently asking "are you sure" — one at a time, cleared by any
    *  repaint. Held here rather than in the DOM so a re-read wipes it. */
   let confirming: string | null = null;
+  /** The row whose button takes focus after the next paint, so a keyboard or
+   *  screen-reader user stays where they were rather than back at the top. */
+  let focusAfter: string | null = null;
 
   /**
    * Repaint on a LATER TURN, never inside the click that asked for it.
@@ -272,12 +282,15 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
    *  about to lose access, and for a domain how many people go with it. */
   function confirmRow(row: Row, match: string): HTMLElement {
     const out = el('div', `board-member board-member--confirm${row.under ? ' acc-under' : ''}`);
+    out.dataset.key = row.key;
     out.appendChild(el('span', 'board-member-who', row.ask));
     const go = button('Remove', 'board-member-remove');
     go.addEventListener('click', () => {
       run(async () => {
         const ok = await deps.remove(match);
         confirming = null;
+        // The row is gone, so focus moves to the one that took its place.
+        focusAfter = nextKey(row.key);
         await refresh();
         deps.toast(ok ? `${match} no longer has access` : 'Could not remove that');
       });
@@ -285,6 +298,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const cancel = button('Cancel', 'board-member-cancel');
     cancel.addEventListener('click', () => {
       confirming = null;
+      focusAfter = row.key;
       repaintSoon();
     });
     out.appendChild(go);
@@ -295,6 +309,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
   function drawRow(row: Row, canEdit: boolean): HTMLElement {
     if (confirming === row.key && row.remove) return confirmRow(row, row.remove);
     const out = el('div', `board-member${row.under ? ' acc-under' : ''}`);
+    out.dataset.key = row.key;
     const who = el('span', 'acc-who');
     who.appendChild(el('span', 'board-member-who', row.title));
     if (row.meta) who.appendChild(el('span', 'acc-via', row.meta));
@@ -305,6 +320,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
       remove.setAttribute('aria-label', `Remove ${row.remove}`);
       remove.addEventListener('click', () => {
         confirming = row.key;
+        focusAfter = row.key;
         repaintSoon();
       });
       out.appendChild(remove);
@@ -312,14 +328,44 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     return out;
   }
 
+  /** The key of the row after `key`, or the one before it when it was last. */
+  function nextKey(key: string): string | null {
+    const keys = view ? accessRows(view).map((r) => r.key) : [];
+    const i = keys.indexOf(key);
+    return keys[i + 1] ?? keys[i - 1] ?? null;
+  }
+
+  /** Put focus back on the row it belongs to: Cancel while confirming (never
+   *  the Remove that would act on Enter), the row's Remove otherwise. */
+  function restoreFocus(): void {
+    const key = focusAfter;
+    focusAfter = null;
+    if (key === null) return;
+    const row = Array.from(deps.list.querySelectorAll<HTMLElement>('[data-key]')).find(
+      (r) => r.dataset.key === key,
+    );
+    const target =
+      row?.querySelector<HTMLElement>('.board-member-cancel') ??
+      row?.querySelector<HTMLElement>('.board-member-remove') ??
+      (deps.form?.elements.namedItem('match') as HTMLElement | null);
+    target?.focus();
+  }
+
   function paint(): void {
     while (deps.list.firstChild) deps.list.removeChild(deps.list.firstChild);
     deps.form?.classList.toggle('hidden', view?.you.role !== 'owner' || !deps.add);
-    if (deps.linkLabel) {
-      const waiting = view?.openProposals ?? 0;
-      deps.linkLabel.textContent = accessLinkLabel(waiting);
-      const a = deps.linkLabel.closest('a');
+    const waiting = view?.openProposals ?? 0;
+    if (deps.waiting) {
+      deps.waiting.textContent = accessLinkLabel(waiting);
+      const a = deps.waiting.closest('a');
+      a?.classList.toggle('hidden', waiting <= 0 || view?.you.role !== 'owner');
       if (a && deps.accessHref) a.href = deps.accessHref(waiting);
+    }
+    if (deps.linkLabel) {
+      const shown = deps.waiting ? 0 : waiting;
+      deps.linkLabel.textContent = accessLinkLabel(shown);
+      const a = deps.linkLabel.closest('a');
+      if (a && deps.accessHref) a.href = deps.accessHref(shown);
     }
     if (!view) {
       deps.note.textContent = 'Could not read who has access — reopen this page to try again.';
@@ -342,6 +388,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
       rows.length === 0
         ? 'Nobody else has been given access yet.'
         : 'Who can sign in to this board.';
+    restoreFocus();
   }
 
   async function refresh(): Promise<void> {
@@ -374,26 +421,47 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
 
   const { form, error, add } = deps;
   if (form && add) {
+    const input = form.elements.namedItem('match') as HTMLInputElement | null;
+    /** A whole domain waiting for its second press: it lets in people nobody named. */
+    let domainAsked: string | null = null;
+    const say = (text: string, invalid = false) => {
+      if (error) {
+        error.textContent = text;
+        error.classList.toggle('acc-ask', text !== '' && !invalid);
+      }
+      if (input) {
+        if (invalid) input.setAttribute('aria-invalid', 'true');
+        else input.removeAttribute('aria-invalid');
+        if (error?.id) input.setAttribute('aria-describedby', error.id);
+      }
+    };
+    input?.addEventListener('input', () => {
+      domainAsked = null;
+      say('');
+    });
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      const input = form.elements.namedItem('match') as HTMLInputElement | null;
-      const match = readAccessMatch(input?.value ?? '');
-      const say = (text: string) => {
-        if (error) error.textContent = text;
-      };
+      const raw = input?.value ?? '';
+      const match = readAccessMatch(raw);
       if (!match) {
-        say('Type a full address (name@company.com) or a domain starting with @.');
+        say(accessMatchProblem(raw), true);
         return;
       }
       if (view?.audience?.some((e) => e.match === match)) {
-        say(`${match} is already on this board.`);
+        say(`${match} is already on this board.`, true);
         return;
       }
+      if (isDomain(match) && domainAsked !== match) {
+        domainAsked = match;
+        say(`This lets anyone with an ${match} address sign in. Press Add again to confirm.`);
+        return;
+      }
+      domainAsked = null;
       say('');
       run(async () => {
         const res = await add(match);
         if (!res.ok) {
-          say(res.message ?? `Could not add ${match}.`);
+          say(res.message ?? `Could not add ${match}.`, true);
           return;
         }
         form.reset();

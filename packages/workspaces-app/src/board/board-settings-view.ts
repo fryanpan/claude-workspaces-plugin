@@ -130,6 +130,7 @@ export function buildSettingsView(): string {
                 <span class="board-settings-label">Who has access
                   <small id="board-members-note" class="board-settings-note"></small>
                 </span>
+                <a id="board-access-waiting" class="acc-waiting hidden" href="/access/waiting"><span id="board-access-waiting-label"></span><svg class="prompt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></a>
                 <p class="acc-sub">People</p>
                 <div id="board-members-list" class="board-members"></div>
                 <form id="board-access-add" class="acc-add hidden" autocomplete="off">

@@ -123,6 +123,12 @@ export function changeSentence(p: AccessProposal): string {
   if (p.change.op === 'set-role') {
     return `Makes ${p.change.email ?? 'them'} an Owner of this board, who can answer what only you could.`;
   }
+  if (p.change.op === 'open-board') {
+    return 'Everyone this board names can sign in again, and its links work again.';
+  }
+  if (p.change.op === 'unlock-board') {
+    return 'Links can be minted for this board again. Nobody new is let in by this alone.';
+  }
   const domain = entries.some((e) => e.startsWith('@'));
   const who = entries.join(', ');
   const tail = domain
@@ -263,8 +269,10 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
     body.appendChild(el('p', 'acc-change', changeSentence(p)));
     card.appendChild(body);
     const opts = el('div', 'board-decide-options');
+    const wide = (p.change.entries ?? []).some((e) => e.startsWith('@'));
     const option = (decision: 'approve' | 'reject', label: string, detail: string) => {
       const b = el('button', 'board-decide-option') as HTMLButtonElement;
+      if (decision === 'approve' && wide) b.classList.add('acc-wide');
       b.type = 'button';
       b.dataset.answer = decision;
       b.appendChild(el('span', 'board-decide-option-label', label));
@@ -272,7 +280,11 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
       b.addEventListener('click', () => answer(p, decision, card));
       opts.appendChild(b);
     };
-    option('approve', 'Approve', 'Applies the change now');
+    option(
+      'approve',
+      'Approve',
+      wide ? 'Lets in everyone at the domain, now' : 'Applies the change now',
+    );
     option('reject', 'Reject', `Nothing changes, and ${p.proposedBy} is told`);
     card.appendChild(opts);
     sec.appendChild(card);
@@ -331,6 +343,7 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
       '<button type="submit" class="prompt-btn prompt-btn-primary">Add</button>';
     s.appendChild(form);
     const error = el('p', 'acc-err');
+    error.id = `${id}-error`;
     error.setAttribute('role', 'status');
     s.appendChild(error);
     const audience = async (body: unknown) =>
@@ -413,6 +426,13 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
       boardKey = '';
       lists.clear();
       await reload();
+      // Arriving from a board's settings opens on that board.
+      const ws = route.workspaceId;
+      if (route.section === 'all' && ws && lists.has(ws)) {
+        route = { ...route, section: ws };
+        subnav();
+        showSections();
+      }
     },
     changed: reload,
     async settled() {
