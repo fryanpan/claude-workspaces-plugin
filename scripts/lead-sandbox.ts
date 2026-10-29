@@ -41,8 +41,10 @@
  * board's socket (`boardSocketEnv`), so its MCP child is the node relay
  * dialling that socket (packages/plugin/bin/claude-workspaces-mcp.sh) and it
  * holds no board token: the server keeps the one its calls carry. The
- * plugin's hooks still dial TCP, which the wall refuses, so the launch says
- * so. The server must have board sockets on (`CW_BOARD_SOCKETS=1`).
+ * plugin's hooks post over the same socket. Before the lead starts, the
+ * launch tells the server which folders it can write, its projects
+ * (`lead-sandbox-roots.ts`), and starts nothing if the server does not
+ * take them. Prod serves board sockets by default.
  */
 import { spawnSync } from 'node:child_process';
 import {
@@ -75,6 +77,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { type RootsRegistrar, leadRoots, registerRootsWithCurl } from './lead-sandbox-roots.ts';
 import {
   type TokenReader,
   readKeychainToken,
@@ -217,12 +220,15 @@ export interface LaunchDeps {
   readToken: TokenReader;
   /** Starts the lead with the terminal handed through; answers its exit status. */
   spawn: (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => number;
+  /** Tells the server the folders a walled lead can write. */
+  registerRoots: RootsRegistrar;
 }
 
 const realDeps: LaunchDeps = {
   platform: process.platform,
   say: (line) => process.stdout.write(`${line}\n`),
   readToken: readKeychainToken,
+  registerRoots: registerRootsWithCurl,
   spawn(file, args, opts) {
     // Ctrl-C interrupts the lead's turn; it must not kill this wrapper and
     // leave the session running without its parent.
@@ -282,10 +288,17 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say('nothing to launch: put the command after --');
       return 2;
     }
-    if (lead.boardWall)
-      say(
-        `note: ${lead.name} is walled. Its board tools go over its board's socket; the plugin's hooks still dial the board server's port, which the wall refuses, so they fail.`,
-      );
+    if (lead.boardWall && lead.boardId) {
+      const refused = deps.registerRoots(lead.boardId, leadRoots(lead, machine.realpath));
+      // The list is what holds the server's reads and git to the lead's
+      // projects, so a lead the server does not know about is not started.
+      if (refused) {
+        say(
+          `launch refused for ${lead.name}: the server did not take its projects and allowed folders (${refused}), so it would follow links and run git in them unguarded. Start the server and launch again.`,
+        );
+        return 2;
+      }
+    }
     const here = machine.realpath(import.meta.dirname);
     if (lead.projects.some((p) => here.startsWith(`${machine.realpath(p)}/`)))
       say(

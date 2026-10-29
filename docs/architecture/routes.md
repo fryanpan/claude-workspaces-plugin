@@ -38,6 +38,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/auth/verify` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-session` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/widget-token` | POST | `routes/auth-share.ts` | trusted-local |  |
+| `/api/board-sockets/:ws/roots` | GET, PUT | `routes/board-socket-roots.ts` | loopback-only |  |
 | `/api/board-tokens` | GET, POST | `routes/board-tokens.ts` | loopback-only |  |
 | `/api/board-tokens/:id/revoke` | POST | `routes/board-tokens.ts` | loopback-only |  |
 | `/api/board-tokens/refresh` | POST | `routes/board-tokens.ts` | trusted-local | Answers only a live `at2` the board-token door admitted, with a fresh value for that same record (`middleware/board-agent-door.ts`). |

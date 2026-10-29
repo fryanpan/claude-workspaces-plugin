@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import {
   basename,
   dirname,
@@ -9,6 +9,7 @@ import {
   sep,
 } from 'node:path';
 import type { DocOriginRepo } from '@claude-workspaces/core';
+import { gitBarred, readLine } from './git-hardening.ts';
 
 /**
  * A doc's ORIGIN REPO: the repo+branch+path where its on-disk copy belongs.
@@ -36,14 +37,17 @@ import type { DocOriginRepo } from '@claude-workspaces/core';
 /** Resolve a worktree root's gitdir: `.git` as a directory (main checkout)
  *  or as a `gitdir: <path>` pointer file (linked worktree). */
 function gitDirOf(worktreeRoot: string): string | null {
+  // A repository holding a walled lead's project is one the server reads
+  // nothing of: its pointer files are the lead's to write.
+  if (gitBarred(worktreeRoot)) return null;
   const dotGit = join(worktreeRoot, '.git');
   try {
     const st = statSync(dotGit);
     if (st.isDirectory()) return dotGit;
     if (st.isFile()) {
-      const m = readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+?)\s*$/m);
-      if (!m?.[1]) return null;
-      const target = isAbsolute(m[1]) ? m[1] : resolvePath(worktreeRoot, m[1]);
+      const named = readLine(dotGit, /^gitdir:\s*(.+?)\s*$/m);
+      if (!named) return null;
+      const target = isAbsolute(named) ? named : resolvePath(worktreeRoot, named);
       return existsSync(target) ? target : null;
     }
   } catch {}
@@ -62,7 +66,7 @@ export function gitCommonDir(worktreeRoot: string): string | null {
   const commondirFile = join(gd, 'commondir');
   try {
     if (existsSync(commondirFile)) {
-      const raw = readFileSync(commondirFile, 'utf8').trim();
+      const raw = (readLine(commondirFile, /^(.*)$/s) ?? '').trim();
       common = isAbsolute(raw) ? raw : resolvePath(gd, raw);
     }
     return realpathSync(common);
@@ -88,8 +92,9 @@ export function canonicalRepoRoot(worktreeRoot: string): string | null {
 
 /** The branch a gitdir's HEAD is on, or null for detached / unreadable. */
 function branchOfGitDir(gd: string): string | null {
+  if (gitBarred(gd)) return null;
   try {
-    const head = readFileSync(join(gd, 'HEAD'), 'utf8').trim();
+    const head = (readLine(join(gd, 'HEAD'), /^(.*)$/s) ?? '').trim();
     const m = head.match(/^ref:\s*refs\/heads\/(.+)$/);
     return m?.[1] ?? null;
   } catch {
@@ -160,6 +165,7 @@ export function placementEscapesRoot(root: string, relPath: string): boolean {
  */
 export function listRepoWorktrees(common: string): Array<{ root: string; branch: string | null }> {
   const out: Array<{ root: string; branch: string | null }> = [];
+  if (gitBarred(common)) return out;
   // The main checkout: a non-bare repo's common dir IS its `.git` dir.
   if (basename(common) === '.git') {
     const root = dirname(common);
@@ -175,7 +181,7 @@ export function listRepoWorktrees(common: string): Array<{ root: string; branch:
   for (const name of entries) {
     const gd = join(wtDir, name);
     try {
-      const raw = readFileSync(join(gd, 'gitdir'), 'utf8').trim();
+      const raw = (readLine(join(gd, 'gitdir'), /^(.*)$/s) ?? '').trim();
       // `gitdir` names the worktree's own `.git` FILE; its dirname is the root.
       const root = dirname(raw);
       if (!existsSync(root)) continue;

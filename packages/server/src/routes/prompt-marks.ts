@@ -32,7 +32,9 @@ export async function handlePromptMarkRoute(
   const match = matchRest(rq.scope, /^agents\/([^/]+)\/prompts$/);
   const boardId = rq.scope?.workspaceId;
   if (!match || boardId === undefined) return undefined;
-  if (rq.visitor) return j(403, { error: 'not available to share visitors' });
+  // The board's own lead is the session the mark is about (lead-scope.ts).
+  if (rq.visitor && rq.leadBoard !== boardId)
+    return j(403, { error: 'not available to share visitors' });
   if (rq.req.method !== 'POST') return j(405, { error: 'method not allowed' });
   const agent = decodeURIComponent(match[1] ?? '').trim();
   if (agent.length === 0 || agent.length > 200) return j(400, { error: 'bad agent' });

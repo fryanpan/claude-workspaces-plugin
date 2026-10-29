@@ -67,6 +67,28 @@ describe('boundFiles', () => {
     expect(boundFiles.quarantined(stalled)).toBe(true);
   });
 
+  it('asks no guard about a quarantined path', async () => {
+    await boundFiles.read(stalled);
+    let asked = 0;
+    const remove = boundFiles.guards.add({
+      covers: () => true,
+      admits: () => {
+        asked++;
+        return true;
+      },
+      landsInside: () => true,
+    });
+    try {
+      expect(await boundFiles.read(stalled)).toEqual({ status: 'unavailable', reason: 'backoff' });
+      expect(asked).toBe(0);
+      // The control: a path that is not quarantined is asked.
+      await boundFiles.read(readable);
+      expect(asked).toBeGreaterThan(0);
+    } finally {
+      remove();
+    }
+  });
+
   it('refuses the second attempt outright instead of paying the deadline again', async () => {
     await boundFiles.read(stalled);
     // The reconnect loop that turned one stalled file into twenty-one

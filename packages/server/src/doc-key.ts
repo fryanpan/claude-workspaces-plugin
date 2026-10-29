@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { shortHash } from './bind-meta.ts';
@@ -8,6 +8,7 @@ import {
   gitCommonDir,
   listRepoWorktrees,
 } from './doc-origin-repo.ts';
+import { gitBarred, readLine } from './git-hardening.ts';
 
 /**
  * A document's identity: the REPO it belongs to plus its path from the repo
@@ -132,13 +133,14 @@ function scpStyleRemote(s: string): { host: string; path: string } | null {
  * the section headed `[remote "origin"]`. Anything it cannot parse is an
  * absent remote, which is a case the caller already handles.
  */
+/** The most of a repository's config `readOriginUrl` reads. */
+const CONFIG_MAX = 256 * 1024;
+
 export function readOriginUrl(commonDir: string): string | null {
-  let text: string;
-  try {
-    text = readFileSync(join(commonDir, 'config'), 'utf8');
-  } catch {
-    return null;
-  }
+  // A walled lead's repository: its config is the lead's to write.
+  if (gitBarred(commonDir)) return null;
+  const text = readLine(join(commonDir, 'config'), /^([\s\S]*)$/, CONFIG_MAX);
+  if (text === null) return null;
   let inOrigin = false;
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trim();

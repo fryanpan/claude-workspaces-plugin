@@ -6,7 +6,7 @@
  * its board over the socket, under the real sandbox-exec, is
  * packages/server/test/board-socket-relay.test.ts.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,24 +21,39 @@ const STORED = `${Buffer.from('sk-ant-oat01-test-harborlight-0000').toString('ba
 function configFile(boardWall: boolean): string {
   const project = join(root, 'dev', 'harborlight');
   mkdirSync(project, { recursive: true });
+  for (const d of [join(root, 'shared'), join(project, 'inner')]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(root, 'allowed-file'), '');
   const file = join(root, `config-${boardWall}.json`);
   writeFileSync(
     file,
     JSON.stringify({
       boardSocketDir: SOCKETS,
-      leads: [{ name: 'harborlight-lead', projects: [project], boardWall, boardId: 'w-harbor' }],
+      leads: [
+        {
+          name: 'harborlight-lead',
+          projects: [project],
+          allow: [join(root, 'shared'), join(project, 'inner'), join(root, 'allowed-file')],
+          boardWall,
+          boardId: 'w-harbor',
+        },
+      ],
     }),
   );
   return file;
 }
 
-function launch(boardWall: boolean) {
+function launch(boardWall: boolean, refuse: string | null = null) {
   const spawned: { env: NodeJS.ProcessEnv }[] = [];
   const lines: string[] = [];
+  const registered: [string, string[]][] = [];
   const deps: LaunchDeps = {
     platform: 'darwin',
     say: (line) => lines.push(line),
     readToken: (service) => (service === TOKEN_SERVICE ? STORED : null),
+    registerRoots: (boardId, roots) => {
+      registered.push([boardId, roots]);
+      return refuse;
+    },
     spawn: (_file, _args, opts) => {
       spawned.push({ env: opts.env });
       return 0;
@@ -46,7 +61,7 @@ function launch(boardWall: boolean) {
   };
   const argv = ['--config', configFile(boardWall), '--profiles', join(root, 'profiles')];
   const code = main([...argv, '--lead', 'harborlight-lead', '--', 'claude'], deps);
-  return { code, env: spawned[0]?.env ?? {}, said: lines.join('\n') };
+  return { code, env: spawned[0]?.env ?? {}, said: lines.join('\n'), registered };
 }
 
 beforeEach(() => {
@@ -65,7 +80,25 @@ describe('launching a walled lead', () => {
     expect(r.code).toBe(0);
     expect(r.env.CW_BOARD_SOCKET).toBe(`${SOCKETS}/w-harbor.sock`);
     expect(r.env.CW_WORKSPACE_ID).toBe('w-harbor');
-    expect(r.said).toContain('hooks');
+    expect(r.said).not.toContain('warning');
+  });
+
+  it('registers its projects and allowed folders, resolved, as the folders it can write', () => {
+    const r = launch(true);
+    // The folder inside the project is held by the project; the file is not a folder.
+    expect(r.registered).toEqual([
+      [
+        'w-harbor',
+        [realpathSync(join(root, 'shared')), realpathSync(join(root, 'dev', 'harborlight'))],
+      ],
+    ]);
+  });
+
+  it('says so, and launches nothing, when the server does not take the list', () => {
+    const r = launch(true, 'the server did not answer');
+    expect(r.code).toBe(2);
+    expect(r.said).toContain('the server did not answer');
+    expect(r.env).toEqual({});
   });
 
   it('hands it no board server token', () => {
@@ -82,6 +115,7 @@ describe('launching a walled lead', () => {
     const r = launch(false);
     expect(r.code).toBe(0);
     expect(r.env.CW_BOARD_SOCKET).toBeUndefined();
+    expect(r.registered).toEqual([]);
   });
 });
 
