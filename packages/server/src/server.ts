@@ -2538,6 +2538,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeJson,
     unlinkFromEveryBoardWorkspace,
     canonicalDocId,
+    onReviewArchived: (setId, archived) =>
+      archived ? boardSocketRoots.archiveBind(setId) : boardSocketRoots.restoreBind(setId),
   };
   const { handleArchiveRoutes } = createArchiveRoutes(archiveRoutesCtx);
 

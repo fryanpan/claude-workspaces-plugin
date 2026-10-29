@@ -27,6 +27,7 @@ import {
   type VoiceNote,
   type WebhookPayload,
   type WriteVia,
+  attachmentIdOf,
   contentKind,
   initDocMeta,
   listThreads,
@@ -1678,7 +1679,8 @@ export class DocStore {
     path: string,
     blocking: boolean,
   ): PrereadFile | 'unavailable' | undefined {
-    const fresh = boundFiles.takeFresh(path);
+    const meta = this.catalog.entry(docId)?.meta;
+    const fresh = boundFiles.takeFresh(path, meta ? attachmentIdOf(meta) : undefined);
     if (fresh) {
       return fresh.exists
         ? { exists: true, text: fresh.text, mtimeMs: fresh.mtimeMs, size: fresh.size }
@@ -1872,7 +1874,7 @@ export class DocStore {
       path = meta.sourceUrl;
     }
     if (!path) return;
-    await boundFiles.read(path);
+    await boundFiles.read(path, { setId: attachmentIdOf(meta) });
   }
 
   getOrCreate(

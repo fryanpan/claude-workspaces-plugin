@@ -7,7 +7,9 @@
  *   nothing from it, neither a file nor a name;
  * - a folder inside the root swapped for such a link serves nothing either,
  *   and a write through it never creates a file outside;
- * - a root dropped from the board's list stops serving;
+ * - a root dropped from the board's list stops serving the lead's set, and
+ *   only the lead's: a set the owner bound on the same folder still serves;
+ * - archiving a lead's set sets its record aside, and unarchiving restores it;
  * - a lead's bind never lands on a set another board holds;
  * - a lead's `maxFiles` is bounded.
  *
@@ -20,6 +22,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -29,9 +32,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { boardSocketRootsPath } from '../src/board-socket-roots.ts';
 import { boardSocketPath } from '../src/board-sockets.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
-import { pastWriteBack, waitFor } from './wait-for.ts';
+import { waitFor } from './wait-for.ts';
 
 let h: ServerHandle;
 let dataDir: string;
@@ -202,7 +206,11 @@ describe('a lead’s bind after the bind', () => {
     renameSync(join(root, 'sub'), join(root, 'sub.moved'));
     symlinkSync(outside, join(root, 'sub'));
     await leadRewrite(docId, '# harbor plan\n\nSecond pass.\n');
-    await Bun.sleep(pastWriteBack()); // timed: the window the write-back would land in
+    // The refusal reports itself on the doc rather than failing quietly.
+    const said = await waitFor(() => h.docStore.getSyncError(docId), {
+      describe: 'the refused write-back reported on the doc',
+    });
+    expect(JSON.stringify(said)).toContain('Not saved to disk');
     expect(existsSync(join(outside, 'plan.md'))).toBe(false);
     expect(readdirSync(outside)).toEqual([]);
   }, 30_000);
@@ -216,6 +224,53 @@ describe('a lead’s bind after the bind', () => {
     expect((await openFile(setId, 'notes.md')).status).toBe(200);
     await setRoots([]);
     expect((await openFile(setId, 'later.md')).status).not.toBe(200);
+  }, 30_000);
+});
+
+describe('the guard holds only the lead’s own sets', () => {
+  it('leaves a set the owner bound on the same folder alone', async () => {
+    const root = project('harbor-owner');
+    await setRoots([root]);
+    const lead = await leadBind(root);
+    expect(lead.status, await lead.clone().text()).toBe(200);
+    const leadSet = ((await lead.json()) as { setId: string }).setId;
+    const owner = await tcp('/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ folderPath: root, hubWorkspaceId: harborlight }),
+    });
+    expect(owner.status, await owner.clone().text()).toBe(200);
+    const ownerSet = ((await owner.json()) as { setId: string }).setId;
+    expect(ownerSet).not.toBe(leadSet);
+
+    await setRoots([]);
+    expect((await openFile(leadSet, 'notes.md')).status).not.toBe(200);
+    // The control is the refusal above; the owner's set on the same file serves.
+    const ownerOpen = await openFile(ownerSet, 'notes.md');
+    expect(ownerOpen.status, await ownerOpen.clone().text()).toBe(200);
+  }, 30_000);
+
+  it('sets a lead’s record aside when its set is archived, and back on unarchive', async () => {
+    const root = project('harbor-archived');
+    await setRoots([root]);
+    const lead = await leadBind(root);
+    expect(lead.status, await lead.clone().text()).toBe(200);
+    const setId = ((await lead.json()) as { setId: string }).setId;
+    const recorded = () =>
+      JSON.parse(readFileSync(boardSocketRootsPath(dataDir), 'utf8')) as {
+        binds: Record<string, unknown>;
+        archived: Record<string, unknown>;
+      };
+    expect(Object.keys(recorded().binds)).toContain(setId);
+
+    const at = `/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}`;
+    const archived = await tcp(`${at}/archive`, { method: 'POST', body: '{}' });
+    expect(archived.status, await archived.clone().text()).toBe(200);
+    expect(Object.keys(recorded().binds)).not.toContain(setId);
+    expect(Object.keys(recorded().archived)).toContain(setId);
+
+    const back = await tcp(`${at}/unarchive`, { method: 'POST', body: '{}' });
+    expect(back.status, await back.clone().text()).toBe(200);
+    expect(Object.keys(recorded().binds)).toContain(setId);
   }, 30_000);
 });
 

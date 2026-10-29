@@ -45,9 +45,9 @@ export function redactBoundPath(path: string): string {
  * resolved off the main thread.
  */
 export interface PathGuard {
-  covers(path: string): boolean;
-  admits(path: string): boolean;
-  landsInside(path: string, real: string): boolean;
+  covers(path: string, setId?: string): boolean;
+  admits(path: string, setId?: string): boolean;
+  landsInside(path: string, real: string, setId?: string): boolean;
 }
 
 /** A guarded read or write refused because the file is not where its guard
@@ -137,7 +137,12 @@ export async function writeChecked(
   return stat(target, { bigint: true });
 }
 
-/** The guards installed on the bound-file reader, asked together. */
+/**
+ * The guards installed on the bound-file reader, asked together. Every
+ * method takes the set the path is read for, when the caller knows it, so a
+ * guard can hold one set's files and leave another set on the same folder
+ * alone; a caller that cannot name the set is held to every guard.
+ */
 export class PathGuards {
   private readonly set = new Set<PathGuard>();
 
@@ -148,35 +153,37 @@ export class PathGuards {
     };
   }
 
-  allows(path: string): boolean {
-    for (const guard of this.set) if (!guard.admits(path)) return false;
+  allows(path: string, setId?: string): boolean {
+    for (const guard of this.set) if (!guard.admits(path, setId)) return false;
     return true;
   }
 
-  covers(path: string): boolean {
-    for (const guard of this.set) if (guard.covers(path)) return true;
+  covers(path: string, setId?: string): boolean {
+    for (const guard of this.set) if (guard.covers(path, setId)) return true;
     return false;
   }
 
-  private landsAll(path: string, real: string): boolean {
-    for (const guard of this.set) if (!guard.landsInside(path, real)) return false;
+  private landsAll(path: string, real: string, setId?: string): boolean {
+    for (const guard of this.set) if (!guard.landsInside(path, real, setId)) return false;
     return true;
   }
 
-  landsAllowedSync(path: string): boolean {
-    if (!this.allows(path)) return false;
-    if (!this.covers(path)) return true;
+  landsAllowedSync(path: string, setId?: string): boolean {
+    if (!this.allows(path, setId)) return false;
+    if (!this.covers(path, setId)) return true;
     const real = nearestRealpathSync(path);
-    return real !== null && this.landsAll(path, real);
+    return real !== null && this.landsAll(path, real, setId);
   }
 
   /** Read a bound file, checked where a guard covers it. */
-  read(path: string): ReturnType<typeof readChecked> {
-    return readChecked(path, this.covers(path) ? (real) => this.landsAll(path, real) : null);
+  read(path: string, setId?: string): ReturnType<typeof readChecked> {
+    const lands = (real: string) => this.landsAll(path, real, setId);
+    return readChecked(path, this.covers(path, setId) ? lands : null);
   }
 
   /** Write a bound file, checked where a guard covers it. */
-  write(path: string, text: string): Promise<BigIntStats> {
-    return writeChecked(path, text, this.covers(path) ? (real) => this.landsAll(path, real) : null);
+  write(path: string, text: string, setId?: string): Promise<BigIntStats> {
+    const lands = (real: string) => this.landsAll(path, real, setId);
+    return writeChecked(path, text, this.covers(path, setId) ? lands : null);
   }
 }

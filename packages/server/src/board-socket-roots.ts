@@ -48,9 +48,20 @@ export interface LeadBindRecord {
   root: string;
 }
 
+function readBinds(listed: unknown, into: Record<string, LeadBindRecord>): void {
+  if (!listed || typeof listed !== 'object') return;
+  for (const [setId, b] of Object.entries(listed as Record<string, unknown>)) {
+    const { board, root } = (b ?? {}) as Record<string, unknown>;
+    if (typeof board === 'string' && typeof root === 'string' && isAbsolute(root))
+      into[setId] = { board, root };
+  }
+}
+
 export class BoardSocketRoots {
   private boards: Record<string, string[]> | null = null;
   private binds: Record<string, LeadBindRecord> = {};
+  /** Lead binds whose set is archived, kept so an unarchive restores them. */
+  private archived: Record<string, LeadBindRecord> = {};
 
   constructor(
     private readonly path: string,
@@ -69,14 +80,8 @@ export class BoardSocketRoots {
             boards[id] = roots.filter((r): r is string => typeof r === 'string' && isAbsolute(r));
         }
       }
-      const binds: unknown = raw?.binds;
-      if (binds && typeof binds === 'object') {
-        for (const [setId, b] of Object.entries(binds as Record<string, unknown>)) {
-          const { board, root } = (b ?? {}) as Record<string, unknown>;
-          if (typeof board === 'string' && typeof root === 'string' && isAbsolute(root))
-            this.binds[setId] = { board, root };
-        }
-      }
+      readBinds(raw?.binds, this.binds);
+      readBinds(raw?.archived, this.archived);
     } catch {
       // Unreadable is the same as empty: every lead bind is refused.
     }
@@ -147,17 +152,49 @@ export class BoardSocketRoots {
   static readonly ROOT_VERDICT_MS = 1_000;
   private verdicts = new Map<string, { at: number; ok: boolean }>();
 
-  /** The lead binds whose root holds `path`. */
-  private bindsOver(path: string): LeadBindRecord[] {
-    this.load();
-    return Object.values(this.binds).filter(
-      ({ root }) => path === root || path.startsWith(`${root}/`),
-    );
+  /** Set a lead's bind aside when its set is archived, so the list holds
+   *  only live sets; `restoreBind` puts it back with the set. */
+  archiveBind(setId: string): void {
+    this.move(setId, this.binds, this.archived);
   }
 
-  /** Whether `path` is under a root a lead bound: the guard's business. */
-  covers(path: string): boolean {
-    return this.bindsOver(path).length > 0;
+  restoreBind(setId: string): void {
+    this.move(setId, this.archived, this.binds);
+  }
+
+  private move(
+    setId: string,
+    from: Record<string, LeadBindRecord>,
+    to: Record<string, LeadBindRecord>,
+  ): void {
+    this.load();
+    const record = from[setId];
+    if (record === undefined) return;
+    to[setId] = record;
+    delete from[setId];
+    this.save();
+  }
+
+  /**
+   * The lead binds that hold `path`. Asked for a set, only that set's own
+   * record, so a set the owner bound on the same folder is never held to a
+   * lead's root. Asked without one, every record whose root holds the path:
+   * a caller that cannot name the set is held to all of them.
+   */
+  private bindsOver(path: string, setId?: string): LeadBindRecord[] {
+    this.load();
+    const under = ({ root }: LeadBindRecord) => path === root || path.startsWith(`${root}/`);
+    if (setId !== undefined) {
+      const own = this.binds[setId];
+      return own && under(own) ? [own] : [];
+    }
+    return Object.values(this.binds).filter(under);
+  }
+
+  /** Whether `path` (of `setId`, when the caller knows it) is under a
+   *  root a lead bound: the guard's business. */
+  covers(path: string, setId?: string): boolean {
+    return this.bindsOver(path, setId).length > 0;
   }
 
   /**
@@ -165,8 +202,8 @@ export class BoardSocketRoots {
    * under a lead's bind needs the root still registered for that board and
    * still resolving to itself, so no link has been swapped in for it.
    */
-  admits(path: string, now = Date.now()): boolean {
-    for (const { board, root } of this.bindsOver(path)) {
+  admits(path: string, setId?: string, now = Date.now()): boolean {
+    for (const { board, root } of this.bindsOver(path, setId)) {
       if (!this.rootsOf(board).includes(root)) return false;
       const cached = this.verdicts.get(root);
       let ok: boolean;
@@ -190,16 +227,22 @@ export class BoardSocketRoots {
    * file not there yet, `real` is its nearest existing folder, resolved, so
    * a write cannot create a file through a linked parent.
    */
-  landsInside(path: string, real: string): boolean {
-    return this.bindsOver(path).every(({ root }) => real === root || real.startsWith(`${root}/`));
+  landsInside(path: string, real: string, setId?: string): boolean {
+    return this.bindsOver(path, setId).every(
+      ({ root }) => real === root || real.startsWith(`${root}/`),
+    );
   }
 
   private save(): void {
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ boards: this.load(), binds: this.binds }, null, 2), {
-      mode: 0o600,
-    });
+    writeFileSync(
+      tmp,
+      JSON.stringify({ boards: this.load(), binds: this.binds, archived: this.archived }, null, 2),
+      {
+        mode: 0o600,
+      },
+    );
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
   }

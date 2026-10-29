@@ -196,15 +196,16 @@ class BoundFileReader {
    * map is: a bind that left its bytes there re-bound a doc to a file since
    * replaced. `quiet: true` skips the dataless note, for a caller retrying a
    * file it has already reported (`unreadAtAttach` in file-binding.ts).
+   * `setId` names the set the file is read for, for `guards`.
    */
   async read(
     path: string,
-    opts: { keep?: boolean; quiet?: boolean } = {},
+    opts: { keep?: boolean; quiet?: boolean; setId?: string } = {},
   ): Promise<BoundReadResult> {
     const keep = opts.keep !== false;
-    const blocked = this.gate(path);
+    const blocked = this.gate(path, opts.setId);
     if (blocked) return blocked;
-    const raced = await this.race('read', path, () => this.guards.read(path));
+    const raced = await this.race('read', path, () => this.guards.read(path, opts.setId));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
       if (raced.err instanceof GuardRefused) {
@@ -244,10 +245,12 @@ class BoundFileReader {
    * attach makes no syscall on the bound path. Consumed rather than cached so
    * a second hydrate reads the file again instead of trusting old bytes.
    */
-  takeFresh(path: string): Extract<BoundReadResult, { status: 'ok' }> | undefined {
+  takeFresh(path: string, setId?: string): Extract<BoundReadResult, { status: 'ok' }> | undefined {
     const hit = this.fresh.get(path);
     if (!hit) return undefined;
     this.fresh.delete(path);
+    // Bytes kept by a read for another set were not judged for this one.
+    if (this.guards.covers(path, setId)) return undefined;
     return Date.now() - hit.at > BOUND_READ_FRESH_MS ? undefined : hit.result;
   }
 
@@ -281,10 +284,10 @@ class BoundFileReader {
    * Returns the mtime the file ended up with, so the caller can record its
    * own write and keep the poll from reading it back as an external edit.
    */
-  async write(path: string, text: string): Promise<BoundStatResult> {
-    const blocked = this.gate(path);
+  async write(path: string, text: string, setId?: string): Promise<BoundStatResult> {
+    const blocked = this.gate(path, setId);
     if (blocked) return blocked;
-    const raced = await this.race('read', path, () => this.guards.write(path, text));
+    const raced = await this.race('read', path, () => this.guards.write(path, text, setId));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
       // No backoff here, and this is where the write differs from the read.
@@ -311,8 +314,8 @@ class BoundFileReader {
   }
 
   /** The mtime half of `read`, for the poll's change detection. */
-  async statMtime(path: string): Promise<BoundStatResult> {
-    const blocked = this.gate(path);
+  async statMtime(path: string, setId?: string): Promise<BoundStatResult> {
+    const blocked = this.gate(path, setId);
     if (blocked) return blocked;
     const raced = await this.race('stat', path, () => this.statFile(path));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
@@ -359,8 +362,9 @@ class BoundFileReader {
 
   private gate(
     path: string,
+    setId?: string,
   ): { status: 'unavailable'; reason: 'backoff' | 'busy' | 'refused' } | undefined {
-    if (!this.guards.allows(path)) {
+    if (!this.guards.allows(path, setId)) {
       this.noteUnusable(path, new GuardRefused(path), 'read');
       return { status: 'unavailable', reason: 'refused' };
     }

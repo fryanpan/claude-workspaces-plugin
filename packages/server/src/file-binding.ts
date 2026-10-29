@@ -37,6 +37,7 @@ import {
   type DocMeta,
   type DocOriginRepo,
   type WebhookPayload,
+  attachmentIdOf,
   contentKind,
   prose,
   suggestOps,
@@ -101,8 +102,22 @@ export interface AttachOpts {
   preread?: PrereadFile;
 }
 
+/** What a doc says when the bound-file guard refused its write-back: the
+ *  file no longer lands inside the folder a walled lead bound. */
+function refusedWrite(): { message: string; at: number } {
+  return {
+    message:
+      'Not saved to disk: this file no longer lands inside the folder its lead bound, so the ' +
+      'server refused the write. The doc keeps its content.',
+    at: Date.now(),
+  };
+}
+
 interface FileBinding {
   path: string;
+  /** The set the doc belongs to, so the bound-file guard holds only a
+   *  walled lead's own sets (`bound-path-guard.ts`). */
+  setId?: string;
   writeTimer?: ReturnType<typeof setTimeout> | null;
   readTimer?: ReturnType<typeof setTimeout> | null;
   /**
@@ -710,7 +725,7 @@ export class FileBindings {
     filePath: string,
     opts: AttachOpts = {},
   ): Promise<ReturnType<FileBindings['attachFile']>> {
-    const ready = await this.withPreread(filePath, opts);
+    const ready = await this.withPreread(docId, filePath, opts);
     if (ready === 'unreadable') return { ok: false, error: 'read-failed' };
     return this.attachFile(docId, filePath, ready);
   }
@@ -729,7 +744,7 @@ export class FileBindings {
     filePath: string,
     opts: AttachOpts & { writeBack?: boolean } = {},
   ): Promise<ReturnType<FileBindings['attachFlatFile']>> {
-    const ready = await this.withPreread(filePath, opts);
+    const ready = await this.withPreread(docId, filePath, opts);
     if (ready === 'unreadable') return { ok: false, error: 'read-failed' };
     return this.attachFlatFile(docId, filePath, ready);
   }
@@ -740,7 +755,7 @@ export class FileBindings {
     filePath: string,
     opts: AttachOpts = {},
   ): Promise<ReturnType<FileBindings['attachReadonlyFile']>> {
-    const ready = await this.withPreread(filePath, opts);
+    const ready = await this.withPreread(docId, filePath, opts);
     if (ready === 'unreadable') return { ok: false, error: 'read-failed' };
     return this.attachReadonlyFile(docId, filePath, ready);
   }
@@ -761,13 +776,16 @@ export class FileBindings {
    * `.ydoc`, with writes parked.
    */
   private async withPreread<T extends AttachOpts>(
+    docId: string,
     filePath: string,
     opts: T,
   ): Promise<T | 'unreadable'> {
     if (opts.preread) return opts;
     if (!filePath || filePath.trim() === '') return opts;
     const abs = filePath.startsWith('/') ? filePath : join(process.cwd(), filePath);
-    const res = await boundFiles.read(abs, { keep: false });
+    const meta = this.p.doc(docId)?.meta;
+    const setId = meta ? attachmentIdOf(meta) : undefined;
+    const res = await boundFiles.read(abs, { keep: false, setId });
     if (res.status !== 'ok') return 'unreadable';
     return {
       ...opts,
@@ -815,7 +833,12 @@ export class FileBindings {
     // hydration passes a preread on every other path (`DocStore.prereadFor`),
     // and no request handler reaches these two without one. The rest of the
     // callers are the tests.
-    if (!pre && (boundFiles.quarantined(abs) || boundFiles.busy())) {
+    if (
+      !pre &&
+      (boundFiles.quarantined(abs) ||
+        boundFiles.busy() ||
+        !boundFiles.guards.landsAllowedSync(abs, attachmentIdOf(doc.meta)))
+    ) {
       return { ok: false, error: 'read-failed' };
     }
     const fileExists = () => (pre ? pre.exists : existsSync(abs));
@@ -847,6 +870,7 @@ export class FileBindings {
     if (existing?.observer) fragment.unobserveDeep(existing.observer);
     const binding: FileBinding = {
       path: abs,
+      setId: attachmentIdOf(doc.meta),
       lastMtimeMs: existing?.lastMtimeMs,
       lastSize: existing?.lastSize,
       diskSource: seedText,
@@ -1081,7 +1105,12 @@ export class FileBindings {
     // folder bind walks — `bind-diff` attaches every member of a repo in one
     // synchronous loop — so a single hostile file in a bound tree is exactly
     // the shape that parked the event loop. Read the note in `attachFile`.
-    if (!pre && (boundFiles.quarantined(abs) || boundFiles.busy())) {
+    if (
+      !pre &&
+      (boundFiles.quarantined(abs) ||
+        boundFiles.busy() ||
+        !boundFiles.guards.landsAllowedSync(abs, attachmentIdOf(doc.meta)))
+    ) {
       return { ok: false, error: 'read-failed' };
     }
     const fileExists = () => (pre ? pre.exists : existsSync(abs));
@@ -1152,6 +1181,7 @@ export class FileBindings {
     // instead would make the writer's no-op check skip the reassert.
     const binding: FileBinding = {
       path: abs,
+      setId: attachmentIdOf(doc.meta),
       lastWritten: reassertDoc ? text : content.toString(),
     };
     this.bindings.set(docId, binding);
@@ -1391,7 +1421,7 @@ export class FileBindings {
     // the filesystem again here would put the blocking call straight back.
     const absent = opts.preread ? !opts.preread.exists : !existsSync(absPath);
     let attachOpts = opts;
-    if (absent && boundFiles.guards.landsAllowedSync(absPath)) {
+    if (absent && boundFiles.guards.landsAllowedSync(absPath, attachmentIdOf(doc.meta))) {
       const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
       try {
         mkdirSync(dirname(absPath), { recursive: true });
@@ -1605,7 +1635,7 @@ export class FileBindings {
     binding.statInFlight = true;
     const startedAt = performance.now();
     void boundFiles
-      .statMtime(binding.path)
+      .statMtime(binding.path, binding.setId)
       .then((res) => {
         this.noteSlowStat(docId, performance.now() - startedAt, res);
         if (res.status !== 'ok') return; // quarantined, busy, or never answered
@@ -1698,7 +1728,7 @@ export class FileBindings {
       // Quiet while retrying an unread file: the attach logged it once, and a
       // line per visit is the noise this binding state exists to replace.
       const quiet = binding.unreadAtAttach !== undefined;
-      void boundFiles.read(binding.path, { quiet }).then((res) => {
+      void boundFiles.read(binding.path, { quiet, setId: binding.setId }).then((res) => {
         if (this.bindings.get(docId) !== binding) return;
         if (res.status !== 'ok') {
           // The read was refused or never answered. Forget that we spotted
@@ -1930,6 +1960,7 @@ export class FileBindings {
     }
     let md: string;
     try {
+      if (!boundFiles.guards.landsAllowedSync(binding.path, binding.setId)) throw new Error();
       md = readFileSync(binding.path, 'utf8');
     } catch {
       return { ok: false, error: 'missing' };
@@ -2007,6 +2038,7 @@ export class FileBindings {
       // retries once the backoff lapses.
       if (boundFiles.quarantined(binding.path)) return 'missing';
       if (!existsSync(binding.path)) return 'missing';
+      if (!boundFiles.guards.landsAllowedSync(binding.path, binding.setId)) return 'missing';
       try {
         md = readFileSync(binding.path, 'utf8');
       } catch (err) {
@@ -2351,7 +2383,7 @@ export class FileBindings {
         // here: until then the doc genuinely is unsaved, and a restart in
         // between must still reassert it.
         void boundFiles
-          .write(binding.path, bytes)
+          .write(binding.path, bytes, binding.setId)
           .then((res) => {
             if (this.bindings.get(doc.docId) !== binding) return;
             // A synchronous flush ran while this write was still on the pool.
@@ -2368,6 +2400,7 @@ export class FileBindings {
             }
             if (res.status !== 'ok') {
               this.failedWrites.add(doc.docId);
+              if (res.reason === 'refused') binding.lastSyncError = refusedWrite();
               return;
             }
             binding.lastWritten = md;
@@ -2415,12 +2448,13 @@ export class FileBindings {
       // write with nothing to stop it.
       // A path the bound-file guard refuses (a walled lead's folder that no
       // longer resolves to itself) is never written, here or on the pool.
-      if (
-        boundFiles.quarantined(binding.path) ||
-        boundFiles.busy() ||
-        !boundFiles.guards.landsAllowedSync(binding.path)
-      ) {
+      if (boundFiles.quarantined(binding.path) || boundFiles.busy()) {
         this.failedWrites.add(doc.docId);
+        return;
+      }
+      if (!boundFiles.guards.landsAllowedSync(binding.path, binding.setId)) {
+        this.failedWrites.add(doc.docId);
+        binding.lastSyncError = refusedWrite();
         return;
       }
       // Take the generation before writing: a pool write already on the
