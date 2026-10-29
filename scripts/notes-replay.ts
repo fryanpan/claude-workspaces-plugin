@@ -24,6 +24,9 @@
  *                      what reconnects cost the notes)
  *   --endpoint-lag N   ms between a speaker stopping and the turn settling
  *   --stub             the deterministic stub composer; free, for plumbing
+ *   --instructions F   the note-taking instructions in file F instead of the
+ *                      shipped ones, saved as this run's own override, so a
+ *                      prompt arm needs no source change
  */
 
 import {
@@ -186,6 +189,20 @@ async function main(argv: string[]): Promise<number> {
     writeNotesMethod(dataDir, plan.docId, { method, at: Date.now() });
   }
   const meter = new SpendMeter(stub ? Number.POSITIVE_INFINITY : cap);
+  const instructionsArg = flag(argv, '--instructions');
+  if (instructionsArg !== undefined) {
+    const words = readFileSync(instructionsArg, 'utf8');
+    mkdirSync(join(runDir, 'prompts'), { recursive: true });
+    const saved = createPromptStore({ dataDir: join(runDir, 'prompts') }).write(
+      'meeting-notes',
+      words,
+    );
+    // A run that silently fell back to the shipped words would score as an arm.
+    if (!saved.ok) {
+      console.error(`--instructions not saved: ${saved.error}`);
+      return 2;
+    }
+  }
   const built = stub ? createStubNotesComposer() : shippedComposer(meter, runDir, dataDir);
   // Every edit the model answered, before the guards: what a note that never
   // reached the doc said is otherwise not recorded anywhere.
@@ -231,6 +248,7 @@ async function main(argv: string[]): Promise<number> {
     docId: plan.docId,
     folder: resolve(folder),
     composer: composer.name,
+    ...(instructionsArg !== undefined ? { instructions: resolve(instructionsArg) } : {}),
     oneLeg: argv.includes('--one-leg'),
     meetings: plan.meetings.map((m) => ({ meetingId: m.meetingId, legs: m.legs.length })),
     turns,
