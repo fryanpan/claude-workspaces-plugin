@@ -1269,5 +1269,13 @@ export function sameOriginPath(raw: string | null): string {
   // Location, so `/\t/evil.example` would arrive as `//evil.example`.
   // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing them is the point
   if (!raw || !/^\/(?![/\\])/.test(raw) || /[\s\x00-\x1f\x7f\\]/.test(raw)) return '/';
-  return raw;
+  // And resolved the way a browser resolves a Location, against a stand-in
+  // origin: anything that lands elsewhere is not a path on this one.
+  const base = 'http://same-origin.invalid';
+  try {
+    const u = new URL(raw, base);
+    return u.origin === base ? `${u.pathname}${u.search}${u.hash}` : '/';
+  } catch {
+    return '/';
+  }
 }

@@ -394,8 +394,10 @@ describe('a fresh sign-in before a destructive action', () => {
     });
 
     it('never redirects off this origin', async () => {
-      const res = await asOwner('/api/auth/reauth?next=%2F%2Fevil.example', 'GET', undefined, 0);
-      expect(res.headers.get('location')).toBe('/');
+      for (const next of ['%2F%2Fevil.example', '%2F%09%2Fevil.example', '%2F%5C%2Fevil.example']) {
+        const res = await asOwner(`/api/auth/reauth?next=${next}`, 'GET', undefined, 0);
+        expect(res.headers.get('location')).toBe('/');
+      }
     });
   });
 });

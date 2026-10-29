@@ -82,38 +82,34 @@ describe('countedActionOf', () => {
   const action = (method: string, path: string, body?: unknown, c = ctx) =>
     countedActionOf(req(method, path, body), path, c);
 
+  /** Every counted action but the TTL one, which needs a live share (below). */
+  const COUNTED: ReadonlyArray<readonly [string, string, unknown, string]> = [
+    ['DELETE', '/workspaces/w-1', undefined, 'delete-workspace'],
+    ['DELETE', '/workspaces/w-1/docs/d-1', undefined, 'delete-doc'],
+    ['DELETE', '/workspaces/w-1/attachments/s-1', undefined, 'delete-attachment-set'],
+    ['POST', '/workspaces/w-1/docs/d-1/archive', undefined, 'archive-doc'],
+    ['POST', '/workspaces/w-1/attachments/s-1/archive', undefined, 'archive-attachment-set'],
+    ['PUT', '/workspaces/w-1/retired', { retired: true }, 'retire-workspace'],
+    ['POST', '/workspaces/w-1/members/a%40b.test/role', { role: 'owner' }, 'raise-role'],
+    ['POST', '/api/share/workspace', {}, 'share-workspace'],
+    ['POST', '/api/share/link', {}, 'share-link'],
+    ['POST', '/api/share/enabled', { enabled: true }, 'sharing-on'],
+    ['POST', '/api/share/lock', { locked: false }, 'unlock-board'],
+    ['POST', '/workspaces/w-1/audience', { add: ['@riverbend.test'] }, 'add-member'],
+    ['POST', ACCESS_CARD, { decision: 'approve' }, 'approve-access'],
+  ];
+
   it('names each counted route', async () => {
-    expect(await action('DELETE', '/workspaces/w-1')).toBe('delete-workspace');
-    expect(await action('DELETE', '/workspaces/w-1/docs/d-1')).toBe('delete-doc');
-    expect(await action('DELETE', '/workspaces/w-1/attachments/s-1')).toBe('delete-attachment-set');
-    expect(await action('POST', '/workspaces/w-1/docs/d-1/archive')).toBe('archive-doc');
-    expect(await action('POST', '/workspaces/w-1/attachments/s-1/archive')).toBe(
-      'archive-attachment-set',
-    );
-    expect(await action('PUT', '/workspaces/w-1/retired', { retired: true })).toBe(
-      'retire-workspace',
-    );
-    expect(await action('POST', '/workspaces/w-1/members/a%40b.test/role', { role: 'owner' })).toBe(
-      'raise-role',
-    );
-    expect(await action('POST', '/api/share/workspace', {})).toBe('share-workspace');
-    expect(await action('POST', '/api/share/link', {})).toBe('share-link');
-    expect(await action('POST', '/api/share/enabled', { enabled: true })).toBe('sharing-on');
-    expect(await action('POST', '/api/share/lock', { locked: false })).toBe('unlock-board');
-    expect(await action('POST', '/workspaces/w-1/audience', { add: ['@riverbend.test'] })).toBe(
-      'add-member',
-    );
-    expect(await action('POST', ACCESS_CARD, { decision: 'approve' })).toBe('approve-access');
+    for (const [method, path, body, name] of COUNTED) {
+      expect(await action(method, path, body)).toBe(name);
+    }
   });
 
-  it('counts a path the router reads the same way with trailing slashes', async () => {
-    expect(await action('DELETE', '/workspaces/w-1/docs/d-1/')).toBe('delete-doc');
-    expect(await action('DELETE', '/workspaces/w-1//')).toBe('delete-workspace');
-    expect(await action('POST', '/workspaces/w-1/docs/d-1/archive/')).toBe('archive-doc');
-    expect(await action('POST', '/api/share/link/')).toBe('share-link');
-    expect(await action('POST', '/workspaces/w-1/audience/', { add: ['a@b.test'] })).toBe(
-      'add-member',
-    );
+  it('counts each one with trailing slashes too, which the routers read the same way', async () => {
+    for (const [method, path, body, name] of COUNTED) {
+      expect(await action(method, `${path}/`, body)).toBe(name);
+      expect(await action(method, `${path}//`, body)).toBe(name);
+    }
   });
 
   it('counts a body it cannot read rather than waving it through', async () => {
@@ -150,6 +146,9 @@ describe('countedActionOf', () => {
     } as unknown as Shares;
     const c = { shares, now: NOW };
     expect(await action('POST', '/api/share/sh-1/ttl', { ttlSeconds: 7200 }, c)).toBe(
+      'lengthen-share',
+    );
+    expect(await action('POST', '/api/share/sh-1/ttl/', { ttlSeconds: 7200 }, c)).toBe(
       'lengthen-share',
     );
     expect(await action('POST', '/api/share/sh-1/ttl', { ttl: '15m' }, c)).toBeNull();

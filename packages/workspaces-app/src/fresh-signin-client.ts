@@ -35,6 +35,8 @@ export interface FreshSignInDeps {
   doc?: Document;
   here?: () => string;
   now?: () => number;
+  /** The id of the person the server proved on this browser, or null. */
+  whoAmI?: () => Promise<string | null>;
 }
 
 const HELD_KEY = 'cw-held-action';
@@ -45,6 +47,19 @@ interface HeldAction {
   request: CountedRequest;
   page: string;
   at: number;
+  /** Who held it, as the server proved them; only they are offered it. */
+  who: string | null;
+}
+
+/** `GET /api/auth/session` names the proven person; null when nobody is. */
+async function provenId(): Promise<string | null> {
+  try {
+    const res = await fetch('/api/auth/session', { headers: { accept: 'application/json' } });
+    const body = (await res.json()) as { user?: { id?: unknown } };
+    return typeof body.user?.id === 'string' ? body.user.id : null;
+  } catch {
+    return null;
+  }
 }
 
 const hereOf = (deps: FreshSignInDeps) => deps.here?.() ?? `${location.pathname}${location.search}`;
@@ -92,7 +107,8 @@ export async function sendCounted(
     leaving.textContent = `You'll sign in again, then come back here to confirm the ${req.noun}.`;
     if (!(await ask(doc, 'Sign in again', leaving, 'Cancel', 'Go to sign-in'))) continue;
     const page = hereOf(deps);
-    const held: HeldAction = { request: req, page, at: (deps.now ?? Date.now)() };
+    const who = await (deps.whoAmI ?? provenId)();
+    const held: HeldAction = { request: req, page, at: (deps.now ?? Date.now)(), who };
     (deps.storage ?? sessionStorage).setItem(HELD_KEY, JSON.stringify(held));
     (deps.leave ?? ((url) => location.assign(url)))(
       `/api/auth/reauth?next=${encodeURIComponent(page)}`,
@@ -122,6 +138,8 @@ export async function resumeHeld(
   storage.removeItem(HELD_KEY);
   const age = (deps.now ?? Date.now)() - held.at;
   if (!(age >= 0 && age <= HELD_MAX_AGE_MS) || !isHeldRequest(held.request)) return null;
+  // Somebody else signed in on this tab: what the last person held is not theirs.
+  if ((held.who ?? null) !== (await (deps.whoAmI ?? provenId)())) return null;
   const req = held.request;
   const doc = deps.doc ?? document;
   const note = doc.createElement('p');
@@ -138,14 +156,15 @@ const METHODS: readonly unknown[] = ['POST', 'PUT', 'DELETE'];
 
 /**
  * Whether a stored value is a request this page could have held: one of the
- * three verbs, to a same-origin path, with string words. Anything else in
+ * three verbs, to a same-origin path under one of the two prefixes every counted
+ * route sits under, with string words. Anything else in
  * sessionStorage was planted, and is dropped without asking.
  */
 function isHeldRequest(r: CountedRequest): boolean {
   return (
     METHODS.includes(r.method) &&
     typeof r.url === 'string' &&
-    /^\/(?![/\\])/.test(r.url) &&
+    /^\/(?:workspaces|api\/share)\//.test(r.url) &&
     !/[\s\\]/.test(r.url) &&
     [r.verb, r.gerund, r.noun, r.name].every((w) => typeof w === 'string')
   );

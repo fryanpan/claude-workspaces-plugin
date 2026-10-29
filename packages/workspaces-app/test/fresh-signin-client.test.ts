@@ -133,7 +133,7 @@ describe('sendCounted', () => {
     );
     expect(storage.size()).toBe(1);
     const held = JSON.parse(storage.getItem('cw-held-action') ?? 'null');
-    expect(held).toEqual({ request: ARCHIVE, page: `${PAGE}?thread=t-1`, at: 1_000 });
+    expect(held).toEqual({ request: ARCHIVE, page: `${PAGE}?thread=t-1`, at: 1_000, who: null });
   });
 });
 
@@ -178,6 +178,8 @@ describe('resumeHeld', () => {
       { request: { ...ARCHIVE, url: '//evil.example/x' }, page: PAGE, at: 1_000 },
       { request: { ...ARCHIVE, method: 'PATCH' }, page: PAGE, at: 1_000 },
       { request: { ...ARCHIVE, verb: 7 }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, url: '/api/auth/logout' }, page: PAGE, at: 1_000 },
+      { request: ARCHIVE, page: PAGE, at: 1_000, who: 'id-bob' },
     ];
     for (const held of planted) {
       const storage = memoryStorage();
@@ -195,6 +197,47 @@ describe('resumeHeld', () => {
       expect(fetchImpl).not.toHaveBeenCalled();
       expect(storage.size()).toBe(0);
     }
+  });
+
+  it('is offered only to the person the server proved when it was held', async () => {
+    const storage = memoryStorage();
+    const fetchImpl = vi.fn(async () => refused());
+    const leave = vi.fn();
+    void sendCounted(ARCHIVE, {
+      toast: vi.fn(),
+      fetchImpl,
+      storage,
+      leave,
+      here: () => PAGE,
+      now: () => 1_000,
+      whoAmI: async () => 'id-alice',
+    });
+    await answer("Confirm it's you", 'Sign in again');
+    await answer('Sign in again', 'Go to sign-in');
+    await vi.waitFor(() => expect(leave).toHaveBeenCalled());
+    document.body.innerHTML = '';
+    const raw = storage.getItem('cw-held-action');
+    const asBob = await resumeHeld({
+      toast: vi.fn(),
+      fetchImpl,
+      storage,
+      here: () => PAGE,
+      now: () => 2_000,
+      whoAmI: async () => 'id-bob',
+    });
+    expect(asBob).toBeNull();
+    expect(card()).toBeNull();
+    // The same hold, back as the person who made it, is offered.
+    storage.setItem('cw-held-action', raw ?? '');
+    void resumeHeld({
+      toast: vi.fn(),
+      fetchImpl,
+      storage,
+      here: () => PAGE,
+      now: () => 2_000,
+      whoAmI: async () => 'id-alice',
+    });
+    await vi.waitFor(() => expect(card()?.title).toBe('Archive Riverbend launch notes now?'));
   });
 
   it('"Not now" sends nothing', async () => {
