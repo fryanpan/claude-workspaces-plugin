@@ -52,6 +52,7 @@ export * from './footnotes.ts';
 export * from './word-count.ts';
 export * from './voice-feedback.ts';
 export * from './page-edits.ts';
+export * from './linked-item.ts';
 export * from './pcm-audio.ts';
 export * from './review-size.ts';
 export * as anchors from './anchor/index.ts';

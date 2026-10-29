@@ -26,6 +26,7 @@
     "./model-cost": "./src/model-cost.ts",
     "./mock-swap-noise": "./src/mock-swap-noise.ts",
     "./page-edits": "./src/page-edits.ts",
+    "./linked-item": "./src/linked-item.ts",
     "./page-edits-text": "./src/page-edits-text.ts",
     "./page-thread-link": "./src/page-thread-link.ts",
     "./plot-spec": "./src/plot-spec.mjs",

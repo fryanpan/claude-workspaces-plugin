@@ -18,6 +18,7 @@ import {
   type DocTitleSource,
   type DocType,
   type ElementAnchor,
+  type LinkedReviewItem,
   type PageEdit,
   type PageSuggestion,
   type ReviewItemJudgement,
@@ -30,6 +31,7 @@ import {
   contentKind,
   initDocMeta,
   listThreads,
+  listThreadsWithLinks,
   prose,
   readDocMeta,
   setThreadSummary,
@@ -2515,6 +2517,8 @@ export class DocStore {
       pageEdits?: PageEdit[];
       /** New words an agent proposes for the page — see `PageSuggestion`. */
       pageSuggestion?: PageSuggestion;
+      /** A review item this reply points at — see `LinkedReviewItem`. */
+      linkedItem?: LinkedReviewItem;
       /** Sent from inside a mock page — see `WriteVia`. */
       via?: WriteVia;
     },
@@ -2841,7 +2845,7 @@ export class DocStore {
       return {
         plainText: text,
         blocks: [{ type: 'code', text, startOffset: 0, endOffset: text.length }],
-        threads: listThreads(doc.ydoc),
+        threads: listThreadsWithLinks(doc.ydoc),
         ...(syncError ? { syncError } : {}),
         ...(parked ? { sourceParked: parked } : {}),
       };
@@ -2907,7 +2911,7 @@ export class DocStore {
     return {
       plainText: walk.plainText,
       blocks,
-      threads: listThreads(doc.ydoc),
+      threads: listThreadsWithLinks(doc.ydoc),
       ...(syncError ? { syncError } : {}),
       ...(sourceParked ? { sourceParked } : {}),
     };

@@ -586,6 +586,22 @@ export function readWriteVia(raw: unknown): WriteVia | undefined {
   return raw === 'mock-frame' ? raw : undefined;
 }
 
+/**
+ * A review item a comment points at, possibly on another board: what it said
+ * and where it opens, as they were when it was linked (`linked-item.ts`).
+ */
+export interface LinkedReviewItem {
+  /** The board the item lives on. */
+  workspaceId: string;
+  /** That board's display name when linked. */
+  board: string;
+  /** The item's headline when linked. */
+  headline: string;
+  /** Root-relative path that opens the item. */
+  url: string;
+  ref: { taskId: string; reviewItemId: string } | { docId: string; threadId: string };
+}
+
 export interface Comment {
   id: string;
   author: User;
@@ -610,6 +626,11 @@ export interface Comment {
    * anchored on, for the reader to Accept or Reject there (`page-edits.ts`).
    */
   pageSuggestion?: PageSuggestion;
+  /**
+   * Present on a comment that points at a review item on any board — the
+   * snapshot taken when an agent linked it (`linked-item.ts`).
+   */
+  linkedItem?: LinkedReviewItem;
   /**
    * Every previous version of `text`, oldest first — present only on a
    * comment somebody has edited. See `CommentEdit`.
