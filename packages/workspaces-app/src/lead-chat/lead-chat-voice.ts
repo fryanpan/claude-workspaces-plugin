@@ -62,6 +62,7 @@ export interface LeadVoiceOpts {
   playbackContext?: () => PlaybackContext | null;
   /** The page's origin facts; a test passes a secure one. */
   blocked?: () => string | null;
+  /** Where the board mic keeps its chosen setup; omitted, this page's own. */
   storage?: Pick<Storage, 'getItem'> | null;
 }
 
@@ -196,7 +197,13 @@ export function createLeadVoice(opts: LeadVoiceOpts): LeadVoice {
 
   const pickSetup = (): SpokenSetup | null => {
     const usable = LEAD_SETUPS.filter((s) => setups?.includes(s));
-    const stored = Number(opts.storage?.getItem(SETUP_KEY) ?? Number.NaN) as SpokenSetup;
+    let raw: string | null = null;
+    try {
+      raw =
+        (opts.storage === undefined ? window.localStorage : opts.storage)?.getItem(SETUP_KEY) ??
+        null;
+    } catch {}
+    const stored = Number(raw ?? Number.NaN) as SpokenSetup;
     return usable.includes(stored) ? stored : (usable[0] ?? null);
   };
 
