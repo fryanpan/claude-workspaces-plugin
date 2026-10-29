@@ -205,7 +205,9 @@ each request it accepts and hands it to the same front door, where
 `middleware/board-socket-door.ts` holds the request to that board. It names
 no path. `board-socket-roots.ts` sits beside it as a store: the folders a
 board's lead may bind, which `routes/board-socket-roots.ts` sets from
-loopback. `server-options.ts` holds
+loopback. `bound-path-guard.ts` is the read and write the bound-file
+reader (`slow-fs.ts`) uses under those roots, each checked by where the
+open file really is. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. `review-hold-message.ts` joins those two at the top level: it is the

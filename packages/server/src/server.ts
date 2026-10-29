@@ -1958,7 +1958,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** The folders each board's lead may bind, and the sets it bound; every
    *  bound read, stat and write under those is re-checked against it. */
   const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
-  const removeLeadBindGuard = boundFiles.addPathGuard((p) => boardSocketRoots.pathAllowed(p));
+  const removeLeadBindGuard = boundFiles.guards.add(boardSocketRoots);
   /** Board agent tokens (`at2`) and their revocation record. */
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),

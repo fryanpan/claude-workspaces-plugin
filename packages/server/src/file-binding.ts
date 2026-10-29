@@ -1391,7 +1391,7 @@ export class FileBindings {
     // the filesystem again here would put the blocking call straight back.
     const absent = opts.preread ? !opts.preread.exists : !existsSync(absPath);
     let attachOpts = opts;
-    if (absent && boundFiles.allows(absPath)) {
+    if (absent && boundFiles.guards.landsAllowedSync(absPath)) {
       const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
       try {
         mkdirSync(dirname(absPath), { recursive: true });
@@ -2418,7 +2418,7 @@ export class FileBindings {
       if (
         boundFiles.quarantined(binding.path) ||
         boundFiles.busy() ||
-        !boundFiles.allows(binding.path)
+        !boundFiles.guards.landsAllowedSync(binding.path)
       ) {
         this.failedWrites.add(doc.docId);
         return;

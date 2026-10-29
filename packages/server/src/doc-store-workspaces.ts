@@ -60,10 +60,10 @@ import { boundFiles } from './slow-fs.ts';
 
 /** A set's bound folder, unless the bound-file guard now refuses it (a
  *  walled lead's folder that no longer resolves to itself, `slow-fs.ts`
- *  `addPathGuard`): then the set reads as gone, its names included. */
+ *  `boundFiles.guards`): then the set reads as gone, its names included. */
 function liveRoot(members: DocMeta[]): string | undefined {
   const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
-  return root && boundFiles.allows(root) ? root : undefined;
+  return root && boundFiles.guards.allows(root) ? root : undefined;
 }
 
 /**
@@ -599,7 +599,7 @@ export class DocStoreWorkspaces {
     const byRel = new Map<string, { meta: DocMeta; openCount: number; threadCount: number }>();
     for (const meta of this.p.list()) {
       if (attachmentIdOf(meta) !== setId) continue;
-      if (!workspaceRoot && meta.workspaceRoot && boundFiles.allows(meta.workspaceRoot))
+      if (!workspaceRoot && meta.workspaceRoot && boundFiles.guards.allows(meta.workspaceRoot))
         workspaceRoot = meta.workspaceRoot;
       const key = meta.relPath ?? meta.docId;
       const { open, total } = this.p.threadCounts(meta.docId);

@@ -19,7 +19,8 @@
  * And a root can still be swapped by whoever CAN write its parent, or
  * dropped from the list at the next launch, so every set a lead bound is
  * recorded here (`recordBind`) and every read, stat and write under it is
- * re-checked (`pathAllowed`, installed as a `slow-fs.ts` path guard).
+ * re-checked (`admits` and `landsInside`, installed as a `slow-fs.ts` path
+ * guard).
  *
  * `scripts/lead-sandbox.ts` writes the list when it launches a walled lead,
  * from the projects that lead's profile already opens to it, through
@@ -140,33 +141,57 @@ export class BoardSocketRoots {
     this.save();
   }
 
-  /**
-   * Whether a bound read, stat or write of `path` may go ahead
-   * (`slow-fs.ts` `addPathGuard`). A path under no lead's bind is not this
-   * list's business. One under a lead's bind needs the root still registered
-   * for that board, still resolving to itself (no link swapped in for it),
-   * and the path, where it exists, still landing inside it.
-   */
-  pathAllowed(path: string): boolean {
+  /** How long a root's verdict is kept, so a poll stat does not resolve it
+   *  on the main thread every time. A swap inside the window is still met
+   *  by `landsInside`, which every read and write asks off the main thread. */
+  static readonly ROOT_VERDICT_MS = 1_000;
+  private verdicts = new Map<string, { at: number; ok: boolean }>();
+
+  /** The lead binds whose root holds `path`. */
+  private bindsOver(path: string): LeadBindRecord[] {
     this.load();
-    for (const { board, root } of Object.values(this.binds)) {
-      if (path !== root && !path.startsWith(`${root}/`)) continue;
+    return Object.values(this.binds).filter(
+      ({ root }) => path === root || path.startsWith(`${root}/`),
+    );
+  }
+
+  /** Whether `path` is under a root a lead bound: the guard's business. */
+  covers(path: string): boolean {
+    return this.bindsOver(path).length > 0;
+  }
+
+  /**
+   * The main-thread half of the guard (`bound-path-guard.ts` `PathGuards`): a path
+   * under a lead's bind needs the root still registered for that board and
+   * still resolving to itself, so no link has been swapped in for it.
+   */
+  admits(path: string, now = Date.now()): boolean {
+    for (const { board, root } of this.bindsOver(path)) {
       if (!this.rootsOf(board).includes(root)) return false;
-      try {
-        if (this.realpath(root) !== root) return false;
-      } catch {
-        return false;
+      const cached = this.verdicts.get(root);
+      let ok: boolean;
+      if (cached && now - cached.at < BoardSocketRoots.ROOT_VERDICT_MS) ok = cached.ok;
+      else {
+        try {
+          ok = this.realpath(root) === root;
+        } catch {
+          ok = false;
+        }
+        this.verdicts.set(root, { at: now, ok });
       }
-      if (path === root) continue;
-      let real: string | null = null;
-      try {
-        real = this.realpath(path);
-      } catch {
-        // Not there yet: a write that creates it lands under the root.
-      }
-      if (real !== null && real !== root && !real.startsWith(`${root}/`)) return false;
+      if (!ok) return false;
     }
     return true;
+  }
+
+  /**
+   * The other half, asked with where `path` really lands (resolved off the
+   * main thread by the caller): inside every lead root that holds it. For a
+   * file not there yet, `real` is its nearest existing folder, resolved, so
+   * a write cannot create a file through a linked parent.
+   */
+  landsInside(path: string, real: string): boolean {
+    return this.bindsOver(path).every(({ root }) => real === root || real.startsWith(`${root}/`));
   }
 
   private save(): void {
