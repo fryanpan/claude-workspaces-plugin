@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { type Server, createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BOARD_SERVER_PORTS, STAGING_PORTS } from '../packages/server/src/reserved-ports.ts';
 import {
@@ -37,7 +37,13 @@ function fixture(home: string, boardWall: unknown, boardSocketDir?: string, boar
   const parsed = parseConfig(
     {
       leads: [
-        { name: 'harborlight-lead', projects: [`${home}/dev/harborlight`], boardWall, boardId },
+        {
+          name: 'harborlight-lead',
+          projects: [`${home}/dev/harborlight`],
+          allow: [`${home}/shared`],
+          boardWall,
+          boardId,
+        },
       ],
       ...(boardSocketDir ? { boardSocketDir } : {}),
     },
@@ -320,6 +326,23 @@ s.on('error', (e) => console.log(e.code));`,
     // Without the wall the same two links are made.
     expect(run(unwalled, ['/bin/ln', '-s', '/etc', join(project, 'open-sym')])).toBe(0);
     expect(run(unwalled, ['/bin/ln', target, join(project, 'open-hard')])).toBe(0);
+  });
+
+  it('may make no symlink or hard link in a folder its config allows, which it may without the wall', () => {
+    const run = (profile: string, argv: string[]) =>
+      spawnSync(SANDBOX_EXEC, ['-f', profile, ...argv], { cwd: project, encoding: 'utf8' }).status;
+    const shared = join(dirname(dirname(project)), 'shared');
+    mkdirSync(shared, { recursive: true });
+    const target = join(shared, 'notes.md');
+    writeFileSync(target, '# saltmarsh notes\n');
+    // The positive control: the walled profile still writes a file there.
+    expect(run(walled, ['/bin/sh', '-c', `echo ok > ${join(shared, 'plain.md')}`])).toBe(0);
+    expect(run(walled, ['/bin/ln', '-s', '/etc', join(shared, 'walled-sym')])).not.toBe(0);
+    expect(run(walled, ['/bin/ln', target, join(shared, 'walled-hard')])).not.toBe(0);
+    expect(existsSync(join(shared, 'walled-sym'))).toBe(false);
+    expect(existsSync(join(shared, 'walled-hard'))).toBe(false);
+    expect(run(unwalled, ['/bin/ln', '-s', '/etc', join(shared, 'open-sym')])).toBe(0);
+    expect(run(unwalled, ['/bin/ln', target, join(shared, 'open-hard')])).toBe(0);
   });
 
   it('makes links in node_modules, which a package manager needs, and moves none of it out', () => {

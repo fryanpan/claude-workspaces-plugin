@@ -40,6 +40,9 @@ export interface WalledLead {
   boardId?: string;
   /** Its own project folders, which the server may read and write for it. */
   projects?: readonly string[];
+  /** The other paths its config opens to it for writing, which the server
+   *  also holds as its roots (`lead-sandbox-roots.ts` `leadRoots`). */
+  allow?: readonly string[];
 }
 
 /**
@@ -71,14 +74,17 @@ export function boardWallRules(
     ...ends.map(
       (d) => `(deny file-write* (subpath ${sbQuote(d)})) ; no link to another board's socket`,
     ),
-    ...(lead.projects ?? []).flatMap((p) => projectRules(p, realpath)),
+    // Every path it can write, so no link appears under a root the server
+    // holds. An `allow` file or missing folder is named too: no link can
+    // then be made at that name.
+    ...[...(lead.projects ?? []), ...(lead.allow ?? [])].flatMap((p) => projectRules(p, realpath)),
   ];
 }
 
 /** Outside `node_modules`, at any depth. */
 const NOT_NODE_MODULES = '(require-not (regex #"/node_modules(/|$)"))';
 
-/** The rules for one project folder, at each of its spellings. */
+/** The rules for one folder it can write, at each of its spellings. */
 function projectRules(project: string, realpath: (path: string) => string): string[] {
   return socketDirEnds(project, realpath).flatMap((d) => {
     sbQuote(d);

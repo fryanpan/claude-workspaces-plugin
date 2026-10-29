@@ -151,6 +151,25 @@ describe('BoardSocketRoots', () => {
     expect(roots.covers(join(off, 'own.md'))).toBe(false);
   });
 
+  it('reads a path holding . or .. as a lead’s, since a link can climb out where text cannot', () => {
+    const lead = join(root, 'harbor-dots');
+    const deep = join(lead, 'a', 'b', 'c');
+    mkdirSync(join(lead, 'node_modules'), { recursive: true });
+    mkdirSync(deep, { recursive: true });
+    symlinkSync(deep, join(lead, 'node_modules', 'evil'));
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'dt')));
+    roots.set('w-harbor', [lead]);
+    // On disk this is <lead>/y.md; as text it is beside the root.
+    const climbing = `${lead}/node_modules/evil/../../../y.md`;
+    for (const p of [climbing, `${riverbend}/./plan.md`, `${riverbend}/x/../plan.md`]) {
+      expect(roots.covers(p), p).toBe(true);
+      expect(roots.admits(p), p).toBe(false);
+      expect(roots.landsInside(p, join(lead, 'y.md')), p).toBe(false);
+    }
+    // The control: the same file spelled plainly off the root is not covered.
+    expect(roots.covers(join(riverbend, 'plan.md'))).toBe(false);
+  });
+
   it('reads a folder it could not spell as a lead’s, and asks again next time', () => {
     const off = join(riverbend, 'flaky');
     mkdirSync(off, { recursive: true });

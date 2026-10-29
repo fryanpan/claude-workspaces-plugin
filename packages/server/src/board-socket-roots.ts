@@ -226,9 +226,12 @@ export class BoardSocketRoots {
 
   /** `path` as the roots are spelled, its last name included, or null when
    *  that could not be told. The first ask for a path, at bind or on load,
-   *  pays the lookups; every later ask is answered from `spellings`. */
+   *  pays the lookups; every later ask is answered from `spellings`. A `.`
+   *  or `..` name is not spelled: walked as text it would drop a folder the
+   *  disk climbs out of through a link, so the path counts as a lead's. */
   private spelled(path: string): string | null {
     if (this.allRoots().length === 0) return path;
+    if (path.split('/').some((n) => n === '.' || n === '..')) return null;
     return this.spell(path);
   }
 
