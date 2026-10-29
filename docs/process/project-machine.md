@@ -206,6 +206,100 @@ the rest on the Mac.
    registers again by itself when the broker restarts, so the broker never
    needs to know about it.
 
+## Moving a board onto the machine
+
+```bash
+bun run machine:move-board --board <id> --project <project> [--dry-run]
+    [--source-data-dir <dir>] [--source-url http://127.0.0.1:8787] [--sync-config <path>]
+```
+
+Run on the Mac, after `machine:deploy` has put this commit's image on the
+machine (the importer, `board-probe.ts`, ships in the image). It keeps every
+id, so `/workspaces/<id>/…` links work once the router sends the board to the
+machine. In order:
+
+1. Fingerprints the board on the Mac's server: each doc's text, every thread
+   and comment on its docs and rows, its tasks, and the lines of its event and
+   agent-note logs (`board-print.ts`).
+2. Stops, changing nothing, if the machine already holds the board.
+3. Exports it (`board-bundle.ts`) and fingerprints the source again. If the
+   board changed while it was read, it stops: quiet the board's agents first.
+4. Copies the bundle up, holds the machine's services off with
+   `/data/maintenance`, imports, and restarts. The import refuses, having
+   written nothing, when the data dir already has any of the board's files or
+   an entry for it in a shared file.
+5. Fingerprints the board on the machine. Only when every part matches does it
+   archive the Mac's board (`PUT /workspaces/<id>/retired`), which is
+   reversible. It never deletes anything on the Mac.
+
+`--dry-run` stops after step 3 and prints what would move.
+
+**What moves.** `workspaces/<board>.*` (the board record with its tasks, goal
+rows and review items, the event and agent-note logs, the comment and voice
+queues, the home brief, the load reports); the docs `ws:<board>`,
+`task:<id>` for every row, and every doc in the board's `docIds`, each with
+its `.ydoc`, voice-feedback log and recordings, meetings folder and huddle
+notes; and the board's entries in seven shared files: share links, members
+and audience (`share-links.json`), Access shares (`shares.json`), the close and
+lock flags (`sharing.json`), lead ranks (`review-ranks.json`), the board
+summary, dispatch reports and the review-answer log.
+
+**What stays on the Mac.** Paths on the Mac never leave it: each doc's
+`.private.json` (its bound file, among others), the board's `notesHome`, and
+any of those keys an old `.ydoc` still carries. The bound files come back as
+`bindings`, for the sync below. Also left: `.attachments.json` (the agent
+sessions attached now; they attach again on the machine), `.index.json`
+(rebuilt at boot), board agent tokens, GitHub push keys and thread-opener
+proofs (minted by the Mac's server and meaningless to another), stall and
+nudge stamps (rebuilt), the owner's analytics logs, and archived docs.
+
+After a move the board's agent needs a board agent token minted on the
+machine, and its GitHub events need the five steps above, run for the
+machine.
+
+## Bound files after the move
+
+On the Mac a doc can be bound to a `.md` in a repo, and the server keeps the
+two in step. The machine cannot reach that repo. `machine:sync-board` holds
+the binding from the Mac instead: one process per board, which joins each
+doc's editing socket as a co-editor does, writes the file when the doc
+changes, and applies the file to the doc when the file changes, with the
+server's own serializer and block diff, so threads on untouched blocks keep
+their anchors.
+
+- **Delay.** A remote edit reaches the file 800ms after it arrives (the
+  server's own write-back debounce). A file edit is seen within 1s and sent at
+  once. With the network, about 2 seconds each way.
+- **Restarts.** It records what it last wrote. At start, if only the file
+  changed, the file wins; otherwise the doc wins, and a file it replaces is
+  copied to `<state dir>/replaced/` first.
+- **Edits from the file read as a person's.** They arrive over the editing
+  socket, so the server's stale-write guard makes an agent re-read before a
+  REST edit replaces them.
+- **Off by default, per board.** `--sync-config <path>` writes a config with
+  `"enabled": false`; it runs only after a person sets it to true. It is
+  refused when group or others can write it, since it names the files the
+  sync writes.
+
+It reaches the board the way the relay does, with two credentials: the
+project's Access service token, and a board agent token for the one board.
+Mint the token on the machine and keep it out of the terminal:
+
+```bash
+TOKEN=$(fly ssh console --app cw-<project> -C \
+  "curl -s -H 'host: localhost:8787' -H 'content-type: application/json' \
+    -d '{\"agentId\":\"<project>-board-sync\",\"boardId\":\"<board id>\",\"label\":\"board sync\"}' \
+    http://127.0.0.1:8787/api/board-tokens" | tail -1 | jq -r .token)
+printf 'add-generic-password -U -a %s -s cw-<project>-board-sync-token -w %s\n' "$USER" "$TOKEN" | security -i
+unset TOKEN
+bun run machine:sync-board <config path>
+```
+
+It renews the token itself every 12 hours and keeps the renewed value in its
+state dir (`CW_BOARD_SYNC_STATE_DIR`, default
+`~/.claude/claude-workspaces/board-sync`, mode 700). Revoking the token on the
+machine stops it.
+
 ## Restore
 
 ```bash

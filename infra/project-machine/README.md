@@ -14,6 +14,8 @@ scripts that stand it up. How to run them is
 | `backup-once.sh`, `backup.ts` | the machine | One backup (data dir, with its events and agent notes, plus Claude Code transcripts): snapshot as `cw`, upload as `cwbackup`, so the server's user never holds the bucket credential |
 | `store-uploader.ts`, `store-upload.ts` | any machine running sessions | Every 5 minutes, sends the new lines of each Claude Code transcript and analytics log to the transcript store, each sealed to its board's key; local-only boards never leave. Not installed anywhere yet |
 | `drill-probe.ts` | the machine | Seeds the drill board and fingerprints its docs, on loopback |
+| `bun run machine:move-board --board <id> --project <name>` | the Mac | Moves one board onto the machine with the same ids (`board-bundle.ts`, `board-print.ts`), and archives the Mac's copy only when both fingerprints match |
+| `board-probe.ts` | the machine | The move's importer and fingerprint, on loopback |
 
 ## Why Tigris for the bucket
 
@@ -56,6 +58,7 @@ with a board's event log and agent-note log, and a transcripts dir beside
 it; snapshots them, restores them, checks the logs and transcripts byte for
 byte and reads the board back from a second server.
 `transcript-store.test.ts` holds the store's uploader: which key each board's files are sealed to, that a local-only board sends nothing, and that a run cut short resumes without repeating or skipping a byte. `transcript-store-uploader.test.ts` holds its keys file and a pass against a stand-in bucket on loopback, which sees PUTs only.
+`project-machine-move-board.test.ts` moves a board between two real servers on loopback and checks what refuses; `bound-file-sync.test.ts` keeps a moved board's doc and its `.md` in step both ways.
 `project-machine-snapshot.test.ts` holds the refusals, the first snapshot
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs
 `entrypoint.sh` and `backup-once.sh` with stand-ins for `setpriv` and each
