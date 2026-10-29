@@ -1106,7 +1106,10 @@ describe('workspace share over HTTP', () => {
       expect(r.status, candidate).toBe(400);
       expect(((await r.json()) as { error: string }).error).toContain('entryDocId');
     }
-    // Positive control: drop the field and the same call mints.
+    // Positive control: drop the field and the same call mints. The board's
+    // audience names the domain first, as the owner's approval would have,
+    // since a link may only invite people the board already names.
+    handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Harborlight');
     const ok = await fetch(`${base}/api/share/workspace`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
