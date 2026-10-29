@@ -14390,9 +14390,8 @@ function isTrustedStamp(stamp, trustBoards, watchedBoards) {
     return false;
   return trustBoards.some((b) => typeof b === "string" && watchedBoards.has(b));
 }
-function indentContinuation(text) {
-  return text.replace(/\r\n?|[\n\u2028\u2029]/g, `
-  `);
+function collapseLines(text) {
+  return text.replace(/\s*(?:\r\n?|[\n\u2028\u2029\u0085])\s*/g, " ").trim();
 }
 var UNTRUSTED_TAG = "untrusted-comment";
 var INVISIBLE_RANGES = [
@@ -15313,8 +15312,9 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const trusted = isTrustedStamp(p.commentTrust, p.trustBoards, watched) || ownWords;
   const parentTrusted = isTrustedStamp(p.inReplyTo?.trust, p.trustBoards, watched) || !!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId;
   const toParent = !parentText ? "" : parentTrusted ? ` — to "${truncate8(parentText, 100)}"` : ` — to ${quoteUntrustedInline(truncate8(parentText, 100), p.inReplyTo?.author ?? "")}`;
-  const who = `${author ? `${author}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
-  const said = trusted ? `${who ? `${who}: ` : ""}${asMember ? indentContinuation(text) : text}` : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}
+  const named = author && asMember ? `${author} (board member)` : author;
+  const who = `${named ? `${named}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
+  const said = trusted ? `${who ? `${who}: ` : ""}${asMember ? collapseLines(text) : text}` : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}
 ${quoteUntrusted(text, author)}`;
   const body = text ? `[${action}]${onItem} ${said}${openPartsClause(p.openParts)}${editHint}` : `[${action}]${onItem}${author ? ` by ${author}${fromMock} —` : fromMock} thread ${threadId} ${header}`.trim();
   await deps.notify({

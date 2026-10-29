@@ -66,7 +66,7 @@ describe('the renderer quotes what the owner did not write', () => {
       comment: { author: { id: 'user-alice', name: 'Alice' }, text: 'Yes' },
     });
     const f = only(frames);
-    expect(f.content).toBe('[replied] Alice — to "Ship it?": Yes');
+    expect(f.content).toBe('[replied] Alice (board member) — to "Ship it?": Yes');
     expect(f.meta.trust).toBe('member');
   });
 

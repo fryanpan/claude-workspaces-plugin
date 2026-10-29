@@ -63,7 +63,9 @@ describe('createCommentTrust', () => {
     for (const name of ['Bryan Chan', 'Bryan (owner)', 'Bryan.', 'ＢＲＹＡＮ', '\u0412ryan']) {
       expect(trust()('task:t1', { id: ALICE_ID, name })).toBe('untrusted');
     }
-    expect(trust()('task:t1', { id: ALICE_ID, name: 'Alice Bryant' })).toBe('member');
+    // Contains, not equals: a near-miss is quoted too.
+    expect(trust()('task:t1', { id: ALICE_ID, name: 'Alice Bryant' })).toBe('untrusted');
+    expect(trust()('task:t1', { id: ALICE_ID, name: 'José' })).toBe('member');
   });
 
   it('fails closed when the audience cannot be read', () => {

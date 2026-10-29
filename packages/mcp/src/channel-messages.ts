@@ -44,7 +44,7 @@ import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
 import {
   UNTRUSTED_LABEL,
-  indentContinuation,
+  collapseLines,
   isTrustedStamp,
   quoteUntrusted,
   quoteUntrustedInline,
@@ -723,9 +723,11 @@ async function emitChannelMessage(
     : parentTrusted
       ? ` — to "${truncate(parentText, 100)}"`
       : ` — to ${quoteUntrustedInline(truncate(parentText, 100), p.inReplyTo?.author ?? '')}`;
-  const who = `${author ? `${author}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
+  // A member's line names them as one, so it never reads as the owner's.
+  const named = author && asMember ? `${author} (board member)` : author;
+  const who = `${named ? `${named}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
   const said = trusted
-    ? `${who ? `${who}: ` : ''}${asMember ? indentContinuation(text) : text}`
+    ? `${who ? `${who}: ` : ''}${asMember ? collapseLines(text) : text}`
     : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}\n${quoteUntrusted(text, author)}`;
   const body = text
     ? `[${action}]${onItem} ${said}${openPartsClause(p.openParts)}${editHint}`

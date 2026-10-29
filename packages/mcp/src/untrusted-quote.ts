@@ -40,10 +40,10 @@ export function isTrustedStamp(
   return trustBoards.some((b) => typeof b === 'string' && watchedBoards.has(b));
 }
 
-/** A member's comment, its later lines indented, so none of them can start
- *  with `[` and read as a channel line of its own. */
-export function indentContinuation(text: string): string {
-  return text.replace(/\r\n?|[\n\u2028\u2029]/g, '\n  ');
+/** A member's comment on one line, so no part of it can start a channel
+ *  line of its own (a "\n[replied] Bryan: …" forgery). */
+export function collapseLines(text: string): string {
+  return text.replace(/\s*(?:\r\n?|[\n\u2028\u2029\u0085])\s*/g, ' ').trim();
 }
 
 /** The marker name. One spelling, so the neutraliser and the wrapper agree. */

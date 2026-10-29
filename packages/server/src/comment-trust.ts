@@ -21,9 +21,9 @@
  *  - **Asked per comment.** Nothing is cached, so a person removed from the
  *    audience is quoted again from their next comment.
  *  - **Not the owner's name.** The rendered line names the author by the name
- *    on the comment, and a member chooses their own. A name that holds an
- *    owner name as a word ("Bryan Chan", "Bryan (owner)", after NFKC and
- *    case folding), or that mixes Latin letters with another script (a
+ *    on the comment, and a member chooses their own. A name that contains an
+ *    owner name ("Bryan Chan", "Bryan (owner)", after NFKC and case
+ *    folding), or that mixes Latin letters with another script (a
  *    Cyrillic "В" standing in for "B"), would put the owner's name on an
  *    unwrapped line, so that comment is quoted instead.
  *  - **Fails closed.** A throw anywhere is `untrusted`. An unreadable
@@ -46,12 +46,7 @@ export interface CommentTrustContext {
   memberOf: (workspaceId: string, email: string) => boolean;
 }
 
-const words = (text: string): string[] =>
-  text
-    .normalize('NFKC')
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w !== '');
+const fold = (text: string): string => text.normalize('NFKC').toLowerCase();
 
 /** Latin letters beside letters of another script: the homoglyph shape. */
 const MIXED_SCRIPT = (name: string): boolean =>
@@ -59,10 +54,9 @@ const MIXED_SCRIPT = (name: string): boolean =>
 
 /** Could this name be read as the owner's on a channel line? */
 export function readsAsOwner(name: string): boolean {
-  const folded = name.normalize('NFKC');
+  const folded = fold(name);
   if (MIXED_SCRIPT(folded)) return true;
-  const said = new Set(words(folded));
-  return ownerDisplayNames().some((owner) => words(owner).some((w) => said.has(w)));
+  return ownerDisplayNames().some((owner) => folded.includes(fold(owner)));
 }
 
 export type CommentTrustFor = (docId: string, author: unknown) => CommentTrust;
