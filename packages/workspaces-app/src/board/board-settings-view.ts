@@ -184,7 +184,7 @@ export function buildSettingsView(): string {
               <!-- What the agent button does on THIS device (lead-chat-mode.ts):
                    per device for the same reason as the row above — a phone
                    and an iPad want different answers from one person. -->
-              <label class="board-settings-row" for="board-lead-chat-mode">
+              <label class="board-settings-row board-settings-row--push" for="board-lead-chat-mode">
                 <span class="board-settings-label">Voice on this device
                   <small class="board-settings-note">What the agent button does: open the chat, or start listening.</small>
                 </span>
