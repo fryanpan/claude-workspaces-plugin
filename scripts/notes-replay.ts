@@ -29,6 +29,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseNotesMethod } from '../packages/core/src/notes-method.ts';
 import {
   type NotesComposer,
   createStubNotesComposer,
@@ -38,7 +39,7 @@ import {
   createCoverageJudge,
 } from '../packages/server/src/notes-coverage-judge.ts';
 import { createNotesMethodComposer } from '../packages/server/src/notes-method-composer.ts';
-import { readNotesMethod } from '../packages/server/src/notes-method-store.ts';
+import { readNotesMethod, writeNotesMethod } from '../packages/server/src/notes-method-store.ts';
 import { createPromptStore } from '../packages/server/src/prompt-store.ts';
 import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import { runReplay } from '../packages/server/test/notes-replay-run.ts';
@@ -166,6 +167,16 @@ async function main(argv: string[]): Promise<number> {
   const dataDir = join(runDir, 'data');
   rmSync(runDir, { recursive: true, force: true });
   mkdirSync(dataDir, { recursive: true });
+  // A note-taker other than the doc's default, as a person would pick it.
+  const methodArg = flag(argv, '--method');
+  if (methodArg !== undefined) {
+    const method = parseNotesMethod(methodArg);
+    if (!method) {
+      console.error(`unknown --method ${methodArg}`);
+      return 2;
+    }
+    writeNotesMethod(dataDir, plan.docId, { method, at: Date.now() });
+  }
   const meter = new SpendMeter(stub ? Number.POSITIVE_INFINITY : cap);
   const composer = stub ? createStubNotesComposer() : shippedComposer(meter, runDir, dataDir);
   const coverageJudge = stub ? undefined : evalCoverageJudge(meter);
