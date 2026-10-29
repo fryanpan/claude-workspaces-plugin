@@ -25,8 +25,9 @@
  * WHICH ACTIONS COUNT. `countedActionOf` is the whole list. Hard deletes
  * (doc, attachment set, workspace, any purge); archiving or retiring a
  * workspace, archiving a doc or an attachment set; and every widening of
- * access — a new share or share link, sharing switched on, a role raised, a
- * link lengthened, a board unlocked. Task and goal archives, every unarchive,
+ * access — a new share or share link, someone added to a board's audience, an
+ * access card approved, sharing switched on, a role raised, a link
+ * lengthened, a board unlocked. Task and goal archives, every unarchive,
  * and every narrowing of access stay instant. Where the body decides which
  * way a call goes, only the explicitly narrowing value is exempt, so a body
  * the handler would refuse anyway is counted rather than waved through.
@@ -125,6 +126,14 @@ export async function countedActionOf(
   if (new RegExp(`^${WS}/members/[^/]+/role$`).test(pathname)) {
     return normalizeBoardRole((await bodyOf(req))?.role) === 'member' ? null : 'raise-role';
   }
+  if (new RegExp(`^${WS}/audience$`).test(pathname)) {
+    const body = await bodyOf(req);
+    const removeOnly = body !== null && (body.add === undefined || isEmptyArray(body.add));
+    return removeOnly ? null : 'add-member';
+  }
+  if (new RegExp(`^${WS}/tasks/[^/]+/review-items/[^/]+/access$`).test(pathname)) {
+    return (await bodyOf(req))?.decision === 'reject' ? null : 'approve-access';
+  }
   if (pathname === '/api/share/enabled') {
     return (await bodyOf(req))?.enabled === false ? null : 'sharing-on';
   }
@@ -135,6 +144,8 @@ export async function countedActionOf(
   if (ttl) return (await lengthensShare(req, ttl[1] ?? '', ctx)) ? 'lengthen-share' : null;
   return null;
 }
+
+const isEmptyArray = (v: unknown): boolean => Array.isArray(v) && v.length === 0;
 
 /**
  * Whether a TTL change moves a live share's expiry later. Resolved with the

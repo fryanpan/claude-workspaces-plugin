@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
+import { resetOwnerIdentities } from '../src/actor-identity.ts';
 import { mintSession, sessionKey, signSession } from '../src/auth/session.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
@@ -88,6 +89,10 @@ describe('a fresh sign-in before a destructive action', () => {
       headers: {
         host: OWNER_HOST,
         ...CF_RAY,
+        // From the board's own page, which the owner-only access writes ask for.
+        origin: `https://${OWNER_HOST}`,
+        'sec-fetch-site': 'same-origin',
+        'x-forwarded-proto': 'https',
         'content-type': 'application/json',
         'cf-access-jwt-assertion': await ownerToken(age, opts),
       },
@@ -140,12 +145,16 @@ describe('a fresh sign-in before a destructive action', () => {
       shareLinkAudience: SHARE_AUD,
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
+      ownerEmail: OWNER_EMAIL,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
       requireSignInToWrite: false,
     });
     base = `http://127.0.0.1:${handle.port}`;
     board = await makeBoard();
-    // A member, through a link, whose role the owner can raise.
+    // A member, through a link, whose role the owner can raise. Only the
+    // owner, signed in, lets a new address into the audience.
+    const let_in = await asOwner(`/workspaces/${board}/audience`, 'POST', { add: [MEMBER] }, 0);
+    expect(let_in.status).toBe(200);
     const link = (await (await post('/api/share/workspace', { workspaceId: board })).json()) as {
       link: { linkId: string };
     };
@@ -158,6 +167,7 @@ describe('a fresh sign-in before a destructive action', () => {
 
   afterAll(async () => {
     await handle.stop();
+    resetOwnerIdentities();
     rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -233,7 +243,27 @@ describe('a fresh sign-in before a destructive action', () => {
       expect(await roles()).toBe('member');
     });
 
-    it('a new share link, a share, and switching sharing on — switching it off stays instant', async () => {
+    it("letting an address into a board's audience, while taking one out stays instant", async () => {
+      const path = `/workspaces/${board}/audience`;
+      const match = '@riverbend.example';
+      const audience = async () =>
+        (
+          (await (await local(`/workspaces/${board}/members`)).json()) as {
+            audience?: Array<{ match: string }>;
+          }
+        ).audience?.map((a) => a.match) ?? [];
+      expect(await isConfirmRequired(await asOwner(path, 'POST', { add: [match] }, STALE))).toBe(
+        true,
+      );
+      expect(await audience()).not.toContain(match);
+      expect((await asOwner(path, 'POST', { add: [match] }, 5)).status).toBe(200);
+      expect(await audience()).toContain(match);
+      const out = await asOwner(path, 'POST', { remove: [match] }, STALE);
+      expect(out.status).toBe(200);
+      expect(await audience()).not.toContain(match);
+    });
+
+    it('a new share link, a share, and switching sharing on — switching it off is never asked', async () => {
       for (const [path, body] of [
         ['/api/share/workspace', { workspaceId: board }],
         ['/api/share/link', { workspaceId: board }],
@@ -243,10 +273,10 @@ describe('a fresh sign-in before a destructive action', () => {
         const fresh = await asOwner(path, 'POST', body, 5);
         expect(await isConfirmRequired(fresh)).toBe(false);
       }
+      // A page cannot change sharing at all (browser_cannot_operate); the point
+      // here is only that the narrowing is not the refusal that asks.
       const off = await asOwner('/api/share/enabled', 'POST', { enabled: false }, STALE);
       expect(await isConfirmRequired(off)).toBe(false);
-      // Back on for the rest of the file, from the box.
-      expect((await post('/api/share/enabled', { enabled: true })).status).toBe(200);
     });
   });
 

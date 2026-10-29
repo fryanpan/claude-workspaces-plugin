@@ -115,7 +115,10 @@ is more than ten minutes old; the request chain calls it below the gates that
 proved the person. `workspaces-app/src/fresh-signin-client.ts` is the page's
 half: it holds the refused request in sessionStorage across the trip to sign
 in again and offers it once more on return. A page that sends a counted
-action goes through `sendCounted` rather than `fetch`. The rules are in
+action goes through `sendCounted` rather than `fetch`; the two access
+writes that widen who is in, Add and Approve, go through
+`board/access-writes.ts`, which wraps it for the board's Settings and
+`/access` alike. The rules are in
 [security.md](security.md).
 
 **The MCP connector can run inside the server.** `server/src/connector/` hosts

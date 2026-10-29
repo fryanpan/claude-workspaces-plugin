@@ -65,6 +65,8 @@ describe('personProofOf', () => {
   });
 });
 
+const ACCESS_CARD = '/workspaces/w-1/tasks/t-1/review-items/r-1/access';
+
 describe('countedActionOf', () => {
   const ctx: CountedActionContext = { shares: null, now: NOW };
   const req = (method: string, path: string, body?: unknown) =>
@@ -93,11 +95,17 @@ describe('countedActionOf', () => {
     expect(await action('POST', '/api/share/link', {})).toBe('share-link');
     expect(await action('POST', '/api/share/enabled', { enabled: true })).toBe('sharing-on');
     expect(await action('POST', '/api/share/lock', { locked: false })).toBe('unlock-board');
+    expect(await action('POST', '/workspaces/w-1/audience', { add: ['@riverbend.test'] })).toBe(
+      'add-member',
+    );
+    expect(await action('POST', ACCESS_CARD, { decision: 'approve' })).toBe('approve-access');
   });
 
   it('counts a body it cannot read rather than waving it through', async () => {
     expect(await action('PUT', '/workspaces/w-1/retired')).toBe('retire-workspace');
     expect(await action('POST', '/api/share/enabled')).toBe('sharing-on');
+    expect(await action('POST', '/workspaces/w-1/audience')).toBe('add-member');
+    expect(await action('POST', ACCESS_CARD)).toBe('approve-access');
   });
 
   it('leaves every narrowing and every task, goal and unarchive verb instant', async () => {
@@ -106,6 +114,11 @@ describe('countedActionOf', () => {
     expect(await action('DELETE', '/workspaces/w-1/members/a')).toBeNull();
     expect(await action('POST', '/api/share/enabled', { enabled: false })).toBeNull();
     expect(await action('POST', '/api/share/lock', { locked: true })).toBeNull();
+    expect(
+      await action('POST', '/workspaces/w-1/audience', { remove: ['@riverbend.test'] }),
+    ).toBeNull();
+    expect(await action('POST', '/workspaces/w-1/audience', { add: [], remove: ['a'] })).toBeNull();
+    expect(await action('POST', ACCESS_CARD, { decision: 'reject' })).toBeNull();
     expect(await action('POST', '/workspaces/w-1/tasks/t-1/archive')).toBeNull();
     expect(await action('POST', '/workspaces/w-1/goals/g-1/archive')).toBeNull();
     expect(await action('POST', '/workspaces/w-1/docs/d-1/unarchive')).toBeNull();
