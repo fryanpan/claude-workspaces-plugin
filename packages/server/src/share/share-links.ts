@@ -572,7 +572,16 @@ export class ShareLinks {
    */
   private load(): void {
     const path = join(this.dataDir, REGISTRY_FILENAME);
-    if (!existsSync(path)) return;
+    // Only a file that is not there means "no registry yet". A stat that
+    // fails any other way is a registry we cannot see, and seeding over it
+    // would replace it.
+    try {
+      statSync(path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      this.failLoad(err);
+      return;
+    }
     // Tighten a file that already exists. New writes are mode 600, but a
     // registry written before that was true — or by a hand-edit, or restored
     // from a backup — keeps whatever mode it had, and nothing else would ever
@@ -586,6 +595,16 @@ export class ShareLinks {
     }
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Persisted>;
+      // Valid JSON that is not the registry's shape is as unreadable as a
+      // syntax error: read as empty, the migration below would save over it.
+      if (
+        parsed === null ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed) ||
+        (!Array.isArray(parsed.links) && !Array.isArray(parsed.members))
+      ) {
+        throw new Error('not a share-link registry');
+      }
       const links = Array.isArray(parsed?.links) ? parsed.links : [];
       const members = Array.isArray(parsed?.members) ? parsed.members : [];
       this.links = links
@@ -634,14 +653,19 @@ export class ShareLinks {
         this.migrateToAudiences();
       }
     } catch (err) {
-      this.links = [];
-      this.members = [];
-      this.audiences = [];
-      this.loadFailed = true;
-      console.error(
-        `[share-links] ${REGISTRY_FILENAME} could not be read (${err instanceof Error ? err.message : String(err)}); admitting nobody and writing nothing until it is fixed and the server restarts`,
-      );
+      this.failLoad(err);
     }
+  }
+
+  /** Admit nobody and write nothing: the registry on disk is not readable. */
+  private failLoad(err: unknown): void {
+    this.links = [];
+    this.members = [];
+    this.audiences = [];
+    this.loadFailed = true;
+    console.error(
+      `[share-links] ${REGISTRY_FILENAME} could not be read (${err instanceof Error ? err.message : String(err)}); admitting nobody and writing nothing until it is fixed and the server restarts`,
+    );
   }
 
   /**

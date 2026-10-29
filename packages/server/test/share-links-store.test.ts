@@ -404,31 +404,55 @@ describe('the share-link store', () => {
       expect(later.audienceOf(BOARD)?.entries).toEqual([]);
     });
 
-    it('admits nobody and writes nothing when the registry cannot be read', () => {
-      links.create({ workspaceId: BOARD, createdBy: 'Test Agent' });
-      const path = join(dataDir, 'share-links.json');
-      const torn = `${readFileSync(path, 'utf8').slice(0, 40)}`;
-      writeFileSync(path, torn);
-      const before = readFileSync(path);
+    /** A registry `load` could not read: it admits nobody, seeds nothing, refuses writes. */
+    const expectUnreadable = (broken: ShareLinks, said: string[]) => {
+      // The seed would otherwise give the board an audience and save it.
+      broken.seedFromOlderShares([{ workspaceId: BOARD, allowDomains: [REVIEWER] }]);
+      expect(broken.audienceOf(BOARD)).toBeUndefined();
+      expect(broken.isMember(BOARD, REVIEWER)).toBe(false);
+      expect(() => broken.addToAudience(BOARD, [REVIEWER], 'Bryan')).toThrow(REGISTRY_UNREADABLE);
+      expect(() => broken.create({ workspaceId: BOARD, createdBy: 'Test Agent' })).toThrow(
+        REGISTRY_UNREADABLE,
+      );
+      expect(said.some((l) => l.includes('could not be read'))).toBe(true);
+    };
+    const quietly = (run: (said: string[]) => void) => {
       const said: string[] = [];
       const spy = spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
         said.push(a.map(String).join(' '));
       });
       try {
-        const broken = new ShareLinks({ dataDir });
-        // The seed would otherwise give the board an audience and save it.
-        broken.seedFromOlderShares([{ workspaceId: BOARD, allowDomains: [REVIEWER] }]);
-        expect(broken.audienceOf(BOARD)).toBeUndefined();
-        expect(broken.isMember(BOARD, REVIEWER)).toBe(false);
-        expect(() => broken.addToAudience(BOARD, [REVIEWER], 'Bryan')).toThrow(REGISTRY_UNREADABLE);
-        expect(() => broken.create({ workspaceId: BOARD, createdBy: 'Test Agent' })).toThrow(
-          REGISTRY_UNREADABLE,
-        );
-        expect(said.some((l) => l.includes('could not be read'))).toBe(true);
+        run(said);
       } finally {
         spy.mockRestore();
       }
-      expect(readFileSync(path).equals(before)).toBe(true);
+    };
+
+    it('admits nobody and writes nothing when the registry cannot be read', () => {
+      links.create({ workspaceId: BOARD, createdBy: 'Test Agent' });
+      const path = join(dataDir, 'share-links.json');
+      const torn = `${readFileSync(path, 'utf8').slice(0, 40)}`;
+      // Torn, and valid JSON that is not a registry: read as empty, the
+      // migration would save an empty registry over the file.
+      for (const content of [torn, 'null', '{}', '[]']) {
+        writeFileSync(path, content);
+        const before = readFileSync(path);
+        quietly((said) => expectUnreadable(new ShareLinks({ dataDir }), said));
+        expect(readFileSync(path).equals(before)).toBe(true);
+      }
+    });
+
+    it('admits nobody when the registry cannot even be looked at', () => {
+      // A data dir that is a file: the stat fails with ENOTDIR, not ENOENT,
+      // so this is not "no registry yet" and must not be seeded over.
+      const parent = mkdtempSync(join(tmpdir(), 'share-links-notdir-'));
+      const notDir = join(parent, 'data');
+      writeFileSync(notDir, 'not a directory');
+      try {
+        quietly((said) => expectUnreadable(new ShareLinks({ dataDir: notDir }), said));
+      } finally {
+        rmSync(parent, { recursive: true, force: true });
+      }
     });
 
     it('seeds a board the older shares let people into when there was never a registry', () => {
