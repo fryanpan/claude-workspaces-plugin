@@ -21,8 +21,10 @@
  * the relay a walled lead runs needs no token of its own.
  *
  * The socket is a lead's (`middleware/lead-scope.ts`), so on this board it
- * also reaches the doc list, a whole-doc rewrite, a folder bind and the
- * plugin hooks' notes and prompt marks, which `collabScope` refuses a member.
+ * also reaches task notes and the plugin hooks' notes and prompt marks,
+ * which `collabScope` refuses a member. The doc list, a whole-doc rewrite
+ * and a folder bind stay refused: each has the server act on files the
+ * lead can write.
  *
  * Every other case reaches `collabScope` with the socket's board as the only board
  * it is a member of, plus, for a named agent, its own watch set cut to that

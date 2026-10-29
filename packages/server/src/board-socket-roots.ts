@@ -44,19 +44,29 @@ export class BoardSocketRoots {
 
   constructor(
     private readonly path: string,
-    private readonly realpath: (p: string) => string = realpathSync,
+    private readonly realpath: (p: string) => string = realpathSync.native,
   ) {}
+
+  /** Whether the file exists and cannot be read; loads it first. */
+  private isBroken(): boolean {
+    this.load();
+    return this.broken;
+  }
 
   private load(): Record<string, string[]> {
     if (this.boards) return this.boards;
-    const boards: Record<string, string[]> = {};
+    const boards: Record<string, string[]> = Object.create(null);
     try {
-      const raw = existsSync(this.path) ? JSON.parse(readFileSync(this.path, 'utf8')) : null;
-      const listed: unknown = raw?.boards;
-      if (listed && typeof listed === 'object') {
+      if (existsSync(this.path)) {
+        const listed: unknown = JSON.parse(readFileSync(this.path, 'utf8'))?.boards;
+        // Any shape but the one `save` writes is unreadable, not empty: a
+        // list read as "no roots" would leave a lead's projects unguarded.
+        if (!listed || typeof listed !== 'object' || Array.isArray(listed))
+          throw new Error('no boards table');
         for (const [id, roots] of Object.entries(listed as Record<string, unknown>)) {
-          if (Array.isArray(roots))
-            boards[id] = roots.filter((r): r is string => typeof r === 'string' && isAbsolute(r));
+          if (!Array.isArray(roots) || !roots.every((r) => typeof r === 'string' && isAbsolute(r)))
+            throw new Error(`board ${id}: not a list of absolute paths`);
+          boards[id] = roots as string[];
         }
       }
     } catch {
@@ -114,6 +124,7 @@ export class BoardSocketRoots {
     if (this.broken) return { ok: false, error: 'the roots file cannot be read' };
     boards[boardId] = resolved;
     this.verdicts.clear();
+    this.spellings.clear();
     this.save();
     return { ok: true, roots: [...resolved] };
   }
@@ -124,23 +135,70 @@ export class BoardSocketRoots {
   static readonly ROOT_VERDICT_MS = 1_000;
   private verdicts = new Map<string, { at: number; ok: boolean }>();
 
-  /** The roots that hold `path`. */
+  /** How long a folder's resolved spelling is kept by `spelled`. */
+  static readonly SPELLING_MS = 1_000;
+  private static readonly SPELLINGS_MAX = 4_096;
+  private spellings = new Map<string, { at: number; real: string | null }>();
+
+  private realOf(dir: string, now: number): string | null {
+    const hit = this.spellings.get(dir);
+    if (hit && now - hit.at < BoardSocketRoots.SPELLING_MS) return hit.real;
+    let real: string | null;
+    try {
+      real = this.realpath(dir);
+    } catch {
+      real = null;
+    }
+    if (this.spellings.size >= BoardSocketRoots.SPELLINGS_MAX) this.spellings.clear();
+    this.spellings.set(dir, { at: now, real });
+    return real;
+  }
+
+  /**
+   * `path` as the roots are spelled. Roots are stored resolved, and a bound
+   * path is kept as it was typed, which may pass through a link above the
+   * root (`~/dev` onto a data volume) or differ in letter case. So each
+   * folder on the way is resolved from the top down, and the first that
+   * resolves at or under a root gives the spelling: that root followed by
+   * the rest of the path as typed. Resolving the whole path instead would
+   * follow a link the lead put below the root, and report it outside.
+   */
+  private spelled(path: string, now = Date.now()): string {
+    const roots = this.allRoots();
+    const under = (p: string) => roots.some((r) => p === r || p.startsWith(`${r}/`));
+    if (roots.length === 0 || under(path)) return path;
+    const parts = path.split('/');
+    for (let i = 2; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join('/');
+      const real = this.realOf(prefix, now);
+      if (real && under(real)) return [real, ...parts.slice(i)].join('/');
+    }
+    return path;
+  }
+
+  /** The roots that hold `path`, however it is spelled. */
   private rootsOver(path: string): string[] {
-    return this.allRoots().filter((root) => path === root || path.startsWith(`${root}/`));
+    const p = this.spelled(path);
+    return this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
   }
 
   /** Whether `path` is under a lead's root: the guard's business. With the
    *  file unreadable, every path is. */
   covers(path: string, _setId?: string): boolean {
-    const over = this.rootsOver(path);
-    return this.broken || over.length > 0;
+    if (this.isBroken()) return true;
+    return this.rootsOver(path).length > 0;
   }
 
   /** Whether some root sits at or below `dir`: a repository there holds a
    *  lead's folder (`git-hardening.ts`). With the file unreadable, always. */
   holdsRoot(dir: string): boolean {
+    if (this.isBroken()) return true;
     const roots = this.allRoots();
-    return this.broken || roots.some((root) => root === dir || root.startsWith(`${dir}/`));
+    if (roots.length === 0) return false;
+    const holds = (d: string) => roots.some((root) => root === d || root.startsWith(`${d}/`));
+    if (holds(dir)) return true;
+    const real = this.realOf(dir, Date.now());
+    return real !== null && holds(real);
   }
 
   /**
@@ -150,10 +208,12 @@ export class BoardSocketRoots {
    * its way below the root, the one place a walled lead may make links.
    */
   admits(path: string, _setId?: string, now = Date.now()): boolean {
-    const over = this.rootsOver(path);
-    if (this.broken) return false;
+    if (this.isBroken()) return false;
+    const p = this.spelled(path, now);
+    const over = this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
     for (const root of over) {
-      if (path.slice(root.length).split('/').includes('node_modules')) return false;
+      // Lower-cased: the disk ignores case, so `Node_Modules` is the same folder.
+      if (p.slice(root.length).toLowerCase().split('/').includes('node_modules')) return false;
       const cached = this.verdicts.get(root);
       let ok: boolean;
       if (cached && now - cached.at < BoardSocketRoots.ROOT_VERDICT_MS) ok = cached.ok;
@@ -177,8 +237,8 @@ export class BoardSocketRoots {
    * a write cannot create a file through a linked parent.
    */
   landsInside(path: string, real: string, _setId?: string): boolean {
+    if (this.isBroken()) return false;
     const over = this.rootsOver(path);
-    if (this.broken) return false;
     return over.every((root) => real === root || real.startsWith(`${root}/`));
   }
 

@@ -12,8 +12,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-roots.ts';
+import { readOriginUrl } from '../src/doc-key.ts';
+import { checkoutBranch, gitCommonDir } from '../src/doc-origin-repo.ts';
 import { scanFolderPaths } from '../src/fs-scan.ts';
-import { gitBarred, hardenedGitArgs, repoOf } from '../src/git-hardening.ts';
+import { gitBarred, hardenedGitArgs, readLine, repoOf } from '../src/git-hardening.ts';
 import { classifyExternalContent, gitConflictHint } from '../src/git-provenance.ts';
 import { boundFiles } from '../src/slow-fs.ts';
 
@@ -199,6 +201,38 @@ describe('no git in a repository holding a lead’s root', () => {
     } finally {
       remove();
     }
+  });
+});
+
+describe('the server reads none of a barred repository’s own files', () => {
+  test('its branch, common folder and origin read as unknown', () => {
+    const leadRoot = repoWithCommit(join(dir, 'harbor-meta'));
+    git(leadRoot, ['remote', 'add', 'origin', 'https://example.invalid/harbor.git']);
+    // The controls: read before the root is registered.
+    expect(checkoutBranch(leadRoot)).not.toBeNull();
+    const common = gitCommonDir(leadRoot);
+    expect(common).not.toBeNull();
+    expect(readOriginUrl(common ?? '')).toBe('https://example.invalid/harbor.git');
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(dir, 'data-meta')));
+    roots.set('w-harbor', [leadRoot]);
+    const remove = boundFiles.guards.add(roots);
+    try {
+      expect(checkoutBranch(leadRoot)).toBeNull();
+      expect(gitCommonDir(leadRoot)).toBeNull();
+      expect(readOriginUrl(common ?? '')).toBeNull();
+    } finally {
+      remove();
+    }
+  });
+
+  test('a pipe where a pointer file belongs answers null without blocking', () => {
+    const fifo = join(dir, 'pointer');
+    expect(spawnSync('mkfifo', [fifo]).status).toBe(0);
+    // Were the open to wait for a writer, this test would never finish.
+    expect(readLine(fifo, /^(.*)$/s)).toBeNull();
+    // The control: a regular file with the same line reads.
+    writeFileSync(join(dir, 'plain'), 'gitdir: x\n');
+    expect(readLine(join(dir, 'plain'), /^gitdir:\s*(.+?)\s*$/m)).toBe('x');
   });
 });
 

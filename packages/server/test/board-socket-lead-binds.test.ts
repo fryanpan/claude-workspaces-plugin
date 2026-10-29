@@ -287,6 +287,39 @@ describe('the images beside a bound doc under a lead’s root', () => {
   }, 30_000);
 });
 
+describe('a doc bound through a link above the root', () => {
+  it('is held as the root is spelled', async () => {
+    const root = project('harbor-alias');
+    const docDir = join(root, 'plan');
+    mkdirSync(join(docDir, 'images'), { recursive: true });
+    writeFileSync(join(docDir, 'doc.md'), '# Harborlight alias plan\n');
+    writeFileSync(join(docDir, 'images', 'chart.png'), tinyPng(50));
+    const outside = join(workDir, 'riverbend-alias');
+    mkdirSync(join(outside, 'images'), { recursive: true });
+    writeFileSync(join(outside, 'images', 'chart.png'), tinyPng(51));
+    await setRoots([root]);
+    // `~/dev` on a symlinked home: the bound path is not the root's spelling.
+    const alias = join(socketRoot, 'work-alias');
+    symlinkSync(workDir, alias);
+    const created = await tcp(`/workspaces/${harborlight}/docs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        docId: 'harbor-alias',
+        type: 'markdown',
+        sourceUrl: join(alias, 'harbor-alias', 'plan', 'doc.md'),
+      }),
+    });
+    expect(created.ok, await created.clone().text()).toBe(true);
+    const image = () => tcp(`/workspaces/${harborlight}/docs/harbor-alias/assets/images/chart.png`);
+    // The control: before the swap the image reads.
+    expect((await image()).status).toBe(200);
+
+    renameSync(docDir, `${docDir}.moved`);
+    symlinkSync(outside, docDir);
+    expect((await image()).status).toBe(404);
+  }, 30_000);
+});
+
 describe('git in a lead’s root', () => {
   it('runs no program the repository names, through the bind and a file open', async () => {
     const root = project('harbor-git');

@@ -20,7 +20,15 @@
  *   and no inherited `GIT_*` variable, which would point the read at
  *   another repository. These are a second line: a filter still runs.
  */
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  constants,
+  closeSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { boundFiles } from './slow-fs.ts';
 
@@ -96,6 +104,8 @@ function gitDirOf(dir: string, dotGit: string): string | null {
   const named = readLine(dotGit, /^gitdir:\s*(.+?)\s*$/m);
   if (!named) return null;
   const target = realOr(resolve(dir, named));
+  // Its files are the lead's to write: read none of them.
+  if (boundFiles.guards.covers(target)) return null;
   const worktree = /^(.+\/\.git)\/worktrees\/[^/]+$/.exec(target);
   if (worktree?.[1]) {
     const back = readLine(join(target, 'gitdir'), /^(.+?)\s*$/m);
@@ -111,11 +121,27 @@ function gitDirOf(dir: string, dotGit: string): string | null {
   return null;
 }
 
-function readLine(path: string, re: RegExp): string | null {
+/** The most of a pointer file `readLine` reads by default; git writes one line. */
+const POINTER_MAX = 4_096;
+
+/** A match in a small regular file, read without blocking: a pipe or a
+ *  device at the path would otherwise hold the main thread. */
+export function readLine(path: string, re: RegExp, max = POINTER_MAX): string | null {
+  let fd: number;
   try {
-    return re.exec(readFileSync(path, 'utf8'))?.[1] ?? null;
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
   } catch {
     return null;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    const buf = Buffer.alloc(max);
+    const n = readSync(fd, buf, 0, max, 0);
+    return re.exec(buf.subarray(0, n).toString('utf8'))?.[1] ?? null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
   }
 }
 

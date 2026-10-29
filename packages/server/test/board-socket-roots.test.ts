@@ -82,6 +82,52 @@ describe('BoardSocketRoots', () => {
     expect(roots.admits(file, 's-owner', later())).toBe(false);
   });
 
+  it('guards a path spelled through a link above the root, or in another case', () => {
+    const lead = join(root, 'Harbor-Spelled');
+    mkdirSync(join(lead, 'docs'), { recursive: true });
+    const alias = join(root, 'alias');
+    symlinkSync(root, alias);
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'h')));
+    roots.set('w-harbor', [lead]);
+    const viaLink = join(alias, 'Harbor-Spelled', 'docs', 'plan.md');
+    const viaCase = join(root, 'harbor-spelled', 'docs', 'plan.md');
+    // The control: the stored spelling is covered, and so is each other one.
+    expect(roots.covers(join(lead, 'docs', 'plan.md'))).toBe(true);
+    for (const p of [viaLink, viaCase]) {
+      expect(roots.covers(p), p).toBe(true);
+      expect(roots.landsInside(p, join(riverbend, 'plan.md')), p).toBe(false);
+      expect(roots.landsInside(p, join(lead, 'docs', 'plan.md')), p).toBe(true);
+    }
+    expect(roots.admits(join(alias, 'Harbor-Spelled', 'Node_Modules', 'x.md'))).toBe(false);
+    // A repository above the root, spelled through the link, holds it.
+    expect(roots.holdsRoot(alias)).toBe(true);
+    // A folder below the root swapped for a link outside is still covered:
+    // the spelling stops at the root and never follows the lead's link.
+    renameSync(join(lead, 'docs'), join(lead, 'docs.moved'));
+    symlinkSync(riverbend, join(lead, 'docs'));
+    expect(roots.covers(viaLink)).toBe(true);
+  });
+
+  it('reads a file of the wrong shape as unreadable, not as no roots', () => {
+    for (const [name, text] of [
+      ['i', '{"boards":null}'],
+      ['j', '{"boards":{"w-harbor":"/x"}}'],
+      ['k', '{"boards":{"w-harbor":["relative"]}}'],
+      ['l', '{"boards":[]}'],
+    ] as const) {
+      const path = boardSocketRootsPath(join(root, name));
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+      expect(new BoardSocketRoots(path).covers(join(riverbend, 'x.md')), text).toBe(true);
+    }
+    // The control: the shape `set` writes reads back as written.
+    const good = boardSocketRootsPath(join(root, 'm'));
+    mkdirSync(dirname(good), { recursive: true });
+    writeFileSync(good, JSON.stringify({ boards: { 'w-harbor': [harborlight] } }));
+    expect(new BoardSocketRoots(good).covers(join(riverbend, 'x.md'))).toBe(false);
+    expect(new BoardSocketRoots(good).rootsOf('w-harbor')).toEqual([harborlight]);
+  });
+
   it('fails closed on every path when its file cannot be read, and writes nothing over it', () => {
     const path = boardSocketRootsPath(join(root, 'f'));
     mkdirSync(dirname(path), { recursive: true });

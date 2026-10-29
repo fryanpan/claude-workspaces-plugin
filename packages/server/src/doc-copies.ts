@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { checkoutBranch } from './doc-origin-repo.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 import type { RepoRegistry } from './repo-registry.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * One file, several checkouts: which copy is live, which have drifted, and
@@ -85,7 +86,10 @@ export interface CopySurvey {
 
 function hashOf(path: string): string | null {
   try {
-    return createHash('sha256').update(readFileSync(path)).digest('hex');
+    // Under a walled lead's root, read as every bound file is there.
+    const guards = boundFiles.guards;
+    const bytes = guards.covers(path) ? guards.readSync(path) : readFileSync(path);
+    return createHash('sha256').update(bytes).digest('hex');
   } catch {
     return null;
   }

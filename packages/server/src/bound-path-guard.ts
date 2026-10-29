@@ -356,6 +356,7 @@ export class PathGuards {
 
   /** Read a bound file, checked where a guard covers it. */
   read(path: string, setId?: string): ReturnType<typeof readChecked> {
+    if (!this.allows(path, setId)) return Promise.reject(new GuardRefused(path));
     const lands = (real: string) => this.landsAll(path, real, setId);
     return readChecked(path, this.covers(path, setId) ? lands : null);
   }
@@ -369,6 +370,7 @@ export class PathGuards {
     setId?: string,
   ): Promise<Uint8Array<ArrayBuffer>> | null {
     if (!this.covers(path, setId)) return null;
+    if (!this.allows(path, setId)) return Promise.reject(new GuardRefused(path));
     return readRangeChecked(path, start, end, (real) => this.landsAll(path, real, setId));
   }
 
@@ -389,6 +391,7 @@ export class PathGuards {
 
   /** Write a bound file, checked where a guard covers it. */
   write(path: string, text: string, setId?: string): Promise<BigIntStats> {
+    if (!this.allows(path, setId)) return Promise.reject(new GuardRefused(path));
     const lands = (real: string) => this.landsAll(path, real, setId);
     return writeChecked(path, text, this.covers(path, setId) ? lands : null);
   }

@@ -1368,7 +1368,13 @@ export class FileBindings {
     const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
     try {
       mkdirSync(dirname(absPath), { recursive: true });
-      writeFileSync(absPath, md, { flag: 'wx' });
+      // Under a walled lead's root, through the checked temp file: a folder
+      // on the way may have been swapped for a link since the move was asked.
+      const guards = boundFiles.guards;
+      if (guards.covers(absPath)) {
+        if (existsSync(absPath)) return { ok: false, error: 'target-exists' };
+        guards.writeSync(absPath, md, 'export');
+      } else writeFileSync(absPath, md, { flag: 'wx' });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         return { ok: false, error: 'target-exists' };
