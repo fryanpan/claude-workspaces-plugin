@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { scanFolderPaths, scanFolderPathsAsync } from './fs-scan.ts';
+import { GitListingFailed, scanFolderPathsAsync, scanFolderPathsOrThrow } from './fs-scan.ts';
 import { realPathUnder } from './safe-path.ts';
 
 /**
@@ -34,7 +34,8 @@ import { realPathUnder } from './safe-path.ts';
  *
  * Cached per root so this is not a subprocess per request: a hit is served
  * from the cached listing, rescanned in the background once it is
- * `LISTING_TTL_MS` old (`cachedListing`), and a MISS on a listing older
+ * `LISTING_TTL_MS` old and rescanned before answering once it is
+ * `LISTING_MAX_AGE_MS` old (`cachedListing`), and a MISS on a listing older
  * than `MISS_RESCAN_MS` rescans once before answering — a file created a
  * moment ago (an agent writing while the reviewer clicks) is found rather
  * than refused for the rest of the window. A miss on a fresh listing stays a
@@ -51,7 +52,7 @@ export function isListedFile(
   const key = listingKey(root, include);
   let entry = cachedListing(key, root, include, now);
   if (entry.paths.has(relPath)) return true;
-  if (now - entry.at >= MISS_RESCAN_MS) entry = refreshListing(key, root, include, now);
+  if (now - entry.at >= MISS_RESCAN_MS) entry = refreshListing(key, root, include, now, entry);
   return entry.paths.has(relPath);
 }
 
@@ -135,7 +136,11 @@ function cachedListing(
   now: number,
 ): { at: number; paths: Set<string> } {
   const entry = listingCache.get(key);
-  if (!entry) return refreshListing(key, root, include, now);
+  if (!entry) return refreshListing(key, root, include, now, null);
+  // Past the hard limit a hit waits for the rescan, as every stale hit used
+  // to: a rescan that keeps failing or hanging must not leave a file that
+  // was removed or newly ignored admitted for good.
+  if (now - entry.at > LISTING_MAX_AGE_MS) return refreshListing(key, root, include, now, null);
   // A stale listing still answers, and the rescan runs beside the request
   // rather than in front of it. Every diff or folder page opened more than
   // five seconds after the last one used to run `git ls-files` synchronously
@@ -179,17 +184,35 @@ export function clearListingCache(): void {
 let cacheGeneration = 0;
 
 const LISTING_TTL_MS = 5_000;
+/** The oldest listing a hit is answered from without a rescan first. */
+const LISTING_MAX_AGE_MS = 30_000;
 const MISS_RESCAN_MS = 250;
 const LISTING_CACHE_MAX_ROOTS = 64;
 const listingCache = new Map<string, { at: number; paths: Set<string> }>();
 
+/**
+ * Rescan now. When git fails on a repository, `keep` is answered instead (a
+ * miss's rescan keeps the listing it already refused from), or, with
+ * nothing to keep, an empty listing. The empty listing is stored, so a repo
+ * git keeps refusing reruns git at most once per `MISS_RESCAN_MS` (a miss
+ * on it) rather than on every request, and admits nothing meanwhile.
+ */
 function refreshListing(
   key: string,
   root: string,
   include: readonly string[],
   now: number,
+  keep: { at: number; paths: Set<string> } | null,
 ): { at: number; paths: Set<string> } {
-  return storeListing(key, { at: now, paths: new Set(scanFolderPaths(root, include)) });
+  let paths: string[];
+  try {
+    paths = scanFolderPathsOrThrow(root, include);
+  } catch (err) {
+    if (!(err instanceof GitListingFailed)) throw err;
+    console.error(`[fs-listing] ${err.message}`);
+    return keep ?? storeListing(key, { at: now, paths: new Set() });
+  }
+  return storeListing(key, { at: now, paths: new Set(paths) });
 }
 
 function storeListing(

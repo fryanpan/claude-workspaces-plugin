@@ -127,6 +127,8 @@ describe('a folder of gitignored recordings', () => {
         '.cache/old.mp4',
         'pack.zip',
         'linked.mp4',
+        'forged\nline.mp4',
+        'forged\u2028line.mp4',
       ],
     });
     expect(res.ok).toBe(true);
@@ -144,6 +146,8 @@ describe('a folder of gitignored recordings', () => {
       '.cache/old.mp4': 'hidden',
       'pack.zip': 'unsupported-type',
       'linked.mp4': 'not-a-regular-file',
+      'forged\nline.mp4': 'bad-path',
+      'forged\u2028line.mp4': 'bad-path',
     });
     expect((await docStore.openContextFile(res.setId, '.env')).ok).toBe(false);
     expect((await docStore.openContextFile(res.setId, 'linked.mp4')).ok).toBe(false);

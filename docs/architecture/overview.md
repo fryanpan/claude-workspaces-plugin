@@ -442,7 +442,7 @@ file nobody has opened yet opens its doc on the first request
 `fs-listing.ts` caches that listing per root and is what decides which files
 of a set may be opened (`isListedFile`, `landsOnListed`); a listing more than
 five seconds old still answers and is rescanned off the main thread, so no
-page request waits on `git`.
+page request waits on `git` until the listing is thirty seconds old.
 `folder-file-types.ts`
 names the binaries no surface can show, which the listing leaves out. A video
 or raster image (`core/src/media-types.ts`, read by server and page alike)

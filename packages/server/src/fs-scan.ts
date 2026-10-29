@@ -33,7 +33,10 @@ import { isUnsupportedType } from './folder-file-types.ts';
  * (`admitIncluded`); the floors above still apply to them.
  */
 export function scanFolder(root: string, include: readonly string[] = []): string[] {
-  const files = listFolder(root, null);
+  return withIncluded(root, listFolder(root, null), include);
+}
+
+function withIncluded(root: string, files: string[], include: readonly string[]): string[] {
   if (include.length === 0) return files;
   const listed = new Set(files);
   for (const abs of admitIncluded(root, include).files) {
@@ -120,26 +123,125 @@ export function scanFolderReport(
  */
 function listFolder(root: string, skipped: SkippedFile[] | null): string[] {
   try {
-    const res = gitLsFiles(root, LISTING_ARGS);
-    if (res !== null) {
-      const out = admitGitListed(root, res, skipped);
-      if (skipped) {
-        // `--directory` names an ignored directory once rather than every
-        // file under it, so a repo's node_modules is one row, not thousands.
-        const ignored = gitLsFiles(root, [
-          '--others',
-          '--ignored',
-          '--exclude-standard',
-          '--directory',
-        ]);
-        for (const rel of ignored ?? []) skipped.push({ path: rel, reason: 'gitignored' });
-      }
-      return out;
-    }
-  } catch {
-    // git missing or threw — fall through to readdir.
+    return listFolderOrThrow(root, skipped);
+  } catch (err) {
+    if (!(err instanceof GitListingFailed)) throw err;
+    // Fail closed: a repo git could not list shows nothing, rather than a
+    // readdir that would show every file its ignore rules hide.
+    console.error(`[fs-scan] ${err.message}`);
+    return [];
   }
+}
+
+/**
+ * `listFolder`, throwing `GitListingFailed` where it would list nothing, so
+ * the listing cache can keep the answer it had (`fs-listing.ts`).
+ */
+export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): string[] {
+  const res = gitLsFiles(root, LISTING_ARGS);
+  if (res !== null) {
+    const out = admitGitListed(root, res, skipped);
+    if (skipped) {
+      // `--directory` names an ignored directory once rather than every
+      // file under it, so a repo's node_modules is one row, not thousands.
+      const ignored = gitLsFiles(root, [
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ]);
+      for (const rel of ignored ?? []) skipped.push({ path: rel, reason: 'gitignored' });
+    }
+    return out;
+  }
+  // The readdir fallback has no ignore file to honour, so it is only for a
+  // folder git says is not a repository. A git that failed inside a work tree
+  // (a timeout, an exhausted buffer, "dubious ownership") would otherwise
+  // list the repo's ignored `service-account.json` and `secrets.yaml`.
+  if (repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
   return readdirRecursive(root, root, skipped);
+}
+
+/** `git ls-files` failed in a folder that is, or may be, a git work tree. */
+export class GitListingFailed extends Error {
+  constructor(root: string) {
+    super(`git could not list ${root}; listing nothing rather than every file in it`);
+  }
+}
+
+type RepoKind = 'work-tree' | 'not-a-repo';
+
+// Roots git said are work trees. Only that answer is kept: a `git init` makes
+// a folder a repo, and a kept "not a repo" would send it back to readdir.
+const repoKinds = new Map<string, 'work-tree'>();
+
+/** What `git rev-parse --is-inside-work-tree` said, or null when it could not say. */
+function repoKindOf(res: {
+  error?: Error | null;
+  status: number | null;
+  stdout?: string;
+  stderr?: string;
+}): RepoKind | null {
+  // No git on this machine at all: nothing can be a repository to it.
+  if ((res.error as NodeJS.ErrnoException | null | undefined)?.code === 'ENOENT') {
+    return 'not-a-repo';
+  }
+  // `false` is a `.git` directory or a bare repository: not a work tree, and
+  // not a folder to read whole either.
+  if (res.status === 0) return res.stdout?.trim() === 'true' ? 'work-tree' : null;
+  if (res.status === 128 && /not a git repository/i.test(res.stderr ?? '')) return 'not-a-repo';
+  return null;
+}
+
+function repoKindSync(root: string): RepoKind | null {
+  const kept = repoKinds.get(root);
+  if (kept) return kept;
+  const res = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], {
+    encoding: 'utf8',
+    timeout: GIT_TIMEOUT.ms,
+    killSignal: 'SIGKILL',
+  });
+  const kind = repoKindOf(res);
+  if (kind === 'work-tree') repoKinds.set(root, kind);
+  return kind;
+}
+
+async function repoKindAsync(root: string): Promise<RepoKind | null> {
+  const kept = repoKinds.get(root);
+  if (kept) return kept;
+  const kind = await new Promise<RepoKind | null>((resolve) => {
+    execFile(
+      'git',
+      ['-C', root, 'rev-parse', '--is-inside-work-tree'],
+      { encoding: 'utf8', timeout: GIT_TIMEOUT.ms, killSignal: 'SIGKILL' },
+      (err, stdout, stderr) => {
+        // An exit code is a number; a spawn failure or a kill is not.
+        const code: unknown = err ? (err as { code?: unknown }).code : 0;
+        resolve(
+          repoKindOf({
+            error: err,
+            status: typeof code === 'number' ? code : null,
+            stdout,
+            stderr,
+          }),
+        );
+      },
+    );
+  });
+  if (kind === 'work-tree') repoKinds.set(root, kind);
+  return kind;
+}
+
+/**
+ * How long any `git` this module runs may take before it is killed and
+ * counts as failed. An object
+ * so a test can shorten it; nothing else writes it.
+ */
+export const GIT_TIMEOUT = { ms: 30_000 };
+
+/** Forget every root's repository answer. Tests only. */
+export function clearRepoKinds(): void {
+  repoKinds.clear();
 }
 
 const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
@@ -175,17 +277,22 @@ export async function scanFolderPathsAsync(
     execFile(
       'git',
       ['-C', root, 'ls-files', '-z', ...LISTING_ARGS],
-      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+      {
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        // A hung git is a failed one, so the cache's in-flight mark clears.
+        timeout: GIT_TIMEOUT.ms,
+        killSignal: 'SIGKILL',
+      },
       (err, stdout) => resolve(err ? null : stdout.split('\0').filter((rel) => rel !== '')),
     );
   });
-  const files =
-    rels === null ? readdirRecursive(root, root, null) : admitGitListed(root, rels, null);
-  if (include.length > 0) {
-    const listed = new Set(files);
-    for (const abs of admitIncluded(root, include).files) if (!listed.has(abs)) files.push(abs);
-  }
-  return files.map((abs) => relative(root, abs).split(sep).join('/')).sort();
+  let files: string[];
+  if (rels !== null) files = admitGitListed(root, rels, null);
+  else if ((await repoKindAsync(root)) === 'not-a-repo') files = readdirRecursive(root, root, null);
+  // Rejects, so the cache keeps the listing it had (see `listFolderOrThrow`).
+  else throw new GitListingFailed(root);
+  return toSortedRel(root, withIncluded(root, files, include));
 }
 
 /**
@@ -253,24 +360,43 @@ function normalizeIncludePath(raw: string): string | null {
     .split('/')
     .filter((seg) => seg !== '' && seg !== '.');
   if (raw.startsWith('/') || segs.length === 0 || segs.includes('..')) return null;
+  // A control character names no file anybody typed, and a newline in a
+  // listed path is how a log line or a header gets forged. C1 controls and
+  // the two Unicode line separators break lines too.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+  if (/[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(raw)) return null;
   return segs.join('/');
 }
 
 /** `git ls-files -z <args>` under `root`, or null when git cannot answer. */
 function gitLsFiles(root: string, args: string[]): string[] | null {
-  const res = spawnSync('git', ['-C', root, 'ls-files', '-z', ...args], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  let res: ReturnType<typeof spawnSync>;
+  try {
+    res = spawnSync('git', ['-C', root, 'ls-files', '-z', ...args], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: GIT_TIMEOUT.ms,
+      killSignal: 'SIGKILL',
+    });
+  } catch {
+    return null;
+  }
   if (res.status !== 0 || typeof res.stdout !== 'string') return null;
   return res.stdout.split('\0').filter((rel) => rel !== '');
 }
 
 /** Repo-relative POSIX paths for every scanned file, sorted. */
 export function scanFolderPaths(root: string, include: readonly string[] = []): string[] {
-  return scanFolder(root, include)
-    .map((abs) => relative(root, abs).split(sep).join('/'))
-    .sort();
+  return toSortedRel(root, scanFolder(root, include));
+}
+
+/** `scanFolderPaths`, throwing `GitListingFailed` instead of listing nothing. */
+export function scanFolderPathsOrThrow(root: string, include: readonly string[] = []): string[] {
+  return toSortedRel(root, withIncluded(root, listFolderOrThrow(root, null), include));
+}
+
+function toSortedRel(root: string, files: string[]): string[] {
+  return files.map((abs) => relative(root, abs).split(sep).join('/')).sort();
 }
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.next', 'coverage']);
