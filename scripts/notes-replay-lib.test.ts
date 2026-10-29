@@ -3,7 +3,7 @@
  * All speech here is made up. The repo is public.
  */
 import { describe, expect, it } from 'vitest';
-import { GOAL, ideaWindows, scoreGoals } from './notes-replay-goals.ts';
+import { GOAL, ideaWindows, noteShape, scoreGoals } from './notes-replay-goals.ts';
 import {
   ReplayClock,
   type ReplayEvent,
@@ -243,5 +243,38 @@ describe('SpendMeter', () => {
     expect(meter.spentUsd).toBeCloseTo(0.002, 6);
     await expect(f('https://example.invalid')).rejects.toThrow('spend cap');
     expect(sent).toBe(1);
+  });
+});
+
+describe('noteShape', () => {
+  it('counts each note-taking criterion from the free checks', () => {
+    const notes = [
+      '### Harborlight launch',
+      '- **Decision:** we agreed to ship the beta on Friday',
+      '- one',
+      '- two',
+      '- three',
+      '- four',
+      '### Riverbend pricing',
+      '- **Question:** does the discount apply to renewals, or only to new accounts signed this quarter and the next one after that?',
+      '### Harborlight launch',
+      '- Alice said the export button sits under the settings menu today',
+      '- [@Bob](speaker:B) **Question:** who owns it?',
+      '### Saltmarsh',
+    ].join('\n');
+    const transcript = 'Alice said the export button sits under the settings menu today.';
+    expect(noteShape(notes, transcript)).toEqual({
+      topics: 4,
+      longFlatRuns: 1,
+      topicsWithLongRun: 1,
+      topicsWithLongRunShare: 0.25,
+      overlongBullets: 1,
+      duplicateTopics: 1,
+      emptyHeadings: 1,
+      decisionsWithoutSpeaker: 2,
+      verbatimBullets: 1,
+      decisionPrefixes: 1,
+      questionPrefixes: 2,
+    });
   });
 });

@@ -22,6 +22,10 @@
  *   6. paraphrases — no note restates an earlier note under its heading
  *                   (`notes-repeat-judge.ts`)
  *
+ * Beside the goals, `shape` counts how the notes are written — flat runs,
+ * long bullets, empty headings, unattributed decisions, verbatim bullets,
+ * the Decision/Question prefixes — from free checks only (`noteShape`).
+ *
  * LOST IS READ TWICE. Each idea the first judge calls lost is shown to a
  * second call that must copy the line carrying it (`notes-lost-confirm.ts`);
  * `lostShare` is after that pass and `rawLostShare` before it.
@@ -67,7 +71,7 @@ import {
   judgeRepeats,
   modelCall,
 } from './notes-repeat-judge.ts';
-import { ideaWindows, scoreGoals } from './notes-replay-goals.ts';
+import { ideaWindows, noteShape, scoreGoals } from './notes-replay-goals.ts';
 import { SpendMeter, type TranscriptRow } from './notes-replay-lib.ts';
 import { readMeetingFolder } from './notes-replay.ts';
 
@@ -309,6 +313,7 @@ async function scoreRun(
   const score = {
     docId: run.docId,
     goals,
+    shape: noteShape(notes, turns.map((t) => t.text).join('\n')),
     allPass: Object.values(goals).every((g) => g.pass),
     unjudgedIdeas: ideas?.unjudged ?? null,
     // Meeting words, kept so a fix can be aimed; score.json never leaves
@@ -411,13 +416,16 @@ async function main(argv: string[]): Promise<number> {
     'doc              repeats  lost(judged)     raw     median  >10s    speakers  reported  para     all',
   );
   let allPass = true;
+  const shapes: Array<[string, Record<string, unknown>]> = [];
   for (const run of runs) {
     const s = (await scoreRun(run, truthDir, key, meter, reuseRaw)) as {
       docId: string;
       allPass: boolean;
       goals: Record<string, Record<string, unknown>>;
+      shape: Record<string, unknown>;
     };
     allPass &&= s.allPass;
+    shapes.push([s.docId, s.shape]);
     const g = s.goals;
     const yes = (k: string): string => (g[k]?.pass ? 'pass' : 'FAIL');
     console.log(
@@ -441,6 +449,14 @@ async function main(argv: string[]): Promise<number> {
         s.allPass ? 'pass' : 'FAIL',
       ].join('  '),
     );
+  }
+  // Counts only, so the shape table prints no meeting words either.
+  const cols = Object.keys(shapes[0]?.[1] ?? {});
+  console.log(['\ndoc', ...cols].join('\t'));
+  for (const [doc, shape] of shapes) {
+    const cell = (v: unknown): string =>
+      typeof v === 'number' && !Number.isInteger(v) ? pct(v) : String(v);
+    console.log([doc, ...cols.map((c) => cell(shape[c]))].join('\t'));
   }
   console.error(`score: $${meter.spentUsd.toFixed(3)} spent on judging over ${meter.calls} calls`);
   return allPass ? 0 : 1;

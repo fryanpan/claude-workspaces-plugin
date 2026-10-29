@@ -4,6 +4,15 @@
  * `notes-replay-lib.test.ts` with invented meetings.
  */
 
+import {
+  decisionsWithoutSpeaker,
+  duplicateTopics,
+  emptyHeadings,
+  longFlatRuns,
+  overlongBullets,
+  parseNotesTopics,
+  verbatimBullets,
+} from '../packages/server/src/notes-quality.ts';
 import type { TranscriptRow } from './notes-replay-lib.ts';
 
 /* ===== The five goal verdicts ===== */
@@ -95,6 +104,50 @@ export function scoreGoals(g: GoalInputs): Record<string, GoalVerdict> {
     };
   }
   return out;
+}
+
+/* ===== The note-taking criteria, as counts ===== */
+
+/**
+ * How the notes are written, from the product's own free checks
+ * (`notes-quality.ts`). Counts only and no verdict: none of these has a bar
+ * the board has agreed, so they sit beside the goals rather than in them.
+ */
+export interface NoteShape {
+  topics: number;
+  /** Flat runs past `MAX_FLAT_RUN_BULLETS`, and the topics holding one. */
+  longFlatRuns: number;
+  topicsWithLongRun: number;
+  topicsWithLongRunShare: number | null;
+  overlongBullets: number;
+  duplicateTopics: number;
+  emptyHeadings: number;
+  decisionsWithoutSpeaker: number;
+  verbatimBullets: number;
+  decisionPrefixes: number;
+  questionPrefixes: number;
+}
+
+/** Lines carrying the prefix anywhere: a speaker tag may come first. */
+const PREFIXED = (word: string): RegExp => new RegExp(`^.*\\*\\*${word}:\\*\\*`, 'gm');
+
+export function noteShape(notes: string, transcript: string): NoteShape {
+  const topics = parseNotesTopics(notes).length;
+  const runs = longFlatRuns(notes);
+  const withRun = new Set(runs.map((r) => r.heading)).size;
+  return {
+    topics,
+    longFlatRuns: runs.length,
+    topicsWithLongRun: withRun,
+    topicsWithLongRunShare: topics > 0 ? withRun / topics : null,
+    overlongBullets: overlongBullets(notes).length,
+    duplicateTopics: duplicateTopics(notes).length,
+    emptyHeadings: emptyHeadings(notes).length,
+    decisionsWithoutSpeaker: decisionsWithoutSpeaker(notes).length,
+    verbatimBullets: verbatimBullets(notes, transcript).length,
+    decisionPrefixes: notes.match(PREFIXED('Decision'))?.length ?? 0,
+    questionPrefixes: notes.match(PREFIXED('Question'))?.length ?? 0,
+  };
 }
 
 /**

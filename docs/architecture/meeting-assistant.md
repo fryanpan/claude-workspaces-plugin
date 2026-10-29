@@ -2846,6 +2846,14 @@ the repeat judge found 5 of 6 repeats with none false. On two, the second
 look credited 5 of 7 ideas rightly. `--reuse-raw` rescores a run, paying
 only for the second look.
 
+Beside the goals, every score carries a free `shape` record. It holds the
+product's own checks in `notes-quality.ts`, counted over the final notes:
+flat runs past four bullets, overlong bullets, duplicate topics, empty
+headings, decisions with no speaker, and verbatim bullets. It also counts
+the `**Decision:**` and `**Question:**` prefixes. These are counts only,
+with no pass bar, because none has been agreed. `--no-judge` prints them
+for nothing.
+
 ### Cost
 
 The four intents are prompt text on a call that was already being made.
