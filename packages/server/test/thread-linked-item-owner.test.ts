@@ -163,6 +163,43 @@ describe('linking another board’s item onto a shared board', () => {
     expect(await linkedOnA()).toBe(1);
   });
 
+  it('is refused through an unshared board when the doc is also filed on a shared one', async () => {
+    // Board Saltmarsh is shared with nobody, and the report is filed there as
+    // well as on shared board A, whose members would read the card.
+    const quiet = (
+      (await ok('/workspaces', { name: 'Saltmarsh', author: AGENT })) as {
+        workspace: { id: string };
+      }
+    ).workspace.id;
+    await ok(`/workspaces/${quiet}/docs:attach`, { docId: 'report' });
+    const before = await linkedOnA();
+    const res = await post(
+      `/workspaces/${quiet}/docs/report/threads/${threadA}/linked-items`,
+      { author: AGENT, item: ITEM() },
+      local(),
+    );
+    expect(res.status).toBe(403);
+    expect(await linkedOnA()).toBe(before);
+    // CONTROL: a doc filed only on that unshared board takes the same link.
+    const file = join(root, 'quiet.html');
+    writeFileSync(file, '<!doctype html><html><body><main><h3>Saltmarsh</h3></main></body></html>');
+    await ok(`/workspaces/${quiet}/docs`, { docId: 'quiet', type: 'mockup', sourceUrl: file });
+    await ok(`/workspaces/${quiet}/docs:attach`, { docId: 'quiet' });
+    const quietThread = (
+      (await ok(`/workspaces/${quiet}/docs/quiet/threads`, {
+        author: AGENT,
+        text: 'Which tide table goes first?',
+        anchor: { kind: 'subject' },
+      })) as { thread: { id: string } }
+    ).thread.id;
+    const allowed = await post(
+      `/workspaces/${quiet}/docs/quiet/threads/${quietThread}/linked-items`,
+      { author: AGENT, item: ITEM() },
+      local(),
+    );
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+  });
+
   it('is open to the agent for an item on the thread’s own board', async () => {
     // The rule is about crossing boards: the same agent, same shared board,
     // an item from that board itself.

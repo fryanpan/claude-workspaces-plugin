@@ -58,20 +58,28 @@ export async function handleDocThreadLinkedItemRoute(
   if (!docStore.getThread(rq.docId, threadId)) return j(404, { error: 'thread not found' });
   // Another board's item on a board somebody else can open would show them
   // that board's headline, which nobody gave them (security.md: a read of
-  // another board dressed as a write). So it is linked only onto a board
-  // nobody else can open, or by the owner from the board's own page. Asked
-  // before the item is looked up, so the refusal says nothing about whether
-  // it exists.
+  // another board dressed as a write). The doc's thread is read on every
+  // board the doc is filed on, not only the one in the path, as
+  // `comment-trust.ts` asks of every board a doc reaches. So the link is made
+  // only when none of those boards but the item's own is shared, or by the
+  // owner from the board's own page. The owner's agents on other machines
+  // (`at2` board tokens) read every board already and are not counted.
+  // Asked before the item is looked up, so the refusal says nothing about
+  // whether it exists.
   const here = rq.scope?.workspaceId;
-  if (
-    parsed.workspaceId !== here &&
-    (!here || ctx.boardIsShared(here)) &&
-    !hasOwnerProof(rq.req, rq.provenIdentityFor, rq.requestOriginFor)
-  ) {
+  const ticketBoard = taskStore.workspaceOfDoc(rq.docId);
+  const reaches = new Set([
+    ...(here ? [here] : []),
+    ...ctx.workspacesOfDoc(rq.docId),
+    ...(ticketBoard ? [ticketBoard] : []),
+  ]);
+  const exposed =
+    !here || [...reaches].some((ws) => ws !== parsed.workspaceId && ctx.boardIsShared(ws));
+  if (exposed && !hasOwnerProof(rq.req, rq.provenIdentityFor, rq.requestOriginFor)) {
     return j(403, {
       error:
-        'this board is shared, so only its owner, from the board, may link a review item ' +
-        'from another board here: its headline would reach people that board was never shared with',
+        'this doc is on a shared board, so only the owner, from the board, may link a review ' +
+        'item from another board here: its headline would reach people that board was never shared with',
     });
   }
   // A doc named by an alias is stored by its own id, so the snapshot's ref
