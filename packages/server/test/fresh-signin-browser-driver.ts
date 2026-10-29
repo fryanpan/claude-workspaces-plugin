@@ -16,8 +16,7 @@
  * plain http as it is over TLS.
  *
  * Spawned by `packages/workspaces-app/test/fresh-signin-browser.test.ts`, which reads the JSON this prints
- * on its last line. Screenshots go to `$FRESH_SIGNIN_SHOTS` when it is set,
- * and `FRESH_SIGNIN_TRACE=1` logs each request through the stand-in.
+ * on its last line. Screenshots go to `$FRESH_SIGNIN_SHOTS` when it is set.
  *
  * audit: no-text — nothing here reads a source file, a bundle or a
  * stylesheet; every value it returns was measured in the running page or read
@@ -34,7 +33,6 @@ import {
   Cdp,
   launchChrome,
   pageSocketUrl,
-  sleep,
   stopBrowser,
   withTimeout,
 } from '../../../scripts/headless-chrome.ts';
@@ -44,6 +42,7 @@ import {
   resolveChromeBin,
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { waitFor } from './wait-for.ts';
 
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
 const KID = 'fresh-signin-browser-kid';
@@ -131,11 +130,6 @@ function edgeFor(server: ServerHandle, mint: () => Promise<string>) {
     port: 0,
     async fetch(req, srv) {
       const url = new URL(req.url);
-      if (process.env.FRESH_SIGNIN_TRACE && !url.pathname.startsWith('/app/')) {
-        step(
-          `edge ${req.method} ${url.pathname} cookie=${/CF_Authorization=/.test(req.headers.get('cookie') ?? '')}`,
-        );
-      }
       if (url.pathname === LOGIN) {
         counts.minted++;
         const back = url.searchParams.get('redirect_url') ?? '/';
@@ -181,16 +175,12 @@ function edgeFor(server: ServerHandle, mint: () => Promise<string>) {
       // Deleting the header is not enough; `fetch` then adds its own.
       headers.set('accept-encoding', 'identity');
       for (const [k, v] of Object.entries(forwarded)) headers.set(k, v);
-      const res = await fetch(`${backendHttp}${url.pathname}${url.search}`, {
+      return fetch(`${backendHttp}${url.pathname}${url.search}`, {
         method: req.method,
         headers,
         body: req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.arrayBuffer(),
         redirect: 'manual',
       });
-      if (process.env.FRESH_SIGNIN_TRACE && req.method === 'POST') {
-        step(`  -> ${res.status} ${(await res.clone().text()).slice(0, 300)}`);
-      }
-      return res;
     },
     websocket: {
       open(ws: ServerWebSocket<{ url: string; headers: Record<string, string>; tunnel?: Tunnel }>) {
@@ -338,22 +328,10 @@ async function main(): Promise<void> {
       });
     };
     const ev = <T>(expr: string) => cdp.evaluate(expr) as Promise<T>;
-    const poll = async <T>(what: string, expr: string, ms = 20_000): Promise<T> => {
-      const deadline = Date.now() + ms;
-      for (;;) {
-        const v = await ev<T>(expr).catch(() => null);
-        if (v) return v;
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-        await sleep(50);
-      }
-    };
-    const pollServer = async (what: string, want: boolean) => {
-      const deadline = Date.now() + 10_000;
-      while ((await onBoard()) !== want) {
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-        await sleep(50);
-      }
-    };
+    const poll = <T>(what: string, expr: string, timeout = 20_000): Promise<T> =>
+      waitFor(() => ev<T>(expr).catch(() => null), { timeout, describe: what }) as Promise<T>;
+    const pollServer = (what: string, want: boolean) =>
+      waitFor(async () => (await onBoard()) === want, { timeout: 10_000, describe: what });
     const open = async () => {
       const loaded = cdp.once('Page.loadEventFired');
       await cdp.send('Page.navigate', { url: `${site}${pagePath}` });

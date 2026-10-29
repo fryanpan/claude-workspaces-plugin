@@ -115,7 +115,10 @@ export function mountDocArchive(deps: DocArchiveDeps): void {
   deps.scope.listen(undo, 'click', () => void unarchive());
 
   // Live: whoever archives it, this page's socket is closed with the reason.
-  const watch = (ws: WebSocket): void => {
+  const watch = (ws: WebSocket | undefined): void => {
+    // A socket that cannot be listened to costs only the live bar; a throw
+    // here would stop the rest of the doc's mount.
+    if (typeof ws?.addEventListener !== 'function') return;
     ws.addEventListener('close', (e) => {
       if (e.reason !== ARCHIVED_CLOSE_REASON || archived) return;
       archived = true;
