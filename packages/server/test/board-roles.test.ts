@@ -160,18 +160,17 @@ describe('the level is enforced by the API', () => {
     );
     board = made.workspace.id;
 
-    // Two people come in through links: one left at the default level, one
-    // minted as an Owner — the ROLE ON THE LINK, so a board can hand out a
-    // second owner without a second round trip.
+    // Two people come in through a link; one is then made an Owner. Since 29
+    // Oct an agent's owner link or promotion is a proposal only Bryan's
+    // browser applies (`share-access-door.test.ts`), so the fixture promotes
+    // in the store, the state an approval leaves.
     handle.shareLinks.addToAudience(board, [REGULAR, PROMOTED], 'Bryan');
     const plain = await jj<{ link: { linkId: string } }>(
       await postLocal('/api/share/workspace', { workspaceId: board }),
     );
     expect((await asVisitor(REGULAR, `/s/${plain.link.linkId}`)).status).toBe(302);
-    const owning = await jj<{ link: { linkId: string } }>(
-      await postLocal('/api/share/workspace', { workspaceId: board, role: 'owner' }),
-    );
-    expect((await asVisitor(PROMOTED, `/s/${owning.link.linkId}`)).status).toBe(302);
+    expect((await asVisitor(PROMOTED, `/s/${plain.link.linkId}`)).status).toBe(302);
+    expect(handle.shareLinks.setMemberRole(board, PROMOTED, 'owner')).toBe(true);
 
     const task = await jj<{ task: { id: string } }>(
       await postLocal(`/workspaces/${encodeURIComponent(board)}/tasks`, {
@@ -249,27 +248,17 @@ describe('the level is enforced by the API', () => {
     expect(await roster()).toEqual(before);
   });
 
-  it('lets an Owner reaching the board through the share host change a level', async () => {
-    // The point of the design: the gate is the ROLE, not the hostname. A
-    // promoted guest manages the board; the Regular User beside them cannot.
+  it('refuses an invited Owner’s change to a level, and the board does not move', async () => {
+    // Bryan, 29 Oct: only he changes who is in. An invited Owner answers
+    // owner-only asks (below) but is an ordinary member for the roster.
+    const before = await roster();
     const res = await postAsVisitor(
       PROMOTED,
       `/workspaces/${encodeURIComponent(board)}/members/${encodeURIComponent(REGULAR)}/role`,
       { role: 'owner' },
     );
-    expect(res.status).toBe(200);
-    expect((await roster())[REGULAR]).toBe('owner');
-    // …and back, by the operator, so the rest of this file reads a Regular
-    // User where it expects one.
-    expect(
-      (
-        await postLocal(
-          `/workspaces/${encodeURIComponent(board)}/members/${encodeURIComponent(REGULAR)}/role`,
-          { role: 'member' },
-        )
-      ).status,
-    ).toBe(200);
-    expect((await roster())[REGULAR]).toBe('member');
+    expect(res.status).toBe(403);
+    expect(await roster()).toEqual(before);
   });
 
   it('refuses a level that is not one of the two words', async () => {

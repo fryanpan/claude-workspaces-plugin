@@ -234,6 +234,7 @@ describe('share links over HTTP', () => {
       // sends. `name` was the per-share-application mint's subdomain and is
       // ignored; `allowDomains` is the link's audience, and the reply says so.
       // Who it then admits is `share-link-audience.test.ts`.
+      handle.shareLinks.addToAudience(board, ['@partner.example'], 'Bryan');
       const r = await postLocal('/api/share/workspace', {
         workspaceId: board,
         allowDomains: ['@partner.example'],

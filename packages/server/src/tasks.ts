@@ -3075,7 +3075,7 @@ export class TaskStore {
     if (refused) return { ok: false, error: 'not-a-person', message: refused };
     const item = this.listReviewItems(taskId).find((r) => r.id === reviewItemId);
     if (!item) return { ok: false, error: 'unknown-review-item' };
-    const wrongDoor = answerDoorRefusal(item.review.shape, opts.door);
+    const wrongDoor = answerDoorRefusal(item.review.shape, opts.door, item.access !== undefined);
     return wrongDoor ? { ok: false, ...wrongDoor } : undefined;
   }
 
@@ -3108,6 +3108,15 @@ export class TaskStore {
       revisedRange?: { start: number; end: number };
     },
   ): ReviseReviewItemResult {
+    // An access item's words are derived from its change, so rewording one
+    // would describe a change other than the one Approve applies.
+    if (this.listReviewItems(taskId).some((r) => r.id === reviewItemId && r.access)) {
+      return {
+        ok: false,
+        error: 'not-revisable',
+        message: 'an access change is not reworded — withdraw it and propose the change you mean',
+      };
+    }
     return this.reviewItems.reviseReviewItem(taskId, reviewItemId, patch, opts);
   }
 

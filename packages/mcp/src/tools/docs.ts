@@ -966,9 +966,37 @@ export async function handleDocsTool(
       // the board's membership list, and this is the same route the board's
       // own Settings panel calls. One door, so an agent and a person cannot
       // be judged by two different rules.
-      const { email, role } = a as { email: string; role: string };
+      // A promotion files an approval card on `taskId` for the owner; a
+      // demotion applies at once (Bryan, 29 Oct: only he lets anyone in).
+      const { email, role, taskId, why } = a as {
+        email: string;
+        role: string;
+        taskId?: string;
+        why?: string;
+      };
       const res = await http('POST', `${board()}/members/${encodeURIComponent(email)}/role`, {
         role,
+        ...(taskId !== undefined ? { taskId } : {}),
+        ...(why !== undefined ? { why } : {}),
+        author: AUTHOR,
+      });
+      return ok(res);
+    }
+    case 'set_share_audience': {
+      // Same door as the board's Settings: removals apply at once, an add
+      // that names somebody new files an approval card on `taskId`.
+      const { add, remove, taskId, why } = a as {
+        add?: string[];
+        remove?: string[];
+        taskId?: string;
+        why?: string;
+      };
+      const res = await http('POST', `${board()}/audience`, {
+        ...(add !== undefined ? { add } : {}),
+        ...(remove !== undefined ? { remove } : {}),
+        ...(taskId !== undefined ? { taskId } : {}),
+        ...(why !== undefined ? { why } : {}),
+        author: AUTHOR,
       });
       return ok(res);
     }

@@ -149,6 +149,7 @@ import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/work
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
 import { captureServerError } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
+import { AccessProposals } from './share/access-proposals.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
 import type { ShareLinks } from './share/share-links.ts';
 import { Shares } from './share/shares.ts';
@@ -2790,6 +2791,19 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     });
   });
 
+  // An agent's share call that would let somebody new in files a proposal;
+  // only the owner's Approve applies it (share/access-proposals.ts).
+  const accessProposals = new AccessProposals({
+    taskStore,
+    shareLinks,
+    shareLinkBaseHost,
+    isBoardLocked: (workspaceId) => sharingGate.isBoardLocked(workspaceId),
+    announce: (task, item, author) => {
+      taskProjection.refreshTask(task);
+      announceTaskReview(task, item, author);
+    },
+  });
+
   /**
    * What the sign-in, session and share routes read instead of this closure's
    * scope. Built once — every collaborator in it is long-lived.
@@ -2800,6 +2814,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     taskStore,
     shares,
     shareLinks,
+    accessProposals,
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
@@ -2840,6 +2855,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // legible in a debugger.
     ...(opts.secretWriter ? { secretWriter: opts.secretWriter } : {}),
     ...(permissionGrants ? { permissionGrants } : {}),
+    accessProposals,
     ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     taskStore,
     taskProjection,
@@ -2916,6 +2932,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     chatAudit,
     shareLinks,
+    accessProposals,
     taskStore,
     taskProjection,
     docStore,

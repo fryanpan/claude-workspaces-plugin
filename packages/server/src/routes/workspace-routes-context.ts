@@ -14,6 +14,7 @@ import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { PageLoadLog } from '../page-loads.ts';
 import type { FeaturesOff } from '../project-profile.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
+import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ShareLinks } from '../share/share-links.ts';
 import type { SlowLoadAlarm } from '../slow-load-alarm.ts';
@@ -51,6 +52,8 @@ export interface WorkspaceRoutesContext {
   /** Share links and the board memberships redeeming one creates — who has
    *  access to a board, and at what level. */
   shareLinks: ShareLinks;
+  /** Files and applies access proposals (`share/access-proposals.ts`). */
+  accessProposals: AccessProposals;
   /** Where a spoken request is routed and how its answer comes back. */
   voiceRouter: VoiceRouter;
   /** The board mic's spoken reply: which setups run, and how long each

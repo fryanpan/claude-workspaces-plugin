@@ -16,6 +16,7 @@ import { ticketOpenParts } from '../answer-coverage.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
+import { ACCESS_ANSWER_DENIAL } from '../review-items/answer-doors.ts';
 import { provenEmailFor } from '../review-items/approver.ts';
 import {
   GRANT_ANSWER_DENIAL,
@@ -167,6 +168,9 @@ export async function handleTaskReviewItems(
       // answer_review_item, or anyone's — may stand in for the owner's own
       // press of Approve. See `routes/task-grants.ts`.
       if (asksForGrant(item?.review)) return j(400, GRANT_ANSWER_DENIAL);
+      // An ACCESS change likewise: approving it changes who is in the board,
+      // so only the owner's own press of Approve does (`routes/task-access.ts`).
+      if (item?.access !== undefined) return j(400, ACCESS_ANSWER_DENIAL);
     }
     // Checked HERE, before any write and before the ask-back conversion below,
     // because the conversion is itself a write on the item: a Regular User's

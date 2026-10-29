@@ -1,3 +1,22 @@
+import type { CodeSender } from '../auth/code-sender.ts';
+import { CODE_TTL_MS, type EmailCodes } from '../auth/email-code.ts';
+import type { SessionRevocations } from '../auth/session-revocations.ts';
+import {
+  HOST_SESSION_COOKIE,
+  SESSION_COOKIE,
+  clearedSessionCookieHeaders,
+  sessionCookieHeader as emailSessionCookieHeader,
+  mintSession,
+  readSessionCookie,
+  verifySession as verifyEmailSession,
+} from '../auth/session.ts';
+import { mintBoardWidgetToken } from '../auth/widget-token.ts';
+import type { DocStore } from '../doc-store.ts';
+import type { Identities, IdentityRecord } from '../identities.ts';
+import { userForIdentity } from '../identities.ts';
+import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
+import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 /**
  * The sign-in, session and share-link REST block, in the order it is matched.
  *
@@ -19,25 +38,7 @@
  * Dependencies arrive in an explicit context rather than captured from the
  * `createServer` closure, following `task-routes-context.ts`.
  */
-import type { CodeSender } from '../auth/code-sender.ts';
-import { CODE_TTL_MS, type EmailCodes } from '../auth/email-code.ts';
-import type { SessionRevocations } from '../auth/session-revocations.ts';
-import {
-  HOST_SESSION_COOKIE,
-  SESSION_COOKIE,
-  clearedSessionCookieHeaders,
-  sessionCookieHeader as emailSessionCookieHeader,
-  mintSession,
-  readSessionCookie,
-  verifySession as verifyEmailSession,
-} from '../auth/session.ts';
-import { mintBoardWidgetToken } from '../auth/widget-token.ts';
-import type { DocStore } from '../doc-store.ts';
-import type { Identities, IdentityRecord } from '../identities.ts';
-import { userForIdentity } from '../identities.ts';
-import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
-import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
-import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
+import { type AccessProposals, proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { boardLockedRefusal, lockedBoardNamedBy } from '../share/board-lock.ts';
 import { type BoardRole, normalizeBoardRole } from '../share/board-role.ts';
 import { collabMembershipEnded } from '../share/collab-member-key.ts';
@@ -143,6 +144,8 @@ export interface AuthShareRoutesContext {
    * a member" at the place that decides who gets in.
    */
   shareLinks: ShareLinks;
+  /** Files the proposal an agent's widening share call becomes. */
+  accessProposals: AccessProposals;
   /**
    * The hostname share URLs are built from (the first `CW_SHARE_LINK_HOSTS`
    * entry), or `''` when this deployment configured none. Empty refuses the
@@ -253,6 +256,7 @@ export async function handleAuthShareRoutes(
     taskStore,
     shares,
     shareLinks,
+    accessProposals,
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
@@ -1069,6 +1073,25 @@ export async function handleAuthShareRoutes(
         error: 'share_hostname_not_configured',
         hint: "Set CW_SHARE_LINK_HOSTS to the share hostname and CF_ACCESS_SHARE_AUD to the audience of the Cloudflare Access application in front of it (its own application, not the owner hostname's), alongside CF_ACCESS_TEAM_DOMAIN.",
       });
+    }
+    // Only the owner lets somebody new in (share/access-proposals.ts): a link
+    // for people the board already names mints now; one naming someone new,
+    // or making its redeemers Owners, becomes an approval card instead.
+    const widening = accessProposals.widening(workspaceId, allowDomains ?? []);
+    if (widening.length > 0 || role === 'owner') {
+      const link = {
+        ...(typeof body?.label === 'string' ? { label: body.label } : {}),
+        ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
+        ...(role !== undefined ? { role } : {}),
+        ...(landing ? { landing } : {}),
+        ...(allowDomains ? { allowDomains } : {}),
+      };
+      const change = { op: 'share-link' as const, workspaceId, entries: widening, link };
+      const actor = proposingAgent(body?.createdBy);
+      return proposalReply(
+        j,
+        accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
+      );
     }
     try {
       const link = shareLinks.create({

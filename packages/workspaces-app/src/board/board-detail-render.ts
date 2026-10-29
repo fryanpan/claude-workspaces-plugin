@@ -23,6 +23,7 @@ import {
   formatEffortSeconds,
   ratioForGoal,
 } from '@claude-workspaces/core/goal-effort';
+import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 import type { ReviewGateNote } from '@claude-workspaces/core/review-hold';
 import { blockableStatus } from '@claude-workspaces/core/task-blocked';
 import { renderCommentMarkdown } from '../comment-markdown.ts';
@@ -1338,6 +1339,8 @@ export interface PanelReviewItem {
   secrets?: readonly ReviewSecretField[];
   /** A GRANT ask's allow lines, exactly as they will be written. */
   allowRules?: readonly string[];
+  /** An ACCESS item's change, echoed back to the access door. */
+  access?: ReviewAccessChange;
   headline: string;
   /** The ONE body. A task-borne decision has no `detail` field to read, so
    *  this is `decisionBlurb`'s derived prose; a declaration carries its own. */

@@ -39,7 +39,10 @@
  */
 import { normalizeEmail } from '@claude-workspaces/core';
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { normalizeBoardRole } from '../share/board-role.ts';
+import { hasOwnerProof } from '../share/owner-proof.ts';
+import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
 import { safeDecodeSegment } from '../workspace-path.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
@@ -49,10 +52,31 @@ export async function handleWorkspaceMembers(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
 ): Promise<Response | undefined> {
-  const { shareLinks, docStore, sse, j, safeJson } = ctx;
-  const { req, scope, accessEmail, roleFor, requireOwner } = rq;
+  const { shareLinks, accessProposals, docStore, sse, j, safeJson } = ctx;
+  const { req, scope, accessEmail, roleFor, requireOwner, visitor } = rq;
   if (!scope) return undefined;
   const { workspaceId } = scope;
+  // Only the owner changes who is in (Bryan, 29 Oct). Their own browser
+  // applies a change at once; an agent's call that lets somebody new in files
+  // a proposal; one that narrows applies at once, because taking access away
+  // never waits on a person. A share visitor changes nothing here — an
+  // invited Owner is an ordinary member for this purpose.
+  const proven = (): boolean => hasOwnerProof(req, rq.provenIdentityFor, rq.requestOriginFor);
+  const refuseVisitor = (): Response | null =>
+    visitor
+      ? j(403, {
+          error: 'owner-only',
+          message: "Only the board's owner changes who is in this board.",
+        })
+      : requireOwner(workspaceId);
+  /** Hang up what these members still have open on this board. */
+  const hangUp = (emails: readonly string[]): { closedSockets: number; closedStreams: number } => {
+    const keys = new Set(emails.map((e) => shareMemberKey(workspaceId, e)));
+    return {
+      closedSockets: docStore.closeSocketsForShareMembers((k) => keys.has(k)),
+      closedStreams: sse.closeForShareMembers((k) => keys.has(k)),
+    };
+  };
 
   // ── The list, and your own place in it ────────────────────────────────
   //
@@ -79,13 +103,16 @@ export async function handleWorkspaceMembers(
         role: m.role ?? 'member',
         addedAt: m.addedAt,
       })),
+      // Who may sign in at all, and the changes waiting on the owner.
+      audience: shareLinks.audienceOf(workspaceId)?.entries ?? [],
+      openProposals: accessProposals.rows([workspaceId]).filter((r) => !r.answer).length,
     });
   }
 
   // ── Promote or demote ─────────────────────────────────────────────────
   const roleMatch = matchRest(scope, /^members\/([^/]+)\/role$/);
   if (roleMatch && req.method === 'POST') {
-    const denied = requireOwner(workspaceId);
+    const denied = refuseVisitor();
     if (denied) return denied;
     // `safeDecodeSegment`, not the bare decoder: one stray `%` in the segment
     // throws a `URIError`, and an address this server has never heard of would
@@ -97,6 +124,23 @@ export async function handleWorkspaceMembers(
     // a silent demotion.
     const role = normalizeBoardRole(body?.role);
     if (!role) return j(400, { error: "role must be 'owner' or 'member'" });
+    const before = shareLinks.roleOf(workspaceId, email);
+    if (before === null) return j(404, { error: 'not a member', workspaceId });
+    // A promotion by anything but the owner's own browser is a proposal.
+    if (role === 'owner' && before !== 'owner' && !proven()) {
+      const change = {
+        op: 'set-role' as const,
+        workspaceId,
+        email: normalizeEmail(email),
+        role,
+        before,
+      };
+      const actor = rq.authorFor(body?.author) ?? proposingAgent(body?.createdBy);
+      return proposalReply(
+        j,
+        accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor }),
+      );
+    }
     if (!shareLinks.setMemberRole(workspaceId, email, role)) {
       return j(404, { error: 'not a member', workspaceId });
     }
@@ -113,7 +157,7 @@ export async function handleWorkspaceMembers(
   // otherwise keep reading AND writing until the connection happened to drop.
   const removeMatch = matchRest(scope, /^members\/([^/]+)$/);
   if (removeMatch && req.method === 'DELETE') {
-    const denied = requireOwner(workspaceId);
+    const denied = refuseVisitor();
     if (denied) return denied;
     const email = safeDecodeSegment(removeMatch[1] ?? '');
     if (!shareLinks.removeMember(workspaceId, email)) {
@@ -121,15 +165,60 @@ export async function handleWorkspaceMembers(
     }
     // Exactly this membership: someone ejected from one board may still hold
     // another, and their connections to that one must survive.
-    const key = shareMemberKey(workspaceId, email);
-    const closedSockets = docStore.closeSocketsForShareMembers((k) => k === key);
-    const closedStreams = sse.closeForShareMembers((k) => k === key);
+    return j(200, { ok: true, workspaceId, email: normalizeEmail(email), ...hangUp([email]) });
+  }
+
+  // ── Who may sign in at all ────────────────────────────────────────────
+  //
+  // `POST /workspaces/<id>/audience` with `{ add?: [...], remove?: [...] }`,
+  // addresses and `@domain`s. A removal applies at once and hangs up whoever
+  // it ended; an add that names somebody new applies only from the owner's
+  // own browser, and from anything else files a proposal (`taskId`, `why`).
+  if (scope.rest === 'audience' && req.method === 'POST') {
+    const denied = refuseVisitor();
+    if (denied) return denied;
+    const body = await safeJson(req);
+    const parse = (raw: unknown): string[] | null => {
+      if (raw === undefined) return [];
+      const parsed = parseShareAudience(raw);
+      return parsed.ok ? parsed.audience : null;
+    };
+    const add = parse(body?.add);
+    const remove = parse(body?.remove);
+    if (add === null || remove === null || add.length + remove.length === 0) {
+      return j(400, {
+        error: 'bad_audience',
+        hint: 'add and remove are lists of addresses ("someone@partner.example") or domains ("@partner.example"); name at least one',
+      });
+    }
+    // Their member rows stay — the record of how they got in — and simply
+    // stop being admitted, so the next request refuses them.
+    const lost = remove.flatMap((m) => shareLinks.removeFromAudience(workspaceId, m));
+    const closed = hangUp(lost);
+    const widening = accessProposals.widening(workspaceId, add);
+    if (widening.length > 0 && !proven()) {
+      const change = { op: 'add-audience' as const, workspaceId, entries: widening };
+      const actor = rq.authorFor(body?.author) ?? proposingAgent(body?.createdBy);
+      const res = accessProposals.propose({ change, taskId: body?.taskId, why: body?.why, actor });
+      if (remove.length === 0) return proposalReply(j, res);
+      // The removals above already landed; say so beside the proposal.
+      const reply = await proposalReply(j, res).json();
+      return j(res.ok ? 202 : res.status, { ...reply, removed: remove, ...closed });
+    }
+    if (widening.length > 0) {
+      shareLinks.addToAudience(
+        workspaceId,
+        widening,
+        rq.provenIdentityFor?.()?.displayName ?? 'owner',
+      );
+    }
     return j(200, {
       ok: true,
       workspaceId,
-      email: normalizeEmail(email),
-      closedSockets,
-      closedStreams,
+      added: widening,
+      removed: remove,
+      audience: shareLinks.audienceOf(workspaceId)?.entries ?? [],
+      ...closed,
     });
   }
 
