@@ -26,7 +26,15 @@
  *   --stub             the deterministic stub composer; free, for plumbing
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseNotesMethod } from '../packages/core/src/notes-method.ts';
@@ -178,7 +186,20 @@ async function main(argv: string[]): Promise<number> {
     writeNotesMethod(dataDir, plan.docId, { method, at: Date.now() });
   }
   const meter = new SpendMeter(stub ? Number.POSITIVE_INFINITY : cap);
-  const composer = stub ? createStubNotesComposer() : shippedComposer(meter, runDir, dataDir);
+  const built = stub ? createStubNotesComposer() : shippedComposer(meter, runDir, dataDir);
+  // Every edit the model answered, before the guards: what a note that never
+  // reached the doc said is otherwise not recorded anywhere.
+  const editLog = join(runDir, 'edits.jsonl');
+  const composer: NotesComposer = argv.includes('--log-edits')
+    ? {
+        name: built.name,
+        async compose(input) {
+          const edits = await built.compose(input);
+          appendFileSync(editLog, `${JSON.stringify({ meetingId: input.meetingId, edits })}\n`);
+          return edits;
+        },
+      }
+    : built;
   const coverageJudge = stub ? undefined : evalCoverageJudge(meter);
   const lag = flag(argv, '--endpoint-lag');
   const legs = plan.meetings.reduce((n, m) => n + m.legs.length, 0);
