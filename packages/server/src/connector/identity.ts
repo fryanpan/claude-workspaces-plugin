@@ -44,6 +44,11 @@ export interface ConnectorIdentity {
   /** True for the shared `agent` identity, which is never pooled. */
   shared: boolean;
   headers: IdentityHeaders;
+  /**
+   * The board whose socket the session was opened on (`board-sockets.ts`),
+   * or undefined for one opened over TCP. Never read from a header.
+   */
+  boardId?: string;
 }
 
 export type IdentityRead = { ok: true; headers: IdentityHeaders } | { ok: false; message: string };
@@ -127,10 +132,16 @@ export function readIdentityHeaders(headers: Headers): IdentityRead {
  * pooled connector reads that default on every write that names no board, so
  * two sessions pinned to different boards sharing one would each file into
  * whichever board initialized last.
+ *
+ * One opened on a board's socket is keyed by that board first, so it never
+ * shares a hosted session with the same agent over TCP, and its default board
+ * is the socket's whatever `x-cw-workspace` said. It must name its agent: the
+ * board token its REST calls carry is minted for one.
  */
 export function resolveIdentity(
   headers: IdentityHeaders,
   sessionId: string,
+  boardId?: string,
 ): { ok: true; identity: ConnectorIdentity } | { ok: false; message: string } {
   const author = resolveAgentAuthor({
     ...(headers.agent !== undefined ? { CW_AGENT_NAME: headers.agent } : {}),
@@ -144,10 +155,18 @@ export function resolveIdentity(
       message: 'x-cw-agent does not resolve to a valid agent id',
     };
   }
-  const key = shared
-    ? `shared\n${sessionId}`
-    : `${author.id}\n${headers.cwd}\n${headers.workspace ?? ''}`;
-  return { ok: true, identity: { key, author, shared, headers } };
+  if (boardId === undefined) {
+    const key = shared
+      ? `shared\n${sessionId}`
+      : `${author.id}\n${headers.cwd}\n${headers.workspace ?? ''}`;
+    return { ok: true, identity: { key, author, shared, headers } };
+  }
+  if (shared) {
+    return { ok: false, message: 'a board socket session must name its agent (x-cw-agent)' };
+  }
+  const scoped = { ...headers, workspace: boardId };
+  const key = `board:${boardId}\n${author.id}\n${headers.cwd}`;
+  return { ok: true, identity: { key, author, shared, headers: scoped, boardId } };
 }
 
 /** Snapshot values back into headers, so a restored identity passes exactly

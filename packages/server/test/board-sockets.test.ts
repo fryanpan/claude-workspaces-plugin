@@ -167,7 +167,6 @@ describe('A. a board socket is held to its board', () => {
       '/api/agent-token',
       '/workspaces?format=json',
       '/api/review-queue',
-      '/mcp',
     ])
       expect((await on(harborlight, path, bearer(at1))).status, path).toBe(403);
   });

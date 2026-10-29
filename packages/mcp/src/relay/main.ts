@@ -8,6 +8,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createRelay } from './relay-core.ts';
+import { unixSocketFetch } from './unix-fetch.ts';
+
+// A walled lead's relay reaches its board only over that board's socket.
+const boardSocket = process.env.CW_BOARD_SOCKET?.trim() || undefined;
 
 const relay = createRelay({
   env: process.env,
@@ -15,7 +19,8 @@ const relay = createRelay({
   homedir,
   existsSync,
   readFileSync,
-  fetch: (url, init) => fetch(url, init),
+  fetch: boardSocket ? unixSocketFetch(boardSocket) : (url, init) => fetch(url, init),
+  ...(boardSocket ? { boardSocket } : {}),
   write: (line) => {
     process.stdout.write(`${line}\n`);
   },
@@ -25,7 +30,7 @@ const relay = createRelay({
     : {}),
 });
 
-console.error('[relay] node relay started');
+console.error(`[relay] node relay started${boardSocket ? ' on a board socket' : ''}`);
 let buf = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk: string) => {

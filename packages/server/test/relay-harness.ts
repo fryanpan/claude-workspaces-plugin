@@ -96,8 +96,18 @@ export interface StdioChild {
   stop(): Promise<void>;
 }
 
-export function startChild(arm: ChildArm, env: Record<string, string>, cwd: string): StdioChild {
-  const proc: ChildProcess = spawn('/bin/sh', [LAUNCHER, BUNDLE], {
+/**
+ * `prefix` runs the launcher under another command, e.g. `sandbox-exec -f
+ * <profile>`, which execs it, so `pid` is still the child's.
+ */
+export function startChild(
+  arm: ChildArm,
+  env: Record<string, string>,
+  cwd: string,
+  prefix: string[] = [],
+): StdioChild {
+  const [file, ...args] = [...prefix, '/bin/sh', LAUNCHER, BUNDLE];
+  const proc: ChildProcess = spawn(file ?? '/bin/sh', args, {
     cwd,
     env: {
       PATH: PATH_WITH_NODE,

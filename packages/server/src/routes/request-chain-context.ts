@@ -87,6 +87,8 @@ export interface RequestChainContext {
   workspaceRoutesCtx: WorkspaceRoutesContext;
   taskRoutesCtx: TaskRoutesContext;
   connectorHost: ConnectorHost;
+  /** The board whose socket a request arrived on (board-sockets.ts), or null. */
+  boardOfSocket: (req: Request) => string | null;
   agentTokenKeyFor: () => string;
   agentIdentityRoutesCtx: AgentIdentityRoutesContext;
   boardTokenRoutesCtx: BoardTokenRoutesContext;

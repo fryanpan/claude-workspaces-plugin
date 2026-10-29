@@ -68,6 +68,7 @@ describe('/mcp gate', () => {
     j: (status: number, body: unknown) => Response.json(body, { status }),
     requestAddress: () => address,
     agentTokenKey: () => KEY,
+    boardOfSocket: () => null,
   });
   const call = (
     headers: Record<string, string>,

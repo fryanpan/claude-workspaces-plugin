@@ -33,6 +33,12 @@
 #      CW_MCP_RELAY=0 (the rollback lever), or when an identity value is not
 #      plain ASCII and so cannot travel as an HTTP header.
 #
+# A WALLED LEAD (CW_BOARD_SOCKET set, by scripts/lead-sandbox.ts) gets the
+# node relay and nothing else: it alone dials a unix socket, and the wall
+# refuses every TCP port either other child would use. If the node relay
+# cannot run, the launch fails and says so rather than start a child with
+# no way to its board.
+#
 # Usage: /bin/sh claude-workspaces-mcp.sh <path-to-mcp/index.js> [args...]
 
 set -u
@@ -185,13 +191,19 @@ compiled_relay() {
   echo "$relay_bin"
 }
 
+board_socket="${CW_BOARD_SOCKET:-}"
+if [ -n "$board_socket" ] && ! relay_wanted; then
+  echo "claude-workspaces-mcp: CW_BOARD_SOCKET is set, so only the node relay can reach the board, and it is off (CW_MCP_RELAY=0, or an identity value that is not plain ASCII)." >&2
+  exit 64
+fi
+
 if relay_wanted; then
   plugin_json="$mcp_dir/../.claude-plugin/plugin.json"
   if [ -f "$plugin_json" ]; then
     CW_RELAY_PLUGIN_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([0-9.]*\)".*/\1/p' "$plugin_json" | head -n 1)
     export CW_RELAY_PLUGIN_VERSION
   fi
-  if relay_bin=$(compiled_relay); then
+  if [ -z "$board_socket" ] && relay_bin=$(compiled_relay); then
     [ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "compiled $relay_bin"; exit 0; }
     exec "$relay_bin"
   fi
@@ -214,6 +226,10 @@ fi
 if relay_wanted && [ -f "$mcp_dir/relay.js" ]; then
   [ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "node-relay"; exit 0; }
   exec "$node_bin" "$mcp_dir/relay.js"
+fi
+if [ -n "$board_socket" ]; then
+  echo "claude-workspaces-mcp: CW_BOARD_SOCKET is set and $mcp_dir/relay.js is missing, so nothing can reach the board." >&2
+  exit 64
 fi
 [ "${CW_MCP_PRINT_CHILD:-}" = "1" ] && { echo "full"; exit 0; }
 exec "$node_bin" "$bundle" "$@"
