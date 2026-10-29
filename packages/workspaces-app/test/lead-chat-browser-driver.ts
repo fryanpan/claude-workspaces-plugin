@@ -167,7 +167,7 @@ async function main(): Promise<void> {
       { encoding: 'utf8', timeout: 120_000 },
     );
     if (built.status !== 0) throw new Error(`app build failed:\n${built.stderr}`);
-    // The listener hears `ears.line` once two frames of the page's mic arrive.
+    // The listener hears `ears.line` on the second frame after it is set.
     const ears = { line: null as string | null, opens: 0, frames: 0 };
     const listener: TranscriptionEngine = {
       name: 'scripted',
@@ -177,7 +177,7 @@ async function main(): Promise<void> {
         return {
           send: () => {
             ears.frames++;
-            if (++n === 2 && ears.line) {
+            if (ears.line && ++n >= 2) {
               const text = ears.line;
               ears.line = null;
               o.onTurn({ turn: 0, text, final: true });
@@ -361,13 +361,14 @@ async function main(): Promise<void> {
       const stored = String(await cdp.evaluate(`localStorage.getItem('cw.lead-chat.mode')`));
       await go(cdp, surfaces[0]?.[1] ?? '');
       const v0 = (await cdp.evaluate(READ)) as Read;
+      // Read before the tap: the question's listener may open before the bar is seen.
+      const opensBefore = ears.opens;
       await tap(cdp, v0.button as Rect);
       const out = await until('the bar out', async () => {
         const r = (await cdp.evaluate(READ)) as Read;
         return r.bar ? r : null;
       });
       const said = `Read me the next one at ${width}`;
-      const opensBefore = ears.opens;
       ears.line = said;
       const heard = await until(
         'the lead hears the spoken question',
