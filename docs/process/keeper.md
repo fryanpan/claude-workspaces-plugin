@@ -62,6 +62,22 @@ checkout, including its `origin/main` ref, so an install from there could be
 any commit an agent chose. The keeper installs from its own clone, owned by
 `cw-relay`, and you check the commit against GitHub before it is used.
 
+## Sections 1 to 3 as one script
+
+`scripts/keeper-install.sh` runs sections 1, 2 and 3. Each step checks what
+is already there and skips or repairs it, so after a crash or a fix you run it
+again from the top. It never boots out the port job, deletes nothing (a
+half-made clone or release is moved aside), and asks you to confirm the
+commit before it installs it. Run it from GitHub, not from your checkout,
+with the merge commit you mean to ship in place of `<sha>`:
+
+```bash
+/bin/zsh -f -c "$(/usr/bin/curl -fsSL https://raw.githubusercontent.com/fryanpan/claude-workspaces-plugin/<sha>/scripts/keeper-install.sh)"
+```
+
+The sections below are what it does, step by step, and stay the reference
+when a step stops. Sections 4 to 7 are still yours to run by hand.
+
 ## 1. Install the keeper
 
 The keeper refuses to start from anything your user can write: its source,
