@@ -104,6 +104,11 @@ const REVIEW_ITEM_SCHEMA = {
       },
       required: ['what'],
     },
+    step: {
+      type: 'string',
+      description:
+        "The step a yes lets you take, when it is one: 'push', 'jira', 'send', 'deploy'. Lower-case. A board that reserves the step for its owner (get_workspace's requireOwnerFor) files the item so only the owner can answer it.",
+    },
   },
   required: ['headline'],
 } as const;

@@ -176,6 +176,12 @@ export interface ReviewPayload {
    */
   ownerOnly?: true;
   /**
+   * The STEP the answer lets the asker take — `push`, `jira`, `send` — when
+   * it names one. A board whose `requireOwnerFor` lists the step files the
+   * item `ownerOnly`, whatever the filer sent (Bryan, 29 Oct).
+   */
+  step?: string;
+  /**
    * The option id a person's answer came from, stamped when they answered by
    * tapping rather than typing. Provenance only: the answer is the reply, and
    * the reply carries the words. Absent on a typed answer, which is not a

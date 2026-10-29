@@ -6,6 +6,7 @@ import type { AgentCallerVerdict } from '../auth/agent-token.ts';
 import type { ChatAudit } from '../chat-audit.ts';
 import type { DocStore } from '../doc-store.ts';
 import type { HomeBriefStore } from '../home-brief.ts';
+import type { IdentityRecord } from '../identities.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -232,6 +233,12 @@ export interface WorkspaceRouteRequest {
   /** The owner gate: `null` for the board's owner, the 403 for anyone else.
    *  `const denied = requireOwner(id); if (denied) return denied;` */
   requireOwner: (workspaceId: string) => Response | null;
+  /** The PERSON this request proved, or null — read by the writes only the
+   *  owner's own browser may make (`share/owner-proof.ts`). Optional so a
+   *  caller that does not pass it fails closed. */
+  provenIdentityFor?: () => IdentityRecord | null;
+  /** The origin this request was served on; see `share/owner-proof.ts`. */
+  requestOriginFor?: () => string;
 }
 
 /**

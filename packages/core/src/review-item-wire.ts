@@ -180,6 +180,9 @@ function readPartialAnswers(value: unknown): ReviewPartialAnswer[] | undefined {
   return partial.length > 0 ? partial : undefined;
 }
 
+/** A step name: `push`, `jira`, `send`, `deploy-prod`. Anything else is dropped. */
+export const REVIEW_STEP = /^[a-z][a-z0-9-]{0,31}$/;
+
 export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   if (!isPlainObject(value)) return undefined;
   const shape = normalizeReviewType(value.review_type ?? value.shape);
@@ -195,6 +198,7 @@ export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   // nothing by them. Anything else reads as absent, which is the open state —
   // safe because the flag's absence is what every item filed before it had.
   if (value.ownerOnly === true) out.ownerOnly = true;
+  if (typeof value.step === 'string' && REVIEW_STEP.test(value.step)) out.step = value.step;
   const blocks = readReviewBlocks(value.blocks);
   if (blocks) out.blocks = blocks;
   if (typeof value.answeredWith === 'string') out.answeredWith = value.answeredWith;
