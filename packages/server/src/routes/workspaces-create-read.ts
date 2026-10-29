@@ -85,6 +85,13 @@ export async function handleWorkspaceCreateRead(
   if (pathname === '/workspaces' && req.method === 'POST') {
     const body = await safeJson(req);
     const folderPath = body?.folderPath as string | undefined;
+    // A board's lead reaches this path (`middleware/lead-scope.ts`) for a
+    // folder bind on its own board, and nothing else: the path names no
+    // board, so the body is held to it here.
+    if (visitor) {
+      const refused = refuseLeadBind(rq.leadBoard ?? null, body, ctx.leadMayBind);
+      if (refused) return j(403, refused);
+    }
     // Creating a board by name involves no file and stays open to the
     // app; binding a FOLDER names a host path, and that is agents only
     // — see browserCannotBindBody.
@@ -393,4 +400,32 @@ export async function handleWorkspaceCreateRead(
     });
   }
   return undefined;
+}
+
+/**
+ * Why a lead's `POST /workspaces` is refused, or null to let it bind. Only a
+ * folder bind; only on the lead's own board; never re-filing a set by id,
+ * which could name one on another board; and only a folder inside a root
+ * registered for that board (`board-socket-roots.ts`), because the server
+ * reads the files and the lead's sandbox does not hold the server.
+ */
+function refuseLeadBind(
+  leadBoard: string | null,
+  body: Record<string, unknown> | null,
+  leadMayBind: (boardId: string, folderPath: string) => boolean,
+): { error: string; message: string } | null {
+  const refuse = (message: string) => ({ error: 'out_of_lead_scope', message });
+  if (leadBoard === null) return refuse('Only a board’s lead may bind a folder from here.');
+  const folderPath = body?.folderPath;
+  if (typeof folderPath !== 'string' || folderPath === '')
+    return refuse('A lead may bind a folder here, and not create a board.');
+  if (body?.hubWorkspaceId !== leadBoard)
+    return refuse('A lead binds a folder onto its own board only.');
+  if (body?.setId !== undefined || body?.workspaceId !== undefined)
+    return refuse('A lead may not re-file an attachment set by id.');
+  if (!leadMayBind(leadBoard, folderPath))
+    return refuse(
+      'That folder is not inside a folder this board’s lead may bind. The launch registers its projects (PUT /api/board-sockets/<board>/roots).',
+    );
+  return null;
 }

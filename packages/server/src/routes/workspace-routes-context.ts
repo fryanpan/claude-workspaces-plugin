@@ -36,6 +36,8 @@ import type { ParallelismCapView } from './task-routes-context.ts';
 export interface WorkspaceRoutesContext {
   /** The board store — boards, their goals, their tasks and their agents. */
   taskStore: TaskStore;
+  /** Whether a board's lead may bind this folder (`board-socket-roots.ts`). */
+  leadMayBind: (boardId: string, folderPath: string) => boolean;
   /** The ydoc projection of the store, refreshed by hand after the writes
    *  that emit no store event (attach, unfile, archive-in-place). */
   taskProjection: TaskProjection;
@@ -232,6 +234,9 @@ export interface WorkspaceRouteRequest {
   /** The owner gate: `null` for the board's owner, the 403 for anyone else.
    *  `const denied = requireOwner(id); if (denied) return denied;` */
   requireOwner: (workspaceId: string) => Response | null;
+  /** The board this request is that board's lead on (the admission gate's
+   *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
+  leadBoard?: string | null;
 }
 
 /**

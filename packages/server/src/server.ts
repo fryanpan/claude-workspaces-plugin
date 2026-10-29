@@ -43,6 +43,7 @@ import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/bo
 import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
+import { BoardSocketRoots, boardSocketRootsPath } from './board-socket-roots.ts';
 import { openBoardSockets } from './board-sockets.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
@@ -119,6 +120,7 @@ import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext } from './routes/auth-share.ts';
+import { type BoardSocketRootsRoutesContext } from './routes/board-socket-roots.ts';
 import { type BoardTokenRoutesContext } from './routes/board-tokens.ts';
 import { type ChatAuditRoutesContext } from './routes/chat-audit-routes.ts';
 import { type CoachRoutesContext } from './routes/coach.ts';
@@ -1953,6 +1955,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * this one subject sit on either side of it.
    */
   /** Board agent tokens (`at2`) and their revocation record. */
+  const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
   const boardAgentTokens = new BoardAgentTokens(boardTokensPath(dataDir), () =>
     boardAgentTokenKey(cookieKey()),
   );
@@ -1996,6 +1999,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
     boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    boardAgentHeld: (tokenId) => boardAgentTokens.isHeld(tokenId),
     // Forward references, as above: the board sockets are opened below, and
     // the agent-token key is derived further down.
     boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
@@ -2614,6 +2618,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeJson,
     requestAddress: (req) => server.requestIP(req)?.address,
   };
+  /** The folders each board's lead may bind (routes/board-socket-roots.ts). */
+  const boardSocketRootsRoutesCtx: BoardSocketRootsRoutesContext = {
+    roots: boardSocketRoots,
+    boardExists: boardTokenRoutesCtx.boardExists,
+    j,
+    safeJson,
+    requestAddress: boardTokenRoutesCtx.requestAddress,
+  };
 
   /**
    * What the meeting, transcript and calendar routes read instead of this
@@ -2921,6 +2933,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    leadMayBind: (boardId, folderPath) => boardSocketRoots.allows(boardId, folderPath),
     chatAudit,
     shareLinks,
     taskStore,
@@ -3029,6 +3042,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     agentTokenKeyFor,
     agentIdentityRoutesCtx,
     boardTokenRoutesCtx,
+    boardSocketRootsRoutesCtx,
     chatAuditRoutesCtx,
     repoRoutesCtx,
     loadReportRoutesCtx,

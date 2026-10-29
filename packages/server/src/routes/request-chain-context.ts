@@ -26,6 +26,7 @@ import type { AgentIdentityRoutesContext } from './agent-identity.ts';
 import type { AppRoutesContext } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
 import type { AuthShareRoutesContext } from './auth-share.ts';
+import type { BoardSocketRootsRoutesContext } from './board-socket-roots.ts';
 import type { BoardTokenRoutesContext } from './board-tokens.ts';
 import type { ChatAuditRoutesContext } from './chat-audit-routes.ts';
 import type { CoachRoutesContext } from './coach.ts';
@@ -92,6 +93,7 @@ export interface RequestChainContext {
   agentTokenKeyFor: () => string;
   agentIdentityRoutesCtx: AgentIdentityRoutesContext;
   boardTokenRoutesCtx: BoardTokenRoutesContext;
+  boardSocketRootsRoutesCtx: BoardSocketRootsRoutesContext;
   chatAuditRoutesCtx: ChatAuditRoutesContext;
   repoRoutesCtx: RepoRoutesContext;
   loadReportRoutesCtx: LoadReportRoutesContext;
