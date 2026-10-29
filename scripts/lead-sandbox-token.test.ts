@@ -26,7 +26,7 @@ const STORED = b64(TOKEN);
 /** The un-labelled item only. */
 const PLAIN = { [TOKEN_SERVICE]: STORED };
 /** One item per labelled account. */
-const BOTH = {
+const BOTH: Record<string, string> = {
   [`${TOKEN_SERVICE}.harborlight`]: b64(TOKEN),
   [`${TOKEN_SERVICE}.riverbend`]: b64(OTHER),
 };
