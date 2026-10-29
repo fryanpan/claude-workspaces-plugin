@@ -109,8 +109,9 @@ that round settles, which is a shared read and not a cache with a lifetime.
 `link-titles.ts` holds the same shape for its lookup POST, keyed per URL.
 
 **A destructive action asks for a recent sign-in, decided in one place on
-each side.** `server/src/fresh-signin.ts` names every counted action and
-refuses one with 403 `confirm-required` when the person proof on the request
+each side.** `core/src/counted-routes.ts` is the one list of the counted
+methods and paths; `server/src/fresh-signin.ts` reads it, decides the
+cases the body settles, and refuses one with 403 `confirm-required` when the person proof on the request
 is more than ten minutes old; the request chain calls it below the gates that
 proved the person. `workspaces-app/src/fresh-signin-client.ts` is the page's
 half: it holds the refused request in sessionStorage across the trip to sign

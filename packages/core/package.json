@@ -18,6 +18,7 @@
     "./app-voice": "./src/app-voice.ts",
     "./asset-manifest": "./src/asset-manifest.ts",
     "./comment-receipt": "./src/comment-receipt.ts",
+    "./counted-routes": "./src/counted-routes.ts",
     "./discovery-file": "./src/discovery-file.ts",
     "./done-when": "./src/done-when.ts",
     "./done-when-refusal": "./src/done-when-refusal.ts",

@@ -34,6 +34,7 @@
  *
  * Stage 2 (a passkey check minting its own confirmation cookie) is not here.
  */
+import { countedRouteOf, trimTrailingSlashes } from '@claude-workspaces/core/counted-routes';
 import type { IdentityRecord } from './identities.ts';
 import { normalizeBoardRole } from './share/board-role.ts';
 import type { Shares } from './share/shares.ts';
@@ -89,18 +90,6 @@ export interface CountedActionContext {
   now: number;
 }
 
-const WS = '/workspaces/[^/]+';
-const PATH_ONLY: readonly (readonly [method: string, pattern: RegExp, action: string])[] = [
-  ['DELETE', new RegExp(`^${WS}$`), 'delete-workspace'],
-  ['DELETE', new RegExp(`^${WS}/docs/[^/]+$`), 'delete-doc'],
-  // Without `purge` this archives the review; with it, it destroys. Both count.
-  ['DELETE', new RegExp(`^${WS}/attachments/[^/]+$`), 'delete-attachment-set'],
-  ['POST', new RegExp(`^${WS}/docs/[^/]+/archive$`), 'archive-doc'],
-  ['POST', new RegExp(`^${WS}/attachments/[^/]+/archive$`), 'archive-attachment-set'],
-  ['POST', /^\/api\/share\/workspace$/, 'share-workspace'],
-  ['POST', /^\/api\/share\/link$/, 'share-link'],
-];
-
 /** The body as JSON, read off a clone so the route still gets its own. */
 async function bodyOf(req: Request): Promise<Record<string, unknown> | null> {
   try {
@@ -113,42 +102,42 @@ async function bodyOf(req: Request): Promise<Record<string, unknown> | null> {
   }
 }
 
-/** The counted action this request is, or null for one that stays instant. */
+/**
+ * The counted action this request is, or null for one that stays instant.
+ * The method and path come off the shared list (`@claude-workspaces/core`'s
+ * `counted-routes.ts`, which the page reads too); the body decides the rest.
+ */
 export async function countedActionOf(
   req: Request,
-  rawPathname: string,
+  pathname: string,
   ctx: CountedActionContext,
 ): Promise<string | null> {
-  const method = req.method;
-  // The routers answer `/docs/<id>/` as `/docs/<id>`, so the list must too.
-  const pathname = rawPathname.length > 1 ? rawPathname.replace(/\/+$/, '') : rawPathname;
-  for (const [m, pattern, action] of PATH_ONLY) {
-    if (m === method && pattern.test(pathname)) return action;
+  const route = countedRouteOf(req.method, pathname);
+  switch (route) {
+    case null:
+      return null;
+    case 'retire-workspace':
+      return (await bodyOf(req))?.retired === false ? null : route;
+    case 'raise-role':
+      return normalizeBoardRole((await bodyOf(req))?.role) === 'member' ? null : route;
+    case 'add-member': {
+      const body = await bodyOf(req);
+      const removeOnly = body !== null && (body.add === undefined || isEmptyArray(body.add));
+      return removeOnly ? null : route;
+    }
+    case 'approve-access':
+      return (await bodyOf(req))?.decision === 'reject' ? null : route;
+    case 'sharing-on':
+      return (await bodyOf(req))?.enabled === false ? null : route;
+    case 'unlock-board':
+      return (await bodyOf(req))?.locked === true ? null : route;
+    case 'lengthen-share': {
+      const shareId = trimTrailingSlashes(pathname).split('/')[3] ?? '';
+      return (await lengthensShare(req, shareId, ctx)) ? route : null;
+    }
+    default:
+      return route;
   }
-  if (method === 'PUT' && new RegExp(`^${WS}/retired$`).test(pathname)) {
-    return (await bodyOf(req))?.retired === false ? null : 'retire-workspace';
-  }
-  if (method !== 'POST') return null;
-  if (new RegExp(`^${WS}/members/[^/]+/role$`).test(pathname)) {
-    return normalizeBoardRole((await bodyOf(req))?.role) === 'member' ? null : 'raise-role';
-  }
-  if (new RegExp(`^${WS}/audience$`).test(pathname)) {
-    const body = await bodyOf(req);
-    const removeOnly = body !== null && (body.add === undefined || isEmptyArray(body.add));
-    return removeOnly ? null : 'add-member';
-  }
-  if (new RegExp(`^${WS}/tasks/[^/]+/review-items/[^/]+/access$`).test(pathname)) {
-    return (await bodyOf(req))?.decision === 'reject' ? null : 'approve-access';
-  }
-  if (pathname === '/api/share/enabled') {
-    return (await bodyOf(req))?.enabled === false ? null : 'sharing-on';
-  }
-  if (pathname === '/api/share/lock') {
-    return (await bodyOf(req))?.locked === true ? null : 'unlock-board';
-  }
-  const ttl = pathname.match(/^\/api\/share\/([^/]+)\/ttl$/);
-  if (ttl) return (await lengthensShare(req, ttl[1] ?? '', ctx)) ? 'lengthen-share' : null;
-  return null;
 }
 
 const isEmptyArray = (v: unknown): boolean => Array.isArray(v) && v.length === 0;

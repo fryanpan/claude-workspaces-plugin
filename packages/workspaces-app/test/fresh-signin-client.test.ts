@@ -182,6 +182,13 @@ describe('resumeHeld', () => {
       { request: { ...ARCHIVE, url: '/workspaces/../api/auth/logout' }, page: PAGE, at: 1_000 },
       { request: { ...ARCHIVE, url: '/workspaces/%2e%2e/api/auth/logout' }, page: PAGE, at: 1_000 },
       { request: { ...ARCHIVE, url: '/workspaces/./w-1/docs/d-1' }, page: PAGE, at: 1_000 },
+      {
+        request: { ...ARCHIVE, url: '/workspaces/w-1/docs/d-1/archive/../../d-2/archive' },
+        page: PAGE,
+        at: 1_000,
+      },
+      { request: { ...ARCHIVE, url: '/workspaces/w-1/tasks/t-1' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, method: 'DELETE' }, page: PAGE, at: 1_000 },
       { request: ARCHIVE, page: PAGE, at: 1_000, who: 'id-bob' },
     ];
     for (const held of planted) {

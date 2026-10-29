@@ -10,6 +10,8 @@
  * a request it does not refuse is answered here exactly as `fetch` answered.
  */
 
+import { countedRouteOf } from '@claude-workspaces/core/counted-routes';
+
 /** One request the server may refuse until the person signs in again. */
 export interface CountedRequest {
   method: 'POST' | 'PUT' | 'DELETE';
@@ -152,37 +154,23 @@ export async function resumeHeld(
   return response ? { request: req, response } : null;
 }
 
-const METHODS: readonly unknown[] = ['POST', 'PUT', 'DELETE'];
-
 /**
- * Whether a stored value is a request this page could have held: one of the
- * three verbs, to a same-origin path under one of the two prefixes every counted
- * route sits under, with string words. Anything else in
- * sessionStorage was planted, and is dropped without asking.
+ * Whether a stored value is a request this page could have held: a method and
+ * path on the shared counted list, with string words. The path must resolve
+ * on this origin to exactly what was stored, so a dot segment (`..`, `%2e`),
+ * a backslash or whitespace that `fetch` would turn into another route fails.
+ * Anything else in sessionStorage was planted, and is dropped without asking.
  */
 function isHeldRequest(r: CountedRequest): boolean {
-  return (
-    METHODS.includes(r.method) &&
-    typeof r.url === 'string' &&
-    isCountedPath(r.url) &&
-    [r.verb, r.gerund, r.noun, r.name].every((w) => typeof w === 'string')
-  );
-}
-
-/**
- * A path under one of the two prefixes every counted route sits under, that
- * a browser sends exactly as written: no dot segment (`..`, `%2e`), backslash
- * or whitespace that `fetch` would resolve to some other route.
- */
-function isCountedPath(url: string): boolean {
-  if (/[\s\\]|%2e/i.test(url)) return false;
-  const base = 'http://same-origin.invalid';
+  if (typeof r.url !== 'string' || typeof r.method !== 'string') return false;
+  if (![r.verb, r.gerund, r.noun, r.name].every((w) => typeof w === 'string')) return false;
+  if (/[\s\\]|%2e/i.test(r.url)) return false;
   try {
-    const u = new URL(url, base);
+    const u = new URL(r.url, location.origin);
     return (
-      u.origin === base &&
-      `${u.pathname}${u.search}` === url &&
-      /^\/(?:workspaces|api\/share)\//.test(u.pathname)
+      u.origin === location.origin &&
+      `${u.pathname}${u.search}` === r.url &&
+      countedRouteOf(r.method, u.pathname) !== null
     );
   } catch {
     return false;
