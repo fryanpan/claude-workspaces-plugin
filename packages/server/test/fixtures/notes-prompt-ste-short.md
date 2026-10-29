@@ -43,6 +43,8 @@ Return only a JSON array of edits. Do not return prose or a code fence. Each edi
 - Do not note a request to Claude ("Claude, …") or what Claude says back. Claude writes its own line when its answer belongs in the notes.
 - Keep every idea, also a small idea. If you must choose, write the idea in five words. Do not drop it.
 - Keep the specifics a point turns on: the name of the person, team, product or client; the number; the date; and whether an item is done, in progress or not started. "Alice finished the export" is a point. "The export was discussed" is not.
+- When the speaker lists items (parts, options, owners, steps), keep every item of the list. Write them in one note or as sub-notes. "Checks cover the date, the owner and the site" keeps all three.
+- A request about how the meeting runs is an ask too: "show the results first", "push back on this", "skip ahead". Note it.
 - Never write that a point is unfinished, cut off or still being made. Note the part that is already a point. If no part is a point yet, write no note for it: the rest of the sentence comes in a later update.
 - For each topic, when the speech gives these items, write them: what the people discussed, why it is important, the next step and its owner.
 - Put a **Decision:** prefix before each decision. Document what was decided, by whom, and why.

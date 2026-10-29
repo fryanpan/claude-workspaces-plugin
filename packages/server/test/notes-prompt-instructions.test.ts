@@ -40,6 +40,11 @@ import { input } from './notes-compose-input.ts';
  *   replays judged about one idea in six lost, most of them present in the
  *   notes without the name, number or done-or-pending state the idea turned
  *   on. Measured by `bun run notes:replay` on those meetings.
+ * - "Keep every item of the list" and "a request about how the meeting runs
+ *   is an ask" (2026-10-28), after a reading of the ideas still judged lost
+ *   found a three-part definition kept as two parts, and requests to skip
+ *   ahead or to push back dropped as talk about the call. Measured by
+ *   `bun run notes:replay` on the same meetings.
  * A further rule goes in the same way: change both copies, and say here what
  * it was measured against.
  */
