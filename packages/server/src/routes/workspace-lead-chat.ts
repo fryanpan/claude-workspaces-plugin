@@ -10,6 +10,8 @@
  * (`middleware/host-guard.ts`), and both refuse a visitor here besides.
  */
 import { LEAD_CHAT_MAX_CHARS, addressesLead } from '@claude-workspaces/core/lead-chat';
+import { leadHearsLine } from '../lead-chat/meeting.ts';
+import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
@@ -168,12 +170,14 @@ async function meetingAction(
     if (typeof turn !== 'number' || !Number.isInteger(turn) || turn < 0 || !who || !text) {
       return ctx.j(400, { error: 'turn, who and text required' });
     }
+    const source = meetings.current(workspaceId)?.source;
     const r = meetings.line(workspaceId, meetingId, { turn, who, text });
     if (!r.ok) return answer(r, {});
     // The one line of the meeting the lead acts on, sent once per turn: a
     // revision of a turn the meeting already holds is not a second ask.
     let toLead: string | undefined;
-    if (r.fresh && addressesLead(text)) {
+    const proven = hasOwnerProof(rq.req, rq.provenIdentityFor, rq.requestOriginFor);
+    if (r.fresh && addressesLead(text) && source && leadHearsLine(source, proven)) {
       const sent = ctx.leadChat.post(workspaceId, person, text, undefined, 'voice');
       if (sent.ok) toLead = sent.message.id;
     }

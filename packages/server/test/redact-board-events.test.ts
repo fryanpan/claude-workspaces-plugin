@@ -14,7 +14,7 @@
  * register. The repo is public.
  */
 import { describe, expect, it } from 'bun:test';
-import { redactBoardEventForVisitor } from '../src/share/redact-board-events.ts';
+import { redactBoardEventForVisitor, visitorBoardFrame } from '../src/share/redact-board-events.ts';
 import type { Task } from '../src/tasks.ts';
 
 const TASK: Task = {
@@ -209,5 +209,21 @@ describe('redactBoardEventForVisitor', () => {
       name: 'Bryan',
       kind: 'person',
     });
+  });
+});
+
+describe('the lead chat on a visitor’s feed', () => {
+  it('sends a share visitor none of the owner’s chat or meeting frames', () => {
+    for (const event of ['lead-chat.changed', 'lead-chat.meeting', 'lead-chat.meeting-line']) {
+      expect(
+        visitorBoardFrame({ event, workspaceId: 'w-1', line: { text: 'Lead, …' } }),
+      ).toBeUndefined();
+    }
+    // Positive control: a board event still reaches them, redacted.
+    const out = visitorBoardFrame({
+      event: 'task.created',
+      actor: { id: 'known-alice', name: 'Alice', kind: 'known' },
+    }) as { actor?: Record<string, unknown> } | undefined;
+    expect(out?.actor).toEqual({ name: 'Alice', kind: 'known' });
   });
 });

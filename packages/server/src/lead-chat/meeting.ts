@@ -42,6 +42,21 @@ export function leadChatMeetingPath(dataDir: string, workspaceId: string): strin
   return join(dataDir, 'workspaces', `${workspaceId}.lead-chat-meeting.json`);
 }
 
+/**
+ * Whether a line said in the meeting may reach the lead as the owner's ask.
+ *
+ * The lead acts on it as the owner, so the line has to be the owner's own
+ * words, and the gate is the one a doc meeting's "Claude, …" already passes
+ * (docs/architecture/security.md): the request carries a person proof that
+ * names the owner, and the words came from this device's microphone alone.
+ * Never a bot's call, where any guest may speak, and never Mac audio, where
+ * the far side of a call is in the stream. On the microphone, anyone in the
+ * room counts as the owner, as there.
+ */
+export function leadHearsLine(source: LeadChatMeetingSource, ownerProven: boolean): boolean {
+  return ownerProven && source === 'mic';
+}
+
 export interface MeetingStart {
   by: { id: string; name: string };
   docId: string;

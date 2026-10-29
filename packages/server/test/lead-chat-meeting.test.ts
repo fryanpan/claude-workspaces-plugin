@@ -27,7 +27,7 @@ import {
   type LeadChatMeeting,
   type LeadChatMeetingLine,
 } from '@claude-workspaces/core/lead-chat';
-import { LeadChatMeetings } from '../src/lead-chat/meeting.ts';
+import { LeadChatMeetings, leadHearsLine } from '../src/lead-chat/meeting.ts';
 import { type TickScheduler, createStubNotesComposer } from '../src/meeting-notes.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type MockScriptTurn, createMockTranscriptionEngine } from '../src/transcribe.ts';
@@ -234,21 +234,14 @@ describe('the lead chat’s meeting', () => {
     expect(read.meeting.lines.map((l) => l.text)).toEqual(['The ferry runs at six.']);
   });
 
-  it('hands a "Lead," line to the lead once, and keeps the room’s talk from it', async () => {
+  it('keeps a "Lead," line from the lead when the request proves no owner', async () => {
     const ask = 'Lead, file a task to price the Saltmarsh slipway.';
-    const send = (turn: number, text: string) =>
-      act({ action: 'line', id: meeting.id, turn, who: 'Bryan', text });
-    expect((await send(1, 'Alice, can you lead the review?')).status).toBe(200);
-    const first = (await (await send(2, ask)).json()) as { message?: string };
-    expect(first.message).toBeDefined();
-    // The same turn again — a reconnect re-sending it — is not a second ask.
-    const twice = (await (await send(2, ask)).json()) as { message?: string };
-    expect(twice.message).toBeUndefined();
-    await waitFor(() => lead.voice.some((v) => v.transcript === ask), {
-      describe: 'lead got the ask',
-    });
-    expect(lead.voice.filter((v) => v.transcript === ask)).toHaveLength(1);
-    expect(lead.voice.some((v) => v.transcript?.startsWith('Alice'))).toBe(false);
+    const res = await act({ action: 'line', id: meeting.id, turn: 2, who: 'Bryan', text: ask });
+    // Positive control: the line itself landed, and every page shows it.
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { message?: string }).message).toBeUndefined();
+    await waitFor(() => page.lines.some((l) => l.text === ask), { describe: 'line on the page' });
+    expect(lead.voice.some((v) => v.transcript === ask)).toBe(false);
   });
 
   it('adds a member who opens a page, and lets only the owner end it', async () => {
@@ -337,5 +330,15 @@ describe('the lead chat’s meeting', () => {
         describe: 'the note in the doc',
       },
     );
+  });
+});
+
+describe('which meeting lines reach the lead', () => {
+  it('only the owner’s own microphone, proven', () => {
+    expect(leadHearsLine('mic', true)).toBe(true);
+    expect(leadHearsLine('mic', false)).toBe(false);
+    // A call's guests and the far side of Mac audio are never the owner.
+    expect(leadHearsLine('bot', true)).toBe(false);
+    expect(leadHearsLine('mix', true)).toBe(false);
   });
 });

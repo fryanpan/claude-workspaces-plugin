@@ -96,6 +96,21 @@ function isTaskShape(value: unknown): value is Task {
 }
 
 /**
+ * A share visitor's copy of one frame on the board feed, or undefined to
+ * send them nothing.
+ *
+ * The lead chat's frames (`lead-chat.*`) are the owner's conversation with
+ * the board's lead and the meeting it runs: every line said, the people in
+ * it and the tab holding the microphone. Both lead-chat routes refuse a
+ * visitor, so the feed must too; everything else is
+ * `redactBoardEventForVisitor`.
+ */
+export function visitorBoardFrame<T extends { event: string }>(payload: T): T | undefined {
+  if (payload.event.startsWith('lead-chat.')) return undefined;
+  return redactBoardEventForVisitor(payload);
+}
+
+/**
  * The payload a share visitor's SSE stream may carry. Returns the input
  * object itself when nothing needs redacting, so owner streams (which never
  * call this) and untouched events pay nothing.

@@ -62,7 +62,7 @@ import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
-import { redactBoardEventForVisitor } from '../share/redact-board-events.ts';
+import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
 import { channelForWatchKey, openAgentMuxStream } from '../sse-mux.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
@@ -741,7 +741,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
           sse,
           `ws~${workspaceId}`,
           visitorShareId ?? undefined,
-          visitor ? redactBoardEventForVisitor : offBox(req) ? offBoxView : undefined,
+          visitor ? visitorBoardFrame : offBox(req) ? offBoxView : undefined,
           streamAgentId,
           sseLastEventId(req, url),
           visitorMemberKey ?? undefined,
