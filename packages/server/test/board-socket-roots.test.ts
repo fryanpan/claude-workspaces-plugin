@@ -6,6 +6,7 @@
  */
 import { afterAll, describe, expect, it } from 'bun:test';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -92,9 +93,12 @@ describe('BoardSocketRoots', () => {
     roots.set('w-harbor', [lead]);
     const viaLink = join(alias, 'Harbor-Spelled', 'docs', 'plan.md');
     const viaCase = join(root, 'harbor-spelled', 'docs', 'plan.md');
+    // Another case names the same folder only where the disk ignores case
+    // (macOS by default); on Linux it is a different, missing folder.
+    const caseBlind = existsSync(dirname(viaCase));
     // The control: the stored spelling is covered, and so is each other one.
     expect(roots.covers(join(lead, 'docs', 'plan.md'))).toBe(true);
-    for (const p of [viaLink, viaCase]) {
+    for (const p of caseBlind ? [viaLink, viaCase] : [viaLink]) {
       expect(roots.covers(p), p).toBe(true);
       expect(roots.landsInside(p, join(riverbend, 'plan.md')), p).toBe(false);
       expect(roots.landsInside(p, join(lead, 'docs', 'plan.md')), p).toBe(true);
