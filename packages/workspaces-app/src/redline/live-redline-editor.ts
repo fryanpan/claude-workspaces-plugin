@@ -1,7 +1,7 @@
 // Named, not off the `prose` namespace object — see block-identity.ts: a
 // namespace property read is invisible to the tree-shaker, and the binding
 // it leaves behind can be one the bundle never declares.
-import { getProseFragment } from '@claude-workspaces/core/prose';
+import { getProseFragment, isMdxPath, normalizeMarkdown } from '@claude-workspaces/core/prose';
 import type { Awareness } from 'y-protocols/awareness';
 import type * as Y from 'yjs';
 import { type EditorHandle, createEditor } from '../editor.ts';
@@ -64,6 +64,10 @@ export interface CreateLiveRedlineEditorOpts {
 }
 
 export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): LiveRedlineSurface {
+  // The live side is the serializer's output, which pads table cells and
+  // rewrites delimiter rows. Diff against the base in that same form, or a
+  // hand-written table reads as replaced whenever anything else changed.
+  const baseText = normalizeMarkdown(opts.baseText, { mdx: isMdxPath(opts.docLink?.relPath) });
   const handle = createEditor({
     parent: opts.parent,
     ydoc: opts.ydoc,
@@ -75,7 +79,7 @@ export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): Live
     editable: opts.editable ?? true,
     extraExtensions: [
       LiveMarkup.configure({
-        baseText: opts.baseText,
+        baseText,
         isAdded: opts.isAdded ?? false,
         ydoc: opts.ydoc,
         debounceMs: opts.debounceMs ?? 300,
@@ -95,7 +99,7 @@ export function createLiveRedlineEditor(opts: CreateLiveRedlineEditorOpts): Live
       const { state, view } = handle.editor;
       const result = opts.isAdded
         ? { insRanges: [], deletions: [] }
-        : computeLiveMarkup(opts.baseText, state.doc, getProseFragment(opts.ydoc));
+        : computeLiveMarkup(baseText, state.doc, getProseFragment(opts.ydoc));
       view.dispatch(state.tr.setMeta(liveMarkupKey, result));
     },
     destroy: () => handle.destroy(),

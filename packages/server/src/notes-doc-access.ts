@@ -146,12 +146,24 @@ export function readNotesOutline(
  * delete of notes somebody has already read. Released, the same edit reaches
  * `applyBlockEdits` as a suggestion.
  *
+ * `keep` is the blocks the meeting now starting wrote itself, on an earlier
+ * leg of the SAME meeting. A reconnect is not a new recording: releasing them
+ * turned the resuming leg's own notes into a person's lines, so every revision
+ * of one became a suggestion or a refusal, and every topic it had opened read
+ * as the doc's own and was opened again. Measured over four recorded
+ * meetings, the topics headed twice rose with the number of reconnects: 0
+ * with one leg, 20 with twenty-one.
+ *
  * Total and quiet: a doc that is gone, or is not prose, releases nothing.
  * Returns how many blocks were released, which is what a test asserts on.
  */
-export function releaseNotesAuthorship(docStore: NotesDocStore, docId: string): number {
+export function releaseNotesAuthorship(
+  docStore: NotesDocStore,
+  docId: string,
+  keep: ReadonlySet<string> = new Set(),
+): number {
   const doc = docStore.get(docId);
   if (!doc) return 0;
   if (contentKind(doc.meta.type) !== 'prose') return 0;
-  return prose.releaseAuthorship(doc.ydoc, NOTES_AUTHOR_ID);
+  return prose.releaseAuthorship(doc.ydoc, NOTES_AUTHOR_ID, 'agent', keep);
 }

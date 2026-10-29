@@ -32,6 +32,7 @@ import { insertScript } from './mockup-live-scripts.ts';
 import { mountVoiceLoader } from './voice/voice-loader.ts';
 import { pauseAnchorRefresh } from './widget-anchor-refresh.ts';
 import { mountAsks } from './widget-ask.ts';
+import { mountCommentMarkdown } from './widget-comment-markdown.ts';
 import { mountPageList } from './widget-page-list.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
@@ -419,6 +420,8 @@ if (parsed) {
     const widget = document.querySelector('claude-feedback-widget') as FeedbackWidgetEl | null;
     if (widget?.shadow) {
       mountAsks(widget);
+      // Each comment's markdown, drawn rendered.
+      mountCommentMarkdown(widget);
       // The panel's thread list, by page.
       mountPageList(widget);
     }

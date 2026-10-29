@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · lead-socket<br/>socket-handlers · server-options · feature-module<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -467,7 +467,11 @@ never writes back, and touches no fragment — and hands each change up as a
 `mockup.updated` frame on the doc's own channels. What that sweep calls a
 change is one stamp, and `file-stamp.ts` is where it is read: the mtime in
 NANOSECONDS plus the byte count, so a same-length write landing in the same
-millisecond as the last one is still seen. An open page fetches the
+millisecond as the last one is still seen. A code file or a live diff member
+is flat text, and when its file changes `flat-text-patch.ts` brings the doc's
+`content` to the new bytes by rewriting only the lines that differ: a
+whole-text replace would leave every comment anchor and every open editor's
+collapsed diff stretches pointing at deleted text. An open page fetches the
 round it names and swaps its content in place, keeping the reader's scroll and
 letting the widget re-anchor its threads onto the new DOM, so a comment whose
 element is gone becomes an outdated one rather than a lost one. The page-side half of that script is two modules in the widget package rather
@@ -685,6 +689,15 @@ controls set gets a dimmed pin. Tapping it loads that address through
 render to show. `widget-thread-text.ts` holds the snippet and receipt markup
 that the popover and the list share. No new route and no new fetch.
 
+**A comment's markdown is drawn rendered in its popover.**
+`widget-comment-markdown.ts` rewrites each popover comment the budgeted bundle
+drew as escaped words: links (`http:`, `https:` and `mailto:` only), bold,
+italics, inline code, lists and fenced code, built as DOM nodes so no comment
+text is parsed as markup. Like `widget-ask.ts`, it ships in `mic.js` and
+`mockup-live.js`; the budgeted bundle is unchanged. It leaves a page-edit
+comment alone, because `edit/edit-diff-view.ts` finds those by their exact
+words.
+
 **A pin follows an element whose words change a little each round.** The
 resolver in core's `anchor/element.ts` takes the element of the anchor's tag
 that says most of its words, over half of them, and none when two are equally
@@ -716,6 +729,15 @@ half is `server/src/comment-log.ts`, one stamped `[comment]` line per write
 through `docStore.postComment` — the choke point all three write paths share —
 carrying the doc, the thread, the author and the LENGTH of the text, never the
 text. Between them, the next lost comment can be told from one nobody sent.
+
+**Enter sends in every comment box.** `core/src/send-key.ts` (a new top-level
+core module) is the one keydown rule: Enter or Cmd/Ctrl+Enter sends,
+Shift+Enter is a line, and an IME's Enter never sends. The board's
+`ComposerForm`, the walkthrough's answer box, the doc card's reply and answer
+field, the doc's new-comment composer and thread view, and the widget's two
+boxes all call it, and each hands it the same send its button runs, so an
+empty box refuses Enter the way it refuses the button. It takes structural
+types, not DOM ones, so it touches no `document`.
 
 **And a comment that DID reach somebody says that too, on the comment.** The
 other half of the same question: one grey tick means the server has it, two
@@ -1557,7 +1579,9 @@ beside it.
 `notes-edit-bullets.ts` runs just before the guard, in the same tier: a
 tick's edits and the outline in, the same edits out with every top-level prose
 line made a bullet. It is the answer to "what if the model writes a note as a
-paragraph", and no boundary moves.
+paragraph", and no boundary moves. `notes-pending-clauses.ts` runs on its
+output, same tier: a note's trailing "not finished yet" report comes off, and
+a note that is only that report is dropped.
 
 `notes-edit-dedupe.ts` sits right after it in the same flow and the same
 tier: the guard's edits and the doc's outline in, the same edits out with a
@@ -1586,7 +1610,20 @@ absent rather than asking the note-taker to judge what is carried — the
 judgement that let the reason of an "X because Y" line go while its point
 stood.
 
-| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `owner-ask.ts`, `stall-gate.ts`, `unanswered-thread.ts`, `waiting-unfiled.ts`, `waiting-unfiled-review.ts`, `waiting-unfiled-frame.ts`, `ui-review-gate.ts`, `blockage-lift.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-missed-words.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-dictation.ts`, `notes-reason-ask.ts`, `notes-inversions.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts`, `project-profile.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
+`notes-recent-speech.ts` joins the same DOMAIN tier and moves no boundary:
+the previous tick's speech and this tick's in, the tail of the earlier one out,
+which the prompt builder shows as context the note-taker must not note again.
+It exists because the cadence ceiling cuts a long answer into slices, and a
+slice read alone has lost its subject.
+
+`notes-coverage-judge.ts` is a services-tier adapter beside the meeting namer:
+once a meeting is over, the quality filer's `amend` hands it the transcript and
+the notes, and one Haiku call per stretch of speech says which points no note
+carries. Its share replaces the lexical coverage reading on the item, so a
+meeting that lost ideas is reported. No boundary moves: it is one more model
+call behind the same key and consent as the composer.
+
+| **Domain (pure)** | `task-owner.ts`, `task-fields.ts`, `task-row.ts`, `decision-shape.ts`, `safe-path.ts`, `workspace-path.ts`, `path-params.ts`, `diff-groups.ts`, `pause-ticker.ts`, `keep-moving.ts`, `owner-ask.ts`, `stall-gate.ts`, `unanswered-thread.ts`, `waiting-unfiled.ts`, `waiting-unfiled-review.ts`, `waiting-unfiled-frame.ts`, `ui-review-gate.ts`, `blockage-lift.ts`, `notes-edit-parse.ts`, `notes-prompt-build.ts`, `notes-prompt-cache-shape.ts`, `notes-invented-links.ts`, `notes-scheme-links.ts`, `notes-research-placeholder.ts`, `ask-detection.ts`, `notes-link-intent.ts`, `notes-idea-coverage.ts`, `notes-missed-words.ts`, `notes-recent-speech.ts`, `notes-edit-guard.ts`, `notes-edit-bullets.ts`, `notes-pending-clauses.ts`, `notes-edit-correction.ts`, `notes-section-fit.ts`, `notes-heading-level.ts`, `notes-heading-rename.ts`, `notes-dictation.ts`, `notes-reason-ask.ts`, `notes-inversions.ts`, `notes-unconfirmed.ts`, `notes-method.ts` (core), `notes-cleanup-report.ts` (core), `model-quota.ts`, `notes-notice.ts`, `notes-edit-address.ts`, `dispatch-request-event.ts`, `agent-listening.ts`, `claude-key-source.ts`, `project-profile.ts` | Functions over values: no clock, filesystem or socket unless passed in, so a rule is testable without a server. |
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `google-oauth.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `push-notify.ts`, `share/cf-api.ts`, `share/keychain.ts`, `secret-store.ts`, `settings-allow-file.ts`, `git-diff.ts`, `sentry.ts`, `outbound-fetch.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts`, `start-contract.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. `start-contract.ts` is the supervisor's half: the port, the data dir (required, no default) and whether a busy port is waited for (prod) or refuses the start; no start moves to another port. |
 

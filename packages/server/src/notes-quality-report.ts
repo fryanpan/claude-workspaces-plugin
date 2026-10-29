@@ -209,8 +209,10 @@ export function duplicateBulletLines(repeats: readonly RepeatedBullet[]): number
   return repeats.reduce((n, r) => n + (r.times - 1), 0);
 }
 
-/** A display name written the way the notes write an unnamed voice. */
-const PLACEHOLDER_NAME = /^speaker\s+\S+$/i;
+/** A display name written the way the notes write an unnamed voice — on a
+ *  two-stream meeting "Room Speaker A" / "Remote Speaker A", the same shapes
+ *  `speakerPlaceholderName` in core renders. */
+const PLACEHOLDER_NAME = /^(?:room|remote)?\s*speaker\s+\S+$/i;
 
 /**
  * Voices the notes attribute something to that the meeting never had.
@@ -399,7 +401,7 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
     }
   } else if (
     coverage.uncoveredShare !== null &&
-    coverage.uncoveredShare > MAX_UNCOVERED_IDEA_SHARE
+    coverage.uncoveredShare >= MAX_UNCOVERED_IDEA_SHARE
   ) {
     flags.push({
       kind: 'coverage',
@@ -407,10 +409,14 @@ export function notesQualityFlags(report: Omit<NotesQualityReport, 'flags'>): No
     });
   }
   const { lateness } = report;
-  if (lateness.lateShare !== null && lateness.lateShare > MAX_LATE_NOTE_SHARE) {
+  // THE GOAL'S TWO HALVES: a median past the bar, or a tenth or more of the
+  // notes past it. Either one is a meeting whose notes did not keep up.
+  const lateByShare = lateness.lateShare !== null && lateness.lateShare >= MAX_LATE_NOTE_SHARE;
+  const lateByMedian = lateness.medianMs !== null && lateness.medianMs > LATE_NOTE_MS;
+  if (lateByShare || lateByMedian) {
     flags.push({
       kind: 'late',
-      text: `${Math.round(lateness.lateShare * 100)}% of notes landed over a minute late`,
+      text: `${Math.round((lateness.lateShare ?? 0) * 100)}% of notes landed more than ${Math.round(LATE_NOTE_MS / 1000)}s after their turn settled`,
     });
   }
   return flags;

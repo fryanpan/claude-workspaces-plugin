@@ -2,6 +2,8 @@ import { getContent } from '@claude-workspaces/core';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import {
+  ChangeSet,
+  type ChangeSpec,
   Compartment,
   EditorState,
   type Extension,
@@ -88,6 +90,11 @@ export interface CodeSurface extends ReviewSurface {
   /** The whole line under the cursor as a line-snapped anchor selection —
    *  lets a bare click (empty selection) comment on its line. */
   getCursorLineRel: () => { start: Uint8Array; end: Uint8Array; snippet: string } | null;
+  /** Where the comment pill belongs, in viewport pixels: the right edge of
+   *  the last selected character, or of the cursor line's last character
+   *  when nothing is selected. `range` says which. Null for an empty line or
+   *  a position CodeMirror has not rendered. */
+  getPillAnchor: () => { range: boolean; right: number; top: number; bottom: number } | null;
 }
 
 // --- gutter comment markers --------------------------------------------------
@@ -425,19 +432,26 @@ export function createCodeEditor(opts: CreateCodeEditorOpts): CodeSurface {
   reportWhitespace();
 
   // Read-only surfaces: one-way bind — when the agent edits the source file,
-  // the server applies it to `content`; mirror it into the CM doc by
-  // replacing the whole text. Editable surfaces skip this (yCollab owns the
+  // the server applies it to `content`; mirror it into the CM doc as the
+  // same edit (`deltaChanges`), so collapsed stretches, scroll and selection
+  // on the lines nobody touched stay put. Editable surfaces skip this (yCollab owns the
   // doc binding; a whole-doc replace here would destroy the cursor on every
   // remote change) but still need the empty→content compartment re-init.
   // Tracked across observer calls, NOT read from the current doc: on
   // editable surfaces yCollab's own observer runs first, so by the time
   // this one fires the CM doc already holds the late-arriving content.
   let hadContent = content.length > 0;
-  const onContentChange = () => {
+  const onContentChange = (event: Y.YTextEvent) => {
     if (!opts.editable) {
       const text = content.toString();
       if (text !== view.state.doc.toString()) {
-        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+        view.dispatch({
+          changes: deltaChanges(view.state.doc, event.delta, text) ?? {
+            from: 0,
+            to: view.state.doc.length,
+            insert: text,
+          },
+        });
       }
     }
     // The merge machinery computes chunks incrementally, but its
@@ -541,10 +555,55 @@ export function createCodeEditor(opts: CreateCodeEditorOpts): CodeSurface {
         snippet,
       };
     },
+    getPillAnchor() {
+      // Read off CodeMirror's own state and coordinates, not the DOM range: a
+      // selection dragged to the start of a later line ends with a zero-width
+      // rect at column 0, which put the pill at the line's left edge.
+      const sel = view.state.selection.main;
+      const doc = view.state.doc;
+      let pos: number;
+      if (sel.empty) {
+        const line = doc.lineAt(sel.head);
+        if (line.from === line.to) return null;
+        pos = line.to;
+      } else {
+        // Ending at a line's start selects nothing on that line: the last
+        // selected text is the end of the line before it.
+        pos = sel.to > sel.from && doc.lineAt(sel.to).from === sel.to ? sel.to - 1 : sel.to;
+      }
+      const at = view.coordsAtPos(pos, -1);
+      if (!at) return null;
+      return { range: !sel.empty, right: at.right, top: at.top, bottom: at.bottom };
+    },
     destroy() {
       content.unobserve(onContentChange);
       undoManager?.destroy();
       view.destroy();
     },
   };
+}
+
+/**
+ * A Y.Text event's delta as CodeMirror changes to `doc`, or null when
+ * applying them would not give `expected` — the CM doc had drifted from the
+ * Y.Text before the event, and only a whole-text replace is safe then.
+ */
+function deltaChanges(
+  doc: import('@codemirror/state').Text,
+  delta: Y.YTextEvent['delta'],
+  expected: string,
+): ChangeSet | null {
+  const specs: ChangeSpec[] = [];
+  let pos = 0;
+  for (const op of delta) {
+    if (typeof op.retain === 'number') pos += op.retain;
+    else if (typeof op.delete === 'number') {
+      specs.push({ from: pos, to: pos + op.delete });
+      pos += op.delete;
+    } else if (typeof op.insert === 'string') specs.push({ from: pos, insert: op.insert });
+    else return null; // an embed: not text this surface can mirror
+  }
+  if (pos > doc.length) return null;
+  const changes = ChangeSet.of(specs, doc.length);
+  return changes.apply(doc).toString() === expected ? changes : null;
 }

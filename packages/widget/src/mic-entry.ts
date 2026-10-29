@@ -15,10 +15,11 @@
 import { mountEditLoader } from './edit/edit-button.ts';
 import { EMBED_LABELS, mountVoiceLoader } from './voice/voice-loader.ts';
 import { mountAsks } from './widget-ask.ts';
+import { mountCommentMarkdown } from './widget-comment-markdown.ts';
 import { mountPageList } from './widget-page-list.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
-/** Put the mic, the pencil, the asks and the thread list on this document's widget. Exported for the test; the call is
+/** Put the mic, the pencil, the asks, rendered comments and the thread list on this document's widget. Exported for the test; the call is
  *  below, because a fetched script's job is to run. */
 export function mountEmbedMic(doc: Document): void {
   const el = doc.querySelector('claude-feedback-widget') as FeedbackWidgetEl | null;
@@ -33,6 +34,8 @@ export function mountEmbedMic(doc: Document): void {
   mountEditLoader(doc, `${base}/widget/edit.js`);
   // A thread's review item, answerable in its popover (`widget-ask.ts`).
   mountAsks(el);
+  // Each comment's markdown, drawn rendered (`widget-comment-markdown.ts`).
+  mountCommentMarkdown(el);
   // The panel's thread list, by page (`widget-page-list.ts`).
   mountPageList(el);
 }

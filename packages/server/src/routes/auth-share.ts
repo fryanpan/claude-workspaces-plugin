@@ -44,7 +44,7 @@ import { collabMembershipEnded } from '../share/collab-member-key.ts';
 import { readCookie } from '../share/link-session.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { landingLookupsFor, landingOnBoard, parseShareLanding } from '../share/share-landing.ts';
-import { type ShareLinks, shareMemberKey } from '../share/share-links.ts';
+import { type ShareLinks, shareLinkUrl, shareMemberKey } from '../share/share-links.ts';
 import { ACCESS_NOT_CONFIGURED, type Shares } from '../share/shares.ts';
 import type { SharingFlip } from '../share/sharing-flip.ts';
 import type { SharingGate } from '../share/sharing-gate.ts';
@@ -622,7 +622,15 @@ export async function handleAuthShareRoutes(
     // someone and the redemption stays on the record while the membership goes.
     return j(200, {
       shares: shares ? shares.listForApi() : [],
-      links: shareLinks.listForApi(),
+      // A live link carries the URL the mint returned; a revoked or expired
+      // one does not, because that door no longer opens.
+      links: shareLinks
+        .listForApi()
+        .map((l) =>
+          shareLinkBaseHost && l.state === 'live'
+            ? { ...l, url: shareLinkUrl(shareLinkBaseHost, l.linkId) }
+            : l,
+        ),
       members: shareLinks.allMembers(),
       sharing: sharingGate.status(),
     });
@@ -1069,7 +1077,7 @@ export async function handleAuthShareRoutes(
         ...(landing ? { landing } : {}),
         ...(allowDomains ? { allowDomains } : {}),
       });
-      const url = `https://${shareLinkBaseHost}/s/${link.linkId}`;
+      const url = shareLinkUrl(shareLinkBaseHost, link.linkId);
       return j(200, {
         link,
         url,

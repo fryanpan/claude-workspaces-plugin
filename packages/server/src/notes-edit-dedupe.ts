@@ -2,11 +2,8 @@
  * The note-taker writes each topic heading once and each note once, whatever
  * the model answers.
  *
- * WHY THIS EXISTS. On 2026-09-14 a three-minute solo meeting left a doc with
- * the same topic heading four and five times, most with nothing under them,
- * and its first flat bullets still standing after the same points had been
- * restated under those headings. Replayed through this pipeline with the
- * production model, the shapes behind it were:
+ * WHY THIS EXISTS. On 2026-09-14 a three-minute meeting left one topic headed
+ * four and five times and its first bullets restated under them. The shapes:
  *
  * - **A heading the section already has, opened again.** The prompt says not
  *   to, and a tick does it anyway: it has just opened `### Ferry timetable`
@@ -15,10 +12,8 @@
  *   repeat only when it sits straight after the topic it repeats, which a
  *   heading appended at the end of the section almost never does.
  * - **A note restated word for word.** The model moves a point by writing it
- *   again under the topic it belongs to, and never deletes the original, so
- *   the point stands twice — or three times, once per regroup.
- * - **A decision nobody took.** A speaker describing a habit of theirs came
- *   back as a `**Decision:**` note, with nothing in the speech deciding it.
+ *   again under its topic and never deletes the original.
+ * - **A decision nobody took.** A habit described came back as a `Decision:`.
  *
  * WHAT IT DOES, per edit that inserts markdown, before the batch is applied:
  *
@@ -34,12 +29,10 @@
  * 3. A `Decision:` label on a note is removed when nothing in this tick's
  *    speech states a decision. The note stays; only the label goes.
  *
- * WHICH WAY IT ERRS. Rule 2 matches a normalised note, or one whose content
- * words are nearly all the same, so a note reworded heavily still lands twice.
- * That is the direction a missed idea cannot come from: nothing here removes a
- * note whose words are not in the doc afterwards. Rule 3 is lexical too, and
- * a decision spoken without any of its cue words loses its label, not its
- * note.
+ * WHICH WAY IT ERRS. Rule 2 matches a normalised note, a near-identical one,
+ * or one whose every word another note holds (`coveredBy`), so a heavy
+ * rewording still lands twice — never a missed idea: nothing here removes a
+ * note whose words are not in the doc afterwards. Rule 3 is lexical too.
  */
 
 import type { prose } from '@claude-workspaces/core';
@@ -58,47 +51,26 @@ export interface NotesDedupeContext {
   authorId: string;
   /** Blocks somebody has commented on — never deleted by a move. */
   commented?: () => ReadonlySet<string>;
-  /**
-   * What the section already held when this meeting took it over — the last
-   * recording's minutes. A note there is not this meeting's to repeat: the
-   * same words said in two meetings are two notes. Topic headings there are
-   * still reused, because a note added under one changes nothing it holds.
-   */
+  /** What the section held when this meeting took it over: the last
+   *  recording's minutes. Its notes are not repeats (the same words in two
+   *  meetings are two notes); its topic headings are still reused. */
   prior?: ReadonlySet<string>;
   /**
    * Notes of this author's that sit OUTSIDE the section, and still count as
-   * already written.
-   *
-   * The tidy-up is bounded by authorship rather than by location now
-   * (`notes-cleanup-scope.ts`), so it may insert under a heading the section
-   * does not reach — and on the very document that change exists for, its own
-   * notes are exactly where the section is not. Judging repeats by section
-   * membership alone would let it restate every one of them, which is the
-   * duplicate this check exists to prevent.
-   *
-   * ONLY THIS AUTHOR'S, which is why the caller passes a set rather than this
-   * reading the whole outline. A person's line and an earlier meeting's
-   * minutes are not this meeting's notes, and the same words said twice are
-   * two notes — the reasoning `prior` is built on.
-   *
-   * Absent for a tick, which judges exactly as it always did.
+   * already written. The tidy-up is bounded by authorship, not location
+   * (`notes-cleanup-scope.ts`), so it may insert where the section does not
+   * reach; judged by section alone it would restate every one of them. ONLY
+   * THIS AUTHOR'S: a person's line or an earlier meeting's minutes said again
+   * is two notes, the reasoning `prior` is built on. Absent for a tick.
    */
   ownedElsewhere?: ReadonlySet<string>;
   /**
    * Every heading on this doc SOME meeting has written as a topic of its own.
-   *
-   * WITHOUT IT THE REPEAT CHECK HOLDS ONE TOPIC OF EIGHT. A meeting's topics
-   * are siblings at its section's level (PR 1048 removed the container), so
-   * the section walk stops at the meeting's second topic. Inside one leg the
-   * check survives on `ownedElsewhere`, which is authorship; across a pause
-   * it does not, because `releaseNotesAuthorship` drops every mark when the
-   * next recording starts. On 2026-09-16 a sixteen-second pause therefore
-   * re-opened eight topics the doc already had.
-   *
-   * The note-taker's own memory of which headings it opened is the one record
-   * of that which survives the release, so it is what carries the scope across
-   * the siblings. Absent — a caller with no memory to ask — the scope is the
-   * old one.
+   * WITHOUT IT THE REPEAT CHECK HOLDS ONE TOPIC OF EIGHT: a meeting's topics
+   * are siblings at its section's level, so the section walk stops at the
+   * second, and across a pause authorship is gone too (2026-09-16: a pause
+   * re-opened eight topics). The note-taker's memory of the headings it
+   * opened survives that. Absent, the scope is the old one.
    */
   meetingTopics?: ReadonlySet<string>;
 }
@@ -166,6 +138,10 @@ export function sameTopic(a: string, b: string): boolean {
   return shared / (wa.size + wb.size - shared) >= 0.6;
 }
 
+/** `sameTopic`, with "Phase 2" and "Phase 3" kept apart as parts of one. */
+export const samePart = (a: string, b: string): boolean =>
+  sameTopic(a, b) && (a.match(/\d+/g) ?? []).join() === (b.match(/\d+/g) ?? []).join();
+
 /** Whether two notes say the same thing: the same words once normalised, or
  *  at least three content words with nearly all of them shared — and never
  *  when one says the opposite of the other. */
@@ -182,6 +158,14 @@ export function sameNote(a: string, b: string): boolean {
   let shared = 0;
   for (const w of wa) if (wb.has(w)) shared++;
   return shared / (wa.size + wb.size - shared) >= 0.8;
+}
+
+/** Every content word of `line` (four or more) is already in `note`. */
+export function coveredBy(line: string, note: string): boolean {
+  if (negates(line) !== negates(note)) return false;
+  const words = contentWords(noteKey(line));
+  const held = new Set(contentWords(noteKey(note)));
+  return words.length >= 4 && words.every((w) => held.has(w));
 }
 
 interface Segment {
@@ -271,7 +255,11 @@ export function dedupeNotesEdits(
   const headings = new Set<string>();
   for (const e of outline) {
     if (e.kind === 'heading') headings.add(e.id);
-    if (!section.blocks.has(e.id) || e.kind !== 'heading') continue;
+    // AND ANY HEADING OF ITS OWN OUTSIDE THE WALK. A section walk stops at
+    // a heading it cannot claim, and a topic this meeting opened past that
+    // point was invisible here, so it was opened a second time.
+    const ours = section.blocks.has(e.id) || ctx.ownedElsewhere?.has(e.id) === true;
+    if (!ours || e.kind !== 'heading') continue;
     lastHeading = e.id;
     // THE SECTION HEADING IS A TOPIC LIKE THE REST. It was skipped here while
     // the section was a `## Meeting notes` CONTAINER, which named no topic and
@@ -341,22 +329,22 @@ export function dedupeNotesEdits(
         kept.push(line);
         continue;
       }
-      if (written.some((w) => sameNote(w, line))) {
+      if (written.some((w) => sameNote(w, line) || coveredBy(line, w))) {
         notes.push('dropped a note this batch already wrote');
         alreadyWritten++;
         continue;
       }
       const twin = existing.find(({ entry }) => sameNote(entry.text, line));
+      if (!twin && existing.some(({ entry }) => coveredBy(line, entry.text))) {
+        notes.push('dropped a note whose every word the doc already carries');
+        alreadyWritten++;
+        continue;
+      }
       if (twin && !taken.has(twin.entry.id)) {
         // A MOVE IS ONLY EVER WITHIN THIS MEETING'S OWN SECTION. A twin
-        // found through `ownedElsewhere` can be DROPPED — the note is
-        // already written, so today's minutes lose nothing — but never
-        // deleted and re-inserted here. Two recordings on one doc both mark
-        // their bullets `meeting-notes`, so without this clause the wider
-        // set let one meeting's tidy-up lift a bullet out of the other's
-        // live section and re-file it under its own topic. The move exists
-        // for a bullet of ours under the WRONG TOPIC of our own section,
-        // which is the only place the destination means anything.
+        // found through `ownedElsewhere` is DROPPED, never moved: two
+        // recordings on one doc both mark bullets `meeting-notes`, and a
+        // wider move let one meeting's tidy-up re-file the other's bullet.
         const movable =
           section.blocks.has(twin.entry.id) &&
           twin.entry.author === ctx.authorId &&
@@ -379,8 +367,43 @@ export function dedupeNotesEdits(
     return kept;
   };
 
-  for (const edit of edits) {
+  // A BLOCK-ADDRESSED EDIT HEADS A KNOWN TOPIC AGAIN TOO: a `###` copy of the
+  // same topic, by name or reworded, straight under its `##`. The address places the notes, so the
+  // copy goes; before the topic's own heading, they go under it.
+  const unheaded = (edit: prose.BlockEdit): prose.BlockEdit | null => {
+    if (edit.op !== 'insert_before_block' && edit.op !== 'replace_block') return edit;
+    const self = edit.op === 'replace_block' ? edit.blockId : undefined;
+    const lines = edit.markdown.split('\n');
+    let named: string | undefined;
+    const kept = lines.filter((line) => {
+      const h = line.match(/^#{1,6}\s+(.*\S)\s*$/);
+      const text = h?.[1] ?? '';
+      const known = text !== '' && topics.find((t) => t.id !== self && samePart(t.text, text));
+      if (known) named = known.id;
+      return !known;
+    });
+    if (named === undefined) return edit;
+    notes.push('dropped a heading that named a topic the section already heads');
+    if (!hasWords(kept)) return null;
+    const markdown = kept.join('\n').trim();
+    return edit.op === 'insert_before_block' && edit.blockId === named
+      ? { op: 'insert_under_heading', headingId: named, markdown }
+      : { ...edit, markdown };
+  };
+
+  for (const raw of edits) {
+    const edit = unheaded(raw);
+    if (edit === null) continue;
     if (edit.op !== 'insert_at_end' && edit.op !== 'insert_under_heading') {
+      // A replace making one note a copy of another is dropped; its block keeps its words.
+      const op = edit.op === 'replace_block' ? edit : undefined;
+      if (
+        op &&
+        existing.some((x) => x.entry.id !== op.blockId && sameNote(x.entry.text, op.markdown))
+      ) {
+        notes.push('dropped a replace that copied another note');
+        continue;
+      }
       if (
         edit.op === 'replace_block' &&
         DECISION_LABEL.test(edit.markdown) &&
@@ -390,7 +413,13 @@ export function dedupeNotesEdits(
         notes.push('removed a Decision label the speech did not state');
         continue;
       }
-      out.push(edit);
+      // A heading opened before a block is opened by this batch too: a later
+      // edit naming it again joins it, rather than heading the topic twice.
+      const made = { ...edit };
+      out.push(made);
+      if (made.op === 'insert_before_block')
+        for (const m of made.markdown.matchAll(/^#{1,6}\s+(.*\S)\s*$/gm))
+          opened.push({ made, text: m[1] ?? '', level: 0 });
       continue;
     }
     // WHERE THE NOTES LAND, which is what tells a move from a restatement. An
@@ -418,7 +447,9 @@ export function dedupeNotesEdits(
       }
       const key = topicKey(seg.heading.text);
       const known = topics.find((t) => sameTopic(t.text, seg.heading?.text ?? ''));
-      if (known && known.level === seg.heading.level) {
+      // AT ANY LEVEL. A topic the doc already heads at `##` and the model
+      // opens again at `###` is still one topic headed twice to its reader.
+      if (known) {
         notes.push(`reused the topic heading already in the section (${known.id})`);
         const lines = keepLines(seg.lines, known.id);
         if (hasWords(lines)) {
@@ -432,9 +463,7 @@ export function dedupeNotesEdits(
       }
       const opening = `new:${key}`;
       const heading = seg.heading;
-      const again = opened.find(
-        (o) => o.level === heading.level && sameTopic(o.text, heading.text),
-      );
+      const again = opened.find((o) => sameTopic(o.text, heading.text));
       const lines = keepLines(seg.lines, opening);
       if (atEnd) target = opening;
       if (again) {

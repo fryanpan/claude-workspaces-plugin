@@ -9,6 +9,7 @@ import {
 } from '@codemirror/merge';
 import type { Extension, Text } from '@codemirror/state';
 import { EditorView, GutterMarker, ViewPlugin, type ViewUpdate, gutter } from '@codemirror/view';
+import { liveCollapseUnchanged } from './live-collapse.ts';
 
 /**
  * PR-style extras layered onto @codemirror/merge's unified view:
@@ -349,9 +350,11 @@ export function diffMergeExtensions(cfg: DiffViewConfig): Extension[] {
     unifiedMergeView({
       original: cfg.baseText,
       mergeControls: false,
-      ...(cfg.collapse !== false ? { collapseUnchanged: { margin: 3, minSize: 6 } } : {}),
       diffConfig: cfg.filter?.diffConfig ?? { scanLimit: DIFF_SCAN_LIMIT },
     }),
+    // Not the library's `collapseUnchanged`: that one expands a whole
+    // collapsed stretch when a live save lands in it (live-collapse.ts).
+    ...(cfg.collapse !== false ? [liveCollapseUnchanged({ margin: 3, minSize: 6 })] : []),
     numberDeletedLines,
   ];
 }

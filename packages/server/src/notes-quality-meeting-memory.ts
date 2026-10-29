@@ -60,6 +60,9 @@ export interface HeldMeeting {
   withdrawRefusalSaid?: true;
   /** The resume grace, while one is armed. */
   timer?: unknown;
+  /** Bumped by each commit and each resume, so an `amend` that outlives a
+   *  resume knows its answer is stale. Not persisted. */
+  generation?: number;
 }
 
 /**

@@ -43,7 +43,8 @@ describe('the generated profile', () => {
   it('leaves the ports open for a lead without it, so a real lead is unchanged', () => {
     const { lead, config } = fixture(fakeMachine.home, undefined);
     expect(lead.boardWall).toBe(false);
-    expect(buildProfile(lead, config, fakeMachine)).not.toContain('remote ip');
+    const profile = buildProfile(lead, config, fakeMachine);
+    for (const port of BOARD_SERVER_PORTS) expect(profile).not.toContain(`*:${port}`);
   });
 
   it('refuses a boardWall that is not true or false', () => {

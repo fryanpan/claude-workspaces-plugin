@@ -187,6 +187,10 @@ describe('the notetaking instructions', () => {
     // one bullet — measured in production on 2026-09-11, and reproduced in
     // `notes-sparse-meeting.test.ts`.
     expect(system).toMatch(/CONTINUES something you already noted, write a NEW note/);
+    // NOT "write nothing for speech that repeats a note": on four replayed
+    // meetings that rule cut restated notes by about a third and raised the
+    // ideas lost from 6-14% to 13-16%.
+    expect(system).not.toContain('only says AGAIN');
     expect(system).toMatch(/Never grow one note into a summary of the meeting so far/);
   });
 

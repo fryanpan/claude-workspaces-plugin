@@ -155,6 +155,13 @@ export interface NotesQualityFilerDeps {
   graceMs?: number;
   /** Where the filing's own line goes. */
   say?: (message: string) => void;
+  /**
+   * The last look before the meeting's reading is acted on: the model's
+   * judgement of what the notes left out (`notes-coverage-judge.ts`). Runs
+   * once, when the meeting is over, so it is paid per meeting and not per
+   * leg. Absent, or failing, the reading is acted on as the pass left it.
+   */
+  amend?: (ids: MeetingIds, input: NotesQualityFileInput) => Promise<NotesQualityFileInput>;
 }
 
 /**
@@ -180,6 +187,8 @@ export interface NotesQualityFiler {
   legBegan(ids: MeetingIds): void;
   /** How many meetings are holding a reading. Diagnostics and tests. */
   heldCount(): number;
+  /** Resolves when no `amend` is still running. Tests and the replay. */
+  settled(): Promise<void>;
 }
 
 const defaultSchedule: TickScheduler = {
@@ -339,6 +348,7 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
    * withdraws the item the meeting has, and does nothing at all for a meeting
    * that never had one.
    */
+  const pending = new Set<Promise<void>>();
   const commit = (ids: MeetingIds): void => {
     const h = memory.peek(ids);
     if (!h) return;
@@ -346,6 +356,24 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
     const input = h.input;
     h.input = undefined;
     if (!input) return;
+    if (!deps.amend) {
+      act(ids, h, input);
+      return;
+    }
+    // A RESUME WHILE THE JUDGE RUNS makes its answer about half a meeting,
+    // so `legBegan` bumps the generation and the answer is dropped.
+    const generation = (h.generation = (h.generation ?? 0) + 1);
+    const run = deps
+      .amend(ids, input)
+      .catch(() => input)
+      .then((amended) => {
+        if (h.generation === generation) act(ids, h, amended);
+      })
+      .finally(() => pending.delete(run));
+    pending.add(run);
+  };
+
+  const act = (ids: MeetingIds, h: HeldMeeting, input: NotesQualityFileInput): void => {
     // THE SAME VOCABULARY THE STOP'S OWN LINE USES, because the two halves of
     // one meeting's story are now written at two moments and a reader greps
     // for one phrase.
@@ -422,7 +450,11 @@ export function createNotesQualityFiler(deps: NotesQualityFilerDeps): NotesQuali
       // The meeting is running again, so the reading taken at the drop is
       // about half a meeting. The next stop reads the whole of it.
       h.input = undefined;
+      h.generation = (h.generation ?? 0) + 1;
     },
     heldCount: () => memory.heldCount(),
+    settled: async () => {
+      while (pending.size > 0) await Promise.all([...pending]);
+    },
   };
 }

@@ -146,6 +146,37 @@ export const DEFAULT_NOTES_ENDPOINT_CONFIRM_MS = 1_000;
  */
 export const DEFAULT_NOTES_CADENCE_MS = 6_000;
 
+/**
+ * How many uncarried words of a turn a ceiling tick holds back while it
+ * waits for the sentence they are in to end.
+ *
+ * WHY A CEILING TICK CUTS AT A SENTENCE END. Carrying every committed word
+ * cut mid-sentence: the note-taker wrote the half it had, then a second note
+ * for the rest. Replayed over four recorded meetings that left one
+ * placeholder note in eight and turned single answers into a dozen bullets.
+ * A slice that ends where a sentence ends is written as one note.
+ *
+ * FIFTY WORDS, about twenty seconds of speech, so an engine that never
+ * punctuates still gets a note, at the old cost of a fragment.
+ */
+export const CEILING_HOLD_WORDS = 50;
+
+/** A word that ends a sentence: `.`, `?` or `!`, then any closing quote or
+ *  bracket. `e.g.` reads as one too, which costs a slice its tail. */
+const SENTENCE_END = /[.?!]["'”’)\]]*$/;
+
+/**
+ * The words of `rest` up to and including its last sentence end, or `null`
+ * when it has none.
+ */
+export function wholeSentences(rest: string): string | null {
+  const words = wordsOf(rest);
+  for (let i = words.length - 1; i >= 0; i--) {
+    if (SENTENCE_END.test(words[i] ?? '')) return words.slice(0, i + 1).join(' ');
+  }
+  return null;
+}
+
 export interface PauseTickerOpts {
   /** How long the transcript stream must be quiet before a tick fires, when
    *  no endpoint has been seen. */
@@ -310,14 +341,28 @@ export function createPauseTicker(opts: PauseTickerOpts): PauseTicker {
     const out: NotesTurn[] = [];
     for (const [turn, held, text] of source.sort((a, b) => a[0] - b[0])) {
       const already = carried.get(turn) ?? 0;
-      const rest = wordsAfter(text, already);
+      let rest = wordsAfter(text, already);
       if (rest === '') continue;
+      // A CEILING SLICE ENDS WHERE A SENTENCE ENDS — see
+      // `CEILING_HOLD_WORDS`. Whole sentences are finished speech, so they
+      // are not flagged `partial`; only a long run with no sentence end in it
+      // still goes out as a fragment. The end tick takes everything.
+      let partial = true;
+      if (reason === 'cadence') {
+        const whole = wholeSentences(rest);
+        if (whole !== null) {
+          rest = whole;
+          partial = false;
+        } else if (wordsOf(rest).length < CEILING_HOLD_WORDS) {
+          continue;
+        }
+      }
       carried.set(turn, already + wordsOf(rest).length);
       out.push({
         turn,
         text: rest,
         ...(held.speaker !== undefined ? { speaker: held.speaker } : {}),
-        partial: true,
+        ...(partial ? { partial: true } : {}),
         ...(already > 0 ? { fromWord: already, continued: true } : {}),
       });
     }

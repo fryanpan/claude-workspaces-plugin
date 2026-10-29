@@ -38,6 +38,7 @@ import {
 } from '../src/meeting-notes.ts';
 import { QUOTA_NOTICE_MARK, QUOTA_NOTICE_TEXT } from '../src/notes-notice.ts';
 import { createNotesTimingLog } from '../src/notes-timing.ts';
+import { CEILING_HOLD_WORDS } from '../src/pause-ticker.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { createMockTranscriptionEngine } from '../src/transcribe.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -531,16 +532,18 @@ describe('pause ticker', () => {
     ticker.onTurn({ turn: 0, text: 'so the plan', final: false });
     ticker.onTurn({
       turn: 0,
-      text: 'so the plan is to measure the write path first',
+      text: 'So the plan is to measure. Then the write path first',
       final: false,
-      settledText: 'so the plan is to measure',
+      settledText: 'So the plan is to measure. Then the',
     });
     expect(schedule.fireAt(CADENCE_MS)).toBe(1);
+    // Up to the last sentence end, and not flagged: a whole sentence is
+    // finished speech. "Then the" waits for its own sentence to end.
     expect(ticks).toEqual([
       {
         tick: 1,
         reason: 'cadence',
-        turns: [{ turn: 0, text: 'so the plan is to measure', partial: true }],
+        turns: [{ turn: 0, text: 'So the plan is to measure.' }],
       },
     ]);
   });
@@ -549,16 +552,16 @@ describe('pause ticker', () => {
     const { schedule, ticks, ticker } = setup();
     ticker.onTurn({
       turn: 0,
-      text: 'so the plan is to measure the write',
+      text: 'So the plan is to measure. Then the write',
       final: false,
-      settledText: 'so the plan is to measure',
+      settledText: 'So the plan is to measure. Then',
     });
     schedule.fireAt(CADENCE_MS);
     // The formatted final re-cases and punctuates the SAME words, which is
     // why the carry is counted in words rather than characters.
     ticker.onTurn({
       turn: 0,
-      text: 'So the plan is to measure the write path first.',
+      text: 'So the plan is to measure. Then the write path first.',
       final: true,
     });
     schedule.fireAt(CONFIRM_MS);
@@ -566,18 +569,51 @@ describe('pause ticker', () => {
     // went out on the ceiling tick, so what the timing row dates is the
     // seventh, not the first.
     expect(ticks[1]?.turns).toEqual([
-      { turn: 0, text: 'the write path first.', fromWord: 6, continued: true },
+      { turn: 0, text: 'Then the write path first.', fromWord: 6, continued: true },
     ]);
   });
 
   it('a turn whose settled words are all already carried adds no empty note', () => {
     const { schedule, ticks, ticker } = setup();
-    ticker.onTurn({ turn: 0, text: 'ship it', final: false, settledText: 'ship it' });
+    ticker.onTurn({ turn: 0, text: 'Ship it.', final: false, settledText: 'Ship it.' });
     schedule.fireAt(CADENCE_MS);
     expect(ticks).toHaveLength(1);
     ticker.onTurn({ turn: 0, text: 'Ship it.', final: true });
     schedule.fire();
     expect(ticks).toHaveLength(1);
+  });
+
+  it('a ceiling holds an unfinished sentence back until it ends', () => {
+    // The fragment is what the note-taker wrote as "not finished yet" and
+    // then noted a second time once the rest arrived.
+    const { schedule, ticks, ticker } = setup();
+    ticker.onTurn({
+      turn: 0,
+      text: 'so the Harborlight crane is booked for the',
+      final: false,
+      settledText: 'so the Harborlight crane is booked for',
+    });
+    schedule.fireAt(CADENCE_MS);
+    expect(ticks).toEqual([]);
+    ticker.onTurn({
+      turn: 0,
+      text: 'So the Harborlight crane is booked for the first week.',
+      final: true,
+    });
+    schedule.fire();
+    expect(ticks.map((t) => t.turns)).toEqual([
+      [{ turn: 0, text: 'So the Harborlight crane is booked for the first week.' }],
+    ]);
+  });
+
+  it('a ceiling still carries a long unpunctuated run, flagged', () => {
+    // An engine whose partials carry no punctuation must not hold a turn
+    // until it settles: past the hold the fragment goes out as before.
+    const { schedule, ticks, ticker } = setup();
+    const words = Array.from({ length: CEILING_HOLD_WORDS }, (_, i) => `word${i}`).join(' ');
+    ticker.onTurn({ turn: 0, text: `${words} more`, final: false, settledText: words });
+    schedule.fireAt(CADENCE_MS);
+    expect(ticks[0]?.turns).toEqual([{ turn: 0, text: words, partial: true }]);
   });
 
   it('a ceiling tick without engine-final words still carries settled turns only', () => {
@@ -603,7 +639,10 @@ describe('pause ticker', () => {
     for (const [text, settled] of [
       ['the second thing', 'the second'],
       ['the second thing we should', 'the second thing we'],
-      ['the second thing we should look at is the write', 'the second thing we should look at'],
+      [
+        'The second thing we should look at. Is the write',
+        'The second thing we should look at. Is',
+      ],
     ] as const) {
       ticker.onTurn({ turn: 0, text, final: false, settledText: settled });
     }
@@ -615,7 +654,7 @@ describe('pause ticker', () => {
     // ordered by how finished its words are, not by turn number.
     expect(ticks[0]?.turns).toEqual([
       { turn: 1, text: 'That matches what I measured.' },
-      { turn: 0, text: 'the second thing we should look at', partial: true },
+      { turn: 0, text: 'The second thing we should look at.' },
     ]);
   });
 
@@ -2694,9 +2733,9 @@ describe('the rest of a sentence the ceiling already carried', () => {
     }
     session.onTurn({
       turn: 0,
-      text: 'so the second thing we should look at is the write',
+      text: 'so the second thing we should look at. is the write',
       final: false,
-      settledText: 'so the second thing we should look at',
+      settledText: 'so the second thing we should look at.',
       ...voice,
     });
     schedule.fireAt(CADENCE);

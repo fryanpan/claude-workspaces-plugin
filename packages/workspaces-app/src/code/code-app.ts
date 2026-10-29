@@ -153,8 +153,11 @@ export async function mountCode(
     editable,
     awareness,
     onSelectionChange: () => {
+      // getSelectionRel snaps to whole lines, so a bare cursor reads as a
+      // one-line selection too. Only a real range shows the pill here; a
+      // click on a line shows its caret pill from the click handler below.
       const sel = surface.getSelectionRel();
-      if (sel) {
+      if (sel && surface.getPillAnchor()?.range) {
         selection = sel;
         positionPill();
       } else {
@@ -187,24 +190,17 @@ export async function mountCode(
   // Click a line (not just its number) → light caret-style pill on that
   // line; tapping it opens the composer for the whole line.
   scope.listen(editorMount, 'click', (ev) => {
-    const mev = ev as MouseEvent;
-    const target = mev.target as HTMLElement | null;
+    const target = ev.target as HTMLElement | null;
     if (!target?.closest('.cm-content')) return;
     if (!document.getElementById('composer')?.classList.contains('hidden')) return;
     // Let CodeMirror place the cursor first.
     setTimeout(() => {
-      if (surface.getSelectionRel()) return; // real range selection → normal pill
+      const anchor = surface.getPillAnchor();
+      if (!anchor || anchor.range) return; // real range selection → normal pill
       const lineSel = surface.getCursorLineRel();
       if (!lineSel) return;
       selection = lineSel;
-      const gap = 10;
-      const pillW = 36;
-      let left = mev.clientX + gap;
-      if (left + pillW > window.innerWidth - 8) left = window.innerWidth - pillW - 8;
-      commentPill.classList.add('caret');
-      commentPill.style.left = `${Math.max(8, left)}px`;
-      commentPill.style.top = `${Math.max(8, mev.clientY - 14)}px`;
-      commentPill.classList.remove('hidden');
+      placePill(anchor, true);
     }, 30);
   });
   // The caret pill is a click affordance, not a cursor follower — dismiss on scroll.
@@ -291,31 +287,26 @@ export async function mountCode(
       hidePill();
       return;
     }
-    const winSel = window.getSelection();
-    if (!winSel || winSel.rangeCount === 0 || winSel.isCollapsed) {
+    const anchor = surface.getPillAnchor();
+    if (!anchor?.range) {
       hidePill();
       return;
     }
-    try {
-      const rects = winSel.getRangeAt(0).getClientRects();
-      const last = rects.length > 0 ? rects[rects.length - 1] : null;
-      if (!last) {
-        hidePill();
-        return;
-      }
-      const gap = 8;
-      const pillW = 36;
-      const viewportW = window.innerWidth;
-      let left = last.right + gap;
-      const top = Math.max(8, last.top - 2);
-      if (left + pillW > viewportW - 8) left = Math.max(8, last.right - pillW);
-      commentPill.classList.remove('caret');
-      commentPill.style.left = `${Math.max(8, left)}px`;
-      commentPill.style.top = `${top}px`;
-      commentPill.classList.remove('hidden');
-    } catch {
-      hidePill();
-    }
+    placePill(anchor, false);
+  }
+  /** Beside the right end of the text the pill comments on, flipped inside
+   *  it when that end is too close to the viewport's right edge, and kept on
+   *  screen when a long line's end is scrolled past it. */
+  function placePill(at: { right: number; top: number; bottom: number }, caret: boolean): void {
+    const gap = 8;
+    const pillSize = 36;
+    const maxLeft = window.innerWidth - pillSize - 8;
+    let left = at.right + gap;
+    if (left > maxLeft) left = Math.min(at.right - pillSize, maxLeft);
+    commentPill.classList.toggle('caret', caret);
+    commentPill.style.left = `${Math.max(8, left)}px`;
+    commentPill.style.top = `${Math.max(8, (at.top + at.bottom - pillSize) / 2)}px`;
+    commentPill.classList.remove('hidden');
   }
   function hidePill(): void {
     commentPill.classList.add('hidden');

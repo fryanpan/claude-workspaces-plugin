@@ -109,6 +109,7 @@ export const CLAUDE_CALL_PATHS = [
   'meeting-notes-ledger',
   'meeting-task-capture',
   'meeting-namer',
+  'meeting-notes-coverage',
   'voice-complete',
   'voice-feedback-tidy',
   'effort-estimate',

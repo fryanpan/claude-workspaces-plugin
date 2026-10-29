@@ -32,6 +32,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import { boardWallRows, escapeRows, installRow, keychainRow } from './lead-sandbox-escapes.ts';
 import {
   CLAUDE_LAUNCHER,
@@ -64,6 +65,17 @@ let profileDir = PROFILE_DIR;
 
 function profilePath(lead: Lead): string {
   return join(profileDir, `${lead.name}.sb`);
+}
+
+/**
+ * For a lead that names GitHub repos: its proxy token (made once) and git
+ * config, and the environment that points its git at them. Nothing for the rest.
+ */
+function gitProxyFiles(lead: Lead, config: LeadSandboxConfig): Record<string, string> {
+  if (lead.githubRepos.length === 0) return {};
+  const dir = gitProxyLeadDir(machine.home, lead.name);
+  const url = `http://127.0.0.1:${config.gitProxyPort}`;
+  return gitProxyEnv(ensureGitProxyFiles(lead.name, dir, url).gitconfig);
 }
 
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
@@ -175,11 +187,13 @@ function main(argv: string[]): number {
         `warning: this script runs from ${here}, inside ${lead.name}'s own project, so the lead can edit the generator of its next profile. Launch from prod's checkout.`,
       );
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
+    const env = { ...process.env, ...gitProxyFiles(lead, config) };
     // Ctrl-C interrupts the lead's turn; it must not kill this wrapper and
     // leave the session running without its parent.
     for (const sig of ['SIGINT', 'SIGQUIT'] as const) process.on(sig, () => {});
     const r = spawnSync(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
       cwd: launch.cwd,
+      env,
       stdio: 'inherit',
     });
     return r.status ?? 1;
@@ -237,8 +251,10 @@ function main(argv: string[]): number {
   const write = own.includes('--write');
   for (const lead of config.leads) {
     const path = profilePath(lead);
-    if (write) writeProfile(lead, config, guard);
-    else {
+    if (write) {
+      writeProfile(lead, config, guard);
+      gitProxyFiles(lead, config);
+    } else {
       say(`# ${path}`);
       say(buildProfile(lead, config, machine, guard));
     }
@@ -247,6 +263,10 @@ function main(argv: string[]): number {
     say(`${lead.name}: ${shellQuote([...wrapper, '--lead', lead.name, '--', 'claude'])}`);
     const launch = launchCommand(lead, path, ['claude']);
     say(`  which runs, in ${launch.cwd}: ${shellQuote(launch.argv)}`);
+    if (lead.githubRepos.length > 0)
+      say(
+        `  with git sent to the GitHub proxy on 127.0.0.1:${config.gitProxyPort} for ${lead.githubRepos.join(', ')}; token and git config in ${gitProxyLeadDir(machine.home, lead.name)}`,
+      );
   }
   say(
     write

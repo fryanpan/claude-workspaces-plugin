@@ -13,6 +13,7 @@
     "machine:drill": "bun run infra/project-machine/drill.ts",
     "router:deploy": "bun run infra/board-router-worker/deploy.ts",
     "access:plan": "bun run infra/access-apps/plan.ts",
+    "access:apply": "bun run infra/access-apps/apply.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "routes:table": "bun run scripts/routes-table.ts",
     "verify": "bun run scripts/verify.ts",
@@ -65,6 +66,8 @@
     "voice:router-eval": "bun run scripts/voice-router-eval.ts",
     "notes:fidelity": "bun run scripts/notes-eval-fidelity.ts",
     "notes:latency": "bun run scripts/notes-latency-check.ts --fail-over 10000",
+    "notes:replay": "bun run scripts/notes-replay.ts",
+    "notes:replay:score": "bun run scripts/notes-replay-score.ts",
     "notes:eval:fixtures": "bun run scripts/notes-eval-fixtures.ts",
     "notes:cost": "bun run scripts/notes-prompt-cost.ts"
   },

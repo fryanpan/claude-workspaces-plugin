@@ -2,6 +2,7 @@ import { type ElementAnchor, escapeHtml as escape } from '@claude-workspaces/cor
 // Anchor leaves, not the `anchors` namespace — see widget-threads.ts.
 import { hasContext } from '@claude-workspaces/core/anchor/context';
 import { createAnchor } from '@claude-workspaces/core/anchor/element';
+import { sendOnEnter } from '@claude-workspaces/core/send-key';
 import { composerNote, composerSignIn } from './widget-auth.ts';
 import {
   cardAnchor,
@@ -45,19 +46,10 @@ export function toggleFeedbackMode(el: FeedbackWidgetEl): void {
   else enterFeedbackMode(el);
 }
 
-/**
- * Enter posts; Shift+Enter is a newline.
- *
- * `isComposing` is checked because an IME's Enter picks a candidate — eating
- * that keystroke posts a half-typed word and loses the rest.
- */
-export function submitOnEnter(ta: HTMLTextAreaElement, submit: () => void): void {
-  ta.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'Enter' || ev.shiftKey || ev.isComposing) return;
-    ev.preventDefault();
-    submit();
-  });
-}
+/** Enter posts, Shift+Enter is a newline — the rule every comment box in
+ *  the product keeps (`core/send-key.ts`, which also holds the IME case).
+ *  Re-exported rather than wrapped: the widget's bytes are budgeted. */
+export { sendOnEnter as submitOnEnter };
 
 export function enterFeedbackMode(el: FeedbackWidgetEl): void {
   if (el.feedbackMode) return;
@@ -487,7 +479,7 @@ export function showComposer(
     // opens the next one.
   };
   submit.addEventListener('click', () => void post());
-  submitOnEnter(ta, () => void post());
+  sendOnEnter(ta, () => void post());
 }
 
 /** Dismissing the composer — cancelled, escaped or posted — takes the
