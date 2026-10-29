@@ -2,11 +2,8 @@
  * The note-taker writes each topic heading once and each note once, whatever
  * the model answers.
  *
- * WHY THIS EXISTS. On 2026-09-14 a three-minute solo meeting left a doc with
- * the same topic heading four and five times, most with nothing under them,
- * and its first flat bullets still standing after the same points had been
- * restated under those headings. Replayed through this pipeline with the
- * production model, the shapes behind it were:
+ * WHY THIS EXISTS. On 2026-09-14 a three-minute meeting left one topic headed
+ * four and five times and its first bullets restated under them. The shapes:
  *
  * - **A heading the section already has, opened again.** The prompt says not
  *   to, and a tick does it anyway: it has just opened `### Ferry timetable`
@@ -15,10 +12,8 @@
  *   repeat only when it sits straight after the topic it repeats, which a
  *   heading appended at the end of the section almost never does.
  * - **A note restated word for word.** The model moves a point by writing it
- *   again under the topic it belongs to, and never deletes the original, so
- *   the point stands twice — or three times, once per regroup.
- * - **A decision nobody took.** A speaker describing a habit of theirs came
- *   back as a `**Decision:**` note, with nothing in the speech deciding it.
+ *   again under its topic and never deletes the original.
+ * - **A decision nobody took.** A habit described came back as a `Decision:`.
  *
  * WHAT IT DOES, per edit that inserts markdown, before the batch is applied:
  *
@@ -34,12 +29,10 @@
  * 3. A `Decision:` label on a note is removed when nothing in this tick's
  *    speech states a decision. The note stays; only the label goes.
  *
- * WHICH WAY IT ERRS. Rule 2 matches a normalised note, or one whose content
- * words are nearly all the same, so a note reworded heavily still lands twice.
- * That is the direction a missed idea cannot come from: nothing here removes a
- * note whose words are not in the doc afterwards. Rule 3 is lexical too, and
- * a decision spoken without any of its cue words loses its label, not its
- * note.
+ * WHICH WAY IT ERRS. Rule 2 matches a normalised note, a near-identical one,
+ * or one whose every word another note holds (`coveredBy`), so a heavy
+ * rewording still lands twice — never a missed idea: nothing here removes a
+ * note whose words are not in the doc afterwards. Rule 3 is lexical too.
  */
 
 import type { prose } from '@claude-workspaces/core';
@@ -67,21 +60,11 @@ export interface NotesDedupeContext {
   prior?: ReadonlySet<string>;
   /**
    * Notes of this author's that sit OUTSIDE the section, and still count as
-   * already written.
-   *
-   * The tidy-up is bounded by authorship rather than by location now
-   * (`notes-cleanup-scope.ts`), so it may insert under a heading the section
-   * does not reach — and on the very document that change exists for, its own
-   * notes are exactly where the section is not. Judging repeats by section
-   * membership alone would let it restate every one of them, which is the
-   * duplicate this check exists to prevent.
-   *
-   * ONLY THIS AUTHOR'S, which is why the caller passes a set rather than this
-   * reading the whole outline. A person's line and an earlier meeting's
-   * minutes are not this meeting's notes, and the same words said twice are
-   * two notes — the reasoning `prior` is built on.
-   *
-   * Absent for a tick, which judges exactly as it always did.
+   * already written. The tidy-up is bounded by authorship, not location
+   * (`notes-cleanup-scope.ts`), so it may insert where the section does not
+   * reach; judged by section alone it would restate every one of them. ONLY
+   * THIS AUTHOR'S: a person's line or an earlier meeting's minutes said again
+   * is two notes, the reasoning `prior` is built on. Absent for a tick.
    */
   ownedElsewhere?: ReadonlySet<string>;
   /**
@@ -166,6 +149,10 @@ export function sameTopic(a: string, b: string): boolean {
   return shared / (wa.size + wb.size - shared) >= 0.6;
 }
 
+/** `sameTopic`, with "Phase 2" and "Phase 3" kept apart as parts of one. */
+export const samePart = (a: string, b: string): boolean =>
+  sameTopic(a, b) && (a.match(/\d+/g) ?? []).join() === (b.match(/\d+/g) ?? []).join();
+
 /** Whether two notes say the same thing: the same words once normalised, or
  *  at least three content words with nearly all of them shared — and never
  *  when one says the opposite of the other. */
@@ -182,6 +169,14 @@ export function sameNote(a: string, b: string): boolean {
   let shared = 0;
   for (const w of wa) if (wb.has(w)) shared++;
   return shared / (wa.size + wb.size - shared) >= 0.8;
+}
+
+/** Every content word of `line` (four or more) is already in `note`. */
+export function coveredBy(line: string, note: string): boolean {
+  if (negates(line) !== negates(note)) return false;
+  const words = contentWords(noteKey(line));
+  const held = new Set(contentWords(noteKey(note)));
+  return words.length >= 4 && words.every((w) => held.has(w));
 }
 
 interface Segment {
@@ -345,12 +340,17 @@ export function dedupeNotesEdits(
         kept.push(line);
         continue;
       }
-      if (written.some((w) => sameNote(w, line))) {
+      if (written.some((w) => sameNote(w, line) || coveredBy(line, w))) {
         notes.push('dropped a note this batch already wrote');
         alreadyWritten++;
         continue;
       }
       const twin = existing.find(({ entry }) => sameNote(entry.text, line));
+      if (!twin && existing.some(({ entry }) => coveredBy(line, entry.text))) {
+        notes.push('dropped a note whose every word the doc already carries');
+        alreadyWritten++;
+        continue;
+      }
       if (twin && !taken.has(twin.entry.id)) {
         // A MOVE IS ONLY EVER WITHIN THIS MEETING'S OWN SECTION. A twin
         // found through `ownedElsewhere` can be DROPPED — the note is
@@ -394,7 +394,7 @@ export function dedupeNotesEdits(
     const kept = lines.filter((line) => {
       const h = line.match(/^#{1,6}\s+(.*\S)\s*$/);
       const text = h?.[1] ?? '';
-      const known = text !== '' && topics.find((t) => t.id !== self && sameTopic(t.text, text));
+      const known = text !== '' && topics.find((t) => t.id !== self && samePart(t.text, text));
       if (known) named = known.id;
       return !known;
     });
