@@ -1,3 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * Correcting a review item raised on a DOC THREAD.
  *
@@ -15,18 +19,19 @@
  * the reader cannot recognise would remove the duplicate and keep the
  * confusion, which is half a fix.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Signed in on the board page in `beforeEach`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON = { id: 'known-alice', name: 'Alice', kind: 'person' };
+const signIns = new Map<string, Record<string, string>>();
 
 const FIRST_DETAIL =
   'At 430px the call to action falls below the fold. Worth moving it above the gallery so it stays visible?';
@@ -46,7 +51,10 @@ describe('revising a review item raised on a doc thread', () => {
   const post = (path: string, body: unknown): Promise<Response> =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: JSON.stringify(body),
     });
   const jj = async <T>(res: Response): Promise<T> => {
@@ -64,6 +72,12 @@ describe('revising a review item raised on a doc thread', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    const signed = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = signed.user;
+    signIns.set(PERSON.id, signed.headers);
     const file = join(dataDir, 'mockup-notes.md');
     writeFileSync(file, '# Mockup notes\n\nThe phone layout holds together.\n');
     const created = await jj<{ docId: string }>(

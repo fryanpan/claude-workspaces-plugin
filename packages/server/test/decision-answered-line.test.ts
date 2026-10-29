@@ -22,9 +22,12 @@ import type { User } from '@claude-workspaces/core';
 import { type DecisionAnsweredPayload, decisionAnsweredLine } from '../../mcp/src/decision-line.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type Task, eventsLogPath } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON: User = { id: 'known-alex', name: 'Alex', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page in `beforeAll`: a person's answer is
+ *  recorded only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
 const AGENT: User = {
   id: 'agent-index-rebuild',
   name: 'Index Rebuild',
@@ -42,11 +45,16 @@ describe('the decision.answered channel line only sends a reader to links that e
   let dataDir: string;
   let base: string;
   let wsId: string;
+  let personHeaders: Record<string, string> = {};
 
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
+      headers: {
+        host: `localhost:${handle.port}`,
+        'content-type': 'application/json',
+        ...((body as { author?: User } | null)?.author?.id === PERSON.id ? personHeaders : {}),
+      },
       body: JSON.stringify(body),
     });
 
@@ -93,6 +101,13 @@ describe('the decision.answered channel line only sends a reader to links that e
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    // The page's origin is the Host these requests name, not the socket's.
+    const alice = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = alice.user;
+    personHeaders = alice.headers;
     const ws = await post('/workspaces', { name: 'index-rebuild' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
     WS = wsId;
@@ -108,7 +123,7 @@ describe('the decision.answered channel line only sends a reader to links that e
     // Positive control: the line renders at all, with the actor and the
     // verbatim answer that are the point of the row.
     expect(line).toContain('[decision.answered]');
-    expect(line).toContain('Alex');
+    expect(line).toContain('Alice');
     expect(line).toContain('Rebuild after the freeze.');
     expect(line).toContain(CLAUSE);
   });
@@ -117,7 +132,7 @@ describe('the decision.answered channel line only sends a reader to links that e
     const line = await answerDecisionWith([]);
     // Same positive control, so "no clause" cannot be "no line".
     expect(line).toContain('[decision.answered]');
-    expect(line).toContain('Alex');
+    expect(line).toContain('Alice');
     expect(line).toContain('Rebuild after the freeze.');
     expect(line).not.toContain(CLAUSE);
     // …and nothing is left dangling where the clause used to sit.

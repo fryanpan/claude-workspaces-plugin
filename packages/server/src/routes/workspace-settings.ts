@@ -9,6 +9,7 @@ import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-jud
 import { canonicalRepoRoot, normalizeDocOriginRepo } from '../doc-origin-repo.ts';
 import { type BoardPromptField, boardPromptBeforeMarkdown } from '../prompt-markdown-migration.ts';
 import { PROMPT_MAX_CHARS } from '../prompt-store.ts';
+import { markUnprovenActor, unprovenPersonAnswer } from '../review-items/answer-proof.ts';
 import { readOwnerSteps } from '../review-items/owner-steps.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { redactCapChangeForVisitor } from '../share/redact-workspace.ts';
@@ -473,7 +474,10 @@ export async function handleWorkspaceSettings(
     const res = await voiceRouter.handle(workspaceId, {
       transcript,
       ...(context !== undefined ? { context } : {}),
-      actor: author,
+      // An unproven person may still speak a comment; the router records no answer.
+      actor: unprovenPersonAnswer(author, rq.answerProof)
+        ? markUnprovenActor({ ...author })
+        : author,
     });
     if (!res.ok) return j(404, res);
     return j(200, res);

@@ -25,11 +25,14 @@ import { join } from 'node:path';
 import { threadReviewItemId } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { eventsLogPath } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = { id: 'agent-riverbend', name: 'Riverbend', kind: 'agent' };
-const ALICE = { id: 'known-alice', name: 'Alice', kind: 'person' };
+/** Signed in on the board page in `beforeAll`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let ALICE = { id: 'known-alice', name: 'Alice', kind: 'person' };
 
 const MOCK_HTML = '<!doctype html><html><body><main id="price">75c a cup</main></body></html>';
 
@@ -48,12 +51,17 @@ describe('a thread review item answered through the mock frame relay', () => {
   let dataDir: string;
   let base: string;
   let ws: string;
+  let aliceHeaders: Record<string, string> = {};
 
+  /** Alice's requests carry Alice's sign-in, relayed or not. */
   const send = (path: string, body: unknown, relayed: boolean): Promise<Response> =>
     fetch(`${base}${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
+        ...((body as { author?: { id?: string } } | null)?.author?.id === ALICE.id
+          ? aliceHeaders
+          : {}),
         ...(relayed ? { 'x-cw-via': 'mock-frame' } : {}),
       },
       body: JSON.stringify(body),
@@ -107,6 +115,12 @@ describe('a thread review item answered through the mock frame relay', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     ws = await seedBoard(base);
+    const alice = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    ALICE = alice.user;
+    aliceHeaders = alice.headers;
   });
   afterAll(async () => {
     await handle.stop();

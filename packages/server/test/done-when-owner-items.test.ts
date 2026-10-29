@@ -16,9 +16,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-reader', name: 'Reader', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const AGENT = { id: 'agent-lanternfish', name: 'Lanternfish', kind: 'known', color: '#888888' };
 
 interface QueueRow {
@@ -36,6 +45,12 @@ let ws = '';
 function boot(): void {
   handle = createServer({ port: 0, dataDir, keepMovingCadenceMs: 0 });
   base = `http://127.0.0.1:${handle.port}`;
+  const personSigned = signedInPerson(handle, dataDir, base, {
+    email: 'reader@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = personSigned.user;
+  PROOF.set(personSigned.user.id, personSigned.headers);
 }
 
 afterEach(async () => {
@@ -47,7 +62,7 @@ afterEach(async () => {
 const post = (path: string, body: unknown) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...proofFor(body) },
     body: JSON.stringify(body),
   });
 
@@ -141,7 +156,7 @@ describe('an owner line is a review item on the queue', () => {
     expect(answered.status).toBe(200);
     const after = await detail(taskId);
     expect(after.doneWhen?.[0]?.verdict).toBe('met');
-    expect(after.doneWhen?.[0]?.by).toBe('Reader');
+    expect(after.doneWhen?.[0]?.by).toBe('Alice');
     expect(after.status).toBe('done');
     expect(await ownerItemsOn(taskId)).toHaveLength(0);
   });

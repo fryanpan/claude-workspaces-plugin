@@ -24,7 +24,7 @@
  * transports) proven with a grant that still exists. The removal itself is
  * asserted rather than dropped: `share_link` with a `docId` answers 410.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -47,7 +47,7 @@ import {
 } from './access-share.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+const PERSON = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
 
 /** The address the Access harness signs every visitor token as. */
 const VISITOR_EMAIL = 'reviewer@partner.example';
@@ -410,7 +410,7 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
           by: Record<string, unknown>;
         }>;
         expect(transitions.length).toBeGreaterThan(0);
-        expect(transitions[0]?.by.name).toBe('Jordan');
+        expect(transitions[0]?.by.name).toBe('Alice');
         expect(transitions[0]?.by.id).toBeUndefined();
       } finally {
         client.close();
@@ -444,7 +444,7 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
       expect(payload).not.toBeNull();
       // Positive control: the event arrived with its display identity…
       const actor = payload?.actor as Record<string, unknown>;
-      expect(actor.name).toBe('Jordan');
+      expect(actor.name).toBe('Alice');
       // …and the absence: no actor id on a visitor stream.
       expect(actor.id).toBeUndefined();
     });
@@ -491,7 +491,7 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
       // spoke, and the route is visible…
       expect(payload).not.toBeNull();
       expect(payload?.route).toBeDefined();
-      expect((payload?.actor as Record<string, unknown>).name).toBe('Jordan');
+      expect((payload?.actor as Record<string, unknown>).name).toBe('Alice');
       // …but the words are not.
       expect(payload?.transcript).toBeUndefined();
       expect(payload?.ack).toBeUndefined();
@@ -709,10 +709,17 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
           { method: 'POST', body: JSON.stringify({ text: 'Ship now.', author }) },
         ],
       ];
+      // Sent from the share page itself, through the tunnel, as a browser marks
+      // it: a person's answer counts only from that person's own page.
+      const page = {
+        'x-forwarded-proto': 'https',
+        origin: `https://${boardCookie.host}`,
+        'sec-fetch-site': 'same-origin',
+      };
       for (const [path, init] of cases) {
         const r = await pub(path, boardCookie, {
           ...init,
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...page },
         });
         expect(r.status, `${init.method} ${path}: ${await r.clone().text()}`).toBe(200);
       }
@@ -947,10 +954,17 @@ describe('workspace-board minimal share (§3.12 commit 8)', () => {
         ['/api/deploy', { method: 'POST' }],
         ['/api/deploy', { method: 'GET' }],
       ];
+      // Sent from the share page itself, through the tunnel, as a browser marks
+      // it: a person's answer counts only from that person's own page.
+      const page = {
+        'x-forwarded-proto': 'https',
+        origin: `https://${boardCookie.host}`,
+        'sec-fetch-site': 'same-origin',
+      };
       for (const [path, init] of cases) {
         const r = await pub(path, boardCookie, {
           ...init,
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...page },
         });
         expect(r.status, `${init.method} ${path}`).toBe(403);
       }

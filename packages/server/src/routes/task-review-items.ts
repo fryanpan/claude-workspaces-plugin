@@ -17,6 +17,7 @@ import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
 import { ACCESS_ANSWER_DENIAL } from '../review-items/answer-doors.ts';
+import { PERSON_PROOF_REQUIRED, unprovenPersonAnswer } from '../review-items/answer-proof.ts';
 import { provenEmailFor } from '../review-items/approver.ts';
 import {
   GRANT_ANSWER_DENIAL,
@@ -180,6 +181,10 @@ export async function handleTaskReviewItems(
         return j(400, ACCESS_ANSWER_DENIAL);
       }
     }
+    // A person's answer only from that person's own proof, before any write:
+    // a body naming the owner is how an agent approved its own ask
+    // (`review-items/answer-proof.ts`).
+    if (unprovenPersonAnswer(author, rq.answerProof)) return j(403, PERSON_PROOF_REQUIRED);
     // Checked HERE, before any write and before the ask-back conversion below,
     // because the conversion is itself a write on the item: a Regular User's
     // question would otherwise land on the thread of an ask they may not

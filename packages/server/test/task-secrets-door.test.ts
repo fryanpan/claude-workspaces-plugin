@@ -93,9 +93,16 @@ async function drive(
   const rq = {
     req: new Request('http://board.invalid/x', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      // The owner's own page: the door asks for his proof before the body.
+      headers: {
+        'content-type': 'application/json',
+        origin: 'http://board.invalid',
+        'sec-fetch-site': 'same-origin',
+      },
       body: JSON.stringify({ author: AGENT, secrets }),
     }),
+    provenIdentityFor: () => ({ id: 'known-bryan', displayName: 'Bryan', kind: 'person' }),
+    requestOriginFor: () => 'http://board.invalid',
     scope: { workspaceId: 'w-harbor', rest: `tasks/${TASK}/review-items/${ITEM}/secrets` },
     authorFor: () => AGENT,
     // The owner, so every case here is about what comes AFTER the owner gate.

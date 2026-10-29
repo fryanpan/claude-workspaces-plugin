@@ -1,3 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * Allow-rule review items: a denial the classifier repeats becomes ONE
  * question Bryan can answer from his phone, with a paste-ready rule — and
@@ -12,10 +16,7 @@
  *
  * All fixtures are synthetic — invented names. The repo is public.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import {
   ALLOW_RULES_FILENAME,
   ALLOW_RULE_THRESHOLD,
@@ -24,10 +25,14 @@ import {
 } from '../src/allow-rules.ts';
 import { normalizeAgent } from '../src/chat-audit.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-sam', name: 'Sam Reviewer', kind: 'person' };
+/** Signed in on the board page in `beforeEach`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON = { id: 'known-bob', name: 'Bob', kind: 'person' };
+const signIns = new Map<string, Record<string, string>>();
 const LEAD = { id: 'agent-beacon-bot', name: 'Beacon Bot', kind: 'agent' };
 
 /**
@@ -79,7 +84,10 @@ describe('allow-rule review items', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: JSON.stringify(body),
     });
   const jj = async <T>(res: Response): Promise<T> => {
@@ -102,6 +110,12 @@ describe('allow-rule review items', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    const signed = signedInPerson(handle, dataDir, base, {
+      email: 'bob@harborlight.example',
+      name: 'Bob',
+    });
+    PERSON = signed.user;
+    signIns.set(PERSON.id, signed.headers);
   });
 
   afterEach(async () => {

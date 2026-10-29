@@ -23,7 +23,7 @@
  * LAYER broke when a promise stops holding.
  *
  * Every fixture phrase is Bryan's own wording. All names are synthetic
- * (jordan@partner.example register); the repo is public. No live model call:
+ * (alice@partner.example register); the repo is public. No live model call:
  * the deterministic paths never reach the completer, and the test asserts
  * that by watching the seam.
  */
@@ -35,9 +35,10 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { TaskStore } from '../src/tasks.ts';
 import { VOICE_STATUS_MAX_WORDS, countWords } from '../src/voice-status.ts';
 import { CHOICE_WINDOW_MS, VoiceRouter } from '../src/voice.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+const PERSON = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
 const AGENT = { id: 'agent-search-revamp', name: 'Search Revamp', kind: 'known', color: '#888888' };
 
 /** Three real documents: a target, a near-twin that makes "cairn review"
@@ -91,21 +92,20 @@ describe('voice, smoothly (route)', () => {
         ...((init.headers as Record<string, string>) ?? {}),
       },
     });
-  const post = (path: string, body: unknown) =>
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     local(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
+  let speaker: SignedInPerson; // signed in: only a proven speaker's answer records
 
-  const say = async (
-    transcript: string,
-    context: unknown,
-    author: unknown = PERSON,
-  ): Promise<{ route: string; ack: string; navigate?: string }> => {
-    const r = await post(`/workspaces/${boardId}/voice`, { transcript, context, author });
+  type Said = { route: string; ack: string; navigate?: string };
+  const say = async (transcript: string, context: unknown): Promise<Said> => {
+    const body = { transcript, context, author: speaker.user };
+    const r = await post(`/workspaces/${boardId}/voice`, body, speaker.headers);
     expect(r.status).toBe(200);
-    return (await r.json()) as { route: string; ack: string; navigate?: string };
+    return (await r.json()) as Said;
   };
 
   const newTask = async (body: Record<string, unknown>): Promise<string> => {
@@ -176,6 +176,7 @@ describe('voice, smoothly (route)', () => {
       },
     });
     base = `http://127.0.0.1:${handle.port}`;
+    speaker = signedInPerson(handle, dataDir, `localhost:${handle.port}`, { name: 'Alice' });
     WS = await seedBoard(base);
 
     const ws = await post('/workspaces', { name: 'QB', goal: 'Ship onboarding.' });
@@ -186,7 +187,7 @@ describe('voice, smoothly (route)', () => {
     cairnDocId = await newDoc('cairn-onboarding', CAIRN);
     decoyDocId = await newDoc('billing-export', DECOY);
 
-    progressTaskId = await newTask({ title: 'Wire the onboarding checklist', assignee: 'Jordan' });
+    progressTaskId = await newTask({ title: 'Wire the onboarding checklist', assignee: 'Alice' });
     expect(
       (
         await post(`/workspaces/${WS}/tasks/${progressTaskId}/transition`, {
@@ -326,7 +327,7 @@ describe('voice, smoothly (route)', () => {
     expect(store.createTask(ws.id, { title: CAIRN_TWIN }).ok).toBe(true);
     let now = 1_700_000_000_000;
     const router = new VoiceRouter({ tasks: store, now: () => now });
-    const actor = { id: 'known-jordan', name: 'Jordan' };
+    const actor = { id: 'known-alice', name: 'Alice' };
     const asked = await router.handle(ws.id, {
       transcript: 'open the cairn review',
       actor,
@@ -365,7 +366,7 @@ describe('voice, smoothly (route)', () => {
     expect(countWords(body.ack)).toBeLessThanOrEqual(VOICE_STATUS_MAX_WORDS);
     expect(body.ack).toContain('Wire the onboarding checklist');
     expect(body.ack).toContain('in progress');
-    expect(body.ack).toContain('Jordan');
+    expect(body.ack).toContain('Alice');
   });
 
   // ── 3. reply to a review item by voice ───────────────────────────────────
@@ -384,7 +385,7 @@ describe('voice, smoothly (route)', () => {
     };
     const declared = threads[0]?.comments.find((c) => c.review);
     expect(declared?.review?.answeredWith).toBe('drop');
-    expect(declared?.review?.answeredBy).toBe('Jordan');
+    expect(declared?.review?.answeredBy).toBe('Alice');
   });
 
   it('"choose keep placeholders" answers by LABEL', async () => {

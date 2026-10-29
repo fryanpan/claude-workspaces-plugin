@@ -1,3 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * A ticket's review items reach the queue, the count, and the projection —
  * driven through the REAL routes.
@@ -15,16 +19,17 @@
  *
  * All fixtures synthetic — invented ids and copy throughout. The repo is public.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import type { ReviewPayload } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Signed in on the board page in `beforeEach`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+const signIns = new Map<string, Record<string, string>>();
 const AGENT = { id: 'agent-scheduler', name: 'Scheduler Agent', kind: 'known', color: '#888888' };
 
 /** Decision-shaped: it asks something, which is the one thing the create gate
@@ -67,7 +72,10 @@ const jj = async <T>(res: Response): Promise<T> => {
 const post = (path: string, body?: unknown) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
@@ -85,7 +93,7 @@ async function seedDecision(workspaceId: string, title = 'keep disk or memory?')
   const { task } = await jj<{ task: Task }>(
     await post(`/workspaces/${workspaceId}/tasks`, {
       title,
-      assignee: 'Jordan',
+      assignee: 'Alice',
       needs: 'decision',
       body: DECISION_BODY,
       options: [{ label: 'Keep the disk one' }, { label: 'Keep memory' }],
@@ -114,7 +122,7 @@ async function queueRows(workspaceId: string): Promise<QueueRow[]> {
 
 async function briefLine(workspaceId: string): Promise<string> {
   const { brief } = await jj<{ brief: { markdown: string } }>(
-    await fetch(`${base}/workspaces/${workspaceId}/home?user=Jordan&format=json`),
+    await fetch(`${base}/workspaces/${workspaceId}/home?user=Alice&format=json`),
   );
   return brief.markdown;
 }
@@ -124,6 +132,12 @@ beforeEach(async () => {
   handle = createServer({ port: 0, dataDir });
   base = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(base);
+  const signed = signedInPerson(handle, dataDir, base, {
+    email: 'alice@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = signed.user;
+  signIns.set(PERSON.id, signed.headers);
 });
 afterEach(async () => {
   await handle.stop();
@@ -226,7 +240,7 @@ describe('GET /workspaces/:id/review-items — ticket-borne rows', () => {
     );
     await jj(
       await post(`/workspaces/${WS}/docs/task:${task.id}/threads/${thread.id}/comments`, {
-        text: 'Jordan — is the cold start acceptable on every deploy?',
+        text: 'Alice — is the cold start acceptable on every deploy?',
         author: AGENT,
       }),
     );
@@ -248,7 +262,7 @@ describe('who asked — the ticket-borne row carries an asker like a thread row 
     const { task } = await jj<{ task: Task }>(
       await post(`/workspaces/${ws}/tasks`, {
         title: 'keep disk or memory?',
-        assignee: 'Jordan',
+        assignee: 'Alice',
         needs: 'decision',
         body: DECISION_BODY,
         options: [{ label: 'Keep the disk one' }, { label: 'Keep memory' }],
@@ -288,7 +302,7 @@ describe('who asked — the ticket-borne row carries an asker like a thread row 
     const res = handle.tasks.addReviewItem(task.id, REVIEW, { actor: PERSON });
     expect(res.ok).toBe(true);
     const rows = await queueRows(ws);
-    expect((rows[0] as { askedBy?: string }).askedBy).toBe('Jordan');
+    expect((rows[0] as { askedBy?: string }).askedBy).toBe('Alice');
   });
 });
 
@@ -356,9 +370,9 @@ describe('the Home queue count', () => {
         author: AGENT,
         tasks: [
           {
-            title: 'Jordan can pick the cache so that the cleanup unblocks',
-            assignee: 'Jordan',
-            body: 'Jordan can pick the cache so that the storage cleanup can start.',
+            title: 'Alice can pick the cache so that the cleanup unblocks',
+            assignee: 'Alice',
+            body: 'Alice can pick the cache so that the storage cleanup can start.',
             review: REVIEW,
           },
         ],
@@ -391,8 +405,8 @@ describe('the create response names visibility', () => {
         author: AGENT,
         tasks: [
           {
-            title: 'Jordan can pick the cache so that the cleanup unblocks',
-            assignee: 'Jordan',
+            title: 'Alice can pick the cache so that the cleanup unblocks',
+            assignee: 'Alice',
             review: REVIEW,
           },
           {
@@ -420,7 +434,7 @@ describe('the create response names visibility', () => {
     }>(
       await post(`/workspaces/${ws}/tasks/batch`, {
         author: PERSON,
-        tasks: [{ title: 'keep disk or memory?', assignee: 'Jordan' }],
+        tasks: [{ title: 'keep disk or memory?', assignee: 'Alice' }],
       }),
     );
     expect(res.tasks[0]?.status).toBe('todo');
@@ -431,8 +445,8 @@ describe('the create response names visibility', () => {
     const ws = await seedWorkspace();
     const res = await jj<{ task: Task; visibility?: string }>(
       await post(`/workspaces/${ws}/tasks`, {
-        title: 'Jordan can pick the cache so that the cleanup unblocks',
-        assignee: 'Jordan',
+        title: 'Alice can pick the cache so that the cleanup unblocks',
+        assignee: 'Alice',
         review: REVIEW,
         author: AGENT,
       }),
