@@ -41,8 +41,9 @@
  * board's socket (`boardSocketEnv`), so its MCP child is the node relay
  * dialling that socket (packages/plugin/bin/claude-workspaces-mcp.sh) and it
  * holds no board token: the server keeps the one its calls carry. The
- * plugin's hooks still dial TCP, which the wall refuses, so the launch says
- * so. The server must have board sockets on (`CW_BOARD_SOCKETS=1`).
+ * plugin's hooks post over the same socket. Before the lead starts, the
+ * launch tells the server which folders it may bind onto its board: its
+ * projects (`lead-sandbox-roots.ts`). Prod serves board sockets by default.
  */
 import { spawnSync } from 'node:child_process';
 import {
@@ -75,6 +76,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { type RootsRegistrar, registerRootsWithCurl } from './lead-sandbox-roots.ts';
 import {
   type TokenReader,
   readKeychainToken,
@@ -217,12 +219,15 @@ export interface LaunchDeps {
   readToken: TokenReader;
   /** Starts the lead with the terminal handed through; answers its exit status. */
   spawn: (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => number;
+  /** Tells the server the folders a walled lead may bind. */
+  registerRoots: RootsRegistrar;
 }
 
 const realDeps: LaunchDeps = {
   platform: process.platform,
   say: (line) => process.stdout.write(`${line}\n`),
   readToken: readKeychainToken,
+  registerRoots: registerRootsWithCurl,
   spawn(file, args, opts) {
     // Ctrl-C interrupts the lead's turn; it must not kill this wrapper and
     // leave the session running without its parent.
@@ -282,10 +287,16 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say('nothing to launch: put the command after --');
       return 2;
     }
-    if (lead.boardWall)
-      say(
-        `note: ${lead.name} is walled. Its board tools go over its board's socket; the plugin's hooks still dial the board server's port, which the wall refuses, so they fail.`,
+    if (lead.boardWall && lead.boardId) {
+      const refused = deps.registerRoots(
+        lead.boardId,
+        lead.projects.map((p) => machine.realpath(p)),
       );
+      if (refused)
+        say(
+          `warning: ${lead.name}'s bind folders were not registered (${refused}), so the server will refuse its folder binds.`,
+        );
+    }
     const here = machine.realpath(import.meta.dirname);
     if (lead.projects.some((p) => here.startsWith(`${machine.realpath(p)}/`)))
       say(

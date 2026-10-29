@@ -138,16 +138,24 @@ its own board's, and every write in that folder. So the lead's only way to a
 board is its own board's socket, where the server holds each request to that
 board whatever token it carries. The folder is the config's top-level
 `boardSocketDir`, or `/private/tmp/cw-<uid>-boards` when unset; a folder too
-long for a socket path is refused. The server opens the sockets only when
-started with `CW_BOARD_SOCKETS=1` (or `CW_BOARD_SOCKET_DIR` /
-`--board-socket-dir` naming the folder); it is off by default.
+long for a socket path is refused. A server on prod's port, 8787, opens the
+sockets in the default folder unless started with `CW_BOARD_SOCKETS=0`; any
+other server opens them only with `CW_BOARD_SOCKETS=1` (or
+`CW_BOARD_SOCKET_DIR` / `--board-socket-dir` naming the folder).
 
 `--lead` launches such a lead with `CW_BOARD_SOCKET` set to its own board's
 socket and `CW_WORKSPACE_ID` to its board, and with no `at1.` or `at2.` value
 in its environment. Its MCP child is then the node relay dialling that
 socket, and the server keeps the board token the relay's tools need, so the
-lead holds none. The plugin's hooks still dial the board server's port,
-which the wall refuses, so they fail; the launch says so.
+lead holds none, and none is written to disk. The plugin's hooks post over
+the same socket. Before the lead starts, the launch sends the server the
+lead's projects, resolved, as the folders it may bind onto its board
+(`PUT /api/board-sockets/<board>/roots`, loopback only, refused on a
+socket); if the server does not take them, the launch says so and the lead's
+folder binds are refused. On its own board the lead may also list docs,
+rewrite a doc, bind a folder inside those projects and post notes, which a
+board member may not (`packages/server/src/middleware/lead-scope.ts`), and it
+keeps its board when the board is closed to outside visitors.
 
 `--check` connects to each port at both loopbacks and
 each LAN and tailnet address from inside the profile (each must be refused
@@ -513,9 +521,9 @@ Sandbox, a macOS user per lead, a VM) is planned for either.
   simply deny it. This closes with a board agent token per lead, scoped to
   that lead's board: the same token a lead on Fly needs. The wall
   (`boardWall`, above), the board sockets it leaves one of open, and the
-  relay that carries the lead's MCP calls over that socket have landed. Two
-  things are left before a real lead runs walled: the server flag must be on
-  in prod, and the plugin's hooks must reach the socket too.
+  relay that carries the lead's MCP calls over that socket have landed, prod
+  serves the sockets by default, and the plugin's hooks post over the socket
+  too. What is left is a real lead setting `boardWall`.
 - **The keychain answers a lead with `allowKeychain`.** By default the
   profile refuses the keychain (step 1): measured 28 October, a dummy item
   read back from inside a profile before the rule was refused after it
