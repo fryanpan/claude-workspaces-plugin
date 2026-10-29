@@ -49,3 +49,37 @@ describe('a note whose every word the doc already carries', () => {
     expect(h.notes()).toContain('is not an option');
   });
 });
+
+describe('a replace that would copy another note', () => {
+  const script = (replacement: string) =>
+    createNotesTickHarness({
+      compose: (input, tick) => {
+        if (tick === 1) {
+          return addNotes(
+            input,
+            '### Riverbend ferry\n\n- Winter sailings stop at six every evening\n- Winter sailings stop at seven on Fridays',
+          );
+        }
+        const friday = input.outline.find((e) => e.text.includes('seven on Fridays'));
+        if (friday === undefined) return [];
+        return [{ op: 'replace_block', blockId: friday.id, markdown: replacement }];
+      },
+    });
+
+  it('leaves the block as it was, so neither note stands twice nor goes', async () => {
+    const h = script('- Winter sailings stop at six every evening');
+    await h.speak('winter sailings stop at six, and at seven on Fridays');
+    await h.speak('sailings stop at six in winter');
+    const notes = h.notes();
+    expect(count(notes, 'Winter sailings stop at six')).toBe(1);
+    expect(notes).toContain('seven on Fridays');
+    expect(h.errors).toEqual([]);
+  });
+
+  it('CONTROL: a replace with new words lands', async () => {
+    const h = script('- Winter sailings stop at seven on Fridays and Saturdays');
+    await h.speak('winter sailings stop at six, and at seven on Fridays');
+    await h.speak('at seven on Fridays and Saturdays');
+    expect(h.notes()).toContain('Fridays and Saturdays');
+  });
+});

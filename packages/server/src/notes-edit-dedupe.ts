@@ -51,12 +51,9 @@ export interface NotesDedupeContext {
   authorId: string;
   /** Blocks somebody has commented on — never deleted by a move. */
   commented?: () => ReadonlySet<string>;
-  /**
-   * What the section already held when this meeting took it over — the last
-   * recording's minutes. A note there is not this meeting's to repeat: the
-   * same words said in two meetings are two notes. Topic headings there are
-   * still reused, because a note added under one changes nothing it holds.
-   */
+  /** What the section held when this meeting took it over: the last
+   *  recording's minutes. Its notes are not repeats (the same words in two
+   *  meetings are two notes); its topic headings are still reused. */
   prior?: ReadonlySet<string>;
   /**
    * Notes of this author's that sit OUTSIDE the section, and still count as
@@ -69,19 +66,11 @@ export interface NotesDedupeContext {
   ownedElsewhere?: ReadonlySet<string>;
   /**
    * Every heading on this doc SOME meeting has written as a topic of its own.
-   *
-   * WITHOUT IT THE REPEAT CHECK HOLDS ONE TOPIC OF EIGHT. A meeting's topics
-   * are siblings at its section's level (PR 1048 removed the container), so
-   * the section walk stops at the meeting's second topic. Inside one leg the
-   * check survives on `ownedElsewhere`, which is authorship; across a pause
-   * it does not, because `releaseNotesAuthorship` drops every mark when the
-   * next recording starts. On 2026-09-16 a sixteen-second pause therefore
-   * re-opened eight topics the doc already had.
-   *
-   * The note-taker's own memory of which headings it opened is the one record
-   * of that which survives the release, so it is what carries the scope across
-   * the siblings. Absent — a caller with no memory to ask — the scope is the
-   * old one.
+   * WITHOUT IT THE REPEAT CHECK HOLDS ONE TOPIC OF EIGHT: a meeting's topics
+   * are siblings at its section's level, so the section walk stops at the
+   * second, and across a pause authorship is gone too (2026-09-16: a pause
+   * re-opened eight topics). The note-taker's memory of the headings it
+   * opened survives that. Absent, the scope is the old one.
    */
   meetingTopics?: ReadonlySet<string>;
 }
@@ -411,6 +400,15 @@ export function dedupeNotesEdits(
     const edit = unheaded(raw);
     if (edit === null) continue;
     if (edit.op !== 'insert_at_end' && edit.op !== 'insert_under_heading') {
+      // A replace making one note a copy of another is dropped; its block keeps its words.
+      const op = edit.op === 'replace_block' ? edit : undefined;
+      if (
+        op &&
+        existing.some((x) => x.entry.id !== op.blockId && sameNote(x.entry.text, op.markdown))
+      ) {
+        notes.push('dropped a replace that copied another note');
+        continue;
+      }
       if (
         edit.op === 'replace_block' &&
         DECISION_LABEL.test(edit.markdown) &&
