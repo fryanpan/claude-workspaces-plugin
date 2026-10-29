@@ -2,7 +2,7 @@
  * Run an unmerged branch as a second claude-workspaces instance, so peers and
  * people can review a build BEFORE it lands on main.
  *
- *   bun run staging [--port 8788] [--data-dir <path>] [--host <addr>]
+ *   bun run staging [--port 8788|8789|8790] [--data-dir <path>] [--host <addr>]
  *
  * Prod keeps running on 8787 with its own data the whole time. Nothing about
  * this touches it — which takes three specific guardrails, all of which are
@@ -34,7 +34,9 @@
  *    webhook to the staging build, which answered `unknown_host` — with a
  *    green health check throughout, because the port itself was still
  *    answering. `--host 0.0.0.0` opts back into the wildcard when a peer on
- *    another machine genuinely needs to reach this staging instance.
+ *    another machine genuinely needs to reach this staging instance. It also
+ *    refuses any port outside `STAGING_PORTS`, because a sandboxed lead's
+ *    wall denies only the board-server ports listed there.
  *
  * Peers whose AGENT side needs staging relaunch with
  * `CW_BASE_URL=http://<host>:<port>`; the MCP checks that override first.
@@ -47,7 +49,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reservedPortError } from '../packages/server/src/reserved-ports.ts';
+import { stagingPortError } from '../packages/server/src/reserved-ports.ts';
 
 type ArgReader = (name: string) => string | undefined;
 
@@ -106,7 +108,7 @@ function main(): void {
   const dataDir = resolve(arg('data-dir') ?? join(repoRoot, 'data-staging'));
   const host = resolveStagingHost(arg);
 
-  const portErr = reservedPortError(port);
+  const portErr = stagingPortError(port);
   if (portErr) {
     console.error(`[staging] ${portErr}`);
     process.exit(2);

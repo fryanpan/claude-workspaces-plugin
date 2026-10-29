@@ -4,7 +4,14 @@
  * proof the refusal actually fires for it.
  */
 import { describe, expect, test } from 'bun:test';
-import { RESERVED_PORTS, reservedPortError, reservedPortOwner } from '../src/reserved-ports';
+import {
+  BOARD_SERVER_PORTS,
+  RESERVED_PORTS,
+  STAGING_PORTS,
+  reservedPortError,
+  reservedPortOwner,
+  stagingPortError,
+} from '../src/reserved-ports';
 
 describe('reservedPortOwner', () => {
   test.each(RESERVED_PORTS.map((p) => [p.port, p.owner] as const))(
@@ -32,5 +39,23 @@ describe('reservedPortError', () => {
 
   test('is null for a free port', () => {
     expect(reservedPortError(9000)).toBeNull();
+  });
+});
+
+describe('stagingPortError', () => {
+  test('lets staging take each board-server port bar prod’s', () => {
+    expect(STAGING_PORTS).toEqual([8788, 8789, 8790]);
+    for (const port of STAGING_PORTS) expect(stagingPortError(port)).toBeNull();
+    expect(BOARD_SERVER_PORTS[0]).toBe(8787);
+  });
+
+  test('refuses prod’s port, and names its owner', () => {
+    expect(stagingPortError(8787)).toContain('prod');
+  });
+
+  test('refuses a port the lead wall does not cover, and names the ones it does', () => {
+    const err = stagingPortError(8800);
+    expect(err).toContain('8800');
+    expect(err).toContain('8788, 8789, 8790');
   });
 });

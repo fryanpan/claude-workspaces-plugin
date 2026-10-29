@@ -45,6 +45,7 @@ import { needsCall } from '@claude-workspaces/core/summary-prompt';
 import { classifyActor } from '../actor-identity.ts';
 import { threadOpenParts } from '../answer-coverage.ts';
 import { claudeKeyAddHint } from '../claude-key-source.ts';
+import { BOARD_SOCKET_TOKEN_ID } from '../middleware/board-socket-door.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
 import { isPageDoc, pageThreadLink, planPageThread } from '../page-thread.ts';
 import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
@@ -224,11 +225,13 @@ export async function handleDocThreadRoutes(
    *  measurement rows leave `taskId` off rather than empty. */
   const rowOfDoc = taskIdOfBodyDoc(docId);
   const viaOpt = via ? { via } : {};
-  /** Record a thread this request's board token opened, for the org relay. */
+  /** Record a thread this request's board token opened, for the org relay.
+   *  Only a real `at2`: an agent a board socket named holds no token. */
   const recordOpener = (thread: Thread | null | undefined): void => {
     const opener = thread?.comments[0];
-    if (thread && opener && rq.boardAgent && opener.author.id === rq.boardAgent.agentId) {
-      threadOpenerProofs.record(docId, thread.id, rq.boardAgent, opener.text);
+    const grant = rq.boardAgent?.tokenId === BOARD_SOCKET_TOKEN_ID ? null : rq.boardAgent;
+    if (thread && opener && grant && opener.author.id === grant.agentId) {
+      threadOpenerProofs.record(docId, thread.id, grant, opener.text);
     }
   };
   /** A blocking ask carries the goal it stops (`review-blocks.ts`): its

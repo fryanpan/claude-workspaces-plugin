@@ -21,6 +21,7 @@
 import { dirname } from 'node:path';
 import { gitProxyNetworkRules, gitProxyPaths } from './git-proxy-lead.ts';
 import type { Lead, LeadSandboxConfig, Machine } from './lead-sandbox-config.ts';
+import { boardWallRules, defaultBoardSocketDir } from './lead-sandbox-wall.ts';
 import { expandRealPaths } from './mac-lead-users-lib.ts';
 
 export {
@@ -377,6 +378,7 @@ export function buildProfile(
     ...escapeRules(lead, m),
     ...keychainRules(lead),
     ...gitProxyNetworkRules(lead, config.gitProxyPort),
+    ...boardWallRules(lead, config.boardSocketDir ?? defaultBoardSocketDir(m.uid), m.realpath),
     ';; Looking up (not listing) each folder above an allowed path.',
     ...lookups,
     '',

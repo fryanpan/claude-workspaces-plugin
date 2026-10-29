@@ -43,3 +43,24 @@ export function reservedPortError(port: number): string | null {
     'Pick a port 8800 or above (or 0 to let the OS choose one).'
   );
 }
+
+/**
+ * Every port a board server may listen on: prod's, then staging's. A
+ * sandboxed lead's profile denies each of them at every address
+ * (`scripts/lead-sandbox-wall.ts`), and `scripts/staging.ts` refuses any
+ * other, so a staging server cannot sit where the wall does not look.
+ */
+export const BOARD_SERVER_PORTS: readonly number[] = [8787, 8788, 8789, 8790];
+
+/** The ports staging may take: the board-server ports bar prod's. */
+export const STAGING_PORTS: readonly number[] = BOARD_SERVER_PORTS.slice(1);
+
+/** A ready-to-print refusal for a staging port, or `null` when it may be used. */
+export function stagingPortError(port: number): string | null {
+  if (STAGING_PORTS.includes(port)) return null;
+  const owner = reservedPortOwner(port);
+  const why = owner
+    ? `is reserved for ${owner}`
+    : "is not a board-server port, so a sandboxed lead's wall would not cover it";
+  return `port ${port} ${why}. Pick one of ${STAGING_PORTS.join(', ')}.`;
+}

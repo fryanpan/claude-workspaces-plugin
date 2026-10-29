@@ -40,10 +40,12 @@
  */
 import { normalizeEmail } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
+import { agentBearerOf } from './auth/agent-token.ts';
 import { type BoardAgentClaims, boardAgentBearerOf } from './auth/board-agent-token.ts';
 import { type FrameHost, frameGate, frameGateRefusal } from './frame-host.ts';
 import { memberBoards, memberHomeResponse, notAMemberResponse, wantsPage } from './member-home.ts';
 import { admitBoardAgent } from './middleware/board-agent-door.ts';
+import { admitBoardSocket } from './middleware/board-socket-door.ts';
 import { LOOPBACK_HOSTS, type OriginPolicy, corsHeadersFor } from './middleware/browser-origin.ts';
 import type { CfAccessVerifier } from './middleware/cf-access.ts';
 import {
@@ -265,6 +267,10 @@ export interface RequestAdmissionContext {
   frameHost: FrameHost | null;
   /** What a board agent token still grants (`auth/board-agent-token.ts`). */
   boardAgentGrantFor: (bearer: string) => BoardAgentClaims | null;
+  /** The board whose socket a request arrived on (`board-sockets.ts`), or null. */
+  boardOfSocket: (req: Request) => string | null;
+  /** The agent an `at1` bearer names, or null when it does not verify. */
+  agentOfToken: (bearer: string) => string | null;
 }
 
 /** Doc metadata as one caller may see it — the full record on the tailnet,
@@ -380,6 +386,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     docTypeOf,
     frameHost,
     boardAgentGrantFor,
+    boardOfSocket,
+    agentOfToken,
   } = ctx;
 
   const admit = async (req: Request, addressed: { pathname: string }): Promise<Admission> => {
@@ -500,6 +508,32 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      * Falling off the end means admitted.
      */
     const answered = await (async (): Promise<Response | null> => {
+      // A board's own socket (board-sockets.ts): the socket names the board,
+      // and the board socket door holds the request to it. Ahead of every
+      // other kind, and the Host header is never read, so a forged one
+      // changes nothing. No fallback to trusted-local.
+      const socketBoard = boardOfSocket(req);
+      if (socketBoard !== null) {
+        const door = admitBoardSocket({
+          req,
+          pathname,
+          boardId: socketBoard,
+          boardBearer: boardAgentBearerOf(req.headers),
+          agentBearer: agentBearerOf(req.headers),
+          grantFor: boardAgentGrantFor,
+          agentFor: agentOfToken,
+          workspacesOf: shareWorkspacesOf,
+          j,
+        });
+        if (!door.ok) return door.response;
+        // A board closed to outside visitors is closed here as on TCP, where
+        // the check at the end of this run refuses a board token.
+        if (!sharingGate.isBoardOpen(socketBoard)) return refuseVisitor('sharing_disabled');
+        visitor = door.target;
+        visitorMemberKey = door.memberKey;
+        boardAgent = door.agent;
+        return null;
+      }
       // The frame-only hostname (frame-host.ts): two read families, for the
       // operator alone. Ahead of every other kind, so nothing else this
       // server answers is reachable on it, whatever the lists say.
