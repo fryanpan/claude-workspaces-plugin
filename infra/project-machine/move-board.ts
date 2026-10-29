@@ -69,6 +69,13 @@ async function archiveSource(source: MoveSource, boardId: string, to: string): P
     throw new Error(`archiving the source board answered ${res.status}: ${await res.text()}`);
 }
 
+/** Whether two exports of a board hold the same record and shared entries. */
+function sameRecord(a: BoardManifest, b: BoardManifest): boolean {
+  const record = (m: BoardManifest) =>
+    m.files.find((f) => f.path === join('workspaces', `${m.boardId}.tasks.json`))?.sha256;
+  return record(a) === record(b) && JSON.stringify(a.merges) === JSON.stringify(b.merges);
+}
+
 export async function moveBoard(opts: {
   boardId: string;
   source: MoveSource;
@@ -114,6 +121,19 @@ export async function moveBoard(opts: {
     if (!ok) {
       log('FAIL: the source board is left as it was, not archived');
       return { ok, archived: false, manifest, lines };
+    }
+    // The import took minutes; an edit on the source in that time is not on the target.
+    // The print covers what a reader sees; exporting again covers the rest of the
+    // board record (task bodies, review items, goal rows) and its shared entries.
+    const last = judgeMove(before, await boardPrint(get, source.dataDir, boardId));
+    const latest = exportBoard(source.dataDir, boardId, join(work, 'latest'));
+    const changed = last.lines.filter((l) => l.startsWith('FAIL'));
+    if (!sameRecord(manifest, latest))
+      changed.push('the board record or its shared entries differ from the export');
+    if (changed.length) {
+      for (const l of changed) log(`source changed during import: ${l}`);
+      log('FAIL: the source board is left as it was, not archived');
+      return { ok: false, archived: false, manifest, lines: changed };
     }
     await archiveSource(source, boardId, target.describe);
     log(`PASS: ${boardId} is on ${target.describe}; the source board is archived`);
@@ -195,25 +215,32 @@ async function flyTarget(project: string): Promise<MoveTarget> {
         );
         if (tar.status !== 0) throw new Error('tar failed');
         stage.share(tgz);
+        // Root-only, so the cw user never reads the board's share rows off the upload.
         const up = `/data/board-import-${boardId}`;
-        flyOk(['ssh', 'sftp', 'put', tgz, `${up}.tgz`, '--app', cfg.app]);
-        console.log(`[move-board] ${cfg.app}: holding services off`);
-        onMachine(cfg.app, 'touch /data/maintenance');
-        flyOk(['machine', 'restart', m.id, '--app', cfg.app]);
-        await started(m.id);
-        console.log(
-          onMachine(
-            cfg.app,
-            `mkdir ${up} && tar -xzf ${up}.tgz -C ${up} && ${PROBE} import ${up} && chown -R cw:cw /data/cw && rm -r ${up} ${up}.tgz`,
-          )
-            .trim()
-            .split('\n')
-            .at(-1),
-        );
-        onMachine(cfg.app, 'rm /data/maintenance');
-        flyOk(['machine', 'restart', m.id, '--app', cfg.app]);
-        await started(m.id);
-        await serving();
+        onMachine(cfg.app, `if [ -e ${up} ]; then rm -r ${up}; fi; mkdir -m 700 ${up}`);
+        flyOk(['ssh', 'sftp', 'put', tgz, `${up}/bundle.tgz`, '--app', cfg.app]);
+        try {
+          console.log(`[move-board] ${cfg.app}: holding services off`);
+          onMachine(cfg.app, 'touch /data/maintenance');
+          flyOk(['machine', 'restart', m.id, '--app', cfg.app]);
+          await started(m.id);
+          console.log(
+            onMachine(
+              cfg.app,
+              `mkdir ${up}/b && tar --no-same-owner --no-same-permissions -xzf ${up}/bundle.tgz -C ${up}/b && ${PROBE} import ${up}/b`,
+            )
+              .trim()
+              .split('\n')
+              .at(-1),
+          );
+        } finally {
+          // Imported, refused or cut short, the machine serves again, the server
+          // can read every file the import wrote as root, and the upload is gone.
+          onMachine(cfg.app, `chown -R cw:cw /data/cw; rm -r ${up}; rm -f /data/maintenance`);
+          flyOk(['machine', 'restart', m.id, '--app', cfg.app]);
+          await started(m.id);
+          await serving();
+        }
       } finally {
         stage.done();
       }

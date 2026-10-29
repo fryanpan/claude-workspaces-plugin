@@ -26,12 +26,10 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as Y from 'yjs';
 import {
   MoveRefused,
   exportBoard,
   importBoard,
-  readBundle,
 } from '../../../infra/project-machine/board-bundle.ts';
 import { boardPrint, loopbackGet } from '../../../infra/project-machine/board-print.ts';
 import { type MoveTarget, moveBoard } from '../../../infra/project-machine/move-board.ts';
@@ -358,124 +356,54 @@ describe('machine:move-board', () => {
     };
     expect(ws.retiredAt).toBeUndefined();
   }, 120_000);
-});
-
-describe('board bundle checks', () => {
-  it('refuses a bundle path outside what a board owns', () => {
-    const dir = join(scratch, 'evil');
-    mkdirSync(join(dir, 'files'), { recursive: true });
-    writeFileSync(join(dir, 'files', 'x'), 'x');
-    writeFileSync(
-      join(dir, 'manifest.json'),
-      JSON.stringify({
-        format: 'cw-board-bundle-1',
-        boardId: 'w-Harbor1',
-        boardName: 'Harborlight',
-        exportedAt: 0,
-        docIds: ['ws:w-Harbor1'],
-        files: [{ path: '../share-cookie.key', sha256: '', bytes: 1 }],
-        merges: {},
-        bindings: [],
-      }),
-    );
-    expect(() => readBundle(dir)).toThrow(/escapes/);
-  });
-
-  it('merges the board entries of shared files and refuses one already there', () => {
-    const from = join(scratch, 'merge-from');
-    const to = join(scratch, 'merge-to');
-    const board = 'w-Harbor2';
-    const other = 'w-River02';
-    mkdirSync(join(from, 'workspaces'), { recursive: true });
-    mkdirSync(join(to, 'workspaces'), { recursive: true });
-    writeFileSync(
-      join(from, 'workspaces', `${board}.tasks.json`),
-      JSON.stringify({
-        workspace: {
-          id: board,
-          name: 'Harborlight',
-          docIds: [],
-          goals: [],
-          notesHome: { repoRoot: '/repo/harborlight', branch: 'main', dir: 'notes' },
+  it('does not archive the source when it changes while the target imports', async () => {
+    const src = api(source.base);
+    const id = (
+      (await src('POST', '/workspaces', { name: 'Riverbend late edit' })).workspace as {
+        id: string;
+      }
+    ).id;
+    const taskId = (
+      (await src('POST', `/workspaces/${id}/tasks`, { assignee: 'Bob', title: 'Sound the bar' }))
+        .task as { id: string }
+    ).id;
+    const other = join(scratch, 'target-late');
+    mkdirSync(other);
+    const late = loopbackTarget(other, await boot(other));
+    const lines: string[] = [];
+    const r = await moveBoard({
+      boardId: id,
+      source: { dataDir: sourceDir, base: source.base },
+      target: {
+        ...late,
+        importBundle: async (dir, b) => {
+          await late.importBundle(dir, b);
+          // A review item filed on the Mac after the export: no doc, thread or
+          // task title changes, so only exporting again can see it.
+          await src('POST', `/workspaces/${b}/tasks/${taskId}/review-items`, {
+            review: {
+              shape: 'decision',
+              headline: 'Which Riverbend channel do we sound first?',
+              options: [
+                { id: 'o-1', label: 'The north channel' },
+                { id: 'o-2', label: 'The south channel' },
+              ],
+            },
+            author: { id: 'agent-riverbend', name: 'Riverbend', kind: 'agent' },
+          });
+          // The record is written on a debounce; a real import takes minutes.
+          const record = join(sourceDir, 'workspaces', `${b}.tasks.json`);
+          await waitFor(() => readFileSync(record, 'utf8').includes('Riverbend channel'));
         },
-        tasks: [],
-      }),
-    );
-    // A board doc written before private meta left the CRDT still carries a path.
-    const legacy = new Y.Doc();
-    legacy.getMap('meta').set('sourceUrl', '/repo/harborlight/board.md');
-    legacy.getMap('meta').set('title', 'Harborlight');
-    writeFileSync(join(from, `ws:${board}.ydoc`), Y.encodeStateAsUpdate(legacy));
-    const link = (ws: string) => ({ linkId: `l-${ws}`, workspaceId: ws, redemptions: [] });
-    const member = (ws: string) => ({
-      workspaceId: ws,
-      email: 'alice@example.com',
-      addedAt: 1,
-      viaLinkId: 'x',
+      },
+      log: (l) => lines.push(l),
     });
-    writeFileSync(
-      join(from, 'share-links.json'),
-      JSON.stringify({
-        links: [link(board), link(other)],
-        members: [member(board), member(other)],
-        audiences: [],
-      }),
-    );
-    writeFileSync(
-      join(from, 'sharing.json'),
-      JSON.stringify({ enabled: false, lockedBoards: [board, other] }),
-    );
-    writeFileSync(
-      join(from, 'review-ranks.json'),
-      JSON.stringify({
-        ranks: {
-          [`${board}:t-1`]: { rank: 1, at: 1, by: 'a' },
-          [`${other}:t-2`]: { rank: 2, at: 1, by: 'a' },
-        },
-        personMoves: {},
-      }),
-    );
-    writeFileSync(
-      join(to, 'share-links.json'),
-      JSON.stringify({ links: [link('w-Salt003')], members: [], audiences: [] }),
-    );
-    const bundle = join(scratch, 'merge-bundle');
-    const m = exportBoard(from, board, bundle);
-    expect(Object.keys(m.merges).sort()).toEqual([
-      'review-ranks.json',
-      'share-links.json',
-      'sharing.json',
-    ]);
-    importBoard(bundle, to);
-    // Neither Mac path reached the target.
-    const record = readFileSync(join(to, 'workspaces', `${board}.tasks.json`), 'utf8');
-    expect(record).not.toContain('/repo/harborlight');
-    const moved = new Y.Doc();
-    Y.applyUpdate(moved, new Uint8Array(readFileSync(join(to, `ws:${board}.ydoc`))));
-    expect(moved.getMap('meta').toJSON()).toEqual({ title: 'Harborlight' });
-    const links = JSON.parse(readFileSync(join(to, 'share-links.json'), 'utf8')) as {
-      links: { workspaceId: string }[];
-      members: { workspaceId: string }[];
+    expect(r.archived).toBe(false);
+    expect(r.ok).toBe(false);
+    expect(lines.join('\n')).toMatch(/source changed during import: the board record/);
+    const ws = (await src('GET', `/workspaces/${id}?format=json`)).workspace as {
+      retiredAt?: number;
     };
-    expect(links.links.map((l) => l.workspaceId)).toEqual(['w-Salt003', board]);
-    expect(links.members.map((l) => l.workspaceId)).toEqual([board]);
-    // A target with no sharing.json reads as sharing on, and still does.
-    expect(JSON.parse(readFileSync(join(to, 'sharing.json'), 'utf8'))).toEqual({
-      enabled: true,
-      lockedBoards: [board],
-    });
-    const ranks = JSON.parse(readFileSync(join(to, 'review-ranks.json'), 'utf8')) as {
-      ranks: Record<string, unknown>;
-    };
-    expect(Object.keys(ranks.ranks)).toEqual([`${board}:t-1`]);
-
-    // A second target that already holds an entry for the board refuses, writing nothing.
-    const clash = join(scratch, 'merge-clash');
-    mkdirSync(clash);
-    const before = JSON.stringify({ links: [link(board)], members: [], audiences: [] });
-    writeFileSync(join(clash, 'share-links.json'), before);
-    expect(() => importBoard(bundle, clash)).toThrow(/already holds/);
-    expect(readFileSync(join(clash, 'share-links.json'), 'utf8')).toBe(before);
-    expect(existsSync(join(clash, 'workspaces', `${board}.tasks.json`))).toBe(false);
-  });
+    expect(ws.retiredAt).toBeUndefined();
+  }, 120_000);
 });

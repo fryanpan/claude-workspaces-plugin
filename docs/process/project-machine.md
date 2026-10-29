@@ -224,12 +224,17 @@ machine. In order:
 2. Stops, changing nothing, if the machine already holds the board.
 3. Exports it (`board-bundle.ts`) and fingerprints the source again. If the
    board changed while it was read, it stops: quiet the board's agents first.
-4. Copies the bundle up, holds the machine's services off with
-   `/data/maintenance`, imports, and restarts. The import refuses, having
-   written nothing, when the data dir already has any of the board's files or
-   an entry for it in a shared file.
-5. Fingerprints the board on the machine. Only when every part matches does it
-   archive the Mac's board (`PUT /workspaces/<id>/retired`), which is
+4. Copies the bundle into a root-only directory on the machine, holds the
+   machine's services off with `/data/maintenance`, imports, and restarts.
+   The import refuses, having written nothing, when the data dir already has
+   any of the board's files or an entry for it in a shared file. It reads the
+   bundle as hostile and also refuses a symlink or an unlisted file, a doc or
+   board record that names a path, and a shared-file entry for any other
+   board. Imported or refused, the upload is removed and the services start
+   again.
+5. Fingerprints the board on the machine, then the Mac's board once more.
+   Only when the machine matches and the Mac has not changed since step 1
+   does it archive the Mac's board (`PUT /workspaces/<id>/retired`), which is
    reversible. It never deletes anything on the Mac.
 
 `--dry-run` stops after step 3 and prints what would move.

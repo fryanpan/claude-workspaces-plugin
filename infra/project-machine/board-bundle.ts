@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -309,23 +310,94 @@ function checkPath(m: BoardManifest, path: string): void {
   if (!docOk) throw new MoveRefused(`bundle path is not one a board owns: ${path}`);
 }
 
-/** Reads and checks a bundle: format, ids, every path's shape and hash. */
+/** Every entry under `dir`, relative to it, without following a symlink. */
+function entries(dir: string, rel = ''): string[] {
+  return readdirSync(join(dir, rel)).flatMap((name) => {
+    const p = rel ? `${rel}/${name}` : name;
+    const st = lstatSync(join(dir, p));
+    return st.isDirectory() && !st.isSymbolicLink() ? entries(dir, p) : [p];
+  });
+}
+
+/** A bundle file's bytes, refusing anything but a plain file. */
+function plainFile(path: string, shown: string): Buffer {
+  if (!lstatSync(path).isFile())
+    throw new MoveRefused(`bundle entry is not a plain file: ${shown}`);
+  return readFileSync(path);
+}
+
+/**
+ * Whether a shared file's entries name only `boardId`. Picking them again
+ * keeps exactly what the export picked, so anything else (another board's
+ * row, a field of the wrong type, a field no rule names) shows as a change.
+ */
+function onlyThisBoard(rule: MergeRule, add: unknown, boardId: string): boolean {
+  // The value is written under the board's own key, whatever it holds.
+  if (rule.kind === 'keyed') return true;
+  if (rule.kind === 'jsonl') {
+    if (!Array.isArray(add) || add.some((l) => typeof l !== 'string' || l.includes('\n')))
+      return false;
+    const again = pick(rule, add.join('\n'), boardId);
+    return Array.isArray(again) && again.length === add.length;
+  }
+  return JSON.stringify(pick(rule, JSON.stringify(add), boardId)) === JSON.stringify(add);
+}
+
+/**
+ * Reads and checks a bundle: format, ids, every path's shape and hash, that
+ * nothing in it names another board or a path on the machine it came from.
+ * The bundle is read as hostile: it is uploaded, then imported as root.
+ */
 export function readBundle(bundleDir: string): BoardManifest {
-  const m = readJson(join(bundleDir, 'manifest.json')) as BoardManifest;
+  const m = JSON.parse(
+    plainFile(join(bundleDir, 'manifest.json'), 'manifest.json').toString('utf8'),
+  ) as BoardManifest;
   if (m.format !== BUNDLE_FORMAT) throw new MoveRefused('not a board bundle');
   if (!BOARD_ID.test(m.boardId)) throw new MoveRefused(`not a board id: ${m.boardId}`);
   if (!Array.isArray(m.docIds) || m.docIds.some((d) => typeof d !== 'string' || !DOC_ID.test(d)))
     throw new MoveRefused('bundle doc ids are malformed');
+  if (!Array.isArray(m.files)) throw new MoveRefused('bundle files are malformed');
+  for (const f of m.files) checkPath(m, f.path);
+  const root = join(bundleDir, 'files');
+  if (!lstatSync(root).isDirectory()) throw new MoveRefused('bundle files/ is not a directory');
+  const listed = new Set(m.files.map((f) => f.path));
+  const stray = entries(root).find((p) => !listed.has(p));
+  if (stray !== undefined) throw new MoveRefused(`the manifest does not list ${stray}`);
+  const record = join('workspaces', `${m.boardId}.tasks.json`);
   for (const f of m.files) {
-    checkPath(m, f.path);
-    const bytes = readFileSync(join(bundleDir, 'files', f.path));
+    const bytes = plainFile(join(bundleDir, 'files', f.path), f.path);
     if (sha(bytes) !== f.sha256) throw new MoveRefused(`bundle file altered: ${f.path}`);
+    // The export removes both; one that is back would bind the board to a path on the target.
+    const ydoc = new Uint8Array(bytes);
+    if (f.path.endsWith('.ydoc') && withoutPrivateMeta(ydoc) !== ydoc) {
+      throw new MoveRefused(`${f.path} carries a path on another machine`);
+    }
+    if (f.path === record) {
+      const ws = (JSON.parse(bytes.toString('utf8')) as Json).workspace;
+      if (isRec(ws) && ws.notesHome !== undefined)
+        throw new MoveRefused(`${f.path} carries a path on another machine (notesHome)`);
+    }
   }
-  for (const k of Object.keys(m.merges ?? {})) {
-    if (!MERGES.some((r) => r.file === k))
-      throw new MoveRefused(`bundle merges an unknown file: ${k}`);
+  if (!isRec(m.merges)) throw new MoveRefused('bundle merges are malformed');
+  for (const [k, add] of Object.entries(m.merges)) {
+    const rule = MERGES.find((r) => r.file === k);
+    if (!rule) throw new MoveRefused(`bundle merges an unknown file: ${k}`);
+    if (!onlyThisBoard(rule, add, m.boardId))
+      throw new MoveRefused(`${k} in the bundle holds entries for not only board ${m.boardId}`);
   }
   return m;
+}
+
+/** Fields that name a row on any board; two rows sharing one would answer for each other. */
+const UNIQUE = ['linkId', 'shareId', 'hostname'] as const;
+
+/** Refuses added rows whose link id, share id or hostname is already on the target. */
+function checkUnique(file: string, cur: unknown[], extra: unknown[]): void {
+  for (const k of UNIQUE) {
+    const seen = new Set(cur.flatMap((r) => (isRec(r) && r[k] !== undefined ? [r[k]] : [])));
+    const dup = extra.find((r) => isRec(r) && r[k] !== undefined && seen.has(r[k]));
+    if (dup !== undefined) throw new MoveRefused(`${file} on the target already has that ${k}`);
+  }
 }
 
 /** `target` with the board's entries from `add` merged in; refuses an entry already there. */
@@ -340,6 +412,7 @@ function merged(rule: MergeRule, target: unknown, add: unknown, boardId: string)
   if (rule.kind === 'rootArray') {
     const rows = Array.isArray(target) ? target : [];
     if (rows.some(ofBoard(boardId))) throw clash();
+    checkUnique(rule.file, rows, add as unknown[]);
     return [...rows, ...(add as unknown[])];
   }
   const t = isRec(target) ? { ...target } : {};
@@ -360,6 +433,7 @@ function merged(rule: MergeRule, target: unknown, add: unknown, boardId: string)
       const cur = Array.isArray(t[f]) ? (t[f] as unknown[]) : [];
       const has = rule.kind === 'idLists' ? cur.includes(boardId) : cur.some(ofBoard(boardId));
       if (has) throw clash();
+      if (rule.kind === 'arrays') checkUnique(rule.file, cur, extra as unknown[]);
       const more = (extra as unknown[]).length;
       if (more > 0) t[f] = [...cur, ...(extra as unknown[])];
     }

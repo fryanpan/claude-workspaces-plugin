@@ -58,7 +58,7 @@ with a board's event log and agent-note log, and a transcripts dir beside
 it; snapshots them, restores them, checks the logs and transcripts byte for
 byte and reads the board back from a second server.
 `transcript-store.test.ts` holds the store's uploader: which key each board's files are sealed to, that a local-only board sends nothing, and that a run cut short resumes without repeating or skipping a byte. `transcript-store-uploader.test.ts` holds its keys file and a pass against a stand-in bucket on loopback, which sees PUTs only.
-`project-machine-move-board.test.ts` moves a board between two real servers on loopback and checks what refuses; `bound-file-sync.test.ts` keeps a moved board's doc and its `.md` in step both ways.
+`project-machine-move-board.test.ts` moves a board between two real servers on loopback and checks when the source is not archived; `project-machine-board-bundle.test.ts` checks the shared-file merge and that a hand-made bundle is refused; `bound-file-sync.test.ts` keeps a moved board's doc and its `.md` in step both ways.
 `project-machine-snapshot.test.ts` holds the refusals, the first snapshot
 format and the write-only upload. `project-machine-entrypoint.test.ts` runs
 `entrypoint.sh` and `backup-once.sh` with stand-ins for `setpriv` and each
