@@ -15,9 +15,9 @@
  * reach another board's socket nor link one in under its own name. Its other
  * local sockets are not touched.
  *
- * Off unless a lead's config sets `boardWall`: a walled lead's board tools
- * do not reach its socket yet, so `lead-sandbox.ts` refuses to launch one and
- * only `--check` uses it.
+ * Off unless a lead's config sets `boardWall`. A walled lead is launched with
+ * `CW_BOARD_SOCKET` naming its own board's socket, which its MCP relay dials
+ * (`lead-sandbox.ts`, `boardSocketEnv`).
  */
 import { defaultBoardSocketDir } from '../packages/server/src/board-sockets.ts';
 import { BOARD_SERVER_PORTS } from '../packages/server/src/reserved-ports.ts';

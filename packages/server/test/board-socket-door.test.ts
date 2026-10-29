@@ -94,7 +94,14 @@ describe('boardSocketScopeAllows', () => {
   });
 
   it('refuses the agent stream, the token mint and the doc list', () => {
-    for (const path of ['/events/agent/agent-alice', '/api/board-tokens', '/workspaces', '/mcp'])
+    for (const path of ['/events/agent/agent-alice', '/api/board-tokens', '/workspaces'])
       expect(allows(path, 'GET', 'agent-alice'), path).toBe(false);
+  });
+
+  it('lets the hosted connector through, which holds its session to this board', () => {
+    for (const method of ['GET', 'POST', 'DELETE'])
+      expect(allows('/mcp', method, null), method).toBe(true);
+    expect(allows('/mcp', 'PUT', null)).toBe(false);
+    expect(allows('/mcp/extra', 'POST', null)).toBe(false);
   });
 });

@@ -32,6 +32,18 @@
  * The connector it hosts mints in-process for every REST call it makes on the
  * agent's behalf, so those routes are gated exactly as they were for the stdio
  * child.
+ *
+ * ON A BOARD'S SOCKET (board-sockets.ts) the answer is different, because the
+ * proof is. The socket is mode 600 in a folder only this user may enter, so
+ * the caller is a process of this user on this machine; and a walled lead's
+ * profile lets it connect to its own board's socket and no other, so the
+ * socket names the board. The admission door has already held the request
+ * to that board (middleware/board-socket-door.ts). So no agent token is
+ * asked for — the lead has none, and cannot mint one through the wall — and
+ * the session the host opens is held to the socket's board: its REST calls
+ * carry a board token the server keeps (connector/board-token-lease.ts), and
+ * its pushes come only from that board. The agent its headers name is a
+ * claim, as it always was, and on a socket that claim reaches one board.
  */
 import { authorizeAgentCaller, refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
 import type { ConnectorHost } from '../connector/host.ts';
@@ -44,6 +56,8 @@ export interface McpConnectorRouteContext {
   requestAddress: (req: Request) => string | undefined;
   /** The key the `at1` agent bearer verifies under. See auth/agent-token.ts. */
   agentTokenKey: () => string;
+  /** The board whose socket the request arrived on, or null. */
+  boardOfSocket: (req: Request) => string | null;
 }
 
 export const MCP_CONNECTOR_PATH = '/mcp';
@@ -68,6 +82,8 @@ export async function handleMcpConnectorRoute(
   input: { req: Request; pathname: string; visitor: unknown },
 ): Promise<Response | null> {
   if (input.pathname !== MCP_CONNECTOR_PATH) return null;
+  const socketBoard = ctx.boardOfSocket(input.req);
+  if (socketBoard !== null) return ctx.host.handle(input.req, { boardId: socketBoard });
   if (input.visitor) return ctx.j(403, { error: 'not available to share visitors' });
   const address = ctx.requestAddress(input.req);
   const refused = refuseNonLocalAgentCaller(input.req, address);

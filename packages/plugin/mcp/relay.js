@@ -85,7 +85,7 @@ function relayIdentityHeaders(env, cwd) {
 }
 function neverSent(e) {
   const code = e?.cause?.code ?? e?.code;
-  return code === "ECONNREFUSED" || code === "ConnectionRefused" || code === "ENOTFOUND";
+  return code === "ECONNREFUSED" || code === "ConnectionRefused" || code === "ENOTFOUND" || code === "ENOENT" || code === "EPERM";
 }
 function parse(text) {
   try {
@@ -126,6 +126,8 @@ function createRelay(deps) {
   let toolCalls = 0;
   const held = [];
   const base = () => {
+    if (deps.boardSocket !== undefined)
+      return "http://board-socket";
     try {
       return resolveBaseUrl({ ...deps, env: deps.env }).replace(/\/+$/, "");
     } catch {
@@ -151,7 +153,7 @@ function createRelay(deps) {
       deps.write(held.shift());
   };
   async function mint() {
-    if (!named || token)
+    if (!named || token || deps.boardSocket !== undefined)
       return;
     const b = base();
     if (!b)
@@ -493,14 +495,80 @@ function createRelay(deps) {
   };
 }
 
+// packages/mcp/src/relay/unix-fetch.ts
+import { request } from "node:http";
+function unixSocketFetch(socketPath) {
+  return (url, init = {}) => new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const headers = {};
+    new Headers(init.headers).forEach((value, name) => {
+      headers[name] = value;
+    });
+    const body = init.body == null ? undefined : String(init.body);
+    if (body !== undefined)
+      headers["content-length"] = String(Buffer.byteLength(body));
+    const req = request({
+      socketPath,
+      path: `${target.pathname}${target.search}`,
+      method: init.method ?? "GET",
+      headers,
+      ...init.signal ? { signal: init.signal } : {}
+    }, (res) => resolve(toResponse(res)));
+    req.on("error", reject);
+    if (body !== undefined)
+      req.write(body);
+    req.end();
+  });
+}
+function toResponse(res) {
+  const headers = new Headers;
+  for (const [name, value] of Object.entries(res.headers)) {
+    if (value !== undefined)
+      headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+  }
+  const status = res.statusCode ?? 502;
+  if (status === 204 || status === 304) {
+    res.resume();
+    return new Response(null, { status, headers });
+  }
+  let done = false;
+  const body = new ReadableStream({
+    start(controller) {
+      res.on("data", (chunk) => {
+        if (!done)
+          controller.enqueue(new Uint8Array(chunk));
+      });
+      res.on("end", () => {
+        if (done)
+          return;
+        done = true;
+        controller.close();
+      });
+      res.on("close", () => {
+        if (done)
+          return;
+        done = true;
+        controller.error(new Error("the board socket closed the response"));
+      });
+    },
+    cancel() {
+      done = true;
+      res.destroy();
+    }
+  });
+  return new Response(body, { status, headers });
+}
+
 // packages/mcp/src/relay/main.ts
+var boardSocket = process.env.CW_BOARD_SOCKET?.trim() || undefined;
 var relay = createRelay({
   env: process.env,
   cwd: process.cwd(),
   homedir,
   existsSync,
   readFileSync,
-  fetch: (url, init) => fetch(url, init),
+  fetch: boardSocket ? unixSocketFetch(boardSocket) : (url, init) => fetch(url, init),
+  ...boardSocket ? { boardSocket } : {},
   write: (line) => {
     process.stdout.write(`${line}
 `);
@@ -508,7 +576,7 @@ var relay = createRelay({
   log: (...args) => console.error(...args),
   ...process.env.CW_RELAY_INIT_WAIT_MS !== undefined ? { initWaitMs: Number(process.env.CW_RELAY_INIT_WAIT_MS) || 0 } : {}
 });
-console.error("[relay] node relay started");
+console.error(`[relay] node relay started${boardSocket ? " on a board socket" : ""}`);
 var buf = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {

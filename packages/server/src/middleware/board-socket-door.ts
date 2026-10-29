@@ -14,7 +14,13 @@
  * - no bearer is a board visitor with no agent: it reads, and writes as a
  *   guest.
  *
- * Every case reaches `collabScope` with the socket's board as the only board
+ * One path is let through that `collabScope` refuses: `/mcp`, the hosted
+ * connector. `routes/mcp-connector.ts` opens a session there held to this
+ * socket's board, whose REST calls carry a board agent token the server
+ * mints and keeps in its own process (`connector/board-token-lease.ts`). So
+ * the relay a walled lead runs needs no token of its own.
+ *
+ * Every other case reaches `collabScope` with the socket's board as the only board
  * it is a member of, plus, for a named agent, its own watch set cut to that
  * board (`routes/agent-identity.ts`, `boardWatches`). An agent's stream
  * across boards (`/events/agent/<id>`), the token mint, the doc list and every
@@ -55,6 +61,10 @@ export type BoardSocketDoorVerdict =
 
 const WATCHES_PATH = /^\/api\/agents\/([^/]+)\/watches$/;
 
+/** The hosted connector's path (`routes/mcp-connector.ts`'s `MCP_CONNECTOR_PATH`). */
+const MCP_PATH = '/mcp';
+const MCP_METHODS = new Set(['GET', 'POST', 'DELETE']);
+
 /** May a caller on `boardId`'s socket reach this path, as `agentId` if named? */
 export function boardSocketScopeAllows(
   pathname: string,
@@ -63,6 +73,7 @@ export function boardSocketScopeAllows(
   agentId: string | null,
   workspacesOf: (id: string) => string[],
 ): boolean {
+  if (pathname === MCP_PATH) return MCP_METHODS.has(method.toUpperCase());
   const watches = pathname.match(WATCHES_PATH);
   if (watches) {
     const m = method.toUpperCase();

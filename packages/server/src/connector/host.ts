@@ -27,17 +27,26 @@
  * it may have been told was empty. A POST for an unknown id is answered 404,
  * which the client does handle: it re-initializes.
  *
+ * A SESSION ON A BOARD'S SOCKET. `handle(req, { boardId })` opens sessions
+ * held to that board (identity.ts keys them by it; session-factory.ts gives
+ * their connector a board token in place of the agent's own). A session id
+ * only answers on the door it was opened through: one opened over TCP is
+ * refused on a socket, and one opened on a socket is refused over TCP and on
+ * every other board's socket, so a session id cannot carry a caller out of
+ * its board. Such sessions are left out of the shutdown snapshot: the
+ * snapshot keeps headers alone, and the board is the socket's to say. The
+ * relay's next GET brings one back, on the socket it arrives on.
+ *
  * WHAT IS NOT HERE. The path and every gate, the agent token's included, are
  * the route's (routes/mcp-connector.ts); building a connector is
  * session-factory.ts. This module is the two tables and their protocol.
  */
 import { randomUUID } from 'node:crypto';
-import type { AgentAuthor } from '../../../mcp/src/author.ts';
-import type { ChannelNotification } from '../../../mcp/src/channel-messages.ts';
 import { CONNECTOR_INSTRUCTIONS } from '../../../mcp/src/connector-instructions.ts';
 import type { ConnectorSession } from '../../../mcp/src/connector-session.ts';
 import { createSseStreamWriter } from '../sse-writer.ts';
 import { answerSessionMessage } from './answer.ts';
+import type { ConnectorDoor, ConnectorHost, ConnectorHostDeps } from './host-types.ts';
 import {
   type ConnectorIdentity,
   type IdentityHeaders,
@@ -59,42 +68,12 @@ import {
   rpcResult,
 } from './protocol.ts';
 
-/** What a hosted connector is built from. */
-export interface HostedSessionSpec {
-  author: AgentAuthor;
-  cwd: string;
-  processId: string;
-  notify: (n: ChannelNotification) => Promise<void>;
-  pluginVersion: () => string;
-  defaultWorkspaceId: () => string;
-}
-
-export interface ConnectorHostDeps {
-  createSession: (spec: HostedSessionSpec) => ConnectorSession;
-  /** The plugin version to report when the client's headers name none. */
-  fallbackPluginVersion: () => string;
-  log: (...args: unknown[]) => void;
-  now?: () => number;
-  epoch?: string;
-  newSessionId?: () => string;
-  keepaliveMs?: number;
-  /** How often idle sessions and identities are swept. 0 disables the timer. */
-  sweepEveryMs?: number;
-}
-
-export interface ConnectorHost {
-  handle(req: Request): Promise<Response>;
-  /** Subscribe every identity a previous process was serving, synchronously. */
-  restore(identities: IdentityHeaders[]): number;
-  /** The identities worth bringing back after a restart. */
-  snapshot(): IdentityHeaders[];
-  /** Retire idle sessions and identities. Runs on a timer; exposed for tests. */
-  sweep(): void;
-  counts(): { identities: number; sessions: number; streams: number };
-  /** The identity a live session was opened as, for the route's agent gate. */
-  sessionIdentity(sid: string): ConnectorIdentity | undefined;
-  stop(): void;
-}
+export type {
+  ConnectorDoor,
+  ConnectorHost,
+  ConnectorHostDeps,
+  HostedSessionSpec,
+} from './host-types.ts';
 
 /** A push waits this long for a stream. Covers a restart with room to spare. */
 export const OUTBOX_MAX_AGE_MS = 10 * 60_000;
@@ -190,6 +169,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
       },
       pluginVersion: () => entry.headers.pluginVersion ?? deps.fallbackPluginVersion(),
       defaultWorkspaceId: () => entry.headers.workspace ?? '',
+      ...(identity.boardId !== undefined ? { boardId: identity.boardId } : {}),
     });
     identities.set(identity.key, entry);
     return entry;
@@ -212,8 +192,9 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
   function openSession(
     headers: IdentityHeaders,
     sid: string,
+    door: ConnectorDoor | undefined,
   ): { ok: true; session: HostedSession; entry: HostedIdentity } | { ok: false; message: string } {
-    const resolved = resolveIdentity(headers, sid);
+    const resolved = resolveIdentity(headers, sid, door?.boardId);
     if (!resolved.ok) return resolved;
     const entry = identityFor(resolved.identity);
     initCounter += 1;
@@ -231,6 +212,14 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     entry.sessions.add(sid);
     return { ok: true, session, entry };
   }
+
+  /** Whether a live session may be used through `door`: only the one it was opened through. */
+  function sameDoor(session: HostedSession, door: ConnectorDoor | undefined): boolean {
+    return identities.get(session.key)?.identity.boardId === door?.boardId;
+  }
+
+  const otherDoor = () =>
+    rpcErrorResponse(403, RPC.badRequest, 'This session was opened through another door');
 
   function dropSession(session: HostedSession): void {
     session.closeStream?.();
@@ -304,7 +293,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     return new Response(body, { headers: SSE_HEADERS });
   }
 
-  async function handleGet(req: Request): Promise<Response> {
+  async function handleGet(req: Request, door: ConnectorDoor | undefined): Promise<Response> {
     const sid = req.headers.get('mcp-session-id');
     if (!sid)
       return rpcErrorResponse(
@@ -315,6 +304,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     if (!isSessionIdShape(sid))
       return rpcErrorResponse(400, RPC.badRequest, 'Bad Request: malformed Mcp-Session-Id');
     const known = sessions.get(sid);
+    if (known && !sameDoor(known, door)) return otherDoor();
     if (known) {
       const entry = identities.get(known.key);
       if (entry) {
@@ -326,7 +316,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     // same id, if its headers still say who it is.
     const read = readIdentityHeaders(req.headers);
     if (!read.ok) return rpcErrorResponse(400, RPC.badRequest, read.message);
-    const opened = openSession(read.headers, sid);
+    const opened = openSession(read.headers, sid, door);
     if (!opened.ok) return rpcErrorResponse(400, RPC.badRequest, opened.message);
     return openStream(opened.session, opened.entry, req.headers.get('last-event-id'), true);
   }
@@ -334,13 +324,18 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
   const pluginVersionOf = (entry: HostedIdentity) =>
     entry.headers.pluginVersion ?? deps.fallbackPluginVersion();
 
-  function initialize(req: Request, msg: Record<string, unknown>, id: RpcId): Response {
+  function initialize(
+    req: Request,
+    msg: Record<string, unknown>,
+    id: RpcId,
+    door: ConnectorDoor | undefined,
+  ): Response {
     if (!isInitializeRequest(msg))
       return rpcErrorResponse(400, RPC.invalidRequest, 'Invalid initialize request', id);
     const read = readIdentityHeaders(req.headers);
     if (!read.ok) return rpcErrorResponse(400, RPC.invalidRequest, read.message, id);
     const sid = newSessionId();
-    const opened = openSession(read.headers, sid);
+    const opened = openSession(read.headers, sid, door);
     if (!opened.ok) return rpcErrorResponse(400, RPC.invalidRequest, opened.message, id);
     const params = isRecord(msg.params) ? msg.params : {};
     const result = {
@@ -360,7 +355,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     });
   }
 
-  async function handlePost(req: Request): Promise<Response> {
+  async function handlePost(req: Request, door: ConnectorDoor | undefined): Promise<Response> {
     const declared = Number(req.headers.get('content-length') ?? '0');
     if (declared > BODY_MAX_BYTES)
       return rpcErrorResponse(413, RPC.invalidRequest, 'Request body too large');
@@ -386,7 +381,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
           'initialize must be sent alone, as a request',
         );
       }
-      return initialize(req, init as Record<string, unknown>, id);
+      return initialize(req, init as Record<string, unknown>, id, door);
     }
 
     const sid = req.headers.get('mcp-session-id');
@@ -399,6 +394,7 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     const session = sessions.get(sid);
     const entry = session ? identities.get(session.key) : undefined;
     if (!session || !entry) return rpcErrorResponse(404, RPC.sessionNotFound, 'Session not found');
+    if (!sameDoor(session, door)) return otherDoor();
     session.lastSeen = now();
     entry.lastSeen = now();
 
@@ -411,10 +407,11 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     return Response.json(Array.isArray(parsed) ? answers : answers[0]);
   }
 
-  function handleDelete(req: Request): Response {
+  function handleDelete(req: Request, door: ConnectorDoor | undefined): Response {
     const sid = req.headers.get('mcp-session-id');
     const session = sid ? sessions.get(sid) : undefined;
     if (!session) return rpcErrorResponse(404, RPC.sessionNotFound, 'Session not found');
+    if (!sameDoor(session, door)) return otherDoor();
     dropSession(session);
     return new Response(null, { status: 200 });
   }
@@ -439,14 +436,14 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
   (sweepTimer as { unref?: () => void } | null)?.unref?.();
 
   return {
-    async handle(req) {
+    async handle(req, door) {
       switch (req.method) {
         case 'POST':
-          return handlePost(req);
+          return handlePost(req, door);
         case 'GET':
-          return handleGet(req);
+          return handleGet(req, door);
         case 'DELETE':
-          return handleDelete(req);
+          return handleDelete(req, door);
         default:
           return new Response('method not allowed', {
             status: 405,
@@ -474,7 +471,9 @@ export function createConnectorHost(deps: ConnectorHostDeps): ConnectorHost {
     },
 
     snapshot() {
-      return [...identities.values()].filter((e) => !e.identity.shared).map((e) => e.headers);
+      return [...identities.values()]
+        .filter((e) => !e.identity.shared && e.identity.boardId === undefined)
+        .map((e) => e.headers);
     },
 
     sweep,

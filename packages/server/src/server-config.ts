@@ -17,6 +17,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
+import { boardSocketDirError, defaultBoardSocketDir } from './board-sockets.ts';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
@@ -257,6 +258,15 @@ export function resolveServerConfig(opts: {
   const requireAgentToken = ['1', 'true', 'yes', 'on'].includes(
     (env.CW_REQUIRE_AGENT_TOKEN ?? '').trim().toLowerCase(),
   );
+
+  /**
+   * One unix socket per board (board-sockets.ts), for sandboxed leads. Off
+   * unless asked: `--board-socket-dir <path>` or `CW_BOARD_SOCKET_DIR` names
+   * the folder, and `CW_BOARD_SOCKETS=1` takes the default one. A folder that
+   * cannot hold the sockets leaves them off and says why, rather than
+   * stopping the server.
+   */
+  const boardSocketDir = resolveBoardSocketDir(env, arg);
 
   /**
    * ACCESS-ONLY browser hosts. Default ON (Bryan, 2026-09-02: *"Let's make
@@ -671,6 +681,7 @@ export function resolveServerConfig(opts: {
     requireEmailAuth,
     requireSignInToWrite,
     requireAgentToken,
+    boardSocketDir,
     accessOnlyBrowserHosts,
     emailCodeSignIn,
     ownerEmail,
@@ -697,6 +708,24 @@ export function resolveServerConfig(opts: {
 
 /** The resolved shape — inferred from the resolver so the two cannot drift. */
 export type ServerConfig = ReturnType<typeof resolveServerConfig>;
+
+/** The board socket folder the flags ask for, or undefined for none. */
+export function resolveBoardSocketDir(
+  env: NodeJS.ProcessEnv,
+  arg: ArgReader,
+  uid: number = process.getuid?.() ?? 0,
+): string | undefined {
+  const named = arg('board-socket-dir', env.CW_BOARD_SOCKET_DIR?.trim() || undefined);
+  const on = ['1', 'true', 'yes', 'on'].includes((env.CW_BOARD_SOCKETS ?? '').trim().toLowerCase());
+  const dir = named ?? (on ? defaultBoardSocketDir(uid) : undefined);
+  if (dir === undefined) return undefined;
+  const refused = boardSocketDirError(dir);
+  if (refused) {
+    console.error(`[board-sockets] off: ${refused}`);
+    return undefined;
+  }
+  return dir;
+}
 
 function pathOrNull(p: string): string | null {
   return existsSync(p) ? p : null;
