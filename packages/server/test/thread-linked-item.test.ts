@@ -262,7 +262,7 @@ describe('a review item linked onto a thread from another board', () => {
 
   it('is refused to a share visitor on the thread’s board, who may still reply there', async () => {
     const before = (await commentsOnA()).length;
-    const share = await mintAccessShare(base, access, boardA);
+    const share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardA);
     const res = await link(
       { item: { workspaceId: boardB, taskId: taskB, reviewItemId: itemB } },
       share.headers,

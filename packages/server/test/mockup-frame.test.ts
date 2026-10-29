@@ -167,10 +167,12 @@ describe('the frame and host helpers', () => {
     expect(visitor).toContain(
       '<a class="cw-board-link" href="/workspaces/board%20one" aria-label="Back to the board">',
     );
-    // The flag adds the pill and its one style rule, and changes nothing
-    // else on the page: take both out and the two pages are the same bytes.
+    // The flag adds the pill, its style rule and the room the bar's title
+    // leaves for it, and changes nothing else on the page: take those out and
+    // the two pages are the same bytes.
     const stripped = visitor
       .replace(/\.cw-board-link\{[^}]*\}/, '')
+      .replace('.cw-bar-title{padding-left:84px}', '')
       .replace(/<a class="cw-board-link"[^>]*>[^<]*<\/a>/, '');
     expect(stripped).toBe(owner);
   });
