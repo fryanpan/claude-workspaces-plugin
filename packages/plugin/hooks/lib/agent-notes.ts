@@ -109,6 +109,54 @@ export function resolveBaseUrl(
   return DEFAULT_BASE_URL;
 }
 
+/**
+ * Where a hook sends its POST: the board server's port, or the board's own
+ * socket.
+ *
+ * A lead behind the board wall (`scripts/lead-sandbox.ts`) is launched with
+ * `CW_BOARD_SOCKET` naming its board's socket, and its profile refuses every
+ * board server port. A hook dialling TCP there posted nothing. So with the
+ * socket set every request goes over it, and the server holds each one to
+ * that socket's board. The board is the launch's `CW_WORKSPACE_ID`, or the
+ * socket's own name (`<board>.sock`); the joined-board lookup is never asked,
+ * since a socket refuses it.
+ */
+export interface HookTransport {
+  baseUrl: string;
+  fetch: typeof fetch;
+  /** The socket's board, when the transport is a board socket. */
+  socketBoard?: string;
+}
+
+/** Bun sends a socket request's path and query; the host is ignored. */
+export const BOARD_SOCKET_BASE_URL = 'http://board';
+
+export function readBoardSocket(env: EnvLike): string | undefined {
+  const socket = env.CW_BOARD_SOCKET?.trim();
+  return socket ? socket : undefined;
+}
+
+export function resolveTransport(
+  env: EnvLike,
+  discoveryPort?: () => number | undefined,
+  fetchImpl: typeof fetch = fetch,
+): HookTransport | undefined {
+  const socket = readBoardSocket(env);
+  if (socket) {
+    const name = socket.slice(socket.lastIndexOf('/') + 1);
+    const socketBoard = name.endsWith('.sock') ? name.slice(0, -'.sock'.length) : undefined;
+    const viaSocket = ((url: string | URL | Request, init?: RequestInit) =>
+      fetchImpl(url, { ...init, unix: socket } as RequestInit)) as typeof fetch;
+    return {
+      baseUrl: BOARD_SOCKET_BASE_URL,
+      fetch: viaSocket,
+      ...(socketBoard ? { socketBoard } : {}),
+    };
+  }
+  const baseUrl = resolveBaseUrl(env, discoveryPort);
+  return baseUrl ? { baseUrl, fetch: fetchImpl } : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Decisions
 
@@ -297,15 +345,16 @@ export async function runHook(
     const decision =
       kind === 'turn' ? decideTurnNote(payload, ctx) : decideDenialNote(payload, ctx);
     if ('skip' in decision) return undefined;
-    const baseUrl = deps.baseUrl ? deps.baseUrl() : resolveBaseUrl(deps.env, deps.discoveryPort);
-    if (!baseUrl) return undefined;
-    const workspaceId =
-      readWorkspaceId(deps.env) ??
-      (deps.joinedBoard
-        ? await findJoinedBoard(baseUrl, decision.post.agent, deps.fetch ?? fetch)
-        : undefined);
+    const fetchImpl = deps.fetch ?? fetch;
+    let transport = resolveTransport(deps.env, deps.discoveryPort, fetchImpl);
+    if (deps.baseUrl && !readBoardSocket(deps.env)) {
+      const baseUrl = deps.baseUrl();
+      transport = baseUrl ? { baseUrl, fetch: fetchImpl } : undefined;
+    }
+    if (!transport) return undefined;
+    const workspaceId = await boardOf(deps.env, transport, decision.post.agent, deps.joinedBoard);
     if (!workspaceId) return undefined;
-    const sent = await postNote(baseUrl, workspaceId, decision.post, deps.fetch ?? fetch);
+    const sent = await postNote(transport.baseUrl, workspaceId, decision.post, transport.fetch);
     // Only a turn can be nudged. A denial note is a record of something the
     // agent already saw refused, and blocking on it would nag about the
     // permission system rather than about an unfiled ask.
@@ -314,6 +363,20 @@ export async function runHook(
     // fail open
   }
   return undefined;
+}
+
+/** The board a hook posts to: the launch setting, the socket's board, or the
+ *  one the session joined (never asked over a socket, which refuses it). */
+export async function boardOf(
+  env: EnvLike,
+  transport: HookTransport,
+  agent: string,
+  joinedBoard: boolean | undefined,
+): Promise<string | undefined> {
+  const fromEnv = readWorkspaceId(env) ?? transport.socketBoard;
+  if (fromEnv) return fromEnv;
+  if (!joinedBoard || readBoardSocket(env)) return undefined;
+  return findJoinedBoard(transport.baseUrl, agent, transport.fetch);
 }
 
 /**

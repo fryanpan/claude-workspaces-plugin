@@ -23,7 +23,8 @@
  *
  * The name comes from the launch env. The board does too, or, for a session
  * launched without one, it is the board the session joined with
- * `attach_agent` (`joined-board.ts`).
+ * `attach_agent` (`joined-board.ts`). A walled lead posts over its board's
+ * socket (`resolveTransport` in `agent-notes.ts`).
  *
  * A prompt is typed unless it starts with a wrapper the harness puts around
  * what it injects. The payload names no origin — past the common fields it
@@ -42,11 +43,10 @@
 import {
   type EnvLike,
   POST_TIMEOUT_MS,
+  boardOf,
   readAgentName,
-  readWorkspaceId,
-  resolveBaseUrl,
+  resolveTransport,
 } from './agent-notes.ts';
-import { findJoinedBoard } from './joined-board.ts';
 import { fullNote } from './note-redact.ts';
 
 /** How an injected prompt begins, after leading whitespace. */
@@ -157,17 +157,12 @@ export async function runPromptHook(stdin: string, deps: PromptHookDeps): Promis
       remote: isRemoteControl(deps.env),
     });
     if ('skip' in decision) return false;
-    const baseUrl = resolveBaseUrl(deps.env, deps.discoveryPort);
-    if (!baseUrl) return false;
-    const fetchImpl = deps.fetch ?? fetch;
-    const workspaceId =
-      readWorkspaceId(deps.env) ??
-      (deps.joinedBoard
-        ? await findJoinedBoard(baseUrl, decision.post.agent, fetchImpl)
-        : undefined);
+    const transport = resolveTransport(deps.env, deps.discoveryPort, deps.fetch ?? fetch);
+    if (!transport) return false;
+    const workspaceId = await boardOf(deps.env, transport, decision.post.agent, deps.joinedBoard);
     if (!workspaceId) return false;
     const path = `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(decision.post.agent)}/prompts`;
-    const res = await fetchImpl(`${baseUrl}${path}`, {
+    const res = await transport.fetch(`${transport.baseUrl}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(decision.post),
