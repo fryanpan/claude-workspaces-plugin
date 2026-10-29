@@ -289,6 +289,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/keep-moving` | GET | `routes/workspace-keep-moving.ts` | trusted-local |  |
 | `/workspaces/:ws/lead` | PUT | `routes/workspace-settings.ts` | trusted-local |  |
 | `/workspaces/:ws/lead-chat` | GET, POST | `routes/workspace-lead-chat.ts` | trusted-local |  |
+| `/workspaces/:ws/lead-chat/meeting` | POST | `routes/workspace-lead-chat.ts` | trusted-local |  |
 | `/workspaces/:ws/library` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/library/items` | GET | `routes/workspace-library.ts` | share-scope |  |
 | `/workspaces/:ws/library/open` | POST | `routes/workspace-library.ts` | trusted-local |  |
