@@ -1,3 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * HTTP-level tests for every param this feature adds — through the REAL
  * routes, because the route layer hand-copies body fields into the store call
@@ -8,18 +12,20 @@
  * Every assertion reads the stored EFFECT back through a second request, not
  * the response body of the call that made it.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task, TaskStoreEvent } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Alice and Bob are signed in on the board page in `beforeAll`: a person's
+ *  answer is recorded only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+let BOB: User = { id: 'known-bob', name: 'Bob', kind: 'known', color: '#888888' };
+const signIns = new Map<string, Record<string, string>>();
 const AGENT = {
   id: 'agent-search-revamp',
   name: 'Search Revamp',
@@ -42,10 +48,14 @@ describe('decision routes', () => {
     expect(res.ok, `${res.status} ${await res.clone().text()}`).toBe(true);
     return res.json() as Promise<T>;
   };
+  /** A signed-in person's request carries that person's sign-in. */
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -83,6 +93,18 @@ describe('decision routes', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    const alice = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    const bob = signedInPerson(handle, dataDir, base, {
+      email: 'bob@harborlight.example',
+      name: 'Bob',
+    });
+    PERSON = alice.user;
+    BOB = bob.user;
+    signIns.set(PERSON.id, alice.headers);
+    signIns.set(BOB.id, bob.headers);
   });
   afterAll(async () => {
     await handle.stop();
@@ -293,7 +315,7 @@ describe('decision routes', () => {
       );
       const other = await post(`/workspaces/${wsId}/tasks/${task.id}/answer`, {
         text: 'Wait for the rebuild',
-        author: { id: 'known-sam', name: 'Sam', kind: 'known', color: '#888888' },
+        author: BOB,
       });
       expect(other.status).toBe(409);
       await jj(
@@ -305,13 +327,13 @@ describe('decision routes', () => {
       const stored = (await getTasks(wsId)).find((t) => t.id === task.id);
       // Last write stands…
       expect(stored?.answer?.text).toBe('Wait for the rebuild');
-      expect(stored?.answer?.by).toBe('Jordan');
+      expect(stored?.answer?.by).toBe('Alice');
       // …and the displaced words survive with their full provenance: whose
       // they were, which option carried them, and who displaced them.
       expect(stored?.answerHistory?.map((a) => a.text)).toEqual(['Ship now']);
-      expect(stored?.answerHistory?.[0]?.by).toBe('Jordan');
+      expect(stored?.answerHistory?.[0]?.by).toBe('Alice');
       expect(stored?.answerHistory?.[0]?.optionId).toBe(picked?.id);
-      expect(stored?.answerHistory?.[0]?.withdrawnBy).toBe('Jordan');
+      expect(stored?.answerHistory?.[0]?.withdrawnBy).toBe('Alice');
       expect(stored?.answerHistory?.[0]?.withdrawnAt).toBeGreaterThan(0);
       // Undo after the change recovers round by round: first the second answer…
       await jj(await post(`/workspaces/${WS}/tasks/${task.id}/answer/undo`, { author: PERSON }));
@@ -360,16 +382,16 @@ describe('decision routes', () => {
       // it.
       expect(stored?.answerHistory?.length).toBe(1);
       expect(stored?.answerHistory?.[0]?.text).toBe('Ship now');
-      expect(stored?.answerHistory?.[0]?.by).toBe('Jordan');
+      expect(stored?.answerHistory?.[0]?.by).toBe('Alice');
       expect(stored?.answerHistory?.[0]?.optionId).toBe(picked.id);
-      expect(stored?.answerHistory?.[0]?.withdrawnBy).toBe('Jordan');
+      expect(stored?.answerHistory?.[0]?.withdrawnBy).toBe('Alice');
       expect(stored?.answerHistory?.[0]?.withdrawnAt).toBeGreaterThan(0);
 
       const withdrawn = events.find((e) => e.type === 'decision.answer_withdrawn');
       expect(withdrawn).toBeDefined();
       if (withdrawn?.type === 'decision.answer_withdrawn') {
         expect(withdrawn.answer).toBe('Ship now');
-        expect(withdrawn.answeredBy).toBe('Jordan');
+        expect(withdrawn.answeredBy).toBe('Alice');
       }
     });
 

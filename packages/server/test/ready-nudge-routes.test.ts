@@ -10,7 +10,7 @@
  * of those can be perfect in isolation while the feature delivers nothing,
  * which is the failure mode this file exists for.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -20,9 +20,18 @@ import { join } from 'node:path';
 import { READY_IDLE_EVENT, REVIEW_ANSWERED_EVENT } from '../src/ready-nudge.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedGoalsOverHttp } from './goal-seed.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { type Frame, listenFrames, waitForFrames } from './sse-frames.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 const settle = (ms = 60) => new Promise((r) => setTimeout(r, ms));
@@ -35,7 +44,7 @@ describe('the board wakes its lead over the wire', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: JSON.stringify(body),
     });
   /** Fail with the server's own words rather than with `undefined` three
@@ -54,6 +63,12 @@ describe('the board wakes its lead over the wire', () => {
     // unaffected by the window's size.
     handle = createServer({ port: 0, dataDir, readyNudgeIdleMs: 0 });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
   });
 
   afterEach(async () => {
@@ -702,7 +717,7 @@ describe('the board wakes its lead over the wire', () => {
       }),
     );
 
-    // Jordan answers. The lead is a different party, so it gets woken.
+    // Alice answers. The lead is a different party, so it gets woken.
     await jj(
       await post(
         `/workspaces/${workspaceId}/tasks/${taskId}/review-items/${encodeURIComponent(item.id)}/answer`,

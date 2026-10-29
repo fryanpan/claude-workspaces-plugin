@@ -44,8 +44,9 @@ import {
 } from '../src/voice-prompt.ts';
 import { VoiceRouter } from '../src/voice.ts';
 import { type AgentStream, openWorkspaceStream } from './agent-stream.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+const PERSON = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
 const AGENT = { id: 'agent-search-revamp', name: 'Search Revamp', kind: 'known', color: '#888888' };
 
 /** The demonstrated injection: 63 characters, under the 70-char headline cap,
@@ -126,7 +127,7 @@ describe('prompt hygiene: workspace text is DATA, on one line, and bounded', () 
 });
 
 describe('resolveVoiceAction: the SPEAKER licenses the write, not the classifier', () => {
-  const ACTOR = { id: 'known-jordan', name: 'Jordan', kind: 'known' };
+  const ACTOR = { id: 'known-alice', name: 'Alice', kind: 'known' };
   const CONTEXT: VoiceContext = { surface: 'task', taskId: 't-fixture' };
   const RESOURCE: VoiceResource = {
     kind: 'task',
@@ -274,7 +275,7 @@ describe('handle(): every added call site degrades to the agent route', () => {
     const res = await router.handle(wsId, {
       transcript: 'note that the crawler is flaky',
       context: { surface: 'doc', docId: 'ranking-notes' },
-      actor: { id: 'known-jordan', name: 'Jordan', kind: 'known' },
+      actor: { id: 'known-alice', name: 'Alice', kind: 'known' },
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -303,7 +304,7 @@ describe('handle(): every added call site degrades to the agent route', () => {
     const res = await router.handle(wsId, {
       transcript: 'note that the crawler is flaky',
       context: { surface: 'task', taskId },
-      actor: { id: 'known-jordan', name: 'Jordan', kind: 'known' },
+      actor: { id: 'known-alice', name: 'Alice', kind: 'known' },
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
@@ -342,20 +343,22 @@ describe('voice actions, hardened: end to end', () => {
       },
     });
 
-  const post = (path: string, body: unknown) =>
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     local(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
+  /** Alice signed in on the board page: only a proven speaker's answer records. */
+  let speaker: SignedInPerson;
 
   const say = async (
     workspaceId: string,
     transcript: string,
     context: unknown,
-    author: unknown = PERSON,
   ): Promise<{ route: string; ack: string; navigate?: string }> => {
-    const r = await post(`/workspaces/${workspaceId}/voice`, { transcript, context, author });
+    const body = { transcript, context, author: speaker.user };
+    const r = await post(`/workspaces/${workspaceId}/voice`, body, speaker.headers);
     expect(r.status).toBe(200);
     return (await r.json()) as { route: string; ack: string; navigate?: string };
   };
@@ -448,6 +451,7 @@ describe('voice actions, hardened: end to end', () => {
         return completeImpl();
       },
     });
+    speaker = signedInPerson(handle, dataDir, `localhost:${handle.port}`, { name: 'Alice' });
     base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', {
@@ -480,7 +484,7 @@ describe('voice actions, hardened: end to end', () => {
     await seedRosterPerson(await newDoc('voice-hard-roster'));
     plainThreadId = await askPlainly(
       plainDocId,
-      'Jordan — should the rollout wait for the migration?',
+      'Alice — should the rollout wait for the migration?',
     );
 
     answerDocId = await newDoc('voice-hard-answer');
@@ -566,7 +570,7 @@ describe('voice actions, hardened: end to end', () => {
     const comments = threads[0]?.comments ?? [];
     expect(comments).toHaveLength(2);
     expect(comments[1]?.text).toBe(said);
-    expect(comments[1]?.author?.id).toBe(PERSON.id);
+    expect(comments[1]?.author?.id).toBe(speaker.user.id);
   });
 
   it('an out-of-scope action verb does NOT report the fast path as down', async () => {

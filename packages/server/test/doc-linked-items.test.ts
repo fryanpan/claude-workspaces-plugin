@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type AccessHarness, accessHarness, mintAccessShare } from './access-share.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
 interface DocRecord {
   meta?: { docId?: string };
@@ -41,10 +42,10 @@ describe("a doc's record and the ticket items that link it", () => {
         ...((init.headers as Record<string, string>) ?? {}),
       },
     });
-  const post = async (path: string, body: unknown) => {
+  const post = async (path: string, body: unknown, headers: Record<string, string> = {}) => {
     const res = await local(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
     expect(res.ok, `${path} ${res.status} ${await res.clone().text()}`).toBe(true);
@@ -135,12 +136,18 @@ describe("a doc's record and the ticket items that link it", () => {
     expect(visitor.body.meta).toBeDefined();
     expect(visitor.body).not.toHaveProperty('linkedItems');
 
-    // Answered, it leaves the record on the next read.
-    await post(`/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/answer`, {
-      author: READER,
-      text: 'Ten minutes',
-      answeredWith: 'o-ten',
+    // Answered, it leaves the record on the next read. The reader answers
+    // signed in on the board page: a person's answer is recorded only from
+    // that person's own proven request.
+    const reader = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'saltmarsh@harborlight.example',
+      name: READER.name,
     });
+    await post(
+      `/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/answer`,
+      { author: reader.user, text: 'Ten minutes', answeredWith: 'o-ten' },
+      reader.headers,
+    );
     expect((await record(linkedDoc)).body).not.toHaveProperty('linkedItems');
   });
 });

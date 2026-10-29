@@ -72,6 +72,13 @@ export async function serveBoardRoutes(
   const { req, url, pathname, scope, gate, attribution } = rq;
   const { visitor, boardAgent, leadBoard, metaFor, roleFor, requireOwner } = gate;
   const { authorFor, refuseCategoryAuthor, withTaskChips, provenIdentityFor } = attribution;
+  /** What this request proved about a person, for the answer doors. */
+  const answerProof = {
+    req,
+    provenIdentityFor,
+    widgetIdentity: attribution.widgetIdentity,
+    requestOrigin: () => policyFor(req).requestOrigin,
+  };
 
   // --- REST: run the summary backfill on request --- see
   // ./routes/ops.ts. Same chain position as before the split: above the
@@ -164,6 +171,7 @@ export async function serveBoardRoutes(
       requireOwner,
       provenIdentityFor,
       requestOriginFor: () => policyFor(req).requestOrigin,
+      answerProof,
     });
     if (handled) return handled;
   }
@@ -188,6 +196,7 @@ export async function serveBoardRoutes(
       requireOwner,
       provenIdentityFor,
       requestOriginFor: () => policyFor(req).requestOrigin,
+      answerProof,
     });
     if (handled) return handled;
   }
@@ -448,6 +457,7 @@ export async function serveBoardRoutes(
       pathname,
       visitor,
       boardAgent: gate.boardAgent,
+      answerProof,
       authorFor,
       refuseCategoryAuthor,
       roleFor,

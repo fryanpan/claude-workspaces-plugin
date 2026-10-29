@@ -250,8 +250,9 @@ agent's widening call into an owner-only access card on a task;
 own browser; `share/access-view.ts` builds what `/access` shows. The routes
 are `routes/task-access.ts` (the door that answers a card) and
 `routes/access.ts` (the owner's page and its nameless `access~` stream). In
-`review-items/`, `approver.ts` records who answered and `owner-steps.ts` makes
-an ask owner-only when its step is one the board reserves. The one new
+`review-items/`, `approver.ts` records who answered, `answer-proof.ts` refuses
+a person's answer the request did not prove (every answer door asks it), and
+`owner-steps.ts` makes an ask owner-only when its step is one the board reserves. The one new
 top-level module is `core/src/review-access.ts`: the shape of an access change
 and the sentence a card says about it, read by the server and the page alike.
 

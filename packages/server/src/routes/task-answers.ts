@@ -8,6 +8,7 @@ import { answerAsksBack } from '@claude-workspaces/core';
 import { classifyActor } from '../actor-identity.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
+import { PERSON_PROOF_REQUIRED, unprovenPersonAnswer } from '../review-items/answer-proof.ts';
 import {
   GRANT_ANSWER_DENIAL,
   SECRET_ANSWER_DENIAL,
@@ -65,6 +66,9 @@ export async function handleTaskAnswers(
     }
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
+    // A person's answer only from that person's own proof — see
+    // `review-items/answer-proof.ts`.
+    if (unprovenPersonAnswer(author, rq.answerProof)) return j(403, PERSON_PROOF_REQUIRED);
     // `optionId` says which candidate the words came from. The words are
     // still the answer — an option is a shortcut to typing them, so this
     // route deliberately does NOT look the label up and substitute it.
@@ -156,6 +160,7 @@ export async function handleTaskAnswers(
     const body = await safeJson(req);
     const author = authorFor(body?.author);
     if (!author) return j(400, { error: 'author required' });
+    if (unprovenPersonAnswer(author, rq.answerProof)) return j(403, PERSON_PROOF_REQUIRED);
     const res = taskStore.withdrawAnswer(taskId, { actor: author });
     if (!res.ok) {
       return j(

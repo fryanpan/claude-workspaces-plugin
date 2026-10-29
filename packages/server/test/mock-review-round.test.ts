@@ -30,10 +30,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseThreadReviewItemId } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 
 const ROUND_1 =
   'Day one opens at a dollar a cup. On a warm morning that is the most expensive stand on the street.';
@@ -65,7 +74,7 @@ describe('a review item raised on a mockup', () => {
   const post = (path: string, body?: unknown): Promise<Response> =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   const jj = async <T>(res: Response): Promise<T> => {
@@ -77,6 +86,12 @@ describe('a review item raised on a mockup', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'mock-review-round-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     ws = await seedBoard(base);
     const file = join(dataDir, 'lemonade.html');
     writeFileSync(file, MOCK_HTML);
@@ -229,7 +244,7 @@ describe('a review item raised on a mockup', () => {
     const stored = await storedReview(threadId);
     expect(stored?.answerText).toBe('Ship at 75c — let the weather be the twist.');
     expect(stored?.answeredWith).toBe('o-75');
-    expect(stored?.answeredBy).toBe('Jordan');
+    expect(stored?.answeredBy).toBe('Alice');
     // Answered is off the queue — the reader is not still being asked.
     expect((await queue()).filter((r) => r.threadId === threadId)).toHaveLength(0);
   });

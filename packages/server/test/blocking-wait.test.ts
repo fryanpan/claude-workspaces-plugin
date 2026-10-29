@@ -19,6 +19,7 @@ import {
   blockingWait,
 } from '../src/review-answer-ledger.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 const HOUR = 3_600_000;
@@ -70,7 +71,12 @@ describe('the blocking-wait rollup', () => {
 });
 
 const AGENT = { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' };
-const PERSON = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = { id: '', name: 'Alice' };
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const CHOICE: ReviewPayload = {
   shape: 'decision',
   headline: 'Small Saltmarsh set by Friday, or the full set on Monday?',
@@ -88,6 +94,12 @@ describe('through the real server', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'blocking-wait-'));
     handle = createServer({ port: 0, dataDir, spawnerAgentId: null });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
   });
   afterAll(async () => {
     await handle.stop();
@@ -97,7 +109,7 @@ describe('through the real server', () => {
   const post = async (path: string, body: unknown) => {
     const r = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: JSON.stringify(body),
     });
     expect(r.status, await r.clone().text()).toBe(200);

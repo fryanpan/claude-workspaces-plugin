@@ -1,3 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * The voice review queue through the REAL server: spoken over the converse
  * socket with fake engines, each `decide` written the way the page writes it
@@ -6,19 +10,30 @@
  *
  * Nothing reaches a vendor. Fixture names are the house ones.
  */
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type SpokenDecide, spokenDecisionRequest } from '@claude-workspaces/core/spoken-reply';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { SpokenVoice } from '../src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../src/transcribe.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 setDefaultTimeout(30_000);
 
-const PERSON = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page by each server's `beforeAll`: a person's
+ *  answer is recorded only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+const signIns = new Map<string, Record<string, string>>();
+const signInAlice = (handle: ServerHandle, dataDir: string, base: string) => {
+  const alice = signedInPerson(handle, dataDir, base, {
+    email: 'alice@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = alice.user;
+  signIns.set(PERSON.id, alice.headers);
+};
+const authHeaders = (body: unknown) =>
+  signIns.get((body as { author?: User } | undefined)?.author?.id ?? '') ?? {};
 const AGENT = { id: 'agent-riverbend', name: 'Riverbend', kind: 'known', color: '#888888' };
 
 interface Frame {
@@ -54,7 +69,7 @@ describe('the review queue by voice, end to end', () => {
   const post = async (path: string, body: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(body) },
       body: JSON.stringify(body),
     });
     return res;
@@ -73,6 +88,7 @@ describe('the review queue by voice, end to end', () => {
     });
     base = `http://127.0.0.1:${handle.port}`;
     wsBase = `ws://127.0.0.1:${handle.port}`;
+    signInAlice(handle, dataDir, base);
     boardId = (
       await ok<{ workspace: { id: string } }>(await post('/workspaces', { name: 'Harborlight' }))
     ).workspace.id;
@@ -242,7 +258,7 @@ describe('POST …/review-items/:id/answer/undo', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}/workspaces/${boardId}/${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...authHeaders(body) },
       body: JSON.stringify(body),
     });
 
@@ -250,6 +266,7 @@ describe('POST …/review-items/:id/answer/undo', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-answer-undo-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    signInAlice(handle, dataDir, base);
     const res = await fetch(`${base}/workspaces`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -19,7 +19,8 @@ import { decisionAnsweredLine } from '../../mcp/src/decision-line.ts';
 import type { AnswerCoverageInput } from '../src/answer-coverage.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { eventsLogPath } from '../src/tasks.ts';
-import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
+import { FILER, LEAD } from './review-judge-harness.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { listenFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -49,6 +50,9 @@ let dataDir = '';
 let base = '';
 let verdict: { open: string[] } | null = null;
 let calls: AnswerCoverageInput[] = [];
+/** Alice, signed in on the board page; `boot` signs him in on each server. */
+let PERSON: { id: string; name: string } = { id: '', name: 'Alice' };
+let PERSON_PROOF: Record<string, string> = {};
 
 function boot(coverage = true): void {
   dataDir = mkdtempSync(join(tmpdir(), 'partial-answer-'));
@@ -68,6 +72,12 @@ function boot(coverage = true): void {
       : {}),
   });
   base = `http://127.0.0.1:${handle.port}`;
+  const alice = signedInPerson(handle, dataDir, base, {
+    email: 'alice@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = alice.user;
+  PERSON_PROOF = alice.headers;
 }
 
 afterEach(async () => {
@@ -79,7 +89,10 @@ afterEach(async () => {
 const post = (path: string, body: unknown) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...((body as { author?: { id?: string } }).author?.id === PERSON.id ? PERSON_PROOF : {}),
+    },
     body: JSON.stringify(body),
   });
 const jj = async <T>(res: Response | Promise<Response>): Promise<T> => {
@@ -235,7 +248,7 @@ describe('an answer that covers only some of an item’s questions', () => {
 describe('partial answers come only from answering', () => {
   it('a filing body cannot plant them on a ticket item or a new task', async () => {
     boot();
-    const planted = [{ text: 'planted', by: 'Reader', ts: 1, open: ['anything'] }];
+    const planted = [{ text: 'planted', by: 'Alice', ts: 1, open: ['anything'] }];
     const { ws, taskId, itemId } = await fileItem({ ...THREE_QUESTIONS, partialAnswers: planted });
     const stored = handle?.tasks.listReviewItems(taskId).find((r) => r.id === itemId);
     expect(stored?.review).toBeDefined();

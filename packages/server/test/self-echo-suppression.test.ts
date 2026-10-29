@@ -27,12 +27,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isSelfAuthoredEvent } from '../../mcp/src/self-authored.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const ACTOR_AGENT = 'agent-harborlight';
 const PEER_AGENT = 'agent-riverbend';
-const PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
+/** Reviewer, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind: string; color?: string } = {
+  id: '',
+  name: 'Reviewer',
+  kind: 'person',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 
 type Frame = { event: string; data: Record<string, unknown> };
 
@@ -107,7 +117,11 @@ describe('an agent hears nothing about its own board acts', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
+      headers: {
+        host: `localhost:${handle.port}`,
+        'content-type': 'application/json',
+        ...proofFor(body),
+      },
       body: JSON.stringify(body),
     });
   const get = (path: string) =>
@@ -212,6 +226,12 @@ describe('an agent hears nothing about its own board acts', () => {
     srcDir = mkdtempSync(join(tmpdir(), 'self-echo-src-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'reviewer@harborlight.example',
+      name: 'Reviewer',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     WS = await seedBoard(base);
     const path = join(srcDir, 'doc-one.md');
     writeFileSync(path, '# doc-one\n\nBody.\n');
