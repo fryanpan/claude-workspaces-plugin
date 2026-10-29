@@ -260,14 +260,18 @@ describe('noteShape', () => {
       '### Harborlight launch',
       '- Alice said the export button sits under the settings menu today',
       '- [@Bob](speaker:B) **Question:** who owns it?',
+      '### Riverbend follow-up',
       '### Saltmarsh',
+      'A paragraph note under no list marker.',
     ].join('\n');
     const transcript = 'Alice said the export button sits under the settings menu today.';
     expect(noteShape(notes, transcript)).toEqual({
-      topics: 4,
+      topics: 5,
+      notes: 9,
+      paragraphNotes: 1,
       longFlatRuns: 1,
       topicsWithLongRun: 1,
-      topicsWithLongRunShare: 0.25,
+      topicsWithLongRunShare: 0.2,
       overlongBullets: 1,
       duplicateTopics: 1,
       emptyHeadings: 1,

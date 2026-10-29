@@ -5,12 +5,14 @@
  */
 
 import {
+  allBullets,
   decisionsWithoutSpeaker,
   duplicateTopics,
   emptyHeadings,
   longFlatRuns,
   overlongBullets,
   parseNotesTopics,
+  proseNote,
   verbatimBullets,
 } from '../packages/server/src/notes-quality.ts';
 import type { TranscriptRow } from './notes-replay-lib.ts';
@@ -115,6 +117,10 @@ export function scoreGoals(g: GoalInputs): Record<string, GoalVerdict> {
  */
 export interface NoteShape {
   topics: number;
+  /** Every note, bullet or paragraph: the denominator of the per-note counts. */
+  notes: number;
+  /** Notes written as a paragraph, not a list item (`proseNote`). */
+  paragraphNotes: number;
   /** Flat runs past `MAX_FLAT_RUN_BULLETS`, and the topics holding one. */
   longFlatRuns: number;
   topicsWithLongRun: number;
@@ -137,6 +143,8 @@ export function noteShape(notes: string, transcript: string): NoteShape {
   const withRun = new Set(runs.map((r) => r.heading)).size;
   return {
     topics,
+    notes: allBullets(notes).length,
+    paragraphNotes: notes.split('\n').filter((line) => proseNote(line) !== undefined).length,
     longFlatRuns: runs.length,
     topicsWithLongRun: withRun,
     topicsWithLongRunShare: topics > 0 ? withRun / topics : null,
