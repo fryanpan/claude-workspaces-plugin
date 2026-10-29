@@ -16,7 +16,13 @@
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
-import { type BoardMembersView, type BoardRole, mountBoardMembers } from './board-members.ts';
+import { type CountedRequest, resumeHeld, sendCounted } from '../fresh-signin-client.ts';
+import {
+  type BoardMembersView,
+  type BoardRole,
+  mountBoardMembers,
+  roleLabel,
+} from './board-members.ts';
 import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
@@ -185,12 +191,11 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       return data;
     },
     setRole: async (email, role) => {
-      const res = await send(
-        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}/role`,
-        'POST',
-        { role },
-      );
-      return res.ok;
+      const url = `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}/role`;
+      if (role === 'member') return (await send(url, 'POST', { role })).ok;
+      // Raising a role widens access, so a stale sign-in is asked first.
+      const res = await sendCounted(raiseRole(url, email), { toast: showToast });
+      return res === null ? null : res.ok;
     },
     remove: async (email) => {
       const res = await send(
@@ -289,9 +294,29 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       () => showToast(deps.href()),
     );
   });
+  // Back from "Sign in again": offer the role change this page held.
+  void resumeHeld({ toast: showToast }).then(async (held) => {
+    if (!held) return;
+    if (held.response.ok) showToast(`${held.request.name} is now ${roleLabel('owner')}`);
+    else showToast('Could not change that role');
+    if (deps.isOpen()) await members.refresh();
+  });
   return {
     membersChanged: () => {
       if (deps.isOpen()) void members.changed();
     },
+  };
+}
+
+/** Making somebody an Owner, as the fresh-sign-in ask names it. */
+function raiseRole(url: string, email: string): CountedRequest {
+  return {
+    method: 'POST',
+    url,
+    body: { role: 'owner' },
+    verb: 'Make owner',
+    gerund: 'Making someone an Owner',
+    noun: 'role change',
+    name: email,
   };
 }

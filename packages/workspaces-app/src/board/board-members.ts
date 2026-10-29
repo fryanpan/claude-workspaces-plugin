@@ -44,8 +44,9 @@ export interface BoardMembersDeps {
   note: HTMLElement;
   /** Read the list. `null` is a failed read, never an empty board. */
   read: () => Promise<BoardMembersView | null>;
-  /** Promote or demote. Resolves false when the server refused. */
-  setRole: (email: string, role: BoardRole) => Promise<boolean>;
+  /** Promote or demote. Resolves false when the server refused, and null
+   *  when the person backed out of signing in again (nothing changed). */
+  setRole: (email: string, role: BoardRole) => Promise<boolean | null>;
   /** End one person's access. Resolves false when the server refused. */
   remove: (email: string) => Promise<boolean>;
   /** The board's one-line report. */
@@ -134,6 +135,10 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
       const next = sel.value === 'owner' ? 'owner' : 'member';
       run(async () => {
         const ok = await deps.setRole(entry.email, next);
+        if (ok === null) {
+          await refresh();
+          return;
+        }
         if (!ok) {
           deps.toast('Could not change that role');
           // Re-read rather than putting the old value back by hand: the server

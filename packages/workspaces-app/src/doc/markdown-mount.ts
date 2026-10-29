@@ -20,6 +20,7 @@ import { navigateTo } from '../router.ts';
 import { el, showToast } from './chrome-dom.ts';
 import { wireThreadRangeClicks } from './chrome-panels.ts';
 import { marginComposerSlot } from './composer-slot.ts';
+import { mountDocArchive } from './doc-archive.ts';
 import { type CommentPillHandle, mountCommentPill } from './doc-comment-pill.ts';
 import { mountDocFloats } from './doc-floats.ts';
 import { wireDocGates } from './doc-gates.ts';
@@ -372,6 +373,7 @@ export async function mountMarkdown(ctx: MountContext): Promise<void> {
 
   // The #save-state chip, and the app preview pane beside the editor.
   mountDocSaveState({ client, ydoc, canWrite, scope });
+  mountDocArchive({ docId, client, ydoc, scope, canWrite, toast: showToast });
   mountDocPreview({ docId, ydoc, scope });
 
   // Last, because it speaks for the whole surface: the format bar, and whether

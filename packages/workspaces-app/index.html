@@ -108,6 +108,21 @@
             ✎
             <span id="suggestions-count" class="badge">0</span>
           </button>
+          <!-- The doc's More menu: Archive this doc (doc/doc-archive.ts). Shown
+               by the mount only to a reader who can write. -->
+          <button
+            type="button"
+            id="doc-more"
+            class="icon-btn"
+            title="More"
+            aria-label="More actions for this doc"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="more-menu"
+            hidden
+          >
+            ⋯
+          </button>
         </div>
       </header>
       <!-- Live-meeting chrome: the transcript strip fused under the top bar,
@@ -125,6 +140,15 @@
       >
         <button type="button" id="suggestions-accept-all" role="menuitem">Accept all</button>
         <button type="button" id="suggestions-reject-all" role="menuitem">Reject all</button>
+      </div>
+      <div
+        id="more-menu"
+        class="suggestions-menu more-menu hidden"
+        role="menu"
+        aria-label="More actions for this doc"
+        aria-hidden="true"
+      >
+        <button type="button" id="menu-archive" role="menuitem">Archive this doc</button>
       </div>
       <!-- Dropdown listing all docs in the current set. Anchored under
            the topbar; only shown when the doc has a setId. The same data
@@ -146,6 +170,10 @@
           <ol id="set-pane-list"></ol>
         </aside>
         <section id="editor-pane">
+          <div id="archived-bar" class="archived-bar" role="status" hidden>
+            <span>Archived. This doc is off the board; its comments are kept.</span>
+            <button type="button" id="archived-undo" class="archived-undo">Put it back</button>
+          </div>
           <!-- Diff-review view toggle: redline vs unified diff vs whole file
                (live). Floats top-right of the editor; hidden except on diff
                docs (code-app / redline-app show it once the base text is
