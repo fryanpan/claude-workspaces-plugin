@@ -155,9 +155,14 @@ describe('no git at all under a lead’s root', () => {
       expect(existsSync(spawned)).toBe(false);
       expect(existsSync(marker)).toBe(false);
       remove();
-      // The control: unguarded, the same read runs the shim's git.
+      // The controls: unguarded, the same reads run the shim's git.
       classifyExternalContent(join(repo, 'notes.md'), '# Harborlight\n');
       expect(existsSync(spawned)).toBe(true);
+      for (const listing of [() => scanFolderPaths(repo), () => scanFolderPathsAsync(repo)]) {
+        spawnSync('rm', [spawned]);
+        await listing();
+        expect(existsSync(spawned)).toBe(true);
+      }
     } finally {
       remove();
       process.env.PATH = realPath;
