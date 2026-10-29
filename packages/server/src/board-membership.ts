@@ -212,6 +212,9 @@ export interface BoardMembership {
   collabMemberOf: (workspaceId: string, email: string | null) => boolean;
   /** …and the same question on the share hostname, against the other record. */
   shareLinkMemberOf: (workspaceId: string, email: string | null) => boolean;
+  /** Does the board's audience admit this address as a member — the
+   *  comment-trust question. */
+  audienceMemberOf: (workspaceId: string, email: string) => boolean;
   /** `GET /s/<id>`: turn a verified email into a member. */
   redeemShareLink: (linkId: string, email: string | null) => Response;
   /** What this caller may DO on this board — see the implementation. */
@@ -391,6 +394,12 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     // list a `share_link` with no audience falls back to, so "who is this
     // deployment's own people" has one answer.
     if (proxiedTrustedEmails.has(who)) return true;
+    return sharedWith(workspaceId, who);
+  };
+
+  /** `collabMemberOf` without the owner allowlist: does a live share the
+   *  board's audience admits name this (normalized) address? */
+  const sharedWith = (workspaceId: string, who: string): boolean => {
     if (!shares) return false;
     const candidates = new Set<string>([workspaceId, ...shareWorkspacesOf(workspaceId)]);
     for (const wsId of candidates) {
@@ -454,6 +463,21 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
       if (shareLinks.isMember(wsId, email)) return true;
     }
     return false;
+  };
+
+  /**
+   * Is this address a member of this board through its AUDIENCE: a share-link
+   * member row, or a live share, that the board's audience admits now. What
+   * the comment-trust stamp asks (`comment-trust.ts`).
+   *
+   * Not `collabMemberOf`: that one also admits the operator allowlist, which
+   * names this deployment's own people on every board and is checked against
+   * no audience. A comment is trusted because the board names its author.
+   */
+  const audienceMemberOf = (workspaceId: string, email: string): boolean => {
+    const who = normalizeEmail(email);
+    if (who === '' || !workspaceId) return false;
+    return shareLinkMemberOf(workspaceId, who) || sharedWith(workspaceId, who);
   };
 
   /**
@@ -939,6 +963,7 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
+    audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
     boardMembersOf,

@@ -42,7 +42,12 @@ import {
 import { type ReviewItemStalePayload, reviewItemStaleLine } from './review-stale-line.ts';
 import { scheduledRunLine, spawnRequestedLine } from './scheduled-line.ts';
 import { isSelfAuthoredEvent } from './self-authored.ts';
-import { UNTRUSTED_LABEL, quoteUntrusted, quoteUntrustedInline } from './untrusted-quote.ts';
+import {
+  UNTRUSTED_LABEL,
+  isTrustedStamp,
+  quoteUntrusted,
+  quoteUntrustedInline,
+} from './untrusted-quote.ts';
 import { voiceRequestLine } from './voice-line.ts';
 import { type WhiteboardChangedLike, whiteboardChangedLine } from './whiteboard-line.ts';
 
@@ -123,8 +128,9 @@ export interface ChannelPayload {
   /** On a reply: the comment it follows. Absent on a first comment and from
    *  servers older than the stamp. */
   inReplyTo?: { author?: string; authorId?: string; trust?: string; text?: string };
-  /** `owner` when the comment the line quotes is the board owner's; anything
-   *  else, or absent, and the line quotes it as untrusted data. */
+  /** `owner` when the comment the line quotes is the board owner's, `member`
+   *  when its author is a member of the board; anything else, or absent, and
+   *  the line quotes it as untrusted data. */
   commentTrust?: string;
   /** A reply that answered some of a review item's questions: the ones still open. */
   openParts?: unknown[];
@@ -695,13 +701,13 @@ async function emitChannelMessage(
   // older server, which leaves the line as it was.
   const onDoc = text && p.docTitle ? ` on "${truncate(p.docTitle, 60)}"` : '';
   const parentText = event === 'thread.replied' ? oneLine(p.inReplyTo?.text ?? '') : '';
-  // A comment that is not the owner's, nor this agent's own, is quoted as
-  // data — and so is the comment it replies to, by the same rule. See
-  // untrusted-quote.ts.
+  // A comment that is not the owner's, a board member's, nor this agent's
+  // own, is quoted as data — and so is the comment it replies to, by the same
+  // rule. See untrusted-quote.ts.
   const spokenBy = (p.comment ?? p.thread?.comments?.at(-1))?.author?.id;
-  const trusted = p.commentTrust === 'owner' || (!!spokenBy && spokenBy === deps.authorId);
+  const trusted = isTrustedStamp(p.commentTrust) || (!!spokenBy && spokenBy === deps.authorId);
   const parentTrusted =
-    p.inReplyTo?.trust === 'owner' ||
+    isTrustedStamp(p.inReplyTo?.trust) ||
     (!!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId);
   const toParent = !parentText
     ? ''

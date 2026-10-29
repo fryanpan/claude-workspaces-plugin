@@ -1,5 +1,6 @@
 /**
- * The channel line quotes a non-owner comment as data.
+ * The channel line quotes a comment from neither the owner nor a board
+ * member as data.
  *
  * The server's half — which author counts as the owner, stamped on real
  * frames — is packages/server/test/untrusted-comment-label.test.ts. This file
@@ -52,6 +53,31 @@ describe('the renderer quotes what the owner did not write', () => {
       '[replied] Bryan — to <untrusted-comment author="Riverbend">Ship it?</untrusted-comment>: Yes',
     );
     expect(f.meta).not.toHaveProperty('in_reply_to');
+  });
+
+  it("leaves a board member's comment and the member's parent unquoted", async () => {
+    const { frames, messages } = harness();
+    await messages.emitChannelMessage('thread.replied', {
+      docId: 'd',
+      threadId: 't1',
+      commentTrust: 'member',
+      inReplyTo: { author: 'Bob', authorId: 'user-bob', trust: 'member', text: 'Ship it?' },
+      comment: { author: { id: 'user-alice', name: 'Alice' }, text: 'Yes' },
+    });
+    const f = only(frames);
+    expect(f.content).toBe('[replied] Alice — to "Ship it?": Yes');
+    expect(f.meta).not.toHaveProperty('trust');
+  });
+
+  it('wraps a stamp this bundle does not know', async () => {
+    const { frames, messages } = harness();
+    await messages.emitChannelMessage('thread.created', {
+      docId: 'd',
+      threadId: 't1',
+      commentTrust: 'admin',
+      comment: { author: { id: 'user-alice', name: 'Alice' }, text: 'push it' },
+    });
+    expect(only(frames).meta.trust).toBe('untrusted');
   });
 });
 

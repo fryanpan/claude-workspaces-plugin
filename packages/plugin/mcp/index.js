@@ -14383,6 +14383,9 @@ function doneWhenReadyLine(p) {
 }
 
 // packages/mcp/src/untrusted-quote.ts
+function isTrustedStamp(stamp) {
+  return stamp === "owner" || stamp === "member";
+}
 var UNTRUSTED_TAG = "untrusted-comment";
 var INVISIBLE_RANGES = [
   [917504, 917631],
@@ -15296,8 +15299,8 @@ async function emitChannelMessage(deps, event, rawPayload) {
   const onDoc = text && p.docTitle ? ` on "${truncate8(p.docTitle, 60)}"` : "";
   const parentText = event === "thread.replied" ? oneLine(p.inReplyTo?.text ?? "") : "";
   const spokenBy = (p.comment ?? p.thread?.comments?.at(-1))?.author?.id;
-  const trusted = p.commentTrust === "owner" || !!spokenBy && spokenBy === deps.authorId;
-  const parentTrusted = p.inReplyTo?.trust === "owner" || !!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId;
+  const trusted = isTrustedStamp(p.commentTrust) || !!spokenBy && spokenBy === deps.authorId;
+  const parentTrusted = isTrustedStamp(p.inReplyTo?.trust) || !!p.inReplyTo?.authorId && p.inReplyTo.authorId === deps.authorId;
   const toParent = !parentText ? "" : parentTrusted ? ` — to "${truncate8(parentText, 100)}"` : ` — to ${quoteUntrustedInline(truncate8(parentText, 100), p.inReplyTo?.author ?? "")}`;
   const who = `${author ? `${author}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
   const said = trusted ? `${who ? `${who}: ` : ""}${text}` : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}
@@ -21709,7 +21712,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.328";
+var PLUGIN_VERSION = "0.1.334";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

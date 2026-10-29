@@ -13,7 +13,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
-import { ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
+import { commentTrustOf, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -49,6 +49,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
@@ -534,6 +535,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // projection it needs. Nothing can fire through it until a doc exists,
   // which is after both.
   let onLiveDocEvent: ((docId: string, payload: WebhookPayload) => void) | null = null;
+  // Late-bound for the same reason: it reads the roster and the board
+  // membership, both built further down. Until then only the owner is trusted.
+  let commentTrustFor: CommentTrustFor | null = null;
   const docStore: DocStore = new DocStore({
     dataDir,
     sse,
@@ -548,6 +552,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // A doc being recorded into stays resident: the notes reach it by a door
     // no other eviction hold can see. See `DocStoreConfig.isRecording`.
     isRecording: (docId) => meetingStore.active(docId) !== undefined,
+    commentTrust: (docId, author) => commentTrustFor?.(docId, author) ?? commentTrustOf(author),
     ...(opts.editSessionIdleMs !== undefined ? { editSessionIdleMs: opts.editSessionIdleMs } : {}),
     ...(summarizer ? { summarizer } : {}),
   });
@@ -1064,6 +1069,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
+    audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
     boardsForDoc,
@@ -1959,6 +1965,11 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     policyFor,
     mayCommentOnBoard,
+  });
+  commentTrustFor = createCommentTrust({
+    identityOf: (id) => identities.get(id),
+    boardsForDoc,
+    memberOf: audienceMemberOf,
   });
 
   /**

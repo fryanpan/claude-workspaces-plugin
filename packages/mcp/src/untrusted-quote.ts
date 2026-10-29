@@ -1,15 +1,17 @@
 /**
  * Quoting a comment an agent must read as data, never as instructions.
  *
- * Anyone a board is shared with can comment on it, and the agent working the
+ * Anyone who can reach a board can comment on it, and the agent working the
  * board reads those comments in its context and can act on them. So every
- * comment whose author is not the board owner reaches the agent inside a
- * labelled wrapper: the label says who wrote it and that its words are
- * quoted, and the wrapper's markers bound exactly what they wrote.
+ * comment whose author is neither the board owner nor a member of the board
+ * reaches the agent inside a labelled wrapper: the label says who wrote it
+ * and that its words are quoted, and the wrapper's markers bound exactly what
+ * they wrote.
  *
- * The server decides who the owner is (`commentTrustOf`, by identity id, in
- * packages/server/src/actor-identity.ts) and stamps it on the frame. This
- * module only renders. A frame with no stamp, from an older server or a
+ * The server decides who the owner and the members are (`commentTrustOf` in
+ * packages/server/src/actor-identity.ts and `comment-trust.ts` beside it, by
+ * identity id) and stamps it on the frame. This module only renders. A frame
+ * with no stamp, or one this bundle does not know, from an older server or a
  * hand-built payload, is wrapped: the safe direction is an owner comment read
  * as a quote, not an outsider's read as an order.
  *
@@ -20,6 +22,12 @@
  * forms such as fullwidth brackets (NFKC), and the invisible tag and format
  * characters used to hide text inside a word.
  */
+
+/** The stamps whose comments render unwrapped. Bryan, 29 Oct: every member
+ *  of a board directs its lead. */
+export function isTrustedStamp(stamp: unknown): boolean {
+  return stamp === 'owner' || stamp === 'member';
+}
 
 /** The marker name. One spelling, so the neutraliser and the wrapper agree. */
 export const UNTRUSTED_TAG = 'untrusted-comment';
