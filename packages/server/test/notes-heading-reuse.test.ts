@@ -79,4 +79,28 @@ describe('a topic heading opened again at another level', () => {
       expect(h.errors).toEqual([]);
     }
   });
+
+  it('reworded, in an edit addressed to a block, is not headed again', async () => {
+    const h = createNotesTickHarness({
+      compose: (input, tick) => {
+        if (tick === 1) return addNotes(input, '### Riverbend slipway costs\n\n- Costs rose');
+        const target = input.outline.find((e) => e.kind === 'listItem');
+        if (target === undefined) return [];
+        return [
+          {
+            op: 'insert_before_block',
+            blockId: target.id,
+            markdown: '### Slipway costs at Riverbend\n\n- Crane booked',
+          },
+        ];
+      },
+    });
+    await h.speak('the slipway costs rose');
+    await h.speak('the crane is booked');
+    const notes = h.notes();
+    expect(headingLines(notes, 'Slipway costs at Riverbend')).toBe(0);
+    expect(headingLines(notes, 'Riverbend slipway costs')).toBe(1);
+    expect(notes).toContain('Crane booked');
+    expect(h.errors).toEqual([]);
+  });
 });

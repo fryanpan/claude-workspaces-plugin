@@ -384,7 +384,7 @@ export function dedupeNotesEdits(
   };
 
   // A BLOCK-ADDRESSED EDIT HEADS A KNOWN TOPIC AGAIN TOO: a `###` copy of the
-  // SAME name straight under its `##`. The address places the notes, so the
+  // same topic, by name or reworded, straight under its `##`. The address places the notes, so the
   // copy goes; before the topic's own heading, they go under it.
   const unheaded = (edit: prose.BlockEdit): prose.BlockEdit | null => {
     if (edit.op !== 'insert_before_block' && edit.op !== 'replace_block') return edit;
@@ -393,8 +393,8 @@ export function dedupeNotesEdits(
     let named: string | undefined;
     const kept = lines.filter((line) => {
       const h = line.match(/^#{1,6}\s+(.*\S)\s*$/);
-      const key = topicKey(h?.[1] ?? '');
-      const known = key !== '' && topics.find((t) => t.id !== self && topicKey(t.text) === key);
+      const text = h?.[1] ?? '';
+      const known = text !== '' && topics.find((t) => t.id !== self && sameTopic(t.text, text));
       if (known) named = known.id;
       return !known;
     });
