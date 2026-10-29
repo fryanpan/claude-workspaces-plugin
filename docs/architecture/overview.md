@@ -1066,14 +1066,20 @@ is the activity feed's name, and a workspace id sitting outside `/workspaces`
 could not be read by the guard that reads every other board path. The address
 it moved off is recorded once, in [glossary.md](glossary.md).
 
-**An agent reads a non-owner comment as quoted data.** Anyone a board is
-shared with can comment, and the lead reads every comment and can act on it.
-The server stamps each thread frame's comment, and the comment a reply
-answers, `owner` only when the author's identity id is the owner's — never by
-display name, which a visitor types (`commentTrustOf` in
-`packages/server/src/actor-identity.ts`). The MCP child quotes every other
-comment, and an unstamped one, inside a labelled `untrusted-comment` block
-whose markers a comment cannot forge (`packages/mcp/src/untrusted-quote.ts`).
+**An agent reads a comment from outside the board as quoted data.** Every
+member of a board directs its lead (Bryan, 29 Oct), and anyone else who can
+reach a doc can still comment on it. The server stamps each thread frame's
+comment, and the comment a reply answers, `owner` when the author's identity
+id is the owner's (`commentTrustOf` in `packages/server/src/actor-identity.ts`)
+and `member` when that id names a person whose email the audience of every
+board the doc reaches admits at that moment (`packages/server/src/comment-trust.ts`,
+asking `audienceMemberOf` in `board-membership.ts`). Never by display name,
+which a visitor types. A `member` stamp carries the boards it was decided
+against (`trustBoards`), and the child trusts it only on a board the session
+is attached to. The MCP child renders both as ordinary lines and quotes
+every other comment, an unstamped one and an unknown stamp inside a labelled
+`untrusted-comment` block whose markers a comment cannot forge
+(`packages/mcp/src/untrusted-quote.ts`).
 
 **An agent gets no wake for an event it cannot act on.** Three rules give that,
 and none of them hides state.
