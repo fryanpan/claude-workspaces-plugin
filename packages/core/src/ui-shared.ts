@@ -84,11 +84,13 @@ export function cssColor(color: string | undefined | null, fallback = '#888888')
 
 /**
  * The one thread-status palette. The widget interpolates these into its
- * shadow-DOM styles; the SPA mirrors them as CSS custom properties in
- * styles.css (--green / --yellow / --orange) — change them together.
+ * shadow-DOM styles; the SPA mirrors resolved and orphan as CSS custom
+ * properties in styles.css (--green / --yellow). Open is the widget's comment
+ * mark, the dark purple its pins, list dots and link badges share (the owner,
+ * 2026-10-29: "a dark purple throughout, same as the marker colour").
  */
 export const STATUS_COLORS = {
-  open: '#e36f1e',
+  open: '#5b3f8f',
   resolved: '#2da44e',
   orphan: '#bf8700',
 } as const;

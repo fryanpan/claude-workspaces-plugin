@@ -25,6 +25,13 @@
  *    doc the server named, and hands them back when the frame asks. Only
  *    draft keys, only this doc's, and each one capped: the frame's scripts
  *    can write here, and the most they can reach is this doc's drafts.
+ * 5. runs the Comments button in the board's bar above the frame: a tap
+ *    opens or closes the comment view inside it, and the view says back
+ *    whether it is open and whether anything is new, which the button shows
+ *    as pressed and as a steady dot. It also keeps what the reader has
+ *    opened (`cfw:seen:<doc>`, `comment-seen-store.ts`) in this page's
+ *    `localStorage`, for this doc's key alone and capped, and seeds it into
+ *    the next load.
  */
 import { createHostMic, tapConfirmed } from './mock-host-mic.ts';
 import { type RelayScope, relayHeaders, relayTarget } from './mock-relay-policy.ts';
@@ -50,6 +57,9 @@ const DRAFT_VALUE_MAX = 16 * 1024;
 const DRAFTS_PER_DOC = 50;
 const DRAFTS_TOTAL_MAX = 256 * 1024;
 const SHELVES = 'cw-frame-draft:';
+/** The one seen record a frame may keep here, and its size. */
+const SEEN = 'cfw:seen:';
+const SEEN_MAX = 64 * 1024;
 
 /** What the host reaches for on the page: the window's own, handed in so a test can stand in. */
 export interface HostEnv {
@@ -57,6 +67,10 @@ export interface HostEnv {
   placeholder: HTMLIFrameElement | null;
   location: { host: string; protocol: string; hash?: string };
   storage: () => Pick<Storage, 'getItem'>;
+  /** Where the seen record is written: the page's own `localStorage`. */
+  keep?: () => Pick<Storage, 'setItem' | 'removeItem'>;
+  /** The Comments button in the bar above the frame, when the page drew one. */
+  bar?: HTMLElement | null;
   /** Where the frame's drafts are kept: the page's own `sessionStorage`. */
   session: () => Storage;
   fetch: (path: string, init: RequestInit) => Promise<Response>;
@@ -82,7 +96,8 @@ export function hostMock(env: HostEnv): void {
   };
 
   const seed: Record<string, string> = {};
-  for (const k of SEEDED_KEYS) {
+  const seenKey = `${SEEN}${scope.docId}`;
+  for (const k of [...SEEDED_KEYS, seenKey]) {
     try {
       const v = env.storage().getItem(k);
       if (v !== null) seed[k] = v;
@@ -141,6 +156,24 @@ export function hostMock(env: HostEnv): void {
     } catch {}
   };
 
+  const keepSeen = (k: unknown, v: unknown): void => {
+    if (k !== seenKey || !env.keep) return;
+    try {
+      if (v === null) env.keep().removeItem(k);
+      else if (typeof v === 'string' && v.length <= SEEN_MAX) env.keep().setItem(k, v);
+    } catch {}
+  };
+  const bar = env.bar ?? null;
+  const barState = (st: { open?: unknown; fresh?: unknown }): void => {
+    if (!bar) return;
+    bar.setAttribute('aria-pressed', String(st.open === true));
+    const dot = bar.querySelector<HTMLElement>('[data-cw-new]');
+    if (dot) dot.hidden = st.fresh !== true;
+  };
+  // The frame's origin is opaque, or the frame hostname's: either way the
+  // message names no secret, so it is posted to whatever the frame holds.
+  bar?.addEventListener('click', () => frame.contentWindow?.postMessage({ cw: 'comments' }, '*'));
+
   env.onMessage((ev) => {
     if (ev.source !== frame.contentWindow) return;
     const m = ev.data as {
@@ -155,6 +188,8 @@ export function hostMock(env: HostEnv): void {
     };
     const port = ev.ports[0];
     if (m?.cw === 'draft') return keepDraft(m.k, m.v);
+    if (m?.cw === 'seen') return keepSeen(m.k, m.v);
+    if (m?.cw === 'comments-state') return barState(m as { open?: unknown; fresh?: unknown });
     if (m?.cw === 'drafts') return port?.postMessage([...mine]);
     if (!port || m?.cw !== 'relay' || typeof m.url !== 'string') return;
 
@@ -300,6 +335,8 @@ hostMock({
   placeholder: document.querySelector<HTMLIFrameElement>('iframe[data-cw-mock-frame]'),
   location: window.location,
   storage: () => window.localStorage,
+  keep: () => window.localStorage,
+  bar: document.querySelector<HTMLElement>('[data-cw-comments]'),
   session: () => window.sessionStorage,
   fetch: (input, init) => window.fetch(input, init),
   WebSocket: window.WebSocket,
