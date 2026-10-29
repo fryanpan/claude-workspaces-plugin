@@ -529,6 +529,18 @@ export async function handleTaskReviewItems(
       const denied = ownerOnlyDenial(taskId, reviewItemId);
       if (denied) return denied;
     }
+    // The sharing notice's card is the owner's one way back in while sharing
+    // is off; an agent that withdrew it would leave him nothing to approve.
+    // Only the notice itself takes it down, when the switch comes back on.
+    {
+      const task = taskStore.getTask(taskId);
+      if (task && reviewItemFilerId(task, reviewItemId) === SHARING_NOTICE_ACTOR.id) {
+        return j(403, {
+          error: 'sharing-notice',
+          message: 'the sharing notice withdraws itself when sharing is turned back on',
+        });
+      }
+    }
     const undo = taskReviewWithdrawMatch[3] !== undefined;
     const body = await safeJson(req);
     const author = authorFor(body?.author);
