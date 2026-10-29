@@ -31,6 +31,7 @@ describe('a frame ticket', () => {
     expect(checkFrameTicket(KEY, ticket, HOST, 'w-harbor', NOW + 119_000)).toEqual({
       ok: true,
       expiresAt: NOW + 120_000,
+      appVoice: false,
     });
     expect(checkFrameTicket(KEY, ticket, HOST, 'w-harbor', NOW + 121_000)).toEqual({
       ok: false,
@@ -61,7 +62,12 @@ describe('a frame ticket', () => {
   });
 
   it('is not signed with the base key, so no other protocol mints one', () => {
-    const claims = { frameHost: HOST, workspaceId: 'w-harbor', expiresAt: NOW + 60_000 };
+    const claims = {
+      frameHost: HOST,
+      workspaceId: 'w-harbor',
+      expiresAt: NOW + 60_000,
+      appVoice: true,
+    };
     const underBase = mintToken(frameTicket, claims, 'harborlight-test-cookie-key');
     expect(checkFrameTicket(KEY, underBase, HOST, 'w-harbor', NOW).ok).toBe(false);
   });
@@ -92,6 +98,28 @@ describe('redeeming a ticket', () => {
       ok: false,
       reason: 'expired',
     });
+  });
+
+  it('carries the app voice grant into the cookie exactly when the ticket had it', () => {
+    for (const appVoice of [true, false]) {
+      const t = mintFrameTicket(KEY, HOST, 'w-harbor', NOW, appVoice);
+      expect(checkFrameTicket(KEY, t, HOST, 'w-harbor', NOW)).toMatchObject({ ok: true, appVoice });
+      const r = redeemFrameTicket(KEYS, t, HOST, 'w-harbor', NOW);
+      if (!r.ok) throw new Error(r.reason);
+      expect(checkFrameCookie(KEYS.cookie, r.cookie, HOST, 'w-harbor', NOW)).toMatchObject({
+        ok: true,
+        appVoice,
+      });
+    }
+  });
+
+  it('refuses a grant added to a ticket that did not carry one', () => {
+    // The field sits inside the signed payload: appending it breaks the
+    // signature, so a reader cannot promote their own ticket.
+    const plain = mintFrameTicket(KEY, HOST, 'w-harbor', NOW);
+    const dot = plain.lastIndexOf('.');
+    const promoted = `${plain.slice(0, dot)}.v${plain.slice(dot)}`;
+    expect(checkFrameTicket(KEY, promoted, HOST, 'w-harbor', NOW).ok).toBe(false);
   });
 
   it('refuses an expired ticket', () => {

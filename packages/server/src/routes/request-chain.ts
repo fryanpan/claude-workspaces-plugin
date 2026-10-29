@@ -448,6 +448,7 @@ export function createRequestChain(
           ownerProven: ownerProven(),
           anyoneProven: provenIdentityFor() !== null,
           mustSignIn: requireSignInToWrite && browserProvedNobody(),
+          frameGrant: gate.frameAppVoice,
         });
       const rq = { req, url, pathname, scope, gate, attribution, ownerProven, mayMintAppVoice };
       return (await serveBoardRoutes(ctx, rq)) ?? (await serveTopLevelRoutes(ctx, rq));

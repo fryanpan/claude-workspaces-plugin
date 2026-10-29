@@ -405,7 +405,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           items: linked.map((i) => ({ taskId: i.taskId, reviewItemId: i.reviewItemId })),
           visitor: Boolean(visitor),
           coachHref: assetHref(readAppAssetManifest(markdownAppDist), 'coach.js'),
-          frame: frameHost?.frameFor(req, Boolean(visitor), workspaceId) ?? null,
+          frame: frameHost?.frameFor(req, Boolean(visitor), workspaceId, mayMintAppVoice) ?? null,
         }),
         browserSentry,
         'mockup',

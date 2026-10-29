@@ -326,6 +326,13 @@ export type Admission =
        */
       widgetDoorGrant: { token: string; origin: string } | null;
       /**
+       * On the frame hostname, a frame cookie whose host page's reader may be
+       * handed an app voice token (`frame-ticket.ts`). The frame's own
+       * request carries no person proof, so this is the only thing it can
+       * say about who the board served. False everywhere else.
+       */
+      frameAppVoice: boolean;
+      /**
        * The agent and board an `at2` bearer proved, or null. Set together
        * with `visitor` (that board), so every visitor rule applies; read by
        * attribution, which writes as that agent, and by the watch-set route,
@@ -442,6 +449,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     let accessIssuedAt: number | null = null;
     /** Set by the widget-door branch below; see the admitted field. */
     let widgetDoorGrant: { token: string; origin: string } | null = null;
+    /** Set by the frame hostname's branch below; see the admitted field. */
+    let frameAppVoice = false;
     /** Set by the board agent door below; see the admitted field. */
     let boardAgent: BoardAgentClaims | null = null;
     /** Set by the board socket door and the board agent door; see the field. */
@@ -582,7 +591,11 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const proof = frameHost.prove(req, pathname, search);
         if (proof.kind === 'redeem') return proof.response;
         if (proof.kind === 'bad_ticket') return frameGateRefusal(404);
-        if (proof.kind === 'public' || proof.kind === 'held') return null;
+        if (proof.kind === 'held') {
+          frameAppVoice = proof.appVoice;
+          return null;
+        }
+        if (proof.kind === 'public') return null;
         // Off the tunnel: a caller on this machine that is not a browser. A
         // browser's frame came from a host page, which handed it a ticket.
         if (!viaTunnel) {
@@ -1053,6 +1066,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       accessIssuedAt,
       visitorHome,
       widgetDoorGrant,
+      frameAppVoice,
       boardAgent,
       leadBoard,
       metaFor,
