@@ -305,6 +305,9 @@ export type Admission =
       visitorMemberKey: string | null;
       /** The email Cloudflare Access verified for this request, if any. */
       accessEmail: string | null;
+      /** When Cloudflare minted the token that proved `accessEmail`, in
+       *  seconds (its verified `iat`), or null. Read by `fresh-signin.ts`. */
+      accessIssuedAt: number | null;
       /**
        * Set when a MEMBER came in through a door that lists their boards at
        * `/` — the share, collaboration or main hostname — carrying the address
@@ -435,6 +438,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      * namespace exists to distrust.
      */
     let accessEmail: string | null = null;
+    /** The `iat` (seconds) of the token that proved `accessEmail`. */
+    let accessIssuedAt: number | null = null;
     /** Set by the widget-door branch below; see the admitted field. */
     let widgetDoorGrant: { token: string; origin: string } | null = null;
     /** Set by the board agent door below; see the admitted field. */
@@ -593,6 +598,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const who = result.email ? normalizeEmail(result.email) : '';
         if (who === '' || !proxiedTrustedEmails.has(who)) return j(403, { error: 'forbidden' });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         return null;
       }
       const decision = classifyHost(req.headers.get('host'), {
@@ -732,6 +738,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await cfAccessVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         // Authenticated for THIS share — but Access only proves the
         // visitor's email domain, not what they may touch. Scope them to
         // the shared board: no doc enumeration, no workspace/diff
@@ -758,6 +765,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await shareLinkVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
 
         // The redeem route, ABOVE the scope check on purpose: `/s/<id>`
         // names no workspace, so `collabScope` would refuse it as an
@@ -806,6 +814,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await collabAccessVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         // Access proves an identity Bryan admitted, not what they may
         // touch. `collabScope` is `shareScopeAllows` with the path's own
         // workspace as the target, so every operator verb a share visitor
@@ -941,6 +950,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           return j(403, { error: 'sharing_disabled' });
         }
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         // Any other email is a MEMBER, not the operator: a visitor on exactly
         // the terms the collaboration hostname gives, never a step past this
         // line into loopback privileges. Membership is either record — a
@@ -976,6 +986,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await cfAccessVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
       }
       // One board closed to outside visitors (`closedBoards` in
       // share/sharing-gate.ts). Only a share, share-link or collab visitor
@@ -1039,6 +1050,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       visitorShareId,
       visitorMemberKey,
       accessEmail,
+      accessIssuedAt,
       visitorHome,
       widgetDoorGrant,
       boardAgent,

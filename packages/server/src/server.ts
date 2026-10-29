@@ -13,7 +13,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
-import { ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
+import { commentTrustOf, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -50,6 +50,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
@@ -64,6 +65,7 @@ import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-watch.ts';
 import { createFrameHost } from './frame-host.ts';
 import { frameKeys } from './frame-ticket.ts';
+import { personProofOf, refuseStaleSignIn } from './fresh-signin.ts';
 import { GithubHub, githubHubPath } from './github-hub.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
@@ -537,6 +539,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // projection it needs. Nothing can fire through it until a doc exists,
   // which is after both.
   let onLiveDocEvent: ((docId: string, payload: WebhookPayload) => void) | null = null;
+  // Late-bound for the same reason: it reads the roster and the board
+  // membership, both built further down. Until then only the owner is trusted.
+  let commentTrustFor: CommentTrustFor | null = null;
+  let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
   const docStore: DocStore = new DocStore({
     dataDir,
     sse,
@@ -551,6 +557,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // A doc being recorded into stays resident: the notes reach it by a door
     // no other eviction hold can see. See `DocStoreConfig.isRecording`.
     isRecording: (docId) => meetingStore.active(docId) !== undefined,
+    commentTrust: (docId, author) => commentTrustFor?.(docId, author) ?? commentTrustOf(author),
+    commentTrustBoards: (docId) => [...(trustBoardsFor?.(docId) ?? [])],
     ...(opts.editSessionIdleMs !== undefined ? { editSessionIdleMs: opts.editSessionIdleMs } : {}),
     ...(summarizer ? { summarizer } : {}),
   });
@@ -1067,6 +1075,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
+    audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
     boardsForDoc,
@@ -1951,6 +1960,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
+    sessionSignedInAtFor,
     refreshSession,
   } = createIdentitySetup({
     dataDir,
@@ -1963,6 +1973,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     policyFor,
     mayCommentOnBoard,
   });
+  commentTrustFor = createCommentTrust({
+    identityOf: (id) => identities.get(id),
+    boardsForDoc,
+    memberOf: audienceMemberOf,
+  });
+  trustBoardsFor = boardsForDoc;
 
   /**
    * Who may reach this server, over which hostname, and as whom — see
@@ -3096,6 +3112,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     localOnlyGate,
     attributeRequest,
     requireSignInToWrite,
+    freshSignInGate: (req, pathname, admitted, widgetIdentity) =>
+      refuseStaleSignIn(
+        req,
+        pathname,
+        personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
+        { shares, now: Date.now() },
+      ),
     authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,

@@ -109,6 +109,9 @@ export const SESSION_REFRESH_AFTER_MS = 24 * 60 * 60 * 1000;
 /** The revocable format. `v1` — expiry-carrying, no session id — is still
  *  accepted by `verifySession` for the cookies minted before the change. */
 const VERSION = 'v2';
+/** `v2` plus the moment of sign-in, which refresh copies unchanged. Minted
+ *  by every login since the fresh-sign-in check (`fresh-signin.ts`). */
+const SIGNED_IN_VERSION = 'v3';
 
 export interface SessionClaims {
   identityId: string;
@@ -119,10 +122,19 @@ export interface SessionClaims {
   issuedAt: number;
   /** ms epoch, v1 cookies only. Null means "never" — the v2 model. */
   expiresAt: number | null;
+  /**
+   * ms epoch: when this person last proved who they are by signing in.
+   * Unlike `issuedAt`, which the daily refresh moves to now, it is set once
+   * at login and carried unchanged. Null for a v1 or v2 cookie, minted
+   * before it existed, which therefore never reads as a fresh sign-in.
+   */
+  signedInAt?: number | null;
 }
 
 /**
- * `v2.<identityId>.<sessionId>.<issuedAt>.<mac>` — opaque to the client.
+ * `v3.<identityId>.<sessionId>.<issuedAt>.<signedInAt>.<mac>` — opaque to the
+ * client. A session with no `signedInAt` encodes as `v2.<identityId>.
+ * <sessionId>.<issuedAt>.<mac>`.
  *
  * Claims without a session id encode as the old `v1.<identityId>.<issuedAt>.
  * <expiresAt>.<mac>`, which exists so tests can mint what old devices hold;
@@ -134,8 +146,11 @@ export interface SessionClaims {
  */
 export const emailSessionToken: TokenFormat<SessionClaims> = {
   keyDomain: 'cw-email-session-v1',
-  tags: [VERSION, 'v1'],
+  tags: [SIGNED_IN_VERSION, VERSION, 'v1'],
   encode(claims) {
+    if (claims.sessionId !== null && typeof claims.signedInAt === 'number') {
+      return `${SIGNED_IN_VERSION}.${claims.identityId}.${claims.sessionId}.${claims.issuedAt}.${claims.signedInAt}`;
+    }
     if (claims.sessionId !== null) {
       return `${VERSION}.${claims.identityId}.${claims.sessionId}.${claims.issuedAt}`;
     }
@@ -143,6 +158,15 @@ export const emailSessionToken: TokenFormat<SessionClaims> = {
   },
   decode(payload) {
     const parts = payload.split('.');
+    if (parts[0] === SIGNED_IN_VERSION) {
+      if (parts.length !== 5) return null;
+      const [, identityId, sessionId, issuedRaw, signedRaw] = parts;
+      const issuedAt = Number(issuedRaw);
+      const signedInAt = Number(signedRaw);
+      if (!identityId || !sessionId) return null;
+      if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(signedInAt)) return null;
+      return { identityId, sessionId, issuedAt, expiresAt: null, signedInAt };
+    }
     if (parts.length !== 4) return null;
     const [version, identityId, thirdRaw, fourthRaw] = parts;
     if (!identityId) return null;
@@ -206,11 +230,13 @@ export function mintSession(identityId: string, now: number = Date.now()): Sessi
     sessionId: randomBytes(16).toString('base64url'),
     issuedAt: now,
     expiresAt: null,
+    signedInAt: now,
   };
 }
 
 /**
- * The sliding extension of a live session. KEEPS the session id — the
+ * The sliding extension of a live session. KEEPS the session id and the
+ * sign-in time — the
  * re-issued cookie is the same session, so a later logout on this device
  * still revokes it. A v1 cookie has no id, so its refresh is the upgrade
  * path: it gains one here and sheds its baked-in expiry.
@@ -221,6 +247,8 @@ export function refreshedSession(claims: SessionClaims, now: number = Date.now()
     sessionId: claims.sessionId ?? randomBytes(16).toString('base64url'),
     issuedAt: now,
     expiresAt: null,
+    // Copied, never reset: a refresh is not a sign-in.
+    signedInAt: claims.signedInAt ?? null,
   };
 }
 

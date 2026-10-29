@@ -129,6 +129,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/api/auth/verify', 'POST'],
     ['share-scope', '/api/auth/session', 'GET'],
     ['trusted-local', '/api/auth/logout', 'POST'],
+    ['trusted-local', '/api/auth/reauth', 'GET'],
     ['trusted-local', '/api/auth/profile', 'POST'],
     ['trusted-local', '/api/share', 'GET'],
     ['trusted-local', '/api/share/enabled', 'POST'],

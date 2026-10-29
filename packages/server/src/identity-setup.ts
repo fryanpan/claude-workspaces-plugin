@@ -327,7 +327,17 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
    * and a revocation list in its failed-closed state (unhealable at boot,
    * or deleted at runtime). Every one of them means "not signed in".
    */
-  const sessionIdentityFor = (req: Request): IdentityRecord | null => {
+  const sessionIdentityFor = (req: Request): IdentityRecord | null =>
+    liveSessionFor(req)?.rec ?? null;
+
+  /** When the live session on this request signed in (ms), or null — no
+   *  session, or one minted before sessions recorded it. */
+  const sessionSignedInAtFor = (req: Request): number | null =>
+    liveSessionFor(req)?.claims.signedInAt ?? null;
+
+  const liveSessionFor = (
+    req: Request,
+  ): { rec: IdentityRecord; claims: NonNullable<ReturnType<typeof verifyEmailSession>> } | null => {
     // Fail closed on a broken revocation list — with it gone, nothing can
     // tell a live session from a logged-out one. Checked here and not only
     // inside `isRevoked` because a surviving v1 cookie has no session id
@@ -346,7 +356,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     // Identity-wide revocation: a cookie minted before the watermark is dead
     // however long it says it lives.
     if (claims.issuedAt < rec.sessionsValidFrom) return null;
-    return rec;
+    return { rec, claims };
   };
 
   /**
@@ -405,6 +415,7 @@ export function createIdentitySetup(ctx: IdentitySetupContext) {
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
+    sessionSignedInAtFor,
     refreshSession,
   };
 }

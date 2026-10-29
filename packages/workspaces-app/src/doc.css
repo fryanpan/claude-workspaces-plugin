@@ -395,6 +395,52 @@ body.has-set .doc-switcher-caret {
 .suggestions-menu button:hover {
   background: var(--bg-hover, rgba(0, 0, 0, 0.04));
 }
+/* The doc's More menu (doc/doc-archive.ts): the same card, anchored under
+   the ⋯ button that opened it, with 44px rows for a finger. */
+#doc-more[hidden] {
+  display: none;
+}
+.more-menu {
+  right: var(--more-right, 8px);
+}
+.more-menu button {
+  min-height: 44px;
+}
+.more-menu button:disabled {
+  color: var(--fg-muted);
+  cursor: default;
+}
+.more-menu button:disabled:hover {
+  background: transparent;
+}
+/* The bar an archived doc's page shows, with the way back. */
+.archived-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--bg-subtle, #f6f8fa);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.archived-bar[hidden] {
+  display: none;
+}
+.archived-undo {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+body.is-archived #editor .ProseMirror {
+  opacity: 0.55;
+}
 
 #editor-pane {
   /* Anchors the floating diff/file view toggle AND the plan-approve float
