@@ -163,6 +163,7 @@ function baseFiler(board: NotesQualityBoard): NotesQualityFiler {
     legEnded: () => {},
     legBegan: () => {},
     heldCount: () => 0,
+    settled: async () => {},
   };
 }
 

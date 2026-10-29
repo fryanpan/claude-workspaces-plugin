@@ -47,6 +47,7 @@ import { haikuEffortEstimator } from '../packages/server/src/effort-estimator.ts
 import { haikuMeetingNamer } from '../packages/server/src/meeting-namer.ts';
 import { createHaikuNotesComposer } from '../packages/server/src/meeting-notes-composer.ts';
 import { createHaikuTaskCaptureExtractor } from '../packages/server/src/meeting-task-capture.ts';
+import { haikuCoverageJudge } from '../packages/server/src/notes-coverage-judge.ts';
 import { createNotesMethodComposer } from '../packages/server/src/notes-method-composer.ts';
 import { haikuRelayFilter } from '../packages/server/src/org-relay/relay-filter.ts';
 import { haikuReviewJudge } from '../packages/server/src/review-judge.ts';
@@ -74,6 +75,7 @@ function driveEveryPath(): void {
   createNotesMethodComposer({ methodFor: () => 'original' });
   createHaikuTaskCaptureExtractor({});
   haikuMeetingNamer({});
+  haikuCoverageJudge({});
   haikuVoiceComplete({});
   createHaikuTidy({});
   haikuEffortEstimator({});

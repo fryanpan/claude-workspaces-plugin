@@ -988,6 +988,9 @@ export type MeetingNotesOptions = Omit<MeetingNotesDeps, 'onNotes'> & {
   /** Names the meeting from its notes (`meeting-titler.ts`). The server
    *  supplies the store around it; absent, a meeting keeps its title. */
   titleNamer?: import('./meeting-namer.ts').MeetingNamer | null;
+  /** Reads, once a meeting is over, what its notes left out
+   *  (`notes-coverage-judge.ts`). Absent, the lexical reading stands. */
+  coverageJudge?: import('./notes-coverage-judge.ts').NotesCoverageJudge | null;
 };
 
 export interface MeetingNotesSession {
@@ -1725,10 +1728,10 @@ export function beginNotesSession(
       // NEXT tick's overlap, never their own. Same multi gate as `turns`:
       // the capture pass must see exactly the window its guards see.
       const priorTurns = multi ? priorRaw.map(withNames) : priorRaw.map(bare);
+      const recent = recentSpeech(priorTurns, turns);
       priorRaw = raw;
       if (deps.captureIntents) {
         const captureStart = clock();
-      const recent = recentSpeech(priorTurns, turns);
         try {
           const captured = await deps.captureIntents({
             docId: ids.docId,
@@ -1893,10 +1896,10 @@ export function beginNotesSession(
         dictation: dictation.see(turns),
         multiSpeaker: multi,
         ...(retries.length > 0 ? { missed: retries } : {}),
+        ...(recent.length > 0 ? { recent } : {}),
         outline,
         ...(notesHeadingId !== undefined ? { notesHeadingId } : {}),
         ...(humanNotes.length > 0 ? { humanNotes } : {}),
-        ...(recent.length > 0 ? { recent } : {}),
         ...(context ? { context } : {}),
         ...(taskLinks.length > 0 ? { taskLinks } : {}),
         ...(docLinks.length > 0 ? { docLinks } : {}),

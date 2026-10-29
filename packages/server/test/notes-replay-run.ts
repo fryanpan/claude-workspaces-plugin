@@ -41,6 +41,7 @@ import {
   beginNotesSession,
 } from '../src/meeting-notes.ts';
 import { meetingIndexPath, meetingTranscriptPath } from '../src/meetings.ts';
+import type { NotesCoverageJudge } from '../src/notes-coverage-judge.ts';
 import type { NotesQualityBoard } from '../src/notes-quality-review.ts';
 import { oneDocStore } from './notes-doc-helpers.ts';
 
@@ -56,6 +57,9 @@ export interface ReplayRunInput {
   endpointLagMs?: number;
   /** Wall clock the replay clock runs on while a call is in flight. */
   wall?: () => number;
+  /** The at-stop reading of what the notes left out, as the server wires it.
+   *  Absent, the lexical reading stands. */
+  coverageJudge?: NotesCoverageJudge;
 }
 
 export interface ReplayFiling {
@@ -135,9 +139,21 @@ export async function runReplay(input: ReplayRunInput): Promise<ReplayRunResult>
       return { ok: true };
     },
   };
+  // The judge runs after a meeting's last leg, at wall speed and off the
+  // replay clock; the run waits for every reading it started.
+  const judging = new Set<Promise<unknown>>();
+  const judge = input.coverageJudge;
+  const coverageJudge: NotesCoverageJudge | undefined = judge
+    ? (args) => {
+        const run = judge(args);
+        judging.add(run);
+        return run;
+      }
+    : undefined;
   const deps = withServerNotesSinks(
     {
       composer,
+      ...(coverageJudge ? { coverageJudge } : {}),
       schedule: clock,
       now: () => clock.now(),
       onError: (m) => errors.push(m),
@@ -219,6 +235,9 @@ export async function runReplay(input: ReplayRunInput): Promise<ReplayRunResult>
     }
     // Whatever grace a filer still holds runs out on the replay clock.
     await driveReplay(clock, [], clock.now() + GRACE_HORIZON_MS);
+    // And a judge still reading finishes, and its filing lands.
+    await Promise.allSettled([...judging]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
     Date.now = realNow;
   }

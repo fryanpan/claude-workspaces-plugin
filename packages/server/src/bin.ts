@@ -158,7 +158,7 @@ const {
   meetingBot,
   calendarBot,
   notesComposer,
-  titleNamer,
+  meetingJudges: judges,
   coachSummarizer,
   pluginRefresher,
   deployer,
@@ -308,7 +308,7 @@ while (!handle) {
       // On unless `CW_MEETING_CLAUDE=0` (Bryan, 2026-10-02: on by default).
       meetingClaude: process.env.CW_MEETING_CLAUDE?.trim() !== '0',
       ...(meetingBotWebhookSecret ? { meetingBotWebhookSecret } : {}),
-      ...(notesComposer ? { meetingNotes: { composer: notesComposer, titleNamer } } : {}),
+      ...(notesComposer ? { meetingNotes: { composer: notesComposer, ...judges } } : {}),
       ...(pluginRefresher ? { pluginRefresher } : {}),
       ...(deployer ? { deployer } : {}),
       // The one construction of the real discovery reader — the seam rule

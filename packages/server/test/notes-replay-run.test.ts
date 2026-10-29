@@ -10,7 +10,9 @@ import { join } from 'node:path';
 import { planMeetings } from '../../../scripts/notes-replay-lib.ts';
 import type { NotesComposer } from '../src/meeting-notes.ts';
 import { meetingIndexPath, meetingTimingPath, meetingTranscriptPath } from '../src/meetings.ts';
+import type { NotesCoverageJudge } from '../src/notes-coverage-judge.ts';
 import { notesTopicHashes } from '../src/notes-heading-level.ts';
+import { notesQualityFiledPath } from '../src/notes-quality-filed-store.ts';
 import { readTickWaits } from '../src/notes-tick-timing.ts';
 import { runReplay } from './notes-replay-run.ts';
 import { addNotes } from './notes-tick-harness.ts';
@@ -140,6 +142,41 @@ describe('runReplay', () => {
       },
     });
     expect(result.filings.map((f) => f.op)).toContain('file');
+  });
+
+  it('reads what the notes left out once per meeting, after its last leg, and files it', async () => {
+    const run = async (judge?: NotesCoverageJudge) => {
+      const dataDir = mkdtempSync(join(tmpdir(), 'notes-replay-'));
+      dirs.push(dataDir);
+      const result = await runReplay({
+        docId: DOC,
+        meetings: meeting(),
+        dataDir,
+        // One tidy note per tick: past no lexical bar.
+        composer: {
+          name: 'one note',
+          compose: async (input) => addNotes(input, `- ${input.tick.turns[0]?.text ?? 'A point'}`),
+        },
+        ...(judge ? { coverageJudge: judge } : {}),
+      });
+      const filed = notesQualityFiledPath(dataDir, DOC, MEETING);
+      const kinds = existsSync(filed)
+        ? (JSON.parse(readFileSync(filed, 'utf8')) as { verdict?: { kinds?: string[] } }).verdict
+            ?.kinds
+        : undefined;
+      return { result, kinds };
+    };
+    let calls = 0;
+    const lossy: NotesCoverageJudge = async () => {
+      calls++;
+      return { ideas: 20, lost: 5, windows: 1, judgedWindows: 1 };
+    };
+    const judged = await run(lossy);
+    expect(calls).toBe(1);
+    expect(judged.result.filings.map((f) => f.op)).toContain('file');
+    expect(judged.kinds).toContain('coverage');
+    const unjudged = await run();
+    expect(unjudged.result.filings).toEqual([]);
   });
 
   it('restores the real clock afterwards', async () => {

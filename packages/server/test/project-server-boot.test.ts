@@ -74,6 +74,7 @@ describe('a project server started without its org key', () => {
       'answerCoverage',
       'effortEstimator',
       'titleNamer',
+      'coverageJudge',
       'coachSummarizer',
     ]) {
       expect(report.built[name], name).toBe(false);

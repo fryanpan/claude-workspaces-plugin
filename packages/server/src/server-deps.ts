@@ -31,6 +31,7 @@ import {
 import { KEEPER_URL_ENV, keeperFetch } from './keeper/keeper-client.ts';
 import { stamped } from './log-stamp.ts';
 import { haikuMeetingNamer } from './meeting-namer.ts';
+import { haikuCoverageJudge } from './notes-coverage-judge.ts';
 import { createNotesMethodComposer } from './notes-method-composer.ts';
 import { readNotesMethod } from './notes-method-store.ts';
 import { createPluginRefresher } from './plugin-refresh.ts';
@@ -378,6 +379,9 @@ export function createServerDeps(
   // notes that composer wrote. Absent key or CW_MEETING_TITLES=0 → null → a
   // meeting keeps the title it was created with until somebody renames it.
   const titleNamer = haikuMeetingNamer();
+  // The at-stop reading of what a meeting's notes left out: same key, and it
+  // sends the notes and the transcript the composer already read.
+  const coverageJudge = haikuCoverageJudge();
 
   // The ONLY place the real coach summariser is constructed. What it sends is
   // what the coach session already reads; absent key or CW_COACH_SUMMARIES=0
@@ -443,7 +447,7 @@ export function createServerDeps(
     meetingBot,
     calendarBot,
     notesComposer,
-    titleNamer,
+    meetingJudges: { titleNamer, coverageJudge },
     coachSummarizer,
     pluginRefresher,
     deployer,

@@ -1701,6 +1701,26 @@ rates ever come back from that half: an example line is a line of somebody's
 meeting restated, so the harness withholds every example — lost ideas and
 failed bullets alike — whenever the corpus resolves outside this repo.
 
+**The report reads the meaning once the meeting is over** (2026-10-28). The
+lexical check read 0-3% uncovered on four replayed meetings where a judge
+found 11-24% of the ideas missing, so a meeting that lost ideas was never
+reported. Matching against one bullet rather than the whole notes did not
+help: a model-written list of each meeting's ideas scored worse than the notes
+themselves. So the quality filer's `amend` step runs `notes-coverage-judge.ts`
+at its commit, after the last leg: one Haiku call per ~3,000 characters of
+speech lists the points that stretch made and says which no note carries, and
+its share replaces the lexical one on the item, with the `coverage` flag at
+the goal's one-in-twenty. It runs once per meeting, not per leg; on the four
+replays it cost under three cents a meeting. `CW_NOTES_COVERAGE_JUDGE=0` turns
+it off.
+
+**A tick sees the speech just before its own** (`notes-recent-speech.ts`,
+2026-10-28). The ceiling cuts a long answer into slices, and the third slice
+of a status round-up read alone is fragments with no subject: replays showed
+a finished item noted as pending and the second half of an answer filed as a
+new topic. The previous tick's speech, cut from its end to 600 characters,
+rides each prompt after the outline, marked as already noted.
+
 **CI runs the smoke slice once a day, not once a push.** It is the only
 thing in this repo's CI that spends money, and Bryan's bar is a dollar a
 day — a per-PR job cannot promise that, because it costs whatever the day's

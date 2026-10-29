@@ -33,6 +33,10 @@ import {
   type NotesComposer,
   createStubNotesComposer,
 } from '../packages/server/src/meeting-notes.ts';
+import {
+  type NotesCoverageJudge,
+  createCoverageJudge,
+} from '../packages/server/src/notes-coverage-judge.ts';
 import { createNotesMethodComposer } from '../packages/server/src/notes-method-composer.ts';
 import { readNotesMethod } from '../packages/server/src/notes-method-store.ts';
 import { createPromptStore } from '../packages/server/src/prompt-store.ts';
@@ -128,6 +132,20 @@ function shippedComposer(meter: SpendMeter, outDir: string, dataDir: string): No
   return composer;
 }
 
+/** The at-stop coverage judge the server wires, on the eval key. */
+function evalCoverageJudge(meter: SpendMeter): NotesCoverageJudge {
+  const credential = resolveEvalCredentialFrom(undefined, readKeychainPassword, process.env);
+  if (!credential || credential.kind !== 'key') {
+    console.error(EVAL_CREDENTIAL_HELP);
+    process.exit(2);
+  }
+  return createCoverageJudge({
+    apiKey: credential.value,
+    fetchImpl: meter.fetch(),
+    onError: (m) => console.error(`[replay] ${m}`),
+  });
+}
+
 async function main(argv: string[]): Promise<number> {
   const folder = argv.find((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));
   const out = flag(argv, '--out');
@@ -150,6 +168,7 @@ async function main(argv: string[]): Promise<number> {
   mkdirSync(dataDir, { recursive: true });
   const meter = new SpendMeter(stub ? Number.POSITIVE_INFINITY : cap);
   const composer = stub ? createStubNotesComposer() : shippedComposer(meter, runDir, dataDir);
+  const coverageJudge = stub ? undefined : evalCoverageJudge(meter);
   const lag = flag(argv, '--endpoint-lag');
   const legs = plan.meetings.reduce((n, m) => n + m.legs.length, 0);
   const turns = plan.meetings.reduce(
@@ -165,6 +184,7 @@ async function main(argv: string[]): Promise<number> {
     seedNames: plan.seedNames,
     dataDir,
     composer,
+    ...(coverageJudge ? { coverageJudge } : {}),
     ...(lag !== undefined ? { endpointLagMs: Number(lag) } : {}),
   });
   const wallMs = Math.round(performance.now() - t0);
