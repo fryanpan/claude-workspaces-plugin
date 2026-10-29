@@ -271,6 +271,9 @@ export interface RequestAdmissionContext {
   frameHost: FrameHost | null;
   /** What a board agent token still grants (`auth/board-agent-token.ts`). */
   boardAgentGrantFor: (bearer: string) => BoardAgentClaims | null;
+  /** Whether a board token id is one the server holds for a board socket
+   *  session (`BoardAgentTokens.isHeld`). */
+  boardAgentHeld: (tokenId: string) => boolean;
   /** The board whose socket a request arrived on (`board-sockets.ts`), or null. */
   boardOfSocket: (req: Request) => string | null;
   /** The agent an `at1` bearer names, or null when it does not verify. */
@@ -323,12 +326,28 @@ export type Admission =
        */
       widgetDoorGrant: { token: string; origin: string } | null;
       /**
+       * On the frame hostname, a frame cookie whose host page's reader may be
+       * handed an app voice token (`frame-ticket.ts`). The frame's own
+       * request carries no person proof, so this is the only thing it can
+       * say about who the board served. False everywhere else.
+       */
+      frameAppVoice: boolean;
+      /**
        * The agent and board an `at2` bearer proved, or null. Set together
        * with `visitor` (that board), so every visitor rule applies; read by
        * attribution, which writes as that agent, and by the watch-set route,
        * which serves it that board's watches only.
        */
       boardAgent: BoardAgentClaims | null;
+      /**
+       * The board this request is that board's LEAD on, or null
+       * (`middleware/lead-scope.ts`): it arrived on the board's own socket,
+       * or carries the board token the server holds for a session opened
+       * there. Set together with `visitor` (that board), so every visitor
+       * rule still applies; the few routes a lead may use past a member
+       * read this to let it through on that board and no other.
+       */
+      leadBoard: string | null;
       /** Doc metadata as this caller may see it. */
       metaFor: MetaForVisitor;
       /**
@@ -394,6 +413,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     docTypeOf,
     frameHost,
     boardAgentGrantFor,
+    boardAgentHeld,
     boardOfSocket,
     agentOfToken,
   } = ctx;
@@ -429,8 +449,12 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     let accessIssuedAt: number | null = null;
     /** Set by the widget-door branch below; see the admitted field. */
     let widgetDoorGrant: { token: string; origin: string } | null = null;
+    /** Set by the frame hostname's branch below; see the admitted field. */
+    let frameAppVoice = false;
     /** Set by the board agent door below; see the admitted field. */
     let boardAgent: BoardAgentClaims | null = null;
+    /** Set by the board socket door and the board agent door; see the field. */
+    let leadBoard: string | null = null;
     /** Set by `memberDoor` below; see the admitted field. */
     let visitorHome: { signedInAs: string } | null = null;
     /** Where a refused visitor's page links for their list, or null on a door
@@ -536,12 +560,13 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           j,
         });
         if (!door.ok) return door.response;
-        // A board closed to outside visitors is closed here as on TCP, where
-        // the check at the end of this run refuses a board token.
-        if (!sharingGate.isBoardOpen(socketBoard)) return refuseVisitor('sharing_disabled');
+        // No board lock here: closing a board to outside visitors shuts the
+        // door on people outside this machine, and the board's own socket is
+        // its lead's, on it.
         visitor = door.target;
         visitorMemberKey = door.memberKey;
         boardAgent = door.agent;
+        leadBoard = socketBoard;
         return null;
       }
       // The frame-only hostname (frame-host.ts): two read families, for the
@@ -566,7 +591,11 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const proof = frameHost.prove(req, pathname, search);
         if (proof.kind === 'redeem') return proof.response;
         if (proof.kind === 'bad_ticket') return frameGateRefusal(404);
-        if (proof.kind === 'public' || proof.kind === 'held') return null;
+        if (proof.kind === 'held') {
+          frameAppVoice = proof.appVoice;
+          return null;
+        }
+        if (proof.kind === 'public') return null;
         // Off the tunnel: a caller on this machine that is not a browser. A
         // browser's frame came from a host page, which handed it a ticket.
         if (!viaTunnel) {
@@ -705,12 +734,14 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
           proxiedVerifier: proxiedTrustedVerifier,
           grantFor: boardAgentGrantFor,
           workspacesOf: shareWorkspacesOf,
+          held: boardAgentHeld,
           j,
         });
         if (!door.ok) return door.response;
         visitor = door.target;
         visitorMemberKey = door.memberKey;
         boardAgent = door.grant;
+        if (door.lead) leadBoard = door.grant.boardId;
       } else if (decision.kind === 'share') {
         if (!cfAccessVerifier) {
           // A share exists but we cannot verify Access tokens — refuse
@@ -975,8 +1006,14 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       // carries a `visitor` target, so the owner's own hostname and every
       // local caller never reach this line. Spelled like the master switch:
       // this caller was already admitted to the board, so naming the reason
-      // tells them nothing they could not see.
-      if (visitor?.workspaceId && !sharingGate.isBoardOpen(visitor.workspaceId)) {
+      // tells them nothing they could not see. The board's own lead is not
+      // outside: its socket returned above, and the token the server holds
+      // for a session opened there is let through here.
+      if (
+        visitor?.workspaceId &&
+        leadBoard !== visitor.workspaceId &&
+        !sharingGate.isBoardOpen(visitor.workspaceId)
+      ) {
         return refuseVisitor('sharing_disabled');
       }
       return null;
@@ -1029,7 +1066,9 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       accessIssuedAt,
       visitorHome,
       widgetDoorGrant,
+      frameAppVoice,
       boardAgent,
+      leadBoard,
       metaFor,
       roleFor,
       requireOwner,

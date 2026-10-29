@@ -19,6 +19,7 @@ import {
   deterministicBrief,
 } from '../src/home-brief.ts';
 import { createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
 const NOW = 1_770_000_000_000;
 
@@ -145,15 +146,24 @@ describe('the Home route reads what each answered item asked', () => {
   const AGENT = { id: 'agent-riverbend', name: 'Riverbend Bot', kind: 'known', color: '#888888' };
   let dataDir: string;
   let handle: ReturnType<typeof createServer>;
-  let local: (path: string, body?: unknown) => Promise<Response>;
+  let local: (path: string, body?: unknown, headers?: Record<string, string>) => Promise<Response>;
 
   beforeAll(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'home-brief-shapes-'));
-    handle = createServer({ port: 0, dataDir, secretWriter: async () => ({ ok: true }) });
-    local = (path, body) =>
+    handle = createServer({
+      port: 0,
+      dataDir,
+      ownerEmail: 'owner@harborlight.test',
+      secretWriter: async () => ({ ok: true }),
+    });
+    local = (path, body, headers = {}) =>
       fetch(`http://127.0.0.1:${handle.port}${path}`, {
         ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
-        headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
+        headers: {
+          host: `localhost:${handle.port}`,
+          'content-type': 'application/json',
+          ...headers,
+        },
       });
   });
   afterAll(async () => {
@@ -197,14 +207,23 @@ describe('the Home route reads what each answered item asked', () => {
         }),
       )
     ).item.id;
+    // The secrets door takes only the owner, signed in on the board page.
+    const owner = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'owner@harborlight.test',
+      name: 'Alice',
+    });
     await json(
-      await local(`/workspaces/${ws}/tasks/${task}/review-items/${item}/secrets`, {
-        author: { id: 'known-riley', name: 'Riley', kind: 'known', color: '#2e7dd7' },
-        secrets: secrets.map((s) => ({ service: s.service, value: 'not-a-real-value' })),
-      }),
+      await local(
+        `/workspaces/${ws}/tasks/${task}/review-items/${item}/secrets`,
+        {
+          author: owner.user,
+          secrets: secrets.map((s) => ({ service: s.service, value: 'not-a-real-value' })),
+        },
+        owner.headers,
+      ),
     );
     const home = await json<{ brief: { markdown: string } }>(
-      await local(`/workspaces/${ws}/home?user=Riley&format=json`),
+      await local(`/workspaces/${ws}/home?user=Alice&format=json`),
     );
     expect(home.brief.markdown).toContain('**Handed over:** 2 values');
     expect(home.brief.markdown).not.toContain('**Decided:**');

@@ -42,6 +42,7 @@ import { type AnswerCoverage, threadOpenParts, ticketOpenParts } from './answer-
 import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import { fixedHostFetch } from './outbound-fetch.ts';
 import { compareSemver } from './plugin-release.ts';
+import { answersAsPerson, isUnprovenActor } from './review-items/answer-proof.ts';
 import { readKeychainPassword } from './share/keychain.ts';
 import { HAIKU_NO_THINKING, resolveKeySlotFrom } from './summarize.ts';
 import { resolveAssignee } from './task-owner.ts';
@@ -611,6 +612,15 @@ export class VoiceRouter {
         );
       }
       case 'answer-review': {
+        // A person's answer needs that person's proof
+        // (`review-items/answer-proof.ts`); the door marked an actor it did
+        // not prove, and the agent hears the utterance instead.
+        if (isUnprovenActor(plan.actor) && answersAsPerson(plan.actor)) {
+          return {
+            kind: 'defer',
+            note: 'An answer is recorded only from your own signed-in page.',
+          };
+        }
         // The words posted are the speaker's (the transcript, or the transcript
         // minus its spoken "answer:" prefix) or the STORE's (an option label).
         // Never the model's.

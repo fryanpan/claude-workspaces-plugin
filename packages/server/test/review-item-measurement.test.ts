@@ -30,10 +30,19 @@ import {
 } from '../src/review-items/analytics.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { LEGACY_REVIEW_ITEM_ID, type Task, eventsLogPath } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = { id: 'agent-ledger-keeper', name: 'Ledger Keeper', kind: 'known', color: '#888888' };
-const PERSON = { id: 'known-harborlight', name: 'Harborlight', kind: 'known', color: '#2e7dd7' };
+/** Harborlight, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Harborlight',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 
 /** Planted strings. Nothing else in the fixture says these words, so finding
  *  one in a row is proof that row carried the text it came from. */
@@ -135,7 +144,7 @@ describe('what a viewed and an answered item write to the board log', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -223,6 +232,12 @@ describe('what a viewed and an answered item write to the board log', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'review-item-measurement-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'harborlight@harborlight.example',
+      name: 'Harborlight',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     wsId = await seedBoard(base, { name: 'tideline' });
   });
   afterAll(async () => {

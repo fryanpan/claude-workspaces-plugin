@@ -1,5 +1,6 @@
 import { mediaTypeOf } from '@claude-workspaces/core';
 import type { DocStore } from '../doc-store.ts';
+import { boundFiles } from '../slow-fs.ts';
 
 /**
  * A video or image in an attached folder, as bytes.
@@ -26,8 +27,13 @@ import type { DocStore } from '../doc-store.ts';
  * under `attachments/<setId>/` is.
  *
  * Streamed from `Bun.file`, never read whole: a recording is megabytes and a
- * mounted run directory can be gigabytes.
+ * mounted run directory can be gigabytes. The exception is a file under a
+ * walled lead's project (`boundFiles.guards`): its bytes come from the descriptor that
+ * was judged, so a folder link swapped in after the check serves nothing,
+ * and at most {@link GUARDED_RAW_MAX} bytes are read for one answer.
  */
+export const GUARDED_RAW_MAX = 16 * 1024 * 1024;
+
 export async function serveReviewRaw(
   docStore: DocStore,
   j: (status: number, body: unknown) => Response,
@@ -61,6 +67,20 @@ export async function serveReviewRaw(
       status: 416,
       headers: { ...headers, 'content-range': `bytes */${size}` },
     });
+  }
+  const guarded = await guardedBytes(res.abs, range, size);
+  if (guarded === 'too-large') {
+    return j(413, { error: 'ask for a byte range: this file is too large to serve whole' });
+  }
+  if (guarded === 'refused') return j(404, { error: 'not-listed' });
+  if (guarded) {
+    headers['content-length'] = String(guarded.bytes.length);
+    if (range.kind === 'partial') {
+      headers['content-range'] =
+        `bytes ${range.start}-${range.start + guarded.bytes.length - 1}/${size}`;
+    }
+    const body = req.method === 'HEAD' ? null : guarded.bytes;
+    return new Response(body, { status: range.kind === 'full' ? 200 : 206, headers });
   }
   const file = Bun.file(res.abs);
   if (range.kind === 'full') {
@@ -112,4 +132,28 @@ export function parseByteRange(header: string | null, size: number): ByteRange {
   const end = last === '' ? size - 1 : Math.min(Number(last), size - 1);
   if (end < start) return { kind: 'unsatisfiable' };
   return { kind: 'partial', start, end };
+}
+
+/**
+ * The bytes for a file under a walled lead's project, read from the judged descriptor,
+ * or null for any other set. A range longer than {@link GUARDED_RAW_MAX} is
+ * shortened (the answer's `content-range` says so, and a player asks again);
+ * a whole file longer than that is refused.
+ */
+async function guardedBytes(
+  abs: string,
+  range: Exclude<ByteRange, { kind: 'unsatisfiable' }>,
+  size: number,
+): Promise<{ bytes: Uint8Array<ArrayBuffer> } | 'too-large' | 'refused' | null> {
+  if (!boundFiles.guards.covers(abs)) return null;
+  if (range.kind === 'full' && size > GUARDED_RAW_MAX) return 'too-large';
+  const start = range.kind === 'full' ? 0 : range.start;
+  const end = range.kind === 'full' ? size - 1 : Math.min(range.end, start + GUARDED_RAW_MAX - 1);
+  if (end < start) return { bytes: new Uint8Array(0) };
+  try {
+    const read = boundFiles.guards.readRange(abs, start, end);
+    return read ? { bytes: await read } : null;
+  } catch {
+    return 'refused';
+  }
 }

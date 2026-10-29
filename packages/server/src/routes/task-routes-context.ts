@@ -14,6 +14,7 @@ import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { PermissionGrants } from '../permission-grants.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ReviewGate } from '../review-gate-types.ts';
+import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { SecretWriter } from '../secret-store.ts';
 import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
@@ -247,6 +248,9 @@ export interface TaskRouteRequest {
   /** The owner gate: `null` for the board's owner, the 403 for anyone else.
    *  Read by the owner-only review item — see `handleTaskReviewItems`. */
   requireOwner: (workspaceId: string) => Response | null;
+  /** The board this request is that board's lead on (the admission gate's
+   *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
+  leadBoard?: string | null;
   /**
    * The PERSON this request proved — the Access email or the signed session
    * cookie — or null. Never a body's claim, a widget token or an agent
@@ -262,6 +266,10 @@ export interface TaskRouteRequest {
    * caller that does not pass it fails closed.
    */
   requestOriginFor?: () => string;
+  /** What this request proved about a person, read by every door that
+   *  records an answer (`review-items/answer-proof.ts`). Undefined refuses
+   *  every person's answer. */
+  answerProof?: AnswerProofInputs;
 }
 
 /**

@@ -24,11 +24,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isBookkeepingEvent } from '../../mcp/src/bookkeeping-events.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = 'agent-harborlight';
-const PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
+/** Signed in on the board page by each case's setup: a person's answer is
+ *  recorded only from that person's own proven request. */
+let PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
 const ASKER = { id: AGENT, name: 'Harborlight', kind: 'agent' };
 
 type Frame = { event: string; data: Record<string, unknown> };
@@ -79,11 +82,18 @@ describe('a click a person made wakes no agent', () => {
   let base: string;
   let WS = '';
   let docId = '';
+  let personHeaders: Record<string, string> = {};
 
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
+      headers: {
+        host: `localhost:${handle.port}`,
+        'content-type': 'application/json',
+        ...((body as { author?: { id?: string } } | null)?.author?.id === PERSON.id
+          ? personHeaders
+          : {}),
+      },
       body: JSON.stringify(body),
     });
   const get = (path: string) =>
@@ -128,6 +138,13 @@ describe('a click a person made wakes no agent', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    // The page's origin is the Host these requests name, not the socket's.
+    const reviewer = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'reviewer@harborlight.example',
+      name: 'Reviewer',
+    });
+    PERSON = reviewer.user;
+    personHeaders = reviewer.headers;
     const path = join(srcDir, 'doc-one.md');
     writeFileSync(path, '# doc-one\n\nBody.\n');
     const res = await post(`/workspaces/${WS}/docs`, {

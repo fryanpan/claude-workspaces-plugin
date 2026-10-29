@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import type { AnswerCoverageInput } from '../src/answer-coverage.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 
 /** Three questions of one kind — the shape a single sentence can settle. */
 const THREE_TIPS = {
@@ -53,6 +54,9 @@ let dataDir = '';
 let base = '';
 let verdict: { open: string[] } | null = null;
 let calls: AnswerCoverageInput[] = [];
+/** The harness's reviewer, signed in on the board page by `boot`: a person's
+ *  answer is recorded only from that person's own proven request. */
+let reviewer: SignedInPerson | undefined;
 
 function boot(): void {
   dataDir = mkdtempSync(join(tmpdir(), 'blanket-answer-'));
@@ -68,6 +72,10 @@ function boot(): void {
     },
   });
   base = `http://127.0.0.1:${handle.port}`;
+  reviewer = signedInPerson(handle, dataDir, base, {
+    email: 'alice@harborlight.example',
+    name: PERSON.name,
+  });
 }
 
 afterEach(async () => {
@@ -76,10 +84,10 @@ afterEach(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-const post = (path: string, body: unknown) =>
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
   });
 const jj = async <T>(res: Response | Promise<Response>): Promise<T> => {
@@ -109,10 +117,11 @@ async function fileItem(review: unknown): Promise<{ ws: string; taskId: string; 
 
 const answer = (ws: string, taskId: string, itemId: string, text: string) =>
   jj<{ item: Item; openParts?: string[] }>(
-    post(`/workspaces/${ws}/tasks/${taskId}/review-items/${itemId}/answer`, {
-      author: PERSON,
-      text,
-    }),
+    post(
+      `/workspaces/${ws}/tasks/${taskId}/review-items/${itemId}/answer`,
+      { author: reviewer?.user, text },
+      reviewer?.headers,
+    ),
   );
 
 async function queueRow(ws: string, itemId: string): Promise<QueueRow | undefined> {

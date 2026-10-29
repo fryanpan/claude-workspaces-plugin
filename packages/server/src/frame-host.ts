@@ -109,8 +109,9 @@ export type FrameProof =
   | { kind: 'bad_ticket' }
   /** The widget's public scripts, which anyone may read. */
   | { kind: 'public' }
-  /** A cookie that opens this board's frames on this hostname. */
-  | { kind: 'held' }
+  /** A cookie that opens this board's frames on this hostname, and whether
+   *  its host page's reader may be handed an app voice token. */
+  | { kind: 'held'; appVoice: boolean }
   | { kind: 'none' };
 
 export interface FrameHost {
@@ -122,9 +123,15 @@ export interface FrameHost {
    * Where a host page should frame board `workspaceId`'s attachment, with a
    * fresh ticket, or null for the opaque same-host frame: a share visitor's
    * page, a page on a hostname that is not a board hostname, and the frame
-   * hostname itself.
+   * hostname itself. `appVoice` is the host page's `mayMintAppVoice`
+   * verdict for its reader, carried in the ticket to the frame.
    */
-  frameFor(req: Request, visitor: boolean, workspaceId: string): FrameTarget | null;
+  frameFor(
+    req: Request,
+    visitor: boolean,
+    workspaceId: string,
+    appVoice?: boolean,
+  ): FrameTarget | null;
   /** What this frame hostname request proves (`FrameProof`). Run after `frameGate`. */
   prove(req: Request, pathname: string, search: URLSearchParams): FrameProof;
   /** The frame response's policy on the frame hostname. */
@@ -209,12 +216,12 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
   return {
     origin: opts.origin,
     isFrameHost,
-    frameFor: (req, visitor, workspaceId) => {
+    frameFor: (req, visitor, workspaceId, appVoice = false) => {
       if (visitor || isFrameHost(req)) return null;
       if (!boards.has(normalizeHost(req.headers.get('host')))) return null;
       return {
         origin: opts.origin,
-        ticket: mintFrameTicket(opts.keys().ticket, frameHost, workspaceId),
+        ticket: mintFrameTicket(opts.keys().ticket, frameHost, workspaceId, Date.now(), appVoice),
       };
     },
     prove: (req, pathname, search) => {
@@ -242,10 +249,17 @@ export function createFrameHost(opts: FrameHostOptions): FrameHost {
           }),
         };
       }
-      const held = frameCookiesOf(req.headers.get('cookie')).some(
-        (v) => checkFrameCookie(keys.cookie, v, frameHost, ws).ok,
-      );
-      return held ? { kind: 'held' } : { kind: 'none' };
+      // A page's script may plant a cookie beside the real one, but cannot
+      // sign one, so any cookie that verifies speaks for its host page.
+      let held = false;
+      let appVoice = false;
+      for (const v of frameCookiesOf(req.headers.get('cookie'))) {
+        const c = checkFrameCookie(keys.cookie, v, frameHost, ws);
+        if (!c.ok) continue;
+        held = true;
+        appVoice ||= c.appVoice;
+      }
+      return held ? { kind: 'held', appVoice } : { kind: 'none' };
     },
     frameCsp: `sandbox ${FRAME_HOST_SANDBOX}; frame-ancestors ${frameAncestors([...boards])}`,
     sameSiteBoardHosts: sameSiteHosts(frameHost, [...boards]),

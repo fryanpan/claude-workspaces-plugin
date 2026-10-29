@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -217,7 +217,14 @@ run for a request whatever path it named. `board-sockets.ts` joins them: it
 opens one more listener per board, a unix socket, that records the board for
 each request it accepts and hands it to the same front door, where
 `middleware/board-socket-door.ts` holds the request to that board. It names
-no path. `server-options.ts` holds
+no path. `board-socket-roots.ts` sits beside it as a store: the projects
+each walled lead can write, which `routes/board-socket-roots.ts` sets from
+loopback. `bound-path-guard.ts` is the read and write the bound-file
+reader (`slow-fs.ts`) uses under those roots, each checked by where the
+open file really is. `git-hardening.ts` decides where the server runs no
+git at all (a repository holding such a project) and the options every
+other git read passes, so a repository's settings cannot make that read
+run a program. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. `review-hold-message.ts` joins those two at the top level: it is the
@@ -243,8 +250,9 @@ agent's widening call into an owner-only access card on a task;
 own browser; `share/access-view.ts` builds what `/access` shows. The routes
 are `routes/task-access.ts` (the door that answers a card) and
 `routes/access.ts` (the owner's page and its nameless `access~` stream). In
-`review-items/`, `approver.ts` records who answered and `owner-steps.ts` makes
-an ask owner-only when its step is one the board reserves. The one new
+`review-items/`, `approver.ts` records who answered, `answer-proof.ts` refuses
+a person's answer the request did not prove (every answer door asks it), and
+`owner-steps.ts` makes an ask owner-only when its step is one the board reserves. The one new
 top-level module is `core/src/review-access.ts`: the shape of an access change
 and the sentence a card says about it, read by the server and the page alike.
 
@@ -439,6 +447,10 @@ admits ignored files by name (`admitIncluded`), and its answer's `listed`
 names every file it listed and `links` gives each its page link. A link to a
 file nobody has opened yet opens its doc on the first request
 (`openListedMember`); `files` stays the docs the bind opened, only the entry.
+`fs-listing.ts` caches that listing per root and is what decides which files
+of a set may be opened (`isListedFile`, `landsOnListed`); a listing more than
+five seconds old still answers and is rescanned off the main thread, so no
+page request waits on `git` until the listing is thirty seconds old.
 `folder-file-types.ts`
 names the binaries no surface can show, which the listing leaves out. A video
 or raster image (`core/src/media-types.ts`, read by server and page alike)

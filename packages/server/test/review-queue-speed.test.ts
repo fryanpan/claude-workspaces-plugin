@@ -26,6 +26,7 @@ import {
   describeItem,
   seedReviewQueueFixture,
 } from './review-queue-fixture.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
 let dataDir: string;
 let handle: ServerHandle;
@@ -143,12 +144,18 @@ describe('the review queue over ranked boards', () => {
     expect(afterRevise).toContain('Does the Riverbend ferry run at spring tide?');
     expect(afterRevise).not.toContain('Does the Riverbend ferry run at neap tide?');
 
+    // The fixture's person, signed in on the board page: a person's answer is
+    // recorded only from that person's own proven request.
+    const reader = signedInPerson(handle, dataDir, base, {
+      email: 'riverbend@harborlight.example',
+      name: FIXTURE_PERSON.name,
+    });
     const res = await fetch(
       `${base}/workspaces/${fx.boards.Riverbend}/tasks/${task}/review-items/${filed.item.id}/answer`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Yes', answeredWith: 'yes', author: FIXTURE_PERSON }),
+        headers: { 'content-type': 'application/json', ...reader.headers },
+        body: JSON.stringify({ text: 'Yes', answeredWith: 'yes', author: reader.user }),
       },
     );
     expect(res.status).toBe(200);

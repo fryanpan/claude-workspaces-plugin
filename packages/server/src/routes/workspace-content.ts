@@ -227,15 +227,22 @@ export async function handleWorkspaceContent(
     // own write, so disk (which we just wrote) wins the race with the
     // doc's debounced flush.
     const boardUrl = `${externalBaseUrl()}/workspaces/${encodeURIComponent(workspaceId)}`;
-    writeFileSync(
-      path,
+    const stamped =
       importBanner({
         workspaceId,
         boardUrl,
         taskCount: res.tasksCreated.length,
         ts: Date.now(),
-      }) + markdown,
-    );
+      }) + markdown;
+    // Under a walled lead's root, written as every bound file is there:
+    // the file may have been swapped for a link since it was read.
+    if (boundFiles.guards.covers(path)) {
+      try {
+        boundFiles.guards.writeSync(path, stamped, 'export');
+      } catch (err) {
+        console.error(`[import-tasks] could not stamp ${path}:`, err);
+      }
+    } else writeFileSync(path, stamped);
     if (bound) docStore.reparseFromDisk(bound.docId);
     // Task/goal events already refreshed the projection; this covers a
     // mapping with zero new goals and zero tasks (nothing emitted).

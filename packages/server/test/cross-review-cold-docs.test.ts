@@ -21,6 +21,7 @@ import type { CrossReviewQueue } from '../src/cross-review-queue.ts';
 import type { AnswerRecord } from '../src/review-answer-ledger.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { taskBodyDocId } from '../src/task-projection.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 const AGENT: User = {
@@ -218,14 +219,23 @@ describe('the cross-board queue reads its docs warm', () => {
 
   it('the answer ledger loads nothing inside the pass, and still records the answer', async () => {
     const h = handle as ServerHandle;
+    // Riverbend answers from her own signed-in page, as a person's answer must.
+    const riverbend = signedInPerson(h, dataDir, base, {
+      email: 'riverbend@harborlight.example',
+      name: 'Riverbend',
+    });
     evictAll(h);
     const cold = coldReads(h);
     const res = await fetch(
       `${base}/workspaces/${fx.live}/tasks/${fx.itemTask}/review-items/${fx.itemId}/answer`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Harbour gauge', answeredWith: 'gauge', author: PERSON }),
+        headers: { 'content-type': 'application/json', ...riverbend.headers },
+        body: JSON.stringify({
+          text: 'Harbour gauge',
+          answeredWith: 'gauge',
+          author: riverbend.user,
+        }),
       },
     );
     expect(res.status).toBe(200);

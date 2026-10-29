@@ -15,6 +15,7 @@ import { ensureUserIdentity, sessionAnswerOf } from './identity-prompt.ts';
 import { wireKeyboardInset } from './keyboard-inset.ts';
 import type { MountContext } from './mount-context.ts';
 import { registerOfflineWorker } from './offline-worker.ts';
+import { startRedlineRequests } from './redline/redline-requests.ts';
 import { remountCurrent, startRouter } from './router.ts';
 import { fetchWriteAccess, installWriteGateNotice, showSignInBar } from './signin/write-gate.ts';
 import { installStaleClientNotice } from './stale-client.ts';
@@ -160,8 +161,10 @@ const loadMarkdownMount = () => import('./doc/markdown-mount.ts');
  *  before seeing a word of a markdown doc. */
 async function mountSurface(ctx: MountContext): Promise<void> {
   if (ctx.docType === 'diff' && ctx.relPath.toLowerCase().endsWith('.md')) {
+    // Sent before the chunk is fetched, so the two downloads overlap.
+    const requests = startRedlineRequests(ctx);
     const { mountRedline } = await import('./redline/redline-app.ts');
-    return mountRedline(ctx);
+    return mountRedline(ctx, requests);
   }
   if (ctx.docType === 'code') {
     const { isMediaDoc, mountMedia } = await import('./media/media-app.ts');

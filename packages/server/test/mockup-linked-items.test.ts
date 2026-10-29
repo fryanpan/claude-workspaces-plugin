@@ -19,6 +19,7 @@ import type { Ref } from '@claude-workspaces/core/task-wire';
 import { itemLinkedDocIds, linkedItemsEmbed, linkedTaskItems } from '../src/mockup-linked-items.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type AccessHarness, accessHarness, mintAccessShare } from './access-share.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
 const T0 = 1_700_000_000_000;
 
@@ -132,11 +133,20 @@ describe('serving a mock', () => {
   let taskId = '';
   let linkedMock = '';
   let unlinkedMock = '';
+  /** The reviewer, signed in on the board page: set in `beforeAll`. */
+  let REVIEWER: { id: string; name: string } = { id: '', name: 'Reviewer' };
+  let REVIEWER_PROOF: Record<string, string> = {};
 
   const post = async (path: string, body: unknown) => {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', host: `localhost:${handle.port}` },
+      headers: {
+        'content-type': 'application/json',
+        host: `localhost:${handle.port}`,
+        ...((body as { author?: { id?: string } }).author?.id === REVIEWER.id
+          ? REVIEWER_PROOF
+          : {}),
+      },
       body: JSON.stringify(body),
     });
     expect(res.ok, `${path} ${res.status} ${await res.clone().text()}`).toBe(true);
@@ -164,6 +174,12 @@ describe('serving a mock', () => {
     access = await accessHarness();
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
     base = `http://127.0.0.1:${handle.port}`;
+    const reviewer = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'reviewer@harborlight.example',
+      name: 'Reviewer',
+    });
+    REVIEWER = reviewer.user;
+    REVIEWER_PROOF = reviewer.headers;
     ws = (
       (await post('/workspaces', { name: 'Lemonade stand', author: AGENT })) as {
         workspace: { id: string };
@@ -195,7 +211,7 @@ describe('serving a mock', () => {
     })) as { item: { id: string }; held?: boolean };
     if (filed.held) {
       await post(`/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/release`, {
-        author: { id: 'person:reviewer', name: 'Reviewer', kind: 'person' },
+        author: REVIEWER,
       });
     }
     const local = (docId: string) =>
@@ -224,7 +240,7 @@ describe('serving a mock', () => {
 
     // Answered, it leaves the page on the next load.
     await post(`/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/answer`, {
-      author: { id: 'person:reviewer', name: 'Reviewer', kind: 'person' },
+      author: REVIEWER,
       text: 'Readable.',
     });
     expect(block(await local(linkedMock))).toBeNull();

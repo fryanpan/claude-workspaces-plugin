@@ -396,10 +396,14 @@ export const widgetStyles = `
 .vnote button { border: 0; background: none; color: #2e7dd7; padding: 0; min-width: 44px; min-height: 44px; margin: -12px 0; font: inherit; cursor: pointer; }
 .vnote summary { list-style: none; cursor: pointer; line-height: 44px; margin: -15px 0; }
 .vnote summary::-webkit-details-marker { display: none; }
+/* The box on a row of its own and the buttons on the row under it: grid rows,
+   not a wrapped flex line. With the line, iPhone Safari drew Reply and Resolve
+   over the comment's last words and the top of the box while the keyboard was
+   up (Bryan, 29 Oct). flex: none, so the list above gives up its height first. */
 .thread-popover .actions {
-  display: flex; gap: 6px; padding-top: 8px; margin-top: 6px; border-top: 1px solid #eaeef2;
-  flex-wrap: wrap;
-  align-items: stretch;
+  display: grid; grid-template-columns: auto auto 1fr; gap: 6px;
+  padding-top: 8px; margin-top: 6px; border-top: 1px solid #eaeef2;
+  flex: none;
 }
 .picker-banner {
   position: fixed;
@@ -480,14 +484,16 @@ export const widgetStyles = `
 .quick .composer-err { grid-column: 1 / -1; }
 
 
+/* 16px for the reason .composer textarea gives: smaller, and iOS zooms the
+   page when the box takes focus. */
 .thread-popover .actions textarea {
-  flex: 1 1 100%;
+  grid-column: 1 / -1;
   min-width: 0;
   border: 1px solid #d1d5da;
   border-radius: 6px;
   padding: 6px;
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   resize: vertical;
 }
 `;

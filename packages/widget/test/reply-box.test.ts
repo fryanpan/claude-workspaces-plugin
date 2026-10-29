@@ -11,6 +11,13 @@
  * popover with an exchange in it is taller than that, and one holding an
  * agent's decision taller still.
  *
+ * And on an iPhone, Bryan again, with the keyboard up (29 Oct): Reply and
+ * Resolve were drawn over the last line of the agent's answer and the top of
+ * the reply box. The box was 12px, so Safari zoomed the page when it took
+ * focus, and the two buttons were a wrapped flex line under the box. Now the
+ * box is 16px and the buttons are a grid row of their own; the cases below
+ * read where every line of comment text, the box and both buttons landed.
+ *
  * `reply-box-driver.ts` drives the page; this file asserts on what it
  * measured.
  *
@@ -56,6 +63,25 @@ function expectReplyable(size: string, id: string): void {
   expect(l.popLater, `${size}: ${id}'s popover stays put`).toEqual(l.pop);
 }
 
+const meets = (a: Box, b: Box): boolean => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+
+/** Reply and Resolve sit under the box, and neither covers the box or a word. */
+function expectClear(key: string): void {
+  const l = reading[key];
+  expect(l, `${key} was measured`).toBeTruthy();
+  if (!l?.box || !l.send) throw new Error(`${key}: no reply box or Reply button`);
+  // Under 16px iOS zooms the page on focus, the state the overlap was seen in.
+  expect(l.fieldPx, `${key}: the reply box's font size`).toBeGreaterThanOrEqual(16);
+  const buttons = [l.send, l.status].filter((b): b is Box => b !== null);
+  // CONTROL: there was text to cover, and both buttons were drawn.
+  expect(l.words.length, `${key}: comment lines in view`).toBeGreaterThan(0);
+  expect(buttons.length, `${key}: Reply and Resolve`).toBe(2);
+  for (const b of buttons) {
+    expect(b[1] >= l.box[3], `${key}: button ${b} under the box ${l.box}`).toBe(true);
+    for (const w of l.words) expect(meets(b, w), `${key}: button ${b} over words ${w}`).toBe(false);
+  }
+}
+
 describe.skipIf(CHROME === null)('a thread opened from the comment list', () => {
   beforeAll(() => {
     const r = spawnSync('bun', [DRIVER], { encoding: 'utf8', timeout: SUITE_MS - 10_000 });
@@ -80,5 +106,16 @@ describe.skipIf(CHROME === null)('a thread opened from the comment list', () => 
     it(`at ${size}: a thread holding an agent's decision opens a reply box on screen`, () => {
       expectReplyable(size, 't-ask');
     });
+
+    for (const id of ['t-top', 't-bottom', 't-ask']) {
+      it(`at ${size}: ${id}'s Reply and Resolve cover neither the box nor a word`, () => {
+        expectClear(`${size}:${id}`);
+      });
+      // A decision's card fills a 520px window, leaving the list no lines.
+      if (w > 1100 || id === 't-ask') continue;
+      it(`at ${size} with the keyboard up: ${id}'s Reply and Resolve cover neither the box nor a word`, () => {
+        expectClear(`${size}:${id}:typed`);
+      });
+    }
   }
 });

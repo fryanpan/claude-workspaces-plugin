@@ -16,11 +16,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { FILER, LEAD, PERSON } from './review-judge-harness.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 
 let handle: ServerHandle | undefined;
 let dataDir = '';
 let base = '';
 let classification = '';
+/** The person speaking, signed in on the board's own page: a person's spoken
+ *  answer is recorded only on that proof (`review-items/answer-proof.ts`). */
+let speaker: SignedInPerson;
 
 function boot(): void {
   dataDir = mkdtempSync(join(tmpdir(), 'voice-grant-secret-'));
@@ -32,6 +36,9 @@ function boot(): void {
     voiceComplete: async () => classification,
   });
   base = `http://127.0.0.1:${handle.port}`;
+  speaker = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+    name: PERSON.name,
+  });
 }
 
 afterEach(async () => {
@@ -41,10 +48,14 @@ afterEach(async () => {
 });
 
 // The voice route is trusted-local, so every request names a local host.
-const post = (path: string, body: unknown) =>
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', host: `localhost:${handle?.port}` },
+    headers: {
+      'content-type': 'application/json',
+      host: `localhost:${handle?.port}`,
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
 const jj = async <T>(res: Response | Promise<Response>): Promise<T> => {
@@ -88,11 +99,15 @@ async function fileItem(review: unknown): Promise<{ ws: string; taskId: string; 
 async function speak(ws: string, taskId: string, itemId: string, transcript: string) {
   classification = JSON.stringify({ kind: 'action', action: 'answer-review', id: taskId });
   return jj<{ route: string }>(
-    post(`/workspaces/${ws}/voice`, {
-      transcript,
-      context: { surface: 'task', taskId, reviewItemId: itemId },
-      author: PERSON,
-    }),
+    post(
+      `/workspaces/${ws}/voice`,
+      {
+        transcript,
+        context: { surface: 'task', taskId, reviewItemId: itemId },
+        author: speaker.user,
+      },
+      speaker.headers,
+    ),
   );
 }
 

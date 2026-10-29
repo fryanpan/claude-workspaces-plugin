@@ -26,6 +26,7 @@ import { type FetchLike, parseHomeRemotesConfig } from '../src/home-remotes.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
 import { landingFrames } from './landing-frames.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
@@ -37,7 +38,10 @@ const CLOUD_ORIGIN = 'riverbend-origin.harborlight.test';
 const PLANTED_ORIGIN = 'saltmarsh-origin.harborlight.test';
 const PLANTED_BOARD = 'w-salt';
 const AGENT = { id: 'agent-riverbend', name: 'Riverbend', kind: 'agent' };
-const PERSON = { id: 'known-bryan', name: 'Bryan', kind: 'known' };
+/** Bryan, signed in on the project server's page: set once that server is up. */
+let PERSON: { id: string; name: string } = { id: '', name: 'Bryan' };
+/** What his browser sends with a press, keyed by the server it is signed in on. */
+const PROOF = new Map<ServerHandle, Record<string, string>>();
 
 /** Fake service tokens, made here and nowhere else. */
 const fakeToken = (origin: string) => ({
@@ -94,9 +98,10 @@ describe('Home on the Mac shows the project server’s review items', () => {
       headers: { host: `localhost:${handle.port}`, ...((init.headers as object) ?? {}) },
     });
   const post = async (handle: ServerHandle, path: string, body: unknown) => {
+    const mine = (body as { author?: { id?: string } }).author?.id === PERSON.id;
     const res = await local(handle, path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(mine ? PROOF.get(handle) : {}) },
       body: JSON.stringify(body),
     });
     expect(res.status, await res.clone().text()).toBe(200);
@@ -225,15 +230,22 @@ describe('Home on the Mac shows the project server’s review items', () => {
     // Same kid and claims, a key Cloudflare never published.
     forge = (await signer()).sign;
 
+    const cloudDir = tmp();
     cloud = createServer({
       port: 0,
-      dataDir: tmp(),
+      dataDir: cloudDir,
       cfAccess: { teamDomain: TEAM_DOMAIN, audience: APP_AUD, jwks },
       // Sharing wired, as on every deployed server; without it loopback
       // would need a stamp too.
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
       homeFeedClientId: tokens[CLOUD_ORIGIN].clientId,
     });
+    const bryan = signedInPerson(cloud, cloudDir, `localhost:${cloud.port}`, {
+      email: 'owner@riverbend.example',
+      name: 'Bryan',
+    });
+    PERSON = bryan.user;
+    PROOF.set(cloud, bryan.headers);
     cloudBoard = (
       (await post(cloud, '/workspaces', { name: 'Riverbend board', author: AGENT })) as {
         workspace: { id: string };

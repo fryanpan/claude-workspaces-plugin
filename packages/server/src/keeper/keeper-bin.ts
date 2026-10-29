@@ -107,7 +107,8 @@ if (command === 'import') {
     `Open this within 15 minutes, on this Mac, and register your passkey. It works only on the keeper running now; if the keeper restarts, make a new one:\n  http://localhost:${port}/enroll/${b64url(new Uint8Array(randomBytes(16)))}#${token}`,
   );
 } else if (command === 'port') {
-  console.log(port);
+  // Not console.log: on a terminal it prints a number in colour.
+  process.stdout.write(`${port}\n`);
 } else if (command === 'plist') {
   // `$K` is the store's parent; the socket's folder sits beside the store.
   const job = {

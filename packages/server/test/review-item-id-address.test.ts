@@ -1,3 +1,7 @@
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * `reviewItemId` as a UNIVERSAL address (Bryan, 2026-08-31: "make sure all
  * review items have unique reviewItemId values and that the tools all work
@@ -22,13 +26,11 @@
  * All fixtures are synthetic — invented ids and generic personas. The repo is
  * public.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type TaskReviewItem, threadReviewItemId } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = {
@@ -37,7 +39,10 @@ const AGENT = {
   kind: 'known',
   color: '#888888',
 };
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Signed in on the board page in `beforeAll`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+const signIns = new Map<string, Record<string, string>>();
 
 const DECISION = {
   shape: 'decision',
@@ -74,7 +79,10 @@ describe('reviewItemId as a universal address', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -159,6 +167,12 @@ describe('reviewItemId as a universal address', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    const signed = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = signed.user;
+    signIns.set(PERSON.id, signed.headers);
   });
   afterAll(async () => {
     await handle.stop();

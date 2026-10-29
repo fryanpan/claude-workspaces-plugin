@@ -18,8 +18,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const AGENT = {
   id: 'agent-index-keeper',
   name: 'Index Keeper',
@@ -68,7 +77,7 @@ describe('task review-item routes', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
 
@@ -106,6 +115,12 @@ describe('task review-item routes', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'task-review-item-routes-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
   });
   afterAll(async () => {
     await handle.stop();

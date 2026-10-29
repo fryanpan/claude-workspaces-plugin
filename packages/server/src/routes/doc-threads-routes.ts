@@ -49,6 +49,7 @@ import { BOARD_SOCKET_TOKEN_ID } from '../middleware/board-socket-door.ts';
 import { mayTouchFrom, writeViaOf } from '../mockup-frame.ts';
 import { isPageDoc, pageThreadLink, planPageThread } from '../page-thread.ts';
 import { reviewItemAnsweredEvent } from '../review-items/analytics.ts';
+import { PERSON_PROOF_REQUIRED, unprovenPersonAnswer } from '../review-items/answer-proof.ts';
 import { refuseOwnerOnlyWrite } from '../share/board-role.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { taskIdOfBodyDoc } from '../task-row.ts';
@@ -323,8 +324,12 @@ export async function handleDocThreadRoutes(
       // question, not an answer to the old one.
       const priorThread = declared.review ? null : docStore.getThread(docId, threadId);
       const pending = priorThread ? pendingDeclaration(priorThread) : null;
+      // A reply from a person this request did not prove posts as the
+      // comment it is and answers nothing (`review-items/answer-proof.ts`).
       const folded =
-        pending?.review && classifyActor(user) === 'person'
+        pending?.review &&
+        classifyActor(user) === 'person' &&
+        !unprovenPersonAnswer(user, rq.answerProof)
           ? answerFromReply(pending.review, text)
           : null;
       let t: Thread | null = null;
@@ -448,6 +453,7 @@ export async function handleDocThreadRoutes(
       if (!user || !text || !commentId) {
         return j(400, { error: 'author + text + commentId required' });
       }
+      if (unprovenPersonAnswer(user, rq.answerProof)) return j(403, PERSON_PROOF_REQUIRED);
       // Before the ask-back conversion below, for the reason the task route
       // gives: the conversion is itself a write on the ask.
       {
@@ -701,6 +707,7 @@ export async function handleDocThreadRoutes(
       const user = authorFor(body?.author);
       const commentId = body?.commentId as string | undefined;
       if (!user || !commentId) return j(400, { error: 'author + commentId required' });
+      if (unprovenPersonAnswer(user, rq.answerProof)) return j(403, PERSON_PROOF_REQUIRED);
       {
         const denied = ownerOnlyDenial(threadId, commentId);
         if (denied) return denied;

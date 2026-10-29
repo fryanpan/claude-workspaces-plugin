@@ -13,7 +13,7 @@
  * with the real client model. `board-presence-model.ts` is pure (no DOM, no fetch), so
  * a server test can import it directly.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -27,9 +27,15 @@ import {
 } from '../../workspaces-app/src/board/board-presence-model.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type Task, eventsLogPath } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: User = { id: '', name: 'Alice', kind: 'known', color: '' };
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const AGENT: User = {
   id: 'agent-search-revamp',
   name: 'Search Revamp',
@@ -57,7 +63,7 @@ describe('the activity view renders the rows the server really wrote', () => {
       },
     });
   const post = (path: string, body: unknown) =>
-    local(path, { method: 'POST', body: JSON.stringify(body) });
+    local(path, { method: 'POST', headers: proofFor(body), body: JSON.stringify(body) });
 
   /** Every audit row, as the activity view reads them. */
   const rows = (): ActivityEvent[] => {
@@ -74,6 +80,12 @@ describe('the activity view renders the rows the server really wrote', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'activity-lines-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     WS = await seedBoard(base);
     const ws = await post('/workspaces', { name: 'search-revamp' });
     wsId = ((await ws.json()) as { workspace: { id: string } }).workspace.id;
@@ -105,7 +117,7 @@ describe('the activity view renders the rows the server really wrote', () => {
     expect(row).toBeDefined();
     const line = describeEvent(row as ActivityEvent, () => 'Ship Thursday or Friday?');
     // Positive control: the row renders at all, with actor and title…
-    expect(line).toContain('Jordan');
+    expect(line).toContain('Alice');
     expect(line).toContain('Ship Thursday or Friday?');
     // …and the verbatim answer is the point of the row.
     expect(line).toContain('Ship Friday, not Thursday.');
@@ -122,7 +134,7 @@ describe('the activity view renders the rows the server really wrote', () => {
     // assertions below vacuous.
     expect(row).toBeDefined();
     const line = describeEvent(row as ActivityEvent, () => 'Ship Thursday or Friday?');
-    expect(line).toContain('Jordan');
+    expect(line).toContain('Alice');
     expect(line).toContain('Ship Thursday or Friday?');
     expect(line).toContain('Ship Friday, not Thursday.');
     // Not the bare slug a missing switch case falls through to.
@@ -197,7 +209,7 @@ describe('the activity view renders the rows the server really wrote', () => {
     const set = rowsOf('task.due_set').at(-1);
     expect(set).toBeDefined();
     const line = describeEvent(set as ActivityEvent, () => 'Cut the release note');
-    expect(line).toContain('Jordan');
+    expect(line).toContain('Alice');
     expect(line).toContain('Cut the release note');
     expect(line).toContain(new Date(due).toLocaleDateString());
     expect(line).not.toContain('task.due_set');

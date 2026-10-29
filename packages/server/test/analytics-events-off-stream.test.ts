@@ -29,11 +29,14 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT = 'agent-harborlight';
-const PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
+/** Signed in on the board page by the setup: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
 
 type Frame = { event: string; data: Record<string, unknown> };
 
@@ -82,11 +85,18 @@ describe('an analytics event stays off every stream', () => {
   let dataDir: string;
   let base: string;
   let WS = '';
+  let personHeaders: Record<string, string> = {};
 
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { host: `localhost:${handle.port}`, 'content-type': 'application/json' },
+      headers: {
+        host: `localhost:${handle.port}`,
+        'content-type': 'application/json',
+        ...((body as { author?: { id?: string } } | null)?.author?.id === PERSON.id
+          ? personHeaders
+          : {}),
+      },
       body: JSON.stringify(body),
     });
   const get = (path: string) =>
@@ -97,6 +107,13 @@ describe('an analytics event stays off every stream', () => {
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    // The page's origin is the Host these requests name, not the socket's.
+    const reviewer = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: 'reviewer@harborlight.example',
+      name: 'Reviewer',
+    });
+    PERSON = reviewer.user;
+    personHeaders = reviewer.headers;
     await post(`/workspaces/${WS}/agents`, {
       agentId: AGENT,
       agentName: 'Harborlight',

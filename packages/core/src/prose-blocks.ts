@@ -106,7 +106,10 @@ export function autoReanchorDoc(
 ): { checked: number; reanchored: number; stillOrphan: number } {
   const threads = doc.getMap('threads') as Y.Map<Y.Map<unknown>>;
   const fragment = getProseFragment(doc);
-  const walk = walkProse(fragment);
+  // Read the text only once an anchor fails to resolve. This runs on every
+  // hydrate, and on a doc whose anchors all hold the walk was most of the
+  // time a cold open held the server's one thread.
+  let walked: ReturnType<typeof walkProse> | null = null;
   let checked = 0;
   let reanchored = 0;
   let stillOrphan = 0;
@@ -132,6 +135,7 @@ export function autoReanchorDoc(
       stillOrphan++;
       return;
     }
+    const walk = (walked ??= walkProse(fragment));
     const first = walk.plainText.indexOf(needle);
     if (first < 0 || walk.plainText.indexOf(needle, first + 1) >= 0) {
       // zero or multiple matches — don't guess

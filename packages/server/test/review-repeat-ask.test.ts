@@ -15,16 +15,22 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { buildReviewJudgePrompt } from '@claude-workspaces/core/review-judge-prompt';
-import {
-  FILER,
-  type Held,
-  type JudgeHarness,
-  PERSON,
-  startJudgeHarness,
-} from './review-judge-harness.ts';
+import { FILER, type Held, type JudgeHarness, startJudgeHarness } from './review-judge-harness.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
 let h: JudgeHarness;
-const post = (...a: Parameters<JudgeHarness['post']>) => h.post(...a);
+/** Alice, signed in on the board page; `beforeEach` signs him in on each server. */
+let PERSON: { id: string; name: string } = { id: '', name: 'Alice' };
+let PERSON_PROOF: Record<string, string> = {};
+/** The harness's post, plus Alice's proof when the body is his. */
+const post = (path: string, body?: unknown): Promise<Response> =>
+  (body as { author?: { id?: string } } | undefined)?.author?.id === PERSON.id
+    ? fetch(`${h.base}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...PERSON_PROOF },
+        body: JSON.stringify(body),
+      })
+    : h.post(path, body);
 const jj = <T>(r: Response | Promise<Response>) => h.jj<T>(r);
 
 /** Passes everything, and records what the prompt said about prior asks. */
@@ -55,6 +61,12 @@ interface ThreadReply {
 beforeEach(() => {
   seenAsks.length = 0;
   h = startJudgeHarness();
+  const alice = signedInPerson(h.handle, h.dataDir, h.base, {
+    email: 'alice@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = alice.user;
+  PERSON_PROOF = alice.headers;
   h.judge = recordingJudge();
 });
 afterEach(async () => {

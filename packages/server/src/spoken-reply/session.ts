@@ -50,6 +50,7 @@ import {
   parseSpokenClientMessage,
   spokenSetupKey,
 } from '@claude-workspaces/core/spoken-reply';
+import { markUnprovenActor } from '../review-items/answer-proof.ts';
 import type { EngineTurn, TranscriptionEngine, TranscriptionSession } from '../transcribe.ts';
 import type { VoiceActor } from '../voice-action.ts';
 import type { VoiceContext } from '../voice-prompt.ts';
@@ -132,7 +133,8 @@ export class SpokenSession {
   private setup: SpokenSetup = 1;
   private mode: SpokenMode = 'hold';
   private context: VoiceContext | undefined;
-  private actor: VoiceActor = NOBODY;
+  /** Unmarked only once a start frame installs the upgrade's proven actor. */
+  private actor: VoiceActor = markUnprovenActor({ ...NOBODY });
   /** This turn hears the meeting on its doc, not this socket. */
   private ears = false;
   private room: MeetingRoom | null = null;
@@ -302,7 +304,10 @@ export class SpokenSession {
     this.ears = msg.ears === 'meeting';
     this.pauseTiming = msg.pause ?? SPOKEN_PAUSE_DEFAULT;
     this.context = this.deps.parseContext(msg.context);
-    this.actor = this.deps.provenActor ?? msg.author ?? NOBODY;
+    // A start frame's author is a claim, not a proof: it may comment as it
+    // always could, and is marked so the router records no answer for it
+    // (`review-items/answer-proof.ts`).
+    this.actor = this.deps.provenActor ?? markUnprovenActor({ ...(msg.author ?? NOBODY) });
     this.deps.answerer.address(msg.agent);
     if (msg.setup === 4) this.agentTurns?.start();
     else if (msg.setup === 3) this.startGemini();

@@ -884,6 +884,44 @@ describe('autoReanchorDoc', () => {
     expect(res.reanchored).toBe(0);
     expect(res.stillOrphan).toBe(1);
   });
+
+  // The sweep runs on every hydrate, so a doc with nothing to recover must
+  // not pay for reading its whole text. Measured on a 255 KB doc: the walk
+  // was 45 of the 67 ms a cold open held the server's one thread.
+  it('reads none of the text when every anchor still resolves', () => {
+    const doc = new Y.Doc();
+    seedDoc(doc, [
+      { tag: 'paragraph', text: 'The quick brown fox' },
+      { tag: 'paragraph', text: 'jumps over the lazy dog' },
+    ]);
+    const p = getProseFragment(doc).toArray()[0] as Y.XmlElement;
+    const text = p.toArray()[0] as Y.XmlText;
+    const tm = new Y.Map<unknown>();
+    tm.set('anchor', {
+      kind: 'text-range',
+      startRel: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, 4)),
+      endRel: Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, 9)),
+      snippet: { text: 'quick' },
+    });
+    (doc.getMap('threads') as Y.Map<Y.Map<unknown>>).set('t1', tm);
+
+    const reads = vi.spyOn(Y.XmlText.prototype, 'toDelta');
+    try {
+      expect(autoReanchorDoc(doc)).toEqual({ checked: 1, reanchored: 0, stillOrphan: 0 });
+      expect(reads).not.toHaveBeenCalled();
+      // Positive control: an orphan is what makes the text worth reading.
+      doc.transact(() => {
+        p.delete(0, p.length);
+        const fresh = new Y.XmlText();
+        fresh.insert(0, 'The quick brown fox');
+        p.insert(0, [fresh]);
+      });
+      expect(autoReanchorDoc(doc).reanchored).toBe(1);
+      expect(reads).toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+    }
+  });
 });
 
 describe('createAgentAnchor', () => {

@@ -15,6 +15,15 @@
  * reach another board's socket nor link one in under its own name. Its other
  * local sockets are not touched.
  *
+ * In its own projects (`board-socket-roots.ts` holds the server to them),
+ * it may make no new symlink or hard link outside a `node_modules` folder,
+ * since the server reads and writes through what it finds there. A package
+ * manager needs links in `node_modules`; the server refuses every path
+ * through one, and a `node_modules` folder may not be renamed or removed,
+ * so nothing made in it moves out. The server runs no git in a repository
+ * holding one of its projects (`packages/server/src/git-hardening.ts`), so git's settings
+ * files are left writable.
+ *
  * Off unless a lead's config sets `boardWall`. A walled lead is launched with
  * `CW_BOARD_SOCKET` naming its own board's socket, which its MCP relay dials
  * (`lead-sandbox.ts`, `boardSocketEnv`).
@@ -29,6 +38,11 @@ export interface WalledLead {
   boardWall: boolean;
   /** The board it works on; required when `boardWall` is set. */
   boardId?: string;
+  /** Its own project folders, which the server may read and write for it. */
+  projects?: readonly string[];
+  /** The other paths its config opens to it for writing, which the server
+   *  also holds as its roots (`lead-sandbox-roots.ts` `leadRoots`). */
+  allow?: readonly string[];
 }
 
 /**
@@ -60,7 +74,27 @@ export function boardWallRules(
     ...ends.map(
       (d) => `(deny file-write* (subpath ${sbQuote(d)})) ; no link to another board's socket`,
     ),
+    // Every path it can write, so no link appears under a root the server
+    // holds. An `allow` file or missing folder is named too: no link can
+    // then be made at that name.
+    ...[...(lead.projects ?? []), ...(lead.allow ?? [])].flatMap((p) => projectRules(p, realpath)),
   ];
+}
+
+/** Outside `node_modules`, at any depth. */
+const NOT_NODE_MODULES = '(require-not (regex #"/node_modules(/|$)"))';
+
+/** The rules for one folder it can write, at each of its spellings. */
+function projectRules(project: string, realpath: (path: string) => string): string[] {
+  return socketDirEnds(project, realpath).flatMap((d) => {
+    sbQuote(d);
+    const re = d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return [
+      `(deny file-write-create (require-all (vnode-type SYMLINK) (subpath ${sbQuote(d)}) ${NOT_NODE_MODULES})) ; no new symlink in a project`,
+      `(deny file-link (require-all (subpath ${sbQuote(d)}) ${NOT_NODE_MODULES})) ; no new hard link in a project`,
+      `(deny file-write-unlink (regex #"^${re}(/.*)?/node_modules$")) ; node_modules stays where it is`,
+    ];
+  });
 }
 
 /** The folder, resolved, and its other spelling across `/tmp` and `/private/tmp`. */

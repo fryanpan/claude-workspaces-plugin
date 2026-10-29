@@ -24,6 +24,7 @@ import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } fro
 import type { SecretWriteResult } from '../src/secret-store.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ACCESS_SHARE_CONFIG, mockCfApi } from './access-share.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 const TEAM_DOMAIN = 'test.cloudflareaccess.com';
@@ -75,6 +76,8 @@ describe('a secret ask, answered by the board owner', () => {
   let board: string;
   let taskId: string;
   let itemId: string;
+  /** The owner signed in on the board page: the only caller the door takes. */
+  let ownerPage: Record<string, string> = {};
 
   /** What the injected writer was handed, in order. */
   const written: Array<{ service: string; value: string }> = [];
@@ -92,10 +95,10 @@ describe('a secret ask, answered by the board owner', () => {
   const local = (path: string, init: RequestInit = {}) =>
     req(path, `localhost:${handle.port}`, init);
 
-  const postLocal = (path: string, body: unknown) =>
+  const postLocal = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     local(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
 
@@ -156,6 +159,7 @@ describe('a secret ask, answered by the board owner', () => {
       shareLinkAudience: SHARE_AUD,
       proxiedTrustedHosts: [OWNER_HOST],
       proxiedTrustedEmails: [OWNER_EMAIL],
+      ownerEmail: OWNER_EMAIL,
       share: { config: ACCESS_SHARE_CONFIG, cfApi: mockCfApi() },
       // The seam. A real Keychain is never touched by this suite, and what
       // the writer was handed is the only evidence that the value moved at
@@ -166,6 +170,10 @@ describe('a secret ask, answered by the board owner', () => {
       },
     });
     base = `http://127.0.0.1:${handle.port}`;
+    ownerPage = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: OWNER_EMAIL,
+      name: READER.name,
+    }).headers;
 
     board = (
       await jj<{ workspace: { id: string } }>(
@@ -302,10 +310,14 @@ describe('a secret ask, answered by the board owner', () => {
 
   it('refuses a body naming a service the item never asked for', async () => {
     const before = written.length;
-    const res = await postLocal(doorPath(), {
-      author: READER,
-      secrets: [{ service: 'somewhere-else-entirely', value: FIRST_VALUE }],
-    });
+    const res = await postLocal(
+      doorPath(),
+      {
+        author: READER,
+        secrets: [{ service: 'somewhere-else-entirely', value: FIRST_VALUE }],
+      },
+      ownerPage,
+    );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: 'unknown-secret' });
     expect(written).toHaveLength(before);
@@ -313,10 +325,14 @@ describe('a secret ask, answered by the board owner', () => {
 
   it('refuses a partial hand-over rather than answering the item half-filled', async () => {
     const before = written.length;
-    const res = await postLocal(doorPath(), {
-      author: READER,
-      secrets: [{ service: 'saltmarsh-relay-account', value: FIRST_VALUE }],
-    });
+    const res = await postLocal(
+      doorPath(),
+      {
+        author: READER,
+        secrets: [{ service: 'saltmarsh-relay-account', value: FIRST_VALUE }],
+      },
+      ownerPage,
+    );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: 'incomplete' });
     expect(written).toHaveLength(before);
@@ -347,12 +363,20 @@ describe('a secret ask, answered by the board owner', () => {
       )
     ).item.id;
 
+    // The owner signed in on the board page: a person's answer is recorded
+    // only from that person's own proven request, so the control below can
+    // only pass, and the refusal only be the secret door's, when it is one.
+    const owner = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+      email: OWNER_EMAIL,
+      name: READER.name,
+    });
     const before = written.length;
     const refused = await postLocal(
       `${scope()}/tasks/${taskId}/review-items/${fresh}/answer`,
       // A placeholder, because this repo is public and because the point is
       // that no value should ever travel this way.
-      { author: READER, text: FIRST_VALUE },
+      { author: owner.user, text: FIRST_VALUE },
+      owner.headers,
     );
     expect(refused.status).toBe(400);
     const body = (await refused.json()) as { error?: string; message?: string };
@@ -383,10 +407,11 @@ describe('a secret ask, answered by the board owner', () => {
         }),
       )
     ).item.id;
-    const answered = await postLocal(`${scope()}/tasks/${taskId}/review-items/${ordinary}/answer`, {
-      author: READER,
-      text: 'Yes, post it to both.',
-    });
+    const answered = await postLocal(
+      `${scope()}/tasks/${taskId}/review-items/${ordinary}/answer`,
+      { author: owner.user, text: 'Yes, post it to both.' },
+      owner.headers,
+    );
     expect(answered.status).toBe(200);
     expect(await taskJson()).toContain('Yes, post it to both.');
   });
@@ -410,13 +435,17 @@ describe('a secret ask, answered by the board owner', () => {
       // silence after it is then a real silence.
       console.log(LOG_CONTROL);
       body = await jj<{ saved: string[]; item: { answer?: { text?: string } } }>(
-        await postLocal(doorPath(), {
-          author: READER,
-          secrets: [
-            { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
-            { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
-          ],
-        }),
+        await postLocal(
+          doorPath(),
+          {
+            author: READER,
+            secrets: [
+              { service: 'saltmarsh-relay-account', value: FIRST_VALUE },
+              { service: 'saltmarsh-relay-signer', value: SECOND_VALUE },
+            ],
+          },
+          ownerPage,
+        ),
       );
     } finally {
       log.mockRestore();

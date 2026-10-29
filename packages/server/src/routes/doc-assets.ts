@@ -1,5 +1,6 @@
 import { statSync } from 'node:fs';
-import { dirname, extname } from 'node:path';
+import { dirname, extname, join } from 'node:path';
+import { GuardRefused, readBytesChecked } from '../bound-path-guard.ts';
 import {
   IMAGE_TYPES,
   MAX_IMAGE_BYTES,
@@ -10,6 +11,7 @@ import {
   storeImageBeside,
 } from '../doc-image-store.ts';
 import { fileSandboxHeaders } from '../mockup-frame.ts';
+import { boundFiles } from '../slow-fs.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
 
 /**
@@ -70,13 +72,24 @@ export async function handleDocAssetsRoute(
   if (!type) return j(415, { error: 'only images are served beside a doc' });
   const md = ctx.docStore.boundPathOf(docId);
   if (!md) return j(404, { error: 'this doc is not bound to a file' });
+  // Under a walled lead's root, judged as every bound read is: the folders
+  // on the way may have been swapped for links since the doc was bound.
+  let lands: ((real: string) => boolean) | null;
+  try {
+    lands = boundFiles.guards.landsFor(join(dirname(md), ...segments));
+  } catch {
+    return j(404, { error: 'no image at that path beside the doc' });
+  }
   const abs = resolveInside(dirname(md), segments);
   if (!abs) return j(404, { error: 'no image at that path beside the doc' });
   // Asked again of where a link LANDS: `chart.png -> notes.txt` is a text file.
   if (IMAGE_TYPES[extname(abs).toLowerCase()] !== type) {
     return j(415, { error: 'only images are served beside a doc' });
   }
-  const st = statSync(abs, { bigint: true });
+  const guarded = lands ? await guardedImage(abs, lands) : null;
+  if (guarded === 'refused') return j(404, { error: 'no image at that path beside the doc' });
+  if (guarded === 'too-large') return j(413, { error: 'this image is too large to serve' });
+  const st = guarded ? guarded.st : statSync(abs, { bigint: true });
   const size = Number(st.size);
   // A validator, so a cache that revalidates can tell a changed file from an
   // unchanged one. `no-cache` stays: the page's `?v=` (doc-image-versions.ts)
@@ -101,7 +114,24 @@ export async function handleDocAssetsRoute(
   if (req.method === 'HEAD') {
     return new Response(null, { headers: { ...headers, 'content-length': String(size) } });
   }
-  return new Response(Bun.file(abs), { headers });
+  return new Response(guarded ? guarded.bytes : Bun.file(abs), { headers });
+}
+
+/** The most a guarded image answer reads into memory. */
+export const GUARDED_IMAGE_MAX = 16 * 1024 * 1024;
+
+/** An image under a walled lead's root, read from the descriptor that was
+ *  judged rather than reopened by path. */
+async function guardedImage(
+  abs: string,
+  lands: (real: string) => boolean,
+): Promise<Awaited<ReturnType<typeof readBytesChecked>> | 'refused'> {
+  try {
+    return await readBytesChecked(abs, GUARDED_IMAGE_MAX, lands);
+  } catch (err) {
+    if (err instanceof GuardRefused || (err as NodeJS.ErrnoException).code) return 'refused';
+    throw err;
+  }
 }
 
 async function uploadImage(ctx: DocRoutesContext, rq: DocResourceRouteRequest): Promise<Response> {
@@ -115,7 +145,13 @@ async function uploadImage(ctx: DocRoutesContext, rq: DocResourceRouteRequest): 
   const ext = sniffImage(bytes);
   if (!ext) return j(415, { error: 'only PNG, JPEG, GIF and WebP images are stored' });
   const name = new URL(rq.req.url).searchParams.get('name');
-  const out = storeImageBeside(md, bytes, ext, imageStem(name));
+  let lands: ((real: string) => boolean) | null;
+  try {
+    lands = boundFiles.guards.landsFor(md);
+  } catch {
+    return j(409, { error: 'cannot store beside this doc: outside' });
+  }
+  const out = storeImageBeside(md, bytes, ext, imageStem(name), undefined, lands);
   if (!out.ok) return j(409, { error: `cannot store beside this doc: ${out.reason}` });
   return j(201, { src: out.src });
 }

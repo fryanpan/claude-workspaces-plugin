@@ -240,7 +240,7 @@ export function replaceIdentityLinks(pairs: Iterable<readonly [string, string]>)
  * from places that hold no configuration to thread through.
  */
 export interface ActivityIdentityRoster {
-  get(id: string): { id: string; displayName: string } | null;
+  get(id: string): { id: string; displayName: string; kind?: string } | null;
 }
 
 let IDENTITY_ROSTER: ActivityIdentityRoster | undefined;
@@ -248,6 +248,11 @@ let IDENTITY_ROSTER: ActivityIdentityRoster | undefined;
 /** Wire (or clear) the roster. Cleared by `resetOwnerIdentities` too. */
 export function setIdentityRoster(roster: ActivityIdentityRoster | undefined): void {
   IDENTITY_ROSTER = roster;
+}
+
+/** Is `id` a person's row in the roster, whatever kind a caller claimed? */
+export function isRosterPerson(id: string): boolean {
+  return id !== '' && IDENTITY_ROSTER?.get(resolveIdentityId(id))?.kind === 'person';
 }
 
 /**
