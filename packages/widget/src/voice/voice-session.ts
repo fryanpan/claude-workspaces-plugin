@@ -81,7 +81,7 @@ export interface SocketLike {
   readyState: number;
   onopen: (() => void) | null;
   onmessage: ((ev: { data: unknown }) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((ev?: { code?: number }) => void) | null;
   onerror: (() => void) | null;
   send(data: string | ArrayBufferLike | ArrayBufferView): void;
   close(code?: number): void;
@@ -233,7 +233,7 @@ export class VoiceSession {
     };
     ws.onmessage = (ev) => this.onMessage(ev.data);
     ws.onerror = () => {};
-    ws.onclose = () => this.closed();
+    ws.onclose = (ev) => this.closed(ev?.code);
   }
 
   /** Stop: the microphone now, the last words once the server has tidied them. */
@@ -446,11 +446,11 @@ export class VoiceSession {
     this.change();
   }
 
-  private closed(): void {
+  private closed(code?: number): void {
     if (this.state === 'idle') return;
-    // Stopped with every word sent: the close is the end Stop waits for.
+    // Stopped with every word sent, or hung up on a grant that ended (1008): an end.
     const done = this.state === 'stopping' && this.buffered.empty;
-    if (done || !this.opened) {
+    if (done || !this.opened || code === 1008) {
       this.finish(done ? null : LOST);
       return;
     }

@@ -126,7 +126,8 @@ describe('voice feedback across a server restart', () => {
     // A note finished before the restart: the page posts it itself.
     speak(5);
     await waitFor(() => notes(handle as ServerHandle).includes(NOTES.harborlight), {
-      timeout: 10_000, describe: 'the first note posted',
+      timeout: 10_000,
+      describe: 'the first note posted',
     });
     // Words still being said when the restart comes.
     speak(3);
@@ -145,12 +146,16 @@ describe('voice feedback across a server restart', () => {
       describe: 'reconnected within 5s of the server coming back',
     });
     await waitFor(() => notes(handle as ServerHandle).includes(NOTES.riverbend), {
-      timeout: 10_000, describe: 'the words said while down became a note',
+      timeout: 10_000,
+      describe: 'the words said while down became a note',
     });
 
     const after = notes(handle);
     expect(after.filter((t) => t === NOTES.harborlight)).toHaveLength(1);
-    expect(after.filter((t) => t === NOTES.saltmarsh), 'pending words kept').toHaveLength(1);
+    expect(
+      after.filter((t) => t === NOTES.saltmarsh),
+      'pending words kept',
+    ).toHaveLength(1);
     expect(after.filter((t) => t === NOTES.riverbend)).toHaveLength(1);
 
     // One steady state through the outage: never idle, never an error, and

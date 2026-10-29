@@ -146,6 +146,13 @@ describe('a socket that drops mid-recording', () => {
     expect(t.session.comments.get('1.v1')?.refused).toBeFalsy();
   });
 
+  it('ends at once when the server hung up on a grant that ended', async () => {
+    const t = await recording();
+    t.socket().drop(1008);
+    expect(t.session.state).toBe('idle');
+    expect(t.sockets).toHaveLength(1);
+  });
+
   it('ends and says so once the server has been gone two minutes', async () => {
     const t = await recording();
     t.socket().drop();
