@@ -420,7 +420,7 @@ Every hostname below is a placeholder; the real ones live in the launchd configu
 | Setup 4's custom-LLM route, same hostname | `routes/voice-agent-llm.ts`, `spoken-reply/agent-llm.ts`     | the two setup-4 cards above, `CW_ELEVENLABS_TRAINING_OFF`    |
 | Browser write gate                       | `isGatedWrite`, `middleware/write-gate.ts`                   | `CW_REQUIRE_SIGNIN_TO_WRITE` (on by default)                 |
 | Fields sent to a visitor                 | `share/redact-meta.ts`                                       | none                                                         |
-| Shared-folder listing                    | `isListedFile`, `fs-scan.ts`; `landsOnListed` for a symlink  | none                                                         |
+| Shared-folder listing                    | `isListedFile`, `fs-listing.ts`; `landsOnListed` for a symlink | none                                                         |
 | Served mocks: sandbox, relay and stamp   | `mockup-frame.ts`; `packages/widget/src/mock-relay-policy.ts`, `mock-host.ts` | none                                        |
 | A mock or app that talks: token in the frame, owner-only socket | `app-voice/gate.ts`, `app-voice/token.ts`, `app-voice/seed.ts`; [app-voice.md](app-voice.md) | none |
 | A project's frame hostname for mocks and app doors | `frame-host.ts`, `frame-ticket.ts`; the frame branch at the top of `request-admission.ts`; `FRAME_DOMAIN` in the router | `CW_FRAME_ORIGIN` (off when unset), `CW_FRAME_BOARD_HOSTS` |

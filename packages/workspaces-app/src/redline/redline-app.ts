@@ -2,7 +2,7 @@ import { type FeedbackClient, connect, suggestOps } from '@claude-workspaces/cor
 import { mountCode } from '../code/code-app.ts';
 import { isEditableRedlineMember } from '../code/editable-policy.ts';
 import { renderDiffNav, wireDiffNavRefresh } from '../diff-nav.ts';
-import { api, docSocketUrl } from '../doc-path.ts';
+import { docSocketUrl } from '../doc-path.ts';
 import type { ChromeSelection } from '../doc/anchor-body.ts';
 import { el } from '../doc/chrome-dom.ts';
 import { wireThreadRangeClicks } from '../doc/chrome-panels.ts';
@@ -12,12 +12,21 @@ import { startReadingTracker } from '../reading-tracker.ts';
 import { mountReviewChrome } from '../review-chrome.ts';
 import type { ReviewSurface } from '../review-surface.ts';
 import { navigateTo, remountCurrent } from '../router.ts';
-import { asBackgroundWrite, lockDocToReading } from '../signin/write-gate.ts';
+import { lockDocToReading } from '../signin/write-gate.ts';
 import { mountSuggestionsSummary } from '../suggestions/suggestions-summary.ts';
 import { getMarkdownMount } from '../surface-registry.ts';
 import { createLiveRedlineEditor } from './live-redline-editor.ts';
 import { type MarkupMarginHandle, mountMarkupMargin } from './markup-margin.ts';
 import { createRedlineEditor } from './redline-editor.ts';
+import {
+  type OpenedCompanion,
+  type RedlineRequests,
+  type RedlineViewMode,
+  readViewMode,
+  requestCompanion,
+  startRedlineRequests,
+  writeViewMode,
+} from './redline-requests.ts';
 
 /**
  * Mount the Word-style redline surface for a markdown file in a diff review.
@@ -33,27 +42,7 @@ import { createRedlineEditor } from './redline-editor.ts';
  * this mount down cleanly; the router owns the client (closed on dispose).
  */
 
-export type RedlineViewMode = 'redline' | 'diff' | 'file';
-
-const modeKey = (docId: string) => `cw-view-mode:${docId}`;
-
-export function readViewMode(docId: string): RedlineViewMode {
-  try {
-    const v = localStorage.getItem(modeKey(docId));
-    if (v === 'diff' || v === 'file' || v === 'redline') return v;
-  } catch {
-    // Private mode / storage disabled — fall through to the default.
-  }
-  return 'redline'; // markdown diffs open redlined
-}
-
-function writeViewMode(docId: string, mode: RedlineViewMode): void {
-  try {
-    localStorage.setItem(modeKey(docId), mode);
-  } catch {
-    // Non-fatal: the toggle just won't persist across reloads.
-  }
-}
+export { readViewMode, type RedlineViewMode } from './redline-requests.ts';
 
 /**
  * Wire the view toggle for a markdown diff doc.
@@ -103,26 +92,21 @@ function wireToggle(
   }
 }
 
-interface DiffInfo {
-  baseText: string | null;
-  status?: 'added' | 'modified' | 'deleted' | 'renamed';
-  oldPath?: string;
-  error?: string;
-}
-
-export async function mountRedline(ctx: MountContext): Promise<void> {
+/**
+ * `requests` are the base text and the companion open, which `app.ts` sends
+ * before this chunk has loaded (`redline-requests.ts`); a caller that did
+ * not gets them sent here.
+ */
+export async function mountRedline(
+  ctx: MountContext,
+  requests: RedlineRequests = startRedlineRequests(ctx),
+): Promise<void> {
   const { docId, client, user, scope } = ctx;
   const mode = readViewMode(docId);
 
-  // The base text this file is compared against. Fetched before mounting so
+  // The base text this file is compared against, awaited before mounting so
   // the surface boots straight into the redline.
-  let diffInfo: DiffInfo | null = null;
-  try {
-    const res = await fetch(api(`docs/${encodeURIComponent(docId)}/diff`));
-    if (res.ok) diffInfo = (await res.json()) as DiffInfo;
-  } catch {
-    // fall through — handled below
-  }
+  const diffInfo = await requests.diff;
   if (scope.disposed) return; // navigated away during the fetch
 
   // No base text (repo worktree pruned) means there is no redline to compute;
@@ -135,7 +119,7 @@ export async function mountRedline(ctx: MountContext): Promise<void> {
     // code view when the companion can't be opened (pinned, no workspace,
     // server error).
     if (mode === 'file' && ctx.workspaceId && !ctx.diffTarget) {
-      const mounted = await mountEditableFileView(ctx);
+      const mounted = await mountEditableFileView(ctx, requests.companion);
       if (scope.disposed) return;
       if (mounted) {
         if (diffInfo?.baseText != null) wireToggle(docId, 'file', scope, true);
@@ -180,7 +164,7 @@ export async function mountRedline(ctx: MountContext): Promise<void> {
     workspaceId: ctx.workspaceId,
     diffStatus: diffInfo.status,
   })
-    ? await openCompanionDoc(ctx)
+    ? await openCompanionDoc(ctx, requests.companion)
     : null;
   if (scope.disposed) return;
 
@@ -401,28 +385,12 @@ export interface CompanionDoc {
  * can't be opened (no workspace binding, server error) so callers can fall
  * back to a read-only surface.
  */
-export async function openCompanionDoc(ctx: MountContext): Promise<CompanionDoc | null> {
-  let opened: { docId: string; meta?: { sourceUrl?: string } };
-  try {
-    // Marked as the app's own, because it IS: this fires at mount over a
-    // document nobody has touched. Unmarked, a refusal raised the blocking
-    // "Sign in to write here" modal on plain page load — verbatim the failure
-    // the reading tracker's POST already taught us (see `asBackgroundWrite`).
-    // The server no longer refuses this route, so the marker is the belt to
-    // that braces: a 401 arriving for any other reason must still not
-    // interrupt somebody who is only reading.
-    const res = await asBackgroundWrite(() =>
-      fetch(api(`attachments/${encodeURIComponent(ctx.workspaceId)}/editable-file`), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ relPath: ctx.relPath }),
-      }),
-    );
-    if (!res.ok) return null;
-    opened = (await res.json()) as { docId: string; meta?: { sourceUrl?: string } };
-  } catch {
-    return null;
-  }
+export async function openCompanionDoc(
+  ctx: MountContext,
+  request: Promise<OpenedCompanion | null> = requestCompanion(ctx),
+): Promise<CompanionDoc | null> {
+  const opened = await request;
+  if (!opened) return null;
   if (ctx.scope.disposed) return null; // navigated away — don't open a socket
   const wsUrl = docSocketUrl(location, opened.docId, 'markdown');
   const client = connect(wsUrl);
@@ -436,10 +404,13 @@ export async function openCompanionDoc(ctx: MountContext): Promise<CompanionDoc 
  * both close with the member's scope. Returns false when the companion
  * can't be opened, so the caller can fall back to the raw-source view.
  */
-async function mountEditableFileView(ctx: MountContext): Promise<boolean> {
+async function mountEditableFileView(
+  ctx: MountContext,
+  request: Promise<OpenedCompanion | null>,
+): Promise<boolean> {
   const mountMarkdown = getMarkdownMount();
   if (!mountMarkdown) return false;
-  const companion = await openCompanionDoc(ctx);
+  const companion = await openCompanionDoc(ctx, request);
   if (ctx.scope.disposed) return true; // navigated away — report handled
   if (!companion) return false;
   await mountMarkdown({

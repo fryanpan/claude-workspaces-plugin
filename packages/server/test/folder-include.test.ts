@@ -20,7 +20,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
-import { isListedFile } from '../src/fs-scan.ts';
+import { isListedFile } from '../src/fs-listing.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
 import { tinyMp4 } from './tiny-mp4.ts';

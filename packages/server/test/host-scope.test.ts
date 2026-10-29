@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emailIdentityId } from '@claude-workspaces/core';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
-import { clearListingCache } from '../src/fs-scan.ts';
+import { clearListingCache } from '../src/fs-listing.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { CfApi } from '../src/share/cf-api.ts';
 import type { CfAccessApp, CfAccessPolicy } from '../src/share/cf-api.ts';
