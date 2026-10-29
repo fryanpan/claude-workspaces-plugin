@@ -45,11 +45,6 @@ import { input } from './notes-compose-input.ts';
  *   found a three-part definition kept as two parts, and requests to skip
  *   ahead or to push back dropped as talk about the call. Measured by
  *   `bun run notes:replay` on the same meetings.
- * - "Write nothing for speech that only says again what a note says"
- *   (2026-10-28), after a two-stage model judge (`scripts/notes-repeat-judge.ts`)
- *   found 5 to 21 notes a meeting restating a note under the same heading on
- *   the same replays, most of them written one tick after the note they
- *   restate. Measured by `bun run notes:replay` on those meetings.
  * A further rule goes in the same way: change both copies, and say here what
  * it was measured against.
  */
