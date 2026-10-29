@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { constants, accessSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
-import { BOARD_SERVER_PORTS, CONNECT_PROBE } from './lead-sandbox-wall.ts';
+import { BOARD_SERVER_PORTS, CONNECT_PROBE, SOCKET_CONNECT_PROBE } from './lead-sandbox-wall.ts';
 
 export interface EscapeRow {
   ok: boolean;
@@ -269,4 +269,54 @@ export function boardWallRows(
       };
     }),
   );
+}
+
+/** What a connect to the unix socket at `path` answers, inside `profile` or, with null, outside any. */
+export function socketConnectFrom(
+  runtime: string,
+  profile: string | null,
+  cwd: string,
+  path: string,
+): string {
+  const argv = [runtime, '-e', SOCKET_CONNECT_PROBE];
+  const [cmd, ...args] = profile ? [SANDBOX_EXEC, '-f', profile, ...argv] : argv;
+  const r = spawnSync(cmd ?? runtime, args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, SOCK: path },
+    timeout: 10_000,
+  });
+  return r.stdout?.trim() || `exit ${r.status}`;
+}
+
+/**
+ * The board sockets (`lead-sandbox-wall.ts`): the lead's own board's socket
+ * must not answer `EPERM` inside the profile, and each other board's socket
+ * must, while connecting without the wall (the control). A path with no
+ * socket behind it answers `ENOENT` inside the wall as well as outside it,
+ * so it fails its row rather than passing on a refusal that never happened.
+ */
+export function boardSocketRows(
+  profile: string,
+  unwalled: string,
+  cwd: string,
+  own: string,
+  others: readonly string[],
+  runtime: string = process.execPath,
+): EscapeRow[] {
+  const inside = socketConnectFrom(runtime, profile, cwd, own);
+  return [
+    {
+      ok: inside !== 'EPERM',
+      says: `board socket: its own, ${own}, answers ${inside} inside (must not be EPERM)`,
+    },
+    ...others.map((path) => {
+      const control = socketConnectFrom(runtime, unwalled, cwd, path);
+      const walled = socketConnectFrom(runtime, profile, cwd, path);
+      return {
+        ok: walled === 'EPERM' && control === 'connected',
+        says: `board socket: ${path} answers ${control} without the wall (the control), ${walled} inside (must be EPERM)`,
+      };
+    }),
+  ];
 }

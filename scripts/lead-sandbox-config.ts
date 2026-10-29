@@ -3,6 +3,7 @@
  * Checked here; turned into profiles by `lead-sandbox-lib.ts`, which
  * re-exports all of it.
  */
+import { boardSocketDirError } from '../packages/server/src/board-sockets.ts';
 import { parseGitProxyPort, parseGithubRepos } from './git-proxy-lead.ts';
 
 export interface Lead {
@@ -27,8 +28,13 @@ export interface Lead {
   allowKeychain: boolean;
   /** `owner/name` repos it may fetch and push through the GitHub proxy (`git-proxy.ts`). */
   githubRepos: string[];
-  /** Deny every board server's port (`lead-sandbox-wall.ts`). Off by default. */
+  /**
+   * Deny every board server's port and every board's socket but its own
+   * (`lead-sandbox-wall.ts`). Off by default.
+   */
   boardWall: boolean;
+  /** The board whose socket a walled lead may reach. Required with `boardWall`. */
+  boardId?: string;
 }
 
 export interface LeadSandboxConfig {
@@ -36,6 +42,8 @@ export interface LeadSandboxConfig {
   /** Folders no lead may read or write, beyond the built-in ones. */
   protect: string[];
   gitProxyPort: number;
+  /** Where the board sockets are; unset is `defaultBoardSocketDir(uid)`. */
+  boardSocketDir?: string;
 }
 
 /** The machine, as the generator may ask about it. */
@@ -47,6 +55,7 @@ export interface Machine {
 }
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const BOARD_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
 /** The config, checked, or the reason it is refused. A path may start `~/`. */
 export function parseConfig(
@@ -91,6 +100,14 @@ export function parseConfig(
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
       return { ok: false, error: `${name}.projects must name at least one repo` };
+    const boardId = o.boardId;
+    if (boardId !== undefined && (typeof boardId !== 'string' || !BOARD_ID.test(boardId)))
+      return { ok: false, error: `${name}.boardId must be a board id` };
+    if (o.boardWall === true && boardId === undefined)
+      return {
+        ok: false,
+        error: `${name}.boardWall needs a boardId: the board whose socket it may reach`,
+      };
     leads.push({
       name,
       projects: projects as string[],
@@ -100,11 +117,30 @@ export function parseConfig(
       allowKeychain: o.allowKeychain === true,
       githubRepos: githubRepos as string[],
       boardWall: o.boardWall === true,
+      ...(typeof boardId === 'string' ? { boardId } : {}),
     });
   }
   const protect = paths(r.protect, 'protect');
   if (typeof protect === 'string') return { ok: false, error: protect };
   const gitProxyPort = parseGitProxyPort((raw as { gitProxyPort?: unknown }).gitProxyPort);
   if (typeof gitProxyPort === 'string') return { ok: false, error: gitProxyPort };
-  return { ok: true, config: { leads, protect, gitProxyPort } };
+  const boardSocketDir = (raw as { boardSocketDir?: unknown }).boardSocketDir;
+  if (boardSocketDir !== undefined) {
+    const why =
+      typeof boardSocketDir !== 'string'
+        ? 'boardSocketDir must be a path'
+        : /["\\\n\r]/.test(boardSocketDir)
+          ? `boardSocketDir: ${boardSocketDir} must not hold a quote or a backslash`
+          : boardSocketDirError(boardSocketDir);
+    if (why) return { ok: false, error: why };
+  }
+  return {
+    ok: true,
+    config: {
+      leads,
+      protect,
+      gitProxyPort,
+      ...(typeof boardSocketDir === 'string' ? { boardSocketDir } : {}),
+    },
+  };
 }

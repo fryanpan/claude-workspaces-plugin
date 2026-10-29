@@ -22,18 +22,36 @@
  * (it must be refused), plants a file beside the `claude` binary (it must
  * be refused), connects to each board server's port at each of this
  * machine's addresses for a lead with `boardWall` (it must be refused with
- * EPERM; the control is the same profile without the wall), and exits 1 on
- * any failure.
+ * EPERM; the control is the same profile without the wall), connects to its
+ * own board's socket (it must not be refused) and to each other board's
+ * socket in the folder (it must be, and must connect without the wall), and
+ * exits 1 on any failure. The socket rows need a server with board sockets
+ * on; with no other board's socket to try, that row fails rather than pass
+ * on nothing.
  *
  * A lead with `boardWall` is for `--check` only: its board tools do not use
- * the lead socket yet, so the launch refuses it.
+ * its board's socket yet, so the launch refuses it.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
-import { boardWallRows, escapeRows, installRow, keychainRow } from './lead-sandbox-escapes.ts';
+import {
+  boardSocketRows,
+  boardWallRows,
+  escapeRows,
+  installRow,
+  keychainRow,
+} from './lead-sandbox-escapes.ts';
 import {
   CLAUDE_LAUNCHER,
   type Lead,
@@ -45,7 +63,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
-import { wallHosts } from './lead-sandbox-wall.ts';
+import { defaultBoardSocketDir, wallHosts } from './lead-sandbox-wall.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
 const machine: Machine = {
@@ -118,11 +136,33 @@ function wallRows(
   writeFileSync(unwalled, buildProfile({ ...lead, boardWall: false }, config, machine, guard), {
     mode: 0o600,
   });
+  const dir = config.boardSocketDir ?? defaultBoardSocketDir(machine.uid);
+  const own = join(dir, `${lead.boardId}.sock`);
+  const others = otherSockets(dir, own);
   try {
-    return boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces()));
+    return [
+      ...boardWallRows(profile, unwalled, cwd, wallHosts(networkInterfaces())),
+      ...boardSocketRows(profile, unwalled, cwd, own, others),
+      ...(others.length === 0
+        ? [{ ok: false, says: `board socket: no other board's socket in ${dir} to try` }]
+        : []),
+    ];
   } finally {
     rmSync(unwalled, { force: true });
   }
+}
+
+/** Every socket in `dir` but `own`: the boards a walled lead must not reach. */
+function otherSockets(dir: string, own: string): string[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .map((n) => join(dir, n))
+    .filter((p) => p !== own && p.endsWith('.sock') && lstatSync(p).isSocket());
 }
 
 function main(argv: string[]): number {
@@ -177,7 +217,7 @@ function main(argv: string[]): number {
     }
     if (lead.boardWall) {
       say(
-        `${lead.name} has boardWall set, which is for --check only: its board tools cannot reach the lead socket yet, so walled it would have none.`,
+        `${lead.name} has boardWall set, which is for --check only: its board tools cannot reach its board's socket yet, so walled it would have none.`,
       );
       return 2;
     }
