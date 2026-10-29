@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -23,8 +24,10 @@ import {
   PathGuards,
   nearestRealpathSync,
   readChecked,
+  readRangeChecked,
   writeChecked,
 } from '../src/bound-path-guard.ts';
+import { makeFifo } from './fifo.ts';
 
 let dir: string;
 let inside: string;
@@ -59,6 +62,22 @@ describe('readChecked', () => {
     await expect(read).rejects.toBeInstanceOf(GuardRefused);
   });
 
+  it('refuses a file with a second name, which a hard link into a root would give it', async () => {
+    const once = join(inside, 'sub', 'once.md');
+    writeFileSync(once, '# harborlight once\n');
+    // The control: one name reads.
+    expect((await readChecked(once, under(inside))).text).toBe('# harborlight once\n');
+    linkSync(join(outside, 'keys.md'), join(inside, 'sub', 'keys.md'));
+    const read = readChecked(join(inside, 'sub', 'keys.md'), under(inside));
+    await expect(read).rejects.toBeInstanceOf(GuardRefused);
+  });
+
+  it('refuses a pipe at once rather than waiting on it', async () => {
+    const pipe = join(inside, 'sub', 'pipe.md');
+    makeFifo(pipe);
+    await expect(readChecked(pipe, under(inside))).rejects.toBeInstanceOf(GuardRefused);
+  });
+
   it('reads anything when nothing guards it', async () => {
     const read = await readChecked(join(inside, 'linked', 'keys.md'), null);
     expect(read.text).toBe('riverbend secret\n');
@@ -70,7 +89,7 @@ describe('writeChecked', () => {
     const path = join(inside, 'sub', 'plan.md');
     await writeChecked(path, '# harborlight plan\n\nRevised.\n', under(inside));
     expect(readFileSync(path, 'utf8')).toContain('Revised.');
-    expect(readdirSync(join(inside, 'sub'))).toEqual(['plan.md']);
+    expect(readdirSync(join(inside, 'sub')).filter((f) => f.includes('cw-pool-write'))).toEqual([]);
   });
 
   it('creates nothing outside through a linked folder', async () => {
@@ -78,6 +97,36 @@ describe('writeChecked', () => {
     await expect(write).rejects.toBeInstanceOf(GuardRefused);
     expect(existsSync(join(outside, 'new.md'))).toBe(false);
     expect(readdirSync(outside)).toEqual(['keys.md']);
+  });
+});
+
+describe('writeChecked and a link at the temp file’s old name', () => {
+  it('never writes through, truncates or removes what the link names', async () => {
+    const victim = join(outside, 'victim.md');
+    writeFileSync(victim, 'riverbend keep\n');
+    const path = join(inside, 'sub', 'notes.md');
+    writeFileSync(path, '# harborlight notes\n');
+    symlinkSync(victim, `${path}.cw-pool-write~`);
+    await writeChecked(path, '# harborlight notes\n\nRevised.\n', under(inside));
+    expect(readFileSync(path, 'utf8')).toContain('Revised.');
+    expect(readFileSync(victim, 'utf8')).toBe('riverbend keep\n');
+  });
+
+  it('removes only its own temp file when a linked folder refuses the write', async () => {
+    const write = writeChecked(join(inside, 'linked', 'keys.md'), 'leaked\n', under(inside));
+    await expect(write).rejects.toBeInstanceOf(GuardRefused);
+    expect(readFileSync(join(outside, 'keys.md'), 'utf8')).toBe('riverbend secret\n');
+    expect(readdirSync(outside).filter((f) => f.includes('cw-pool-write'))).toEqual([]);
+  });
+});
+
+describe('readRangeChecked', () => {
+  it('reads the range of a file inside, and refuses one a link carries outside', async () => {
+    const bytes = await readRangeChecked(join(inside, 'sub', 'plan.md'), 2, 13, under(inside));
+    expect(new TextDecoder().decode(bytes)).toBe('harborlight ');
+    writeFileSync(join(outside, 'range.md'), 'riverbend range\n');
+    const outsideRead = readRangeChecked(join(inside, 'linked', 'range.md'), 0, 4, under(inside));
+    await expect(outsideRead).rejects.toBeInstanceOf(GuardRefused);
   });
 });
 

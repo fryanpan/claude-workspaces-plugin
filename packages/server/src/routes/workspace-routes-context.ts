@@ -38,6 +38,9 @@ export interface WorkspaceRoutesContext {
   taskStore: TaskStore;
   /** Whether a board's lead may bind this folder (`board-socket-roots.ts`). */
   leadBindRoot: (boardId: string, folderPath: string) => string | null;
+  /** The first link under a lead's root that leads outside it, if any
+   *  (`board-socket-roots.ts` `linkOutOf`). */
+  leadRootLinkOut: (root: string) => Promise<string | 'too-many' | null>;
   /** Remember a lead's bind so every later read under it is re-checked. */
   recordLeadBind: (setId: string, boardId: string, root: string) => void;
   /** The ydoc projection of the store, refreshed by hand after the writes

@@ -104,6 +104,17 @@ export async function handleWorkspaceCreateRead(
           error: 'out_of_lead_scope',
           message: 'That folder’s set is filed on another board.',
         });
+      // A link already in the folder that leads out of it would carry the
+      // server's reads there; links that stay inside are a repository's own.
+      const out = await ctx.leadRootLinkOut(judged.root);
+      if (out !== null)
+        return j(403, {
+          error: 'out_of_lead_scope',
+          message:
+            out === 'too-many'
+              ? 'That folder holds too many files to check for links out of it.'
+              : `That folder holds a link that leads out of it: ${out}`,
+        });
       lead = judged;
     }
     // Creating a board by name involves no file and stays open to the

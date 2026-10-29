@@ -29,7 +29,8 @@
  * file holds paths, no secret, and is written mode 600.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { realpathSync, statSync } from 'node:fs';
+import { type Dirent, realpathSync, statSync } from 'node:fs';
+import { readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
@@ -246,4 +247,42 @@ export class BoardSocketRoots {
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
   }
+}
+
+/** The most entries `linkOutOf` will look at before it gives up. */
+export const LINK_SCAN_MAX = 200_000;
+
+/**
+ * The first symlink under `root` that leads outside it (or nowhere), as a
+ * path relative to the root; `'too-many'` past {@link LINK_SCAN_MAX}
+ * entries; null when every link stays inside. Links are not followed, so a
+ * folder link is judged by where it leads and not walked. A walled lead may
+ * make no link (`scripts/lead-sandbox-wall.ts`), so this is about the ones
+ * already there when it binds.
+ */
+export async function linkOutOf(root: string): Promise<string | 'too-many' | null> {
+  const inside = (p: string) => p === root || p.startsWith(`${root}/`);
+  const queue = [root];
+  let seen = 0;
+  for (let dir = queue.pop(); dir !== undefined; dir = queue.pop()) {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (++seen > LINK_SCAN_MAX) return 'too-many';
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) queue.push(path);
+      else if (entry.isSymbolicLink()) {
+        let real: string | null = null;
+        try {
+          real = await realpath(path);
+        } catch {}
+        if (real === null || !inside(real)) return path.slice(root.length + 1);
+      }
+    }
+  }
+  return null;
 }

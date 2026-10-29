@@ -9,9 +9,10 @@
  * to the file the descriptor holds), and a guarded write opens its temp file
  * first and asks the same before writing a byte.
  */
+import { randomBytes } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
-import { realpathSync } from 'node:fs';
-import { open, realpath, rename, stat, unlink } from 'node:fs/promises';
+import { constants, realpathSync } from 'node:fs';
+import { type FileHandle, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, sep } from 'node:path';
 import { stampOf } from './file-stamp.ts';
@@ -85,15 +86,38 @@ export function isEnoent(err: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
-/** A read that, when given `lands`, opens and then asks where the open
- *  file really is before reading a byte. */
+/**
+ * Open `path` for a guarded read and judge what was opened: where the
+ * descriptor really is, that it is a regular file (a FIFO or a device would
+ * hold a pool thread; the open is non-blocking for the same reason), and
+ * that it has one name (a hard link made into a root resolves inside it).
+ */
+async function openChecked(path: string, lands: (real: string) => boolean): Promise<FileHandle> {
+  const fh = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const st = await fh.stat();
+    if (!st.isFile() || st.nlink > 1 || !lands(await realpathOfOpen(fh.fd))) {
+      throw new GuardRefused(path);
+    }
+    return fh;
+  } catch (err) {
+    await fh.close();
+    throw err;
+  }
+}
+
+/** A read that, when given `lands`, opens and then judges the open file
+ *  (`openChecked`) before reading a byte; unguarded, a plain read. */
 export async function readChecked(
   path: string,
   lands: ((real: string) => boolean) | null,
 ): Promise<{ text: string } & ReturnType<typeof stampOf>> {
-  const fh = await open(path, 'r');
+  if (!lands) {
+    const [text, st] = await Promise.all([readFile(path, 'utf8'), stat(path, { bigint: true })]);
+    return { text, ...stampOf(st) };
+  }
+  const fh = await openChecked(path, lands);
   try {
-    if (lands && !lands(await realpathOfOpen(fh.fd))) throw new GuardRefused(path);
     const [text, st] = await Promise.all([fh.readFile('utf8'), fh.stat({ bigint: true })]);
     return { text, ...stampOf(st) };
   } finally {
@@ -101,10 +125,41 @@ export async function readChecked(
   }
 }
 
+/** Bytes `start` to `end` (inclusive) of a file judged as `readChecked`
+ *  judges one: what a guarded media request is served from. */
+export async function readRangeChecked(
+  path: string,
+  start: number,
+  end: number,
+  lands: (real: string) => boolean,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const fh = await openChecked(path, lands);
+  try {
+    const out = new Uint8Array(end - start + 1);
+    let at = 0;
+    while (at < out.length) {
+      const { bytesRead } = await fh.read(out, at, out.length - at, start + at);
+      if (bytesRead === 0) break;
+      at += bytesRead;
+    }
+    return at === out.length ? out : out.subarray(0, at);
+  } finally {
+    await fh.close();
+  }
+}
+
+/** The temp file's flags: made new, never through a link at its own name. */
+const TEMP_FLAGS = constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+
 /**
- * A guarded write: the temp file is opened first and judged by where it
- * really is before a byte goes in, so a linked parent cannot carry the
- * write outside. The rename then names the same folder; if a link has been
+ * A write through a temp file, then a rename onto the target.
+ *
+ * The temp file has a random name and is created new (`O_EXCL`), never
+ * through a link at that name (`O_NOFOLLOW`), so a link planted where the
+ * temp file goes cannot turn the write, or its cleanup, onto another file.
+ * Guarded, it is then judged by where it really is before a byte goes in, so
+ * a linked parent folder cannot carry the write outside; refused, only that
+ * temp path is removed. The rename names the same folder; if a link has been
  * swapped in since, the temp file is not there and the rename fails.
  */
 export async function writeChecked(
@@ -116,24 +171,24 @@ export async function writeChecked(
   try {
     target = await realpath(path);
   } catch {}
-  const tmp = `${target}.cw-pool-write~`;
-  // `w+`, not `w`: /dev/fd/<n> refuses an lstat on a write-only descriptor.
-  const fh = await open(tmp, 'w+');
-  let landed: string | null = null;
+  const tmp = `${target}.cw-pool-write-${randomBytes(6).toString('hex')}~`;
+  // Read-write: /dev/fd/<n> refuses an lstat on a write-only descriptor.
+  const fh = await open(tmp, TEMP_FLAGS, 0o644);
   try {
-    if (lands) {
-      landed = await realpathOfOpen(fh.fd);
-      if (!lands(landed)) throw new GuardRefused(path);
-    }
+    if (lands && !lands(await realpathOfOpen(fh.fd))) throw new GuardRefused(path);
     await fh.writeFile(text);
   } catch (err) {
     await fh.close();
-    // Remove the empty temp file this made, wherever it landed.
-    if (landed !== null) await unlink(landed).catch(() => {});
+    await unlink(tmp).catch(() => {});
     throw err;
   }
   await fh.close();
-  await rename(tmp, target);
+  try {
+    await rename(tmp, target);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
   return stat(target, { bigint: true });
 }
 
@@ -179,6 +234,18 @@ export class PathGuards {
   read(path: string, setId?: string): ReturnType<typeof readChecked> {
     const lands = (real: string) => this.landsAll(path, real, setId);
     return readChecked(path, this.covers(path, setId) ? lands : null);
+  }
+
+  /** A byte range of a covered file, judged as `read` judges one; null
+   *  when no guard covers it, for the caller's own unguarded read. */
+  readRange(
+    path: string,
+    start: number,
+    end: number,
+    setId?: string,
+  ): Promise<Uint8Array<ArrayBuffer>> | null {
+    if (!this.covers(path, setId)) return null;
+    return readRangeChecked(path, start, end, (real) => this.landsAll(path, real, setId));
   }
 
   /** Write a bound file, checked where a guard covers it. */

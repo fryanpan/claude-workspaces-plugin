@@ -258,6 +258,9 @@ describe('A. the tools a member is refused work for the lead on its own board', 
       subscribe: false,
     });
     expect(viaLink.isError).toBe(true);
+    // A root holding a link out of it is refused at the bind, so the cases
+    // below bind it without one.
+    (await import('node:fs')).unlinkSync(link);
   }, 30_000);
 
   it('binds by the resolved root under a set of its own, leaving another board’s set alone', async () => {

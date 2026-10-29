@@ -13,7 +13,8 @@
  * board. A walled lead may connect to its own board's socket and to no other
  * socket in that folder, and may write nothing there, so it can neither
  * reach another board's socket nor link one in under its own name. Its other
- * local sockets are not touched.
+ * local sockets are not touched. It may make no symlink or hard link at
+ * all, since the server follows links in the folders a lead binds.
  *
  * Off unless a lead's config sets `boardWall`. A walled lead is launched with
  * `CW_BOARD_SOCKET` naming its own board's socket, which its MCP relay dials
@@ -60,6 +61,11 @@ export function boardWallRules(
     ...ends.map(
       (d) => `(deny file-write* (subpath ${sbQuote(d)})) ; no link to another board's socket`,
     ),
+    // The server reads and writes the folders this lead binds
+    // (`board-socket-roots.ts`), so a link the lead made in one would carry
+    // the server outside it. It may make neither kind anywhere.
+    '(deny file-write-create (vnode-type SYMLINK)) ; no new symlink',
+    '(deny file-link) ; no new hard link',
   ];
 }
 

@@ -43,7 +43,7 @@ import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/bo
 import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
-import { BoardSocketRoots, boardSocketRootsPath } from './board-socket-roots.ts';
+import { BoardSocketRoots, boardSocketRootsPath, linkOutOf } from './board-socket-roots.ts';
 import { openBoardSockets } from './board-sockets.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
@@ -2940,6 +2940,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
+    leadRootLinkOut: linkOutOf,
     recordLeadBind: (setId, boardId, root) => boardSocketRoots.recordBind(setId, boardId, root),
     chatAudit,
     shareLinks,

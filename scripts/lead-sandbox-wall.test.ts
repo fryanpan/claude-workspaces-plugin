@@ -304,6 +304,23 @@ s.on('error', (e) => console.log(e.code));`,
     expect(existsSync(join(boards, 'w-plant.sock'))).toBe(false);
   });
 
+  it('may make no symlink or hard link, and still writes a plain file', () => {
+    const run = (profile: string, argv: string[]) =>
+      spawnSync(SANDBOX_EXEC, ['-f', profile, ...argv], { cwd: project, encoding: 'utf8' }).status;
+    const target = join(project, 'plan.md');
+    writeFileSync(target, '# harborlight plan\n');
+    // The positive control: the walled profile still writes a file.
+    expect(run(walled, ['/bin/sh', '-c', `echo ok > ${join(project, 'plain.md')}`])).toBe(0);
+    expect(existsSync(join(project, 'plain.md'))).toBe(true);
+    expect(run(walled, ['/bin/ln', '-s', '/etc', join(project, 'walled-sym')])).not.toBe(0);
+    expect(run(walled, ['/bin/ln', target, join(project, 'walled-hard')])).not.toBe(0);
+    expect(existsSync(join(project, 'walled-sym'))).toBe(false);
+    expect(existsSync(join(project, 'walled-hard'))).toBe(false);
+    // Without the wall the same two links are made.
+    expect(run(unwalled, ['/bin/ln', '-s', '/etc', join(project, 'open-sym')])).toBe(0);
+    expect(run(unwalled, ['/bin/ln', target, join(project, 'open-hard')])).toBe(0);
+  });
+
   it('fails a check row whose path has no socket behind it, which proves nothing', () => {
     // Measured: such a connect answers ENOENT inside the wall too.
     const rows = boardSocketRows(

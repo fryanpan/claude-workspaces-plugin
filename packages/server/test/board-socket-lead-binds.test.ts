@@ -274,6 +274,51 @@ describe('the guard holds only the lead’s own sets', () => {
   }, 30_000);
 });
 
+describe('links at the bind, and media after it', () => {
+  it('refuses a root holding a link out of it, and keeps one that stays inside', async () => {
+    const root = project('harbor-links');
+    symlinkSync(join(root, 'notes.md'), join(root, 'notes-link.md'));
+    await setRoots([root]);
+    // The control: a link that stays inside binds.
+    const kept = await leadBind(root);
+    expect(kept.status, await kept.clone().text()).toBe(200);
+    symlinkSync(secrets, join(root, 'keys'));
+    const refused = await leadBind(root, { exclude: ['later.md'] });
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain('a link that leads out of it');
+  }, 30_000);
+
+  it('serves a lead’s media from the file it checked, and nothing through a swapped folder', async () => {
+    const root = project('harbor-media');
+    mkdirSync(join(root, 'shots'));
+    writeFileSync(join(root, 'shots', 'first.png'), 'harbor-png-first');
+    writeFileSync(join(root, 'shots', 'later.png'), 'harbor-png-later');
+    writeFileSync(join(secrets, 'later.png'), 'riverbend-png');
+    await setRoots([root]);
+    const bound = await leadBind(root);
+    expect(bound.status, await bound.clone().text()).toBe(200);
+    const { setId } = (await bound.json()) as { setId: string };
+    const raw = (rel: string, range?: string) =>
+      tcp(
+        `/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}/raw?path=${encodeURIComponent(rel)}`,
+        range ? { headers: { range } } : {},
+      );
+    // The controls: the whole file, and a range of it, from inside.
+    const whole = await raw('shots/first.png');
+    expect(whole.status, await whole.clone().text()).toBe(200);
+    expect(await whole.text()).toBe('harbor-png-first');
+    const part = await raw('shots/first.png', 'bytes=0-5');
+    expect(part.status).toBe(206);
+    expect(await part.text()).toBe('harbor');
+
+    renameSync(join(root, 'shots'), join(root, 'shots.moved'));
+    symlinkSync(secrets, join(root, 'shots'));
+    const through = await raw('shots/later.png');
+    expect(through.status).not.toBe(200);
+    expect(await through.text()).not.toContain('riverbend');
+  }, 30_000);
+});
+
 describe('a lead’s bind is held to its own board', () => {
   it('is refused when its set is filed on another board', async () => {
     const root = project('harbor-shared');

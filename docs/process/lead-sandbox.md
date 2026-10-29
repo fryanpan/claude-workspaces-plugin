@@ -136,7 +136,13 @@ server's port (8787 to 8790, the list in
 enforces) at every address, and every socket in the board socket folder but
 its own board's, and every write in that folder. So the lead's only way to a
 board is its own board's socket, where the server holds each request to that
-board whatever token it carries. The folder is the config's top-level
+board whatever token it carries. The profile also denies the lead every new
+symlink and hard link, anywhere: the server reads and writes the projects a
+lead binds, and a link the lead made in one, or made elsewhere and moved in,
+would carry the server outside it. The cost is real: `bun install` and
+`npm install` make links in `node_modules/.bin`, and a checkout of a
+repository that holds symlinks makes them too, so neither works for a
+walled lead. The folder is the config's top-level
 `boardSocketDir`, or `/private/tmp/cw-<uid>-boards` when unset; a folder too
 long for a socket path is refused. A server on prod's port, 8787, opens the
 sockets in the default folder unless started with `CW_BOARD_SOCKETS=0`; any
