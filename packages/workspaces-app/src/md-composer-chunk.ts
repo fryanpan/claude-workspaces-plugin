@@ -48,6 +48,27 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
     onUpdate: () => opts.onUpdate(),
   });
 
+  // SELECT ALL STAYS IN THE BOX. A reply box in an inline thread card sits
+  // inside the doc's own editing host (the card is a widget decoration), and
+  // WebKit's native select-all widens to the HIGHEST editable ancestor,
+  // stepping over the card's `contenteditable=false`. So iOS's Select All
+  // menu, which never sends a keydown for Tiptap's Mod-a to catch, selected
+  // the whole doc from inside a comment. WebKit announces it first with a
+  // cancellable `selectstart` aimed at that outer host: refuse it and select
+  // this box instead. A selection starting inside the box targets the box's
+  // own nodes, so a drag or a long-press is untouched.
+  const doc = opts.parent.ownerDocument;
+  const keepSelectAllInside = (ev: Event): void => {
+    const dom = editor.view.dom;
+    const target = ev.target;
+    if (!(target instanceof Node) || target === dom || !target.contains(dom)) return;
+    const anchor = doc.getSelection()?.anchorNode ?? null;
+    if (!anchor || !dom.contains(anchor)) return;
+    ev.preventDefault();
+    editor.commands.selectAll();
+  };
+  doc.addEventListener('selectstart', keepSelectAllInside, true);
+
   const clamp = (pos: number) => Math.max(0, Math.min(pos, editor.state.doc.content.size));
 
   return {
@@ -97,6 +118,9 @@ export function createComposerEditor(opts: CreateComposerEditorOpts): ComposerEd
     // editor's rendering of them back over the textarea a caller is about to
     // hand back verbatim.
     setEditable: (on: boolean) => editor.setEditable(on, false),
-    destroy: () => editor.destroy(),
+    destroy: () => {
+      doc.removeEventListener('selectstart', keepSelectAllInside, true);
+      editor.destroy();
+    },
   };
 }
