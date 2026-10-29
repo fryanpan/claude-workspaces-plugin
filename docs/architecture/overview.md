@@ -2308,7 +2308,7 @@ agent token (MCP verb `rank_review_item`). The lead hears what to rank from
 row, key, headline and filing time, never the detail. The feed and the
 ranks cover every board, including one that is private or that the coach is
 off for: the lead sees what the owner sees (the owner, 2026-10-23), and
-`coach/exclusion.ts` applies to the coach alone. A lead stream opened off this
+the coach's own switch (`coach/exclusion.ts`) applies to the coach alone. A lead stream opened off this
 machine (through the tunnel, or from a peer that is not loopback) gets the
 frame without the asks from local-only boards and docs (`offBoxAskView`,
 which `routes/upgrade-stream.ts` hands both stream kinds as their transform).
@@ -2438,11 +2438,15 @@ paragraph he writes when he pauses, to `/coach/here`
 (`workspaces-app/src/coach-card.ts`); the front page and the review walk,
 which name no board, send which page they are (`PAGE_PLACES`); `coach/stream.ts` turns that and his
 own comment, reply and open rows (through `onActivity` in `activity.ts`)
-into one event per thing he does, dropping repeats. `coach/exclusion.ts`
-drops everything from a board that is local-only, sharing-locked, or that he
-turned off from the card ("Coach off for this board", `POST /coach/boards`);
-a check that throws counts as off. A board others can reach still counts:
-what reaches the coach from it is only his own actions there.
+into one event per thing he does, dropping repeats. The coach's visibility
+is the owner's own: every board he can see, local-only, sharing-locked and
+shared ones included, minus the boards he turned off from the card ("Coach
+off for this board", `POST /coach/boards`), from which `coach/exclusion.ts`
+drops everything (the owner, 2026-10-28: "All boards. Team Lead and Coach may
+have access to everything I have access to."). A doc on a board he turned off
+is off wherever it is viewed, and when the boards holding a doc cannot be read
+it counts as off. What reaches the coach from a shared board is only his own
+actions there.
 (C) *Intervene*: `coach/moment.ts` sends every event, his answers and his
 how-readily setting to the coach's Claude Code session, the Coach board's
 lead, as addressed frames (`coach/session-feed.ts`). Events are held: the

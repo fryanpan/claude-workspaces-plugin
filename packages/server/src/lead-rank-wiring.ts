@@ -10,8 +10,8 @@
  *    live-doc event hook (`onDocEvent`), and sends them to the lead in
  *    batches.
  *  - Neither skips a board. The lead sees every board the owner does (the
- *    owner, 2026-10-23), so the coach's exclusion (`coach/exclusion.ts`)
- *    does not apply here.
+ *    owner, 2026-10-23), so the boards he turned the coach off for
+ *    (`coach/exclusion.ts`) are not skipped here.
  */
 import type { WebhookPayload } from '@claude-workspaces/core';
 import {

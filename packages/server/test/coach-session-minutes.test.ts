@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentIdForName } from '@claude-workspaces/core';
-import type { BoardPrivacy } from '../src/coach/exclusion.ts';
+import type { DocBoards } from '../src/coach/exclusion.ts';
 import {
   READ_CAP_MS,
   RUN_IDLE_MS,
@@ -43,7 +43,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function wire(privacy: Partial<BoardPrivacy> = {}, overrides: Partial<CoachWiringDeps> = {}) {
+function wire(docBoards: Partial<DocBoards> = {}, overrides: Partial<CoachWiringDeps> = {}) {
   const windows: (() => void)[] = [];
   const sent: unknown[] = [];
   const deps: CoachWiringDeps = {
@@ -60,13 +60,7 @@ function wire(privacy: Partial<BoardPrivacy> = {}, overrides: Partial<CoachWirin
     label: () => ({}),
     boardName: (ws) => NAMES[ws],
     workspaceOf: () => 'w-coach',
-    privacy: {
-      localOnlyBoard: () => false,
-      localOnlyDoc: () => false,
-      locked: () => false,
-      boardsOfDoc: () => [],
-      ...privacy,
-    },
+    docBoards: { boardsOfDoc: () => [], ...docBoards },
     leadOf: (ws) => LEADS[ws],
     sendToAgent: (_ws, _agent, frame) => {
       sent.push(frame);
@@ -173,7 +167,8 @@ describe('the digest’s Claude Code section', () => {
   });
 
   it('leaves out a session on a board the coach is off for, entirely, and the coach’s own', () => {
-    const { w, sent, closeWindows } = wire({ locked: (ws) => ws === 'w-river' });
+    const { w, sent, closeWindows } = wire();
+    w.store.setBoardOff('w-river', true);
     expect(w.sessionPrompt('w-river', typed(RIVER_LEAD, 0), '/work/riverbend')).toBe(false);
     closeWindows();
     expect(sent).toEqual([]);

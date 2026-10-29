@@ -83,12 +83,7 @@ function boot(time: ReturnType<typeof fakeTime>, connected: () => boolean = () =
     label: () => ({}),
     boardName: () => undefined,
     workspaceOf: () => 'w-coach',
-    privacy: {
-      localOnlyBoard: () => false,
-      localOnlyDoc: () => false,
-      locked: () => false,
-      boardsOfDoc: () => [],
-    },
+    docBoards: { boardsOfDoc: () => [] },
     leadOf: () => 'agent-coach',
     sendToAgent: (_ws, _agent, frame) => {
       sent.push(frame);
