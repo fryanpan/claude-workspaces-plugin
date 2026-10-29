@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  SIGN_IN_NOTE,
   TAP_NOTE,
   TAP_WAIT_MS,
   createLeadMeetingRun,
@@ -81,6 +82,23 @@ describe('the lead chat meeting, on the device that records it', () => {
       text: 'The slipway opens at nine.',
     });
     expect(run.state().partial).toBe('');
+  });
+
+  it('says so when the server could not hand a "Lead," line to the lead without a sign-in', async () => {
+    const { meeting, fake, net, run } = setup();
+    await run.begin(meeting, { gesture: true });
+    const s = net.last();
+    s.onopen?.();
+    s.say({ type: 'ready', meetingId: 'm-77' });
+    await flush();
+    s.say({ type: 'transcript', turn: 0, text: 'The slipway opens at nine.', final: true });
+    await flush();
+    // Positive control: an answer with no refusal leaves the heading quiet.
+    expect(run.state().note).toBe('');
+    fake.lineAnswer.lead = 'sign-in';
+    s.say({ type: 'transcript', turn: 1, text: 'Lead, file the slipway task.', final: true });
+    await flush();
+    expect(run.state()).toMatchObject({ phase: 'recording', note: SIGN_IN_NOTE });
   });
 
   it('turns the note-taker off for a meeting with no notes', async () => {

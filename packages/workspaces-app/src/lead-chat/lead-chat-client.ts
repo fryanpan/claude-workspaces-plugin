@@ -42,7 +42,7 @@ export interface LeadChatState extends LeadChatRead {
 }
 
 export type MeetingAnswer =
-  | { ok: true; meeting?: LeadChatMeeting; message?: string }
+  | { ok: true; meeting?: LeadChatMeeting; message?: string; lead?: 'sign-in' }
   | { ok: false; error: string };
 
 export type SendResult = { ok: true; message: LeadChatMessage } | { ok: false; error: string };
@@ -182,6 +182,7 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
         const got = (await res.json().catch(() => ({}))) as {
           meeting?: LeadChatMeeting;
           message?: string;
+          lead?: string;
           error?: string;
         };
         if (!res.ok) return { ok: false, error: got.error ?? `HTTP ${res.status}` };
@@ -192,6 +193,7 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
           ok: true,
           ...(got.meeting ? { meeting: got.meeting } : {}),
           ...(got.message ? { message: got.message } : {}),
+          ...(got.lead === 'sign-in' ? { lead: 'sign-in' as const } : {}),
         };
       } catch {
         return { ok: false, error: 'offline' };

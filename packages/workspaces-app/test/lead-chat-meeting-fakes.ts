@@ -137,6 +137,8 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
   };
   const fns: Array<(s: LeadChatState) => void> = [];
   const calls: Array<{ action: string; body: Record<string, unknown> }> = [];
+  /** What the server says of a line's ask, as it does to a caller it cannot prove. */
+  const lineAnswer: { lead?: 'sign-in' } = {};
   const changed = () => {
     for (const fn of fns) fn(state);
   };
@@ -193,7 +195,7 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
           meeting: { ...m, lines: [...m.lines.filter((l) => l.turn !== line.turn), line] },
         };
         changed();
-        return { ok: true };
+        return { ok: true, ...lineAnswer };
       }
       if (action === 'join') {
         state = {
@@ -218,6 +220,7 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
   return {
     client,
     calls,
+    lineAnswer,
     actions: () => calls.map((c) => c.action),
     setMeeting(next: LeadChatMeeting | null) {
       state = { ...state, meeting: next };

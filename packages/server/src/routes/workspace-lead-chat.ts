@@ -176,12 +176,22 @@ async function meetingAction(
     // The one line of the meeting the lead acts on, sent once per turn: a
     // revision of a turn the meeting already holds is not a second ask.
     let toLead: string | undefined;
-    const proven = hasOwnerProof(rq.req, rq.provenIdentityFor, rq.requestOriginFor);
-    if (r.fresh && addressesLead(text) && source && leadHearsLine(source, proven)) {
-      const sent = ctx.leadChat.post(workspaceId, person, text, undefined, 'voice');
-      if (sent.ok) toLead = sent.message.id;
+    let refused: 'sign-in' | undefined;
+    if (r.fresh && addressesLead(text) && source) {
+      const proven = hasOwnerProof(rq.req, rq.provenIdentityFor, rq.requestOriginFor);
+      if (leadHearsLine(source, proven)) {
+        const sent = ctx.leadChat.post(workspaceId, person, text, undefined, 'voice');
+        if (sent.ok) toLead = sent.message.id;
+      } else if (leadHearsLine(source, true)) {
+        // Only the sign-in is missing, so the page can say so.
+        refused = 'sign-in';
+      }
     }
-    return ctx.j(200, { line: r.line, ...(toLead ? { message: toLead } : {}) });
+    return ctx.j(200, {
+      line: r.line,
+      ...(toLead ? { message: toLead } : {}),
+      ...(refused ? { lead: refused } : {}),
+    });
   }
   if (action === 'end') {
     const r = meetings.end(workspaceId, meetingId);

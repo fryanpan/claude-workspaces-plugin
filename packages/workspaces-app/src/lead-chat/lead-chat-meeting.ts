@@ -71,6 +71,8 @@ export interface MeetingRunState {
  *  asks for the tap that starts it. */
 export const TAP_WAIT_MS = 1_500;
 export const TAP_NOTE = 'Tap to keep recording';
+/** A "Lead," line the server would not pass on: this page proves no owner. */
+export const SIGN_IN_NOTE = 'Sign in to talk to the lead from a meeting';
 
 export interface LeadMeetingRunOpts {
   workspaceId: string;
@@ -163,12 +165,13 @@ export function createLeadMeetingRun(opts: LeadMeetingRunOpts): LeadMeetingRun {
   const postLine = (turn: number, text: string, speaker?: string): void => {
     if (!meeting || posted.has(turn) || !text.trim()) return;
     posted.add(turn);
-    void opts.client.meeting('line', opts.author, {
-      id: meeting.id,
-      turn,
-      who: who(speaker),
-      text,
-    });
+    void opts.client
+      .meeting('line', opts.author, { id: meeting.id, turn, who: who(speaker), text })
+      .then((r) => {
+        if (r.ok && r.lead === 'sign-in' && state.phase === 'recording') {
+          set({ note: SIGN_IN_NOTE });
+        }
+      });
   };
 
   const link: MeetingLink = createMeetingLink({
