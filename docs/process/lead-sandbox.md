@@ -53,9 +53,14 @@ profile per lead. A profile allows everything, then:
   `network-outbound` deny: a lead in a pane finds the socket in `$TMUX`, and a
   file deny on the folder alone still let it connect;
 - **refuses the keychain**: every read goes to `securityd` over Mach, so the
-  profile denies its two services and every item is refused at once. Claude
-  Code still signs in, from `~/.claude/.credentials.json`. A lead whose
-  config sets `allowKeychain` keeps it (step 1).
+  profile denies its two services and every item is refused at once. That
+  also refuses Claude Code its own sign-in: measured 28 October, 21:20 PT,
+  `claude -p "say ok"` inside a profile said "OAuth token revoked", and said
+  "Ok." from the same profile with only the keychain deny removed. Earlier
+  that day it signed in from `~/.claude/.credentials.json`; it no longer
+  does. So the wrapper reads a long-lived token outside the wall and hands
+  it to the lead (step 4). A lead whose config sets `allowKeychain` keeps
+  the keychain (step 1).
 
 Seatbelt applies the last rule that matches, so the profile runs from the
 shortest path to the longest and the most specific folder decides. It
@@ -169,6 +174,15 @@ each, against the real `sandbox-exec`.
 bun scripts/lead-sandbox.ts --config ~/.config/claude-workspaces/lead-sandbox.json --check
 ```
 
+One more row, `claude turn`, runs `claude -p "say ok"` inside each lead's
+profile with the token step 4 hands over, and must answer. It spends a model
+turn per lead, so it runs only with `--turn`. A plain `--check` prints it as
+`skip` and counts it as not run, never as held.
+
+```bash
+bun scripts/lead-sandbox.ts --config ~/.config/claude-workspaces/lead-sandbox.json --check --turn
+```
+
 **4. Launch the lead through the wrapper**, from prod's checkout, which no
 lead can write. Launched from a lead's own project, the lead could edit the
 generator of its next profile; the wrapper warns when it is.
@@ -181,6 +195,17 @@ bun "$HOME/Library/Application Support/claude-workspaces/repo/scripts/lead-sandb
 
 It writes the profile, then runs `sandbox-exec -f <profile> claude …` in the
 lead's first project with the terminal handed through.
+
+Before that it reads the lead's Claude Code token outside the wall, from the
+keychain item `claude-workspaces-secret.claude-lead-oauth-token` (account
+`claude-workspaces`, stored BASE64, as a secret card stores it), and passes
+it to the lead as `CLAUDE_CODE_OAUTH_TOKEN`. The value goes into the child's
+environment only: never printed, logged or written, and the dry run does not
+read it. To make one, run `claude setup-token` outside the wall and save what
+it prints through a secret card named `claude-lead-oauth-token`. Without the
+item the launch is refused, naming it, because a walled lead without it
+cannot answer. A lead with `allowKeychain` can still sign in from the
+keychain, so for it the token is optional.
 
 ## GitHub through the proxy
 
@@ -424,8 +449,11 @@ Sandbox, a macOS user per lead, a VM) is planned for either.
 - **The keychain answers a lead with `allowKeychain`.** By default the
   profile refuses the keychain (step 1): measured 28 October, a dummy item
   read back from inside a profile before the rule was refused after it
-  (exit 44), and `claude -p` still signed in, from
-  `~/.claude/.credentials.json`, which every lead can read and write. A lead
+  (exit 44). Claude Code now signs in from the token the wrapper hands it
+  (step 4), not from the keychain or `~/.claude/.credentials.json`:
+  measured 28 October, 21:20 PT, `claude -p` inside a profile without it
+  said "OAuth token revoked". The token is in every walled lead's
+  environment, so any lead can act as Bryan's Claude account. A lead
   that sets `allowKeychain` for `gh` or git over HTTPS still reads every
   item. That closes with the keeper ([keeper.md](keeper.md)), which moves the
   fleet's secrets behind Bryan's passkey.

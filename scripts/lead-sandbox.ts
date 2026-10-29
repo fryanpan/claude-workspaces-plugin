@@ -8,6 +8,7 @@
  *   bun scripts/lead-sandbox.ts --config <file>                 # dry run: profiles + launch commands
  *   bun scripts/lead-sandbox.ts --config <file> --write         # write the profiles
  *   bun scripts/lead-sandbox.ts --config <file> --check         # prove each wall from inside it
+ *   bun scripts/lead-sandbox.ts --config <file> --check --turn  # and one `claude -p` turn per lead
  *   bun scripts/lead-sandbox.ts --config <file> --lead <name> -- claude [args]   # launch
  *
  * Profiles go to `~/.config/claude-workspaces/lead-sandbox/`, or to
@@ -20,7 +21,13 @@
  * tries each way out of the wall (`lead-sandbox-escapes.ts`: tmux, `open`,
  * `osascript`, `shortcuts`, launchd), reads a dummy keychain item it made
  * (it must be refused), plants a file beside the `claude` binary (it must
- * be refused), and exits 1 on any failure.
+ * be refused), and exits 1 on any failure. With `--turn` it also has
+ * `claude -p` answer once inside each profile; without it that row is named
+ * as not run.
+ *
+ * A launch reads the lead's Claude Code token from the keychain, outside the
+ * wall, and hands it over as `CLAUDE_CODE_OAUTH_TOKEN`
+ * (`lead-sandbox-token.ts`).
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -39,6 +46,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
+import { type TokenReader, readKeychainToken, tokenEnv, turnCheck } from './lead-sandbox-token.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
 const machine: Machine = {
@@ -98,9 +106,31 @@ function bunEnvCount(profile: string, cwd: string): number {
   return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
 }
 
-function main(argv: string[]): number {
-  const say = (line: string) => process.stdout.write(`${line}\n`);
-  if (process.platform !== 'darwin') {
+/** What `main` reaches outside itself, so a test can stand in for each. */
+export interface LaunchDeps {
+  platform: string;
+  say: (line: string) => void;
+  /** The stored Claude Code token, read outside the wall. */
+  readToken: TokenReader;
+  /** Starts the lead with the terminal handed through; answers its exit status. */
+  spawn: (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => number;
+}
+
+const realDeps: LaunchDeps = {
+  platform: process.platform,
+  say: (line) => process.stdout.write(`${line}\n`),
+  readToken: readKeychainToken,
+  spawn(file, args, opts) {
+    // Ctrl-C interrupts the lead's turn; it must not kill this wrapper and
+    // leave the session running without its parent.
+    for (const sig of ['SIGINT', 'SIGQUIT'] as const) process.on(sig, () => {});
+    return spawnSync(file, args, { ...opts, stdio: 'inherit' }).status ?? 1;
+  },
+};
+
+export function main(argv: string[], deps: LaunchDeps = realDeps): number {
+  const { say } = deps;
+  if (deps.platform !== 'darwin') {
     say('Seatbelt is macOS only.');
     return 2;
   }
@@ -153,22 +183,24 @@ function main(argv: string[]): number {
       say(
         `warning: this script runs from ${here}, inside ${lead.name}'s own project, so the lead can edit the generator of its next profile. Launch from prod's checkout.`,
       );
+    const token = tokenEnv(lead, deps.readToken);
+    if (!token.ok) {
+      say(`launch refused for ${lead.name}: ${token.error}`);
+      return 2;
+    }
     const launch = launchCommand(lead, writeProfile(lead, config, guard), command);
-    const env = { ...process.env, ...gitProxyFiles(lead, config) };
-    // Ctrl-C interrupts the lead's turn; it must not kill this wrapper and
-    // leave the session running without its parent.
-    for (const sig of ['SIGINT', 'SIGQUIT'] as const) process.on(sig, () => {});
-    const r = spawnSync(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
+    const env = { ...process.env, ...gitProxyFiles(lead, config), ...token.env };
+    return deps.spawn(launch.argv[0] ?? SANDBOX_EXEC, launch.argv.slice(1), {
       cwd: launch.cwd,
       env,
-      stdio: 'inherit',
     });
-    return r.status ?? 1;
   }
 
   if (own.includes('--check')) {
+    const turn = own.includes('--turn');
     let bad = 0;
     let total = 0;
+    let notRun = 0;
     for (const lead of config.leads) {
       const profile = writeProfile(lead, config, guard);
       const t = checkTargets(lead, config, machine);
@@ -209,8 +241,20 @@ function main(argv: string[]): number {
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
       }
+      const row = turnCheck(lead, profile, cwd, { turn, read: deps.readToken, env: process.env });
+      if (!row.ran) {
+        notRun++;
+        say(`skip ${lead.name}  ${row.says}`);
+      } else {
+        total++;
+        if (!row.ok) bad++;
+        say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
+      }
     }
-    say(bad === 0 ? `All ${total} checks hold.` : `${bad} of ${total} checks failed.`);
+    const skipped = notRun > 0 ? ` ${notRun} not run (claude turn; add --turn).` : '';
+    say(
+      `${bad === 0 ? `All ${total} checks hold.` : `${bad} of ${total} checks failed.`}${skipped}`,
+    );
     return bad === 0 ? 0 : 1;
   }
 
@@ -242,4 +286,4 @@ function main(argv: string[]): number {
   return 0;
 }
 
-process.exit(main(process.argv.slice(2)));
+if (import.meta.main) process.exit(main(process.argv.slice(2)));
