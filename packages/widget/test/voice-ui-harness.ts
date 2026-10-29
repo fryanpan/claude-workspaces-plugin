@@ -16,6 +16,7 @@ export interface FakeSession {
   pinned: number | null | undefined;
   note: string | null;
   ask: VoiceSession['ask'];
+  reconnecting: boolean;
   setResolved: ReturnType<typeof vi.fn>;
   reopen: ReturnType<typeof vi.fn>;
   answer: ReturnType<typeof vi.fn>;
@@ -53,6 +54,7 @@ export function setup() {
     pinned: undefined,
     note: null,
     ask: null,
+    reconnecting: false,
     setResolved: vi.fn(async () => {}),
     reopen: vi.fn(),
     answer: vi.fn(),

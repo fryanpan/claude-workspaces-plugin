@@ -371,8 +371,9 @@ describe('stopping', () => {
     ).toBe(false);
   });
 
-  it('says the connection was lost when the socket closes mid-recording', async () => {
-    const t = await recording();
+  it('says the connection was lost when the socket never opened', async () => {
+    const t = setup();
+    await t.session.start();
     t.socket().drop();
     expect(t.session.state).toBe('idle');
     expect(t.session.note).toBe('Voice feedback lost its connection.');

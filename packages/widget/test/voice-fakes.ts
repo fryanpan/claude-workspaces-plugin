@@ -18,7 +18,7 @@ export class FakeSocket implements SocketLike {
   readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev?: { code?: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   readonly sent: Array<string | ArrayBufferLike | ArrayBufferView> = [];
   readonly closes: Array<number | undefined> = [];
@@ -41,10 +41,10 @@ export class FakeSocket implements SocketLike {
   recv(msg: unknown): void {
     this.onmessage?.({ data: JSON.stringify(msg) });
   }
-  /** The connection went away without anyone asking. */
-  drop(): void {
+  /** The connection went away without anyone asking; `code`, the server hung up. */
+  drop(code?: number): void {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.(code === undefined ? undefined : { code });
   }
   /** The JSON frames the page sent, parsed. */
   json(): Array<Record<string, unknown>> {

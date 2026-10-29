@@ -791,7 +791,9 @@ that `widget.ts` never imports — it makes only the button, the readout and
 their rules. Voice feedback itself is the widget's `voice/` directory, a third
 entry (`@claude-workspaces/widget/voice`): `voice-session.ts` streams PCM over
 `WS /workspaces/<ws>/docs/<docId>/voice` and writes the comments the server
-settles through the ordinary thread routes, `voice-ui.ts` draws the live
+settles through the ordinary thread routes (`voice-note-writes.ts`), and
+reopens a socket that dropped mid-recording on a backoff while the microphone
+keeps listening (`voice-redial.ts`), `voice-ui.ts` draws the live
 comment and the settled cards (its styles in `voice-css.ts`, the column
 layout in `voice-column.ts`), and `voice-mode.ts` glues them to the page (a
 tap sends the next words to an element, or back into that element's earlier
