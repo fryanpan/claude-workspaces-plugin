@@ -123,6 +123,7 @@ describe('a local-only attachment set behind a share link', () => {
       privacy: 'local-only',
     });
     openSet = await bind(folder('Riverbend', 'Notes Bob may read.'));
+    handle.shareLinks.addToAudience(board, [MEMBER], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId: board });
     expect(minted.status, await minted.clone().text()).toBe(200);
     const linkId = ((await minted.json()) as { link: { linkId: string } }).link.linkId;

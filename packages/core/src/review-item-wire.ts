@@ -1,3 +1,4 @@
+import { readAccessChange } from './review-access.ts';
 import { readReviewBlocks } from './review-blocks.ts';
 import { applySecretShape } from './review-item-secret-wire.ts';
 import type {
@@ -179,6 +180,9 @@ function readPartialAnswers(value: unknown): ReviewPartialAnswer[] | undefined {
   return partial.length > 0 ? partial : undefined;
 }
 
+/** A step name: `push`, `jira`, `send`, `deploy-prod`. Anything else is dropped. */
+export const REVIEW_STEP = /^[a-z][a-z0-9-]{0,31}$/;
+
 export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   if (!isPlainObject(value)) return undefined;
   const shape = normalizeReviewType(value.review_type ?? value.shape);
@@ -194,6 +198,7 @@ export function readReviewPayload(value: unknown): ReviewPayload | undefined {
   // nothing by them. Anything else reads as absent, which is the open state —
   // safe because the flag's absence is what every item filed before it had.
   if (value.ownerOnly === true) out.ownerOnly = true;
+  if (typeof value.step === 'string' && REVIEW_STEP.test(value.step)) out.step = value.step;
   const blocks = readReviewBlocks(value.blocks);
   if (blocks) out.blocks = blocks;
   if (typeof value.answeredWith === 'string') out.answeredWith = value.answeredWith;
@@ -313,6 +318,10 @@ function readAnswer(value: unknown): ReviewItemAnswer | undefined {
   const out: ReviewItemAnswer = { text: value.text, by: str(value.by, ''), ts: num(value.ts, 0) };
   if (typeof value.answeredWith === 'string') out.answeredWith = value.answeredWith;
   if (value.via === 'mock-frame') out.via = value.via;
+  const by = value.answeredBy;
+  if (isPlainObject(by) && typeof by.id === 'string') {
+    out.answeredBy = { id: by.id, ...(typeof by.email === 'string' ? { email: by.email } : {}) };
+  }
   return out;
 }
 
@@ -335,6 +344,8 @@ export function readTaskReviewItem(value: unknown): TaskReviewItem | undefined {
   // as answered disappears from the queue and nobody is told.
   const answer = readAnswer(value.answer);
   if (answer) out.answer = answer;
+  const access = readAccessChange(value.access);
+  if (access) out.access = access;
 
   if (Array.isArray(value.priorAnswers)) {
     const prior: ReviewItemAnswer[] = [];

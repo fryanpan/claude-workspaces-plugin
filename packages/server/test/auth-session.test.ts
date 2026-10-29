@@ -87,7 +87,7 @@ describe('signing and verifying', () => {
     expect(verifySession(shareValue, sessionKey(shared), NOW)).toBeNull();
     const sessionValue = signSession(mintSession(ID, NOW), sessionKey(shared));
     // The share verifier would have to accept our whole payload as a shareId.
-    expect(sessionValue.startsWith('v2.')).toBe(true);
+    expect(sessionValue.startsWith('v3.')).toBe(true);
   });
 });
 

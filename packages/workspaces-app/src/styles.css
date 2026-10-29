@@ -2936,6 +2936,14 @@ body.signin-gated #main {
   outline-offset: -1px;
   border-color: var(--accent);
 }
+/* The fresh-sign-in ask (fresh-signin-client.ts): the same card, with
+   44px touch targets and a primary button sized for its longest label. */
+.fresh-signin-prompt .identity-actions button {
+  min-height: 44px;
+}
+.fresh-signin-prompt .identity-actions button[type="submit"] {
+  min-width: 112px;
+}
 .identity-actions {
   display: flex;
   justify-content: flex-end;

@@ -22,6 +22,8 @@ import {
   ENV_LOCKED_HINT,
   type ShareSwitchContext,
   type ShareSwitchRequest,
+  openingNeedsOwner,
+  provedOwner,
 } from './share-switch.ts';
 
 export const BOARD_LOCK_PATH = '/api/share/lock';
@@ -48,6 +50,11 @@ export async function handleBoardLock(
   // as a precaution taken.
   if (!taskStore.getWorkspace(workspaceId)) {
     return j(404, { error: 'unknown_workspace', workspaceId });
+  }
+  // Locking applies at once; unlocking is the owner's, so an agent's unlock
+  // files a card (share-switch.ts `openingNeedsOwner`).
+  if (!locked && !provedOwner(rq)) {
+    return openingNeedsOwner(ctx, { op: 'unlock-board', workspaceId }, parsed.value);
   }
   const res = sharingGate.setBoardLocked(workspaceId, locked);
   if (!res.ok) return j(409, { error: res.error, hint: ENV_LOCKED_HINT });

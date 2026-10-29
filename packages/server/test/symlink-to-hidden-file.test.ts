@@ -127,7 +127,9 @@ describe('a symlink to a file the folder hides', () => {
     setId = bound.workspaceId as string;
     expect(setId).toBeTruthy();
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+    ).headers;
   });
 
   afterAll(async () => {

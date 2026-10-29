@@ -43,7 +43,7 @@ describe('the keep-moving route', () => {
     handle = createServer({ port: 0, dataDir, ...access.serverOptions });
     base = `http://127.0.0.1:${handle.port}`;
     boardId = await seedBoard(base, { name: 'Harbour plan' });
-    share = await mintAccessShare(base, access, boardId);
+    share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId);
   });
 
   afterAll(async () => {

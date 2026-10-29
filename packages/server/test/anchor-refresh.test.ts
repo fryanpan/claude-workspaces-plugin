@@ -190,7 +190,11 @@ describe('a refreshed anchor', () => {
   it('is refused to a share visitor, on this board or another, and changes nothing', async () => {
     const id = await newThread();
     for (const board of [ws, other]) {
-      const share = await mintAccessShare(base, access, board);
+      const share = await mintAccessShare(
+        base,
+        { ...access, shareLinks: handle.shareLinks },
+        board,
+      );
       const res = await refresh(id, share.headers);
       expect(
         res.status,
@@ -199,7 +203,7 @@ describe('a refreshed anchor', () => {
     }
     expect((await anchorOf(id)).fingerprint.text).toBe('Riverbend high water by month');
     // CONTROL: the same visitor on this board may still reply on the thread.
-    const share = await mintAccessShare(base, access, ws);
+    const share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, ws);
     const reply = await post(
       `/workspaces/${ws}/docs/${mock}/threads/${id}/comments`,
       { text: 'Agreed.' },

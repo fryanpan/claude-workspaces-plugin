@@ -107,7 +107,7 @@ describe('over HTTP, on the share hostname', () => {
     base = `http://127.0.0.1:${handle.port}`;
     boardId = await seedBoard(base, { name: 'Harbour plan' });
     otherBoardId = await seedBoard(base, { name: 'Other board' });
-    share = await mintAccessShare(base, access, boardId);
+    share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId);
   });
 
   afterAll(async () => {

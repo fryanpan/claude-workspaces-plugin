@@ -129,7 +129,9 @@ describe('a share visitor reads a projected workspace, not the stored record', (
       ).status,
     ).toBe(200);
 
-    visitorHeaders = (await mintAccessShare(base, access, workspaceId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, workspaceId)
+    ).headers;
   });
 
   afterAll(async () => {

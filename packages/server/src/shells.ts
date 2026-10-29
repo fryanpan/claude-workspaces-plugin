@@ -466,6 +466,39 @@ export function renderSettingsShell(
 }
 
 /**
+ * The access page (`/access`): who can reach every board, and the changes
+ * agents proposed. The settings page's frame and bundle, with the board's
+ * stylesheet ahead of it in the board's own order, because each board's list
+ * is the board settings' "Who has access" rows and each proposal is the
+ * board's decision card. The behaviour is `/app/settings.js`.
+ */
+export function renderAccessShell(
+  sentry: BrowserSentryConfig | null,
+  assets: AssetManifest = {},
+): string {
+  const sentryTags = sentryHeadTags(sentry, 'settings', assets);
+  const sentryMeta = sentryTags ? `\n    ${sentryTags}` : '';
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <title>Who has access · Settings</title>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#2e7dd7" />${sentryMeta}
+    <link rel="stylesheet" href="${assetHref(assets, 'board.css')}" />
+    <link rel="stylesheet" href="${assetHref(assets, 'styles.css')}" />
+    <link rel="stylesheet" href="${assetHref(assets, 'settings.css')}" />
+    <link rel="stylesheet" href="${assetHref(assets, 'tokens.css')}" />
+  </head>
+  <body class="settings-body access-body">
+    <div id="settings-root"></div>
+    <script type="module" src="${assetHref(assets, 'settings.js')}"></script>
+  </body>
+</html>`;
+}
+
+/**
  * The cross-board review page (`/review`): every open item on every board,
  * one card at a time, top project first. The board's stylesheets in the
  * board's order and the board's frame — topbar, rail, Home column — because

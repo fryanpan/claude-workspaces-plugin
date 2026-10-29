@@ -306,6 +306,10 @@ export function createRequestChain(
       if (requireSignInToWrite && isGatedWrite(req.method, pathname) && browserProvedNobody()) {
         return j(401, signInRequiredBody());
       }
+      // --- Fresh sign-in for a person's destructive action --- (fresh-signin.ts)
+      // Above every route it guards; below the gates that proved the person.
+      const staleSignIn = await ctx.freshSignInGate(req, pathname, gate, widgetIdentity);
+      if (staleSignIn) return staleSignIn;
 
       // --- Sign-in, session and share links (routes/auth-share.ts) ---
       // Extracted whole and called from the position the block occupied, so

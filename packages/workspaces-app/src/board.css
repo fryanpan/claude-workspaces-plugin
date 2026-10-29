@@ -663,6 +663,181 @@ body.board-body {
   background: color-mix(in srgb, var(--fg) 85%, var(--bg-panel));
 }
 
+/* ################# BOARD · WHO HAS ACCESS #################
+   Two pages draw these rows: the board's Settings ("Who has access") and the
+   owner's /access page, which lists every board with the same module
+   (board/board-members.ts). Here because both pages link board.css: the
+   board's shell, and /access's (server shells.ts `renderAccessShell`), which
+   also needs this file's `.board-member` rows and `.board-decide` cards.
+   ################################################################### */
+.acc-who {
+  flex: 1 1 14ch;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.acc-who .board-member-who {
+  flex: none;
+}
+.acc-via {
+  font-size: 12px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+/* A person a domain let in sits under that domain's row. */
+.acc-under {
+  margin-left: 6px;
+  padding-left: 20px;
+  border-left: 2px solid var(--border);
+}
+.acc-sub {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.acc-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.acc-add .acc-sub {
+  flex-basis: 100%;
+}
+.acc-add input {
+  flex: 1 1 18ch;
+  min-width: 0;
+  width: auto;
+  min-height: 44px;
+}
+.acc-add button {
+  min-height: 44px;
+}
+/* Holds its line when empty, so a message appearing moves nothing below it. */
+.acc-err {
+  min-height: 1.2em;
+  margin: 2px 0 0;
+  color: var(--danger, #b42318);
+  font-size: 13px;
+}
+/* A question before a wide add, not a mistake: not drawn as an error. */
+.acc-err.acc-ask {
+  color: var(--fg);
+}
+.acc-link,
+.acc-waiting {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.acc-link .prompt-chev,
+.acc-waiting .prompt-chev {
+  flex: none;
+  /* Beside the words on every width, never up at the line's top. */
+  align-self: center;
+  margin-top: 0;
+  stroke: currentColor;
+}
+/* Changes an agent proposed, at the top of the section: the owner's next step. */
+.acc-waiting {
+  margin: 6px 0 2px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-weight: 600;
+}
+/* The /access page: proposals first, then one section per board, each set
+   off by a rule and space above it (Bryan, on the mock: "make headers and
+   grouping more clear"). */
+.access-shell h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--fg);
+}
+#acc-waiting {
+  padding: 8px 0 24px;
+}
+#acc-waiting h2 {
+  margin-bottom: 12px;
+}
+.acc-board {
+  padding: 24px 0 20px;
+  border-top: 1px solid var(--border);
+}
+.acc-board.acc-lead {
+  border-top: 0;
+}
+.acc-note {
+  margin: 0;
+  color: var(--fg-muted);
+}
+.acc-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.acc-proposals .board-decide {
+  margin: 0;
+}
+.acc-change {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.acc-proposals .board-decide-meta a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  color: var(--accent);
+}
+/* Approving a whole domain lets in people nobody named, so it does not look
+   like Reject beside it. */
+.acc-proposals .board-decide-option[data-answer="approve"].acc-wide {
+  border-color: var(--danger, #b42318);
+}
+.acc-proposals .board-decide-option[data-answer="approve"].acc-wide .board-decide-option-label {
+  color: var(--danger, #b42318);
+}
+.acc-answered-head {
+  margin: 16px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.acc-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+.acc-done strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.acc-empty {
+  margin: 4px 0;
+  color: var(--fg-muted);
+}
+.settings-subnav a .acc-count {
+  margin-left: 6px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ################# BOARD · LEAD SEAT + PRESENCE STRIP #################
    Who is responsible for this board (`.board-lead`), and who is here
    right now (`.board-presence`, §2.7). */

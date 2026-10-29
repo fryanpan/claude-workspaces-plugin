@@ -68,6 +68,7 @@ export const IN_REPLY_TO_MAX = 280;
 export function commentRepliedTo(
   thread: Thread,
   reply: { id: string } | undefined,
+  trustOf: (author: unknown) => CommentTrust = commentTrustOf,
 ): { author: string; authorId: string; trust: CommentTrust; text: string } | undefined {
   if (!reply) return undefined;
   const at = thread.comments.findIndex((c) => c.id === reply.id);
@@ -80,7 +81,7 @@ export function commentRepliedTo(
   return {
     author: parent.author.name,
     authorId: parent.author.id,
-    trust: commentTrustOf(parent.author),
+    trust: trustOf(parent.author),
     text,
   };
 }
@@ -222,6 +223,11 @@ export interface LiveDocFanoutHost {
   /** What a thread frame names the doc by — `DocStoreConfig.docTitle`, then
    *  the doc's own title. */
   titleOf(doc: LiveDoc): string | undefined;
+  /** `DocStoreConfig.commentTrust`, defaulted to the owner-only check. */
+  trustOf(doc: LiveDoc, author: unknown): CommentTrust;
+  /** `DocStoreConfig.commentTrustBoards`: the boards a `member` stamp was
+   *  decided against. */
+  trustBoards(doc: LiveDoc): string[];
   /** `DocStoreConfig.onDocEvent`, already defaulted to a no-op. */
   emitDocEvent(docId: string, payload: WebhookPayload): void;
   summarizer(): ThreadSummarizer | undefined;
@@ -524,12 +530,22 @@ export class LiveDocFanout {
     if (opts?.generate !== false) this.scheduleSummary(doc, thread.id);
     const decorate = (m: DocMeta) => this.host.decorate(m);
     const docTitle = this.host.titleOf(doc);
-    const inReplyTo = event === 'thread.replied' ? commentRepliedTo(thread, comment) : undefined;
-    // Whether an agent may read the words as the owner's. Stamped on the
+    const trustOf = (author: unknown) => this.host.trustOf(doc, author);
+    const inReplyTo =
+      event === 'thread.replied' ? commentRepliedTo(thread, comment, trustOf) : undefined;
+    // Whether an agent may read the words as the owner's or a member's. Stamped on the
     // comment the channel line quotes — this one, or the thread's last when a
     // created / undo frame carries none — so the reader never has to guess.
     const spoken = comment ?? thread.comments.at(-1);
     const speech = event === 'thread.created' || event === 'thread.replied';
+    const commentTrust = speech && spoken ? trustOf(spoken.author) : undefined;
+    // A `member` stamp holds only for the boards it was decided against. The
+    // doc's own channel reaches any agent that watches the doc, whatever board
+    // it leads, so the child trusts a member only on one of these boards.
+    const trustBoards =
+      commentTrust === 'member' || inReplyTo?.trust === 'member'
+        ? this.host.trustBoards(doc)
+        : undefined;
     this.broadcastToDoc(doc, {
       event,
       docId: doc.docId,
@@ -552,7 +568,8 @@ export class LiveDocFanout {
       // "Go ahead" knows what it is being told to go ahead with.
       ...(docTitle ? { docTitle } : {}),
       ...(inReplyTo ? { inReplyTo } : {}),
-      ...(speech && spoken ? { commentTrust: commentTrustOf(spoken.author) } : {}),
+      ...(commentTrust ? { commentTrust } : {}),
+      ...(trustBoards ? { trustBoards } : {}),
       seq: doc.seq,
     });
   }

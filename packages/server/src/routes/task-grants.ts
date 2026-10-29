@@ -160,6 +160,7 @@ export async function handleTaskGrants(
   const answered = taskStore.answerTaskReview(taskId, reviewItemId, text, {
     actor: author,
     door: 'grant',
+    ...(proven.email ? { provenEmail: proven.email } : {}),
   });
   if (!answered.ok) return j(answered.error === 'not-found' ? 404 : 400, answered);
   taskProjection.refreshTask(answered.task);

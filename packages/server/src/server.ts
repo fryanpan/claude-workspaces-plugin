@@ -13,7 +13,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
-import { isOwnerActor, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
+import { commentTrustOf, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -49,6 +49,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { type CommentTrustFor, createCommentTrust } from './comment-trust.ts';
 import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
@@ -63,6 +64,7 @@ import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-watch.ts';
 import { createFrameHost } from './frame-host.ts';
 import { frameKeys } from './frame-ticket.ts';
+import { personProofOf, refuseStaleSignIn } from './fresh-signin.ts';
 import { GithubHub, githubHubPath } from './github-hub.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
@@ -88,7 +90,13 @@ import { parseMuxCursor } from './mux-cursor.ts';
 import { rollupNotesQuality } from './notes-quality-store.ts';
 import { NOTES_QUALITY_WINDOW_MS } from './notes-quality-thresholds.ts';
 import { PageLoadLog } from './page-loads.ts';
-import { PROMPTS_CHANNEL, VOICE_CHANNEL, createPageNudger, wirePageNudges } from './page-nudges.ts';
+import {
+  ACCESS_CHANNEL,
+  PROMPTS_CHANNEL,
+  VOICE_CHANNEL,
+  createPageNudger,
+  wirePageNudges,
+} from './page-nudges.ts';
 import {
   PARK_MIGRATION_ACTOR,
   type ParkMigrationResult,
@@ -117,6 +125,7 @@ import type { ReviewThreadItem } from './review-queue.ts';
 import { ReviewSizePrefs } from './review-size-prefs.ts';
 import type { SizedReviewItemRow } from './review-sizing.ts';
 import { createStaleAskNotifier } from './review-stale-notify.ts';
+import { type AccessRoutesContext } from './routes/access.ts';
 import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
@@ -152,10 +161,14 @@ import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/work
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
 import { captureServerError } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
+import { AccessProposals } from './share/access-proposals.ts';
+import { buildAccessView } from './share/access-view.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
+import type { ShareLinks } from './share/share-links.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
 import { SHARING_NOTICE_ACTOR, SharingNotice, rankFallbackBoards } from './sharing-notice.ts';
+import { sharingOffCardPath, sharingOffDoorAllows } from './sharing-off-door.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
@@ -219,6 +232,7 @@ import {
   appCacheControl,
   boardLastActivity,
   readAppAssetManifest,
+  renderAccessShell,
   renderBoardShell,
   renderReviewsShell,
   renderSigninShell,
@@ -312,6 +326,10 @@ export interface ServerHandle {
    *  test can count them after the last page leaves. */
   folderWatches: FolderWatches;
   shares: Shares | null;
+  /** The share-link store: links, members and each board's audience.
+   *  Exposed so a test can name who a board admits without a person's
+   *  browser, which is the only other door that may (`board-audience.ts`). */
+  shareLinks: ShareLinks;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -520,6 +538,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // projection it needs. Nothing can fire through it until a doc exists,
   // which is after both.
   let onLiveDocEvent: ((docId: string, payload: WebhookPayload) => void) | null = null;
+  // Late-bound for the same reason: it reads the roster and the board
+  // membership, both built further down. Until then only the owner is trusted.
+  let commentTrustFor: CommentTrustFor | null = null;
+  let trustBoardsFor: ((docId: string) => Set<string>) | null = null;
   const docStore: DocStore = new DocStore({
     dataDir,
     sse,
@@ -534,6 +556,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // A doc being recorded into stays resident: the notes reach it by a door
     // no other eviction hold can see. See `DocStoreConfig.isRecording`.
     isRecording: (docId) => meetingStore.active(docId) !== undefined,
+    commentTrust: (docId, author) => commentTrustFor?.(docId, author) ?? commentTrustOf(author),
+    commentTrustBoards: (docId) => [...(trustBoardsFor?.(docId) ?? [])],
     ...(opts.editSessionIdleMs !== undefined ? { editSessionIdleMs: opts.editSessionIdleMs } : {}),
     ...(summarizer ? { summarizer } : {}),
   });
@@ -1050,6 +1074,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
+    audienceMemberOf,
     redeemShareLink,
     boardRoleOf,
     boardsForDoc,
@@ -1952,6 +1977,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
+    sessionSignedInAtFor,
     refreshSession,
   } = createIdentitySetup({
     dataDir,
@@ -1964,6 +1990,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     policyFor,
     mayCommentOnBoard,
   });
+  commentTrustFor = createCommentTrust({
+    identityOf: (id) => identities.get(id),
+    boardsForDoc,
+    memberOf: audienceMemberOf,
+  });
+  trustBoardsFor = boardsForDoc;
 
   /**
    * Who may reach this server, over which hostname, and as whom — see
@@ -1996,6 +2028,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     recallCallbackHost,
     accessOnlyBrowserHosts,
     proxiedTrustedEmails,
+    // Read at request time; the notice is built further down.
+    sharingOffDoor: (method, pathname) =>
+      sharingOffDoorAllows(method, pathname, sharingNotice.openCard()),
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
@@ -2747,9 +2782,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ),
     getTask: (taskId) => taskStore.getTask(taskId),
     createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
-    addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
-    reviseReviewItem: (taskId, itemId, patch, o) =>
-      taskStore.reviseReviewItem(taskId, itemId, patch, o),
+    addAccessReviewItem: (taskId, change, why, o) =>
+      taskStore.addAccessReviewItem(taskId, change, why, o),
     withdrawReviewItem: (taskId, itemId, o) => taskStore.withdrawReviewItem(taskId, itemId, o),
     refresh: (taskId) => {
       const task = taskStore.getTask(taskId);
@@ -2791,8 +2825,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         color: ANONYMOUS_ACTOR.color,
       });
     },
-    isOwner: (actor) => isOwnerActor(actor),
-    turnBackOn: (who) => {
+  });
+  /** The owner approved the notice's card at the access door. */
+  const turnSharingOnFromCard = (by: string): { ok: boolean; error?: string } =>
+    sharingNotice.turnOnFromCard(() => {
       const res = applyMasterFlip(
         {
           docStore,
@@ -2801,21 +2837,66 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           sharingGate,
           onSharingFlip: (flip) => void sharingNotice.onFlip(flip),
         },
-        { enabled: true, actor: who.actor, peer: who.peer, reason: who.reason, at: Date.now() },
+        {
+          enabled: true,
+          actor: `owner ${by}`,
+          peer: 'the access door',
+          reason: 'approved the sharing notice',
+          at: Date.now(),
+        },
       );
       return res.ok ? { ok: true } : { ok: false, error: res.error };
-    },
-  });
-  taskStore.onEvent((ev) => {
-    if (ev.type !== 'decision.answered') return;
-    sharingNotice.onAnswered({
-      taskId: ev.taskId,
-      ...(ev.reviewItemId !== undefined ? { reviewItemId: ev.reviewItemId } : {}),
-      ...(ev.optionId !== undefined ? { optionId: ev.optionId } : {}),
-      answer: ev.answer,
-      actor: ev.actor,
     });
+
+  // An agent's share call that would let somebody new in files a proposal;
+  // only the owner's Approve applies it (share/access-proposals.ts).
+  const accessProposals = new AccessProposals({
+    taskStore,
+    shareLinks,
+    shareLinkBaseHost,
+    isBoardLocked: (workspaceId) => sharingGate.isBoardLocked(workspaceId),
+    setBoardEnabled: (workspaceId) => sharingGate.setBoardEnabled(workspaceId, true),
+    setBoardUnlocked: (workspaceId) => sharingGate.setBoardLocked(workspaceId, false),
+    setSharingOn: turnSharingOnFromCard,
+    announce: (task, item, author) => {
+      taskProjection.refreshTask(task);
+      announceTaskReview(task, item, author);
+    },
+    onChanged: pageNudges.accessChanged,
   });
+  /** The owner's page of who can reach every board (routes/access.ts). */
+  const accessRoutesCtx: AccessRoutesContext = {
+    view: () =>
+      buildAccessView({
+        boards: taskStore.listWorkspaces(),
+        shareLinks,
+        proposals: (ids) => accessProposals.rows(ids),
+      }),
+    renderPage: () => renderAccessShell(browserSentry, readAppAssetManifest(markdownAppDist)),
+    pageHeaders: HTML_SHELL_HEADERS,
+    stream: () => openSseStream(sse, ACCESS_CHANNEL),
+    sharingOff: () => {
+      const open = sharingNotice.openCard();
+      const item = open
+        ? taskStore.listReviewItems(open.taskId).find((r) => r.id === open.itemId)
+        : undefined;
+      const review = item?.review as { headline?: unknown; detail?: unknown } | undefined;
+      return {
+        enabled: sharingGate.isEnabled(),
+        ...(open && item && item.answer === undefined && item.access !== undefined
+          ? {
+              card: {
+                path: sharingOffCardPath(open),
+                change: item.access,
+                headline: typeof review?.headline === 'string' ? review.headline : '',
+                detail: typeof review?.detail === 'string' ? review.detail : '',
+              },
+            }
+          : {}),
+      };
+    },
+    j,
+  };
 
   /**
    * What the sign-in, session and share routes read instead of this closure's
@@ -2827,6 +2908,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     taskStore,
     shares,
     shareLinks,
+    accessProposals,
     shareLinkBaseHost,
     collabMemberOf,
     sharingGate,
@@ -2867,6 +2949,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // legible in a debugger.
     ...(opts.secretWriter ? { secretWriter: opts.secretWriter } : {}),
     ...(permissionGrants ? { permissionGrants } : {}),
+    accessProposals,
     ...(opts.answerCoverage ? { answerCoverage: opts.answerCoverage } : {}),
     taskStore,
     taskProjection,
@@ -2943,6 +3026,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
     chatAudit,
     shareLinks,
+    accessProposals,
     taskStore,
     taskProjection,
     docStore,
@@ -3033,6 +3117,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     localOnlyGate,
     attributeRequest,
     requireSignInToWrite,
+    freshSignInGate: (req, pathname, admitted, widgetIdentity) =>
+      refuseStaleSignIn(
+        req,
+        pathname,
+        personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req), widgetIdentity),
+        { shares, now: Date.now() },
+      ),
     authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,
@@ -3063,6 +3154,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sse,
     reviewQueueRoutesCtx,
     voicePageRoutesCtx,
+    accessRoutesCtx,
     voiceApiRoutesCtx,
     featureRoutes: features.routes,
     coachRoutesCtx,
@@ -3422,6 +3514,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     dispatchReports,
     folderWatches,
     shares,
+    shareLinks,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
     // Exactly what the interval does, exposed for the same reason

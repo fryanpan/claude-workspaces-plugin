@@ -145,7 +145,11 @@ describe('expired shares lose their sockets', () => {
       body: JSON.stringify({ docId: 'ws-shared' }),
     });
     expect(filed.status).toBe(200);
-    const minted = await mintAccessShare(base, access, boardId);
+    const minted = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      boardId,
+    );
     visitorHeaders = minted.headers;
     return { base, shareId: minted.shareId };
   }

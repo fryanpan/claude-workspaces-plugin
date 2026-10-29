@@ -243,6 +243,7 @@ function shellChildren(posture: Posture = 'signed-in'): string[] {
 const OUT_OF_FLOW = [
   '#suggestions-menu', // absolute — popover over the prose
   '#doc-menu', // absolute — topbar dropdown
+  '#more-menu', // absolute — the doc's More menu
   '#thread-view', // fixed — mobile thread sheet
   '#composer-scrim', // fixed — full-window scrim
   '#composer', // fixed — pinned above the keyboard

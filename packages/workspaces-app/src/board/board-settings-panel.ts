@@ -1,3 +1,4 @@
+import { letInRequest, resumeAccessWrite, sendAccessWrite } from './access-writes.ts';
 /**
  * The workspace settings panel: the three controls inside it, what each one
  * reads and writes, and when the panel itself opens and closes.
@@ -17,7 +18,12 @@
  * `BoardState` it actually lives on.
  */
 import { deviceStorage, readLeadChatMode, writeLeadChatMode } from '../lead-chat/lead-chat-mode.ts';
-import { type BoardMembersView, type BoardRole, mountBoardMembers } from './board-members.ts';
+import {
+  type BoardMembersView,
+  type BoardRole,
+  accessWriteOf,
+  mountBoardMembers,
+} from './board-members.ts';
 import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
 import { mountPushToggle } from './push-toggle.ts';
@@ -37,7 +43,11 @@ export interface BoardSettingsPanelDeps {
   /** The signed-in reader, for the push subscription's own author field. */
   user: { id: string; name: string };
   fetchJson<T>(path: string): Promise<T | null>;
-  send(path: string, method: string, body: unknown): Promise<{ ok: boolean }>;
+  send(
+    path: string,
+    method: string,
+    body: unknown,
+  ): Promise<{ ok: boolean; status?: number; data?: Record<string, unknown> | null }>;
   showToast(message: string): void;
   /** The panel's open flag, which lives on `BoardState`. Two thunks rather
    *  than the state object: this file has no other business with it. */
@@ -185,6 +195,12 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
   const members = mountBoardMembers({
     list: el('board-members-list'),
     note: el('board-members-note'),
+    form: el('board-access-add') as HTMLFormElement,
+    error: el('board-access-error'),
+    linkLabel: el('board-access-link-label'),
+    waiting: el('board-access-waiting-label'),
+    accessHref: (waiting) =>
+      `/access${waiting > 0 ? '/waiting' : ''}?ws=${encodeURIComponent(workspaceId)}`,
     read: async () => {
       const data = await fetchJson<BoardMembersView>(
         `/workspaces/${encodeURIComponent(workspaceId)}/members`,
@@ -192,26 +208,23 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       if (!data || typeof data.you?.role !== 'string' || !Array.isArray(data.members)) return null;
       return data;
     },
-    setRole: async (email, role) => {
-      const res = await send(
-        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}/role`,
-        'POST',
-        { role },
-      );
+    remove: async (match) => {
+      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/audience`, 'POST', {
+        remove: [match],
+      });
       return res.ok;
     },
-    remove: async (email) => {
-      const res = await send(
-        `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(email)}`,
-        'DELETE',
-        {},
-      );
-      return res.ok;
+    // Letting someone in asks for a recent sign-in (`access-writes.ts`).
+    add: async (match) => {
+      const res = await sendAccessWrite(letInRequest(workspaceId, match), send, showToast);
+      return res ? accessWriteOf(res) : { ok: false, message: 'Nothing changed.' };
     },
     toast: showToast,
     onRole: (role: BoardRole | null) => {
       canEdit = role === 'owner';
       applyLevel();
+      // The access page is the owner's alone; a member would follow it to a 403.
+      el('board-access-link').classList.toggle('hidden', !canEdit);
     },
   });
 
@@ -303,6 +316,10 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       () => showToast('Workspace URL copied'),
       () => showToast(deps.href()),
     );
+  });
+  // Back from "Sign in again": offer the access change this page held.
+  void resumeAccessWrite(send, showToast).then(async (sent) => {
+    if (sent && deps.isOpen()) await members.refresh();
   });
   return {
     membersChanged: () => {

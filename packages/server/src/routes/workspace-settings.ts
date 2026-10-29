@@ -9,6 +9,8 @@ import { DEFAULT_REVIEW_ITEM_CRITERIA } from '@claude-workspaces/core/review-jud
 import { canonicalRepoRoot, normalizeDocOriginRepo } from '../doc-origin-repo.ts';
 import { type BoardPromptField, boardPromptBeforeMarkdown } from '../prompt-markdown-migration.ts';
 import { PROMPT_MAX_CHARS } from '../prompt-store.ts';
+import { readOwnerSteps } from '../review-items/owner-steps.ts';
+import { hasOwnerProof } from '../share/owner-proof.ts';
 import { redactCapChangeForVisitor } from '../share/redact-workspace.ts';
 import { PARALLELISM_CAP_MAX, PARALLELISM_CAP_MIN, type WorkspaceNotesHome } from '../tasks.ts';
 import { parseVoiceContext } from '../voice.ts';
@@ -30,6 +32,9 @@ const REVIEW_ITEM_CRITERIA_MAX_CHARS = PROMPT_MAX_CHARS;
 const EFFORT_ESTIMATE_PROMPT_MAX_CHARS = PROMPT_MAX_CHARS;
 
 /** Answers the routes below, or `undefined` when the path is none of them. */
+const OWNER_STEPS_DENIAL =
+  "Only the board's owner, signed in on this board's own page, can change which steps need them.";
+
 export async function handleWorkspaceSettings(
   ctx: WorkspaceRoutesContext,
   rq: WorkspaceRouteRequest,
@@ -316,6 +321,17 @@ export async function handleWorkspaceSettings(
         hasParallelismCap = true;
         parallelismCapValue = typeof raw === 'number' ? raw : undefined;
       }
+      // The steps only the owner approves (`review-items/owner-steps.ts`).
+      // The owner's own browser alone: dropping one lets anyone approve it.
+      let ownerSteps: string[] | undefined;
+      if (body && Object.hasOwn(body, 'requireOwnerFor')) {
+        if (!hasOwnerProof(req, rq.provenIdentityFor, rq.requestOriginFor)) {
+          return j(403, { error: 'owner-proof-required', message: OWNER_STEPS_DENIAL });
+        }
+        ownerSteps = readOwnerSteps(body.requireOwnerFor);
+        if (!ownerSteps) return j(400, { error: 'requireOwnerFor must be step names, or null' });
+      }
+      if (ownerSteps) taskStore.setRequireOwnerFor(workspaceId, ownerSteps);
       if (hasReviewCriteria) {
         const res = taskStore.setReviewItemCriteria(workspaceId, reviewCriteriaValue, {
           actor: author,
@@ -386,6 +402,7 @@ export async function handleWorkspaceSettings(
           : {}),
       },
       dispatchesInUse: capView.inUse,
+      requireOwnerFor: taskStore.requireOwnerFor(workspaceId),
       // Withheld from a member, for the reason the refusal above gives: it is
       // `repoRoot` on the owner's machine. Everything else on this route
       // describes the board, so a member reads all of it.

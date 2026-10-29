@@ -91,11 +91,13 @@ describe('share link landing and the shared library', () => {
       },
     });
 
-  const mint = (workspaceId: string, landing?: unknown) =>
-    postLocal('/api/share/workspace', {
+  const mint = (workspaceId: string, landing?: unknown) => {
+    handle.shareLinks.addToAudience(workspaceId, ['@example.com'], 'Bryan');
+    return postLocal('/api/share/workspace', {
       workspaceId,
       ...(landing === undefined ? {} : { landing }),
     });
+  };
   const mintLinkId = async (workspaceId: string, landing?: unknown): Promise<string> => {
     const r = await mint(workspaceId, landing);
     expect(r.status, await r.clone().text()).toBe(200);

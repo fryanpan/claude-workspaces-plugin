@@ -522,7 +522,10 @@ export function userForIdentity(rec: IdentityRecord): User {
   return { id: rec.id, name: rec.displayName, kind: 'known', color: rec.color };
 }
 
+/** A name is one line of text: a control or line-separator character is
+ *  refused, so a display name cannot start a forged line where it is shown. */
 function cleanName(name: string | undefined): string | null {
+  if (name !== undefined && /[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)) return null;
   const trimmed = name?.trim().slice(0, MAX_NAME);
   return trimmed ? trimmed : null;
 }

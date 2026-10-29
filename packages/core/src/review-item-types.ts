@@ -15,6 +15,7 @@
  * name below, and `packages/core/src/index.ts` re-exports that.
  */
 
+import type { ReviewAccessChange } from './review-access.ts';
 import type { ReviewRefusalKind } from './review-refusal.ts';
 
 /**
@@ -174,6 +175,12 @@ export interface ReviewPayload {
    * what the check reads, and hiding the composer is not the enforcement.
    */
   ownerOnly?: true;
+  /**
+   * The STEP the answer lets the asker take — `push`, `jira`, `send` — when
+   * it names one. A board whose `requireOwnerFor` lists the step files the
+   * item `ownerOnly`, whatever the filer sent (Bryan, 29 Oct).
+   */
+  step?: string;
   /**
    * The option id a person's answer came from, stamped when they answered by
    * tapping rather than typing. Provenance only: the answer is the reply, and
@@ -392,6 +399,13 @@ export interface ReviewItemAnswer {
   answeredWith?: string;
   /** Set when the answer was sent from inside a mock page — see `WriteVia`. */
   via?: 'mock-frame';
+  /**
+   * WHO approved, when a person answered: their identity id and, when the
+   * request proved it (the Access email or the signed session cookie), their
+   * address. The approver record an agent quotes when it acts on the answer
+   * (`approvalLine` on `decision.answered`). Absent on an agent's answer.
+   */
+  answeredBy?: { id: string; email?: string };
 }
 
 /** An answer that left some of the item's questions open — see `partialAnswers`. */
@@ -444,6 +458,13 @@ export interface TaskReviewItem {
    * or on a board with no judge configured; both read as "not held".
    */
   judge?: ReviewItemJudgement;
+  /**
+   * The change an ACCESS item proposes (`review-access.ts`). Written by the
+   * server alone, on the wrapper beside `answer` rather than in `review`, so
+   * no caller's payload can claim one; applied only by the owner's Approve
+   * through the access door.
+   */
+  access?: ReviewAccessChange;
 }
 
 /**

@@ -44,6 +44,10 @@ export interface CfAccessSuccess {
   /** A service token's client id, which Access stamps in place of an
    *  email. Read only by the home feed's gate (`routes/home-feed.ts`). */
   commonName?: string;
+  /** The verified token's `iat`, in seconds: when Cloudflare minted it for
+   *  this application. What a fresh sign-in is measured from
+   *  (`fresh-signin.ts`). Absent when the token carries none. */
+  issuedAt?: number;
 }
 
 export interface CfAccessFailure {
@@ -90,7 +94,16 @@ export function createCfAccessVerifier(opts: CfAccessOptions): CfAccessVerifier 
       });
       const email = typeof payload.email === 'string' ? payload.email : undefined;
       const commonName = typeof payload.common_name === 'string' ? payload.common_name : undefined;
-      return { ok: true, email, ...(commonName !== undefined ? { commonName } : {}) };
+      // Read off the VERIFIED payload only, so a forged or re-signed token
+      // never reaches this line with an `iat` of its choosing.
+      const issuedAt =
+        typeof payload.iat === 'number' && Number.isFinite(payload.iat) ? payload.iat : undefined;
+      return {
+        ok: true,
+        email,
+        ...(commonName !== undefined ? { commonName } : {}),
+        ...(issuedAt !== undefined ? { issuedAt } : {}),
+      };
     } catch {
       // Generic on purpose. jose's messages name the check that failed
       // ("unexpected aud", "exp timestamp check failed"), which is a guide to

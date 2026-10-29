@@ -110,6 +110,8 @@ describe('the Unfiled board cannot be shared', () => {
     const board = await local('/workspaces', { name: 'Partner review' });
     expect(board.status).toBe(200);
     boardId = ((await board.json()) as { workspace: { id: string } }).workspace.id;
+    // The board names the partner, so its own link mints at once.
+    handle.shareLinks.addToAudience(boardId, ['@partner.example'], 'Bryan');
     expect(boardId).toBeTruthy();
 
     // A bind that names NO board — exactly the stray this refusal protects.

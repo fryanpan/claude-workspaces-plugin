@@ -230,6 +230,10 @@ export interface RequestAdmissionContext {
   accessOnlyBrowserHosts: boolean;
   /** WHO may come through the operator's own proxied hostname. */
   proxiedTrustedEmails: Set<string>;
+  /** The requests the owner's own hostname still takes while the master
+   *  switch is off: the way back to the sharing notice (`sharing-off-door.ts`).
+   *  Absent: none, as before. */
+  sharingOffDoor?: (method: string, pathname: string) => boolean;
   /** Membership, scoping and redemption, from `board-membership.ts`. */
   shareWorkspacesOf: (rawId: string) => string[];
   collabMemberOf: (workspaceId: string, email: string | null) => boolean;
@@ -298,6 +302,9 @@ export type Admission =
       visitorMemberKey: string | null;
       /** The email Cloudflare Access verified for this request, if any. */
       accessEmail: string | null;
+      /** When Cloudflare minted the token that proved `accessEmail`, in
+       *  seconds (its verified `iat`), or null. Read by `fresh-signin.ts`. */
+      accessIssuedAt: number | null;
       /**
        * Set when a MEMBER came in through a door that lists their boards at
        * `/` — the share, collaboration or main hostname — carrying the address
@@ -363,6 +370,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     collabAccessVerifier,
     shareLinkVerifier,
     proxiedTrustedVerifier,
+    sharingOffDoor,
     accessTunnelHosts,
     proxiedTrustedHosts,
     shareLinkHosts,
@@ -417,6 +425,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
      * namespace exists to distrust.
      */
     let accessEmail: string | null = null;
+    /** The `iat` (seconds) of the token that proved `accessEmail`. */
+    let accessIssuedAt: number | null = null;
     /** Set by the widget-door branch below; see the admitted field. */
     let widgetDoorGrant: { token: string; origin: string } | null = null;
     /** Set by the board agent door below; see the admitted field. */
@@ -572,6 +582,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const who = result.email ? normalizeEmail(result.email) : '';
         if (who === '' || !proxiedTrustedEmails.has(who)) return j(403, { error: 'forbidden' });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         return null;
       }
       const decision = classifyHost(req.headers.get('host'), {
@@ -658,18 +669,32 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       // AND LOCKED, and it now locks remote operator access with it —
       // which is what "the outside door is shut" was always supposed to
       // mean.
+      //
+      // One exception, so the owner is never stranded away from the box: on
+      // the owner's own hostname, the sharing notice's page and its card's
+      // access door (`sharing-off-door.ts`). They still need the Access
+      // token AND an allowlisted email below, no board token, and the door
+      // its own person proof.
+      const ownerDoorWhileOff =
+        decision.kind === 'proxied-local' &&
+        !sharingGate.isEnabled() &&
+        (sharingOffDoor?.(req.method, pathname) ?? false);
       if (
         (decision.kind === 'share' ||
           decision.kind === 'share-link' ||
           decision.kind === 'collab' ||
           decision.kind === 'proxied-local') &&
-        !sharingGate.isEnabled()
+        !sharingGate.isEnabled() &&
+        !ownerDoorWhileOff
       ) {
         return j(403, { error: 'sharing_disabled' });
       }
       // A board agent token is judged by itself and nothing else, whatever
       // the host would otherwise grant (middleware/board-agent-door.ts).
       const boardBearer = boardAgentBearerOf(req.headers);
+      if (ownerDoorWhileOff && boardBearer !== null) {
+        return j(403, { error: 'sharing_disabled' });
+      }
       if (boardBearer !== null) {
         const door = await admitBoardAgent({
           req,
@@ -695,6 +720,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await cfAccessVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         // Authenticated for THIS share — but Access only proves the
         // visitor's email domain, not what they may touch. Scope them to
         // the shared board: no doc enumeration, no workspace/diff
@@ -721,6 +747,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await shareLinkVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
 
         // The redeem route, ABOVE the scope check on purpose: `/s/<id>`
         // names no workspace, so `collabScope` would refuse it as an
@@ -769,6 +796,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await collabAccessVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         // Access proves an identity Bryan admitted, not what they may
         // touch. `collabScope` is `shareScopeAllows` with the path's own
         // workspace as the target, so every operator verb a share visitor
@@ -900,7 +928,11 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // A token with no email names nobody, and nobody is refused outright.
         const who = result.email ? normalizeEmail(result.email) : '';
         if (who === '') return j(403, { error: 'forbidden' });
+        if (ownerDoorWhileOff && !proxiedTrustedEmails.has(who)) {
+          return j(403, { error: 'sharing_disabled' });
+        }
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
         // Any other email is a MEMBER, not the operator: a visitor on exactly
         // the terms the collaboration hostname gives, never a step past this
         // line into loopback privileges. Membership is either record — a
@@ -936,6 +968,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         const result = await cfAccessVerifier(req);
         if (!result.ok) return j(result.status, { error: result.error });
         accessEmail = result.email ?? null;
+        accessIssuedAt = result.issuedAt ?? null;
       }
       // One board closed to outside visitors (`closedBoards` in
       // share/sharing-gate.ts). Only a share, share-link or collab visitor
@@ -993,6 +1026,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       visitorShareId,
       visitorMemberKey,
       accessEmail,
+      accessIssuedAt,
       visitorHome,
       widgetDoorGrant,
       boardAgent,

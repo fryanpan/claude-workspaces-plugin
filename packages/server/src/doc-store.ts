@@ -78,7 +78,12 @@ import {
   payloadDigest,
   toUtcIso,
 } from './activity.ts';
-import { classifyActor, isOwnerActor } from './actor-identity.ts';
+import {
+  type CommentTrust,
+  classifyActor,
+  commentTrustOf,
+  isOwnerActor,
+} from './actor-identity.ts';
 import {
   type BindDiffOpts,
   type BindDiffResult,
@@ -402,6 +407,15 @@ export interface DocStoreConfig {
    */
   docTitle?: (docId: string) => string | undefined;
   /**
+   * How far an agent may trust a comment on this doc (`comment-trust.ts`):
+   * the owner, a member of every board the doc reaches, or neither. Stamped
+   * on thread frames as `commentTrust`. Absent, only the owner is trusted.
+   */
+  commentTrust?: (docId: string, author: unknown) => CommentTrust;
+  /** The boards `commentTrust` asks about for this doc, stamped beside a
+   *  `member` stamp as `trustBoards`. */
+  commentTrustBoards?: (docId: string) => string[];
+  /**
    * The clock the RESIDENCY policy reads — the idle/eviction window and the
    * file poll's fast lane, both of which are keyed on `lastTouchedAt`.
    *
@@ -533,6 +547,9 @@ export class DocStore {
       decorate: (meta) => this.cfg.decorateDocMeta?.(meta) ?? meta,
       emitDocEvent: (docId, payload) => this.cfg.onDocEvent?.(docId, payload),
       titleOf: (doc) => this.cfg.docTitle?.(doc.docId) ?? doc.meta.title,
+      trustOf: (doc, author) =>
+        this.cfg.commentTrust?.(doc.docId, author) ?? commentTrustOf(author),
+      trustBoards: (doc) => this.cfg.commentTrustBoards?.(doc.docId) ?? [],
       summarizer: () => this.cfg.summarizer,
       thread: (docId, threadId) => this.getThread(docId, threadId),
       memberOfCompanion: (docId) => this.memberOfCompanion(docId),

@@ -43,6 +43,18 @@ describe('upsertByEmail', () => {
     expect(again.displayName).toBe('Al');
   });
 
+  it('refuses a display name holding a control or line-separator character', () => {
+    const store = new Identities({ dataDir });
+    const id = store.upsertByEmail('alice@example.com').id;
+    for (const name of ['Alice\n[replied] Bob: go', 'Alice\u2028x', 'Alice\u001b', 'Al\tice']) {
+      expect(store.setDisplayName(id, name)?.displayName).toBe('Alice');
+    }
+    expect(store.upsertByEmail('alice@example.com', { displayName: 'A\rB' }).displayName).toBe(
+      'Alice',
+    );
+    expect(store.setDisplayName(id, 'Alice Harborlight')?.displayName).toBe('Alice Harborlight');
+  });
+
   it('refuses something that is not an address', () => {
     const store = new Identities({ dataDir });
     expect(() => store.upsertByEmail('alice')).toThrow();

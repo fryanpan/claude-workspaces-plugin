@@ -3,7 +3,7 @@
  *
  * The families that belong to the server rather than to one board — the
  * prompt settings, the workspaces list's stream, the cross-board review
- * queue, the voice page and API, the registered features (`features.ts`),
+ * queue, the voice page and API, the access page, the registered features (`features.ts`),
  * the goal coach and the webhook log — and then the tail: the shell and
  * static serving, the task address, the stale-client 410, the wrong-prefix
  * hint, the board's own not-found page and the bare 404. Moved whole and in
@@ -17,6 +17,7 @@
  *
  * Always answers: the last line is the 404.
  */
+import { handleAccessRoutes } from './access.ts';
 import { handleCoachRoutes } from './coach.ts';
 import { handleLandingStreamRoute } from './landing-stream.ts';
 import { handleWebhookLogRoute } from './ops.ts';
@@ -40,6 +41,7 @@ export async function serveTopLevelRoutes(
     j,
     reviewQueueRoutesCtx,
     voicePageRoutesCtx,
+    accessRoutesCtx,
     voiceApiRoutesCtx,
     requireSignInToWrite,
     policyFor,
@@ -97,6 +99,19 @@ export async function serveTopLevelRoutes(
       ownerProven: () => ownerProven(),
       anyoneProven: () => provenIdentityFor() !== null,
       mustSignIn: () => requireSignInToWrite && browserProvedNobody(),
+    });
+    if (handled) return handled;
+  }
+
+  // --- Page + REST: the access page --- see ./routes/access.ts. Top-level
+  // for the review queue's reason; claims `/access` and `/api/access` alone.
+  {
+    const handled = handleAccessRoutes(accessRoutesCtx, {
+      req,
+      pathname,
+      visitor,
+      ownerProven: () => ownerProven(),
+      anyoneProven: () => provenIdentityFor() !== null,
     });
     if (handled) return handled;
   }
