@@ -2,6 +2,8 @@ import { getContent } from '@claude-workspaces/core';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import {
+  ChangeSet,
+  type ChangeSpec,
   Compartment,
   EditorState,
   type Extension,
@@ -430,19 +432,26 @@ export function createCodeEditor(opts: CreateCodeEditorOpts): CodeSurface {
   reportWhitespace();
 
   // Read-only surfaces: one-way bind — when the agent edits the source file,
-  // the server applies it to `content`; mirror it into the CM doc by
-  // replacing the whole text. Editable surfaces skip this (yCollab owns the
+  // the server applies it to `content`; mirror it into the CM doc as the
+  // same edit (`deltaChanges`), so collapsed stretches, scroll and selection
+  // on the lines nobody touched stay put. Editable surfaces skip this (yCollab owns the
   // doc binding; a whole-doc replace here would destroy the cursor on every
   // remote change) but still need the empty→content compartment re-init.
   // Tracked across observer calls, NOT read from the current doc: on
   // editable surfaces yCollab's own observer runs first, so by the time
   // this one fires the CM doc already holds the late-arriving content.
   let hadContent = content.length > 0;
-  const onContentChange = () => {
+  const onContentChange = (event: Y.YTextEvent) => {
     if (!opts.editable) {
       const text = content.toString();
       if (text !== view.state.doc.toString()) {
-        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+        view.dispatch({
+          changes: deltaChanges(view.state.doc, event.delta, text) ?? {
+            from: 0,
+            to: view.state.doc.length,
+            insert: text,
+          },
+        });
       }
     }
     // The merge machinery computes chunks incrementally, but its
@@ -572,4 +581,29 @@ export function createCodeEditor(opts: CreateCodeEditorOpts): CodeSurface {
       view.destroy();
     },
   };
+}
+
+/**
+ * A Y.Text event's delta as CodeMirror changes to `doc`, or null when
+ * applying them would not give `expected` — the CM doc had drifted from the
+ * Y.Text before the event, and only a whole-text replace is safe then.
+ */
+function deltaChanges(
+  doc: import('@codemirror/state').Text,
+  delta: Y.YTextEvent['delta'],
+  expected: string,
+): ChangeSet | null {
+  const specs: ChangeSpec[] = [];
+  let pos = 0;
+  for (const op of delta) {
+    if (typeof op.retain === 'number') pos += op.retain;
+    else if (typeof op.delete === 'number') {
+      specs.push({ from: pos, to: pos + op.delete });
+      pos += op.delete;
+    } else if (typeof op.insert === 'string') specs.push({ from: pos, insert: op.insert });
+    else return null; // an embed: not text this surface can mirror
+  }
+  if (pos > doc.length) return null;
+  const changes = ChangeSet.of(specs, doc.length);
+  return changes.apply(doc).toString() === expected ? changes : null;
 }
