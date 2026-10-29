@@ -165,6 +165,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'promote'],
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id'],
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'comments'],
+  ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'linked-items'],
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'answer'],
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'revise'],
   ['workspaces', ':id', 'docs', ':id', 'threads', ':id', 'withdraw'],

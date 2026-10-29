@@ -577,6 +577,15 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/docs/:docId/threads/:threadId/insert_blocks_after', 'POST'],
   ]),
 
+  ...family('routes/doc-thread-linked-item.ts', [
+    [
+      'owner-in-handler',
+      '/workspaces/:ws/docs/:docId/threads/:threadId/linked-items',
+      'POST',
+      'the guard admits `threads/*`; the handler refuses a visitor, since the item may be on a board they were not given',
+    ],
+  ]),
+
   ...family('routes/doc-edit-routes.ts', [
     ['trusted-local', '/workspaces/:ws/docs/:docId/content', 'POST'],
     ['share-scope', '/workspaces/:ws/docs/:docId/content', 'GET'],
