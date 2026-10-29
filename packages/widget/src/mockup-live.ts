@@ -28,6 +28,7 @@
  */
 
 import { mountEditLoader } from './edit/edit-button.ts';
+import { keepPageLifted } from './mock-page-lift.ts';
 import { insertScript } from './mockup-live-scripts.ts';
 import { mountVoiceLoader } from './voice/voice-loader.ts';
 import { pauseAnchorRefresh } from './widget-anchor-refresh.ts';
@@ -381,6 +382,8 @@ export function startMockupLive(cfg: Config): void {
 
   renderControl(state, load);
   keepControlLifted();
+  // The mock's own buttons along the bottom, above a docked ask.
+  keepPageLifted(document);
 
   const es = new EventSource(streamUrl(state));
   es.addEventListener('mockup.updated', (ev) => {

@@ -477,6 +477,10 @@ what re-inserting the round's own `<script>` elements does — including the
 redeclaration a second round used to die on, which browsers report two
 different ways. It joins no subsystem; it is the swap's other half, split for
 size.
+`mock-page-lift.ts`, also in `mockup-live.js`, moves the mock's own fixed
+buttons along the bottom up by the review-item dock's height while an item is
+docked, so the dock never covers them; the widget's own buttons already rise by
+that height. It joins the same subsystem and changes no route.
 `mockup-page-links.ts` reads the HTML at bind time for root-relative `<a
 href>` and `<form action>` links, which resolve against the workspaces host
 inside a mockup, and the bind answers with a warning naming them and the
