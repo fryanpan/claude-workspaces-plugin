@@ -183,6 +183,19 @@ describe('scoreGoals', () => {
     expect(g.speakers?.pass).toBe(false);
   });
 
+  it('scores paraphrased repeats only when they were judged, and leaves them out of the report goal', () => {
+    expect(scoreGoals(clean).paraphrases).toBeUndefined();
+    expect(scoreGoals({ ...clean, paraphrasedRepeats: 0 }).paraphrases?.pass).toBe(true);
+    const g = scoreGoals({ ...clean, paraphrasedRepeats: 3 });
+    expect(g.paraphrases).toMatchObject({ pass: false, paraphrasedRepeats: 3 });
+    // No product flag can name a paraphrase, so a miss here is not a silent one.
+    expect(g.reported).toMatchObject({ pass: true, missed: [] });
+    expect(scoreGoals({ ...clean, paraphrasedRepeats: null }).paraphrases).toMatchObject({
+      pass: false,
+      paraphrasedRepeats: null,
+    });
+  });
+
   it('counts a missed goal as reported only when a filed flag names it', () => {
     const g = scoreGoals({
       ...clean,

@@ -30,6 +30,9 @@ export interface GoalInputs {
   unknownSpeakers: number;
   /** Quality-flag kinds the meeting's at-stop report filed, if any. */
   reportedKinds: readonly string[];
+  /** Notes restating an earlier note under the same heading
+   *  (`notes-repeat-judge.ts`). Absent: not asked. Null: asked, unread. */
+  paraphrasedRepeats?: number | null;
 }
 
 export interface GoalVerdict {
@@ -84,6 +87,13 @@ export function scoreGoals(g: GoalInputs): Record<string, GoalVerdict> {
     (k) => !(NAMED_BY[k] ?? []).some((kind) => g.reportedKinds.includes(kind)),
   );
   out.reported = { pass: silent.length === 0, missed, unreported: silent };
+  // After `reported` on purpose: no product flag can name a paraphrase.
+  if (g.paraphrasedRepeats !== undefined) {
+    out.paraphrases = {
+      pass: g.paraphrasedRepeats === 0,
+      paraphrasedRepeats: g.paraphrasedRepeats,
+    };
+  }
   return out;
 }
 

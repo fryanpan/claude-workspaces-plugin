@@ -19,6 +19,14 @@
  *                   (`unknownVoices`)
  *   5. reported   — every goal of 1-4 the meeting missed is named by the
  *                   quality item the at-stop pass filed
+ *   6. paraphrases — no note restates an earlier note under its heading
+ *                   (`notes-repeat-judge.ts`)
+ *
+ * LOST IS READ TWICE. Each idea the first judge calls lost is shown to a
+ * second call that must copy the line carrying it (`notes-lost-confirm.ts`);
+ * `lostShare` is after that pass and `rawLostShare` before it.
+ * `--reuse-raw` takes the first reading from an earlier score.json of the
+ * same notes instead of paying for it again.
  *
  * The truth dir and the run dirs hold meeting words, so both must be outside
  * the repository. The console prints numbers only.
@@ -41,12 +49,25 @@ import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import type { SummaryCredential } from '../packages/server/src/summarize.ts';
 import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
 import { judgeCarried, listIdeas, setIdeaUsageSink } from './notes-eval-ideas.ts';
+import { confirmLost } from './notes-lost-confirm.ts';
+import {
+  CHECK_MODEL,
+  CHECK_SYSTEM,
+  CHECK_TOOL,
+  PROPOSE_MODEL,
+  PROPOSE_SYSTEM,
+  PROPOSE_TOOL,
+  type RepeatCall,
+  judgeRepeats,
+  modelCall,
+} from './notes-repeat-judge.ts';
 import { ideaWindows, scoreGoals } from './notes-replay-goals.ts';
 import { SpendMeter, type TranscriptRow } from './notes-replay-lib.ts';
 import { readMeetingFolder } from './notes-replay.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const JUDGE_BATCH = 40;
+const CONFIRM_BATCH = 20;
 
 interface Truth {
   docId: string;
@@ -126,6 +147,25 @@ async function judgeAll(
   return { judged, lost, unjudged, lostIdeas };
 }
 
+/** The lost ideas a quoted line shows carried after all are taken out. A
+ *  batch the second call could not answer keeps its first verdict. */
+async function confirmAll(
+  key: SummaryCredential,
+  lostIdeas: readonly string[],
+  notes: string,
+  meter: SpendMeter,
+): Promise<{ stillLost: string[]; foundCarried: string[] }> {
+  const stillLost: string[] = [];
+  const foundCarried: string[] = [];
+  for (let i = 0; i < lostIdeas.length; i += CONFIRM_BATCH) {
+    const batch = lostIdeas.slice(i, i + CONFIRM_BATCH);
+    if (meter.over) throw new Error(`spend cap $${meter.capUsd} reached while confirming`);
+    const carried = await confirmLost(key, batch, notes);
+    batch.forEach((idea, j) => (carried?.[j] ? foundCarried : stillLost).push(idea));
+  }
+  return { stillLost, foundCarried };
+}
+
 function outside(path: string): boolean {
   return relative(REPO_ROOT, resolve(path)).startsWith('..');
 }
@@ -135,6 +175,7 @@ async function scoreRun(
   truthDir: string,
   key: SummaryCredential | null,
   meter: SpendMeter,
+  reuseRaw = false,
 ): Promise<Record<string, unknown>> {
   const run = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')) as {
     docId: string;
@@ -174,30 +215,80 @@ async function scoreRun(
   }
 
   let ideas: Awaited<ReturnType<typeof judgeAll>> | null = null;
+  let confirmed: Awaited<ReturnType<typeof confirmAll>> | null = null;
+  let paraphrases: Awaited<ReturnType<typeof judgeRepeats>> | null = null;
   const truthPath = join(truthDir, `${run.docId}.ideas.json`);
   if (key) {
     const before = meter.spentUsd;
-    if (!existsSync(truthPath)) {
-      const truth = await buildTruth(key, run.docId, turns, meter);
-      writeFileSync(truthPath, `${JSON.stringify(truth, null, 2)}\n`);
+    const earlier = reuseRaw ? previousRaw(runDir) : null;
+    if (earlier) {
+      ideas = earlier;
+    } else {
+      if (!existsSync(truthPath)) {
+        const truth = await buildTruth(key, run.docId, turns, meter);
+        writeFileSync(truthPath, `${JSON.stringify(truth, null, 2)}\n`);
+      }
+      const truth = JSON.parse(readFileSync(truthPath, 'utf8')) as Truth;
+      ideas = await judgeAll(
+        key,
+        truth.windows.flatMap((w) => w.ideas),
+        notes,
+        meter,
+      );
     }
-    const truth = JSON.parse(readFileSync(truthPath, 'utf8')) as Truth;
-    ideas = await judgeAll(
-      key,
-      truth.windows.flatMap((w) => w.ideas),
+    confirmed = await confirmAll(key, ideas.lostIdeas, notes, meter);
+    const book = meter.book.bind(meter);
+    const guarded =
+      (call: RepeatCall): RepeatCall =>
+      (user) => {
+        if (meter.over) throw new Error(`spend cap $${meter.capUsd} reached while judging repeats`);
+        return call(user);
+      };
+    paraphrases = await judgeRepeats(
       notes,
-      meter,
+      guarded(
+        modelCall({
+          key,
+          model: PROPOSE_MODEL,
+          system: PROPOSE_SYSTEM,
+          tool: PROPOSE_TOOL,
+          maxTokens: 8_000,
+          book,
+        }),
+      ),
+      guarded(
+        modelCall({
+          key,
+          model: CHECK_MODEL,
+          system: CHECK_SYSTEM,
+          tool: CHECK_TOOL,
+          maxTokens: 3_000,
+          book,
+        }),
+      ),
     );
     console.error(`score: ${run.docId} judged for $${(meter.spentUsd - before).toFixed(3)}`);
   }
   const goals = scoreGoals({
     duplicateBulletLines: duplicateBulletLines(repeatedBullets(notes)),
     duplicateHeadings: duplicateTopics(notes).length,
-    ideas,
+    ideas: ideas && confirmed ? { judged: ideas.judged, lost: confirmed.stillLost.length } : ideas,
     waitsMs: waits,
     unknownSpeakers: unknownVoices(notes, voices).length,
     reportedKinds: [...reportedKinds],
+    ...(key
+      ? {
+          paraphrasedRepeats:
+            paraphrases && paraphrases.judgedNotes === paraphrases.notes
+              ? paraphrases.repeats
+              : null,
+        }
+      : {}),
   });
+  if (goals.lostIdeas && ideas) {
+    goals.lostIdeas.rawLost = ideas.lost;
+    goals.lostIdeas.rawLostShare = ideas.judged > 0 ? ideas.lost / ideas.judged : null;
+  }
   const score = {
     docId: run.docId,
     goals,
@@ -205,13 +296,35 @@ async function scoreRun(
     unjudgedIdeas: ideas?.unjudged ?? null,
     // Meeting words, kept so a fix can be aimed; score.json never leaves
     // the run dir.
-    lostIdeas: ideas?.lostIdeas ?? null,
+    lostIdeas: confirmed?.stillLost ?? ideas?.lostIdeas ?? null,
+    rawLostIdeas: ideas?.lostIdeas ?? null,
+    foundCarried: confirmed?.foundCarried ?? null,
+    paraphrasePairs: paraphrases?.pairs ?? null,
+    paraphraseNotes: paraphrases
+      ? { notes: paraphrases.notes, judged: paraphrases.judgedNotes }
+      : null,
     reportedKinds: [...reportedKinds],
     replayUsd: run.spend.meteredUsd,
     scoredAt: new Date().toISOString(),
   };
   writeFileSync(join(runDir, 'score.json'), `${JSON.stringify(score, null, 2)}\n`);
   return score;
+}
+
+/** The first judge's reading from an earlier score.json of these notes. */
+function previousRaw(runDir: string): Awaited<ReturnType<typeof judgeAll>> | null {
+  const path = join(runDir, 'score.json');
+  if (!existsSync(path)) return null;
+  const prev = JSON.parse(readFileSync(path, 'utf8')) as {
+    goals?: { lostIdeas?: { judged?: number } };
+    unjudgedIdeas?: number | null;
+    lostIdeas?: string[] | null;
+    rawLostIdeas?: string[] | null;
+  };
+  const lostIdeas = prev.rawLostIdeas ?? prev.lostIdeas;
+  const judged = prev.goals?.lostIdeas?.judged;
+  if (!Array.isArray(lostIdeas) || typeof judged !== 'number') return null;
+  return { judged, lost: lostIdeas.length, unjudged: prev.unjudgedIdeas ?? 0, lostIdeas };
 }
 
 function pct(x: unknown): string {
@@ -226,6 +339,7 @@ async function main(argv: string[]): Promise<number> {
   const truthDir = at('--truth');
   const cap = Number(at('--spend-usd'));
   const noJudge = argv.includes('--no-judge');
+  const reuseRaw = argv.includes('--reuse-raw');
   const runs = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));
   if (runs.length === 0 || !truthDir || (!noJudge && !(cap > 0))) {
     console.error(
@@ -246,13 +360,20 @@ async function main(argv: string[]): Promise<number> {
     }
   }
   const meter = new SpendMeter(noJudge ? Number.POSITIVE_INFINITY : cap);
-  setIdeaUsageSink((model, input, output) =>
-    meter.book(model, { input_tokens: input, output_tokens: output }),
+  setIdeaUsageSink((model, input, output, cacheRead, cacheWrite) =>
+    meter.book(model, {
+      input_tokens: input,
+      output_tokens: output,
+      cache_read_input_tokens: cacheRead ?? 0,
+      cache_creation_input_tokens: cacheWrite ?? 0,
+    }),
   );
-  console.log('doc              repeats  lost(judged)     median  >10s    speakers  reported  all');
+  console.log(
+    'doc              repeats  lost(judged)     raw     median  >10s    speakers  reported  para     all',
+  );
   let allPass = true;
   for (const run of runs) {
-    const s = (await scoreRun(run, truthDir, key, meter)) as {
+    const s = (await scoreRun(run, truthDir, key, meter, reuseRaw)) as {
       docId: string;
       allPass: boolean;
       goals: Record<string, Record<string, unknown>>;
@@ -267,6 +388,7 @@ async function main(argv: string[]): Promise<number> {
           8,
         ),
         `${yes('lostIdeas')} ${pct(g.lostIdeas?.lostShare)} (${g.lostIdeas?.judged})`.padEnd(16),
+        pct(g.lostIdeas?.rawLostShare).padStart(6),
         `${typeof g.latency?.medianMs === 'number' ? (g.latency.medianMs / 1000).toFixed(1) : '-'}s`.padStart(
           6,
         ),
@@ -274,6 +396,9 @@ async function main(argv: string[]): Promise<number> {
         `${yes('latency')}`,
         `${yes('speakers')} ${g.speakers?.unknownSpeakers}`.padEnd(9),
         yes('reported').padEnd(9),
+        `${g.paraphrases ? yes('paraphrases') : '-'} ${g.paraphrases?.paraphrasedRepeats ?? '-'}`.padEnd(
+          8,
+        ),
         s.allPass ? 'pass' : 'FAIL',
       ].join('  '),
     );

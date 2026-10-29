@@ -108,7 +108,13 @@ const LIST_TOOL: ToolSpec = {
  * makes. A total that omits the largest term is worse than no total, because
  * it is the number a spend cap would be enforced against.
  */
-export type UsageSink = (model: string, input: number, output: number) => void;
+export type UsageSink = (
+  model: string,
+  input: number,
+  output: number,
+  cacheRead?: number,
+  cacheWrite?: number,
+) => void;
 
 let usageSink: UsageSink | null = null;
 
@@ -118,19 +124,32 @@ export function setIdeaUsageSink(sink: UsageSink | null): void {
 }
 
 /** A forced tool call, the shape both questions here take. */
-interface ToolSpec {
+export interface ToolSpec {
   name: string;
   description: string;
   input_schema: { type: 'object'; properties: Record<string, unknown>; required: string[] };
 }
 
-async function callTool(
+/**
+ * One forced tool call. `cached` goes first in the user turn behind a cache
+ * mark: the notes a judge reads are the same in every batch of one run, and
+ * read from the cache they cost a tenth.
+ */
+export async function callTool(
   key: SummaryCredential,
   system: string,
   user: string,
   tool: ToolSpec,
   maxTokens: number,
+  cached?: string,
 ): Promise<Record<string, unknown> | null> {
+  const content =
+    cached === undefined
+      ? user
+      : [
+          { type: 'text', text: cached, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: user },
+        ];
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -144,7 +163,7 @@ async function callTool(
       system,
       tools: [tool],
       tool_choice: { type: 'tool', name: tool.name },
-      messages: [{ role: 'user', content: user }],
+      messages: [{ role: 'user', content }],
     }),
   });
   // The STATUS only, never the body: a body can echo the prompt, and the
@@ -155,9 +174,20 @@ async function callTool(
   }
   const body = (await res.json()) as {
     content?: Array<{ type?: string; name?: string; input?: unknown }>;
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    };
   };
-  usageSink?.(TRUTH_MODEL, body.usage?.input_tokens ?? 0, body.usage?.output_tokens ?? 0);
+  usageSink?.(
+    TRUTH_MODEL,
+    body.usage?.input_tokens ?? 0,
+    body.usage?.output_tokens ?? 0,
+    body.usage?.cache_read_input_tokens ?? 0,
+    body.usage?.cache_creation_input_tokens ?? 0,
+  );
   const call = body.content?.find((b) => b.type === 'tool_use' && b.name === tool.name);
   if (!call?.input || typeof call.input !== 'object') return null;
   return call.input as Record<string, unknown>;
@@ -226,11 +256,9 @@ export async function judgeCarried(
   notes: string,
 ): Promise<boolean[] | null> {
   if (ideas.length === 0) return [];
-  const user = [
-    `The notes:\n${notes || '(the notes are empty)'}`,
-    `The ideas:\n${ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n')}`,
-  ].join('\n\n');
-  const out = await callTool(key, CARRY_SYSTEM, user, CARRY_TOOL, 200 + ideas.length * 40);
+  const head = `The notes:\n${notes || '(the notes are empty)'}`;
+  const user = `The ideas:\n${ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n')}`;
+  const out = await callTool(key, CARRY_SYSTEM, user, CARRY_TOOL, 200 + ideas.length * 40, head);
   if (!out || !Array.isArray(out.carried)) return null;
   const verdicts = new Array<boolean>(ideas.length).fill(false);
   // INDICES, NOT ROWS. Counting rows let a judge that answered idea 3 twice
