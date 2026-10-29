@@ -33,6 +33,11 @@
  *   never seen this session id) re-initializes with the client's own
  *   initialize request and retries once; the GET stream redials with its
  *   `Last-Event-ID`, which the server answers by bringing the session back.
+ * - **A walled lead holds no token.** With `boardSocket` set (main.ts reads
+ *   `CW_BOARD_SOCKET`), every request goes over that board's own unix socket
+ *   and none mints: the socket names the board, the server holds the session
+ *   to it, and the board token the session's tools need stays in the
+ *   server's process (packages/server/src/connector/board-token-lease.ts).
  * - **No push lands inside a tool call.** A frame that arrives while a
  *   `tools/call` is waiting is held until that call's answer is written, the
  *   rule deferred-emit.ts keeps for the stdio child (measured 2026-08-20: a
@@ -65,6 +70,12 @@ export interface RelayDeps {
   sleep?: (ms: number) => Promise<void>;
   /** How long initialize waits for the server before answering locally. */
   initWaitMs?: number;
+  /**
+   * The board socket `fetch` dials, when it dials one. The URL's host is then
+   * never used, the server's address is never looked up, and no token is
+   * minted.
+   */
+  boardSocket?: string;
 }
 
 export interface Relay {
@@ -105,6 +116,7 @@ export function createRelay(deps: RelayDeps): Relay {
   const held: string[] = [];
 
   const base = (): string | null => {
+    if (deps.boardSocket !== undefined) return 'http://board-socket';
     try {
       return resolveBaseUrl({ ...deps, env: deps.env }).replace(/\/+$/, '');
     } catch {
@@ -130,7 +142,7 @@ export function createRelay(deps: RelayDeps): Relay {
   };
 
   async function mint(): Promise<void> {
-    if (!named || token) return;
+    if (!named || token || deps.boardSocket !== undefined) return;
     const b = base();
     if (!b) return;
     try {
