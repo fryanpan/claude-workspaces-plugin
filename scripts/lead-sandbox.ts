@@ -241,7 +241,11 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
       }
-      const row = turnCheck(lead, profile, cwd, { turn, read: deps.readToken, env: process.env });
+      const row = turnCheck(lead, profile, cwd, {
+        turn,
+        read: deps.readToken,
+        env: { ...process.env, ...gitProxyFiles(lead, config) },
+      });
       if (!row.ran) {
         notRun++;
         say(`skip ${lead.name}  ${row.says}`);

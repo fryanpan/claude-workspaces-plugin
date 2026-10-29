@@ -58,11 +58,11 @@ export type Spawn = (
   file: string,
   args: string[],
   opts: { cwd: string; env: Record<string, string | undefined> },
-) => { status: number | null; stdout: string };
+) => { status: number | null; stdout: string; stderr?: string };
 
 const spawnCaptured: Spawn = (file, args, opts) => {
   const r = spawnSync(file, args, { ...opts, encoding: 'utf8', timeout: 180_000 });
-  return { status: r.status, stdout: r.stdout ?? '' };
+  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 };
 
 /**
@@ -102,9 +102,15 @@ export function turnRow(
 ): { ok: boolean; says: string } {
   const r = spawn(SANDBOX_EXEC, ['-f', profile, 'claude', '-p', 'say ok'], { cwd, env });
   const token = env[TOKEN_ENV];
-  let reply = (r.stdout.trim().split('\n')[0] ?? '').slice(0, 80);
-  if (token) reply = reply.replaceAll(token, '<token>');
-  const ok = r.status === 0 && reply !== '';
+  const first = (text: string) => {
+    const line = text.trim().split('\n')[0] ?? '';
+    // Before the cut, so no part of the token survives it.
+    return (token ? line.replaceAll(token, '<token>') : line).slice(0, 80);
+  };
+  const answer = first(r.stdout);
+  const ok = r.status === 0 && answer !== '';
+  // A refused sign-in may say why on stderr only.
+  const reply = answer || first(r.stderr ?? '');
   return {
     ok,
     says: `claude turn: \`claude -p "say ok"\` ${ok ? 'answered' : `exited ${r.status}`}${reply ? `: ${reply}` : ''} (must answer)`,

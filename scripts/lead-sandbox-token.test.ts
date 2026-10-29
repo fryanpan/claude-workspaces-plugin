@@ -198,7 +198,23 @@ describe('the claude turn row', () => {
   it('fails when it exits non-zero or says nothing, and never repeats the token', () => {
     expect(turnRow('/p.sb', '/cwd', {}, fake(1, 'OAuth token revoked')).ok).toBe(false);
     expect(turnRow('/p.sb', '/cwd', {}, fake(0, '')).ok).toBe(false);
-    const echoed = turnRow('/p.sb', '/cwd', { [TOKEN_ENV]: TOKEN }, fake(0, `key ${TOKEN}`));
-    expect(echoed.says).not.toContain(TOKEN);
+    // Placed so an 80-character cut would split it.
+    const echoed = turnRow(
+      '/p.sb',
+      '/cwd',
+      { [TOKEN_ENV]: TOKEN },
+      fake(0, `${'x'.repeat(70)}${TOKEN}`),
+    );
+    expect(echoed.says).not.toContain(TOKEN.slice(0, 10));
+  });
+
+  it('shows why on a failure that only stderr explains', () => {
+    const row = turnRow('/p.sb', '/cwd', {}, () => ({
+      status: 1,
+      stdout: '',
+      stderr: 'OAuth token revoked\n',
+    }));
+    expect(row.ok).toBe(false);
+    expect(row.says).toContain('exited 1: OAuth token revoked');
   });
 });
