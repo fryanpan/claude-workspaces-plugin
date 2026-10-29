@@ -2347,9 +2347,23 @@ export class TaskStore {
    *  workspaces list's feed still has to hear it (`landing-changes.ts`). */
   onWorkspaceCreated: ((workspace: BoardWorkspace) => void) | null = null;
 
+  private readonly workspaceListListeners = new Set<() => void>();
+
+  /** Told after a board is made, archived, restored or deleted; returns the
+   *  unsubscribe. The board sockets keep one listener per live board by it. */
+  onWorkspaceListChanged(listener: () => void): () => void {
+    this.workspaceListListeners.add(listener);
+    return () => this.workspaceListListeners.delete(listener);
+  }
+
+  private workspaceListChanged(): void {
+    for (const listener of this.workspaceListListeners) listener();
+  }
+
   createWorkspace(name: string, opts?: { leadAgentId?: string }): BoardWorkspace {
     const workspace = this.workspaceStore.createWorkspace(name, opts);
     this.onWorkspaceCreated?.(workspace);
+    this.workspaceListChanged();
     return workspace;
   }
 
@@ -2369,7 +2383,9 @@ export class TaskStore {
     | { ok: false; error: 'not-found' }
     | { ok: false; error: 'has-open-tasks'; openTasks: number }
     | { ok: false; error: 'persist-failed' } {
-    return this.workspaceStore.deleteWorkspace(workspaceId, opts);
+    const res = this.workspaceStore.deleteWorkspace(workspaceId, opts);
+    if (res.ok) this.workspaceListChanged();
+    return res;
   }
 
   listWorkspaces(): BoardWorkspace[] {
@@ -2381,7 +2397,9 @@ export class TaskStore {
     retired: boolean,
     opts: { actor: { id: string; name: string; kind?: string }; reason?: string },
   ): SetWorkspaceRetiredResult {
-    return this.workspaceStore.setWorkspaceRetired(workspaceId, retired, opts);
+    const res = this.workspaceStore.setWorkspaceRetired(workspaceId, retired, opts);
+    this.workspaceListChanged();
+    return res;
   }
 
   renameWorkspace(

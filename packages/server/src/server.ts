@@ -37,11 +37,13 @@ import {
   agentTokenKey as deriveAgentTokenKey,
   mintAgentToken,
   refuseNonLocalAgentCaller,
+  verifyAgentToken,
 } from './auth/agent-token.ts';
 import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/board-agent-token.ts';
 import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
+import { openBoardSockets } from './board-sockets.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
@@ -1995,6 +1997,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
     boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
+    // Forward references, as above: the board sockets are opened below, and
+    // the agent-token key is derived further down.
+    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
+    agentOfToken: (bearer) => verifyAgentToken(bearer, agentTokenKeyFor())?.agentId ?? null,
   });
 
   /**
@@ -3086,6 +3092,22 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     websocket: socketHandlers,
   });
 
+  // One socket per live board (board-sockets.ts), only when asked for: no
+  // caller passes the folder yet but a test, until a lead's relay can use it.
+  // Kept in step with the boards as they are made, archived and deleted.
+  const boardSockets = opts.boardSocketDir
+    ? openBoardSockets({ dir: opts.boardSocketDir, handle: handleWithOrigin, j })
+    : null;
+  const syncBoardSockets = () =>
+    boardSockets?.sync(
+      taskStore
+        .listWorkspaces()
+        .filter((w) => w.retiredAt === undefined)
+        .map((w) => w.id),
+    );
+  syncBoardSockets();
+  const unwatchBoardList = taskStore.onWorkspaceListChanged(syncBoardSockets);
+
   // The port is bound. Stamped HERE rather than at the top of `createServer`
   // because `Bun.serve` THROWS on a taken port and `bin.ts` retries on
   // another — a server that never reached this line is one no request can
@@ -3442,6 +3464,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // below are still live — after `docStore.flush()` that write would have
       // nowhere left to land.
       server.stop(true);
+      unwatchBoardList();
+      boardSockets?.stop();
       // Who the connector was hosting, for the next process to subscribe
       // before its first request; then its subscriptions come down with the
       // sockets that carried them.

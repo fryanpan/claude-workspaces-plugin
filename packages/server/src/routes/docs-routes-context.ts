@@ -298,8 +298,9 @@ export interface DocRouteRequest {
    *  for the same reason: what a visitor is shown is narrower. */
   withTaskChips: <T extends { id: string }>(docId: string, t: T) => T;
   /** The agent and board a board agent token (`at2`) on this request proved,
-   *  or null/absent when none was presented. */
-  boardAgent?: { agentId: string; boardId: string } | null;
+   *  or a board's own socket did (`tokenId` is then `BOARD_SOCKET_TOKEN_ID`),
+   *  or null/absent when neither did. */
+  boardAgent?: { agentId: string; boardId: string; tokenId?: string } | null;
 }
 
 /**
