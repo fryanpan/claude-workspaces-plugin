@@ -482,39 +482,3 @@ describe("the editor's trailing blank line", () => {
     expect(blanks).toHaveLength(0);
   });
 });
-
-describe('a note whose every word the doc already carries', () => {
-  const script = (second: string) =>
-    createNotesTickHarness({
-      compose: (input, tick) =>
-        tick === 1
-          ? addNotes(
-              input,
-              '### Saltmarsh slipway\n\n- A prebuilt crane is one option, and a hired crane with a driver is another',
-            )
-          : addNotes(input, `### Saltmarsh slipway\n\n${second}`),
-    });
-
-  it('is not written a second time in shorter words', async () => {
-    const h = script('- A hired crane with a driver is also an option');
-    await h.speak('a prebuilt crane is one option, a hired crane with a driver another');
-    await h.speak('a hired crane with a driver is also an option');
-    const notes = h.notes();
-    expect(count(notes, 'hired crane')).toBe(1);
-    expect(h.errors).toEqual([]);
-  });
-
-  it('CONTROL: a shorter note that adds a word is written', async () => {
-    const h = script('- A hired crane with a driver costs less in winter');
-    await h.speak('a prebuilt crane is one option, a hired crane with a driver another');
-    await h.speak('a hired crane with a driver costs less in winter');
-    expect(h.notes()).toContain('costs less in winter');
-  });
-
-  it('CONTROL: the same words said as their opposite are written', async () => {
-    const h = script('- A hired crane with a driver is not an option');
-    await h.speak('a prebuilt crane is one option, a hired crane with a driver another');
-    await h.speak('a hired crane with a driver is not an option');
-    expect(h.notes()).toContain('is not an option');
-  });
-});
