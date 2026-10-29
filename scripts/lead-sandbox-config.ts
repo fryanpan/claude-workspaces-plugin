@@ -27,10 +27,20 @@ export interface Lead {
   allowKeychain: boolean;
   /** `owner/name` repos it may fetch and push through the GitHub proxy (`git-proxy.ts`). */
   githubRepos: string[];
+  /** Which of `claudeAccounts` it signs in to Claude as; else the default. */
+  claudeAccount?: string;
 }
 
 export interface LeadSandboxConfig {
   leads: Lead[];
+  /**
+   * Labels for the Claude accounts a lead may sign in as. Each names a
+   * keychain item of its own (`lead-sandbox-token.ts`). Empty: every lead
+   * uses the one un-labelled item.
+   */
+  claudeAccounts: string[];
+  /** The account a lead that names none signs in as. */
+  defaultClaudeAccount?: string;
   /** Folders no lead may read or write, beyond the built-in ones. */
   protect: string[];
   gitProxyPort: number;
@@ -53,7 +63,12 @@ export function parseConfig(
 ): { ok: true; config: LeadSandboxConfig } | { ok: false; error: string } {
   if (typeof raw !== 'object' || raw === null)
     return { ok: false, error: 'config is not an object' };
-  const r = raw as { leads?: unknown; protect?: unknown };
+  const r = raw as {
+    leads?: unknown;
+    protect?: unknown;
+    claudeAccounts?: unknown;
+    defaultClaudeAccount?: unknown;
+  };
   if (!Array.isArray(r.leads) || r.leads.length === 0)
     return { ok: false, error: 'config.leads must list at least one lead' };
   const paths = (v: unknown, what: string): string[] | string => {
@@ -69,6 +84,21 @@ export function parseConfig(
     }
     return expanded;
   };
+  const accounts = r.claudeAccounts ?? [];
+  if (
+    !Array.isArray(accounts) ||
+    !accounts.every((a) => typeof a === 'string' && NAME.test(a)) ||
+    new Set(accounts).size !== accounts.length
+  )
+    return { ok: false, error: 'claudeAccounts must list distinct lowercase words' };
+  const claudeAccounts = accounts as string[];
+  const account = (v: unknown, what: string): string | undefined | { error: string } => {
+    if (v === undefined) return undefined;
+    if (typeof v === 'string' && claudeAccounts.includes(v)) return v;
+    return { error: `${what} ${JSON.stringify(v)} is not one of claudeAccounts` };
+  };
+  const defaultClaudeAccount = account(r.defaultClaudeAccount, 'defaultClaudeAccount');
+  if (typeof defaultClaudeAccount === 'object') return { ok: false, ...defaultClaudeAccount };
   const leads: Lead[] = [];
   const seen = new Set<string>();
   for (const l of r.leads as unknown[]) {
@@ -90,6 +120,8 @@ export function parseConfig(
       if (typeof p === 'string') return { ok: false, error: p };
     if ((projects as string[]).length === 0)
       return { ok: false, error: `${name}.projects must name at least one repo` };
+    const claudeAccount = account(o.claudeAccount, `${name}.claudeAccount`);
+    if (typeof claudeAccount === 'object') return { ok: false, ...claudeAccount };
     leads.push({
       name,
       projects: projects as string[],
@@ -98,11 +130,21 @@ export function parseConfig(
       allowTmux: o.allowTmux === true,
       allowKeychain: o.allowKeychain === true,
       githubRepos: githubRepos as string[],
+      ...(claudeAccount ? { claudeAccount } : {}),
     });
   }
   const protect = paths(r.protect, 'protect');
   if (typeof protect === 'string') return { ok: false, error: protect };
   const gitProxyPort = parseGitProxyPort((raw as { gitProxyPort?: unknown }).gitProxyPort);
   if (typeof gitProxyPort === 'string') return { ok: false, error: gitProxyPort };
-  return { ok: true, config: { leads, protect, gitProxyPort } };
+  return {
+    ok: true,
+    config: {
+      leads,
+      protect,
+      gitProxyPort,
+      claudeAccounts,
+      ...(defaultClaudeAccount ? { defaultClaudeAccount } : {}),
+    },
+  };
 }
