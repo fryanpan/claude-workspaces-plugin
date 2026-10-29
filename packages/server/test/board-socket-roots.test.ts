@@ -109,6 +109,49 @@ describe('BoardSocketRoots', () => {
     expect(roots.covers(viaLink)).toBe(true);
   });
 
+  it('guards an owner’s link into a root after the lead swaps the folder it names', () => {
+    const lead = join(root, 'harbor-swap');
+    mkdirSync(join(lead, 'docs', 'sub'), { recursive: true });
+    const notes = join(root, 'notes-link');
+    symlinkSync(join(lead, 'docs', 'sub'), notes);
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'sw')));
+    roots.set('w-harbor', [lead]);
+    const viaOwner = join(notes, 'plan.md');
+    expect(roots.covers(viaOwner)).toBe(true);
+    // The lead swaps `docs` for a link off the root. The owner's link is
+    // spelled from its own text, so the lead's link is never followed.
+    renameSync(join(lead, 'docs'), join(lead, 'docs.moved'));
+    mkdirSync(join(riverbend, 'sub'), { recursive: true });
+    symlinkSync(riverbend, join(lead, 'docs'));
+    const fresh = new BoardSocketRoots(boardSocketRootsPath(join(root, 'sw2')));
+    fresh.set('w-harbor', [lead]);
+    for (const r of [roots, fresh]) {
+      expect(r.covers(viaOwner)).toBe(true);
+      // Where it really lands is off the root, so the write is refused.
+      expect(r.landsInside(viaOwner, join(riverbend, 'sub', 'plan.md'))).toBe(false);
+    }
+    // The control: the same file spelled off the root is not covered.
+    expect(fresh.covers(join(riverbend, 'sub', 'plan.md'))).toBe(false);
+  });
+
+  it('reads a folder it could not spell as a lead’s, and asks again next time', () => {
+    const off = join(riverbend, 'flaky');
+    mkdirSync(off, { recursive: true });
+    let fail = true;
+    const flaky = (p: string) => {
+      if (fail && p === off) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+      return realpathSync.native(p);
+    };
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'fl')), flaky);
+    roots.set('w-harbor', [harborlight]);
+    const file = join(off, 'plan.md');
+    expect(roots.covers(file)).toBe(true);
+    expect(roots.admits(file)).toBe(false);
+    expect(roots.landsInside(file, join(harborlight, 'x.md'))).toBe(false);
+    fail = false;
+    expect(roots.covers(file)).toBe(false);
+  });
+
   it('resolves no file and no folder twice, for a path off every root', () => {
     const asked: string[] = [];
     const counted = (p: string) => {

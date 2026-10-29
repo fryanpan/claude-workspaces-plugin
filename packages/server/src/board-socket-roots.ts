@@ -24,8 +24,8 @@
  * file holds paths, no secret, and is written mode 600.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
 export const MAX_ROOTS = 32;
@@ -169,64 +169,76 @@ export class BoardSocketRoots {
   static readonly ROOT_VERDICT_MS = 1_000;
   private verdicts = new Map<string, { at: number; ok: boolean }>();
 
-  /** The most folder spellings `realOf` keeps, least recently used out. */
-  static readonly SPELLINGS_MAX = 4_096;
-  private spellings = new Map<string, string | null>();
+  /** The most folder spellings `spellDir` keeps, least recently used out. */
+  static readonly SPELLINGS_MAX = 16_384;
+  /** The most links `spellDir` follows for one path, as the kernel's. */
+  private static readonly LINKS_MAX = 32;
+  private spellings = new Map<string, string>();
+
+  private under(p: string): boolean {
+    return this.allRoots().some((r) => p === r || p.startsWith(`${r}/`));
+  }
 
   /**
-   * A folder resolved, kept until the roots change. Only folders at or
-   * above a root, or off every root, are ever asked (`spelled` stops at
-   * the first that lands under one), and those are the owner's, not the
-   * lead's, so they do not move under the guard.
+   * A folder as the roots are spelled, or null when it could not be told.
+   * Walked one name at a time from `/`: a name that is a link is replaced by
+   * where it points and walked on, any other name takes its on-disk letter
+   * case, and the walk stops at the first point at or under a root, taking
+   * the rest as typed. So a link above a root (`~/dev` onto a data volume),
+   * an owner's link into a project and a case variant all reach the root's
+   * spelling, and no link below a root, which the lead can make, is ever
+   * followed. Answers are kept until the roots change; only folders off
+   * every root or above one are kept, and those are the owner's.
    */
-  private realOf(dir: string): string | null {
-    if (this.spellings.has(dir)) {
-      const real = this.spellings.get(dir) ?? null;
+  private spellDir(dir: string, links = 0): string | null {
+    if (dir === '/' || this.under(dir)) return dir;
+    const hit = this.spellings.get(dir);
+    if (hit !== undefined) {
       this.spellings.delete(dir);
-      this.spellings.set(dir, real);
-      return real;
+      this.spellings.set(dir, hit);
+      return hit;
     }
-    let real: string | null;
+    const parent = this.spellDir(dirname(dir), links);
+    if (parent === null) return null;
+    const next = join(parent, basename(dir));
+    if (this.under(parent)) return next;
+    let out: string | null;
     try {
-      real = this.realpath(dir);
-    } catch {
-      real = null;
+      if (lstatSync(next).isSymbolicLink()) {
+        if (links >= BoardSocketRoots.LINKS_MAX) return null;
+        const target = readlinkSync(next);
+        out = this.spellDir(resolve(parent, target), links + 1);
+      } else out = this.realpath(next);
+    } catch (err) {
+      // Not there: spelled as typed, and asked again next time. Any other
+      // failure is not an answer, so the path counts as a lead's.
+      return (err as NodeJS.ErrnoException).code === 'ENOENT' ? next : null;
     }
+    if (out === null) return null;
     if (this.spellings.size >= BoardSocketRoots.SPELLINGS_MAX) {
       const oldest = this.spellings.keys().next().value;
       if (oldest !== undefined) this.spellings.delete(oldest);
     }
-    this.spellings.set(dir, real);
-    return real;
+    this.spellings.set(dir, out);
+    return out;
   }
 
   /**
-   * `path` as the roots are spelled. Roots are stored resolved, and a bound
-   * path is kept as it was typed, which may pass through a link above the
-   * root (`~/dev` onto a data volume) or differ in letter case. So each
-   * folder on the way is resolved from the top down, and the first that
-   * resolves at or under a root gives the spelling: that root followed by
-   * the rest of the path as typed. Resolving the whole path instead would
-   * follow a link the lead put below the root, and report it outside.
-   * The last name is not resolved: for a file that would be one blocking
-   * call per bound file, and a folder is bound resolved already.
+   * `path` as the roots are spelled (`spellDir` on its folder), or null
+   * when that could not be told. The last name is not resolved: for a file
+   * that would be one blocking call per bound file on the main thread.
    */
-  private spelled(path: string): string {
-    const roots = this.allRoots();
-    const under = (p: string) => roots.some((r) => p === r || p.startsWith(`${r}/`));
-    if (roots.length === 0 || under(path)) return path;
-    const parts = path.split('/');
-    for (let i = 2; i < parts.length; i++) {
-      const prefix = parts.slice(0, i).join('/');
-      const real = this.realOf(prefix);
-      if (real && under(real)) return [real, ...parts.slice(i)].join('/');
-    }
-    return path;
+  private spelled(path: string): string | null {
+    if (this.allRoots().length === 0 || this.under(path)) return path;
+    const folder = this.spellDir(dirname(path));
+    return folder === null ? null : join(folder, basename(path));
   }
 
-  /** The roots that hold `path`, however it is spelled. */
-  private rootsOver(path: string): string[] {
+  /** The roots that hold `path`, however it is spelled; null when the
+   *  spelling could not be told, which every check reads as refused. */
+  private rootsOver(path: string): string[] | null {
     const p = this.spelled(path);
+    if (p === null) return null;
     return this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
   }
 
@@ -234,7 +246,8 @@ export class BoardSocketRoots {
    *  file unreadable, every path is. */
   covers(path: string): boolean {
     if (this.isBroken()) return true;
-    return this.rootsOver(path).length > 0;
+    const over = this.rootsOver(path);
+    return over === null || over.length > 0;
   }
 
   /** Whether some root sits at or below `dir`: a repository there holds a
@@ -246,8 +259,8 @@ export class BoardSocketRoots {
     const holds = (d: string) =>
       d === '/' || roots.some((root) => root === d || root.startsWith(`${d}/`));
     if (holds(dir)) return true;
-    const real = this.realOf(dir);
-    return real !== null && holds(real);
+    const spelled = this.spellDir(dir);
+    return spelled === null || holds(spelled);
   }
 
   /**
@@ -259,6 +272,7 @@ export class BoardSocketRoots {
   admits(path: string, now = Date.now()): boolean {
     if (this.isBroken()) return false;
     const p = this.spelled(path);
+    if (p === null) return false;
     const over = this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
     for (const root of over) {
       // Lower-cased: the disk ignores case, so `Node_Modules` is the same folder.
@@ -288,6 +302,7 @@ export class BoardSocketRoots {
   landsInside(path: string, real: string): boolean {
     if (this.isBroken()) return false;
     const over = this.rootsOver(path);
+    if (over === null) return false;
     return over.every((root) => real === root || real.startsWith(`${root}/`));
   }
 
