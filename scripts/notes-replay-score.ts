@@ -318,7 +318,11 @@ async function scoreRun(
     foundCarried: confirmed?.foundCarried ?? null,
     paraphrasePairs: paraphrases?.pairs ?? null,
     paraphraseNotes: paraphrases
-      ? { notes: paraphrases.notes, judged: paraphrases.judgedNotes }
+      ? {
+          notes: paraphrases.notes,
+          judged: paraphrases.judgedNotes,
+          unchecked: paraphrases.unchecked,
+        }
       : null,
     reportedKinds: [...reportedKinds],
     replayUsd: run.spend.meteredUsd,
