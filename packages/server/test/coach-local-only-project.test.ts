@@ -1,16 +1,14 @@
 /**
- * A doc bound from a project marked local-only is off for the coach, through
- * the real server, and still takes the plan lead's rank: the lead sees every
- * board the owner does (the owner, 2026-10-23).
+ * A doc bound from a project marked local-only still reaches the coach and
+ * still takes the plan lead's rank, through the real server: the coach and
+ * the lead see every board the owner does (the owner, 2026-10-23 for the
+ * lead; 2026-10-28 for the coach: "All boards.").
  *
- * The privacy check asked the project store about the doc's KEY
- * (`repoKey\0relPath`) where it takes the project's key, so no doc was ever
- * off for its project's privacy, and neither was a board holding one. Here
- * the project is marked local-only over the real route, after the same doc
+ * The project is marked local-only over the real route, after the same doc
  * has been seen to reach the coach and to take a rank, so the only thing
  * that changes between the two halves is the project's privacy. A doc from a
- * project that is not local-only, on another board, still reaches the coach
- * afterwards, and both docs still take a rank.
+ * project that is not local-only, on another board, proves a digest went
+ * after the letters comment was made.
  *
  * The real server, a real git repo per project, the owner's Access assertion
  * for his comments, and the coach session's own stream. Nothing here reaches
@@ -214,7 +212,7 @@ async function rank(key: string, value: number): Promise<number> {
 }
 
 describe('a doc in a local-only project', () => {
-  it('stops reaching the coach once its project is local-only, while another project still does; both still take a rank', async () => {
+  it('still reaches the coach once its project is local-only, and both docs still take a rank', async () => {
     // The coach: its board, its seated lead, and that lead's stream.
     const setup = await ok<{ url: string }>(send('POST', '/coach/setup', {}, await owner()));
     const coachBoard = decodeURIComponent(setup.url.split('/')[2] ?? '');
@@ -267,13 +265,15 @@ describe('a doc in a local-only project', () => {
       await waitFor(() => stream.wire().includes('Post comment, after.'), {
         describe: 'the post comment in a digest after the letters project is local-only',
       });
+      await waitFor(
+        () => JSON.stringify(stream.digests().slice(seen)).includes('Letters comment, after.'),
+        { describe: 'the letters comment in a digest after its project is local-only' },
+      );
       const after = JSON.stringify(stream.digests().slice(seen));
-      expect(after).not.toContain('Letters comment, after.');
-      expect(after).not.toContain(letters);
-      expect(after).not.toContain(records);
-      expect(after).not.toContain('Clinic letters');
+      expect(after).toContain(letters);
+      expect(after).toContain(records);
 
-      // The plan lead is not the coach: both asks still take a rank.
+      // Both asks still take a rank.
       expect(await rank(lettersKey, 2)).toBe(200);
       expect(await rank(postKey, 1)).toBe(200);
     } finally {
