@@ -2835,6 +2835,25 @@ named every miss. Ideas are listed once per doc from the transcript into
 commands refuse an output path inside the repository and use the eval key
 only. Neither is in `bun run verify`: each run costs money.
 
+It reports two more numbers. **Paraphrased repeats** are notes that restate
+an earlier note under the same heading in other words, which the
+repeated-bullet check cannot see (`notes-repeat-judge.ts`: Sonnet proposes,
+Opus checks each proposal). **Lost ideas are read twice**: an idea the first
+judge calls lost is counted carried only when a second call (Opus) copies a
+line of the notes that carries it (`notes-lost-confirm.ts`). `lostShare` is
+after that check and `rawLostShare` before it. On one hand-labelled replay
+the repeat judge found 5 of 6 repeats with none false. On two, the second
+look credited 5 of 7 ideas rightly. `--reuse-raw` rescores a run, paying
+only for the second look.
+
+Beside the goals, every score carries a free `shape` record. It holds the
+product's own checks in `notes-quality.ts`, counted over the final notes:
+flat runs past four bullets, overlong bullets, duplicate topics, empty
+headings, decisions with no speaker, and verbatim bullets. It also counts
+the `**Decision:**` and `**Question:**` prefixes. These are counts only,
+with no pass bar, because none has been agreed. `--no-judge` prints them
+for nothing.
+
 ### Cost
 
 The four intents are prompt text on a call that was already being made.

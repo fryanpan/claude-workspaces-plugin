@@ -3,7 +3,7 @@
  * All speech here is made up. The repo is public.
  */
 import { describe, expect, it } from 'vitest';
-import { GOAL, ideaWindows, scoreGoals } from './notes-replay-goals.ts';
+import { GOAL, ideaWindows, noteShape, scoreGoals } from './notes-replay-goals.ts';
 import {
   ReplayClock,
   type ReplayEvent,
@@ -183,6 +183,19 @@ describe('scoreGoals', () => {
     expect(g.speakers?.pass).toBe(false);
   });
 
+  it('scores paraphrased repeats only when they were judged, and leaves them out of the report goal', () => {
+    expect(scoreGoals(clean).paraphrases).toBeUndefined();
+    expect(scoreGoals({ ...clean, paraphrasedRepeats: 0 }).paraphrases?.pass).toBe(true);
+    const g = scoreGoals({ ...clean, paraphrasedRepeats: 3 });
+    expect(g.paraphrases).toMatchObject({ pass: false, paraphrasedRepeats: 3 });
+    // No product flag can name a paraphrase, so a miss here is not a silent one.
+    expect(g.reported).toMatchObject({ pass: true, missed: [] });
+    expect(scoreGoals({ ...clean, paraphrasedRepeats: null }).paraphrases).toMatchObject({
+      pass: false,
+      paraphrasedRepeats: null,
+    });
+  });
+
   it('counts a missed goal as reported only when a filed flag names it', () => {
     const g = scoreGoals({
       ...clean,
@@ -230,5 +243,42 @@ describe('SpendMeter', () => {
     expect(meter.spentUsd).toBeCloseTo(0.002, 6);
     await expect(f('https://example.invalid')).rejects.toThrow('spend cap');
     expect(sent).toBe(1);
+  });
+});
+
+describe('noteShape', () => {
+  it('counts each note-taking criterion from the free checks', () => {
+    const notes = [
+      '### Harborlight launch',
+      '- **Decision:** we agreed to ship the beta on Friday',
+      '- one',
+      '- two',
+      '- three',
+      '- four',
+      '### Riverbend pricing',
+      '- **Question:** does the discount apply to renewals, or only to new accounts signed this quarter and the next one after that?',
+      '### Harborlight launch',
+      '- Alice said the export button sits under the settings menu today',
+      '- [@Bob](speaker:B) **Question:** who owns it?',
+      '### Riverbend follow-up',
+      '### Saltmarsh',
+      'A paragraph note under no list marker.',
+    ].join('\n');
+    const transcript = 'Alice said the export button sits under the settings menu today.';
+    expect(noteShape(notes, transcript)).toEqual({
+      topics: 5,
+      notes: 9,
+      paragraphNotes: 1,
+      longFlatRuns: 1,
+      topicsWithLongRun: 1,
+      topicsWithLongRunShare: 0.2,
+      overlongBullets: 1,
+      duplicateTopics: 1,
+      emptyHeadings: 1,
+      decisionsWithoutSpeaker: 2,
+      verbatimBullets: 1,
+      decisionPrefixes: 1,
+      questionPrefixes: 2,
+    });
   });
 });

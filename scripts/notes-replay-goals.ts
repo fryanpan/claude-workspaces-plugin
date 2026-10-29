@@ -4,6 +4,17 @@
  * `notes-replay-lib.test.ts` with invented meetings.
  */
 
+import {
+  allBullets,
+  decisionsWithoutSpeaker,
+  duplicateTopics,
+  emptyHeadings,
+  longFlatRuns,
+  overlongBullets,
+  parseNotesTopics,
+  proseNote,
+  verbatimBullets,
+} from '../packages/server/src/notes-quality.ts';
 import type { TranscriptRow } from './notes-replay-lib.ts';
 
 /* ===== The five goal verdicts ===== */
@@ -30,6 +41,9 @@ export interface GoalInputs {
   unknownSpeakers: number;
   /** Quality-flag kinds the meeting's at-stop report filed, if any. */
   reportedKinds: readonly string[];
+  /** Notes restating an earlier note under the same heading
+   *  (`notes-repeat-judge.ts`). Absent: not asked. Null: asked, unread. */
+  paraphrasedRepeats?: number | null;
 }
 
 export interface GoalVerdict {
@@ -84,7 +98,64 @@ export function scoreGoals(g: GoalInputs): Record<string, GoalVerdict> {
     (k) => !(NAMED_BY[k] ?? []).some((kind) => g.reportedKinds.includes(kind)),
   );
   out.reported = { pass: silent.length === 0, missed, unreported: silent };
+  // After `reported` on purpose: no product flag can name a paraphrase.
+  if (g.paraphrasedRepeats !== undefined) {
+    out.paraphrases = {
+      pass: g.paraphrasedRepeats === 0,
+      paraphrasedRepeats: g.paraphrasedRepeats,
+    };
+  }
   return out;
+}
+
+/* ===== The note-taking criteria, as counts ===== */
+
+/**
+ * How the notes are written, from the product's own free checks
+ * (`notes-quality.ts`). Counts only and no verdict: none of these has a bar
+ * the board has agreed, so they sit beside the goals rather than in them.
+ */
+export interface NoteShape {
+  topics: number;
+  /** Every note, bullet or paragraph: the denominator of the per-note counts. */
+  notes: number;
+  /** Notes written as a paragraph, not a list item (`proseNote`). */
+  paragraphNotes: number;
+  /** Flat runs past `MAX_FLAT_RUN_BULLETS`, and the topics holding one. */
+  longFlatRuns: number;
+  topicsWithLongRun: number;
+  topicsWithLongRunShare: number | null;
+  overlongBullets: number;
+  duplicateTopics: number;
+  emptyHeadings: number;
+  decisionsWithoutSpeaker: number;
+  verbatimBullets: number;
+  decisionPrefixes: number;
+  questionPrefixes: number;
+}
+
+/** Lines carrying the prefix anywhere: a speaker tag may come first. */
+const PREFIXED = (word: string): RegExp => new RegExp(`^.*\\*\\*${word}:\\*\\*`, 'gm');
+
+export function noteShape(notes: string, transcript: string): NoteShape {
+  const topics = parseNotesTopics(notes).length;
+  const runs = longFlatRuns(notes);
+  const withRun = new Set(runs.map((r) => r.heading)).size;
+  return {
+    topics,
+    notes: allBullets(notes).length,
+    paragraphNotes: notes.split('\n').filter((line) => proseNote(line) !== undefined).length,
+    longFlatRuns: runs.length,
+    topicsWithLongRun: withRun,
+    topicsWithLongRunShare: topics > 0 ? withRun / topics : null,
+    overlongBullets: overlongBullets(notes).length,
+    duplicateTopics: duplicateTopics(notes).length,
+    emptyHeadings: emptyHeadings(notes).length,
+    decisionsWithoutSpeaker: decisionsWithoutSpeaker(notes).length,
+    verbatimBullets: verbatimBullets(notes, transcript).length,
+    decisionPrefixes: notes.match(PREFIXED('Decision'))?.length ?? 0,
+    questionPrefixes: notes.match(PREFIXED('Question'))?.length ?? 0,
+  };
 }
 
 /**
