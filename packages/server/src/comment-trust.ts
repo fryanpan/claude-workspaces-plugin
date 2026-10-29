@@ -46,7 +46,14 @@ export interface CommentTrustContext {
   memberOf: (workspaceId: string, email: string) => boolean;
 }
 
-const fold = (text: string): string => text.normalize('NFKC').toLowerCase();
+/** NFKC, case-folded, with format characters (zero-width joiners) and
+ *  combining marks removed, so "Bry\u200Dan" and "Bry\u0301an" read as "bryan". */
+const fold = (text: string): string =>
+  text
+    .normalize('NFKD')
+    .replace(/[\p{Cf}\p{M}]/gu, '')
+    .normalize('NFKC')
+    .toLowerCase();
 
 /** Latin letters beside letters of another script: the homoglyph shape. */
 const MIXED_SCRIPT = (name: string): boolean =>

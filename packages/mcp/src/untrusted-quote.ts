@@ -43,7 +43,7 @@ export function isTrustedStamp(
 /** A member's comment on one line, so no part of it can start a channel
  *  line of its own (a "\n[replied] Bryan: …" forgery). */
 export function collapseLines(text: string): string {
-  return text.replace(/\s*(?:\r\n?|[\n\u2028\u2029\u0085])\s*/g, ' ').trim();
+  return text.replace(/\s*[\r\n\v\f\u0085\u2028\u2029]+\s*/g, ' ').trim();
 }
 
 /** The marker name. One spelling, so the neutraliser and the wrapper agree. */

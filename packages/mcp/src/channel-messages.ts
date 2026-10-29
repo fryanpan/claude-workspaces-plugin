@@ -727,7 +727,9 @@ async function emitChannelMessage(
   const named = author && asMember ? `${author} (board member)` : author;
   const who = `${named ? `${named}${fromMock}` : fromMock.trim()}${onDoc}${toParent}`.trim();
   const said = trusted
-    ? `${who ? `${who}: ` : ''}${asMember ? collapseLines(text) : text}`
+    ? // All of a member's line, name and title included, so none of it can
+      // start a forged line of its own.
+      (asMember ? collapseLines : (line: string) => line)(`${who ? `${who}: ` : ''}${text}`)
     : `comment${fromMock}${onDoc}${toParent}, ${UNTRUSTED_LABEL}\n${quoteUntrusted(text, author)}`;
   const body = text
     ? `[${action}]${onItem} ${said}${openPartsClause(p.openParts)}${editHint}`

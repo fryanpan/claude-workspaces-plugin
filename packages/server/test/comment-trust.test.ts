@@ -60,7 +60,15 @@ describe('createCommentTrust', () => {
   it("quotes a member whose comment carries the owner's name", () => {
     expect(trust()('task:t1', { id: ALICE_ID, name: 'Bryan' })).toBe('untrusted');
     expect(trust()('task:t1', { id: ALICE_ID, name: ' bryan ' })).toBe('untrusted');
-    for (const name of ['Bryan Chan', 'Bryan (owner)', 'Bryan.', 'ＢＲＹＡＮ', '\u0412ryan']) {
+    for (const name of [
+      'Bryan Chan',
+      'Bryan (owner)',
+      'Bryan.',
+      'ＢＲＹＡＮ',
+      '\u0412ryan',
+      'Bry\u200Dan',
+      'Bry\u0301an',
+    ]) {
       expect(trust()('task:t1', { id: ALICE_ID, name })).toBe('untrusted');
     }
     // Contains, not equals: a near-miss is quoted too.
