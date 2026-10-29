@@ -201,7 +201,7 @@ describe('A. the tools a member is refused work for the lead on its own board', 
     expect(await river.text()).not.toContain('Overwritten.');
   }, 30_000);
 
-  it('attach_folder binds a folder inside its roots onto its board, and nowhere else', async () => {
+  it('attach_folder binds a registered root onto its board, and nowhere else', async () => {
     const call = await session(harborlight);
     const own = await call('attach_folder', {
       workspaceId: harborlight,
@@ -225,8 +225,17 @@ describe('A. the tools a member is refused work for the lead on its own board', 
       subscribe: false,
     });
     expect(notARoot.isError).toBe(true);
-    expect(notARoot.text).toContain('not inside a folder');
-    // A link inside the root that leads out of it is judged by where it leads.
+    expect(notARoot.text).toContain('registered for its board');
+    // Not a folder inside a root either: the lead could swap it for a link
+    // after the bind, and every later read would follow it.
+    mkdirSync(join(inside, 'docs'), { recursive: true });
+    const sub = await call('attach_folder', {
+      workspaceId: harborlight,
+      folderPath: join(inside, 'docs'),
+      subscribe: false,
+    });
+    expect(sub.isError).toBe(true);
+    // A link to a root's outside is judged by where it leads.
     const link = join(inside, 'escape');
     (await import('node:fs')).symlinkSync(outside, link);
     const viaLink = await call('attach_folder', {
@@ -236,6 +245,34 @@ describe('A. the tools a member is refused work for the lead on its own board', 
     });
     expect(viaLink.isError).toBe(true);
   }, 30_000);
+
+  it('binds by the resolved root under a set of its own, leaving another board’s set alone', async () => {
+    // An operator files the same folder on Riverbend over TCP first.
+    const theirs = await tcp('/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ folderPath: inside, hubWorkspaceId: riverbend, exclude: ['keep/**'] }),
+    });
+    expect(theirs.status, await theirs.clone().text()).toBe(200);
+    const theirSet = ((await theirs.json()) as { setId: string }).setId;
+    // The lead sends a link to its root; the bind is of the root itself.
+    const alias = join(workDir, 'harbor-alias');
+    (await import('node:fs')).symlinkSync(inside, alias);
+    const mine = await on(harborlight, '/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ folderPath: alias, hubWorkspaceId: harborlight, exclude: [] }),
+    });
+    expect(mine.status, await mine.clone().text()).toBe(200);
+    const bound = (await mine.json()) as { setId: string; root: string; hubWorkspaceId: string };
+    expect(bound.root).toBe(inside);
+    expect(bound.hubWorkspaceId).toBe(harborlight);
+    expect(bound.setId).not.toBe(theirSet);
+    // Riverbend's set is still Riverbend's alone.
+    const river = (await (await tcp(`/workspaces/${riverbend}?format=json`)).json()) as {
+      workspace?: { docIds?: string[] };
+    };
+    expect(river.workspace?.docIds ?? []).toContain(theirSet);
+    expect(river.workspace?.docIds ?? []).not.toContain(bound.setId);
+  });
 
   it('refuses a board create and a set re-filed by id over the socket', async () => {
     const create = await on(harborlight, '/workspaces', {

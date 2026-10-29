@@ -37,7 +37,7 @@ export interface WorkspaceRoutesContext {
   /** The board store — boards, their goals, their tasks and their agents. */
   taskStore: TaskStore;
   /** Whether a board's lead may bind this folder (`board-socket-roots.ts`). */
-  leadMayBind: (boardId: string, folderPath: string) => boolean;
+  leadBindRoot: (boardId: string, folderPath: string) => string | null;
   /** The ydoc projection of the store, refreshed by hand after the writes
    *  that emit no store event (attach, unfile, archive-in-place). */
   taskProjection: TaskProjection;

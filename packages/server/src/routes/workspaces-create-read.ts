@@ -4,12 +4,14 @@
  * Lifted verbatim out of `createServer`'s request closure; the handlers
  * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
  */
+import { basename } from 'node:path';
 import { classifyActor } from '../actor-identity.ts';
 import {
   ATTACHMENT_PRIVACY_ERROR,
   parseAttachmentPrivacy,
   privacyNote,
 } from '../attachment-privacy.ts';
+import { shortHash } from '../bind-meta.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -88,9 +90,21 @@ export async function handleWorkspaceCreateRead(
     // A board's lead reaches this path (`middleware/lead-scope.ts`) for a
     // folder bind on its own board, and nothing else: the path names no
     // board, so the body is held to it here.
+    let lead: LeadBind | null = null;
     if (visitor) {
-      const refused = refuseLeadBind(rq.leadBoard ?? null, body, ctx.leadMayBind);
-      if (refused) return j(403, refused);
+      const judged = refuseLeadBind(rq.leadBoard ?? null, body, ctx.leadBindRoot);
+      if ('error' in judged) return j(403, judged);
+      // A set id of the lead's board's own, so the bind can never land on a
+      // set another board holds for the same folder.
+      const elsewhere = taskStore
+        .listWorkspaces()
+        .some((w) => w.id !== judged.board && w.docIds.includes(judged.setId));
+      if (elsewhere)
+        return j(403, {
+          error: 'out_of_lead_scope',
+          message: 'That folder’s set is filed on another board.',
+        });
+      lead = judged;
     }
     // Creating a board by name involves no file and stays open to the
     // app; binding a FOLDER names a host path, and that is agents only
@@ -146,10 +160,11 @@ export async function handleWorkspaceCreateRead(
       });
     }
     const res = await docStore.bindFolder({
-      folderPath,
+      // A lead's bind is by the resolved root, never the path it sent.
+      folderPath: lead?.root ?? folderPath,
       // `workspaceId` is what this body key was called before a review
       // stopped being a workspace; both are read, neither is required.
-      setId: (body?.setId ?? body?.workspaceId) as string | undefined,
+      setId: lead?.setId ?? ((body?.setId ?? body?.workspaceId) as string | undefined),
       title: body?.title as string | undefined,
       include: Array.isArray(body?.include) ? (body.include as string[]) : undefined,
       // Accepted by bindFolder and honoured by the scan since forever,
@@ -160,7 +175,10 @@ export async function handleWorkspaceCreateRead(
       exclude: Array.isArray(body?.exclude) ? (body.exclude as string[]) : undefined,
       maxFiles: typeof body?.maxFiles === 'number' ? Number(body.maxFiles) : undefined,
       owner: body?.owner as string | undefined,
-      producedBy: body?.producedBy as { agentId?: string; sessionId?: string } | undefined,
+      // A lead's claim of who produced the set is not taken.
+      producedBy: lead
+        ? undefined
+        : (body?.producedBy as { agentId?: string; sessionId?: string } | undefined),
     });
     if (!res.ok) {
       // not-found → 404; reserved-namespace → 400 (the caller chose an
@@ -402,18 +420,32 @@ export async function handleWorkspaceCreateRead(
   return undefined;
 }
 
+interface LeadBind {
+  board: string;
+  /** The registered root the folder resolved to: what is bound. */
+  root: string;
+  setId: string;
+}
+
+/** The set id a lead's bind of `root` gets: the folder's name, and a hash of
+ *  the root AND the board, so no other board's set shares it. */
+function leadSetId(root: string, board: string): string {
+  const base = basename(root).replace(/[^a-zA-Z0-9_.\-]/g, '-') || 'workspace';
+  return `${base}-${shortHash(`${root}\0${board}`)}`;
+}
+
 /**
- * Why a lead's `POST /workspaces` is refused, or null to let it bind. Only a
+ * Why a lead's `POST /workspaces` is refused, or what it binds. Only a
  * folder bind; only on the lead's own board; never re-filing a set by id,
- * which could name one on another board; and only a folder inside a root
- * registered for that board (`board-socket-roots.ts`), because the server
- * reads the files and the lead's sandbox does not hold the server.
+ * which could name one on another board; and only a folder that resolves to
+ * a root registered for that board (`board-socket-roots.ts`), because the
+ * server reads the files and the lead's sandbox does not hold the server.
  */
 function refuseLeadBind(
   leadBoard: string | null,
   body: Record<string, unknown> | null,
-  leadMayBind: (boardId: string, folderPath: string) => boolean,
-): { error: string; message: string } | null {
+  leadBindRoot: (boardId: string, folderPath: string) => string | null,
+): { error: string; message: string } | LeadBind {
   const refuse = (message: string) => ({ error: 'out_of_lead_scope', message });
   if (leadBoard === null) return refuse('Only a board’s lead may bind a folder from here.');
   const folderPath = body?.folderPath;
@@ -423,9 +455,10 @@ function refuseLeadBind(
     return refuse('A lead binds a folder onto its own board only.');
   if (body?.setId !== undefined || body?.workspaceId !== undefined)
     return refuse('A lead may not re-file an attachment set by id.');
-  if (!leadMayBind(leadBoard, folderPath))
+  const root = leadBindRoot(leadBoard, folderPath);
+  if (root === null)
     return refuse(
-      'That folder is not inside a folder this board’s lead may bind. The launch registers its projects (PUT /api/board-sockets/<board>/roots).',
+      'A lead binds one of the folders registered for its board (PUT /api/board-sockets/<board>/roots), and narrows to a subfolder with include.',
     );
-  return null;
+  return { board: leadBoard, root, setId: leadSetId(root, leadBoard) };
 }

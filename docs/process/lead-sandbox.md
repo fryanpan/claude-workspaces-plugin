@@ -153,7 +153,8 @@ lead's projects, resolved, as the folders it may bind onto its board
 (`PUT /api/board-sockets/<board>/roots`, loopback only, refused on a
 socket); if the server does not take them, the launch says so and the lead's
 folder binds are refused. On its own board the lead may also list docs,
-rewrite a doc, bind a folder inside those projects and post notes, which a
+rewrite a doc, bind one of those projects (narrowed with `include`, never a
+folder inside one, which it could swap for a link) and post notes, which a
 board member may not (`packages/server/src/middleware/lead-scope.ts`), and it
 keeps its board when the board is closed to outside visitors.
 

@@ -7,8 +7,14 @@
  * holds, is what reads the files. So without this list a lead could have the
  * server publish onto its board a folder its own profile denies it: another
  * lead's project, or a key folder. A bind from a lead is refused unless the
- * folder, resolved, is one of these or inside one. With no list for a board,
- * every such bind is refused.
+ * folder, resolved, IS one of these, and it is bound by that resolved path.
+ *
+ * Not a folder inside one: the lead can write inside its projects, so it
+ * could bind `<project>/x` and then replace `x` with a link to `~/.ssh`, and
+ * every later read would follow the link. A root itself sits in a folder the
+ * lead cannot write, so it cannot be swapped; `include` narrows a bind to a
+ * subfolder instead. For the same reason one root may not sit inside
+ * another. With no list for a board, every lead bind is refused.
  *
  * `scripts/lead-sandbox.ts` writes the list when it launches a walled lead,
  * from the projects that lead's profile already opens to it, through
@@ -83,22 +89,26 @@ export class BoardSocketRoots {
       if (real === '/') return { ok: false, error: 'a root of / would allow every folder' };
       if (!resolved.includes(real)) resolved.push(real);
     }
+    for (const a of resolved)
+      for (const b of resolved)
+        if (a !== b && b.startsWith(`${a}/`))
+          return { ok: false, error: `${b} is inside ${a}; a root may not hold another` };
     const boards = this.load();
     boards[boardId] = resolved;
     this.save();
     return { ok: true, roots: [...resolved] };
   }
 
-  /** Whether `folderPath`, resolved, is one of the board's roots or inside one. */
-  allows(boardId: string, folderPath: string): boolean {
-    if (!isAbsolute(folderPath)) return false;
+  /** The root `folderPath` resolves to, when it is one of the board's; else null. */
+  rootFor(boardId: string, folderPath: string): string | null {
+    if (!isAbsolute(folderPath)) return null;
     let real: string;
     try {
       real = this.realpath(folderPath);
     } catch {
-      return false;
+      return null;
     }
-    return this.rootsOf(boardId).some((root) => real === root || real.startsWith(`${root}/`));
+    return this.rootsOf(boardId).includes(real) ? real : null;
   }
 
   private save(): void {

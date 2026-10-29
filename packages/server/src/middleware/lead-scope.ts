@@ -17,7 +17,7 @@
  *   (`set_doc_content`) of a doc on that board;
  * - `POST /workspaces` — a folder bind (`attach_folder`). The path names no
  *   board, so `routes/workspaces-create-read.ts` holds the body to it: the
- *   board must be the lead's, the folder inside a root registered for it
+ *   board must be the lead's, the folder one of the roots registered for it
  *   (`board-socket-roots.ts`), and a board create is refused;
  * - `POST /workspaces/<board>/agents/<agent>/notes` and `…/prompts` — the
  *   plugin's Stop, PermissionDenied and UserPromptSubmit hooks, and

@@ -17,25 +17,22 @@ for (const d of [join(harborlight, 'docs'), riverbend]) mkdirSync(d, { recursive
 symlinkSync(riverbend, join(harborlight, 'to-riverbend'));
 
 describe('BoardSocketRoots', () => {
-  it('allows a root and what is inside it, on its board only', () => {
+  it('answers a registered root, resolved, on its board only', () => {
     const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'a')));
     expect(roots.set('w-harbor', [harborlight]).ok).toBe(true);
-    expect(roots.allows('w-harbor', harborlight)).toBe(true);
-    expect(roots.allows('w-harbor', join(harborlight, 'docs'))).toBe(true);
-    expect(roots.allows('w-river', harborlight)).toBe(false);
-    expect(roots.allows('w-harbor', riverbend)).toBe(false);
-    // A sibling whose name starts with the root's is not inside it.
-    mkdirSync(`${harborlight}-other`, { recursive: true });
-    expect(roots.allows('w-harbor', `${harborlight}-other`)).toBe(false);
+    expect(roots.rootFor('w-harbor', harborlight)).toBe(harborlight);
+    expect(roots.rootFor('w-harbor', join(harborlight, 'docs', '..'))).toBe(harborlight);
+    expect(roots.rootFor('w-river', harborlight)).toBeNull();
+    expect(roots.rootFor('w-harbor', riverbend)).toBeNull();
+    // A folder inside a root is not one: it could be swapped for a link.
+    expect(roots.rootFor('w-harbor', join(harborlight, 'docs'))).toBeNull();
   });
 
   it('judges a folder by where its links lead', () => {
     const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'b')));
     roots.set('w-harbor', [harborlight]);
-    expect(roots.allows('w-harbor', join(harborlight, 'to-riverbend'))).toBe(false);
-    expect(roots.allows('w-harbor', join(harborlight, 'docs', '..', '..', 'riverbend'))).toBe(
-      false,
-    );
+    expect(roots.rootFor('w-harbor', join(harborlight, 'to-riverbend'))).toBeNull();
+    expect(roots.rootFor('w-harbor', 'relative')).toBeNull();
   });
 
   it('refuses a list it cannot hold to anything', () => {
@@ -44,6 +41,8 @@ describe('BoardSocketRoots', () => {
       expect(roots.set('w-harbor', [bad]).ok, bad).toBe(false);
     expect(roots.set('w-harbor', 'not a list').ok).toBe(false);
     expect(roots.set('w-harbor', Array(MAX_ROOTS + 1).fill(harborlight)).ok).toBe(false);
+    // One root inside another would let the lead swap the inner one.
+    expect(roots.set('w-harbor', [harborlight, join(harborlight, 'docs')]).ok).toBe(false);
     expect(roots.rootsOf('w-harbor')).toEqual([]);
   });
 
