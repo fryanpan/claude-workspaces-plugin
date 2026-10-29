@@ -135,6 +135,22 @@ describe("the owner's notice", () => {
     expect(await openNotices()).toHaveLength(1);
   });
 
+  it("refuses an agent's withdrawal of the card, so the owner still has it to approve", async () => {
+    expect(await masterEnabled()).toBe(false);
+    const [n] = (await openNotices()) as [
+      { board: string; taskId: string; reviewItemId: string; access: unknown },
+    ];
+    const agent = { id: 'agent-riverbend', name: 'Riverbend Agent', kind: 'agent' };
+    const item = `/workspaces/${n.board}/tasks/${n.taskId}/review-items/${n.reviewItemId}`;
+    for (const path of [`${item}/withdraw`, `${item}/withdraw/undo`]) {
+      const r = await postLocal(path, { author: agent, reason: 'tidying up' });
+      expect(r.status).toBe(403);
+      expect(((await r.json()) as { error: string }).error).toBe('sharing-notice');
+    }
+    const still = await openNotices();
+    expect(still.map((x) => x.reviewItemId)).toEqual([n.reviewItemId]);
+  });
+
   it('lets the owner, and nobody else, back in through the tunnel while it is off', async () => {
     expect(await masterEnabled()).toBe(false);
     const [n] = (await openNotices()) as [
