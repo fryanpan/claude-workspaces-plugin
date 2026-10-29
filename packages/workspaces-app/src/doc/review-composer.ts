@@ -5,6 +5,7 @@ import {
   formatTime,
   receiptState,
 } from '@claude-workspaces/core';
+import { sendKeyListener } from '@claude-workspaces/core/send-key';
 import { commentHead } from '../comment-view.ts';
 /**
  * The two places a person writes on an attachment: the comment composer
@@ -275,13 +276,10 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
   on(composerText, 'input', replaceIfOpen);
   on(window, 'resize', replaceIfOpen);
   if (window.visualViewport) on(window.visualViewport, 'resize', replaceIfOpen);
+  const composerKeys = sendKeyListener(() => void submitComposer());
   on(composerText, 'keydown', (ev) => {
-    const ke = ev as KeyboardEvent;
-    if (ke.key === 'Enter' && !ke.shiftKey && !ke.isComposing) {
-      ke.preventDefault();
-      void submitComposer();
-    }
-    if (ke.key === 'Escape') hideComposer();
+    composerKeys(ev as KeyboardEvent);
+    if ((ev as KeyboardEvent).key === 'Escape') hideComposer();
   });
   on(el<HTMLButtonElement>('composer-submit'), 'click', () => void submitComposer());
 
@@ -452,13 +450,8 @@ export function wireReviewComposer(opts: ComposerOptions): ComposerHandle {
     );
   }
   on(threadViewReplySubmit, 'click', () => void submitThreadReply());
-  on(threadViewReplyText, 'keydown', (ev) => {
-    const ke = ev as KeyboardEvent;
-    if (ke.key === 'Enter' && !ke.shiftKey && !ke.isComposing) {
-      ke.preventDefault();
-      void submitThreadReply();
-    }
-  });
+  const replyKeys = sendKeyListener(() => void submitThreadReply());
+  on(threadViewReplyText, 'keydown', (ev) => replyKeys(ev as KeyboardEvent));
   return {
     openComposer,
     hideComposer,

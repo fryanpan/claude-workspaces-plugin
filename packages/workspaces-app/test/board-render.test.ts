@@ -1930,13 +1930,27 @@ describe('renderTaskDetail — discussion', () => {
     );
   });
 
-  it('Enter alone stays a newline, not a send', () => {
+  /** Enter alone sends, as it does in every other comment box; Shift+Enter
+   *  is the new line (core/send-key.ts). */
+  it('Enter alone posts the comment', () => {
+    const onComment = vi.fn();
+    renderTaskDetail(root, task(), detailHandlers({ onComment }), { loading: false, threads: [] });
+    const ta = root.querySelector('.board-comment-form textarea') as HTMLTextAreaElement;
+    ta.value = 'Sent with Enter.';
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    expect(onComment).toHaveBeenLastCalledWith(expect.anything(), 'Sent with Enter.', undefined);
+  });
+
+  it('Shift+Enter stays a newline, not a send', () => {
     const onComment = vi.fn();
     renderTaskDetail(root, task(), detailHandlers({ onComment }), { loading: false, threads: [] });
     const ta = root.querySelector('.board-comment-form textarea') as HTMLTextAreaElement;
     ta.value = 'Still mid-sentence';
-    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+    const consumed = !ta.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, cancelable: true }),
+    );
     expect(onComment).not.toHaveBeenCalled();
+    expect(consumed).toBe(false);
   });
 
   /**
@@ -1963,13 +1977,11 @@ describe('renderTaskDetail — discussion', () => {
     expect(consumed).toBe(true);
   });
 
-  it('Cmd+Enter on an empty box refuses with the note, same as the button', () => {
+  it('Enter on an empty box refuses with the note, same as the button', () => {
     const onComment = vi.fn();
     renderTaskDetail(root, task(), detailHandlers({ onComment }), { loading: false, threads: [] });
     const ta = root.querySelector('.board-comment-form textarea') as HTMLTextAreaElement;
-    ta.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, cancelable: true }),
-    );
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
     expect(onComment).not.toHaveBeenCalled();
     expect(root.querySelector('.board-comment-form .board-form-error')?.textContent).toBe(
       'Write something first',

@@ -29,6 +29,7 @@ import {
   threadSummary,
 } from '@claude-workspaces/core';
 import { STALE_ASK_NOTE, type StaleAsk, staleAsk } from '@claude-workspaces/core/review-stale';
+import { sendOnEnter } from '@claude-workspaces/core/send-key';
 import { askedMetaLine, decidedMetaLine } from '../board/board-review-model.ts';
 import { renderCommentMarkdown, renderCommentMarkdownInline } from '../comment-markdown.ts';
 import { commentHead, receiptMark } from '../comment-view.ts';
@@ -454,12 +455,7 @@ function slotB(
       });
   };
   const submitReply = () => postReply(ta.value.trim());
-  ta.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
-      ev.preventDefault();
-      submitReply();
-    }
-  });
+  sendOnEnter(ta, submitReply);
   const actions = div('thread-actions');
   actions.appendChild(lockWrite(host, btn(answering ? 'Answer' : 'Reply', 'primary', submitReply)));
   // Resolve/Reopen is NOT here — one control, in the foot, outside the
@@ -627,12 +623,7 @@ function compactAnswerField(
       });
   };
   const send = () => sendText(input.value.trim());
-  input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && !ev.isComposing) {
-      ev.preventDefault();
-      send();
-    }
-  });
+  sendOnEnter(input, send);
   wrap.append(
     lockWrite(host, input),
     lockWrite(host, btn('Answer', 'thread-answer-send primary', send)),
