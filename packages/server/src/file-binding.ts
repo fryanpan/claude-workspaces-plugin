@@ -53,6 +53,7 @@ import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import type { LiveDoc } from './doc-store.ts';
 import { backgroundPasses } from './event-loop.ts';
 import { statStampSync } from './file-stamp.ts';
+import { patchFlatText } from './flat-text-patch.ts';
 import { showFile } from './git-diff.ts';
 import { gitConflictHint } from './git-provenance.ts';
 import { isWithinRoot } from './safe-path.ts';
@@ -1138,10 +1139,7 @@ export class FileBindings {
         reassertDoc = true;
       } else {
         const origin = content.length === 0 ? 'file-seed' : 'file-watch';
-        doc.ydoc.transact(() => {
-          if (content.length > 0) content.delete(0, content.length);
-          if (text.length > 0) content.insert(0, text);
-        }, origin);
+        doc.ydoc.transact(() => patchFlatText(content, text), origin);
       }
     }
     const existing = this.bindings.get(docId);
@@ -1901,10 +1899,7 @@ export class FileBindings {
       const text = showFile(workspaceRoot, diffTarget, relPath);
       if (text === null) return { ok: false, error: 'missing' };
       const content = doc.ydoc.getText('content');
-      doc.ydoc.transact(() => {
-        content.delete(0, content.length);
-        content.insert(0, text);
-      }, 'file-watch');
+      doc.ydoc.transact(() => patchFlatText(content, text), 'file-watch');
       return { ok: true };
     }
     // A pinned doc re-resolves its home before the reparse reads anything.
@@ -1941,10 +1936,7 @@ export class FileBindings {
     }
     if (contentKind(doc.meta.type) === 'flat') {
       const content = doc.ydoc.getText('content');
-      doc.ydoc.transact(() => {
-        content.delete(0, content.length);
-        content.insert(0, md);
-      }, 'file-watch');
+      doc.ydoc.transact(() => patchFlatText(content, md), 'file-watch');
       binding.lastWritten = md;
       binding.lastSyncError = undefined;
       return { ok: true };
@@ -2031,8 +2023,9 @@ export class FileBindings {
       this.p.onMockupChanged(doc, md);
       return 'apply';
     }
-    // Code and working-tree diff docs are flat text — replace the whole
-    // `content` Y.Text on change. Read-only bindings can't hold live edits,
+    // Code and working-tree diff docs are flat text — bring `content` to
+    // the file's bytes on change, touching only the lines that differ
+    // (flat-text-patch.ts says what a whole-text replace breaks). Read-only bindings can't hold live edits,
     // so 'conflict' is impossible for them; editable (writeBack) bindings
     // get the same keep-live/backup/reassert arm the prose path has — a
     // blind replace here would eat the reviewer's in-flight keystrokes.
@@ -2053,10 +2046,7 @@ export class FileBindings {
         this.recordConflictReassert(doc, binding, md);
         return decision;
       }
-      doc.ydoc.transact(() => {
-        content.delete(0, content.length);
-        content.insert(0, md);
-      }, 'file-watch');
+      doc.ydoc.transact(() => patchFlatText(content, md), 'file-watch');
       binding.lastWritten = md;
       binding.lastSyncError = undefined;
       return decision;
