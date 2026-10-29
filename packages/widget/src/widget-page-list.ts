@@ -236,6 +236,17 @@ export function mountPageList(el: FeedbackWidgetEl): void {
       list
         ?.querySelector(`[data-thread-id="${CSS.escape(t.id)}"]`)
         ?.scrollIntoView({ block: 'nearest' });
+    // A card with an exchange in it can be taller than the list, so the
+    // reply box and its button come into view last, once laid out. The list
+    // scrolls by hand: scrollIntoView would move the page under it too.
+    const reply = () => {
+      const box = list?.querySelector('.thread.active .thread-popover .actions');
+      if (!list || !box) return;
+      const over = box.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
+      if (over > 0) list.scrollTop += over;
+    };
+    reply();
+    requestAnimationFrame(reply);
   }
 
   /** Go to the page a thread or a page key is on. A move of the fragment
