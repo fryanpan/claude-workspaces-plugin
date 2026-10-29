@@ -136,6 +136,9 @@ export function buildShell(
         ${NAV_COLLAPSE_HTML}
         <div class="board-nav-dock" role="group" aria-label="Voice">
           <button type="button" id="board-mic" class="voice-mic" title="Hold to talk (or hold Space)" aria-label="Hold to talk">${MIC_ICON}</button>
+          <!-- The chat with the board's lead: its agent button, drawn into this
+               slot's shadow root by lead-chat/lead-chat-mount.ts. -->
+          <span id="board-lead-chat" hidden></span>
           <div id="board-voice" class="voice-indicator hidden" aria-live="polite"></div>
         </div>
       </nav>

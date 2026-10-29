@@ -16,6 +16,7 @@
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
+import { deviceStorage, readLeadChatMode, writeLeadChatMode } from '../lead-chat/lead-chat-mode.ts';
 import { type BoardMembersView, type BoardRole, mountBoardMembers } from './board-members.ts';
 import { focusSettingsOpener } from './board-settings-view.ts';
 import { mountParallelismCap } from './parallelism-cap.ts';
@@ -87,6 +88,13 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     author: () => ({ id: user.id, name: user.name }),
   });
   void pushToggle.refresh();
+  // Chat first or Voice first, also this device's (`lead-chat-mode.ts`).
+  // Read at every tap of the agent button, so a change here applies at once.
+  const leadChatMode = document.getElementById('board-lead-chat-mode') as HTMLSelectElement;
+  leadChatMode.value = readLeadChatMode(deviceStorage());
+  leadChatMode.addEventListener('change', () =>
+    writeLeadChatMode(deviceStorage(), leadChatMode.value === 'voice' ? 'voice' : 'chat'),
+  );
 
   // What the quality gate judges an agent's ask against, in the owner's own
   // words. Read on every open, because an agent can rewrite it from a tool
@@ -268,6 +276,13 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
     // sits here, and the row is only ever read at the moment it is opened.
     // Same reason for the criteria, which an agent can rewrite from a tool.
     void pushToggle.refresh();
+    // Chat first or Voice first, also this device's (`lead-chat-mode.ts`).
+    // Read at every tap of the agent button, so a change here applies at once.
+    const leadChatMode = document.getElementById('board-lead-chat-mode') as HTMLSelectElement;
+    leadChatMode.value = readLeadChatMode(deviceStorage());
+    leadChatMode.addEventListener('change', () =>
+      writeLeadChatMode(deviceStorage(), leadChatMode.value === 'voice' ? 'voice' : 'chat'),
+    );
     void refreshRoleAndBoardSettings();
   }
   el('board-settings').addEventListener('click', openSettings);

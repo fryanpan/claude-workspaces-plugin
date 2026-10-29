@@ -181,6 +181,18 @@ export function buildSettingsView(): string {
                 </span>
                 <input type="checkbox" id="board-push-toggle" class="board-check" aria-describedby="board-push-note" />
               </label>
+              <!-- What the agent button does on THIS device (lead-chat-mode.ts):
+                   per device for the same reason as the row above — a phone
+                   and an iPad want different answers from one person. -->
+              <label class="board-settings-row" for="board-lead-chat-mode">
+                <span class="board-settings-label">Voice on this device
+                  <small class="board-settings-note">What the agent button does: open the chat, or start listening.</small>
+                </span>
+                <select id="board-lead-chat-mode" class="board-select" aria-label="What the agent button does on this device">
+                  <option value="chat">Chat first</option>
+                  <option value="voice">Voice first</option>
+                </select>
+              </label>
             </div>
             <!-- Painted by board-prompts-pane.ts once the board has an api
                  to read them with. Empty in the markup: this file paints no
