@@ -1204,6 +1204,9 @@ export interface DecisionAnsweredEvent {
    * second answer. Absent on a first answer. See `answer-change.ts`.
    */
   replaces?: { answer: string; optionId?: string; by: string; ts: number };
+  /** Who approved, in words, when a person answered — the sentence the agent
+   *  quotes where it acts on the answer. See `review-items/approver.ts`. */
+  approvalLine?: string;
   actor: TaskActor;
   /** The decision task's links — a ready-made propagation checklist. */
   links: Ref[];

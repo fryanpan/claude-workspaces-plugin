@@ -1,3 +1,4 @@
+import { readAccessChange } from './review-access.ts';
 import { readReviewBlocks } from './review-blocks.ts';
 import { applySecretShape } from './review-item-secret-wire.ts';
 import type {
@@ -313,6 +314,10 @@ function readAnswer(value: unknown): ReviewItemAnswer | undefined {
   const out: ReviewItemAnswer = { text: value.text, by: str(value.by, ''), ts: num(value.ts, 0) };
   if (typeof value.answeredWith === 'string') out.answeredWith = value.answeredWith;
   if (value.via === 'mock-frame') out.via = value.via;
+  const by = value.answeredBy;
+  if (isPlainObject(by) && typeof by.id === 'string') {
+    out.answeredBy = { id: by.id, ...(typeof by.email === 'string' ? { email: by.email } : {}) };
+  }
   return out;
 }
 
@@ -335,6 +340,8 @@ export function readTaskReviewItem(value: unknown): TaskReviewItem | undefined {
   // as answered disappears from the queue and nobody is told.
   const answer = readAnswer(value.answer);
   if (answer) out.answer = answer;
+  const access = readAccessChange(value.access);
+  if (access) out.access = access;
 
   if (Array.isArray(value.priorAnswers)) {
     const prior: ReviewItemAnswer[] = [];

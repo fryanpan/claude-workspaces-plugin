@@ -16,6 +16,7 @@ import { ticketOpenParts } from '../answer-coverage.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
+import { provenEmailFor } from '../review-items/approver.ts';
 import {
   GRANT_ANSWER_DENIAL,
   GRANT_FILING_DENIAL,
@@ -227,11 +228,13 @@ export async function handleTaskReviewItems(
       text,
       answeredWith,
     );
+    const provenEmail = provenEmailFor(rq.provenIdentityFor, author.id);
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, {
       actor: author,
       ...(answeredWith !== undefined ? { answeredWith } : {}),
       ...(via ? { via } : {}),
       ...(openParts.length > 0 ? { openParts } : {}),
+      ...(provenEmail ? { provenEmail } : {}),
     });
     // Somebody else's answer stands: a conflict, not a malformed request.
     if (!res.ok) {
