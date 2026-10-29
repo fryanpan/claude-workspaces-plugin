@@ -102,7 +102,7 @@ describe.skipIf(process.platform !== 'darwin')('a file staged for the keeper', (
 
   it("is readable by this user and the keeper's alone, never by everyone", () => {
     process.env.CW_KEEPER_USER = me;
-    const stage = keeperStage('cw-harbor-restore-');
+    const stage = keeperStage('cw-harborlight-restore-');
     try {
       expect(stage.dir.startsWith(tmpdir())).toBe(false);
       expect(statSync(stage.dir).mode & 0o777).toBe(0o700);

@@ -128,7 +128,7 @@ beforeAll(async () => {
   store = opened;
   store.setCredential('fly-org-token', FLY_TOKEN);
   store.setCredential('cloudflare-api-token', CF_TOKEN);
-  store.addApp('cw-harbor');
+  store.addApp('cw-harborlight');
   keeper = serveKeeper({
     store,
     exec: keeperExecutors({ store, flyBin, home, fetch: cfFetch }),
@@ -168,11 +168,11 @@ describe('enrollment', () => {
 describe('routine calls', () => {
   it('restarts a machine the keeper created with no passkey, the token only in its environment', async () => {
     const before = flyLines().length;
-    const r = await askFly(['machine', 'restart', 'm1', '--app', 'cw-harbor']);
+    const r = await askFly(['machine', 'restart', 'm1', '--app', 'cw-harborlight']);
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ status: 0, stdout: 'ran machine restart\n' });
     const lines = flyLines().slice(before);
-    expect(lines).toContain('ARGS machine restart m1 --app cw-harbor');
+    expect(lines).toContain('ARGS machine restart m1 --app cw-harborlight');
     expect(lines).toContain('TOKEN ok');
     expect(lines.join('\n')).not.toContain(FLY_TOKEN);
   });
@@ -225,7 +225,7 @@ describe('held calls', () => {
 
   it('moving a token to an older app is held, and the page names the secret but not its value', async () => {
     const r = await askFly(
-      ['secrets', 'import', '--app', 'cw-harbor'],
+      ['secrets', 'import', '--app', 'cw-harborlight'],
       'RELAY_AT2=test-secret-value',
     );
     expect(r.status).toBe(202);
@@ -238,8 +238,8 @@ describe('held calls', () => {
   });
 
   it("an assertion for one request does not approve another, nor does a stranger's passkey", async () => {
-    const a = await askFly(['secrets', 'import', '--app', 'cw-harbor'], 'A=1');
-    const b = await askFly(['secrets', 'import', '--app', 'cw-harbor'], 'B=2');
+    const a = await askFly(['secrets', 'import', '--app', 'cw-harborlight'], 'A=1');
+    const b = await askFly(['secrets', 'import', '--app', 'cw-harborlight'], 'B=2');
     const before = flyLines().length;
     const crossed = await approve(String(a.body.id), key, String(b.body.id));
     expect(crossed.status).toBe(403);
@@ -281,7 +281,7 @@ describe('held calls', () => {
 describe('clients', () => {
   it('keeperFly waits through a hold and returns the approved command', async () => {
     let approveUrl = '';
-    const pending = keeperFly(base, ['ssh', 'console', '--app', 'cw-harbor'], undefined, {
+    const pending = keeperFly(base, ['ssh', 'console', '--app', 'cw-harborlight'], undefined, {
       pollMs: 20,
       onHeld: (h) => {
         approveUrl = h.approveUrl;

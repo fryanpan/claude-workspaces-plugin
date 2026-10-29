@@ -117,14 +117,14 @@ afterAll(async () => {
 
 describe('reloading the approval page', () => {
   it('the owner can reload it any number of times, and the newest page approves', async () => {
-    const { id } = await hold(['apps', 'create', 'cw-harbor-reload']);
+    const { id } = await hold(['apps', 'create', 'cw-harborlight-reload']);
     let page = '';
     for (let i = 0; i < 12; i++) {
       page = await pageTokenOf(id);
       expect(page).not.toBe('');
     }
     expect(await approveOn(id, page)).toBe(200);
-    expect(ran).toContainEqual(['apps', 'create', 'cw-harbor-reload']);
+    expect(ran).toContainEqual(['apps', 'create', 'cw-harborlight-reload']);
   });
 
   it("pages another process opens do not push out an owner's page that is mid-tap", async () => {
@@ -153,14 +153,14 @@ describe('reloading the approval page', () => {
 
 describe('a requester that stops waiting', () => {
   it('withdraws its request with its poll token, and the request can no longer be approved', async () => {
-    const { id, pollToken } = await hold(['apps', 'create', 'cw-harbor-gone']);
+    const { id, pollToken } = await hold(['apps', 'create', 'cw-harborlight-gone']);
     const page = await pageTokenOf(id);
     const res = await withdraw(id, pollToken);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { status: string }).status).toBe('withdrawn');
     expect(keeper.requests.pending().some((r) => r.id === id)).toBe(false);
     expect(await approveOn(id, page)).not.toBe(200);
-    expect(ran).not.toContainEqual(['apps', 'create', 'cw-harbor-gone']);
+    expect(ran).not.toContainEqual(['apps', 'create', 'cw-harborlight-gone']);
   });
 
   it('only with the poll token and the API header', async () => {
@@ -184,7 +184,7 @@ describe('local paths the keeper cannot read', () => {
     const tgz = join(tmp, 'data.tgz');
     writeFileSync(tgz, 'not really a tarball');
     chmodSync(tgz, 0o000);
-    const args = ['ssh', 'sftp', 'put', tgz, '/data/cw.restored.tgz', '--app', 'cw-harbor'];
+    const args = ['ssh', 'sftp', 'put', tgz, '/data/cw.restored.tgz', '--app', 'cw-harborlight'];
     const r = await submit(args);
     expect(r.status).toBe(403);
     expect(r.body.error).toContain('cannot read');
