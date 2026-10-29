@@ -36,7 +36,10 @@ export type ReviewAccessChange =
   /** Turn this board's sharing back on after it was closed. */
   | { op: 'open-board'; workspaceId: string }
   /** Clear this board's never-shareable lock. */
-  | { op: 'unlock-board'; workspaceId: string };
+  | { op: 'unlock-board'; workspaceId: string }
+  /** Turn the master switch back on: the sharing notice's card, filed on
+   *  `workspaceId`, the board that holds the notice. */
+  | { op: 'sharing-on'; workspaceId: string };
 
 const ROLE_WORD: Record<AccessRole, string> = { owner: 'Owner', member: 'Regular User' };
 
@@ -114,6 +117,8 @@ export function accessChangeLine(change: ReviewAccessChange): string {
       return 'Turns sharing back on for this board, so the people it names can sign in again.';
     case 'unlock-board':
       return 'Unlocks this board, so it can be shared again.';
+    case 'sharing-on':
+      return 'Turns sharing back on for every board, so the people each one names can sign in again.';
   }
 }
 
@@ -150,7 +155,9 @@ export function readAccessChange(raw: unknown): ReviewAccessChange | undefined {
   if (r.op === 'set-role' && typeof r.email === 'string' && isRole(r.role) && isRole(r.before)) {
     return { op: 'set-role', workspaceId, email: r.email, role: r.role, before: r.before };
   }
-  if (r.op === 'open-board' || r.op === 'unlock-board') return { op: r.op, workspaceId };
+  if (r.op === 'open-board' || r.op === 'unlock-board' || r.op === 'sharing-on') {
+    return { op: r.op, workspaceId };
+  }
   if (r.op === 'share-link' && isStrings(r.entries) && r.link && typeof r.link === 'object') {
     const l = r.link as Record<string, unknown>;
     const link: AccessLinkRequest = {};

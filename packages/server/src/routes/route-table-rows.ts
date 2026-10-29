@@ -193,6 +193,8 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/access/:section', 'GET'],
     ['trusted-local', '/api/access', 'GET'],
     ['trusted-local', '/api/access/events:stream', 'GET'],
+    // While sharing is off, the one page the owner's hostname still serves.
+    ['trusted-local', '/sharing-off', 'GET'],
   ]),
   // The voice conversation API. `/v1/` takes a voice API bearer and nothing
   // else, checked in the handler. The token routes are the owner's: through

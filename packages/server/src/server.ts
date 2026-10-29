@@ -13,7 +13,7 @@ import {
 } from '@claude-workspaces/core';
 import { createAccessDeps } from './access-deps.ts';
 import { releaseActivityLock } from './activity-lock.ts';
-import { isOwnerActor, ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
+import { ownerDisplayNames, ownerIdentityIds } from './actor-identity.ts';
 import { AgentNoteLog } from './agent-note-log.ts';
 import { AgentNoteRing } from './agent-notes.ts';
 import { AgentWatches } from './agent-watches.ts';
@@ -164,6 +164,7 @@ import type { ShareLinks } from './share/share-links.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
 import { SHARING_NOTICE_ACTOR, SharingNotice, rankFallbackBoards } from './sharing-notice.ts';
+import { sharingOffCardPath, sharingOffDoorAllows } from './sharing-off-door.ts';
 import { SlowLoadAlarm } from './slow-load-alarm.ts';
 import { type UpgradeData, createSocketHandlers } from './socket-handlers.ts';
 import { agentLine } from './spoken-reply/agent-conversation.ts';
@@ -1991,6 +1992,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     recallCallbackHost,
     accessOnlyBrowserHosts,
     proxiedTrustedEmails,
+    // Read at request time; the notice is built further down.
+    sharingOffDoor: (method, pathname) =>
+      sharingOffDoorAllows(method, pathname, sharingNotice.openCard()),
     shareWorkspacesOf,
     collabMemberOf,
     shareLinkMemberOf,
@@ -2742,9 +2746,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ),
     getTask: (taskId) => taskStore.getTask(taskId),
     createTask: (workspaceId, taskOpts) => taskStore.createTask(workspaceId, taskOpts),
-    addReviewItem: (taskId, review, o) => taskStore.addReviewItem(taskId, review, o),
-    reviseReviewItem: (taskId, itemId, patch, o) =>
-      taskStore.reviseReviewItem(taskId, itemId, patch, o),
+    addAccessReviewItem: (taskId, change, why, o) =>
+      taskStore.addAccessReviewItem(taskId, change, why, o),
     withdrawReviewItem: (taskId, itemId, o) => taskStore.withdrawReviewItem(taskId, itemId, o),
     refresh: (taskId) => {
       const task = taskStore.getTask(taskId);
@@ -2786,8 +2789,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         color: ANONYMOUS_ACTOR.color,
       });
     },
-    isOwner: (actor) => isOwnerActor(actor),
-    turnBackOn: (who) => {
+  });
+  /** The owner approved the notice's card at the access door. */
+  const turnSharingOnFromCard = (by: string): { ok: boolean; error?: string } =>
+    sharingNotice.turnOnFromCard(() => {
       const res = applyMasterFlip(
         {
           docStore,
@@ -2796,21 +2801,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           sharingGate,
           onSharingFlip: (flip) => void sharingNotice.onFlip(flip),
         },
-        { enabled: true, actor: who.actor, peer: who.peer, reason: who.reason, at: Date.now() },
+        {
+          enabled: true,
+          actor: `owner ${by}`,
+          peer: 'the access door',
+          reason: 'approved the sharing notice',
+          at: Date.now(),
+        },
       );
       return res.ok ? { ok: true } : { ok: false, error: res.error };
-    },
-  });
-  taskStore.onEvent((ev) => {
-    if (ev.type !== 'decision.answered') return;
-    sharingNotice.onAnswered({
-      taskId: ev.taskId,
-      ...(ev.reviewItemId !== undefined ? { reviewItemId: ev.reviewItemId } : {}),
-      ...(ev.optionId !== undefined ? { optionId: ev.optionId } : {}),
-      answer: ev.answer,
-      actor: ev.actor,
     });
-  });
 
   // An agent's share call that would let somebody new in files a proposal;
   // only the owner's Approve applies it (share/access-proposals.ts).
@@ -2821,6 +2821,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     isBoardLocked: (workspaceId) => sharingGate.isBoardLocked(workspaceId),
     setBoardEnabled: (workspaceId) => sharingGate.setBoardEnabled(workspaceId, true),
     setBoardUnlocked: (workspaceId) => sharingGate.setBoardLocked(workspaceId, false),
+    setSharingOn: turnSharingOnFromCard,
     announce: (task, item, author) => {
       taskProjection.refreshTask(task);
       announceTaskReview(task, item, author);
@@ -2838,6 +2839,26 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     renderPage: () => renderAccessShell(browserSentry, readAppAssetManifest(markdownAppDist)),
     pageHeaders: HTML_SHELL_HEADERS,
     stream: () => openSseStream(sse, ACCESS_CHANNEL),
+    sharingOff: () => {
+      const open = sharingNotice.openCard();
+      const item = open
+        ? taskStore.listReviewItems(open.taskId).find((r) => r.id === open.itemId)
+        : undefined;
+      const review = item?.review as { headline?: unknown; detail?: unknown } | undefined;
+      return {
+        enabled: sharingGate.isEnabled(),
+        ...(open && item && item.answer === undefined && item.access !== undefined
+          ? {
+              card: {
+                path: sharingOffCardPath(open),
+                change: item.access,
+                headline: typeof review?.headline === 'string' ? review.headline : '',
+                detail: typeof review?.detail === 'string' ? review.detail : '',
+              },
+            }
+          : {}),
+      };
+    },
     j,
   };
 

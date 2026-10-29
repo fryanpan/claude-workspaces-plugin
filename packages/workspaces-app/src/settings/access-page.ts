@@ -129,6 +129,9 @@ export function changeSentence(p: AccessProposal): string {
   if (p.change.op === 'unlock-board') {
     return 'Links can be minted for this board again. Nobody new is let in by this alone.';
   }
+  if (p.change.op === 'sharing-on') {
+    return 'Every board reopens to the people it names, except a board closed on its own. Nobody new is let in.';
+  }
   const domain = entries.some((e) => e.startsWith('@'));
   const who = entries.join(', ');
   const tail = domain

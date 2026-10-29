@@ -3,18 +3,17 @@
  * behaviour, on a real server, is the "owner's notice" block of
  * `sharing-switch.test.ts`; this file pins what that one cannot reach
  * cheaply: a restart keeps the standing task and the open item, a repeat
- * flip revises rather than refiles, and who may turn the switch back on by
- * answering.
+ * flip revises rather than refiles, and the card is let go, not withdrawn,
+ * when the access door turns the switch on from it. Who may answer it is the
+ * door's (`share-door-holes.test.ts`, `sharing-switch.test.ts`).
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isOwnerActor } from '../src/actor-identity.ts';
 import type { SharingFlip } from '../src/share/sharing-flip.ts';
 import {
-  SHARING_LEAVE_OFF_OPTION,
-  SHARING_ON_OPTION,
+  SHARING_NOTICE_FILENAME,
   SharingNotice,
   type SharingNoticeDeps,
   actorOnCard,
@@ -27,17 +26,14 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
-const OWNER = { id: 'known-owner', name: 'Owner', kind: 'person' };
-
 function fakeStore(prefix: string) {
   const dataDir = mkdtempSync(join(tmpdir(), prefix));
   dirs.push(dataDir);
   const tasks = new Map<string, { id: string; workspaceId: string }>();
   const retired = new Set<string>();
   const live: string[] = [];
-  const open = new Map<string, { taskId: string; review: { detail?: unknown } }>();
+  const open = new Map<string, { taskId: string; change: unknown; review: { detail?: unknown } }>();
   const log: string[] = [];
-  const flips: Array<{ actor: string; peer: string; reason: string }> = [];
   let n = 0;
   const deps: SharingNoticeDeps = {
     dataDir,
@@ -52,18 +48,11 @@ function fakeStore(prefix: string) {
       log.push(`create ${ws} ${task.id}`);
       return { ok: true, task };
     },
-    addReviewItem: (taskId, review) => {
+    addAccessReviewItem: (taskId, change, why) => {
       const id = `r-${++n}`;
-      open.set(id, { taskId, review: review as { detail?: unknown } });
+      open.set(id, { taskId, change, review: { detail: why } });
       log.push(`add ${taskId} ${id}`);
       return { ok: true, item: { id } };
-    },
-    reviseReviewItem: (_taskId, itemId, patch) => {
-      const row = open.get(itemId);
-      if (!row) return { ok: false };
-      row.review = { ...row.review, ...patch };
-      log.push(`revise ${itemId}`);
-      return { ok: true };
     },
     withdrawReviewItem: (_taskId, itemId) => {
       open.delete(itemId);
@@ -74,14 +63,9 @@ function fakeStore(prefix: string) {
     gate: async (_taskId, itemId) => {
       log.push(`gate ${itemId}`);
     },
-    isOwner: (actor) => actor.id === OWNER.id,
-    turnBackOn: (who) => {
-      flips.push(who);
-      return { ok: true };
-    },
     say: (line) => log.push(line),
   };
-  return { deps, tasks, open, log, flips, retired, live };
+  return { deps, tasks, open, log, retired, live };
 }
 
 const flip = (enabled: boolean, extra: Partial<SharingFlip> = {}): SharingFlip => ({
@@ -104,20 +88,22 @@ describe('SharingNotice', () => {
     expect(s.open.size).toBe(0);
   });
 
-  it('revises the open item on a repeat off, so the queue holds one naming the latest flip', async () => {
+  it('replaces the open card on a repeat off, so the queue holds one naming the latest flip', async () => {
     const s = fakeStore('notice-repeat-');
     const notice = new SharingNotice(s.deps);
     await notice.onFlip(flip(false));
     await notice.onFlip(flip(false, { reason: 'second look' }));
     expect(s.open.size).toBe(1);
+    // An access card is never reworded: the old one goes, a new one names the latest flip.
     expect(s.log).toEqual([
       'create w-unfiled t-1',
       'add t-1 r-2',
       'gate r-2',
-      'revise r-2',
-      'gate r-2',
+      'withdraw r-2',
+      'add t-1 r-3',
+      'gate r-3',
     ]);
-    expect(String(s.open.get('r-2')?.review.detail)).toContain('second look');
+    expect(String(s.open.get('r-3')?.review.detail)).toContain('second look');
   });
 
   it('files on a live board when the catch-all board is retired', async () => {
@@ -165,89 +151,44 @@ describe('SharingNotice', () => {
     expect(s.open.size).toBe(0);
   });
 
-  it('turns the switch back on when the owner answers Turn back on', async () => {
-    const s = fakeStore('notice-answer-');
+  it('files an access card that turns sharing on, on the board holding the notice', async () => {
+    const s = fakeStore('notice-card-');
     const notice = new SharingNotice(s.deps);
     await notice.onFlip(flip(false));
-    notice.onAnswered({
-      taskId: 't-1',
-      reviewItemId: 'r-2',
-      optionId: SHARING_ON_OPTION,
-      answer: 'Turn back on',
-      actor: OWNER,
+    expect(s.open.get('r-2')?.change).toEqual({ op: 'sharing-on', workspaceId: 'w-unfiled' });
+    expect(notice.openCard()).toEqual({ workspaceId: 'w-unfiled', taskId: 't-1', itemId: 'r-2' });
+  });
+
+  it('lets the card go, not withdrawn, when the door turns sharing on from it', async () => {
+    const s = fakeStore('notice-door-');
+    const notice = new SharingNotice(s.deps);
+    await notice.onFlip(flip(false));
+    const res = notice.turnOnFromCard(() => {
+      void notice.onFlip(flip(true, { actor: 'owner Bryan' }));
+      return { ok: true };
     });
-    expect(s.flips).toHaveLength(1);
-    expect(s.flips[0]?.actor).toBe('owner Owner (known-owner)');
+    expect(res.ok).toBe(true);
+    // Still on the store for the door to answer; no longer the notice's.
+    expect(s.open.has('r-2')).toBe(true);
     expect(notice.openItem()).toBeUndefined();
+    // Positive control: any other turn-on withdraws it.
+    await notice.onFlip(flip(false));
+    await notice.onFlip(flip(true));
+    expect(s.log.at(-1)).toBe(`withdraw ${'r-3'}`);
   });
 
-  it('records Leave off, and a Turn back on from anyone but the owner, without flipping', async () => {
-    const s = fakeStore('notice-refuse-');
+  it('forgets an item filed before the notice was a card, so the next flip files one', async () => {
+    const s = fakeStore('notice-legacy-');
+    s.tasks.set('t-0', { id: 't-0', workspaceId: 'w-unfiled' });
+    writeFileSync(
+      join(s.deps.dataDir, SHARING_NOTICE_FILENAME),
+      JSON.stringify({ taskId: 't-0', itemId: 'r-old' }),
+    );
     const notice = new SharingNotice(s.deps);
+    expect(notice.openItem()).toBeUndefined();
     await notice.onFlip(flip(false));
-    notice.onAnswered({
-      taskId: 't-1',
-      reviewItemId: 'r-2',
-      optionId: SHARING_LEAVE_OFF_OPTION,
-      answer: 'Leave off',
-      actor: OWNER,
-    });
-    expect(s.flips).toHaveLength(0);
-    // A new item for the next flip, then an agent answering it.
-    await notice.onFlip(flip(false));
-    const item = notice.openItem();
-    expect(item?.itemId).toBe('r-3');
-    notice.onAnswered({
-      taskId: 't-1',
-      reviewItemId: 'r-3',
-      optionId: SHARING_ON_OPTION,
-      answer: 'Turn back on',
-      actor: { id: 'agent-bob', name: 'Bob', kind: 'agent' },
-    });
-    expect(s.flips).toHaveLength(0);
-    expect(s.log.at(-1)).toContain('not the owner');
-  });
-
-  it('judges the owner by account id: a person who calls themselves Bryan cannot turn it back on', async () => {
-    // The server wires `isOwner` to `isOwnerActor`; this uses the real one.
-    const s = fakeStore('notice-by-id-');
-    s.deps.isOwner = (actor) => isOwnerActor(actor);
-    const notice = new SharingNotice(s.deps);
-    await notice.onFlip(flip(false));
-    notice.onAnswered({
-      taskId: 't-1',
-      reviewItemId: 'r-2',
-      optionId: SHARING_ON_OPTION,
-      answer: 'Turn back on',
-      actor: { id: 'anon-riverbend', name: 'Bryan', kind: 'person' },
-    });
-    expect(s.flips).toHaveLength(0);
-    expect(s.log.at(-1)).toContain('not the owner');
-    // Positive control: the owner's own id, under any name, does flip it.
-    await notice.onFlip(flip(false));
-    notice.onAnswered({
-      taskId: 't-1',
-      reviewItemId: notice.openItem()?.itemId ?? '',
-      optionId: SHARING_ON_OPTION,
-      answer: 'Turn back on',
-      actor: { id: 'known-bryan', name: 'Harborlight', kind: 'person' },
-    });
-    expect(s.flips).toHaveLength(1);
-  });
-
-  it('ignores an answer to any other item', async () => {
-    const s = fakeStore('notice-other-');
-    const notice = new SharingNotice(s.deps);
-    await notice.onFlip(flip(false));
-    notice.onAnswered({
-      taskId: 't-1',
-      reviewItemId: 'r-99',
-      optionId: SHARING_ON_OPTION,
-      answer: 'Turn back on',
-      actor: OWNER,
-    });
-    expect(s.flips).toHaveLength(0);
-    expect(notice.openItem()?.itemId).toBe('r-2');
+    expect(s.log).not.toContain('withdraw r-old');
+    expect(notice.openCard()?.taskId).toBe('t-0');
   });
 });
 
@@ -271,9 +212,9 @@ describe('the card says how to decide', () => {
   it('names the intended, mistaken and incident readings, each with its option and what to look at', () => {
     const { detail } = sharingOffReview(flip(false));
     expect(detail).toContain('To tell what happened, read the first line');
-    expect(detail).toMatch(/\*\*Intended, for one board:\*\*[^\n]*Turn back on/);
-    expect(detail).toMatch(/\*\*A mistake:\*\*[^\n]*older plugin[^\n]*Turn back on/);
-    expect(detail).toMatch(/\*\*An incident:\*\*[^\n]*Leave off[^\n]*share list/);
+    expect(detail).toMatch(/\*\*Intended, for one board:\*\*[^\n]*Approve/);
+    expect(detail).toMatch(/\*\*A mistake:\*\*[^\n]*older plugin[^\n]*Approve/);
+    expect(detail).toMatch(/\*\*An incident:\*\*[^\n]*Reject[^\n]*share list/);
     // One observable per reading, so the reader can tell them apart.
     expect(detail).toMatch(
       /\*\*Intended, for one board:\*\* the caller is your agent and the reason names a board/,
@@ -309,11 +250,10 @@ describe('actorOnCard', () => {
 });
 
 describe('sharingOffReview', () => {
-  it('is a decision naming who, where, when, why and what stays refused', () => {
+  it('names who, where, when, why and what stays refused', () => {
     const review = sharingOffReview(flip(false));
-    expect(review.review_type).toBe('decision');
     expect(review.headline).toBe('External sharing was turned off');
-    expect(review.options.map((o) => o.label)).toEqual(['Turn back on', 'Leave off']);
+    expect(review.detail).toContain('Approve turns it back on; Reject leaves it off.');
     expect(review.detail).toContain('The agent Bob turned off');
     expect(review.detail).toContain('127.0.0.1, this machine');
     expect(review.detail).toContain('00:00 UTC on 23 September 2026');

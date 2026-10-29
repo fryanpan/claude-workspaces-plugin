@@ -147,6 +147,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/settings/prompts` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/settings/prompts/:id` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/share/:slug` | GET | `routes/auth-share.ts` | trusted-local |  |
+| `/sharing-off` | GET | `routes/access.ts` | trusted-local |  |
 | `/signin` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/sw.js` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/sw.js.map` | GET | `routes/shell-static.ts` | trusted-local |  |

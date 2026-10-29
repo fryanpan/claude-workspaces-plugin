@@ -11,7 +11,7 @@
  * Time is passed in rather than waited on. Every state and redeem call takes a
  * `now`, so "a link that lapsed" is a number, not a sleep.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -23,7 +23,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ShareLinks } from '../src/share/share-links.ts';
+import { REGISTRY_UNREADABLE, ShareLinks } from '../src/share/share-links.ts';
 
 const BOARD = 'w-board-1';
 const OTHER_BOARD = 'w-board-2';
@@ -402,6 +402,33 @@ describe('the share-link store', () => {
       const later = new ShareLinks({ dataDir });
       later.seedFromOlderShares(older);
       expect(later.audienceOf(BOARD)?.entries).toEqual([]);
+    });
+
+    it('admits nobody and writes nothing when the registry cannot be read', () => {
+      links.create({ workspaceId: BOARD, createdBy: 'Test Agent' });
+      const path = join(dataDir, 'share-links.json');
+      const torn = `${readFileSync(path, 'utf8').slice(0, 40)}`;
+      writeFileSync(path, torn);
+      const before = readFileSync(path);
+      const said: string[] = [];
+      const spy = spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+        said.push(a.map(String).join(' '));
+      });
+      try {
+        const broken = new ShareLinks({ dataDir });
+        // The seed would otherwise give the board an audience and save it.
+        broken.seedFromOlderShares([{ workspaceId: BOARD, allowDomains: [REVIEWER] }]);
+        expect(broken.audienceOf(BOARD)).toBeUndefined();
+        expect(broken.isMember(BOARD, REVIEWER)).toBe(false);
+        expect(() => broken.addToAudience(BOARD, [REVIEWER], 'Bryan')).toThrow(REGISTRY_UNREADABLE);
+        expect(() => broken.create({ workspaceId: BOARD, createdBy: 'Test Agent' })).toThrow(
+          REGISTRY_UNREADABLE,
+        );
+        expect(said.some((l) => l.includes('could not be read'))).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(readFileSync(path).equals(before)).toBe(true);
     });
 
     it('seeds a board the older shares let people into when there was never a registry', () => {

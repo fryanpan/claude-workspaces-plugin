@@ -165,6 +165,9 @@ interface Persisted {
   audiences?: BoardAudience[];
 }
 
+/** What a write answers while the registry on disk could not be read. */
+export const REGISTRY_UNREADABLE = 'share-link registry unreadable';
+
 export class ShareLinks {
   private readonly dataDir: string;
   private links: ShareLinkRecord[] = [];
@@ -173,6 +176,14 @@ export class ShareLinks {
   private migratedThisBoot = false;
   private members: ShareLinkMember[] = [];
   private audiences: BoardAudience[] = [];
+  /**
+   * Set when the registry file exists and could not be read. Everything then
+   * stays empty, which admits nobody, and nothing is written: a save would
+   * replace the real registry, its links, members and the owner's removals,
+   * with whatever this boot rebuilt. Fixing or restoring the file and
+   * restarting is the way back.
+   */
+  private loadFailed = false;
 
   constructor(opts: { dataDir: string }) {
     this.dataDir = opts.dataDir;
@@ -186,6 +197,7 @@ export class ShareLinks {
    * Access application in front of it.
    */
   create(req: CreateShareLinkReq): ShareLinkRecord {
+    this.refuseWhileUnreadable();
     if (!req.workspaceId) throw new Error('workspaceId is required');
     if (req.ttlSeconds !== undefined && (!Number.isFinite(req.ttlSeconds) || req.ttlSeconds <= 0)) {
       throw new Error('ttlSeconds must be a positive, finite number of seconds');
@@ -241,6 +253,7 @@ export class ShareLinks {
    * that history to achieve something the flag already achieves.
    */
   revoke(linkId: string, now: number = Date.now()): boolean {
+    this.refuseWhileUnreadable();
     const link = this.get(linkId);
     if (!link || link.revokedAt !== null) return false;
     link.revokedAt = now;
@@ -354,6 +367,7 @@ export class ShareLinks {
   seedFromOlderShares(
     shares: ReadonlyArray<{ workspaceId: string; allowDomains?: readonly string[] }>,
   ): void {
+    if (this.loadFailed) return;
     const merge = this.migratedThisBoot;
     this.migratedThisBoot = false;
     const untouched = new Set(
@@ -384,6 +398,7 @@ export class ShareLinks {
     by: string,
     now = Date.now(),
   ): BoardAudience {
+    this.refuseWhileUnreadable();
     const next = addAudienceEntries(
       this.audienceOf(workspaceId) ?? { workspaceId, entries: [] },
       matches,
@@ -400,6 +415,7 @@ export class ShareLinks {
    * so the caller can hang up what they have open.
    */
   removeFromAudience(workspaceId: string, match: string): string[] {
+    this.refuseWhileUnreadable();
     const current = this.audienceOf(workspaceId);
     if (!current) return [];
     this.putAudience(removeFromAudience(current, match));
@@ -441,6 +457,7 @@ export class ShareLinks {
    * a second, quieter way to admit somebody.
    */
   setMemberRole(workspaceId: string, email: string, role: BoardRole): boolean {
+    this.refuseWhileUnreadable();
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
     const row = this.admittedRow(workspaceId, who);
@@ -487,6 +504,7 @@ export class ShareLinks {
    * admitted is still on the record.
    */
   removeMember(workspaceId: string, email: string): boolean {
+    this.refuseWhileUnreadable();
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
     const before = this.members.length;
@@ -615,10 +633,14 @@ export class ShareLinks {
       } else {
         this.migrateToAudiences();
       }
-    } catch {
+    } catch (err) {
       this.links = [];
       this.members = [];
       this.audiences = [];
+      this.loadFailed = true;
+      console.error(
+        `[share-links] ${REGISTRY_FILENAME} could not be read (${err instanceof Error ? err.message : String(err)}); admitting nobody and writing nothing until it is fixed and the server restarts`,
+      );
     }
   }
 
@@ -663,7 +685,13 @@ export class ShareLinks {
    * as corrupt and then fails closed on: every member would lose access at
    * once, and the redemption history would be gone with them.
    */
+  /** A write while the registry is unreadable throws rather than replace it. */
+  private refuseWhileUnreadable(): void {
+    if (this.loadFailed) throw new Error(REGISTRY_UNREADABLE);
+  }
+
   private save(): void {
+    this.refuseWhileUnreadable();
     const path = join(this.dataDir, REGISTRY_FILENAME);
     const state: Persisted = {
       links: this.links,

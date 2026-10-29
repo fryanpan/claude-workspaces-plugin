@@ -27,6 +27,7 @@ import {
   asksForSecret,
   refuseOwnerOnlyWrite,
 } from '../share/board-role.ts';
+import { SHARING_NOTICE_ACTOR } from '../sharing-notice.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
 import {
@@ -171,6 +172,13 @@ export async function handleTaskReviewItems(
       // An ACCESS change likewise: approving it changes who is in the board,
       // so only the owner's own press of Approve does (`routes/task-access.ts`).
       if (item?.access !== undefined) return j(400, ACCESS_ANSWER_DENIAL);
+      // And the sharing notice, whatever shape it was filed in: one filed
+      // before it was an access card is a plain decision, and an answer here
+      // takes the author the body names.
+      const task = taskStore.getTask(taskId);
+      if (task && reviewItemFilerId(task, reviewItemId) === SHARING_NOTICE_ACTOR.id) {
+        return j(400, ACCESS_ANSWER_DENIAL);
+      }
     }
     // Checked HERE, before any write and before the ask-back conversion below,
     // because the conversion is itself a write on the item: a Regular User's

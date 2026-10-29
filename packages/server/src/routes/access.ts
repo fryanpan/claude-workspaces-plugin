@@ -1,9 +1,15 @@
+import { SHARING_OFF_PAGE_PATH } from '../sharing-off-door.ts';
+import { type SharingOffView, renderSharingOffPage } from './sharing-off-page.ts';
+
 /**
  * ── The access page: who can reach every board, and what is waiting ──
  *
  *   GET /access[/<section>]          the page (the settings shell)
  *   GET /api/access                  boards, entries, people, proposals
  *   GET /api/access/events:stream    `access.changed`, nameless (page-nudges.ts)
+ *   GET /sharing-off                 the sharing notice, for the owner away from
+ *                                    this machine while sharing is off
+ *                                    (routes/sharing-off-page.ts)
  *
  * Top-level for the review queue's reason: it is about every board. It
  * writes nothing itself. Approve and Reject go to each card's own door
@@ -23,6 +29,8 @@ export interface AccessRoutesContext {
   renderPage: () => string;
   pageHeaders: Record<string, string>;
   stream: () => Response;
+  /** The master switch and the notice's open card. */
+  sharingOff: () => SharingOffView;
   j: (status: number, body: unknown) => Response;
 }
 
@@ -64,6 +72,15 @@ export function handleAccessRoutes(
   rq: AccessRouteRequest,
 ): Response | null {
   const { pathname } = rq;
+  if (pathname === SHARING_OFF_PAGE_PATH) {
+    if (rq.req.method !== 'GET') return ctx.j(405, { error: 'method not allowed' });
+    if (rq.visitor) return ctx.j(403, { error: 'not available to share visitors' });
+    if (rq.anyoneProven() && !rq.ownerProven()) {
+      return ctx.j(403, { error: 'owner-only', message: 'Only the owner can see this page.' });
+    }
+    const page = renderSharingOffPage(ctx.sharingOff());
+    return new Response(page.html, { headers: page.headers });
+  }
   if (pathname !== LIST && pathname !== STREAM && !PAGE.test(pathname)) return null;
   if (rq.req.method !== 'GET') return ctx.j(405, { error: 'method not allowed' });
   if (pathname === STREAM) return refuseNonOwnerRead(ctx, rq) ?? ctx.stream();

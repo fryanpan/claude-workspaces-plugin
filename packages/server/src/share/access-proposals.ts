@@ -49,6 +49,9 @@ export interface AccessProposalDeps {
    *  where the server has no sharing gate; the change is then refused. */
   setBoardEnabled?: (workspaceId: string) => { ok: boolean; error?: string };
   setBoardUnlocked?: (workspaceId: string) => { ok: boolean; error?: string };
+  /** Turn the master switch back on, logged with the approver as the actor:
+   *  the sharing notice's card. Absent where there is no sharing gate. */
+  setSharingOn?: (by: string) => { ok: boolean; error?: string };
   /** Re-project the task and tell the queue, as the review-item route does. */
   announce: (task: Task, item: TaskReviewItem, author: User) => void;
   /** Told after a proposal is filed or answered, for the access page. */
@@ -163,6 +166,18 @@ export class AccessProposals {
   apply(change: ReviewAccessChange, by: string): ApplyResult {
     const { shareLinks } = this.deps;
     const ws = change.workspaceId;
+    if (change.op === 'sharing-on') {
+      const res = this.deps.setSharingOn?.(by) ?? { ok: false, error: 'no_sharing_gate' };
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: res.error ?? 'refused',
+          message:
+            'sharing is fixed in the environment (CW_SHARING_DISABLED), so it cannot be turned back on here',
+        };
+      }
+      return { ok: true, text: `Approved. ${accessChangeLine(change)}` };
+    }
     if (change.op === 'unlock-board' || change.op === 'open-board') {
       if (change.op === 'open-board' && this.deps.isBoardLocked(ws)) {
         return {
