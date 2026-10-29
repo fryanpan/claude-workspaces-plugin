@@ -301,9 +301,6 @@ export interface DocRouteRequest {
    *  or a board's own socket did (`tokenId` is then `BOARD_SOCKET_TOKEN_ID`),
    *  or null/absent when neither did. */
   boardAgent?: { agentId: string; boardId: string; tokenId?: string } | null;
-  /** The board this request is that board's lead on (the admission gate's
-   *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
-  leadBoard?: string | null;
 }
 
 /**

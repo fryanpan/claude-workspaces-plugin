@@ -11,8 +11,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-roots.ts';
 import { scanFolderPaths } from '../src/fs-scan.ts';
-import { gitBarred, gitDirRefused, hardenedGitArgs } from '../src/git-hardening.ts';
+import { gitBarred, hardenedGitArgs, repoOf } from '../src/git-hardening.ts';
 import { classifyExternalContent, gitConflictHint } from '../src/git-provenance.ts';
 import { boundFiles } from '../src/slow-fs.ts';
 
@@ -118,7 +119,7 @@ function plantedRepo(name: string): string {
   return repo;
 }
 
-describe('no git at all under a root a lead bound', () => {
+describe('no git at all under a lead’s root', () => {
   test('a planted filter runs under plain git, and not through the listing or the conflict path', () => {
     const repo = plantedRepo('lead-root');
     // Positive control: a stat-dirty file makes plain git status run both.
@@ -136,11 +137,10 @@ describe('no git at all under a root a lead bound', () => {
     chmodSync(join(shimDir, 'git'), 0o755);
     const realPath = process.env.PATH;
     process.env.PATH = `${shimDir}:${realPath ?? ''}`;
-    const remove = boundFiles.guards.add({
-      covers: (path) => path === repo || path.startsWith(`${repo}/`),
-      admits: () => true,
-      landsInside: () => true,
-    });
+    // Registered for a walled lead, never bound by anyone.
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(dir, 'data')));
+    roots.set('w-harbor', [repo]);
+    const remove = boundFiles.guards.add(roots);
     try {
       expect(gitConflictHint(join(repo, 'notes.md'), '# Harborlight\n')).toBe('');
       expect(classifyExternalContent(join(repo, 'notes.md'), '# Harborlight\n').source).toBe(
@@ -161,37 +161,75 @@ describe('no git at all under a root a lead bound', () => {
   });
 });
 
+/** A repository with one commit. */
+function repoWithCommit(path: string): string {
+  mkdirSync(path, { recursive: true });
+  git(path, ['init', '-q']);
+  git(path, [
+    '-c',
+    'user.name=Alice',
+    '-c',
+    'user.email=fixture@example.invalid',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'x',
+  ]);
+  return path;
+}
+
+describe('no git in a repository holding a lead’s root', () => {
+  test('bars a parent repository and a worktree whose git folder is in the root', () => {
+    const outer = repoWithCommit(join(dir, 'outer'));
+    const leadRoot = repoWithCommit(join(outer, 'projects', 'harbor'));
+    const wt = join(dir, 'harbor-wt');
+    git(leadRoot, ['worktree', 'add', '-q', wt, '-b', 'wt']);
+    const other = repoWithCommit(join(dir, 'riverbend'));
+    // The controls: nothing is barred before the root is registered.
+    for (const d of [outer, wt, other]) expect(gitBarred(d), d).toBe(false);
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(dir, 'data')));
+    roots.set('w-harbor', [leadRoot]);
+    const remove = boundFiles.guards.add(roots);
+    try {
+      expect(gitBarred(leadRoot)).toBe(true);
+      expect(gitBarred(join(outer, 'README.md'))).toBe(true);
+      expect(gitBarred(wt)).toBe(true);
+      expect(gitBarred(other)).toBe(false);
+    } finally {
+      remove();
+    }
+  });
+});
+
 describe('a .git that leads somewhere planted', () => {
-  test('refuses a gitdir file pointing outside, and a link; keeps a worktree and a folder', () => {
-    const main = join(dir, 'main');
-    mkdirSync(main);
-    git(main, ['init', '-q']);
-    git(main, [
-      '-c',
-      'user.name=Alice',
-      '-c',
-      'user.email=fixture@example.invalid',
-      'commit',
-      '-q',
-      '--allow-empty',
-      '-m',
-      'x',
-    ]);
-    expect(gitDirRefused(main)).toBe(false);
+  test('refuses a gitdir file git did not write, and a link; keeps a worktree and a folder', () => {
+    const main = repoWithCommit(join(dir, 'main'));
+    expect(repoOf(main)).toEqual({ top: main, common: join(main, '.git') });
     const wt = join(dir, 'wt');
     git(main, ['worktree', 'add', '-q', wt, '-b', 'wt']);
-    expect(gitDirRefused(wt)).toBe(false);
-    expect(gitDirRefused(join(wt, 'deeper'))).toBe(false);
+    expect(repoOf(wt)).toEqual({ top: wt, common: join(main, '.git') });
+    expect(repoOf(join(wt, 'deeper'))).toEqual({ top: wt, common: join(main, '.git') });
 
     const planted = join(dir, 'planted');
     mkdirSync(planted);
     writeFileSync(join(planted, '.git'), `gitdir: ${join(dir, 'elsewhere')}\n`);
-    expect(gitDirRefused(planted)).toBe(true);
+    expect(repoOf(planted)).toBe('refused');
     expect(gitBarred(join(planted, 'notes.md'))).toBe(true);
+
+    // Shaped like a worktree's git folder, but not one git registered.
+    const fake = join(dir, 'fake', '.git', 'worktrees', 'w');
+    mkdirSync(fake, { recursive: true });
+    writeFileSync(join(fake, 'commondir'), '../..\n');
+    writeFileSync(join(fake, 'gitdir'), `${join(dir, 'somewhere', '.git')}\n`);
+    const shaped = join(dir, 'shaped');
+    mkdirSync(shaped);
+    writeFileSync(join(shaped, '.git'), `gitdir: ${fake}\n`);
+    expect(repoOf(shaped)).toBe('refused');
 
     const linked = join(dir, 'linked');
     mkdirSync(linked);
     symlinkSync(join(main, '.git'), join(linked, '.git'));
-    expect(gitDirRefused(linked)).toBe(true);
+    expect(repoOf(linked)).toBe('refused');
   });
 });

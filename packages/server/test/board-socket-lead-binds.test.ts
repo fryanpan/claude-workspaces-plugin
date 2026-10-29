@@ -1,21 +1,22 @@
 /**
- * A walled lead's folder bind stays held to its roots after the bind, not
- * only at it (`board-socket-roots.ts`, installed as a path guard on
- * `slow-fs.ts` `boundFiles.guards`):
+ * A file the server reads or writes under a walled lead's registered root
+ * stays held to that root (`board-socket-roots.ts`, installed as a path guard
+ * on `slow-fs.ts` `boundFiles.guards`), whoever bound it. The lead can write
+ * the folders on the way to such a file, so:
  *
- * - a bound root swapped for a link to a folder outside the roots serves
- *   nothing from it, neither a file nor a name;
+ * - a bound root swapped for a link to a folder outside serves nothing from
+ *   it, neither a file nor a name;
  * - a folder inside the root swapped for such a link serves nothing either,
  *   and a write through it never creates a file outside;
- * - a root dropped from the board's list stops serving the lead's set, and
- *   only the lead's: a set the owner bound on the same folder still serves;
- * - archiving a lead's set sets its record aside, and unarchiving restores it;
- * - a lead's bind never lands on a set another board holds;
- * - a lead's `maxFiles` is bounded.
+ * - media, and the images beside a bound doc, are read from the descriptor
+ *   that was checked, and an image upload through a swapped folder creates
+ *   nothing outside;
+ * - no git runs in a repository holding a root, so no program its settings
+ *   name runs.
  *
  * Each refusal has its positive control: the same read before the change.
- * The bind is posted on Harborlight's socket; reads are over TCP from this
- * machine, which is any reader the server answers. Fixtures synthetic.
+ * The binds are the owner's, over TCP from this machine: a lead may not bind
+ * over its socket. Fixtures synthetic.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
@@ -24,7 +25,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -34,9 +34,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { boardSocketRootsPath } from '../src/board-socket-roots.ts';
 import { boardSocketPath } from '../src/board-sockets.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { tinyPng } from './tiny-png.ts';
 import { waitFor } from './wait-for.ts';
 
 let h: ServerHandle;
@@ -46,18 +46,11 @@ let socketRoot: string;
 let socketDir: string;
 let base: string;
 let harborlight: string;
-let riverbend: string;
 let secrets: string;
 
 const json = { 'content-type': 'application/json' };
 const tcp = (path: string, init: RequestInit = {}) =>
   fetch(`${base}${path}`, { ...init, headers: { ...json, ...(init.headers ?? {}) } });
-const onSocket = (path: string, init: RequestInit = {}) =>
-  fetch(`http://board${path}`, {
-    ...init,
-    unix: boardSocketPath(socketDir, harborlight),
-    headers: { ...json, ...(init.headers ?? {}) },
-  });
 
 async function board(name: string): Promise<string> {
   const res = await tcp('/workspaces', { method: 'POST', body: JSON.stringify({ name }) });
@@ -81,11 +74,14 @@ async function setRoots(roots: string[]): Promise<void> {
   expect(res.status, await res.clone().text()).toBe(200);
 }
 
-async function leadBind(folderPath: string, extra: Record<string, unknown> = {}) {
-  return onSocket('/workspaces', {
+/** The owner binds a folder on Harborlight; its set id. */
+async function bind(folderPath: string): Promise<string> {
+  const res = await tcp('/workspaces', {
     method: 'POST',
-    body: JSON.stringify({ folderPath, hubWorkspaceId: harborlight, ...extra }),
+    body: JSON.stringify({ folderPath, hubWorkspaceId: harborlight }),
   });
+  expect(res.status, await res.clone().text()).toBe(200);
+  return ((await res.json()) as { setId: string }).setId;
 }
 
 /** Open one file of a set for context, the all-files sidebar's click. */
@@ -106,9 +102,9 @@ async function openEditable(setId: string, relPath: string): Promise<string> {
   return ((await res.json()) as { docId: string }).docId;
 }
 
-/** The lead's whole-doc rewrite, posted on its own socket. */
-async function leadRewrite(docId: string, markdown: string): Promise<Response> {
-  return onSocket(`/workspaces/${harborlight}/docs/${encodeURIComponent(docId)}/content`, {
+/** A whole-doc rewrite. */
+async function rewrite(docId: string, markdown: string): Promise<Response> {
+  return tcp(`/workspaces/${harborlight}/docs/${encodeURIComponent(docId)}/content`, {
     method: 'POST',
     body: JSON.stringify({ markdown, confirmOverwriteHumanEdits: true }),
   });
@@ -129,7 +125,8 @@ beforeAll(async () => {
   h = createServer({ port: 0, dataDir, boardSocketDir: socketDir });
   base = `http://127.0.0.1:${h.port}`;
   harborlight = await board('Harborlight');
-  riverbend = await board('Riverbend');
+  // The socket is opened, as for any walled lead; nothing here is posted on it.
+  expect(existsSync(boardSocketPath(socketDir, harborlight))).toBe(true);
   // What the lead's profile keeps from it, with a file of the same name.
   secrets = join(workDir, 'riverbend-keys');
   mkdirSync(secrets, { recursive: true });
@@ -142,13 +139,11 @@ afterAll(async () => {
   for (const d of [dataDir, workDir, socketRoot]) rmSync(d, { recursive: true, force: true });
 });
 
-describe('a lead’s bind after the bind', () => {
-  it('serves nothing through a root swapped for a link out of the roots', async () => {
+describe('a bound folder under a lead’s root, after the bind', () => {
+  it('serves nothing through a root swapped for a link out of it', async () => {
     const root = project('harbor-swap');
     await setRoots([root]);
-    const bound = await leadBind(root);
-    expect(bound.status, await bound.clone().text()).toBe(200);
-    const { setId } = (await bound.json()) as { setId: string };
+    const setId = await bind(root);
     // The control: before the swap the root's own file opens.
     expect((await openFile(setId, 'notes.md')).status).toBe(200);
 
@@ -167,9 +162,7 @@ describe('a lead’s bind after the bind', () => {
     writeFileSync(join(root, 'sub', 'first.md'), '# harbor sub first\n');
     writeFileSync(join(root, 'sub', 'later.md'), '# harbor sub later\n');
     await setRoots([root]);
-    const bound = await leadBind(root);
-    expect(bound.status, await bound.clone().text()).toBe(200);
-    const { setId } = (await bound.json()) as { setId: string };
+    const setId = await bind(root);
     // The control: before the swap a file in the folder opens.
     expect((await openFile(setId, 'sub/first.md')).status).toBe(200);
 
@@ -189,13 +182,11 @@ describe('a lead’s bind after the bind', () => {
     const outside = join(workDir, 'riverbend-rules');
     mkdirSync(outside, { recursive: true });
     await setRoots([root]);
-    const bound = await leadBind(root);
-    expect(bound.status, await bound.clone().text()).toBe(200);
-    const { setId } = (await bound.json()) as { setId: string };
+    const setId = await bind(root);
     const docId = await openEditable(setId, 'sub/plan.md');
 
     // The control: before the swap the rewrite reaches the file on disk.
-    const first = await leadRewrite(docId, '# harbor plan\n\nFirst pass.\n');
+    const first = await rewrite(docId, '# harbor plan\n\nFirst pass.\n');
     expect(first.status, await first.clone().text()).toBe(200);
     await waitFor(
       () =>
@@ -207,7 +198,7 @@ describe('a lead’s bind after the bind', () => {
 
     renameSync(join(root, 'sub'), join(root, 'sub.moved'));
     symlinkSync(outside, join(root, 'sub'));
-    await leadRewrite(docId, '# harbor plan\n\nSecond pass.\n');
+    await rewrite(docId, '# harbor plan\n\nSecond pass.\n');
     // The refusal reports itself on the doc rather than failing quietly.
     const said = await waitFor(() => h.docStore.getSyncError(docId), {
       describe: 'the refused write-back reported on the doc',
@@ -217,62 +208,82 @@ describe('a lead’s bind after the bind', () => {
     expect(readdirSync(outside)).toEqual([]);
   }, 30_000);
 
-  it('stops serving a root dropped from the board’s list', async () => {
-    const root = project('harbor-dropped');
+  it('serves media from the file it checked, and nothing through a swapped folder', async () => {
+    const root = project('harbor-media');
+    mkdirSync(join(root, 'shots'));
+    writeFileSync(join(root, 'shots', 'first.png'), 'harbor-png-first');
+    writeFileSync(join(root, 'shots', 'later.png'), 'harbor-png-later');
+    writeFileSync(join(secrets, 'later.png'), 'riverbend-png');
     await setRoots([root]);
-    const bound = await leadBind(root);
-    expect(bound.status, await bound.clone().text()).toBe(200);
-    const { setId } = (await bound.json()) as { setId: string };
-    expect((await openFile(setId, 'notes.md')).status).toBe(200);
-    await setRoots([]);
-    expect((await openFile(setId, 'later.md')).status).not.toBe(200);
+    const setId = await bind(root);
+    const raw = (rel: string, range?: string) =>
+      tcp(
+        `/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}/raw?path=${encodeURIComponent(rel)}`,
+        range ? { headers: { range } } : {},
+      );
+    // The controls: the whole file, and a range of it, from inside.
+    const whole = await raw('shots/first.png');
+    expect(whole.status, await whole.clone().text()).toBe(200);
+    expect(await whole.text()).toBe('harbor-png-first');
+    const part = await raw('shots/first.png', 'bytes=0-5');
+    expect(part.status).toBe(206);
+    expect(await part.text()).toBe('harbor');
+
+    renameSync(join(root, 'shots'), join(root, 'shots.moved'));
+    symlinkSync(secrets, join(root, 'shots'));
+    const through = await raw('shots/later.png');
+    expect(through.status).not.toBe(200);
+    expect(await through.text()).not.toContain('riverbend');
   }, 30_000);
 });
 
-describe('the guard holds only the lead’s own sets', () => {
-  it('leaves a set the owner bound on the same folder alone', async () => {
-    const root = project('harbor-owner');
+describe('the images beside a bound doc under a lead’s root', () => {
+  it('reads and stores nothing through the doc’s folder swapped for a link', async () => {
+    const root = project('harbor-assets');
+    const docDir = join(root, 'plan');
+    mkdirSync(join(docDir, 'images'), { recursive: true });
+    writeFileSync(join(docDir, 'doc.md'), '# Harborlight plan\n');
+    const png = tinyPng(40);
+    writeFileSync(join(docDir, 'images', 'chart.png'), png);
+    // What the profile keeps from the lead, with an image at the same place.
+    const outside = join(workDir, 'riverbend-plan');
+    mkdirSync(join(outside, 'images'), { recursive: true });
+    writeFileSync(join(outside, 'images', 'chart.png'), tinyPng(41));
     await setRoots([root]);
-    const lead = await leadBind(root);
-    expect(lead.status, await lead.clone().text()).toBe(200);
-    const leadSet = ((await lead.json()) as { setId: string }).setId;
-    const owner = await tcp('/workspaces', {
+    const created = await tcp(`/workspaces/${harborlight}/docs`, {
       method: 'POST',
-      body: JSON.stringify({ folderPath: root, hubWorkspaceId: harborlight }),
+      body: JSON.stringify({
+        docId: 'harbor-assets',
+        type: 'markdown',
+        sourceUrl: join(docDir, 'doc.md'),
+      }),
     });
-    expect(owner.status, await owner.clone().text()).toBe(200);
-    const ownerSet = ((await owner.json()) as { setId: string }).setId;
-    expect(ownerSet).not.toBe(leadSet);
+    expect(created.ok, await created.clone().text()).toBe(true);
+    const at = `/workspaces/${harborlight}/docs/harbor-assets/assets`;
+    const upload = () =>
+      fetch(`${base}${at}?name=${encodeURIComponent('Harborlight Chart.png')}`, {
+        method: 'POST',
+        headers: { 'content-type': 'image/png' },
+        body: tinyPng(42),
+      });
 
-    await setRoots([]);
-    expect((await openFile(leadSet, 'notes.md')).status).not.toBe(200);
-    // The control is the refusal above; the owner's set on the same file serves.
-    const ownerOpen = await openFile(ownerSet, 'notes.md');
-    expect(ownerOpen.status, await ownerOpen.clone().text()).toBe(200);
-  }, 30_000);
+    // The controls: before the swap the image reads and an upload stores.
+    const served = await tcp(`${at}/images/chart.png`);
+    expect(served.status, await served.clone().text()).toBe(200);
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(png);
+    const stored = await upload();
+    expect(stored.status, await stored.clone().text()).toBe(201);
 
-  it('sets a lead’s record aside when its set is archived, and back on unarchive', async () => {
-    const root = project('harbor-archived');
-    await setRoots([root]);
-    const lead = await leadBind(root);
-    expect(lead.status, await lead.clone().text()).toBe(200);
-    const setId = ((await lead.json()) as { setId: string }).setId;
-    const recorded = () =>
-      JSON.parse(readFileSync(boardSocketRootsPath(dataDir), 'utf8')) as {
-        binds: Record<string, unknown>;
-        archived: Record<string, unknown>;
-      };
-    expect(Object.keys(recorded().binds)).toContain(setId);
-
-    const at = `/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}`;
-    const archived = await tcp(`${at}/archive`, { method: 'POST', body: '{}' });
-    expect(archived.status, await archived.clone().text()).toBe(200);
-    expect(Object.keys(recorded().binds)).not.toContain(setId);
-    expect(Object.keys(recorded().archived)).toContain(setId);
-
-    const back = await tcp(`${at}/unarchive`, { method: 'POST', body: '{}' });
-    expect(back.status, await back.clone().text()).toBe(200);
-    expect(Object.keys(recorded().binds)).toContain(setId);
+    // A link the lead could make in node_modules, moved into the doc folder's
+    // place. Every check beside the doc resolves from that folder, so only
+    // the guard, which judges from the root, can see that it left.
+    renameSync(docDir, `${docDir}.moved`);
+    symlinkSync(outside, docDir);
+    const through = await tcp(`${at}/images/chart.png`);
+    expect(through.status).toBe(404);
+    const refused = await upload();
+    expect(refused.status).toBe(409);
+    expect(readdirSync(join(outside, 'images'))).toEqual(['chart.png']);
   }, 30_000);
 });
 
@@ -297,101 +308,16 @@ describe('git in a lead’s root', () => {
     rmSync(marker);
 
     await setRoots([root]);
-    const bound = await leadBind(root);
-    expect(bound.status, await bound.clone().text()).toBe(200);
-    const { setId, listed } = (await bound.json()) as { setId: string; listed: string[] };
+    const res = await tcp('/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ folderPath: root, hubWorkspaceId: harborlight }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const { setId, listed } = (await res.json()) as { setId: string; listed: string[] };
     // Listed by a walk, since no git runs here.
     expect(listed).toEqual(['later.md', 'notes.md']);
     const opened = await openFile(setId, 'notes.md');
     expect(opened.status, await opened.clone().text()).toBe(200);
     expect(existsSync(marker)).toBe(false);
-  }, 30_000);
-});
-
-describe('links at the bind, and media after it', () => {
-  it('refuses a root holding a link out of it, and keeps one that stays inside', async () => {
-    const root = project('harbor-links');
-    symlinkSync('notes.md', join(root, 'notes-link.md'));
-    // A package manager's links are its own: node_modules is skipped here,
-    // and every path under it is refused when read or written.
-    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
-    symlinkSync(secrets, join(root, 'node_modules', '.bin', 'tool'));
-    await setRoots([root]);
-    // The control: a relative link that stays inside binds.
-    const kept = await leadBind(root);
-    expect(kept.status, await kept.clone().text()).toBe(200);
-    symlinkSync(secrets, join(root, 'keys'));
-    const refused = await leadBind(root, { exclude: ['later.md'] });
-    expect(refused.status).toBe(403);
-    expect(await refused.text()).toContain('a link that leads out of it');
-  }, 30_000);
-
-  it('refuses a link that climbs, because moving its folder moves where it lands', async () => {
-    const root = project('harbor-climb');
-    mkdirSync(join(root, 'deep'));
-    // Inside today: deep/up -> ../notes.md. Rename deep's parent and it is not.
-    symlinkSync('../notes.md', join(root, 'deep', 'up.md'));
-    await setRoots([root]);
-    const refused = await leadBind(root);
-    expect(refused.status).toBe(403);
-    expect(await refused.text()).toContain('a link that leads out of it');
-  }, 30_000);
-
-  it('serves a lead’s media from the file it checked, and nothing through a swapped folder', async () => {
-    const root = project('harbor-media');
-    mkdirSync(join(root, 'shots'));
-    writeFileSync(join(root, 'shots', 'first.png'), 'harbor-png-first');
-    writeFileSync(join(root, 'shots', 'later.png'), 'harbor-png-later');
-    writeFileSync(join(secrets, 'later.png'), 'riverbend-png');
-    await setRoots([root]);
-    const bound = await leadBind(root);
-    expect(bound.status, await bound.clone().text()).toBe(200);
-    const { setId } = (await bound.json()) as { setId: string };
-    const raw = (rel: string, range?: string) =>
-      tcp(
-        `/workspaces/${harborlight}/attachments/${encodeURIComponent(setId)}/raw?path=${encodeURIComponent(rel)}`,
-        range ? { headers: { range } } : {},
-      );
-    // The controls: the whole file, and a range of it, from inside.
-    const whole = await raw('shots/first.png');
-    expect(whole.status, await whole.clone().text()).toBe(200);
-    expect(await whole.text()).toBe('harbor-png-first');
-    const part = await raw('shots/first.png', 'bytes=0-5');
-    expect(part.status).toBe(206);
-    expect(await part.text()).toBe('harbor');
-
-    renameSync(join(root, 'shots'), join(root, 'shots.moved'));
-    symlinkSync(secrets, join(root, 'shots'));
-    const through = await raw('shots/later.png');
-    expect(through.status).not.toBe(200);
-    expect(await through.text()).not.toContain('riverbend');
-  }, 30_000);
-});
-
-describe('a lead’s bind is held to its own board', () => {
-  it('is refused when its set is filed on another board', async () => {
-    const root = project('harbor-shared');
-    await setRoots([root]);
-    const first = await leadBind(root);
-    expect(first.status, await first.clone().text()).toBe(200);
-    const { setId } = (await first.json()) as { setId: string };
-    // An operator files the same set on Riverbend too.
-    const filed = await tcp(`/workspaces/${riverbend}/docs:attach`, {
-      method: 'POST',
-      body: JSON.stringify({ docId: setId }),
-    });
-    expect(filed.status, await filed.clone().text()).toBe(200);
-    const again = await leadBind(root, { exclude: ['notes.md'] });
-    expect(again.status).toBe(403);
-    expect(await again.text()).toContain('another board');
-  }, 30_000);
-
-  it('bounds maxFiles', async () => {
-    const root = project('harbor-max');
-    await setRoots([root]);
-    expect((await leadBind(root, { maxFiles: 1_000_000_000 })).status).toBe(403);
-    expect((await leadBind(root, { maxFiles: 'all' })).status).toBe(403);
-    const ok = await leadBind(root, { maxFiles: 100 });
-    expect(ok.status, await ok.clone().text()).toBe(200);
   }, 30_000);
 });

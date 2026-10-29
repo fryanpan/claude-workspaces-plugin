@@ -73,15 +73,16 @@ describe('launching a walled lead', () => {
     expect(r.said).not.toContain('warning');
   });
 
-  it('registers its projects, resolved, as the folders it may bind', () => {
+  it('registers its projects, resolved, as the folders it can write', () => {
     const r = launch(true);
     expect(r.registered).toEqual([['w-harbor', [realpathSync(join(root, 'dev', 'harborlight'))]]]);
   });
 
-  it('says so, and still launches, when the server does not take the list', () => {
+  it('says so, and launches nothing, when the server does not take the list', () => {
     const r = launch(true, 'the server did not answer');
-    expect(r.code).toBe(0);
+    expect(r.code).toBe(2);
     expect(r.said).toContain('the server did not answer');
+    expect(r.env).toEqual({});
   });
 
   it('hands it no board server token', () => {

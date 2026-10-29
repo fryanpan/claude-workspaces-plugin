@@ -43,7 +43,7 @@ import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/bo
 import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
-import { BoardSocketRoots, boardSocketRootsPath, linkOutOf } from './board-socket-roots.ts';
+import { BoardSocketRoots, boardSocketRootsPath } from './board-socket-roots.ts';
 import { openBoardSockets } from './board-sockets.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
@@ -1955,8 +1955,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * above, and that setup takes `policyFor` as an input: the two halves of
    * this one subject sit on either side of it.
    */
-  /** The folders each board's lead may bind, and the sets it bound; every
-   *  bound read, stat and write under those is re-checked against it. */
+  /** The folders each walled lead works in; every bound read, stat and
+   *  write under them is re-checked against it (`board-socket-roots.ts`). */
   const boardSocketRoots = new BoardSocketRoots(boardSocketRootsPath(dataDir));
   const removeLeadBindGuard = boundFiles.guards.add(boardSocketRoots);
   /** Board agent tokens (`at2`) and their revocation record. */
@@ -2538,8 +2538,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     safeJson,
     unlinkFromEveryBoardWorkspace,
     canonicalDocId,
-    onReviewArchived: (setId, archived) =>
-      archived ? boardSocketRoots.archiveBind(setId) : boardSocketRoots.restoreBind(setId),
   };
   const { handleArchiveRoutes } = createArchiveRoutes(archiveRoutesCtx);
 
@@ -2939,9 +2937,6 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
-    leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
-    leadRootLinkOut: linkOutOf,
-    recordLeadBind: (setId, boardId, root) => boardSocketRoots.recordBind(setId, boardId, root),
     chatAudit,
     shareLinks,
     taskStore,

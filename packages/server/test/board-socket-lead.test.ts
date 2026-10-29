@@ -1,11 +1,11 @@
 /**
- * A walled lead keeps its board features over its board's own socket
+ * A walled lead keeps its board's hooks and status over its own socket
  * (`middleware/lead-scope.ts`):
  *
- * A. The tools a member is refused — the doc list, a whole-doc rewrite, a
- *    folder bind and `post_status` — work for a session opened on
- *    Harborlight's socket, on Harborlight, and each is refused on Riverbend.
- *    A folder bind is held to the folders registered for the board.
+ * A. `post_status` works for a session opened on Harborlight's socket, on
+ *    Harborlight, and is refused on Riverbend. The doc list, a whole-doc
+ *    rewrite and a folder bind stay refused on both, as for a member: each
+ *    would have the server act on a file tree the lead controls.
  * B. The plugin hooks' notes and prompt marks, posted on the socket with no
  *    token, land on Harborlight and are refused on Riverbend.
  * C. A board closed to outside visitors still admits its own lead, on the
@@ -157,151 +157,50 @@ afterAll(async () => {
   for (const d of [dataDir, workDir, socketRoot]) rmSync(d, { recursive: true, force: true });
 });
 
-describe('A. the tools a member is refused work for the lead on its own board', () => {
-  it('list_docs lists its board, with no paths on this machine, and is refused another', async () => {
+describe('A. post_status works for the lead on its own board, and the tree tools stay refused', () => {
+  it('list_docs, set_doc_content and attach_folder are refused on its own board and another', async () => {
+    // Each would have the server act on a file tree the lead controls.
     const call = await session(harborlight);
-    const own = await call('list_docs', { workspaceId: harborlight });
-    expect(own.isError, own.text).toBe(false);
-    expect(own.text).toContain(harborDoc);
-    expect(own.text).not.toContain(riverDoc);
-    expect(own.text).not.toContain(workDir);
-    const other = await call('list_docs', { workspaceId: riverbend });
-    expect(other.isError).toBe(true);
-    expect(other.text).toContain('403');
+    for (const boardId of [harborlight, riverbend]) {
+      const list = await call('list_docs', { workspaceId: boardId });
+      expect(list.isError, list.text).toBe(true);
+      const doc = boardId === harborlight ? harborDoc : riverDoc;
+      const rewrite = await call('set_doc_content', {
+        workspaceId: boardId,
+        docId: doc,
+        markdown: '# Overwritten by the lead.\n',
+        confirmOverwriteHumanEdits: true,
+      });
+      expect(rewrite.isError, rewrite.text).toBe(true);
+      const bind = await call('attach_folder', {
+        workspaceId: boardId,
+        folderPath: inside,
+        subscribe: false,
+      });
+      expect(bind.isError, bind.text).toBe(true);
+    }
+    for (const [boardId, doc] of [
+      [harborlight, harborDoc],
+      [riverbend, riverDoc],
+    ] as const) {
+      const read = await tcp(`/workspaces/${boardId}/docs/${doc}/content`);
+      expect(await read.text()).not.toContain('Overwritten by the lead.');
+    }
+    // The control: the same session's post_status works (below), so the
+    // refusal is the route's, not a dead session.
   }, 30_000);
 
-  it('set_doc_content rewrites its board’s doc, and is refused another board’s', async () => {
-    const call = await session(harborlight);
-    const own = await call('set_doc_content', {
-      workspaceId: harborlight,
-      docId: harborDoc,
-      markdown: '# harbor-plan\n\nRewritten by the lead.\n',
-      confirmOverwriteHumanEdits: true,
-    });
-    expect(own.isError, own.text).toBe(false);
-    const read = await tcp(`/workspaces/${harborlight}/docs/${harborDoc}/content`);
-    expect(await read.text()).toContain('Rewritten by the lead.');
-
-    const other = await call('set_doc_content', {
-      workspaceId: riverbend,
-      docId: riverDoc,
-      markdown: '# river-plan\n\nOverwritten.\n',
-      confirmOverwriteHumanEdits: true,
-    });
-    expect(other.isError).toBe(true);
-    // Another board's doc spelled under the lead's own board is refused too.
-    const crossed = await call('set_doc_content', {
-      workspaceId: harborlight,
-      docId: riverDoc,
-      markdown: '# river-plan\n\nOverwritten.\n',
-      confirmOverwriteHumanEdits: true,
-    });
-    expect(crossed.isError).toBe(true);
-    const river = await tcp(`/workspaces/${riverbend}/docs/${riverDoc}/content`);
-    expect(await river.text()).not.toContain('Overwritten.');
-  }, 30_000);
-
-  it('set_doc_content over the socket is still refused after a human edit', async () => {
-    const call = await session(harborlight);
-    h.docStore.noteHumanEdit(harborDoc);
-    const refused = await call('set_doc_content', {
-      workspaceId: harborlight,
-      docId: harborDoc,
-      markdown: '# harbor-plan\n\nOver a person’s edit.\n',
-    });
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toContain('stale-write');
-    const read = await tcp(`/workspaces/${harborlight}/docs/${harborDoc}/content`);
-    expect(await read.text()).not.toContain('Over a person’s edit.');
-  }, 30_000);
-
-  it('attach_folder binds a registered root onto its board, and nowhere else', async () => {
-    const call = await session(harborlight);
-    const own = await call('attach_folder', {
-      workspaceId: harborlight,
-      folderPath: inside,
-      subscribe: false,
-    });
-    expect(own.isError, own.text).toBe(false);
-    expect(own.text).toContain(harborlight);
-
-    const otherBoard = await call('attach_folder', {
-      folderPath: inside,
-      workspaceId: riverbend,
-      subscribe: false,
-    });
-    expect(otherBoard.isError).toBe(true);
-    expect(otherBoard.text).toContain('own board');
-
-    const notARoot = await call('attach_folder', {
-      workspaceId: harborlight,
-      folderPath: outside,
-      subscribe: false,
-    });
-    expect(notARoot.isError).toBe(true);
-    expect(notARoot.text).toContain('registered for its board');
-    // Not a folder inside a root either: the lead could swap it for a link
-    // after the bind, and every later read would follow it.
-    mkdirSync(join(inside, 'docs'), { recursive: true });
-    const sub = await call('attach_folder', {
-      workspaceId: harborlight,
-      folderPath: join(inside, 'docs'),
-      subscribe: false,
-    });
-    expect(sub.isError).toBe(true);
-    // A link to a root's outside is judged by where it leads.
-    const link = join(inside, 'escape');
-    (await import('node:fs')).symlinkSync(outside, link);
-    const viaLink = await call('attach_folder', {
-      workspaceId: harborlight,
-      folderPath: link,
-      subscribe: false,
-    });
-    expect(viaLink.isError).toBe(true);
-    // A root holding a link out of it is refused at the bind, so the cases
-    // below bind it without one.
-    (await import('node:fs')).unlinkSync(link);
-  }, 30_000);
-
-  it('binds by the resolved root under a set of its own, leaving another board’s set alone', async () => {
-    // An operator files the same folder on Riverbend over TCP first.
-    const theirs = await tcp('/workspaces', {
-      method: 'POST',
-      body: JSON.stringify({ folderPath: inside, hubWorkspaceId: riverbend, exclude: ['keep/**'] }),
-    });
-    expect(theirs.status, await theirs.clone().text()).toBe(200);
-    const theirSet = ((await theirs.json()) as { setId: string }).setId;
-    // The lead sends a link to its root; the bind is of the root itself.
-    const alias = join(workDir, 'harbor-alias');
-    (await import('node:fs')).symlinkSync(inside, alias);
-    const mine = await on(harborlight, '/workspaces', {
-      method: 'POST',
-      body: JSON.stringify({ folderPath: alias, hubWorkspaceId: harborlight, exclude: [] }),
-    });
-    expect(mine.status, await mine.clone().text()).toBe(200);
-    const bound = (await mine.json()) as { setId: string; root: string; hubWorkspaceId: string };
-    expect(bound.root).toBe(inside);
-    expect(bound.hubWorkspaceId).toBe(harborlight);
-    expect(bound.setId).not.toBe(theirSet);
-    // Riverbend's set is still Riverbend's alone.
-    const river = (await (await tcp(`/workspaces/${riverbend}?format=json`)).json()) as {
-      workspace?: { docIds?: string[] };
-    };
-    expect(river.workspace?.docIds ?? []).toContain(theirSet);
-    expect(river.workspace?.docIds ?? []).not.toContain(bound.setId);
-  });
-
-  it('refuses a board create and a set re-filed by id over the socket', async () => {
-    const create = await on(harborlight, '/workspaces', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'Saltmarsh' }),
-    });
-    expect(create.status).toBe(403);
-    const refile = await on(harborlight, '/workspaces', {
-      method: 'POST',
-      body: JSON.stringify({ folderPath: inside, hubWorkspaceId: harborlight, setId: 'rev-x' }),
-    });
-    expect(refile.status).toBe(403);
+  it('refuses a folder bind and a board create posted straight on the socket', async () => {
+    for (const body of [
+      { folderPath: inside, hubWorkspaceId: harborlight },
+      { name: 'Saltmarsh' },
+    ]) {
+      const res = await on(harborlight, '/workspaces', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(403);
+    }
   });
 
   it('post_status lands on its board’s row, and is refused another board’s', async () => {

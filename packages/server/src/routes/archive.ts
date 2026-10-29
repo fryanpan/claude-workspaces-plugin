@@ -46,9 +46,6 @@ export interface ArchiveRoutesContext {
   j: (status: number, body: unknown) => Response;
   /** Parse a request body, answering null rather than throwing. */
   safeJson: (req: Request) => Promise<Record<string, unknown> | null>;
-  /** Told when a review is archived or unarchived, so a walled lead's
-   *  record of the sets it bound follows them (`board-socket-roots.ts`). */
-  onReviewArchived?: (setId: string, archived: boolean) => void;
 
   /** Take a doc or review off every board holding it, so an archived row is
    *  not left as a dead end. */
@@ -124,7 +121,6 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       ...(Object.keys(memberWorkspaces).length > 0 ? { memberWorkspaces } : {}),
     });
     if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
-    ctx.onReviewArchived?.(setId, true);
     // A board row pointing at a review that no longer loads is a dead
     // end, so archiving takes the row too — and the manifest remembers
     // which boards, so unarchiving puts it back rather than orphaning it.
@@ -232,7 +228,6 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const author = body?.author as { name?: string } | undefined;
       const res = docStore.unarchiveReview(setId, { archivedBy: author?.name ?? 'unknown' });
       if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
-      ctx.onReviewArchived?.(setId, false);
       // Put the review back on every board it was on when it was archived,
       // and each individually-filed member back on the boards that had it —
       // which is the whole reason the manifest carries them per member rather

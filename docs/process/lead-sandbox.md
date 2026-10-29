@@ -139,15 +139,17 @@ board is its own board's socket, where the server holds each request to that
 board whatever token it carries. In the lead's own projects the profile
 also denies every new symlink and hard link outside a `node_modules`
 folder, and renaming or removing a `node_modules` folder: the server reads
-and writes the projects a lead binds, and a link the lead made in one, or
-made elsewhere and moved in, would carry the server outside it. `bun
-install` and `npm install` still work, since their links are in
+and writes docs the owner binds in those projects, and a link the lead made
+in one, or made elsewhere and moved in, would carry the server outside it.
+`bun install` and `npm install` still work, since their links are in
 `node_modules`, and the server refuses every path through one. The server
-runs no git in a folder a lead bound, so the lead's git settings stay
-writable: commits, `git push -u`, `git config` and `git worktree add` work.
-The cost: a walled lead cannot check out a repository whose tracked files
-include symlinks outside `node_modules`, and cannot rename or delete a
-`node_modules` folder. The folder is the config's top-level
+runs no git in a repository that holds one of the lead's projects, so the
+lead's git settings stay writable: commits, `git push -u`, `git config` and
+`git worktree add` work. The costs: a walled lead cannot check out a
+repository whose tracked files include symlinks outside `node_modules`, and
+cannot rename or delete a `node_modules` folder; and a diff review of its
+repository, or of a repository that holds it, does not work, since that
+needs git. The folder is the config's top-level
 `boardSocketDir`, or `/private/tmp/cw-<uid>-boards` when unset; a folder too
 long for a socket path is refused. A server on prod's port, 8787, opens the
 sockets in the default folder unless started with `CW_BOARD_SOCKETS=0`; any
@@ -160,14 +162,14 @@ in its environment. Its MCP child is then the node relay dialling that
 socket, and the server keeps the board token the relay's tools need, so the
 lead holds none, and none is written to disk. The plugin's hooks post over
 the same socket. Before the lead starts, the launch sends the server the
-lead's projects, resolved, as the folders it may bind onto its board
+lead's projects, resolved, as the folders it can write
 (`PUT /api/board-sockets/<board>/roots`, loopback only, refused on a
-socket); if the server does not take them, the launch says so and the lead's
-folder binds are refused. On its own board the lead may also list docs,
-rewrite a doc, bind one of those projects (narrowed with `include`, never a
-folder inside one, which it could swap for a link) and post notes, which a
-board member may not (`packages/server/src/middleware/lead-scope.ts`), and it
-keeps its board when the board is closed to outside visitors.
+socket), which the server then reads and writes only through its guarded
+reader; if the server does not take them, the launch says so and starts nothing. On its own
+board the lead may also post notes and prompt marks, which a board member
+may not (`packages/server/src/middleware/lead-scope.ts`), and it keeps its
+board when the board is closed to outside visitors. It may not list docs,
+rewrite a whole doc or bind a folder.
 
 `--check` connects to each port at both loopbacks and
 each LAN and tailnet address from inside the profile (each must be refused

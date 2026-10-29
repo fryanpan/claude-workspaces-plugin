@@ -12,18 +12,15 @@
  * `collabScope` refuses these because a member is a reviewer, not an
  * operator; a lead is the board's operator, so on its own board it gets:
  *
- * - `GET /workspaces/<board>/docs` — the board's doc list (`list_docs`);
- * - `POST /workspaces/<board>/docs/<doc>/content` — a whole-doc rewrite
- *   (`set_doc_content`) of a doc on that board;
- * - `POST /workspaces` — a folder bind (`attach_folder`). The path names no
- *   board, so `routes/workspaces-create-read.ts` holds the body to it: the
- *   board must be the lead's, the folder one of the roots registered for it
- *   (`board-socket-roots.ts`), and a board create is refused;
  * - `POST /workspaces/<board>/agents/<agent>/notes` and `…/prompts` — the
  *   plugin's Stop, PermissionDenied and UserPromptSubmit hooks, and
  *   `post_status`'s untargeted form;
  * - `POST /workspaces/<board>/tasks/<task>/notes` — `post_status` on a row
  *   of that board.
+ *
+ * A lead's own folder bind, the doc list and a whole-doc rewrite are not
+ * here: each would have the server act on a file tree the lead controls,
+ * and they wait for a design where that runs contained.
  *
  * Each names its board in its first segment and is refused for any other.
  * The agent a notes path names is a claim, as it is over TCP: the hooks send
@@ -35,7 +32,6 @@
 /** Every board an id belongs to, as `collabScope` asks it. */
 type WorkspacesOf = (id: string) => string[];
 
-const FOLDER_BIND_PATH = '/workspaces';
 const BOARD_PATH = /^\/workspaces\/([^/]+)\/(.+)$/;
 
 export function leadScopeAllows(
@@ -45,15 +41,12 @@ export function leadScopeAllows(
   workspacesOf: WorkspacesOf,
 ): boolean {
   const m = method.toUpperCase();
-  if (pathname === FOLDER_BIND_PATH) return m === 'POST';
   const match = pathname.match(BOARD_PATH);
   if (!match || decoded(match[1] ?? '') !== boardId) return false;
   const rest = match[2] ?? '';
-  if (rest === 'docs') return m === 'GET';
   const parts = rest.split('/').map(decoded);
   if (parts.length !== 3 || m !== 'POST') return false;
   const [collection, id = '', verb] = parts;
-  if (collection === 'docs' && verb === 'content') return onBoard(workspacesOf, id, boardId);
   if (collection === 'tasks' && verb === 'notes')
     return onBoard(workspacesOf, `task:${id}`, boardId);
   if (collection === 'agents') return (verb === 'notes' || verb === 'prompts') && id !== '';

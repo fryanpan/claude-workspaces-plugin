@@ -1,8 +1,10 @@
 /**
- * Tell the board server which folders a walled lead may bind onto its board
+ * Tell the board server which folders a walled lead can write
  * (`packages/server/src/board-socket-roots.ts`): the lead's projects, the
- * folders its profile already opens to it. Without the list the server
- * refuses every folder bind the lead asks for over its socket.
+ * folders its profile already opens to it. The server then reads and writes
+ * bound files under them only through its guard, and runs no git in a
+ * repository holding one, so `lead-sandbox.ts` starts no walled lead
+ * without the list.
  *
  * Sent from outside the wall, as the lead launches, to
  * `PUT /api/board-sockets/<board>/roots` on prod's port. That route answers

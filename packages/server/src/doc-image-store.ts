@@ -1,5 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, realpathSync, statSync, writeSync } from 'node:fs';
+import {
+  constants,
+  closeSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 
 /**
@@ -63,15 +72,26 @@ const ATTEMPTS = 8;
  * the name, a dangling symlink included, and the next suffix is tried. The
  * folder must be a real directory at its own path — a symlinked `images/`
  * is refused, so nothing is written outside the doc's tree.
+ *
+ * Under a walled lead's root (`lands`, from `boundFiles.guards.landsFor`),
+ * the doc's folder is judged before anything is made in it, the file is
+ * created `O_EXCL|O_NOFOLLOW` and judged again by where the descriptor
+ * really is before a byte goes in, so a folder swapped for a link on the
+ * way creates nothing outside; refused, only that new file is removed.
  */
+/** Made new, never through a link at its name. */
+const CREATE_FLAGS = constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+
 export function storeImageBeside(
   mdPath: string,
   bytes: Uint8Array,
   ext: ImageExt,
   stem: string,
   suffix: () => string = () => randomBytes(4).toString('hex'),
+  lands: ((real: string) => boolean) | null = null,
 ): StoreResult {
   const docDir = realpathSync(dirname(mdPath));
+  if (lands && !lands(docDir)) return { ok: false, reason: 'outside' };
   const folder = join(docDir, IMAGE_FOLDER);
   try {
     mkdirSync(folder, { recursive: true });
@@ -82,16 +102,26 @@ export function storeImageBeside(
   for (let i = 0; i < ATTEMPTS; i++) {
     const name = `${stem}-${suffix()}${ext}`;
     let fd: number;
+    const path = join(folder, name);
     try {
-      fd = openSync(join(folder, name), 'wx');
+      // Read-write: /dev/fd/<n> refuses an lstat on a write-only descriptor.
+      fd = openSync(path, CREATE_FLAGS, 0o644);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;
       throw err;
     }
+    let refused = false;
     try {
-      writeSync(fd, bytes);
+      refused = lands !== null && !lands(realpathSync(`/dev/fd/${fd}`));
+      if (!refused) writeSync(fd, bytes);
     } finally {
       closeSync(fd);
+    }
+    if (refused) {
+      try {
+        unlinkSync(path);
+      } catch {}
+      return { ok: false, reason: 'outside' };
     }
     return { ok: true, src: `${IMAGE_FOLDER}/${name}` };
   }

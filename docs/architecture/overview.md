@@ -203,13 +203,14 @@ run for a request whatever path it named. `board-sockets.ts` joins them: it
 opens one more listener per board, a unix socket, that records the board for
 each request it accepts and hands it to the same front door, where
 `middleware/board-socket-door.ts` holds the request to that board. It names
-no path. `board-socket-roots.ts` sits beside it as a store: the folders a
-board's lead may bind, which `routes/board-socket-roots.ts` sets from
+no path. `board-socket-roots.ts` sits beside it as a store: the projects
+each walled lead can write, which `routes/board-socket-roots.ts` sets from
 loopback. `bound-path-guard.ts` is the read and write the bound-file
 reader (`slow-fs.ts`) uses under those roots, each checked by where the
 open file really is. `git-hardening.ts` decides where the server runs no
-git at all (a folder a lead bound) and the options every other git read
-passes, so a repository's settings cannot make that read run a program. `server-options.ts` holds
+git at all (a repository holding such a project) and the options every
+other git read passes, so a repository's settings cannot make that read
+run a program. `server-options.ts` holds
 `ServerOptions` so a route can name it without importing the router back, and
 `review-gate-types.ts` holds the two verdict shapes a route and the gate both
 need. `review-hold-message.ts` joins those two at the top level: it is the

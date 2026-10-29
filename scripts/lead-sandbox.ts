@@ -219,7 +219,7 @@ export interface LaunchDeps {
   readToken: TokenReader;
   /** Starts the lead with the terminal handed through; answers its exit status. */
   spawn: (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => number;
-  /** Tells the server the folders a walled lead may bind. */
+  /** Tells the server the folders a walled lead can write. */
   registerRoots: RootsRegistrar;
 }
 
@@ -292,10 +292,14 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         lead.boardId,
         lead.projects.map((p) => machine.realpath(p)),
       );
-      if (refused)
+      // The list is what holds the server's reads and git to the lead's
+      // projects, so a lead the server does not know about is not started.
+      if (refused) {
         say(
-          `warning: ${lead.name}'s bind folders were not registered (${refused}), so the server will refuse its folder binds.`,
+          `launch refused for ${lead.name}: the server did not take its projects (${refused}), so it would follow links and run git in them unguarded. Start the server and launch again.`,
         );
+        return 2;
+      }
     }
     const here = machine.realpath(import.meta.dirname);
     if (lead.projects.some((p) => here.startsWith(`${machine.realpath(p)}/`)))

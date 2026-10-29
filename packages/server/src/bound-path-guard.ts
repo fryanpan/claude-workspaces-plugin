@@ -59,6 +59,9 @@ export interface PathGuard {
   covers(path: string, setId?: string): boolean;
   admits(path: string, setId?: string): boolean;
   landsInside(path: string, real: string, setId?: string): boolean;
+  /** Whether a folder it guards sits at or below `dir`, for a caller that
+   *  must not act on anything holding one (`git-hardening.ts`). */
+  holdsRoot?(dir: string): boolean;
 }
 
 /** A guarded read or write refused because the file is not where its guard
@@ -153,6 +156,30 @@ export async function readRangeChecked(
       at += bytesRead;
     }
     return at === out.length ? out : out.subarray(0, at);
+  } finally {
+    await fh.close();
+  }
+}
+
+/** A whole file judged as `readChecked` judges one, as bytes with its
+ *  stat, or `'too-large'` past `max` bytes: a guarded image answer. */
+export async function readBytesChecked(
+  path: string,
+  max: number,
+  lands: (real: string) => boolean,
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; st: BigIntStats } | 'too-large'> {
+  const fh = await openChecked(path, lands);
+  try {
+    const st = await fh.stat({ bigint: true });
+    if (st.size > BigInt(max)) return 'too-large';
+    const out = new Uint8Array(Number(st.size));
+    let at = 0;
+    while (at < out.length) {
+      const { bytesRead } = await fh.read(out, at, out.length - at, at);
+      if (bytesRead === 0) break;
+      at += bytesRead;
+    }
+    return { bytes: at === out.length ? out : out.subarray(0, at), st };
   } finally {
     await fh.close();
   }
@@ -301,6 +328,11 @@ export class PathGuards {
     return false;
   }
 
+  holdsRoot(dir: string): boolean {
+    for (const guard of this.set) if (guard.holdsRoot?.(dir)) return true;
+    return false;
+  }
+
   private landsAll(path: string, real: string, setId?: string): boolean {
     for (const guard of this.set) if (!guard.landsInside(path, real, setId)) return false;
     return true;
@@ -311,6 +343,15 @@ export class PathGuards {
     if (!this.covers(path, setId)) return true;
     const real = nearestRealpathSync(path);
     return real !== null && this.landsAll(path, real, setId);
+  }
+
+  /** The check a covered path's real location must pass, for a caller
+   *  doing its own guarded open; null when no guard covers it. Throws
+   *  `GuardRefused` when a guard refuses the path outright. */
+  landsFor(path: string, setId?: string): ((real: string) => boolean) | null {
+    if (!this.covers(path, setId)) return null;
+    if (!this.allows(path, setId)) throw new GuardRefused(path);
+    return (real) => this.landsAll(path, real, setId);
   }
 
   /** Read a bound file, checked where a guard covers it. */

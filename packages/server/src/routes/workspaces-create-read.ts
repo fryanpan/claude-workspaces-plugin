@@ -1,10 +1,15 @@
+/**
+ * Creating a board or binding a folder, the diff review beside it, and the two reads of a board.
+ *
+ * Lifted verbatim out of `createServer`'s request closure; the handlers
+ * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
+ */
 import { classifyActor } from '../actor-identity.ts';
 import {
   ATTACHMENT_PRIVACY_ERROR,
   parseAttachmentPrivacy,
   privacyNote,
 } from '../attachment-privacy.ts';
-import { leadSetId } from '../board-socket-roots.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -80,36 +85,6 @@ export async function handleWorkspaceCreateRead(
   if (pathname === '/workspaces' && req.method === 'POST') {
     const body = await safeJson(req);
     const folderPath = body?.folderPath as string | undefined;
-    // A board's lead reaches this path (`middleware/lead-scope.ts`) for a
-    // folder bind on its own board, and nothing else: the path names no
-    // board, so the body is held to it here.
-    let lead: LeadBind | null = null;
-    if (visitor) {
-      const judged = refuseLeadBind(rq.leadBoard ?? null, body, ctx.leadBindRoot);
-      if ('error' in judged) return j(403, judged);
-      // A set id of the lead's board's own, so the bind can never land on a
-      // set another board holds for the same folder.
-      const elsewhere = taskStore
-        .listWorkspaces()
-        .some((w) => w.id !== judged.board && w.docIds.includes(judged.setId));
-      if (elsewhere)
-        return j(403, {
-          error: 'out_of_lead_scope',
-          message: 'That folder’s set is filed on another board.',
-        });
-      // A link already in the folder that leads out of it would carry the
-      // server's reads there; links that stay inside are a repository's own.
-      const out = await ctx.leadRootLinkOut(judged.root);
-      if (out !== null)
-        return j(403, {
-          error: 'out_of_lead_scope',
-          message:
-            out === 'too-many'
-              ? 'That folder holds too many files to check for links out of it.'
-              : `That folder holds a link that leads out of it: ${out}`,
-        });
-      lead = judged;
-    }
     // Creating a board by name involves no file and stays open to the
     // app; binding a FOLDER names a host path, and that is agents only
     // — see browserCannotBindBody.
@@ -163,14 +138,11 @@ export async function handleWorkspaceCreateRead(
         hint: 'attachment-privacy.json in the data directory cannot be read, so every attachment set is served as local-only and none can be changed until it is fixed.',
       });
     }
-    // Recorded before the scan, so even the bind's own reads are guarded.
-    if (lead) ctx.recordLeadBind(lead.setId, lead.board, lead.root);
     const res = await docStore.bindFolder({
-      // A lead's bind is by the resolved root, never the path it sent.
-      folderPath: lead?.root ?? folderPath,
+      folderPath,
       // `workspaceId` is what this body key was called before a review
       // stopped being a workspace; both are read, neither is required.
-      setId: lead?.setId ?? ((body?.setId ?? body?.workspaceId) as string | undefined),
+      setId: (body?.setId ?? body?.workspaceId) as string | undefined,
       title: body?.title as string | undefined,
       include: Array.isArray(body?.include) ? (body.include as string[]) : undefined,
       // Accepted by bindFolder and honoured by the scan since forever,
@@ -181,10 +153,7 @@ export async function handleWorkspaceCreateRead(
       exclude: Array.isArray(body?.exclude) ? (body.exclude as string[]) : undefined,
       maxFiles: typeof body?.maxFiles === 'number' ? Number(body.maxFiles) : undefined,
       owner: body?.owner as string | undefined,
-      // A lead's claim of who produced the set is not taken.
-      producedBy: lead
-        ? undefined
-        : (body?.producedBy as { agentId?: string; sessionId?: string } | undefined),
+      producedBy: body?.producedBy as { agentId?: string; sessionId?: string } | undefined,
     });
     if (!res.ok) {
       // not-found → 404; reserved-namespace → 400 (the caller chose an
@@ -424,53 +393,4 @@ export async function handleWorkspaceCreateRead(
     });
   }
   return undefined;
-}
-
-/** The most files a lead's bind may ask the scan for. */
-const LEAD_MAX_FILES = 5_000;
-
-interface LeadBind {
-  board: string;
-  /** The registered root the folder resolved to: what is bound. */
-  root: string;
-  setId: string;
-}
-
-/**
- * Why a lead's `POST /workspaces` is refused, or what it binds. Only a
- * folder bind; only on the lead's own board; never re-filing a set by id,
- * which could name one on another board; and only a folder that resolves to
- * a root registered for that board (`board-socket-roots.ts`), because the
- * server reads the files and the lead's sandbox does not hold the server.
- */
-function refuseLeadBind(
-  leadBoard: string | null,
-  body: Record<string, unknown> | null,
-  leadBindRoot: (boardId: string, folderPath: string) => string | null,
-): { error: string; message: string } | LeadBind {
-  const refuse = (message: string) => ({ error: 'out_of_lead_scope', message });
-  if (leadBoard === null) return refuse('Only a board’s lead may bind a folder from here.');
-  const folderPath = body?.folderPath;
-  if (typeof folderPath !== 'string' || folderPath === '')
-    return refuse('A lead may bind a folder here, and not create a board.');
-  if (body?.hubWorkspaceId !== leadBoard)
-    return refuse('A lead binds a folder onto its own board only.');
-  if (body?.setId !== undefined || body?.workspaceId !== undefined)
-    return refuse('A lead may not re-file an attachment set by id.');
-  const { maxFiles } = body;
-  if (
-    maxFiles !== undefined &&
-    !(
-      Number.isInteger(maxFiles) &&
-      (maxFiles as number) > 0 &&
-      (maxFiles as number) <= LEAD_MAX_FILES
-    )
-  )
-    return refuse(`A lead’s maxFiles is a whole number from 1 to ${LEAD_MAX_FILES}.`);
-  const root = leadBindRoot(leadBoard, folderPath);
-  if (root === null)
-    return refuse(
-      'A lead binds one of the folders registered for its board (PUT /api/board-sockets/<board>/roots), and narrows to a subfolder with include.',
-    );
-  return { board: leadBoard, root, setId: leadSetId(root, leadBoard) };
 }
