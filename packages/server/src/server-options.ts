@@ -68,11 +68,12 @@ export interface ServerOptions {
    */
   hostname?: string;
   /**
-   * Also listen on this unix socket, the lead socket (`lead-socket.ts`): a
-   * sandboxed lead's one way in, admitting a board agent token and nothing
-   * else. Unset, there is none.
+   * Also listen on one unix socket per live board in this folder,
+   * `<boardId>.sock` (`board-sockets.ts`): a sandboxed lead's one way in,
+   * held to the board its socket names. Unset, there are none. Must be short
+   * enough for a socket path (`boardSocketDirError`).
    */
-  leadSocketPath?: string;
+  boardSocketDir?: string;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,

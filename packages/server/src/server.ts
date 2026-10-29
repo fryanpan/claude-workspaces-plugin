@@ -37,11 +37,13 @@ import {
   agentTokenKey as deriveAgentTokenKey,
   mintAgentToken,
   refuseNonLocalAgentCaller,
+  verifyAgentToken,
 } from './auth/agent-token.ts';
 import { BoardAgentTokens, boardAgentTokenKey, boardTokensPath } from './auth/board-agent-token.ts';
 import { githubPushKeyKey } from './auth/github-push-key.ts';
 import { lastBoardActivityAt } from './board-activity.ts';
 import { DEFAULT_BOARD_WORKSPACE_NAME, createBoardMembership } from './board-membership.ts';
+import { openBoardSockets } from './board-sockets.ts';
 import { createBoardSummaries } from './board-summary.ts';
 import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
@@ -71,7 +73,6 @@ import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
 import { renderRemoteReview } from './landing-remote.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
-import { openLeadSocket } from './lead-socket.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
@@ -1996,8 +1997,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requestAddress: (req) => server.requestIP(req)?.address,
     frameHost,
     boardAgentGrantFor: (bearer) => boardAgentTokens.verify(bearer),
-    // Forward reference, as above: the lead socket is opened below.
-    isLeadSocketRequest: (req) => leadSocket?.isLeadSocketRequest(req) ?? false,
+    // Forward references, as above: the board sockets are opened below, and
+    // the agent-token key is derived further down.
+    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
+    agentOfToken: (bearer) => verifyAgentToken(bearer, agentTokenKeyFor())?.agentId ?? null,
   });
 
   /**
@@ -3082,11 +3085,21 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     websocket: socketHandlers,
   });
 
-  // The lead socket (lead-socket.ts), only when asked for: no caller passes
-  // the path yet but a test, until the lead's relay can use it.
-  const leadSocket = opts.leadSocketPath
-    ? openLeadSocket({ path: opts.leadSocketPath, handle: handleWithOrigin, j })
+  // One socket per live board (board-sockets.ts), only when asked for: no
+  // caller passes the folder yet but a test, until a lead's relay can use it.
+  // Kept in step with the boards as they are made, archived and deleted.
+  const boardSockets = opts.boardSocketDir
+    ? openBoardSockets({ dir: opts.boardSocketDir, handle: handleWithOrigin, j })
     : null;
+  const syncBoardSockets = () =>
+    boardSockets?.sync(
+      taskStore
+        .listWorkspaces()
+        .filter((w) => w.retiredAt === undefined)
+        .map((w) => w.id),
+    );
+  syncBoardSockets();
+  const unwatchBoardList = taskStore.onWorkspaceListChanged(syncBoardSockets);
 
   // The port is bound. Stamped HERE rather than at the top of `createServer`
   // because `Bun.serve` THROWS on a taken port and `bin.ts` retries on
@@ -3444,7 +3457,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // below are still live — after `docStore.flush()` that write would have
       // nowhere left to land.
       server.stop(true);
-      leadSocket?.stop();
+      unwatchBoardList();
+      boardSockets?.stop();
       // Who the connector was hosting, for the next process to subscribe
       // before its first request; then its subscriptions come down with the
       // sockets that carried them.
