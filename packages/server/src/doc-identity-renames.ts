@@ -1,3 +1,4 @@
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 /**
  * Where a file went, according to git.
  *
@@ -40,22 +41,20 @@ function renameScanOf(checkoutRoot: string): Map<string, string> {
   if (cached) return cached;
   const map = new Map<string, string>();
   renameScans.set(checkoutRoot, map);
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_') && v !== undefined) env[k] = v;
-  }
+  if (gitBarred(checkoutRoot)) return map;
+  const env = hardenedGitEnv();
   let stdout = '';
   try {
     const res = spawnSync(
       'git',
-      [
+      hardenedGitArgs([
         'log',
         '--diff-filter=R',
         '--name-status',
         '--format=',
         '-M',
         `--max-count=${RENAME_SCAN_COMMITS}`,
-      ],
+      ]),
       {
         cwd: checkoutRoot,
         env,

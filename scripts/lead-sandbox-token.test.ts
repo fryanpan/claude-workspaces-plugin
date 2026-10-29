@@ -73,6 +73,7 @@ function run(argv: string[], items: Record<string, string>): Run {
       out.reads.push(service);
       return items[service] ?? null;
     },
+    registerRoots: () => null,
     spawn: (file, args, opts) => {
       out.spawned.push({ file, args, env: opts.env });
       return 0;

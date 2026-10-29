@@ -27,11 +27,18 @@
  * the doc list, every other board) are refused here by the same lines, and a
  * route added to one is added to both — plus its own watch set, which the
  * route then filters to that board.
+ *
+ * A token the server holds for a session opened on a board's own socket
+ * (`held`, `connector/board-token-lease.ts`) is that board's lead, and also
+ * reaches what `middleware/lead-scope.ts` names on its board. Its value
+ * never leaves the server's process, so only the server's own hosted
+ * connector presents one.
  */
 import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import { boardAgentMemberKey } from '../auth/board-agent-token.ts';
 import type { CfAccessResult } from './cf-access.ts';
 import { type ShareTarget, collabScope, isLoopbackAddress } from './host-guard.ts';
+import { leadScopeAllows } from './lead-scope.ts';
 import { isBrowserRequest } from './write-gate.ts';
 
 export interface BoardAgentDoorInput {
@@ -49,12 +56,21 @@ export interface BoardAgentDoorInput {
   grantFor: (bearer: string) => BoardAgentClaims | null;
   /** Every workspace an id belongs to, as `collabScope` asks it. */
   workspacesOf: (id: string) => string[];
+  /** Whether a token id is one the server holds for a board socket session. */
+  held: (tokenId: string) => boolean;
   j: (status: number, body: unknown) => Response;
 }
 
 export type BoardAgentDoorVerdict =
   | { ok: false; response: Response }
-  | { ok: true; grant: BoardAgentClaims; target: ShareTarget; memberKey: string };
+  | {
+      ok: true;
+      grant: BoardAgentClaims;
+      target: ShareTarget;
+      memberKey: string;
+      /** True for a token the server holds for its board's lead. */
+      lead: boolean;
+    };
 
 const WATCHES_PATH = /^\/api\/agents\/([^/]+)\/watches$/;
 
@@ -68,6 +84,7 @@ export function boardAgentScopeAllows(
   method: string,
   grant: BoardAgentClaims,
   workspacesOf: (id: string) => string[],
+  lead = false,
 ): boolean {
   // Renewing itself: the route answers a fresh value for this token's own
   // record and nothing else (`routes/board-tokens.ts`).
@@ -77,6 +94,7 @@ export function boardAgentScopeAllows(
     const m = method.toUpperCase();
     return decoded(watches[1] ?? '') === grant.agentId && (m === 'GET' || m === 'POST');
   }
+  if (lead && leadScopeAllows(pathname, method, grant.boardId, workspacesOf)) return true;
   const scope = collabScope(pathname, method, {
     workspacesOf,
     isMember: (workspaceId) => workspaceId === grant.boardId,
@@ -106,7 +124,9 @@ export async function admitBoardAgent(input: BoardAgentDoorInput): Promise<Board
   // one answer, so a caller learns nothing about which check refused.
   const grant = input.grantFor(input.bearer);
   if (!grant) return refuse(401, 'board_token_invalid');
-  if (!boardAgentScopeAllows(pathname, req.method, grant, input.workspacesOf)) {
+  // Only off the tunnel, from loopback: where the server's own connector is.
+  const lead = hostKind === 'local' && input.held(grant.tokenId);
+  if (!boardAgentScopeAllows(pathname, req.method, grant, input.workspacesOf, lead)) {
     return refuse(403, 'out_of_board_token_scope');
   }
   return {
@@ -114,6 +134,7 @@ export async function admitBoardAgent(input: BoardAgentDoorInput): Promise<Board
     grant,
     target: { workspaceId: grant.boardId },
     memberKey: boardAgentMemberKey(grant.boardId, grant.tokenId),
+    lead,
   };
 }
 

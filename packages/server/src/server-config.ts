@@ -25,6 +25,7 @@ import { parseHostAudiences } from './middleware/cf-access.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
+import { BOARD_SERVER_PORTS } from './reserved-ports.ts';
 import { TTL_FORMAT_HINT, parseTtl } from './share/ttl.ts';
 
 /** Reads one `--name value` / `--name=value` flag out of argv. Parsing stays
@@ -260,13 +261,12 @@ export function resolveServerConfig(opts: {
   );
 
   /**
-   * One unix socket per board (board-sockets.ts), for sandboxed leads. Off
-   * unless asked: `--board-socket-dir <path>` or `CW_BOARD_SOCKET_DIR` names
-   * the folder, and `CW_BOARD_SOCKETS=1` takes the default one. A folder that
-   * cannot hold the sockets leaves them off and says why, rather than
-   * stopping the server.
+   * One unix socket per board (board-sockets.ts), for sandboxed leads. On by
+   * default for prod's port, off for any other: see `resolveBoardSocketDir`.
+   * A folder that cannot hold the sockets leaves them off and says why,
+   * rather than stopping the server.
    */
-  const boardSocketDir = resolveBoardSocketDir(env, arg);
+  const boardSocketDir = resolveBoardSocketDir(env, arg, undefined, requestedPort);
 
   /**
    * ACCESS-ONLY browser hosts. Default ON (Bryan, 2026-09-02: *"Let's make
@@ -709,15 +709,31 @@ export function resolveServerConfig(opts: {
 /** The resolved shape — inferred from the resolver so the two cannot drift. */
 export type ServerConfig = ReturnType<typeof resolveServerConfig>;
 
-/** The board socket folder the flags ask for, or undefined for none. */
+/**
+ * The board socket folder, or undefined for none.
+ *
+ * `--board-socket-dir <path>` or `CW_BOARD_SOCKET_DIR` names a folder.
+ * Otherwise the default folder is used when `CW_BOARD_SOCKETS=1`, or when
+ * the variable is unset and the server is on prod's port, so prod serves the
+ * sockets a walled lead dials with no change to its launch settings.
+ * `CW_BOARD_SOCKETS=0` turns them off. Only prod's port gets the default
+ * folder: a staging server sharing it would unlink prod's sockets as stale.
+ * And only a server that bound its port opens it (`createServer` opens the
+ * sockets after `Bun.serve`), so a second server started on 8787 fails before
+ * it touches them.
+ */
 export function resolveBoardSocketDir(
   env: NodeJS.ProcessEnv,
   arg: ArgReader,
   uid: number = process.getuid?.() ?? 0,
+  port?: number,
 ): string | undefined {
   const named = arg('board-socket-dir', env.CW_BOARD_SOCKET_DIR?.trim() || undefined);
-  const on = ['1', 'true', 'yes', 'on'].includes((env.CW_BOARD_SOCKETS ?? '').trim().toLowerCase());
-  const dir = named ?? (on ? defaultBoardSocketDir(uid) : undefined);
+  const flag = (env.CW_BOARD_SOCKETS ?? '').trim().toLowerCase();
+  const on = ['1', 'true', 'yes', 'on'].includes(flag);
+  const off = ['0', 'false', 'no', 'off'].includes(flag);
+  const byDefault = flag === '' && port === BOARD_SERVER_PORTS[0];
+  const dir = named ?? (on || (byDefault && !off) ? defaultBoardSocketDir(uid) : undefined);
   if (dir === undefined) return undefined;
   const refused = boardSocketDirError(dir);
   if (refused) {

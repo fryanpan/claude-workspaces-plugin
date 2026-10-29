@@ -586,9 +586,7 @@ describe('classifyExternalContent', () => {
    *
    * It matters because `spawnSync`'s `timeout` sends `killSignal` and then
    * keeps waiting: under the default SIGTERM a child that ignores the signal
-   * blocks this synchronous call, and the budget is advisory. That is not
-   * hypothetical here — `hash-object --path` invokes the repository's
-   * configured clean filter, i.e. arbitrary user-configured code.
+   * blocks this synchronous call, and the budget is advisory.
    */
   it('cuts off a git that ignores SIGTERM instead of blocking the event loop', () => {
     const shimDir = join(root, 'shim');

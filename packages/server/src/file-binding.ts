@@ -21,17 +21,7 @@
  * bound-doc sync behaviour rests on, and this file moved them without
  * touching them.
  */
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type DocMeta,
@@ -99,6 +89,17 @@ export interface AttachOpts {
   liveWins?: boolean;
   /** Bytes read ahead of the attach; see `PrereadFile`. */
   preread?: PrereadFile;
+}
+
+/** What a doc says when the bound-file guard refused its write-back: the
+ *  file no longer lands inside the walled lead's project that holds it. */
+function refusedWrite(): { message: string; at: number } {
+  return {
+    message:
+      'Not saved to disk: this file no longer lands inside the lead’s project that holds it, so the ' +
+      'server refused the write. The doc keeps its content.',
+    at: Date.now(),
+  };
 }
 
 interface FileBinding {
@@ -815,11 +816,14 @@ export class FileBindings {
     // hydration passes a preread on every other path (`DocStore.prereadFor`),
     // and no request handler reaches these two without one. The rest of the
     // callers are the tests.
-    if (!pre && (boundFiles.quarantined(abs) || boundFiles.busy())) {
+    if (
+      !pre &&
+      (boundFiles.quarantined(abs) || boundFiles.busy() || !boundFiles.guards.landsAllowedSync(abs))
+    ) {
       return { ok: false, error: 'read-failed' };
     }
     const fileExists = () => (pre ? pre.exists : existsSync(abs));
-    const readFile = () => (pre ? (pre.text ?? '') : readFileSync(abs, 'utf8'));
+    const readFile = () => (pre ? (pre.text ?? '') : boundFiles.guards.readSync(abs));
     let seeded = false;
     let seedText: string | undefined;
     if (fragment.length === 0 && fileExists()) {
@@ -1081,14 +1085,17 @@ export class FileBindings {
     // folder bind walks — `bind-diff` attaches every member of a repo in one
     // synchronous loop — so a single hostile file in a bound tree is exactly
     // the shape that parked the event loop. Read the note in `attachFile`.
-    if (!pre && (boundFiles.quarantined(abs) || boundFiles.busy())) {
+    if (
+      !pre &&
+      (boundFiles.quarantined(abs) || boundFiles.busy() || !boundFiles.guards.landsAllowedSync(abs))
+    ) {
       return { ok: false, error: 'read-failed' };
     }
     const fileExists = () => (pre ? pre.exists : existsSync(abs));
     let text = '';
     if (fileExists()) {
       try {
-        text = pre ? (pre.text ?? '') : readFileSync(abs, 'utf8');
+        text = pre ? (pre.text ?? '') : boundFiles.guards.readSync(abs);
       } catch (err) {
         console.error(`[doc-store] read failed for ${abs}:`, err);
         return { ok: false, error: 'read-failed' };
@@ -1346,8 +1353,15 @@ export class FileBindings {
   ): { ok: true; previous?: string } | { ok: false; error: 'target-exists' | 'write-failed' } {
     const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
     try {
-      mkdirSync(dirname(absPath), { recursive: true });
-      writeFileSync(absPath, md, { flag: 'wx' });
+      // Under a walled lead's root, through checked folders and the checked
+      // temp file: a folder on the way may have been swapped for a link
+      // since the move was asked.
+      const guards = boundFiles.guards;
+      guards.mkdirSync(dirname(absPath));
+      if (guards.covers(absPath)) {
+        if (existsSync(absPath)) return { ok: false, error: 'target-exists' };
+        guards.writeSync(absPath, md, 'export');
+      } else writeFileSync(absPath, md, { flag: 'wx' });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         return { ok: false, error: 'target-exists' };
@@ -1391,13 +1405,11 @@ export class FileBindings {
     // the filesystem again here would put the blocking call straight back.
     const absent = opts.preread ? !opts.preread.exists : !existsSync(absPath);
     let attachOpts = opts;
-    if (absent) {
+    if (absent && boundFiles.guards.landsAllowedSync(absPath)) {
       const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
       try {
-        mkdirSync(dirname(absPath), { recursive: true });
-        const tmp = `${absPath}.cw-export~`;
-        writeFileSync(tmp, md);
-        renameSync(tmp, absPath);
+        boundFiles.guards.mkdirSync(dirname(absPath));
+        boundFiles.guards.writeSync(absPath, md, 'export');
         // The export just changed the answer the preread carried, and a
         // preread saying "not there" would leave the attach unbound and the
         // poll unarmed. Drop it: the path has answered a write, so the
@@ -1930,7 +1942,7 @@ export class FileBindings {
     }
     let md: string;
     try {
-      md = readFileSync(binding.path, 'utf8');
+      md = boundFiles.guards.readSync(binding.path);
     } catch {
       return { ok: false, error: 'missing' };
     }
@@ -2008,7 +2020,7 @@ export class FileBindings {
       if (boundFiles.quarantined(binding.path)) return 'missing';
       if (!existsSync(binding.path)) return 'missing';
       try {
-        md = readFileSync(binding.path, 'utf8');
+        md = boundFiles.guards.readSync(binding.path);
       } catch (err) {
         console.error(`[doc-store] read failed for ${binding.path}:`, err);
         return 'missing';
@@ -2368,6 +2380,7 @@ export class FileBindings {
             }
             if (res.status !== 'ok') {
               this.failedWrites.add(doc.docId);
+              if (res.reason === 'refused') binding.lastSyncError = refusedWrite();
               return;
             }
             binding.lastWritten = md;
@@ -2413,26 +2426,28 @@ export class FileBindings {
       // is also the state that leaves no mark on the path, so the quarantine
       // check alone cannot see it — a merely slow file reaches the sync
       // write with nothing to stop it.
+      // A path the bound-file guard refuses (a walled lead's folder that no
+      // longer resolves to itself) is never written, here or on the pool.
       if (boundFiles.quarantined(binding.path) || boundFiles.busy()) {
         this.failedWrites.add(doc.docId);
+        return;
+      }
+      if (!boundFiles.guards.landsAllowedSync(binding.path)) {
+        this.failedWrites.add(doc.docId);
+        binding.lastSyncError = refusedWrite();
         return;
       }
       // Take the generation before writing: a pool write already on the
       // thread must not report its own bytes as the file's content once this
       // one has landed on top of them.
       binding.writeSeq = (binding.writeSeq ?? 0) + 1;
-      let target = binding.path;
-      try {
-        target = realpathSync(binding.path);
-      } catch {}
       // A LANE of its own, never the pool writer's temp path. Both can be
       // live at the same moment — SIGTERM arriving while a write-back sits on
       // the thread pool is precisely the case this branch exists for — and
       // two writers filling one temp file interleave their bytes into it,
-      // which the rename then publishes as the user's document.
-      const tmp = `${target}.cw-flush~`;
-      writeFileSync(tmp, bytes);
-      renameSync(tmp, target);
+      // which the rename then publishes as the user's document. Every temp
+      // name is random and created new (`bound-path-guard.ts`).
+      boundFiles.guards.writeSync(binding.path, bytes, 'flush');
       binding.lastWritten = md;
       binding.diskSource = written;
       // Record our own write's mtime so the poll doesn't treat the
