@@ -2815,6 +2815,10 @@ at-stop quality pass and its filer) and writes the notes, the timing file
 and the quality rows to `<out>/<docId>/`. Each reconnect in the index is
 its own notes session, as it was live. `--one-leg` runs a meeting as one
 session, which is the control for what reconnects cost the notes.
+`--method <id>` runs the meeting on a named note-taker (as if a person had
+picked it for the doc), and `--log-edits` writes every edit the model
+answered, before the guards, to `edits.jsonl`. That log is how a lost idea
+is told apart as never written or written and then removed.
 
 The clock is virtual while no model call is in flight and real while one
 is (`ReplayClock`, `notes-replay-lib.ts`). An hour of talk replays in the
