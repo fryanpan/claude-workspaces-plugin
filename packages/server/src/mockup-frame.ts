@@ -194,8 +194,8 @@ const BOARD_LINK = (workspaceId: string): { style: string; anchor: string } => (
  * on: a reader who arrived on a mock or a dev server from a share link had no
  * way to the board but the address bar. The owner's page draws nothing of
  * its own, so the link never sits over the owner's mock; it loads the
- * coach's card (`coachHref`), which the sandboxed frame cannot show, and the
- * card stops itself for anyone but the owner. Its script builds
+ * coach's card (`coachHref`) and the lead chat (`leadChatHref`), which the
+ * sandboxed frame cannot show, and each stops itself for anyone but the owner. Its script builds
  * the frame, so it can hand the frame the reader's display name before the
  * widget inside reads it (see `mock-host.ts`).
  */
@@ -210,6 +210,8 @@ export function renderMockHost(args: {
   visitor: boolean;
   /** The coach card's script, on every page but a share visitor's. */
   coachHref?: string;
+  /** The lead chat's script (`lead-chat-page.ts`), on the same pages. */
+  leadChatHref?: string;
   /**
    * The frame-only hostname (`frame-host.ts`), when this page frames its
    * attachment there: the frame's address is the same path on that origin
@@ -232,6 +234,11 @@ export function renderMockHost(args: {
       ? `<script type="module" src="${escapeAttr(args.coachHref)}" data-coach-page` +
         ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"></script>`
       : '';
+  const leadChat =
+    args.leadChatHref && !args.visitor
+      ? `<script type="module" src="${escapeAttr(args.leadChatHref)}" data-lead-chat-page` +
+        ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"></script>`
+      : '';
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -247,6 +254,7 @@ export function renderMockHost(args: {
     `<script src="/widget/mock-host.js" data-workspace-id="${escapeAttr(args.workspaceId)}"` +
     ` data-doc-id="${escapeAttr(args.docId)}" data-items="${escapeAttr(items)}"></script>` +
     coach +
+    leadChat +
     '</body></html>'
   );
 }

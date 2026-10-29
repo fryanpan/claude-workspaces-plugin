@@ -11,7 +11,11 @@ import { cryptoId } from '../task-fields.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import type { VoiceActor } from '../voice-action.ts';
 import type { VoiceContext } from '../voice-prompt.ts';
-import { AgentConversation, type AgentLine } from './agent-conversation.ts';
+import {
+  AgentConversation,
+  type AgentConversationLog,
+  type AgentLine,
+} from './agent-conversation.ts';
 import type { AgentCallbacks } from './agent-llm.ts';
 import { SpokenAnswerer, type SpokenBoard } from './answer.ts';
 import { SpokenInterview, type SpokenInterviewDeps } from './interview.ts';
@@ -51,6 +55,8 @@ export interface SpokenReplyRelayDeps {
   /** Where a turn addressed to one agent goes (`agent-conversation.ts`);
    *  absent, a page that names an agent is told it cannot. */
   agentLine?: AgentLine;
+  /** Told of each turn to a named agent and its answer: the lead chat. */
+  conversationLog?: AgentConversationLog;
   /** A fresh id for a conversation or a turn. */
   newId?: () => string;
 }
@@ -98,6 +104,8 @@ export class SpokenReplyRelay {
             this.deps.agentLine,
             workspaceId,
             this.deps.newId ?? (() => cryptoId('vt')),
+            Date.now,
+            this.deps.conversationLog,
           )
         : undefined;
     const session: SpokenSession = new SpokenSession({

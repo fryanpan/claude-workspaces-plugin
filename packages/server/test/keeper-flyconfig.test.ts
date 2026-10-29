@@ -6,7 +6,7 @@ import { cleanFlyConfig } from '../src/keeper/keeper-flyconfig.ts';
 
 /** The deploy script's own fly.toml shape, as renderFlyToml writes it. */
 const DEPLOYED = `# a comment
-app = "cw-harborlight"
+app = "cw-harbor"
 primary_region = "sjc"
 
 [env]

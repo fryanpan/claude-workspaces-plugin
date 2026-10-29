@@ -58,6 +58,20 @@ export interface AgentLine {
   deliver(frame: AgentVoiceFrame): number | null;
 }
 
+/** Told of every turn sent and every answer kept, so the board's lead chat
+ *  (`lead-chat/lead-chat.ts`) shows a spoken talk with the lead too. */
+export interface AgentConversationLog {
+  turn(
+    workspaceId: string,
+    agentId: string,
+    actor: { id: string; name: string },
+    transcript: string,
+    queueId: string,
+    queued: boolean,
+  ): void;
+  replied(workspaceId: string, queueId: string, text: string): void;
+}
+
 export type AgentTurn =
   | { kind: 'sent' | 'queued'; name: string; queueId: string; agentId: string }
   | { kind: 'not-attached' }
@@ -83,6 +97,7 @@ export class AgentConversation {
     private readonly workspaceId: string,
     private readonly newId: () => string,
     private readonly now: () => number = Date.now,
+    private readonly log?: AgentConversationLog,
   ) {}
 
   /** The agent this socket talks to, or undefined for the board's router. */
@@ -121,6 +136,14 @@ export class AgentConversation {
     if (sent === null) return { kind: 'failed' };
     this.remember({ from: 'owner', text: transcript });
     this.asked.add(queueId);
+    this.log?.turn(
+      this.workspaceId,
+      agentId,
+      { id: actor.id, name: actor.name },
+      transcript,
+      queueId,
+      sent === 0,
+    );
     return { kind: sent > 0 ? 'sent' : 'queued', name: who.name, queueId, agentId };
   }
 
@@ -128,6 +151,7 @@ export class AgentConversation {
   replied(queueId: string, text: string): void {
     if (!this.asked.delete(queueId)) return;
     this.remember({ from: 'agent', text });
+    this.log?.replied(this.workspaceId, queueId, text);
   }
 
   private remember(t: ConversationTurn): void {

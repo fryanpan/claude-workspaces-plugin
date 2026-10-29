@@ -72,6 +72,8 @@ import { Identities } from './identities.ts';
 import { createIdentitySetup } from './identity-setup.ts';
 import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './landing-changes.ts';
 import { renderRemoteReview } from './landing-remote.ts';
+import { LeadChat } from './lead-chat/lead-chat.ts';
+import { LeadChatLog } from './lead-chat/log.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
@@ -1492,6 +1494,20 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     sendToAgent: (workspaceId, agentId, frame) =>
       sse.sendToAgent(`ws~${workspaceId}`, agentId, frame),
   });
+  // The board's lead chat (`lead-chat/`): typed and spoken turns to the lead,
+  // one log per board, every change sent to the board's pages only.
+  const leadChat = new LeadChat({
+    log: new LeadChatLog(dataDir),
+    line: voiceAgentLine,
+    leadOf: (workspaceId) => {
+      const agentId = taskStore.getWorkspace(workspaceId)?.leadAgentId;
+      if (!agentId) return null;
+      return { agentId, name: voiceAgentLine.attached(workspaceId, agentId)?.name ?? agentId };
+    },
+    broadcast: (workspaceId, frame) =>
+      sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
+    newId: () => cryptoId('lc'),
+  });
   const spokenEngines = opts.spokenReply ?? {
     listener: null,
     voices: { 1: null, 2: null },
@@ -1500,6 +1516,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const spokenRelay = new SpokenReplyRelay({
     leads: leadAnswers,
     agentLine: voiceAgentLine,
+    conversationLog: {
+      turn: (...args) => leadChat.voiceTurn(...args),
+      replied: (...args) => leadChat.voiceReply(...args),
+    },
     engines: spokenEngines,
     board: spokenBoard,
     timings: spokenTimings,
@@ -2932,6 +2952,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     voiceRouter,
     spokenRelay,
     spokenTimings,
+    leadChat,
     featuresOff: opts.featuresOff ?? {},
     authorizeAgent: (req, agentId) =>
       authorizeAgentCaller({

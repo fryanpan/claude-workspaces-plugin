@@ -60,7 +60,7 @@ function boot(env: Record<string, string>, opts: { ghLogin?: boolean } = {}) {
 
 describe('a project server started without its org key', () => {
   const { log, report } = boot(
-    { FLY_APP_NAME: 'cw-harborlight', CW_PROJECT_PROFILE: 'claude-only', ...EVERY_OTHER_KEY },
+    { FLY_APP_NAME: 'cw-harbor', CW_PROJECT_PROFILE: 'claude-only', ...EVERY_OTHER_KEY },
     { ghLogin: true },
   );
 

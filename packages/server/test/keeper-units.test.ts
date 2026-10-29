@@ -11,18 +11,18 @@ import { type StatFn, chainProblems, keeperStartProblems } from '../src/keeper/k
 import { classifyCloudflare, classifyFly, grantCovers } from '../src/keeper/keeper-policy.ts';
 import { openKeeperStore } from '../src/keeper/keeper-store.ts';
 
-const APPS = ['cw-harborlight'];
+const APPS = ['cw-harbor'];
 const tmp = mkdtempSync(join(tmpdir(), 'keeper-units-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe('fly policy', () => {
   it.each([
-    [['machine', 'restart', 'm1', '--app', 'cw-harborlight']],
-    [['machine', 'start', 'm1', '--app=cw-harborlight']],
-    [['machines', 'stop', 'm1', '-a', 'cw-harborlight']],
-    [['machines', 'list', '--app', 'cw-harborlight', '--json']],
-    [['status', '--app', 'cw-harborlight']],
-    [['logs', '--app', 'cw-harborlight', '--no-tail']],
+    [['machine', 'restart', 'm1', '--app', 'cw-harbor']],
+    [['machine', 'start', 'm1', '--app=cw-harbor']],
+    [['machines', 'stop', 'm1', '-a', 'cw-harbor']],
+    [['machines', 'list', '--app', 'cw-harbor', '--json']],
+    [['status', '--app', 'cw-harbor']],
+    [['logs', '--app', 'cw-harbor', '--no-tail']],
     [['apps', 'list']],
   ])('runs %j with no passkey', (args) => {
     expect(classifyFly(args, APPS).kind).toBe('routine');
@@ -40,14 +40,14 @@ describe('fly policy', () => {
       app: 'cw-saltmarsh',
     });
     for (const args of [
-      ['secrets', 'import', '--app', 'cw-harborlight'],
-      ['secrets', 'set', 'A=b', '--app', 'cw-harborlight'],
-      ['ssh', 'console', '--app', 'cw-harborlight'],
+      ['secrets', 'import', '--app', 'cw-harbor'],
+      ['secrets', 'set', 'A=b', '--app', 'cw-harbor'],
+      ['ssh', 'console', '--app', 'cw-harbor'],
     ]) {
       expect(classifyFly(args, APPS)).toMatchObject({ kind: 'held', hold: 'token.move' });
     }
     expect(
-      classifyFly(['machine', 'destroy', 'm1', '--app', 'cw-harborlight'], APPS),
+      classifyFly(['machine', 'destroy', 'm1', '--app', 'cw-harbor'], APPS),
     ).toMatchObject({
       kind: 'held',
       hold: 'other',
@@ -60,11 +60,11 @@ describe('fly policy', () => {
       ['tokens', 'create', 'org'],
       ['orgs', 'invite', 'someone@example.test'],
       ['ssh', 'issue', '--org', 'x'],
-      ['apps', 'move', 'cw-harborlight'],
-      ['machine', 'restart', 'm1', '--app', 'cw-harborlight', '--access-token', 'x'],
-      ['status', '-t', 'x', '--app', 'cw-harborlight'],
-      ['machine', 'restart', 'm1', '--app', 'cw-harborlight', '--app', 'cw-riverbend'],
-      ['machine', 'restart', 'm1', '--app=cw-harborlight', '-a', 'cw-riverbend'],
+      ['apps', 'move', 'cw-harbor'],
+      ['machine', 'restart', 'm1', '--app', 'cw-harbor', '--access-token', 'x'],
+      ['status', '-t', 'x', '--app', 'cw-harbor'],
+      ['machine', 'restart', 'm1', '--app', 'cw-harbor', '--app', 'cw-riverbend'],
+      ['machine', 'restart', 'm1', '--app=cw-harbor', '-a', 'cw-riverbend'],
     ]) {
       expect(classifyFly(args, APPS).kind).toBe('refused');
     }
@@ -78,12 +78,12 @@ describe('fly argv is parsed strictly', () => {
 
   it.each([
     // A joined short flag: pflag reads -aprod as --app prod, and keeps the last.
-    [['machine', 'stop', 'm1', '-a', 'cw-harborlight', '-aprod']],
+    [['machine', 'stop', 'm1', '-a', 'cw-harbor', '-aprod']],
     [['machine', 'list', '-acw-riverbend']],
-    [['status', '-tTOKEN', '--app', 'cw-harborlight']],
+    [['status', '-tTOKEN', '--app', 'cw-harbor']],
     [['machine', 'stop', 'm1', '-a=cw-riverbend']],
-    [['machine', 'stop', 'm1', '--app', 'cw-harborlight', '--', '-a', 'cw-riverbend']],
-    [['status', '-', '--app', 'cw-harborlight']],
+    [['machine', 'stop', 'm1', '--app', 'cw-harbor', '--', '-a', 'cw-riverbend']],
+    [['status', '-', '--app', 'cw-harbor']],
     [['status', '--app']],
   ])('refuses the flag shape in %j', (args) => {
     expect(verdict(args)).toBe('refused');
@@ -91,16 +91,16 @@ describe('fly argv is parsed strictly', () => {
 
   it.each([
     // A leading flag hides the command from a check that reads argv[0].
-    [['--debug', 'tokens', 'create', 'deploy', '-a', 'cw-harborlight']],
-    [['-a', 'cw-harborlight', 'status']],
+    [['--debug', 'tokens', 'create', 'deploy', '-a', 'cw-harbor']],
+    [['-a', 'cw-harbor', 'status']],
     // So does a flag between a command and its subcommand.
-    [['ssh', '-a', 'cw-harborlight', 'issue']],
-    [['wireguard', 'create', 'org', 'iad', 'peer', '-a', 'cw-harborlight']],
+    [['ssh', '-a', 'cw-harbor', 'issue']],
+    [['wireguard', 'create', 'org', 'iad', 'peer', '-a', 'cw-harbor']],
     [['organizations', 'invite', 'alice@example.test']],
     // Debug output may carry the Authorization header.
-    [['status', '--app', 'cw-harborlight', '--debug']],
-    [['status', '--app', 'cw-harborlight', '--verbose']],
-    [['logs', '--app', 'cw-harborlight', '--no-tail', '--debug=true']],
+    [['status', '--app', 'cw-harbor', '--debug']],
+    [['status', '--app', 'cw-harbor', '--verbose']],
+    [['logs', '--app', 'cw-harbor', '--no-tail', '--debug=true']],
   ])('refuses %j', (args) => {
     expect(verdict(args)).toBe('refused');
   });
@@ -109,13 +109,13 @@ describe('fly argv is parsed strictly', () => {
     // --signal takes a value, so fly reads "-a" as the signal and takes the
     // app from the config file: this must not run as a restart of ours.
     expect(
-      verdict(['machine', 'stop', 'm1', '--signal', '-a', 'cw-harborlight', '--config', 'x.toml']),
+      verdict(['machine', 'stop', 'm1', '--signal', '-a', 'cw-harbor', '--config', 'x.toml']),
     ).not.toBe('routine');
     expect(
-      verdict(['machine', 'stop', 'm1', '--app', 'cw-harborlight', '--config', 'x.toml']),
+      verdict(['machine', 'stop', 'm1', '--app', 'cw-harbor', '--config', 'x.toml']),
     ).toBe('refused');
     // CONTROL: the plain form still runs.
-    expect(verdict(['machine', 'stop', 'm1', '--app', 'cw-harborlight'])).toBe('routine');
+    expect(verdict(['machine', 'stop', 'm1', '--app', 'cw-harbor'])).toBe('routine');
   });
 });
 
@@ -126,7 +126,7 @@ describe('fly deploy', () => {
         'deploy',
         '/tmp/ctx',
         '--app',
-        'cw-harborlight',
+        'cw-harbor',
         '--config',
         '/tmp/ctx/fly.toml',
         '--dockerfile',
@@ -146,12 +146,12 @@ describe('fly deploy', () => {
 
   it.each([
     // A flag outside the deploy script's list may name another path to read.
-    [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--build-secret', 'A=/x']],
-    [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--file-local', '/m=/x']],
+    [['deploy', '/tmp/ctx', '--app', 'cw-harbor', '--build-secret', 'A=/x']],
+    [['deploy', '/tmp/ctx', '--app', 'cw-harbor', '--file-local', '/m=/x']],
     // No folder named: fly builds the keeper's own working folder.
-    [['deploy', '--app', 'cw-harborlight']],
+    [['deploy', '--app', 'cw-harbor']],
     // No --config: fly would look for one in the build folder or the keeper's own.
-    [['deploy', '/tmp/ctx', '--app', 'cw-harborlight', '--remote-only']],
+    [['deploy', '/tmp/ctx', '--app', 'cw-harbor', '--remote-only']],
   ])('refuses %j', (args) => {
     expect(classifyFly(args, APPS).kind).toBe('refused');
   });
@@ -159,19 +159,19 @@ describe('fly deploy', () => {
   // A held command runs only as written below; any flag or command outside
   // the list is refused, so no flag that reads a local file can reach fly.
   it.each([
-    ['machine', 'run', 'img', '--app', 'cw-harborlight'],
-    ['machine', 'run', 'img', '--app', 'cw-harborlight', '--file-local', '/m=/x'],
-    ['machine', 'update', 'm1', '--app', 'cw-harborlight', '--file-local=/m=/x'],
-    ['console', '--app', 'cw-harborlight', '--file-local', '/m=/x'],
+    ['machine', 'run', 'img', '--app', 'cw-harbor'],
+    ['machine', 'run', 'img', '--app', 'cw-harbor', '--file-local', '/m=/x'],
+    ['machine', 'update', 'm1', '--app', 'cw-harbor', '--file-local=/m=/x'],
+    ['console', '--app', 'cw-harbor', '--file-local', '/m=/x'],
     ['launch', '--path', '/x'],
-    ['secrets', 'import', '--app', 'cw-harborlight', '--env-file', '/x'],
-    ['secrets', 'set', 'A=b', '--app', 'cw-harborlight', '--config', '/x/fly.toml'],
-    ['ssh', 'console', '--app', 'cw-harborlight', '--pty'],
-    ['ssh', 'sftp', 'shell', '--app', 'cw-harborlight'],
+    ['secrets', 'import', '--app', 'cw-harbor', '--env-file', '/x'],
+    ['secrets', 'set', 'A=b', '--app', 'cw-harbor', '--config', '/x/fly.toml'],
+    ['ssh', 'console', '--app', 'cw-harbor', '--pty'],
+    ['ssh', 'sftp', 'shell', '--app', 'cw-harbor'],
     ['apps', 'create', 'cw-saltmarsh', '--org', 'x', '--generate-name'],
     ['storage', 'create', '--org', 'x', '--name', 'b', '--public'],
-    ['machine', 'destroy', 'm1', '--app', 'cw-harborlight', '--image', 'x'],
-    ['certs', 'add', 'example.test', '--app', 'cw-harborlight'],
+    ['machine', 'destroy', 'm1', '--app', 'cw-harbor', '--image', 'x'],
+    ['certs', 'add', 'example.test', '--app', 'cw-harbor'],
   ])('refuses a command or flag the held list does not name: %j', (...args) => {
     expect(classifyFly(args, APPS)).toMatchObject({ kind: 'refused' });
   });
@@ -180,7 +180,7 @@ describe('fly deploy', () => {
     for (const args of [
       ['apps', 'create', 'cw-saltmarsh', '--org', 'x', '--network', 'n'],
       ['storage', 'create', '--org', 'x', '--name', 'b', '--yes'],
-      ['secrets', 'import', '--app', 'cw-harborlight', '--stage'],
+      ['secrets', 'import', '--app', 'cw-harbor', '--stage'],
       [
         'volumes',
         'create',
@@ -193,11 +193,11 @@ describe('fly deploy', () => {
         '1',
         '--yes',
       ],
-      ['ssh', 'console', '--app', 'cw-harborlight', '--command', "sh -c 'true'"],
-      ['ssh', 'sftp', 'put', '/tmp/a.tgz', '/data/a.tgz', '--app', 'cw-harborlight'],
+      ['ssh', 'console', '--app', 'cw-harbor', '--command', "sh -c 'true'"],
+      ['ssh', 'sftp', 'put', '/tmp/a.tgz', '/data/a.tgz', '--app', 'cw-harbor'],
       ['machine', 'restart', 'm1', '--app', 'cw-riverbend'],
-      ['machine', 'destroy', 'm1', '--app', 'cw-harborlight', '--force'],
-      ['volumes', 'destroy', 'v1', '--app', 'cw-harborlight', '--yes'],
+      ['machine', 'destroy', 'm1', '--app', 'cw-harbor', '--force'],
+      ['volumes', 'destroy', 'v1', '--app', 'cw-harbor', '--yes'],
     ]) {
       expect({ args, kind: classifyFly(args, APPS).kind }).toEqual({ args, kind: 'held' });
     }
@@ -224,7 +224,7 @@ describe('cloudflare policy', () => {
       '/zones?name=example.com',
       '/zones/z1/dns_records?name=%2A.example.com',
       '/zones/z1/ssl/certificate_packs?status=all',
-      '/accounts/abc/cfd_tunnel?name=cw-harborlight&is_deleted=false',
+      '/accounts/abc/cfd_tunnel?name=cw-harbor&is_deleted=false',
       '/accounts/abc/cfd_tunnel/0f1e-2d3c/configurations',
     ]) {
       expect({ path, kind: classifyCloudflare('GET', path).kind }).toEqual({
@@ -370,9 +370,9 @@ describe('store', () => {
     const store = openKeeperStore(dir);
     if ('error' in store) throw new Error(store.error);
     store.setCredential('fly-org-token', 'test-fly-token');
-    store.addApp('cw-harborlight');
+    store.addApp('cw-harbor');
     expect(store.credentials().fly?.orgToken).toBe('test-fly-token');
-    expect(store.apps()).toEqual(['cw-harborlight']);
+    expect(store.apps()).toEqual(['cw-harbor']);
     store.addAccessApp('0f1e-2d3c');
     expect(store.accessApps()).toEqual(['0f1e-2d3c']);
     expect(() => store.addAccessApp('../x')).toThrow();

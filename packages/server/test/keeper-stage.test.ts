@@ -21,7 +21,7 @@ const tmp = mkdtempSync(join(tmpdir(), 'keeper-stage-test-'));
 const ctx = join(tmp, 'ctx');
 mkdirSync(join(ctx, 'infra'), { recursive: true });
 writeFileSync(join(ctx, 'Dockerfile'), 'FROM scratch\n');
-writeFileSync(join(ctx, 'infra', 'fly.toml'), 'app = "cw-harborlight"\n');
+writeFileSync(join(ctx, 'infra', 'fly.toml'), 'app = "cw-harbor"\n');
 symlinkSync('/etc/hosts', join(ctx, 'hosts-link'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
@@ -34,7 +34,7 @@ describe('stageFlyPaths', () => {
     expect(readFileSync(join(copy, 'Dockerfile'), 'utf8')).toBe('FROM scratch\n');
     // A file inside the build folder is the folder copy's own.
     expect(config).toBe(`--config=${join(copy, 'infra', 'fly.toml')}`);
-    expect(readFileSync(join(copy, 'infra', 'fly.toml'), 'utf8')).toContain('cw-harborlight');
+    expect(readFileSync(join(copy, 'infra', 'fly.toml'), 'utf8')).toContain('cw-harbor');
     expect(readlinkSync(join(copy, 'hosts-link'))).toBe('/etc/hosts');
     expect(staged.args.slice(3)).toEqual(['--app', 'x']);
     staged.done();

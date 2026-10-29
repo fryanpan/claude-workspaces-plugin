@@ -73,7 +73,7 @@ function greedyReader() {
 
 describe('which machine is a project server', () => {
   it('is a Fly machine, or one that names a profile, and never the Mac', () => {
-    expect(isProjectServer({ FLY_APP_NAME: 'cw-harborlight' })).toBe(true);
+    expect(isProjectServer({ FLY_APP_NAME: 'cw-harbor' })).toBe(true);
     expect(isProjectServer({ CW_PROJECT_PROFILE: 'standard' })).toBe(true);
     expect(isProjectServer({ [LAUNCHD_JOB_ENV]: PROD_SERVICE_LABEL })).toBe(false);
     expect(isProjectServer({})).toBe(false);

@@ -59,7 +59,7 @@ describe.skipIf(!ENABLED)('a deploy on a keeper that is this process', () => {
     // The agent's folder, made and owned by `nobody`, readable by the keeper.
     const made = asNobody(
       'umask 022; d=$(mktemp -d /tmp/keeper-agent-XXXXXX) && chmod 755 "$d" && ' +
-        `printf '# the agent wrote this\\napp = "cw-harborlight"\\nprimary_region = "sjc"\\n' > "$d/fly.toml" && ` +
+        `printf '# the agent wrote this\\napp = "cw-harbor"\\nprimary_region = "sjc"\\n' > "$d/fly.toml" && ` +
         `printf 'FROM scratch\\n' > "$d/Dockerfile" && echo "$d"`,
     );
     expect(made.status, made.stderr).toBe(0);
@@ -100,7 +100,7 @@ describe.skipIf(!ENABLED)('a deploy on a keeper that is this process', () => {
       'deploy',
       ctx,
       '--app',
-      'cw-harborlight',
+      'cw-harbor',
       '--config',
       join(ctx, 'fly.toml'),
       '--yes',
@@ -119,7 +119,7 @@ describe.skipIf(!ENABLED)('a deploy on a keeper that is this process', () => {
     });
     expect(a.status).toBe(200);
     expect(keeper.requests.get(id)?.error).toBeUndefined();
-    expect(configs).toEqual(['app = "cw-harborlight"\nprimary_region = "sjc"\n']);
+    expect(configs).toEqual(['app = "cw-harbor"\nprimary_region = "sjc"\n']);
     // CONTROL: the agent's folder was nobody's, so this keeper could copy it.
     expect(existsSync(join(ctx, 'fly.toml'))).toBe(true);
   });

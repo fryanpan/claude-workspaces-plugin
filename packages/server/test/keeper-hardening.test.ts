@@ -30,7 +30,7 @@ const outside = mkdtempSync(join(tmpdir(), 'keeper-hardening-ctx-'));
 writeFileSync(join(outside, 'Dockerfile'), 'FROM scratch\n');
 writeFileSync(join(outside, 'server.ts'), '// app\n');
 /** A config written only with keys the keeper accepts. */
-const FLY_TOML = 'app = "cw-harborlight"\nprimary_region = "sjc"\n';
+const FLY_TOML = 'app = "cw-harbor"\nprimary_region = "sjc"\n';
 writeFileSync(join(outside, 'fly.toml'), FLY_TOML);
 /** A user id nobody on this machine has, standing in for the keeper's. */
 const KEEPER_UID = 4_000_000;
@@ -110,7 +110,7 @@ const enrollOptions = async (token: string) => {
 
 beforeAll(async () => {
   store = openStore('store');
-  store.addApp('cw-harborlight');
+  store.addApp('cw-harbor');
   // The test's files are this process's own, so the keeper here is another user.
   keeper = serveKeeper({ store, exec, port: 0, keeperUid: KEEPER_UID });
   base = `http://127.0.0.1:${keeper.port}`;
@@ -242,7 +242,7 @@ describe('the approval page', () => {
   });
 
   it('denies a request only with the passkey', async () => {
-    const id = await hold(['apps', 'create', 'cw-harborlight-two']);
+    const id = await hold(['apps', 'create', 'cw-harbor-two']);
     const pageToken = await pageTokenOf(id);
     const bare = await post(`/v1/requests/${id}/deny`, { page: pageToken });
     expect(bare.status).toBe(403);
@@ -271,7 +271,7 @@ describe('paths a fly call names', () => {
     'deploy',
     ctx,
     '--app',
-    'cw-harborlight',
+    'cw-harbor',
     '--remote-only',
     ...(more.some((m) => m.startsWith('--config')) ? [] : ['--config', join(ctx, 'fly.toml')]),
     ...more,
@@ -382,7 +382,7 @@ describe('paths a fly call names', () => {
         ...signed(owner, c2.challenge ?? ''),
       });
       expect(keeper.requests.get(ok.body.id ?? '')?.error).toBeUndefined();
-      expect(configs.at(-1)).toBe('app = "cw-harborlight"\nprimary_region = "sjc"\n');
+      expect(configs.at(-1)).toBe('app = "cw-harbor"\nprimary_region = "sjc"\n');
     } finally {
       rmSync(ctx, { recursive: true, force: true });
     }
