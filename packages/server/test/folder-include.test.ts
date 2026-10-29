@@ -20,7 +20,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocStore } from '../src/doc-store.ts';
-import { isListedFile } from '../src/fs-scan.ts';
+import { isListedFile } from '../src/fs-listing.ts';
 import { SseBus } from '../src/sse.ts';
 import { createWebhookDispatcher } from '../src/webhooks.ts';
 import { tinyMp4 } from './tiny-mp4.ts';
@@ -127,6 +127,8 @@ describe('a folder of gitignored recordings', () => {
         '.cache/old.mp4',
         'pack.zip',
         'linked.mp4',
+        'forged\nline.mp4',
+        'forged\u2028line.mp4',
       ],
     });
     expect(res.ok).toBe(true);
@@ -144,6 +146,8 @@ describe('a folder of gitignored recordings', () => {
       '.cache/old.mp4': 'hidden',
       'pack.zip': 'unsupported-type',
       'linked.mp4': 'not-a-regular-file',
+      'forged\nline.mp4': 'bad-path',
+      'forged\u2028line.mp4': 'bad-path',
     });
     expect((await docStore.openContextFile(res.setId, '.env')).ok).toBe(false);
     expect((await docStore.openContextFile(res.setId, 'linked.mp4')).ok).toBe(false);

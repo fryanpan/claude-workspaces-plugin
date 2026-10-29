@@ -446,6 +446,10 @@ admits ignored files by name (`admitIncluded`), and its answer's `listed`
 names every file it listed and `links` gives each its page link. A link to a
 file nobody has opened yet opens its doc on the first request
 (`openListedMember`); `files` stays the docs the bind opened, only the entry.
+`fs-listing.ts` caches that listing per root and is what decides which files
+of a set may be opened (`isListedFile`, `landsOnListed`); a listing more than
+five seconds old still answers and is rescanned off the main thread, so no
+page request waits on `git` until the listing is thirty seconds old.
 `folder-file-types.ts`
 names the binaries no surface can show, which the listing leaves out. A video
 or raster image (`core/src/media-types.ts`, read by server and page alike)

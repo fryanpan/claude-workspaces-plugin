@@ -1,9 +1,8 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
-import { realPathUnder } from './safe-path.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
 
@@ -35,7 +34,10 @@ import { realPathUnder } from './safe-path.ts';
  * (`admitIncluded`); the floors above still apply to them.
  */
 export function scanFolder(root: string, include: readonly string[] = []): string[] {
-  const files = listFolder(root, null);
+  return withIncluded(root, listFolder(root, null), include);
+}
+
+function withIncluded(root: string, files: string[], include: readonly string[]): string[] {
   if (include.length === 0) return files;
   const listed = new Set(files);
   for (const abs of admitIncluded(root, include).files) {
@@ -122,36 +124,168 @@ export function scanFolderReport(
  */
 function listFolder(root: string, skipped: SkippedFile[] | null): string[] {
   try {
-    const res = gitLsFiles(root, ['--cached', '--others', '--exclude-standard']);
-    if (res !== null) {
-      const out: string[] = [];
-      for (const rel of res) {
-        const name = rel.split('/').pop() ?? rel;
-        const reason = isCredentialShapedName(name)
-          ? 'credential-name'
-          : isUnsupportedType(name)
-            ? 'unsupported-type'
-            : null;
-        if (reason) skipped?.push({ path: rel, reason });
-        else out.push(join(root, rel));
-      }
-      if (skipped) {
-        // `--directory` names an ignored directory once rather than every
-        // file under it, so a repo's node_modules is one row, not thousands.
-        const ignored = gitLsFiles(root, [
-          '--others',
-          '--ignored',
-          '--exclude-standard',
-          '--directory',
-        ]);
-        for (const rel of ignored ?? []) skipped.push({ path: rel, reason: 'gitignored' });
-      }
-      return out;
-    }
-  } catch {
-    // git missing or threw — fall through to readdir.
+    return listFolderOrThrow(root, skipped);
+  } catch (err) {
+    if (!(err instanceof GitListingFailed)) throw err;
+    // Fail closed: a repo git could not list shows nothing, rather than a
+    // readdir that would show every file its ignore rules hide.
+    console.error(`[fs-scan] ${err.message}`);
+    return [];
   }
+}
+
+/**
+ * `listFolder`, throwing `GitListingFailed` where it would list nothing, so
+ * the listing cache can keep the answer it had (`fs-listing.ts`).
+ */
+export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): string[] {
+  const res = gitLsFiles(root, LISTING_ARGS);
+  if (res !== null) {
+    const out = admitGitListed(root, res, skipped);
+    if (skipped) {
+      // `--directory` names an ignored directory once rather than every
+      // file under it, so a repo's node_modules is one row, not thousands.
+      const ignored = gitLsFiles(root, [
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ]);
+      for (const rel of ignored ?? []) skipped.push({ path: rel, reason: 'gitignored' });
+    }
+    return out;
+  }
+  // The readdir fallback has no ignore file to honour, so it is only for a
+  // folder git says is not a repository. A git that failed inside a work tree
+  // (a timeout, an exhausted buffer, "dubious ownership") would otherwise
+  // list the repo's ignored `service-account.json` and `secrets.yaml`. A
+  // root no git may run in (`gitBarred`) is walked, as it always was.
+  if (!gitBarred(root) && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
   return readdirRecursive(root, root, skipped);
+}
+
+/** `git ls-files` failed in a folder that is, or may be, a git work tree. */
+export class GitListingFailed extends Error {
+  constructor(root: string) {
+    super(`git could not list ${root}; listing nothing rather than every file in it`);
+  }
+}
+
+type RepoKind = 'work-tree' | 'not-a-repo';
+
+// Roots git said are work trees. Only that answer is kept: a `git init` makes
+// a folder a repo, and a kept "not a repo" would send it back to readdir.
+const repoKinds = new Map<string, 'work-tree'>();
+
+/** What `git rev-parse --is-inside-work-tree` said, or null when it could not say. */
+type GitAnswer = { error?: Error | null; status: number | null; stdout?: string; stderr?: string };
+function repoKindOf(res: GitAnswer): RepoKind | null {
+  // No git on this machine at all: nothing can be a repository to it.
+  if ((res.error as NodeJS.ErrnoException | null | undefined)?.code === 'ENOENT') {
+    return 'not-a-repo';
+  }
+  // `false` is a `.git` directory or a bare repository: not a work tree, and
+  // not a folder to read whole either.
+  if (res.status === 0) return res.stdout?.trim() === 'true' ? 'work-tree' : null;
+  if (res.status === 128 && /not a git repository/i.test(res.stderr ?? '')) return 'not-a-repo';
+  return null;
+}
+
+function repoKindSync(root: string): RepoKind | null {
+  const kept = repoKinds.get(root);
+  if (kept) return kept;
+  const res = spawnSync('git', REV_PARSE(root), gitOptions());
+  const kind = repoKindOf(res);
+  if (kind === 'work-tree') repoKinds.set(root, kind);
+  return kind;
+}
+
+async function repoKindAsync(root: string): Promise<RepoKind | null> {
+  const kept = repoKinds.get(root);
+  if (kept) return kept;
+  const kind = await new Promise<RepoKind | null>((resolve) => {
+    execFile('git', REV_PARSE(root), gitOptions(), (err, stdout, stderr) => {
+      // An exit code is a number; a spawn failure or a kill is not.
+      const code: unknown = err ? (err as { code?: unknown }).code : 0;
+      const status = typeof code === 'number' ? code : null;
+      resolve(repoKindOf({ error: err, status, stdout, stderr }));
+    });
+  });
+  if (kind === 'work-tree') repoKinds.set(root, kind);
+  return kind;
+}
+
+/** How long any git here may run before it is killed and counts as failed. */
+export const GIT_TIMEOUT = { ms: 30_000 };
+
+/** Every git here: hardened (`git-hardening.ts`), and killed past the limit. */
+function gitOptions() {
+  return {
+    env: hardenedGitEnv(),
+    encoding: 'utf8' as const,
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: GIT_TIMEOUT.ms,
+    killSignal: 'SIGKILL' as const,
+  };
+}
+
+const REV_PARSE = (root: string) =>
+  hardenedGitArgs(['-C', root, 'rev-parse', '--is-inside-work-tree']);
+
+/** Forget every root's repository answer. Tests only. */
+export function clearRepoKinds(): void {
+  repoKinds.clear();
+}
+
+const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
+
+/** The git mode's floor over what `git ls-files` named, as absolute paths. */
+function admitGitListed(root: string, rels: string[], skipped: SkippedFile[] | null): string[] {
+  const out: string[] = [];
+  for (const rel of rels) {
+    const name = rel.split('/').pop() ?? rel;
+    const reason = isCredentialShapedName(name)
+      ? 'credential-name'
+      : isUnsupportedType(name)
+        ? 'unsupported-type'
+        : null;
+    if (reason) skipped?.push({ path: rel, reason });
+    else out.push(join(root, rel));
+  }
+  return out;
+}
+
+/**
+ * `scanFolderPaths` with the `git` subprocess off the event loop, for a
+ * listing nobody is waiting on (`fs-listing.ts` refreshes in the background
+ * with it). The readdir fallback and the include `lstat`s stay synchronous:
+ * a folder outside git is small or slow either way, and it is the subprocess
+ * that grows with the repository.
+ */
+export async function scanFolderPathsAsync(
+  root: string,
+  include: readonly string[] = [],
+): Promise<string[]> {
+  const barred = gitBarred(root);
+  const rels = barred
+    ? null
+    : await new Promise<string[] | null>((resolve) => {
+        // A hung git is killed (`gitOptions`), so the cache's in-flight mark clears.
+        execFile(
+          'git',
+          hardenedGitArgs(['-C', root, 'ls-files', '-z', ...LISTING_ARGS]),
+          gitOptions(),
+          (err, stdout) => resolve(err ? null : stdout.split('\0').filter((rel) => rel !== '')),
+        );
+      });
+  let files: string[];
+  if (rels !== null) files = admitGitListed(root, rels, null);
+  else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {
+    files = readdirRecursive(root, root, null);
+  }
+  // Rejects, so the cache keeps the listing it had (see `listFolderOrThrow`).
+  else throw new GitListingFailed(root);
+  return toSortedRel(root, withIncluded(root, files, include));
 }
 
 /**
@@ -219,26 +353,39 @@ function normalizeIncludePath(raw: string): string | null {
     .split('/')
     .filter((seg) => seg !== '' && seg !== '.');
   if (raw.startsWith('/') || segs.length === 0 || segs.includes('..')) return null;
+  // A control character names no file anybody typed, and a newline in a
+  // listed path is how a log line or a header gets forged. C1 controls and
+  // the two Unicode line separators break lines too.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+  if (/[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(raw)) return null;
   return segs.join('/');
 }
 
 /** `git ls-files -z <args>` under `root`, or null when git cannot answer. */
 function gitLsFiles(root: string, args: string[]): string[] | null {
   if (gitBarred(root)) return null;
-  const res = spawnSync('git', hardenedGitArgs(['-C', root, 'ls-files', '-z', ...args]), {
-    env: hardenedGitEnv(),
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  let res: ReturnType<typeof spawnSync>;
+  try {
+    res = spawnSync('git', hardenedGitArgs(['-C', root, 'ls-files', '-z', ...args]), gitOptions());
+  } catch {
+    return null;
+  }
   if (res.status !== 0 || typeof res.stdout !== 'string') return null;
   return res.stdout.split('\0').filter((rel) => rel !== '');
 }
 
 /** Repo-relative POSIX paths for every scanned file, sorted. */
 export function scanFolderPaths(root: string, include: readonly string[] = []): string[] {
-  return scanFolder(root, include)
-    .map((abs) => relative(root, abs).split(sep).join('/'))
-    .sort();
+  return toSortedRel(root, scanFolder(root, include));
+}
+
+/** `scanFolderPaths`, throwing `GitListingFailed` instead of listing nothing. */
+export function scanFolderPathsOrThrow(root: string, include: readonly string[] = []): string[] {
+  return toSortedRel(root, withIncluded(root, listFolderOrThrow(root, null), include));
+}
+
+function toSortedRel(root: string, files: string[]): string[] {
+  return files.map((abs) => relative(root, abs).split(sep).join('/')).sort();
 }
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.next', 'coverage']);
@@ -337,160 +484,4 @@ function readdirRecursive(root: string, dir: string, skipped: SkippedFile[] | nu
     }
   }
   return out;
-}
-
-/**
- * Is `relPath` one of the files the tree SHOWS for `root`?
- *
- * The all-files tree is `scanFolderPaths(root)` — `git ls-files --cached
- * --others --exclude-standard` in a repo — so an ignored file never appears
- * in it, and on top of that the credential names never do either
- * (`isCredentialShapedName`), because `--others` lists untracked files and an
- * un-ignored `.env` is one. OUTSIDE a repo the listing falls back to a
- * recursive readdir, which has no ignore file to honour; there the floor
- * widens to every dotfile as well (`isSecretShapedName`).
- * `openContextFile` / `openEditableFile` used to accept any path that
- * merely existed under the root, which let a caller who knew the name open
- * `.env` or a credentials dump the tree had deliberately hidden; and a
- * review root is a whole repository, reachable by a share visitor.
- * (Urgent-fixes ticket, 2026-09-02.) The rule is now the tree's rule: a path
- * opens only if the listing contains it.
- *
- * Anything under `.git/` is refused before the listing is consulted. Git
- * never lists its own directory, but a rescan is a subprocess and `.git`
- * holds the one thing (config, hooks, packed refs) that should never need
- * one to be refused.
- *
- * Cached per root so this is not a subprocess per request: a hit is served
- * from a listing up to `LISTING_TTL_MS` old, and a MISS on a listing older
- * than `MISS_RESCAN_MS` rescans once before answering — a file created a
- * moment ago (an agent writing while the reviewer clicks) is found rather
- * than refused for the rest of the window. A miss on a fresh listing stays a
- * miss, which bounds a hammering caller to one subprocess per
- * `MISS_RESCAN_MS` per root.
- */
-export function isListedFile(
-  root: string,
-  relPath: string,
-  include: readonly string[] = [],
-): boolean {
-  if (relPath.split('/').includes('.git')) return false;
-  const now = Date.now();
-  const key = listingKey(root, include);
-  let entry = cachedListing(key, root, include, now);
-  if (entry.paths.has(relPath)) return true;
-  if (now - entry.at >= MISS_RESCAN_MS) entry = refreshListing(key, root, include, now);
-  return entry.paths.has(relPath);
-}
-
-/**
- * The paths `isListedFile` admits for `root`, from the same cache: a hit is
- * up to `LISTING_TTL_MS` old. For a caller that has to search the listing
- * rather than ask about one path, such as turning a member's docId back into
- * the file it names.
- */
-export function listedFiles(root: string, include: readonly string[] = []): ReadonlySet<string> {
-  return cachedListing(listingKey(root, include), root, include, Date.now()).paths;
-}
-
-/**
- * Whether the file `clean` really serves is one the set shows. Git lists a
- * symlink under its own name, so the listing, the exclude and the credential
- * floor had judged only the link: `clip.mp4 -> .env`, with `.env` ignored,
- * passed every check and streamed `.env` (security review, 2026-10-18). The
- * file it lands on must be inside the root AND pass the same rules itself.
- * A link to a listed file stays allowed — it reaches nothing the tree does
- * not already show. `not-listed` rather than a reason naming the target, so
- * a hidden target's existence is not told.
- *
- * One rule for every path that reads a set's file: the request paths in
- * `doc-store-workspaces.ts`, and the two that read at bind time — a browse
- * bind's entry and a working-tree diff's members (`bind-diff.ts`), which
- * read through the link before any request asked (security review,
- * 2026-10-19). `excludes` are normalized, as `normalizeExcludes` gives them.
- */
-export function landsOnListed(
-  root: string,
-  clean: string,
-  abs: string,
-  excludes: readonly string[],
-  include: readonly string[] = [],
-): 'ok' | 'bad-path' | 'not-listed' {
-  const target = realPathUnder(root, abs);
-  if (target === null) return 'bad-path';
-  if (target === clean) return 'ok';
-  if (excludes.some((p) => target === p || target.startsWith(`${p}/`))) return 'not-listed';
-  return isListedFile(root, target, include) ? 'ok' : 'not-listed';
-}
-
-/**
- * A browse bind's entry doc: the root README, else the first markdown, else
- * the first file of `sorted`, skipping each one `landsOnListed` refuses. The
- * entry binds before any request could ask, so it needs the check itself.
- * `entry` is undefined when every file was refused.
- */
-export function browseEntry(
-  root: string,
-  sorted: readonly string[],
-  excludes: readonly string[],
-  include: readonly string[] = [],
-): { entry: string | undefined; refused: string[] } {
-  const candidates = new Set([
-    ...sorted.filter((r) => r.toLowerCase() === 'readme.md'),
-    ...sorted.filter((r) => r.toLowerCase().endsWith('.md')),
-    ...sorted,
-  ]);
-  const refused: string[] = [];
-  for (const rel of candidates) {
-    if (landsOnListed(root, rel, join(root, rel), excludes, include) === 'ok') {
-      return { entry: rel, refused };
-    }
-    refused.push(rel);
-  }
-  return { entry: undefined, refused };
-}
-
-/** A set's include is part of its listing, so it is part of the cache key:
- *  two sets on one root with different includes list different files. */
-function listingKey(root: string, include: readonly string[]): string {
-  return include.length === 0 ? root : `${root}\0${include.join('\0')}`;
-}
-
-function cachedListing(
-  key: string,
-  root: string,
-  include: readonly string[],
-  now: number,
-): { at: number; paths: Set<string> } {
-  const entry = listingCache.get(key);
-  if (!entry || now - entry.at > LISTING_TTL_MS) return refreshListing(key, root, include, now);
-  return entry;
-}
-
-/** Forget every cached listing. Tests only. */
-export function clearListingCache(): void {
-  listingCache.clear();
-}
-
-const LISTING_TTL_MS = 5_000;
-const MISS_RESCAN_MS = 250;
-const LISTING_CACHE_MAX_ROOTS = 64;
-const listingCache = new Map<string, { at: number; paths: Set<string> }>();
-
-function refreshListing(
-  key: string,
-  root: string,
-  include: readonly string[],
-  now: number,
-): { at: number; paths: Set<string> } {
-  const entry = { at: now, paths: new Set(scanFolderPaths(root, include)) };
-  // Re-insert so the Map keeps insertion order as recency; evict the oldest
-  // root once too many reviews have been opened on distinct repos.
-  listingCache.delete(key);
-  listingCache.set(key, entry);
-  if (listingCache.size > LISTING_CACHE_MAX_ROOTS) {
-    const oldest = listingCache.keys().next().value;
-    if (oldest !== undefined) listingCache.delete(oldest);
-  }
-  return entry;
 }
