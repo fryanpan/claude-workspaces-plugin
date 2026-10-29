@@ -118,7 +118,9 @@ describe('link mode is retired', () => {
     // board the doc is filed on and every share below is scoped to — comes
     // back with it.
 
-    live = await mintAccessShare(base, access, boardId, { label: 'the replacement' });
+    live = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId, {
+      label: 'the replacement',
+    });
   });
 
   afterAll(async () => {

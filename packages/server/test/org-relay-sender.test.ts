@@ -154,6 +154,7 @@ describe('the relay’s sender check holds against a forged author', () => {
     await mint(harbor, harborBoard, WRITER);
 
     // The member: a share link to the board, redeemed through the tunnel.
+    harbor.shareLinks.addToAudience(harborBoard, [MEMBER], 'Bryan');
     const link = (await post(harbor, '/api/share/workspace', { workspaceId: harborBoard })) as {
       link: { linkId: string };
     };

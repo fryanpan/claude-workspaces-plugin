@@ -15,6 +15,7 @@ import type { PermissionGrants } from '../permission-grants.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ReviewGate } from '../review-gate-types.ts';
 import type { SecretWriter } from '../secret-store.ts';
+import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { BoardWorkspace, ParallelismCapChange, Task, TaskStore } from '../tasks.ts';
@@ -112,6 +113,9 @@ export interface TaskRoutesContext {
    * grant door answers 503 to an approval and nothing is written.
    */
   permissionGrants?: PermissionGrants;
+  /** Applies an access item the owner approved (`routes/task-access.ts`).
+   *  Omitted, the access door answers 503 and nothing changes. */
+  accessProposals?: AccessProposals;
   /**
    * Whether an answer covered every question an item asks. **No default**,
    * the judge's seam rule; omitted, every answer closes its item as before.

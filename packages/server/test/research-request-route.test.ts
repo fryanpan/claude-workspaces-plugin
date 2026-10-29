@@ -224,7 +224,11 @@ describe(`POST /workspaces/${WS}/docs/:docId/research-request`, () => {
       anchor,
     });
     expect(category.status).toBe(400);
-    const share = await mintAccessShare(base, access, workspaceId);
+    const share = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      workspaceId,
+    );
     // Positive control: those same credentials DO read the doc, so the
     // refusal below is the route's rule rather than a rejected visitor.
     expect(

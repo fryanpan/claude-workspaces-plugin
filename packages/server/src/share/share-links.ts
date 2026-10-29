@@ -48,8 +48,16 @@ import {
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 
+import {
+  type BoardAudience,
+  addAudienceEntries,
+  boardAudienceAdmits,
+  removeFromAudience,
+  seedAudiences,
+  storedAudiences,
+} from './board-audience.ts';
 import { type BoardRole, DEFAULT_BOARD_ROLE, normalizeBoardRole } from './board-role.ts';
-import { audienceAdmits, storedAudience } from './share-audience.ts';
+import { audienceAdmits, parseShareAudience, storedAudience } from './share-audience.ts';
 import type { ShareLanding } from './share-landing.ts';
 
 const SECRET_MODE = 0o600;
@@ -152,12 +160,30 @@ export interface CreateShareLinkReq {
 interface Persisted {
   links: ShareLinkRecord[];
   members: ShareLinkMember[];
+  /** Absent on a registry written before audiences existed: `load` seeds
+   *  them from the members (`board-audience.ts`). */
+  audiences?: BoardAudience[];
 }
+
+/** What a write answers while the registry on disk could not be read. */
+export const REGISTRY_UNREADABLE = 'share-link registry unreadable';
 
 export class ShareLinks {
   private readonly dataDir: string;
   private links: ShareLinkRecord[] = [];
+  /** Set when this load gave the registry its first audiences, so the
+   *  older Cloudflare shares can be seeded in the same boot. */
+  private migratedThisBoot = false;
   private members: ShareLinkMember[] = [];
+  private audiences: BoardAudience[] = [];
+  /**
+   * Set when the registry file exists and could not be read. Everything then
+   * stays empty, which admits nobody, and nothing is written: a save would
+   * replace the real registry, its links, members and the owner's removals,
+   * with whatever this boot rebuilt. Fixing or restoring the file and
+   * restarting is the way back.
+   */
+  private loadFailed = false;
 
   constructor(opts: { dataDir: string }) {
     this.dataDir = opts.dataDir;
@@ -171,6 +197,7 @@ export class ShareLinks {
    * Access application in front of it.
    */
   create(req: CreateShareLinkReq): ShareLinkRecord {
+    this.refuseWhileUnreadable();
     if (!req.workspaceId) throw new Error('workspaceId is required');
     if (req.ttlSeconds !== undefined && (!Number.isFinite(req.ttlSeconds) || req.ttlSeconds <= 0)) {
       throw new Error('ttlSeconds must be a positive, finite number of seconds');
@@ -226,6 +253,7 @@ export class ShareLinks {
    * that history to achieve something the flag already achieves.
    */
   revoke(linkId: string, now: number = Date.now()): boolean {
+    this.refuseWhileUnreadable();
     const link = this.get(linkId);
     if (!link || link.revokedAt !== null) return false;
     link.revokedAt = now;
@@ -264,7 +292,14 @@ export class ShareLinks {
     // visitor's page identical whatever went wrong.
     if (who === '') return { ok: false, state: 'unknown' };
     // Refused before anything is written: no member row, no redemption.
-    if (!audienceAdmits(link.allowDomains, who)) return { ok: false, state: 'outside-audience' };
+    // The board's audience as well as the link's: a link only ever invites
+    // someone the board already names.
+    if (
+      !audienceAdmits(link.allowDomains, who) ||
+      !boardAudienceAdmits(this.audienceOf(link.workspaceId), who)
+    ) {
+      return { ok: false, state: 'outside-audience' };
+    }
     const added = this.addMember(link.workspaceId, who, linkId, now, link.role);
     if (added) {
       link.redemptions.push({ email: who, at: now });
@@ -297,9 +332,101 @@ export class ShareLinks {
     return row && this.admitted(row) ? row : null;
   }
 
-  /** Lists show who is in, so a row the gate refuses is not listed. */
+  /** Lists show who is in, so a row the gate refuses is not listed. Both
+   *  audiences: the link's, and the board's. */
   private admitted(row: ShareLinkMember): boolean {
-    return audienceAdmits(this.get(row.viaLinkId)?.allowDomains, row.email);
+    return (
+      audienceAdmits(this.get(row.viaLinkId)?.allowDomains, row.email) &&
+      boardAudienceAdmits(this.audienceOf(row.workspaceId), row.email)
+    );
+  }
+
+  /** The board's audience, or undefined when it has none, which admits nobody. */
+  audienceOf(workspaceId: string): BoardAudience | undefined {
+    return this.audiences.find((a) => a.workspaceId === workspaceId);
+  }
+
+  /** Every board's audience. */
+  allAudiences(): BoardAudience[] {
+    return this.audiences.slice();
+  }
+
+  /**
+   * Seed the audiences from the older Cloudflare shares' allow lists. Those
+   * shares admit on the collaboration hostname, which now also checks the
+   * board's audience, so without this the upgrade would shut out the people
+   * they let in.
+   *
+   * A board with no audience record at all is seeded on any boot: a
+   * deployment that never had a share-link registry runs no migration, and
+   * its older shares are the only list there is. On the boot that ran the
+   * migration, the allow lists are also merged into the audiences it just
+   * built. Every other boot leaves an existing audience alone, emptied or
+   * not, so the owner's removals since stay removed.
+   */
+  seedFromOlderShares(
+    shares: ReadonlyArray<{ workspaceId: string; allowDomains?: readonly string[] }>,
+  ): void {
+    if (this.loadFailed) return;
+    const merge = this.migratedThisBoot;
+    this.migratedThisBoot = false;
+    const untouched = new Set(
+      shares.map((s) => s.workspaceId).filter((ws) => this.audienceOf(ws) === undefined),
+    );
+    const now = Date.now();
+    for (const share of shares) {
+      if (!merge && !untouched.has(share.workspaceId)) continue;
+      const parsed = parseShareAudience(share.allowDomains ?? []);
+      const entries = parsed.ok ? (parsed.audience ?? []) : [];
+      if (entries.length === 0) continue;
+      const current = this.audienceOf(share.workspaceId) ?? {
+        workspaceId: share.workspaceId,
+        entries: [],
+      };
+      const list = current.entries.slice();
+      for (const match of entries) {
+        if (!list.some((e) => e.match === match)) list.push({ match, addedAt: now });
+      }
+      this.putAudience({ workspaceId: share.workspaceId, entries: list });
+    }
+  }
+
+  /** Let these entries in. Already parsed by `parseShareAudience`. */
+  addToAudience(
+    workspaceId: string,
+    matches: readonly string[],
+    by: string,
+    now = Date.now(),
+  ): BoardAudience {
+    this.refuseWhileUnreadable();
+    const next = addAudienceEntries(
+      this.audienceOf(workspaceId) ?? { workspaceId, entries: [] },
+      matches,
+      by,
+      now,
+    );
+    this.putAudience(next);
+    return next;
+  }
+
+  /**
+   * Take an address or an `@domain` out of the audience, and with it the
+   * member rows it no longer admits. Answers the addresses that lost access,
+   * so the caller can hang up what they have open.
+   */
+  removeFromAudience(workspaceId: string, match: string): string[] {
+    this.refuseWhileUnreadable();
+    const current = this.audienceOf(workspaceId);
+    if (!current) return [];
+    this.putAudience(removeFromAudience(current, match));
+    return this.members
+      .filter((m) => m.workspaceId === workspaceId && !this.admitted(m))
+      .map((m) => m.email);
+  }
+
+  private putAudience(next: BoardAudience): void {
+    this.audiences = [...this.audiences.filter((a) => a.workspaceId !== next.workspaceId), next];
+    this.save();
   }
 
   /** Every member of a workspace, in the order they arrived. */
@@ -330,6 +457,7 @@ export class ShareLinks {
    * a second, quieter way to admit somebody.
    */
   setMemberRole(workspaceId: string, email: string, role: BoardRole): boolean {
+    this.refuseWhileUnreadable();
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
     const row = this.admittedRow(workspaceId, who);
@@ -376,11 +504,18 @@ export class ShareLinks {
    * admitted is still on the record.
    */
   removeMember(workspaceId: string, email: string): boolean {
+    this.refuseWhileUnreadable();
     const who = normalizeEmail(email);
     if (who === '' || !workspaceId) return false;
     const before = this.members.length;
     this.members = this.members.filter((m) => !(m.workspaceId === workspaceId && m.email === who));
     if (this.members.length === before) return false;
+    // And out of the audience, so the link they came through cannot let them
+    // straight back in: their exact entry goes, a domain records them.
+    const audience = this.audienceOf(workspaceId);
+    if (audience) {
+      this.audiences = this.audiences.map((a) => (a === audience ? removeFromAudience(a, who) : a));
+    }
     this.save();
     return true;
   }
@@ -437,7 +572,16 @@ export class ShareLinks {
    */
   private load(): void {
     const path = join(this.dataDir, REGISTRY_FILENAME);
-    if (!existsSync(path)) return;
+    // Only a file that is not there means "no registry yet". A stat that
+    // fails any other way is a registry we cannot see, and seeding over it
+    // would replace it.
+    try {
+      statSync(path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      this.failLoad(err);
+      return;
+    }
     // Tighten a file that already exists. New writes are mode 600, but a
     // registry written before that was true — or by a hand-edit, or restored
     // from a backup — keeps whatever mode it had, and nothing else would ever
@@ -451,6 +595,16 @@ export class ShareLinks {
     }
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<Persisted>;
+      // Valid JSON that is not the registry's shape is as unreadable as a
+      // syntax error: read as empty, the migration below would save over it.
+      if (
+        parsed === null ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed) ||
+        (!Array.isArray(parsed.links) && !Array.isArray(parsed.members))
+      ) {
+        throw new Error('not a share-link registry');
+      }
       const links = Array.isArray(parsed?.links) ? parsed.links : [];
       const members = Array.isArray(parsed?.members) ? parsed.members : [];
       this.links = links
@@ -493,10 +647,54 @@ export class ShareLinks {
           return row;
         })
         .filter((m) => m.email !== '');
-    } catch {
-      this.links = [];
-      this.members = [];
+      if (Array.isArray(parsed?.audiences)) {
+        this.audiences = storedAudiences(parsed.audiences);
+      } else {
+        this.migrateToAudiences();
+      }
+    } catch (err) {
+      this.failLoad(err);
     }
+  }
+
+  /** Admit nobody and write nothing: the registry on disk is not readable. */
+  private failLoad(err: unknown): void {
+    this.links = [];
+    this.members = [];
+    this.audiences = [];
+    this.loadFailed = true;
+    console.error(
+      `[share-links] ${REGISTRY_FILENAME} could not be read (${err instanceof Error ? err.message : String(err)}); admitting nobody and writing nothing until it is fixed and the server restarts`,
+    );
+  }
+
+  /**
+   * The one-time upgrade of a registry written before audiences existed.
+   * Every board is given an audience of the people already in, by exact
+   * address, plus what any live link's own audience named — so nobody loses
+   * access. An invited Owner becomes an ordinary member: the seat that
+   * changes who is in is Bryan's alone now (29 Oct).
+   */
+  private migrateToAudiences(): void {
+    this.migratedThisBoot = true;
+    const now = Date.now();
+    const admitted = this.members.filter((m) =>
+      audienceAdmits(this.get(m.viaLinkId)?.allowDomains, m.email),
+    );
+    this.audiences = seedAudiences(
+      admitted,
+      this.links.map((l) => ({
+        workspaceId: l.workspaceId,
+        live: this.state(l.linkId, now) === 'live',
+        ...(l.allowDomains ? { allowDomains: l.allowDomains } : {}),
+      })),
+      now,
+    );
+    this.members = this.members.map(({ role: _role, ...rest }) => rest);
+    // And the links: a live link minted as an Owner's would otherwise make
+    // its next redeemer an Owner again.
+    this.links = this.links.map(({ role: _role, ...rest }) => rest);
+    this.save();
   }
 
   /**
@@ -511,9 +709,19 @@ export class ShareLinks {
    * as corrupt and then fails closed on: every member would lose access at
    * once, and the redemption history would be gone with them.
    */
+  /** A write while the registry is unreadable throws rather than replace it. */
+  private refuseWhileUnreadable(): void {
+    if (this.loadFailed) throw new Error(REGISTRY_UNREADABLE);
+  }
+
   private save(): void {
+    this.refuseWhileUnreadable();
     const path = join(this.dataDir, REGISTRY_FILENAME);
-    const state: Persisted = { links: this.links, members: this.members };
+    const state: Persisted = {
+      links: this.links,
+      members: this.members,
+      audiences: this.audiences,
+    };
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: SECRET_MODE });
     chmodSync(tmp, SECRET_MODE); // an existing tmp keeps its old mode otherwise

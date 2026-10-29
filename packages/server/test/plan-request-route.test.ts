@@ -203,9 +203,14 @@ describe('POST /workspaces/<ws>/docs/:docId/plan-request', () => {
 
   it('refuses a share visitor, whose cookie does reach the doc', async () => {
     const docId = await newPlanDoc(workspaceId);
-    const visitor = await mintAccessShare(base, access, workspaceId, {
-      label: 'plan-request share',
-    });
+    const visitor = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      workspaceId,
+      {
+        label: 'plan-request share',
+      },
+    );
     const visitorHeaders = { ...visitor.headers, 'content-type': 'application/json' };
     // Presence: the same credentials DO read the doc.
     const read = await fetch(`${base}/workspaces/${workspaceId}/docs/${docId}?format=json`, {

@@ -7,6 +7,7 @@ import type {
 } from '@claude-workspaces/core';
 import type { BoardEmbeds } from '@claude-workspaces/core/board-embeds';
 import { DEFAULT_EFFORT_ESTIMATE_PROMPT } from '@claude-workspaces/core/effort-estimate-prompt';
+import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 import type { ReviewRefusalKind } from '@claude-workspaces/core/review-refusal';
 import type {
   ArtifactCheck,
@@ -35,6 +36,7 @@ import {
   syncOwnerItems,
 } from './review-items/done-when-owner.ts';
 import { ReviewJudgementStore } from './review-items/judgements.ts';
+import { accessReviewPayload, ownerOnlyForStep } from './review-items/owner-steps.ts';
 import { ReviewItemQueries } from './review-items/queries.ts';
 import { ReviewItemStore } from './review-items/store.ts';
 import type {
@@ -405,6 +407,14 @@ export interface BoardWorkspace {
    * are the ordinary case.
    */
   parallelismCap?: number;
+  /**
+   * The STEPS only the board's owner may approve — `push`, `jira`, `send` —
+   * (Bryan, 29 Oct). A review item naming one of them (`review.step`) is
+   * filed `ownerOnly` whatever its filer sent. Absent means none. Changed
+   * only by the owner's own browser (`routes/workspace-settings.ts`), since
+   * dropping a step is what would let anyone else approve it.
+   */
+  requireOwnerFor?: string[];
   /**
    * The LAST time the cap moved: who, when, from what, to what. The full
    * history is the `workspace.parallelism_cap_changed` rows in the board's
@@ -1204,6 +1214,9 @@ export interface DecisionAnsweredEvent {
    * second answer. Absent on a first answer. See `answer-change.ts`.
    */
   replaces?: { answer: string; optionId?: string; by: string; ts: number };
+  /** Who approved, in words, when a person answered — the sentence the agent
+   *  quotes where it acts on the answer. See `review-items/approver.ts`. */
+  approvalLine?: string;
   actor: TaskActor;
   /** The decision task's links — a ready-made propagation checklist. */
   links: Ref[];
@@ -2896,7 +2909,46 @@ export class TaskStore {
     review: unknown,
     opts: { actor: { id: string; name: string; kind?: string } },
   ): AddReviewItemResult {
-    return this.reviewItems.addReviewItem(taskId, review, opts);
+    const task = this.getTask(taskId);
+    const steps = task ? this.requireOwnerFor(task.workspaceId) : [];
+    return this.reviewItems.addReviewItem(taskId, ownerOnlyForStep(review, steps), opts);
+  }
+
+  /**
+   * File an ACCESS item: the owner's Approve applies `change`, nothing else
+   * does (`routes/task-access.ts`). Its words are derived from the change,
+   * and the change is written on the wrapper after the store files it, so no
+   * caller's payload can carry one.
+   */
+  addAccessReviewItem(
+    taskId: string,
+    change: ReviewAccessChange,
+    why: string,
+    opts: { actor: { id: string; name: string; kind?: string } },
+  ): AddReviewItemResult {
+    const res = this.reviewItems.addReviewItem(taskId, accessReviewPayload(change, why), opts);
+    if (!res.ok) return res;
+    res.item.access = change;
+    const stored = res.task.reviews?.find((r) => r.id === res.item.id);
+    if (stored) stored.access = change;
+    this.scheduleSave(res.task.workspaceId);
+    return res;
+  }
+
+  /** The steps only this board's owner may approve; empty when none. */
+  requireOwnerFor(workspaceId: string): string[] {
+    return this.workspaces.get(workspaceId)?.workspace.requireOwnerFor ?? [];
+  }
+
+  setRequireOwnerFor(
+    workspaceId: string,
+    steps: string[],
+  ): { ok: true; requireOwnerFor: string[] } | { ok: false; error: 'workspace-not-found' } {
+    const state = this.workspaces.get(workspaceId);
+    if (!state) return { ok: false, error: 'workspace-not-found' };
+    state.workspace.requireOwnerFor = steps.length > 0 ? [...new Set(steps)] : undefined;
+    this.scheduleSave(workspaceId);
+    return { ok: true, requireOwnerFor: this.requireOwnerFor(workspaceId) };
   }
 
   listReviewItems(taskId: string): TaskReviewItem[] {
@@ -3023,7 +3075,7 @@ export class TaskStore {
     if (refused) return { ok: false, error: 'not-a-person', message: refused };
     const item = this.listReviewItems(taskId).find((r) => r.id === reviewItemId);
     if (!item) return { ok: false, error: 'unknown-review-item' };
-    const wrongDoor = answerDoorRefusal(item.review.shape, opts.door);
+    const wrongDoor = answerDoorRefusal(item.review.shape, opts.door, item.access !== undefined);
     return wrongDoor ? { ok: false, ...wrongDoor } : undefined;
   }
 
@@ -3056,6 +3108,15 @@ export class TaskStore {
       revisedRange?: { start: number; end: number };
     },
   ): ReviseReviewItemResult {
+    // An access item's words are derived from its change, so rewording one
+    // would describe a change other than the one Approve applies.
+    if (this.listReviewItems(taskId).some((r) => r.id === reviewItemId && r.access)) {
+      return {
+        ok: false,
+        error: 'not-revisable',
+        message: 'an access change is not reworded — withdraw it and propose the change you mean',
+      };
+    }
     return this.reviewItems.reviseReviewItem(taskId, reviewItemId, patch, opts);
   }
 

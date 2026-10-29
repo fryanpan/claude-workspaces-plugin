@@ -41,6 +41,7 @@
 import { type DocMeta, attachmentIdOf, normalizeEmail } from '@claude-workspaces/core';
 import type { DocStore } from './doc-store.ts';
 import type { ShareTarget } from './middleware/host-guard.ts';
+import { boardAudienceAdmits } from './share/board-audience.ts';
 import { type BoardRole, DEFAULT_BOARD_ROLE } from './share/board-role.ts';
 import {
   landingLookupsFor,
@@ -393,6 +394,9 @@ export function createBoardMembership(ctx: BoardMembershipContext): BoardMembers
     if (!shares) return false;
     const candidates = new Set<string>([workspaceId, ...shareWorkspacesOf(workspaceId)]);
     for (const wsId of candidates) {
+      // A share admits only inside its board's audience: the owner approved
+      // that list, and an older share's own allow list cannot widen it.
+      if (!boardAudienceAdmits(shareLinks.audienceOf(wsId), who)) continue;
       for (const share of shares.liveForWorkspace(wsId)) {
         if (!boardShareTarget(share)) continue;
         if ((share.allowDomains ?? []).some((entry) => audienceEntryAdmits(entry, who))) {

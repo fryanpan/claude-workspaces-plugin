@@ -155,7 +155,9 @@ describe('the sync channel leaks no host metadata', () => {
     leakyId = ((await created.json()) as { docId: string }).docId;
     expect(leakyId).toBeTruthy();
 
-    visitorHeaders = (await mintAccessShare(base, access, boardId)).headers;
+    visitorHeaders = (
+      await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, boardId)
+    ).headers;
   });
 
   afterAll(async () => {

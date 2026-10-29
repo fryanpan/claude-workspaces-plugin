@@ -86,8 +86,19 @@ export const READER_CUTS: readonly ReaderCut[] = [
       '    if (span) rev.revisedRange = span;\n',
       '  const payloadPartial = readPartialAnswers(value.partialAnswers);\n',
       '  if (payloadPartial) out.partialAnswers = payloadPartial;\n',
+      // Who approved, the step an ask reserves, and the access change an
+      // access card carries: the board and the owner's page read them; the
+      // widget never answers an owner-only ask, so it reads none of them.
+      // Cutting the `access` read also drops `review-access.ts` from the bundle.
+      '  const by = value.answeredBy;\n',
+      "  if (typeof value.step === 'string' && REVIEW_STEP.test(value.step)) out.step = value.step;\n",
+      '  const access = readAccessChange(value.access);\n',
+      '  if (access) out.access = access;\n',
     ],
-    blocks: ['  if (Array.isArray(value.answerHistory)) {\n'],
+    blocks: [
+      '  if (Array.isArray(value.answerHistory)) {\n',
+      "  if (isPlainObject(by) && typeof by.id === 'string') {\n",
+    ],
   },
   {
     // Not a field, but the same reason: the doc page's offline copy hands
@@ -118,6 +129,7 @@ export const STRIPPED_FIELDS: readonly string[] = [
   'revisedRange',
   'answerHistory',
   'partialAnswers',
+  'access',
 ];
 
 /** The cut for a module path, or undefined when the file is not one of the readers. */

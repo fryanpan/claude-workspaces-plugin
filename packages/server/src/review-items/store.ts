@@ -5,10 +5,8 @@
  * Lifted out of `TaskStore` whole; a test hands it a plain object as the
  * `ReviewItemPersistence` this module declares.
  *
- * The `r-legacy` row is not one of these: it is DERIVED from a legacy
- * decision's own fields, so the two verbs that accept it hand it straight to
- * `TaskDecisionStore` rather than growing a second implementation of
- * "record a decision's answer" free to drift from the first.
+ * The `r-legacy` row is DERIVED from a legacy decision, so the verbs that
+ * accept it hand it to `TaskDecisionStore`.
  */
 import {
   type ReviewItemRange,
@@ -28,6 +26,7 @@ import type { StoredReviewItem, TaskActor } from '@claude-workspaces/core/task-w
 import { classifyActor } from '../actor-identity.ts';
 import { cryptoId } from '../task-fields.ts';
 import { answeredByOther, mayChangeAnswer, replacedItemAnswer } from './answer-change.ts';
+import { approverFields } from './approver.ts';
 import { TaskDecisionStore } from './decisions.ts';
 import { LEGACY_REVIEW_ITEM_ID } from './derive.ts';
 import type { ReviewItemPersistence } from './persistence.ts';
@@ -51,10 +50,8 @@ export class ReviewItemStore {
    *
    * `review` arrives as `unknown` because every door into this is a route
    * carrying parsed JSON, and it is gated by `checkReviewPayload` — THE
-   * checker, the same one comment-borne declarations pass through. Writing a
-   * second gate here is precisely the "two spellings of one concept" this
-   * whole change deletes: a second copy of a limit is how a card ends up
-   * rendering something the API swore it had refused.
+   * checker comment-borne declarations pass through; a second gate here is a
+   * second copy of a limit, free to drift.
    *
    * The stored payload is the one `readReviewPayload` normalizes out of the
    * input, so caller-supplied junk keys never reach the sidecar. Option ids
@@ -131,11 +128,8 @@ export class ReviewItemStore {
   /**
    * Answer ONE review item on a ticket, leaving its siblings open.
    *
-   * `r-legacy` DELEGATES to `answerDecision`, untouched. That is the whole
-   * back-compat story in one line: `task.answer`, the `optionId` validation
-   * and the `decision.answered` payload stay byte-identical for every caller
-   * that never heard of review items, and there is no second implementation of
-   * "record a decision's answer" free to drift from the first.
+   * `r-legacy` DELEGATES to `answerDecision`, untouched, so its payload stays
+   * byte-identical and there is no second "record a decision's answer".
    */
   answerTaskReview(
     taskId: string,
@@ -148,6 +142,8 @@ export class ReviewItemStore {
       /** The questions this answer left open. Non-empty on an unanswered
        *  item records a partial answer and leaves the item open. */
       openParts?: string[];
+      /** The address the request PROVED for this actor (`approver.ts`). */
+      provenEmail?: string;
     },
   ): AnswerTaskReviewResult {
     const task = this.p.getTask(taskId);
@@ -190,12 +186,14 @@ export class ReviewItemStore {
     };
     // Read before the superseded answer moves aside: recorded words are kept.
     const replaces = replacedItemAnswer(item);
+    const approver = approverFields(opts.actor, opts.provenEmail, ts);
     const record = {
       text,
       by: actor.name,
       ts,
       ...(opts.answeredWith !== undefined ? { answeredWith: opts.answeredWith } : {}),
       ...(opts.via ? { via: opts.via } : {}),
+      ...approver.record,
     };
     // An answer that left questions open is recorded beside the item rather
     // than on it: `answer` is what closes an item, and the rest is still the
@@ -221,6 +219,7 @@ export class ReviewItemStore {
       ...(opts.via ? { via: opts.via } : {}),
       ...(openParts.length > 0 ? { openParts } : {}),
       ...(replaces && openParts.length === 0 ? { replaces } : {}),
+      ...(openParts.length === 0 ? approver.event : {}),
       actor,
       links: task.links,
       ts,

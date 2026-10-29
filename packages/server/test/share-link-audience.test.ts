@@ -77,7 +77,10 @@ describe('a share link with an audience', () => {
       headers: { host: SHARE_HOST, ...CF_RAY, 'cf-access-jwt-assertion': await signJwt(email) },
     });
 
-  const mint = async (allowDomains?: unknown): Promise<string> => {
+  const mint = async (allowDomains?: string[]): Promise<string> => {
+    // The board names the same people first: a link only invites someone
+    // its board's audience admits (`board-audience.ts`).
+    if (allowDomains) handle.shareLinks.addToAudience(board, allowDomains, 'Bryan');
     const r = await postLocal('/api/share/workspace', {
       workspaceId: board,
       ...(allowDomains !== undefined ? { allowDomains } : {}),
@@ -109,13 +112,14 @@ describe('a share link with an audience', () => {
   });
 
   it('says on the reply which audience it applied', async () => {
+    handle.shareLinks.addToAudience(board, ['@harborlight.example'], 'Bryan');
     const r = await postLocal('/api/share/workspace', {
       workspaceId: board,
       allowDomains: ['@Harborlight.Example'],
     });
     expect(((await r.json()) as { audience: unknown }).audience).toEqual(['@harborlight.example']);
     const open = await postLocal('/api/share/workspace', { workspaceId: board });
-    expect(((await open.json()) as { audience: unknown }).audience).toBe('anyone-who-signs-in');
+    expect(((await open.json()) as { audience: unknown }).audience).toBe('board-audience');
   });
 
   it('refuses a malformed audience and mints nothing', async () => {
@@ -185,10 +189,23 @@ describe('a share link with an audience', () => {
     expect(await opensBoard(BOB)).toBe(200);
   });
 
-  it('with no audience, admits whoever signs in, as before', async () => {
+  it("with no audience of its own, invites only the board's audience", async () => {
     const linkId = await mint();
     const stranger = 'bob@saltmarsh.example';
+    expect((await onShareHost(`/s/${linkId}`, stranger)).status).toBe(403);
+    expect(await opensBoard(stranger)).toBe(403);
+    // Positive control: someone the board names gets in through the same link.
+    handle.shareLinks.addToAudience(board, [stranger], 'Bryan');
     expect((await onShareHost(`/s/${linkId}`, stranger)).status).toBe(302);
     expect(await opensBoard(stranger)).toBe(200);
+  });
+
+  it("ends a member when the board's audience stops naming them, on their next request", async () => {
+    const linkId = await mint(['carol@saltmarsh.example']);
+    expect((await onShareHost(`/s/${linkId}`, 'carol@saltmarsh.example')).status).toBe(302);
+    expect(await opensBoard('carol@saltmarsh.example')).toBe(200);
+    handle.shareLinks.removeFromAudience(board, 'carol@saltmarsh.example');
+    expect(await opensBoard('carol@saltmarsh.example')).toBe(403);
+    expect(await members()).not.toContain('carol@saltmarsh.example');
   });
 });

@@ -119,18 +119,27 @@ export function buildSettingsView(): string {
               <label class="board-settings-row" for="board-done-filter">Show done tasks from
                 <select id="board-done-filter" class="board-select" aria-label="Done task visibility"></select>
               </label>
-              <!-- Who can reach this board, and at what level (Bryan, 2026-09-11:
-                   "share a board with someone who can read and comment but cannot
-                   act as him"). Everyone in the workspace can read the list — a
-                   person who cannot see who else is here cannot know who reads what
-                   they write — and the controls are drawn for an Owner only. The
-                   enforcement is the API's: the routes behind these controls refuse
-                   a Regular User with a 403 whether or not the page drew them. -->
-              <div class="board-settings-row board-settings-row--members">
+              <!-- Who can sign in to this board: exact addresses and @domains, and
+                   the people each let in (Bryan, 29 Oct: "share a board with named
+                   emails or a whole domain, and only he can change who is in").
+                   Everyone in the workspace can read the list, and the controls
+                   are drawn for the owner only. The enforcement is the API's: an
+                   add from anything but the owner's signed-in browser files a
+                   proposal (board/board-members.ts). -->
+              <div class="board-settings-row board-settings-row--members" id="board-access-row">
                 <span class="board-settings-label">Who has access
                   <small id="board-members-note" class="board-settings-note"></small>
                 </span>
+                <a id="board-access-waiting" class="acc-waiting hidden" href="/access/waiting"><span id="board-access-waiting-label"></span><svg class="prompt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></a>
+                <p class="acc-sub">People</p>
                 <div id="board-members-list" class="board-members"></div>
+                <form id="board-access-add" class="acc-add hidden" autocomplete="off">
+                  <label class="acc-sub" for="board-access-input">Add someone</label>
+                  <input id="board-access-input" class="board-cap-input" name="match" type="text" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="name@company.com or @company.com" />
+                  <button type="submit" class="board-btn board-btn-primary">Add</button>
+                </form>
+                <p id="board-access-error" class="acc-err" role="status"></p>
+                <a id="board-access-link" class="acc-link hidden" href="/access"><span id="board-access-link-label">Everyone with access, on every board</span><svg class="prompt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></a>
               </div>
               <!-- What the quality gate judges an agent's ask against, in the
                    owner's own words (Bryan, 2026-08-29: "Something we can change in

@@ -104,6 +104,11 @@ const REVIEW_ITEM_SCHEMA = {
       },
       required: ['what'],
     },
+    step: {
+      type: 'string',
+      description:
+        "The step a yes lets you take, when it is one: 'push', 'jira', 'send', 'deploy'. Lower-case. A board that reserves the step for its owner (get_workspace's requireOwnerFor) files the item so only the owner can answer it.",
+    },
   },
   required: ['headline'],
 } as const;
@@ -1527,7 +1532,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'share_workspace',
       description:
-        'Mint a share link for a board. Anyone you send it to signs in once with their email (pass allowDomains to limit who), and joins that board as a Regular User — able to read and comment, not to change who else is in. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in. Returns a share.<domain>/s/<id> URL. Returns `url`, the absolute link to the share link. Give that link to a person.',
+        "Mint a share link for a board. A link only ever lets in people the board's audience names: the addresses and @domains the owner approved (list_shares shows them). A link for people the board already names is minted at once and returns `url`, the absolute share.<domain>/s/<id> link to give the person. A link that names somebody new in allowDomains, or with role 'owner', is NOT minted: it files an approval card for the owner on `taskId` and returns `proposed: true`. Only the owner can let somebody new in. When they approve, you are told, and the answer carries the link. Everything filed on the board travels with the share, so check what else is there. Pass landing to send them straight to one thing on the board after sign-in.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1546,7 +1551,7 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'array',
             items: { type: 'string' },
             description:
-              'Optional audience. Each entry is one address ("someone@partner.example") or one exact domain ("@partner.example"; subdomains are not included). Only a matching sign-in can join, checked on every request. The audience is set when the link is minted; to change it, mint a new link, unshare the old one, and remove_share_member anyone who should lose access. Omit it and anyone who opens the link and signs in joins.',
+              'Optional audience for this link. Each entry is one address ("someone@partner.example") or one exact domain ("@partner.example"; subdomains are not included). Only a matching sign-in can join, checked on every request. An entry the board does not already name makes this a proposal for the owner. Omit it and the link invites whoever the board names.',
           },
           role: {
             type: 'string',
@@ -1566,6 +1571,49 @@ export const TOOL_LIST: ListToolsResult = {
               },
             },
             required: ['kind'],
+          },
+          taskId: {
+            type: 'string',
+            description:
+              'The task that needs the access. Required when the call needs the owner: the approval card is filed there.',
+          },
+          why: {
+            type: 'string',
+            description:
+              'What the access is for, in a sentence or two the owner reads on the card. Required with taskId.',
+          },
+        },
+        required: ['workspaceId'],
+      },
+    },
+    {
+      name: 'set_share_audience',
+      description:
+        'Change who may sign in to a board at all: its audience of addresses and @domains. `remove` applies at once: anyone it no longer admits is refused on their next request and their open sockets are hung up. `add` lets somebody new in, so it is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`. Only the owner can let somebody new in; you are told when they answer. Removing one person a domain admits keeps them out while the rest of the domain stays in.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string', description: 'The board whose audience changes.' },
+          add: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Addresses ("someone@partner.example") or domains ("@partner.example") to let in.',
+          },
+          remove: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Addresses or domains to take out, as list_shares shows them.',
+          },
+          taskId: {
+            type: 'string',
+            description:
+              'The task that needs the access. Required when the call needs the owner: the approval card is filed there.',
+          },
+          why: {
+            type: 'string',
+            description:
+              'What the access is for, in a sentence or two the owner reads on the card. Required with taskId.',
           },
         },
         required: ['workspaceId'],
@@ -1587,7 +1635,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_share_member_role',
       description:
-        'Change what someone may do on a board they joined through a share link. An Owner can change who has access and their role, and can answer asks that run a command on the machine; a Regular User can do everything else. Takes effect on their next request.',
+        "Change what someone may do on a board they joined through a share link. An Owner can answer asks that run a command on the machine; a Regular User can do everything else. Only the board's owner changes who is in. A demotion takes effect on their next request. A promotion to 'owner' is NOT applied: it files an approval card for the owner on `taskId` and returns `proposed: true`; you are told when they answer.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1597,6 +1645,16 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'string',
             enum: ['owner', 'member'],
             description: "'owner' promotes them; 'member' puts them back to a Regular User.",
+          },
+          taskId: {
+            type: 'string',
+            description:
+              'The task that needs the access. Required when the call needs the owner: the approval card is filed there.',
+          },
+          why: {
+            type: 'string',
+            description:
+              'What the access is for, in a sentence or two the owner reads on the card. Required with taskId.',
           },
         },
         required: ['workspaceId', 'email', 'role'],
@@ -1639,7 +1697,7 @@ export const TOOL_LIST: ListToolsResult = {
     {
       name: 'set_sharing_enabled',
       description:
-        "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until someone turns it back on from this machine. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Call it without enabled to read the current state. Any other argument is refused.",
+        "Turn outside access off or on, for ONE board or for everything. With workspaceId it closes or reopens that board only: its share, share-link and collaboration visitors are refused and its open connections hang up, while the owner and every other board are untouched, and the answer echoes the id back. This is the precaution to use before putting sensitive material on a board (set_project_privacy keeps a project's bytes on this machine as well). Without workspaceId it is the MASTER switch: off refuses every share and link on every board, AND the owner's own public hostname, until the owner turns it back on. Every flip is logged with who, from where and the reason, and the owner is told on their queue when the master switch goes off, with a choice to turn it back on. Turning OFF applies at once. Turning ON is the owner's: for one board it is NOT applied but files an approval card on `taskId` and returns `proposed: true`; for the master switch it is refused, and the owner answers the card filed when it went off. Call it without enabled to read the current state. Any other argument is refused.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1656,13 +1714,22 @@ export const TOOL_LIST: ListToolsResult = {
             type: 'string',
             description: "Why, in a sentence. Written to the log line and the owner's notice.",
           },
+          taskId: {
+            type: 'string',
+            description:
+              'The task that needs the board open. Required to reopen: the approval card is filed there.',
+          },
+          why: {
+            type: 'string',
+            description: 'What it is for, in a sentence or two the owner reads on the card.',
+          },
         },
       },
     },
     {
       name: 'set_board_sharing_lock',
       description:
-        "Lock ONE board never-shareable, or unlock it. A locked board refuses share_workspace and every other share-link mint, naming the lock, and is closed to its share and collaboration visitors, whose open connections hang up. It is stronger than set_sharing_enabled's per-board close, which refuses visitors but still lets a link be minted. Only a call from the owner's machine can set or clear it; through the tunnel or the network it is refused. Call it without locked to read the board's current lock. Any other argument is refused.",
+        "Lock ONE board never-shareable, or unlock it. A locked board refuses share_workspace and every other share-link mint, naming the lock, and is closed to its share and collaboration visitors, whose open connections hang up. It is stronger than set_sharing_enabled's per-board close, which refuses visitors but still lets a link be minted. Only a call from the owner's machine can set or clear it; through the tunnel or the network it is refused. Locking applies at once. Unlocking is the owner's: it is NOT applied but files an approval card on `taskId` and returns `proposed: true`. Call it without locked to read the board's current lock. Any other argument is refused.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -1672,6 +1739,15 @@ export const TOOL_LIST: ListToolsResult = {
             description: 'true locks, false unlocks. Omit to read the current state.',
           },
           reason: { type: 'string', description: 'Why, in a sentence. Written to the log line.' },
+          taskId: {
+            type: 'string',
+            description:
+              'The task that needs the board unlocked. Required to unlock: the approval card is filed there.',
+          },
+          why: {
+            type: 'string',
+            description: 'What it is for, in a sentence or two the owner reads on the card.',
+          },
         },
         required: ['workspaceId'],
       },

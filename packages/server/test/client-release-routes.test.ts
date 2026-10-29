@@ -209,7 +209,11 @@ describe('client release over the attachments route', () => {
     ).json()) as ClientReleaseBody;
     expect(ownerBody.clientRelease?.stale).toBe(true);
 
-    const visitor = await mintAccessShare(base, access as AccessHarness, workspaceId);
+    const visitor = await mintAccessShare(
+      base,
+      { ...(access as AccessHarness), shareLinks: handle?.shareLinks },
+      workspaceId,
+    );
 
     const raw = await (
       await fetch(`${base}/workspaces/${workspaceId}/agents`, {

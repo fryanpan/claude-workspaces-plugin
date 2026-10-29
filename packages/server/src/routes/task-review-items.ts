@@ -16,6 +16,8 @@ import { ticketOpenParts } from '../answer-coverage.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { writeViaOf } from '../mockup-frame.ts';
 import { reviewItemAnsweredEvent, reviewItemFilerId } from '../review-items/analytics.ts';
+import { ACCESS_ANSWER_DENIAL } from '../review-items/answer-doors.ts';
+import { provenEmailFor } from '../review-items/approver.ts';
 import {
   GRANT_ANSWER_DENIAL,
   GRANT_FILING_DENIAL,
@@ -25,6 +27,7 @@ import {
   asksForSecret,
   refuseOwnerOnlyWrite,
 } from '../share/board-role.ts';
+import { SHARING_NOTICE_ACTOR } from '../sharing-notice.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import { LEGACY_REVIEW_ITEM_ID } from '../tasks.ts';
 import {
@@ -166,6 +169,16 @@ export async function handleTaskReviewItems(
       // answer_review_item, or anyone's — may stand in for the owner's own
       // press of Approve. See `routes/task-grants.ts`.
       if (asksForGrant(item?.review)) return j(400, GRANT_ANSWER_DENIAL);
+      // An ACCESS change likewise: approving it changes who is in the board,
+      // so only the owner's own press of Approve does (`routes/task-access.ts`).
+      if (item?.access !== undefined) return j(400, ACCESS_ANSWER_DENIAL);
+      // And the sharing notice, whatever shape it was filed in: one filed
+      // before it was an access card is a plain decision, and an answer here
+      // takes the author the body names.
+      const task = taskStore.getTask(taskId);
+      if (task && reviewItemFilerId(task, reviewItemId) === SHARING_NOTICE_ACTOR.id) {
+        return j(400, ACCESS_ANSWER_DENIAL);
+      }
     }
     // Checked HERE, before any write and before the ask-back conversion below,
     // because the conversion is itself a write on the item: a Regular User's
@@ -227,11 +240,13 @@ export async function handleTaskReviewItems(
       text,
       answeredWith,
     );
+    const provenEmail = provenEmailFor(rq.provenIdentityFor, author.id);
     const res = taskStore.answerTaskReview(taskId, reviewItemId, text, {
       actor: author,
       ...(answeredWith !== undefined ? { answeredWith } : {}),
       ...(via ? { via } : {}),
       ...(openParts.length > 0 ? { openParts } : {}),
+      ...(provenEmail ? { provenEmail } : {}),
     });
     // Somebody else's answer stands: a conflict, not a malformed request.
     if (!res.ok) {
@@ -513,6 +528,18 @@ export async function handleTaskReviewItems(
     {
       const denied = ownerOnlyDenial(taskId, reviewItemId);
       if (denied) return denied;
+    }
+    // The sharing notice's card is the owner's one way back in while sharing
+    // is off; an agent that withdrew it would leave him nothing to approve.
+    // Only the notice itself takes it down, when the switch comes back on.
+    {
+      const task = taskStore.getTask(taskId);
+      if (task && reviewItemFilerId(task, reviewItemId) === SHARING_NOTICE_ACTOR.id) {
+        return j(403, {
+          error: 'sharing-notice',
+          message: 'the sharing notice withdraws itself when sharing is turned back on',
+        });
+      }
     }
     const undo = taskReviewWithdrawMatch[3] !== undefined;
     const body = await safeJson(req);

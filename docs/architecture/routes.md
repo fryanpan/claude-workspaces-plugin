@@ -18,6 +18,10 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `*` | GET, HEAD, POST, PUT, DELETE | `server.ts` | open | A path segment that is not valid percent-encoding is answered 400 `bad-path` at the top of the front door, above every gate. The answer depends only on the caller’s own typo — see `path-params.ts`. |
 | `*` | OPTIONS | `server.ts` | open | CORS preflight, answered with a bare 204 before the guard runs. It carries no body, and no `Access-Control-Allow-*` unless the origin is allowed, so it discloses only that a server is here. |
 | `/` | GET | `routes/shell-static.ts` | trusted-local |  |
+| `/access` | GET | `routes/access.ts` | trusted-local |  |
+| `/access/:section` | GET | `routes/access.ts` | trusted-local |  |
+| `/api/access` | GET | `routes/access.ts` | trusted-local |  |
+| `/api/access/events:stream` | GET | `routes/access.ts` | trusted-local |  |
 | `/api/agent-notes` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agent-notes/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/agent-token` | GET | `routes/agent-identity.ts` | loopback-only |  |
@@ -144,6 +148,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/settings/prompts` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/settings/prompts/:id` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/share/:slug` | GET | `routes/auth-share.ts` | trusted-local |  |
+| `/sharing-off` | GET | `routes/access.ts` | trusted-local |  |
 | `/signin` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/sw.js` | GET | `routes/shell-static.ts` | trusted-local |  |
 | `/sw.js.map` | GET | `routes/shell-static.ts` | trusted-local |  |
@@ -183,6 +188,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/attachments/:setId/threads` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/tree` | GET | `routes/review-files.ts` | share-scope |  |
 | `/workspaces/:ws/attachments/:setId/unarchive` | POST | `routes/archive.ts` | trusted-local |  |
+| `/workspaces/:ws/audience` | POST | `routes/workspace-members.ts` | trusted-local |  |
 | `/workspaces/:ws/calendar/events/:eventId/join` | POST | `routes/meetings-calendar.ts` | trusted-local |  |
 | `/workspaces/:ws/chat-audit` | GET, POST | `routes/chat-audit-routes.ts` | trusted-local |  |
 | `/workspaces/:ws/chat-audit/:agent` | GET | `routes/chat-audit-routes.ts` | trusted-local |  |
@@ -289,8 +295,8 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/load-reports` | GET, POST | `routes/workspace-next.ts` | share-scope |  |
 | `/workspaces/:ws/manifest.webmanifest` | GET | `routes/workspace-manifest.ts` | share-scope |  |
 | `/workspaces/:ws/members` | GET | `routes/workspace-members.ts` | share-scope |  |
-| `/workspaces/:ws/members/:email` | DELETE | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself |
-| `/workspaces/:ws/members/:email/role` | POST | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses a Regular User itself |
+| `/workspaces/:ws/members/:email` | DELETE | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |
+| `/workspaces/:ws/members/:email/role` | POST | `routes/workspace-members.ts` | owner-in-handler | the guard admits `members/*`; `workspace-members.ts` refuses every share visitor itself |
 | `/workspaces/:ws/mockups/:docId` | GET | `routes/shell-static.ts` | share-scope |  |
 | `/workspaces/:ws/next` | GET | `routes/workspace-next.ts` | trusted-local |  |
 | `/workspaces/:ws/parallelism-cap` | GET, PUT | `routes/workspace-settings.ts` | trusted-local |  |
@@ -322,6 +328,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/tasks/:taskId/park` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/restore` | POST | `routes/task-fields.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items` | POST | `routes/task-review-items.ts` | share-scope |  |
+| `/workspaces/:ws/tasks/:taskId/review-items/:itemId/access` | POST | `routes/task-access.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/answer` | POST | `routes/task-review-items.ts` | share-scope |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/answer/undo` | POST | `routes/task-review-answer-undo.ts` | trusted-local |  |
 | `/workspaces/:ws/tasks/:taskId/review-items/:itemId/grant` | POST | `routes/task-grants.ts` | trusted-local |  |

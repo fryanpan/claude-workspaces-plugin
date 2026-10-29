@@ -89,6 +89,13 @@ export interface AccessHarness {
   };
   /** Sign a token for one share's AUD, as the given email. */
   signJwt: (aud: string, email?: string) => Promise<string>;
+  /**
+   * The server's share-link store. Given, `mintAccessShare` first names the
+   * share's audience on the board, as the owner's approval would: only the
+   * owner lets somebody new in (Bryan, 29 Oct), and an agent's mint for
+   * people the board does not name files a card instead.
+   */
+  shareLinks?: { addToAudience: (workspaceId: string, matches: string[], by: string) => unknown };
 }
 
 /** The keys and the `createServer` options an Access share needs. */
@@ -143,12 +150,18 @@ export async function mintAccessShare(
   workspaceId: string,
   opts: { label?: string; ttlSeconds?: number; allowDomains?: string[] } = {},
 ): Promise<MintedShare> {
+  const allowDomains = opts.allowDomains ?? ['@partner.example'];
+  harness.shareLinks?.addToAudience(
+    workspaceId,
+    allowDomains.map((d) => (d.includes('@') ? d.toLowerCase() : `@${d.toLowerCase()}`)),
+    'Harborlight',
+  );
   const res = await fetch(`${base}/api/share/link`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       workspaceId,
-      allowDomains: opts.allowDomains ?? ['@partner.example'],
+      allowDomains,
       ...(opts.label ? { label: opts.label } : {}),
       ...(opts.ttlSeconds ? { ttlSeconds: opts.ttlSeconds } : {}),
     }),

@@ -113,7 +113,11 @@ describe('a revoked share loses its event stream', () => {
       body: JSON.stringify({ docId: 'ws-shared' }),
     });
     expect(filed.status).toBe(200);
-    const minted = await mintAccessShare(base, access, boardId);
+    const minted = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      boardId,
+    );
     visitorHeaders = minted.headers;
 
     /** Post a comment as the owner — every live stream should see it. */

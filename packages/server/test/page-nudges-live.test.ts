@@ -133,8 +133,17 @@ describe('page nudges', () => {
       JSON.stringify({
         links: [],
         members: [
-          { workspaceId: WS, email: 'riverbend@example.com', addedAt: 1, viaLinkId: 'l-1' },
+          {
+            workspaceId: WS,
+            email: 'riverbend@example.com',
+            addedAt: 1,
+            viaLinkId: 'l-1',
+            role: 'owner',
+          },
         ],
+        // Already migrated, so the Owner row is read as written (an
+        // unmigrated registry's invited Owners become members on load).
+        audiences: [{ workspaceId: WS, entries: [{ match: 'riverbend@example.com', addedAt: 1 }] }],
       }),
     );
     boot();
@@ -143,7 +152,7 @@ describe('page nudges', () => {
       const res = await send(
         `/workspaces/${WS}/members/${encodeURIComponent('riverbend@example.com')}/role`,
         'POST',
-        { role: 'owner' },
+        { role: 'member' },
       );
       expect(res.status).toBe(200);
       await waitFor(() => page.names().includes('members.changed'));
