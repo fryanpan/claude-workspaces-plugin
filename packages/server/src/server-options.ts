@@ -67,6 +67,13 @@ export interface ServerOptions {
    * must not take the wildcard.
    */
   hostname?: string;
+  /**
+   * Also listen on one unix socket per live board in this folder,
+   * `<boardId>.sock` (`board-sockets.ts`): a sandboxed lead's one way in,
+   * held to the board its socket names. Unset, there are none. Must be short
+   * enough for a socket path (`boardSocketDirError`).
+   */
+  boardSocketDir?: string;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,

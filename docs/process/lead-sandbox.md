@@ -129,6 +129,25 @@ Fly tokens included until the keeper's cutover. A lead that needs only git
 fetch and push to named GitHub repos lists them in `githubRepos` instead and
 keeps the keychain refused ("GitHub through the proxy", below).
 
+**A test lead for the board wall** sets `"boardWall": true` and its board's
+id, `"boardId": "w-…"`, in its entry. The profile then denies every board
+server's port (8787 to 8790, the list in
+`packages/server/src/reserved-ports.ts`, which `bun run staging` also
+enforces) at every address, and every socket in the board socket folder but
+its own board's, and every write in that folder. So the lead's only way to a
+board is its own board's socket, where the server holds each request to that
+board whatever token it carries. The folder is the config's top-level
+`boardSocketDir`, or `/private/tmp/cw-<uid>-boards` when unset; a folder too
+long for a socket path is refused. The lead's own MCP child and hooks do not
+use that socket yet, so `--lead` refuses to launch a lead with `boardWall`
+set: it is for `--check`, which connects to each port at both loopbacks and
+each LAN and tailnet address from inside the profile (each must be refused
+with `EPERM`), to its own board's socket (it must not be), and to each other
+board's socket in the folder (each must be refused, and must connect without
+the wall: the control). The socket rows need a server with board sockets on;
+with no other board's socket in the folder, that row fails. Real leads leave
+it off and are unchanged.
+
 **A lead that runs tmux sessions of its own** sets `"allowTmux": true` in its
 entry. Every other lead is refused the tmux socket by default, because a lead
 that can reach it can `tmux send-keys` into any unsandboxed session, the Team
@@ -483,7 +502,10 @@ Sandbox, a macOS user per lead, a VM) is planned for either.
   which runs as Bryan outside the wall, to read a file the lead cannot. The
   lead's own MCP child and hooks reach the same port, so the profile cannot
   simply deny it. This closes with a board agent token per lead, scoped to
-  that lead's board: the same token a lead on Fly needs.
+  that lead's board: the same token a lead on Fly needs. The wall
+  (`boardWall`, above) and the board sockets it leaves one of open have
+  landed, for `--check` only; a real lead gets them once its tools reach its
+  board's socket.
 - **The keychain answers a lead with `allowKeychain`.** By default the
   profile refuses the keychain (step 1): measured 28 October, a dummy item
   read back from inside a profile before the rule was refused after it
