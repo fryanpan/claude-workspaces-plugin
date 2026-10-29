@@ -277,4 +277,23 @@ describe('a review item linked onto a thread from another board', () => {
     );
     expect(reply.status).toBe(200);
   });
+
+  it('refuses the owner’s agent too, once the thread’s board is shared, for an item from another board', async () => {
+    // The case before shared board A, and the first case linked this same
+    // item while it was not: sharing is the only thing that changed.
+    const before = (await commentsOnA()).length;
+    const res = await link({
+      author: AGENT,
+      item: { workspaceId: boardB, taskId: taskB, reviewItemId: itemB },
+    });
+    expect(res.status).toBe(403);
+    // The same words for an item that does not exist: no existence oracle.
+    const ghost = await link({
+      author: AGENT,
+      item: { workspaceId: boardB, taskId: taskB, reviewItemId: 'r-none' },
+    });
+    expect(ghost.status).toBe(403);
+    expect(await ghost.text()).toBe(await res.clone().text());
+    expect((await commentsOnA()).length).toBe(before);
+  });
 });

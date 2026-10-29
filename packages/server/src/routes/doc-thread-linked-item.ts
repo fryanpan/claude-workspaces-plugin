@@ -13,11 +13,15 @@
  * Gated as a reply is — the board scope this resource block already sits
  * behind, `authorFor` and the category-author refusal — and closed to share
  * visitors outright: the item may be on a board the visitor cannot see, and
- * its headline is that board's content.
+ * its headline is that board's content. For the same reason an item from
+ * another board is refused onto a board that is shared at all, unless the
+ * owner asks from the board's own page: the snapshot would be read there by
+ * its members.
  */
 import { linkedItemText } from '@claude-workspaces/core';
 import { parseLinkItemRequest, resolveLinkedItem } from '../linked-review-item.ts';
 import { writeViaOf } from '../mockup-frame.ts';
+import { hasOwnerProof } from '../share/owner-proof.ts';
 import { isCategoryAuthor } from '../task-owner.ts';
 import type { DocResourceRouteRequest, DocRoutesContext } from './docs-routes-context.ts';
 
@@ -52,6 +56,24 @@ export async function handleDocThreadLinkedItemRoute(
     });
   }
   if (!docStore.getThread(rq.docId, threadId)) return j(404, { error: 'thread not found' });
+  // Another board's item on a board somebody else can open would show them
+  // that board's headline, which nobody gave them (security.md: a read of
+  // another board dressed as a write). So it is linked only onto a board
+  // nobody else can open, or by the owner from the board's own page. Asked
+  // before the item is looked up, so the refusal says nothing about whether
+  // it exists.
+  const here = rq.scope?.workspaceId;
+  if (
+    parsed.workspaceId !== here &&
+    (!here || ctx.boardIsShared(here)) &&
+    !hasOwnerProof(rq.req, rq.provenIdentityFor, rq.requestOriginFor)
+  ) {
+    return j(403, {
+      error:
+        'this board is shared, so only its owner, from the board, may link a review item ' +
+        'from another board here: its headline would reach people that board was never shared with',
+    });
+  }
   // A doc named by an alias is stored by its own id, so the snapshot's ref
   // and link name the doc the way every other surface does.
   const request =

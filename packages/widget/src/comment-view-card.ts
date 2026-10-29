@@ -19,8 +19,9 @@ export function linkedHtml(item: LinkedReviewItem): string {
     '<div class="cw-linked" data-linked-item>' +
     `<span class="from">Review item · ${esc(item.board)}</span>` +
     `<span class="hl">${esc(item.headline)}</span>` +
-    // A board page: the frame's bridge opens it at the top (`mock-bridge.ts`).
-    `<a href="${esc(item.url)}" target="_top">Open item</a>` +
+    // A board page. No target: inside a mock's frame the bridge points it at
+    // the board's hostname and opens it at the top (`mock-bridge.ts`).
+    `<a href="${esc(item.url)}">Open item</a>` +
     '</div>'
   );
 }

@@ -2714,6 +2714,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const docRoutesCtx: DocRoutesContext = {
+    boardIsShared,
     docStore,
     taskStore,
     taskProjection,

@@ -454,6 +454,8 @@ export async function serveBoardRoutes(
       requireOwner,
       metaFor,
       withTaskChips,
+      provenIdentityFor,
+      requestOriginFor: () => policyFor(req).requestOrigin,
     });
     if (handled) return handled;
   }
