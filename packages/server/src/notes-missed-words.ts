@@ -79,12 +79,10 @@ export function missedBlock<T extends { text: string }>(
   prefix: (turn: T) => string,
 ): string {
   return [
-    'SAID EARLIER AND STILL IN NO NOTE, by a check of the words. That check',
-    'misses a note that says the same thing in other words, so first read the',
-    'notes under the heading each line belongs to. If a note there already',
-    'says it, write nothing for that line: a second note saying it again is a',
-    'repeat. Otherwise write the note it should have produced, under that',
-    'heading. Where a line gives a reason, a cause or a trade-off for',
+    'SAID EARLIER AND STILL IN NO NOTE. Each of these went past without',
+    'producing anything. Read them again with the notes above in front of',
+    'you: write the note each one should have produced, under the heading',
+    'it belongs to. Where a line gives a reason, a cause or a trade-off for',
     'a point the notes already make, replace that note so it carries the',
     'reason too ("X, because Y") — the reason is an idea, not packaging,',
     'and it belongs with its point. Leave one out only if it is a greeting or a',
