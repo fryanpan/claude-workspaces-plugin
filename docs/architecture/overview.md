@@ -727,6 +727,15 @@ through `docStore.postComment` â€” the choke point all three write paths share â
 carrying the doc, the thread, the author and the LENGTH of the text, never the
 text. Between them, the next lost comment can be told from one nobody sent.
 
+**Enter sends in every comment box.** `core/src/send-key.ts` (a new top-level
+core module) is the one keydown rule: Enter or Cmd/Ctrl+Enter sends,
+Shift+Enter is a line, and an IME's Enter never sends. The board's
+`ComposerForm`, the walkthrough's answer box, the doc card's reply and answer
+field, the doc's new-comment composer and thread view, and the widget's two
+boxes all call it, and each hands it the same send its button runs, so an
+empty box refuses Enter the way it refuses the button. It takes structural
+types, not DOM ones, so it touches no `document`.
+
 **And a comment that DID reach somebody says that too, on the comment.** The
 other half of the same question: one grey tick means the server has it, two
 mean a session watching the doc was handed it, and both disappear once a reply

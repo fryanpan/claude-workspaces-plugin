@@ -46,6 +46,7 @@ import {
   reviewItemBodyMarkdown,
   sizeAllowed,
 } from '@claude-workspaces/core';
+import { sendOnEnter } from '@claude-workspaces/core/send-key';
 import { signal } from '@preact/signals';
 import { Fragment, render } from 'preact';
 import { type MutableRef, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -358,6 +359,9 @@ function fillPromptForm(form: HTMLFormElement, spec: PromptSpec): () => void {
       });
   };
   form.addEventListener('submit', onSubmit);
+  // Enter sends, Shift+Enter is a line — the rule of every comment box
+  // (core/send-key.ts), reached through the editor's re-dispatch onto `ta`.
+  sendOnEnter(ta, () => form.requestSubmit());
   return () => {
     form.removeEventListener('submit', onSubmit);
     form.replaceChildren();

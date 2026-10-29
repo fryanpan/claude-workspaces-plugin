@@ -52,6 +52,7 @@
     "./review-item-id": "./src/review-item-id.ts",
     "./secret-line": "./src/secret-line.ts",
     "./secret-name": "./src/secret-name.ts",
+    "./send-key": "./src/send-key.ts",
     "./schedule-missed": "./src/schedule-missed.ts",
     "./schedule-run-record": "./src/schedule-run-record.ts",
     "./schedule-wake": "./src/schedule-wake.ts",

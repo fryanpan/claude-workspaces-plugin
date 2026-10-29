@@ -190,8 +190,13 @@ export function attachMarkdownComposer(ta: HTMLTextAreaElement): () => void {
   //
   // The proxy does NOT bubble. Ancestor handlers already see the real event
   // on its way up from the editor; a bubbling proxy would deliver it twice.
+  //
+  // A composing Enter is the IME's, never the composer's, and stays with the
+  // editor. Checked here because the proxy cannot carry Safari's sign of it:
+  // a constructed event's keyCode is 0, so keyCode 229 would arrive as a send.
   surface.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' && ev.key !== 'Escape') return;
+    if (ev.isComposing || ev.keyCode === 229) return;
     const proxy = new KeyboardEvent('keydown', {
       key: ev.key,
       code: ev.code,

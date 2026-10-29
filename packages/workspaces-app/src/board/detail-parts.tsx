@@ -16,6 +16,7 @@
  * ever needed off the task was its id — the draft's identity and the post's
  * destination. Taking the id makes that literal instead of implied.
  */
+import { sendOnEnter } from '@claude-workspaces/core/send-key';
 import type { RefObject } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { attachMarkdownComposer, focusMarkdownComposer } from '../md-composer.ts';
@@ -171,16 +172,12 @@ function fillComposerForm(form: HTMLFormElement, latest: () => ComposerSpec): ()
     attempt();
   };
   form.addEventListener('submit', onSubmit);
-  // Cmd+Enter sends (Ctrl+Enter off a Mac). The listener sits on the textarea
-  // rather than the form because that is the one address every keystroke
-  // reaches: the mounted editor's surface re-dispatches its Enter keydowns
-  // onto the textarea (md-composer.ts) and honours a consumed proxy — the
-  // preventDefault inside `onSubmit` is what keeps the editor from also
-  // inserting a paragraph under the send.
-  ta.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'Enter' || !(ev.metaKey || ev.ctrlKey) || ev.isComposing) return;
-    onSubmit(ev);
-  });
+  // Enter sends, Shift+Enter is a line, as in every comment box
+  // (core/send-key.ts). The listener sits on the textarea rather than the
+  // form because that is the one address every keystroke reaches: the mounted
+  // editor's surface re-dispatches its Enter keydowns onto the textarea
+  // (md-composer.ts) and honours a consumed proxy.
+  sendOnEnter(ta, () => attempt());
   return () => {
     form.removeEventListener('submit', onSubmit);
     form.replaceChildren();
