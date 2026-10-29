@@ -731,7 +731,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // A share visitor's stream carries the §3.3 visitor-contract view
         // of every board event (display names, projected tasks) — the SSE
         // feed is the second door next to the ws doc, and redacting one
-        // transport but not the other is how the DocMeta leak shipped.
+        // transport but not the other is how the DocMeta leak shipped. It
+        // carries no lead-chat frame at all (`visitorBoardFrame`).
         // An agent's MCP child names itself here; a browser tab does not.
         // A visitor never counts as one — their stream is authorized by a
         // share, and letting a share-bearer claim an agentId would let an

@@ -96,21 +96,6 @@ function isTaskShape(value: unknown): value is Task {
 }
 
 /**
- * A share visitor's copy of one frame on the board feed, or undefined to
- * send them nothing.
- *
- * The lead chat's frames (`lead-chat.*`) are the owner's conversation with
- * the board's lead and the meeting it runs: every line said, the people in
- * it and the tab holding the microphone. Both lead-chat routes refuse a
- * visitor, so the feed must too; everything else is
- * `redactBoardEventForVisitor`.
- */
-export function visitorBoardFrame<T extends { event: string }>(payload: T): T | undefined {
-  if (payload.event.startsWith('lead-chat.')) return undefined;
-  return redactBoardEventForVisitor(payload);
-}
-
-/**
  * The payload a share visitor's SSE stream may carry. Returns the input
  * object itself when nothing needs redacting, so owner streams (which never
  * call this) and untouched events pay nothing.
@@ -139,4 +124,23 @@ export function redactBoardEventForVisitor<T extends { event: string }>(payload:
     for (const key of REVIEW_ITEM_PRIVATE_FIELDS) delete out[key];
   }
   return out as unknown as T;
+}
+
+/**
+ * Event families a visitor's stream never carries, whatever their fields.
+ *
+ * `lead-chat.*` is the owner's conversation with the board's lead. Both of
+ * its routes refuse a visitor, but its frames ride the board stream a visitor
+ * may open, and the whole frame is the conversation, so there is nothing to
+ * redact it down to.
+ */
+const VISITOR_DROPPED_EVENT = /^lead-chat\./;
+
+/**
+ * A share visitor's copy of one board-stream frame: `undefined` drops it,
+ * otherwise it is `redactBoardEventForVisitor`'s view.
+ */
+export function visitorBoardFrame<T extends { event: string }>(payload: T): T | undefined {
+  if (VISITOR_DROPPED_EVENT.test(payload.event)) return undefined;
+  return redactBoardEventForVisitor(payload);
 }

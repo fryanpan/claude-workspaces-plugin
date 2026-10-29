@@ -212,18 +212,25 @@ describe('redactBoardEventForVisitor', () => {
   });
 });
 
-describe('the lead chat on a visitor’s feed', () => {
-  it('sends a share visitor none of the owner’s chat or meeting frames', () => {
-    for (const event of ['lead-chat.changed', 'lead-chat.meeting', 'lead-chat.meeting-line']) {
+describe('visitorBoardFrame', () => {
+  it('drops a lead-chat frame and redacts every other one', () => {
+    expect(
+      visitorBoardFrame({ event: 'lead-chat.changed', message: { text: 'hi' } }),
+    ).toBeUndefined();
+    const out: unknown = visitorBoardFrame({
+      event: 'task.created',
+      actor: { id: 'known-alice', name: 'Alice', kind: 'known' },
+    });
+    expect(out).toEqual({ event: 'task.created', actor: { name: 'Alice', kind: 'known' } });
+  });
+});
+
+describe('the lead chat meeting on a visitor’s feed', () => {
+  it('sends a share visitor none of the meeting or its lines', () => {
+    for (const event of ['lead-chat.meeting', 'lead-chat.meeting-line']) {
       expect(
         visitorBoardFrame({ event, workspaceId: 'w-1', line: { text: 'Lead, …' } }),
       ).toBeUndefined();
     }
-    // Positive control: a board event still reaches them, redacted.
-    const out = visitorBoardFrame({
-      event: 'task.created',
-      actor: { id: 'known-alice', name: 'Alice', kind: 'known' },
-    }) as { actor?: Record<string, unknown> } | undefined;
-    expect(out?.actor).toEqual({ name: 'Alice', kind: 'known' });
   });
 });
