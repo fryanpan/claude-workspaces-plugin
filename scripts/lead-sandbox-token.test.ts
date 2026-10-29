@@ -12,6 +12,7 @@ import {
   TOKEN_ENV,
   TOKEN_SERVICE,
   decodeToken,
+  resolveAccount,
   tokenEnv,
   turnCheck,
   turnRow,
@@ -19,18 +20,39 @@ import {
 import { type LaunchDeps, main } from './lead-sandbox.ts';
 
 const TOKEN = 'sk-ant-oat01-test-harborlight-0000';
-const STORED = `${Buffer.from(TOKEN).toString('base64')}\n`;
+const OTHER = 'sk-ant-oat01-test-riverbend-1111';
+const b64 = (t: string) => `${Buffer.from(t).toString('base64')}\n`;
+const STORED = b64(TOKEN);
+/** The un-labelled item only. */
+const PLAIN = { [TOKEN_SERVICE]: STORED };
+/** One item per labelled account. */
+const BOTH = {
+  [`${TOKEN_SERVICE}.harborlight`]: b64(TOKEN),
+  [`${TOKEN_SERVICE}.riverbend`]: b64(OTHER),
+};
 
 const root = mkdtempSync(join(tmpdir(), 'lead-sandbox-token-'));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-function configFile(allowKeychain: boolean): string {
+let configs = 0;
+function configFile(
+  allowKeychain: boolean,
+  accounts: {
+    claudeAccounts?: string[];
+    defaultClaudeAccount?: string;
+    claudeAccount?: string;
+  } = {},
+): string {
   const project = join(root, 'dev', 'harborlight');
   mkdirSync(project, { recursive: true });
-  const file = join(root, `config-${allowKeychain}.json`);
+  const file = join(root, `config-${configs++}.json`);
+  const { claudeAccount, ...top } = accounts;
   writeFileSync(
     file,
-    JSON.stringify({ leads: [{ name: 'harborlight-lead', projects: [project], allowKeychain }] }),
+    JSON.stringify({
+      ...top,
+      leads: [{ name: 'harborlight-lead', projects: [project], allowKeychain, claudeAccount }],
+    }),
   );
   return file;
 }
@@ -39,17 +61,17 @@ interface Run {
   code: number;
   lines: string[];
   spawned: { file: string; args: string[]; env: Record<string, string | undefined> }[];
-  reads: number;
+  reads: string[];
 }
 
-function run(argv: string[], stored: string | null): Run {
-  const out: Run = { code: 0, lines: [], spawned: [], reads: 0 };
+function run(argv: string[], items: Record<string, string>): Run {
+  const out: Run = { code: 0, lines: [], spawned: [], reads: [] };
   const deps: LaunchDeps = {
     platform: 'darwin',
     say: (line) => out.lines.push(line),
-    readToken: () => {
-      out.reads++;
-      return stored;
+    readToken: (service) => {
+      out.reads.push(service);
+      return items[service] ?? null;
     },
     spawn: (file, args, opts) => {
       out.spawned.push({ file, args, env: opts.env });
@@ -60,15 +82,24 @@ function run(argv: string[], stored: string | null): Run {
   return out;
 }
 
-const launch = (allowKeychain: boolean) => [
+const launchWith = (config: string, ...extra: string[]) => [
   '--config',
-  configFile(allowKeychain),
+  config,
   '--profiles',
   join(root, 'profiles'),
   '--lead',
   'harborlight-lead',
+  ...extra,
   '--',
   'claude',
+];
+const launch = (allowKeychain: boolean) => launchWith(configFile(allowKeychain));
+const dryRun = (config: string, ...extra: string[]) => [
+  '--config',
+  config,
+  '--profiles',
+  join(root, 'profiles'),
+  ...extra,
 ];
 
 let written: string[] = [];
@@ -85,7 +116,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('launching a walled lead', () => {
   it('hands the decoded token to the child as CLAUDE_CODE_OAUTH_TOKEN', () => {
-    const r = run(launch(false), STORED);
+    const r = run(launch(false), PLAIN);
     expect(r.code).toBe(0);
     expect(r.spawned).toHaveLength(1);
     expect(r.spawned[0]?.env[TOKEN_ENV]).toBe(TOKEN);
@@ -93,7 +124,7 @@ describe('launching a walled lead', () => {
   });
 
   it('refuses the launch, naming the item and `claude setup-token`, when the item is missing', () => {
-    const r = run(launch(false), null);
+    const r = run(launch(false), {});
     expect(r.code).toBe(2);
     expect(r.spawned).toHaveLength(0);
     const said = r.lines.join('\n');
@@ -102,32 +133,88 @@ describe('launching a walled lead', () => {
   });
 
   it('refuses a stored value that is not BASE64', () => {
-    const r = run(launch(false), 'not base64!');
+    const r = run(launch(false), { [TOKEN_SERVICE]: 'not base64!' });
     expect(r.code).toBe(2);
     expect(r.spawned).toHaveLength(0);
   });
 
   it('launches an allowKeychain lead without a token', () => {
-    const r = run(launch(true), null);
+    const r = run(launch(true), {});
     expect(r.code).toBe(0);
     expect(r.spawned).toHaveLength(1);
     expect(r.spawned[0]?.env[TOKEN_ENV]).toBeUndefined();
   });
 
   it('never writes the value to stdout, stderr or the dry run', () => {
-    const runs = [
-      run(launch(false), STORED),
-      run(['--config', configFile(false), '--profiles', join(root, 'profiles')], STORED),
-    ];
+    const runs = [run(launch(false), PLAIN), run(dryRun(configFile(false)), PLAIN)];
     for (const r of runs) expect(r.lines.join('\n')).not.toContain(TOKEN);
     expect(written.join('')).not.toContain(TOKEN);
     expect(written.join('')).not.toContain(STORED.trim());
   });
 
   it('does not read the keychain for a dry run', () => {
-    const r = run(['--config', configFile(false), '--profiles', join(root, 'profiles')], STORED);
+    const r = run(dryRun(configFile(false)), PLAIN);
     expect(r.code).toBe(0);
-    expect(r.reads).toBe(0);
+    expect(r.reads).toEqual([]);
+  });
+});
+
+describe('choosing a Claude account', () => {
+  const two = { claudeAccounts: ['harborlight', 'riverbend'] };
+
+  it("signs a lead in with its own account's item", () => {
+    const r = run(launchWith(configFile(false, { ...two, claudeAccount: 'riverbend' })), BOTH);
+    expect(r.code).toBe(0);
+    expect(r.reads).toEqual([`${TOKEN_SERVICE}.riverbend`]);
+    expect(r.spawned[0]?.env[TOKEN_ENV]).toBe(OTHER);
+  });
+
+  it('falls back to defaultClaudeAccount, and --claude-account overrides both', () => {
+    const config = configFile(false, { ...two, defaultClaudeAccount: 'harborlight' });
+    expect(run(launchWith(config), BOTH).spawned[0]?.env[TOKEN_ENV]).toBe(TOKEN);
+    const moved = run(launchWith(config, '--claude-account', 'riverbend'), BOTH);
+    expect(moved.spawned[0]?.env[TOKEN_ENV]).toBe(OTHER);
+  });
+
+  it('refuses an account that is not listed, naming the item', () => {
+    const r = run(launchWith(configFile(false, two), '--claude-account', 'saltmarsh'), BOTH);
+    expect(r.code).toBe(2);
+    expect(r.spawned).toHaveLength(0);
+    expect(r.lines.join('\n')).toContain(`${TOKEN_SERVICE}.saltmarsh`);
+  });
+
+  it('refuses a listed account whose item is missing, even for an allowKeychain lead', () => {
+    const r = run(launchWith(configFile(true, { ...two, claudeAccount: 'riverbend' })), PLAIN);
+    expect(r.code).toBe(2);
+    expect(r.spawned).toHaveLength(0);
+    expect(r.lines.join('\n')).toContain(`${TOKEN_SERVICE}.riverbend`);
+  });
+
+  it('refuses a config whose lead names an account not in claudeAccounts', () => {
+    const r = run(dryRun(configFile(false, { ...two, claudeAccount: 'saltmarsh' })), BOTH);
+    expect(r.code).toBe(2);
+    expect(r.lines.join('\n')).toContain('not one of claudeAccounts');
+  });
+
+  it('prints in the dry run which account each lead resolves to, never a token', () => {
+    const config = configFile(false, { ...two, defaultClaudeAccount: 'harborlight' });
+    const plain = run(dryRun(config), BOTH);
+    expect(plain.lines.join('\n')).toContain(
+      `account harborlight, with the token in keychain item ${TOKEN_SERVICE}.harborlight`,
+    );
+    const moved = run(dryRun(config, '--claude-account', 'riverbend'), BOTH);
+    expect(moved.lines.join('\n')).toContain('account riverbend');
+    for (const r of [plain, moved]) {
+      expect(r.reads).toEqual([]);
+      expect(r.lines.join('\n')).not.toContain(TOKEN);
+      expect(r.lines.join('\n')).not.toContain(OTHER);
+    }
+  });
+
+  it('uses the un-labelled item when no account is named anywhere', () => {
+    expect(resolveAccount({}, { claudeAccounts: [] })).toEqual({ ok: true, account: undefined });
+    const r = run(launch(false), PLAIN);
+    expect(r.reads).toEqual([TOKEN_SERVICE]);
   });
 });
 
@@ -140,8 +227,11 @@ describe('the token', () => {
   });
 
   it('is required for a walled lead and optional for an allowKeychain one', () => {
-    expect(tokenEnv({ allowKeychain: false }, () => null).ok).toBe(false);
-    expect(tokenEnv({ allowKeychain: true }, () => null)).toEqual({ ok: true, env: {} });
+    expect(tokenEnv({ allowKeychain: false }, undefined, () => null).ok).toBe(false);
+    expect(tokenEnv({ allowKeychain: true }, undefined, () => null)).toEqual({
+      ok: true,
+      env: {},
+    });
   });
 });
 
@@ -154,6 +244,7 @@ describe('the claude turn row', () => {
     let spawned = 0;
     const row = turnCheck({ allowKeychain: false }, '/p.sb', '/cwd', {
       turn: false,
+      account: undefined,
       read: () => STORED,
       env: {},
       spawn: () => {
@@ -166,11 +257,12 @@ describe('the claude turn row', () => {
     expect(spawned).toBe(0);
   });
 
-  it('runs with the token under --turn, and fails a walled lead without one', () => {
+  it("runs with the lead's account's token under --turn, and fails a walled lead without one", () => {
     let env: Record<string, string | undefined> = {};
     const ran = turnCheck({ allowKeychain: false }, '/p.sb', '/cwd', {
       turn: true,
-      read: () => STORED,
+      account: 'riverbend',
+      read: (service) => BOTH[service] ?? null,
       env: {},
       spawn: (_f, _a, opts) => {
         env = opts.env;
@@ -178,9 +270,11 @@ describe('the claude turn row', () => {
       },
     });
     expect(ran).toMatchObject({ ran: true, ok: true });
-    expect(env[TOKEN_ENV]).toBe(TOKEN);
+    expect(ran.says).toContain('claude turn as riverbend:');
+    expect(env[TOKEN_ENV]).toBe(OTHER);
     const missing = turnCheck({ allowKeychain: false }, '/p.sb', '/cwd', {
       turn: true,
+      account: undefined,
       read: () => null,
       env: {},
       spawn: fake(0, 'ok'),

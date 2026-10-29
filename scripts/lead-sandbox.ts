@@ -10,6 +10,7 @@
  *   bun scripts/lead-sandbox.ts --config <file> --check         # prove each wall from inside it
  *   bun scripts/lead-sandbox.ts --config <file> --check --turn  # and one `claude -p` turn per lead
  *   bun scripts/lead-sandbox.ts --config <file> --lead <name> -- claude [args]   # launch
+ *   bun scripts/lead-sandbox.ts --config <file> --lead <name> --claude-account <label> -- claude
  *
  * Profiles go to `~/.config/claude-workspaces/lead-sandbox/`, or to
  * `--profiles <dir>`. A config path or profile folder given relative is
@@ -27,7 +28,8 @@
  *
  * A launch reads the lead's Claude Code token from the keychain, outside the
  * wall, and hands it over as `CLAUDE_CODE_OAUTH_TOKEN`
- * (`lead-sandbox-token.ts`).
+ * (`lead-sandbox-token.ts`): the token of the Claude account
+ * `--claude-account` names, else the one the config gives the lead.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -46,7 +48,14 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
-import { type TokenReader, readKeychainToken, tokenEnv, turnCheck } from './lead-sandbox-token.ts';
+import {
+  type TokenReader,
+  readKeychainToken,
+  resolveAccount,
+  tokenEnv,
+  tokenService,
+  turnCheck,
+} from './lead-sandbox-token.ts';
 import { shellQuote } from './mac-lead-users-lib.ts';
 
 const machine: Machine = {
@@ -165,6 +174,7 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
   }
   const { config } = parsed;
   profileDir = resolve(flag('--profiles') ?? PROFILE_DIR);
+  const accountFlag = flag('--claude-account');
   const guard = [file, profileDir];
 
   const leadName = flag('--lead');
@@ -183,7 +193,12 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       say(
         `warning: this script runs from ${here}, inside ${lead.name}'s own project, so the lead can edit the generator of its next profile. Launch from prod's checkout.`,
       );
-    const token = tokenEnv(lead, deps.readToken);
+    const account = resolveAccount(lead, config, accountFlag);
+    if (!account.ok) {
+      say(`launch refused for ${lead.name}: ${account.error}`);
+      return 2;
+    }
+    const token = tokenEnv(lead, account.account, deps.readToken);
     if (!token.ok) {
       say(`launch refused for ${lead.name}: ${token.error}`);
       return 2;
@@ -241,8 +256,14 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
         if (!row.ok) bad++;
         say(`${row.ok ? 'ok  ' : 'FAIL'} ${lead.name}  ${row.says}`);
       }
+      const account = resolveAccount(lead, config, accountFlag);
+      if (!account.ok) {
+        say(`check refused: ${account.error}`);
+        return 2;
+      }
       const row = turnCheck(lead, profile, cwd, {
         turn,
+        account: account.account,
         read: deps.readToken,
         env: { ...process.env, ...gitProxyFiles(lead, config) },
       });
@@ -277,6 +298,14 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     say(`${lead.name}: ${shellQuote([...wrapper, '--lead', lead.name, '--', 'claude'])}`);
     const launch = launchCommand(lead, path, ['claude']);
     say(`  which runs, in ${launch.cwd}: ${shellQuote(launch.argv)}`);
+    const account = resolveAccount(lead, config, accountFlag);
+    if (!account.ok) {
+      say(`  ${account.error}`);
+      return 2;
+    }
+    say(
+      `  signed in to Claude as ${account.account ? `account ${account.account}` : 'the one unlabelled account'}, with the token in keychain item ${tokenService(account.account)}`,
+    );
     if (lead.githubRepos.length > 0)
       say(
         `  with git sent to the GitHub proxy on 127.0.0.1:${config.gitProxyPort} for ${lead.githubRepos.join(', ')}; token and git config in ${gitProxyLeadDir(machine.home, lead.name)}`,

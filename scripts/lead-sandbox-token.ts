@@ -11,6 +11,12 @@
  * account `claude-workspaces`, service `claude-workspaces-secret.<name>`.
  * The value goes into the child's environment and nowhere else: never a log
  * line, an error, the dry run or a file.
+ *
+ * The owner has more than one Claude account. The config labels them
+ * (`claudeAccounts`), and the token for label X is the item named
+ * `TOKEN_SERVICE.X`. A lead signs in as the account `--claude-account` names,
+ * else its own `claudeAccount`, else `defaultClaudeAccount`, else the
+ * un-labelled `TOKEN_SERVICE`.
  */
 import { spawnSync } from 'node:child_process';
 import { SANDBOX_EXEC } from './lead-sandbox-lib.ts';
@@ -19,13 +25,13 @@ export const TOKEN_ACCOUNT = 'claude-workspaces';
 export const TOKEN_SERVICE = 'claude-workspaces-secret.claude-lead-oauth-token';
 export const TOKEN_ENV = 'CLAUDE_CODE_OAUTH_TOKEN';
 
-/** The stored value as the keychain returns it (BASE64), or null when there is none. */
-export type TokenReader = () => string | null;
+/** The item `service`'s value as the keychain returns it (BASE64), or null when there is none. */
+export type TokenReader = (service: string) => string | null;
 
-export const readKeychainToken: TokenReader = () => {
+export const readKeychainToken: TokenReader = (service) => {
   const r = spawnSync(
     '/usr/bin/security',
-    ['find-generic-password', '-a', TOKEN_ACCOUNT, '-s', TOKEN_SERVICE, '-w'],
+    ['find-generic-password', '-a', TOKEN_ACCOUNT, '-s', service, '-w'],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
   );
   return r.status === 0 ? r.stdout : null;
@@ -39,19 +45,48 @@ export function decodeToken(stored: string | null): string | null {
   return /^[\x21-\x7e]+$/.test(token) ? token : null;
 }
 
-export const MISSING_TOKEN = `there is no Claude Code token to sign the lead in with. The keychain item ${TOKEN_SERVICE} (account ${TOKEN_ACCOUNT}) is missing or not BASE64. Run \`claude setup-token\` outside the wall, then save the token it prints through a secret card named claude-lead-oauth-token. The wall refuses the keychain, so without it the lead cannot answer.`;
+/** The keychain item that holds `account`'s token; the un-labelled one for none. */
+export function tokenService(account: string | undefined): string {
+  return account ? `${TOKEN_SERVICE}.${account}` : TOKEN_SERVICE;
+}
+
+export function missingToken(account: string | undefined): string {
+  const card = tokenService(account).slice('claude-workspaces-secret.'.length);
+  return `there is no Claude Code token to sign the lead in with${account ? ` as account ${account}` : ''}. The keychain item ${tokenService(account)} (account ${TOKEN_ACCOUNT}) is missing or not BASE64. Run \`claude setup-token\` outside the wall${account ? `, signed in as ${account},` : ''} then save the token it prints through a secret card named ${card}. The wall refuses the keychain, so without it the lead cannot answer.`;
+}
 
 /**
- * What the lead's environment gains: the token. A lead with `allowKeychain`
- * can still sign in from the keychain, so for it the token is optional.
+ * The account a lead signs in as, or undefined for the un-labelled item.
+ * `override` is `--claude-account`, which must be a listed label.
+ */
+export function resolveAccount(
+  lead: { claudeAccount?: string },
+  config: { claudeAccounts: string[]; defaultClaudeAccount?: string },
+  override?: string,
+): { ok: true; account: string | undefined } | { ok: false; error: string } {
+  if (override !== undefined && !config.claudeAccounts.includes(override))
+    return {
+      ok: false,
+      error: `--claude-account ${override} is not one of claudeAccounts (${config.claudeAccounts.join(', ') || 'none listed'}), so there is no item ${tokenService(override)} to read`,
+    };
+  return { ok: true, account: override ?? lead.claudeAccount ?? config.defaultClaudeAccount };
+}
+
+/**
+ * What the lead's environment gains: the account's token. A lead with
+ * `allowKeychain` and no account named can still sign in from the keychain,
+ * so for it the token is optional. Naming an account asks for that account.
  */
 export function tokenEnv(
   lead: { allowKeychain: boolean },
+  account: string | undefined,
   read: TokenReader,
 ): { ok: true; env: Record<string, string> } | { ok: false; error: string } {
-  const token = decodeToken(read());
+  const token = decodeToken(read(tokenService(account)));
   if (token) return { ok: true, env: { [TOKEN_ENV]: token } };
-  return lead.allowKeychain ? { ok: true, env: {} } : { ok: false, error: MISSING_TOKEN };
+  return lead.allowKeychain && account === undefined
+    ? { ok: true, env: {} }
+    : { ok: false, error: missingToken(account) };
 }
 
 export type Spawn = (
@@ -75,6 +110,7 @@ export function turnCheck(
   cwd: string,
   opts: {
     turn: boolean;
+    account: string | undefined;
     read: TokenReader;
     env: Record<string, string | undefined>;
     spawn?: Spawn;
@@ -85,9 +121,11 @@ export function turnCheck(
       ran: false,
       says: 'claude turn: not run (`--turn` runs it, and spends one model turn)',
     };
-  const token = tokenEnv(lead, opts.read);
-  if (!token.ok) return { ran: true, ok: false, says: `claude turn: ${token.error}` };
-  return { ran: true, ...turnRow(profile, cwd, { ...opts.env, ...token.env }, opts.spawn) };
+  const as = opts.account ? ` as ${opts.account}` : '';
+  const token = tokenEnv(lead, opts.account, opts.read);
+  if (!token.ok) return { ran: true, ok: false, says: `claude turn${as}: ${token.error}` };
+  const row = turnRow(profile, cwd, { ...opts.env, ...token.env }, opts.spawn);
+  return { ran: true, ok: row.ok, says: row.says.replace('claude turn:', `claude turn${as}:`) };
 }
 
 /**

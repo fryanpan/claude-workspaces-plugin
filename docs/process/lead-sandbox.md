@@ -204,8 +204,46 @@ environment only: never printed, logged or written, and the dry run does not
 read it. To make one, run `claude setup-token` outside the wall and save what
 it prints through a secret card named `claude-lead-oauth-token`. Without the
 item the launch is refused, naming it, because a walled lead without it
-cannot answer. A lead with `allowKeychain` can still sign in from the
-keychain, so for it the token is optional.
+cannot answer. A lead with `allowKeychain` and no account named can still
+sign in from the keychain, so for it the token is optional.
+
+### Which Claude account a lead signs in as
+
+Bryan has more than one Claude account. The config labels them, and each
+label has a keychain item of its own, `claude-workspaces-secret.claude-lead-oauth-token.<label>`:
+
+```json
+{
+  "claudeAccounts": ["harborlight", "riverbend"],
+  "defaultClaudeAccount": "harborlight",
+  "leads": [
+    { "name": "harborlight-lead", "projects": ["~/dev/harborlight"] },
+    { "name": "riverbend-lead", "projects": ["~/dev/riverbend"], "claudeAccount": "riverbend" }
+  ]
+}
+```
+
+A lead signs in as the account `--claude-account` names for that launch,
+else its own `claudeAccount`, else `defaultClaudeAccount`. When the config
+names no account at all, every lead uses the un-labelled item above. The
+labels are the config's own; the repo holds none. To make a label's item,
+run `claude setup-token` signed in as that account and save the token
+through a secret card named `claude-lead-oauth-token.<label>`.
+
+**To switch a lead to the other account**, either set its `claudeAccount`
+and relaunch it, or keep the config and relaunch with the flag:
+
+```bash
+bun "$HOME/Library/Application Support/claude-workspaces/repo/scripts/lead-sandbox.ts" \
+  --config ~/.config/claude-workspaces/lead-sandbox.json \
+  --lead riverbend-lead --claude-account harborlight -- claude <the lead's usual flags>
+```
+
+A running lead keeps the account it was launched with; the switch takes
+effect at the relaunch. A label not in `claudeAccounts`, or one whose item
+is missing, refuses the launch and names the item, for an `allowKeychain`
+lead too. The dry run prints the account and item each lead resolves to,
+never the token, and `--check --turn` runs each lead's turn as that account.
 
 ## GitHub through the proxy
 
