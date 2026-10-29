@@ -33,14 +33,23 @@ export interface VoiceRun {
   /** The Settings Voice row as it first showed, and what choosing Voice first stored. */
   settingsDefault: string;
   settingsStored: string;
+  /** The select's right edge, and the push toggle's above it: one column. */
+  settingsRight: number;
+  toggleRight: number;
   button: Rect | null;
   bar: Rect | null;
   barText: string;
   viewport: { width: number; height: number };
-  recognitionStarts: number;
-  recognitionStops: number;
+  /** Mic frames the server's listener was sent, across both widths so far. */
+  framesHeard: number;
+  /** Listener sessions opened from the tap on: the question, then the next. */
+  listens: number;
   leadHeard: string | null;
   storedVia: string | null;
+  /** The lead's spoken answer, shown in the bar live. */
+  answerInBar: boolean;
+  /** And kept in the chat as the lead's message. */
+  answerStored: boolean;
   barGone: boolean;
 }
 

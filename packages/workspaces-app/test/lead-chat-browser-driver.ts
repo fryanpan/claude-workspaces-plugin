@@ -4,12 +4,15 @@
  * bundles: on the board, its Home, a doc and a mock, at 1180x820 and at
  * 430x932, a tap on the agent button opens the chat, a typed message reaches
  * the board's lead, and the lead's answer appears in the open panel. Then, in
- * Voice first, a tap brings out the bar attached to the button and a line
- * heard goes to the lead marked as said.
+ * Voice first, a tap brings out the bar attached to the button, the page
+ * streams its mic over the converse socket, the lead hears the question and
+ * its answer comes back into the bar, and the page listens again.
  *
- * Speech recognition is a fake installed before the page loads: no page here
- * touches a microphone. The lead is an agent stream this driver holds; it
- * answers through the same route `answer_voice` calls.
+ * No real device and no billed engine: the microphone is Chrome's fake
+ * device, audio output is muted, and the server's listener and voice are
+ * scripted fakes — the listener "hears" whatever line this driver set once
+ * frames arrive. The lead is an agent stream this driver holds; it answers
+ * through the same route `answer_voice` calls.
  *
  * Spawned by `lead-chat-browser.test.ts`, which reads the JSON it prints.
  * `LEAD_CHAT_SHOTS=<dir>` also writes a screenshot of every open panel.
@@ -31,6 +34,8 @@ import {
   resolveChromeBin,
 } from '../../../scripts/ui-shot-lib.ts';
 import { type ServerHandle, createServer } from '../../server/src/server.ts';
+import type { SpokenVoice } from '../../server/src/spoken-reply/tts.ts';
+import type { TranscriptionEngine } from '../../server/src/transcribe.ts';
 import { agentStream } from '../../server/test/agent-voice-stream.ts';
 import { buildWidget } from '../../widget/test/frame-driver-kit.ts';
 import type { LeadChatRun, Rect, SurfaceRun, VoiceRun } from './lead-chat-browser-reading.ts';
@@ -54,18 +59,6 @@ async function until<T>(
   }
   throw new Error(`never happened: ${what}`);
 }
-
-/** A recognition the page can be told to hear with, in place of the mic. */
-const FAKE_RECOGNITION = `(() => {
-  class FakeRec {
-    constructor() { this.onresult = null; this.onend = null; this.onerror = null; window.__rec = this; window.__recStarts = (window.__recStarts || 0); }
-    start() { window.__recStarts++; }
-    stop() { window.__recStops = (window.__recStops || 0) + 1; }
-  }
-  window.webkitSpeechRecognition = FakeRec;
-  try { delete window.SpeechRecognition; } catch {}
-  window.__hear = (t) => window.__rec && window.__rec.onresult && window.__rec.onresult({ resultIndex: 0, results: [{ 0: { transcript: t }, isFinal: true }] });
-})()`;
 
 /** Everything the page shows of the chat, read through its shadow roots. */
 const READ = `(() => {
@@ -110,7 +103,12 @@ const browsers: Array<{ proc: ChildProcess; profile: string }> = [];
 async function openBrowser(width: number, height: number): Promise<Cdp> {
   const b = await launchChrome(
     resolveChromeBin(undefined),
-    (profile) => chromeLaunchArgs({ width, height }, profile),
+    (profile) =>
+      chromeLaunchArgs({ width, height }, profile, [
+        '--use-fake-ui-for-media-stream',
+        '--use-fake-device-for-media-stream',
+        '--mute-audio',
+      ]),
     STARTUP_TIMEOUT_MS,
     `lead-chat-${width}-${process.pid}`,
     (started) => {
@@ -128,7 +126,7 @@ async function openBrowser(width: number, height: number): Promise<Cdp> {
   });
   // A returning reader, so no name prompt sits over the page.
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `try { localStorage.setItem('feedback-user-name', 'Alice'); } catch {}\n${FAKE_RECOGNITION}`,
+    source: `try { localStorage.setItem('feedback-user-name', 'Alice'); } catch {}`,
   });
   return cdp;
 }
@@ -169,7 +167,32 @@ async function main(): Promise<void> {
       { encoding: 'utf8', timeout: 120_000 },
     );
     if (built.status !== 0) throw new Error(`app build failed:\n${built.stderr}`);
+    // The listener hears `ears.line` once two frames of the page's mic arrive.
+    const ears = { line: null as string | null, opens: 0, frames: 0 };
+    const listener: TranscriptionEngine = {
+      name: 'scripted',
+      async open(o) {
+        ears.opens++;
+        let n = 0;
+        return {
+          send: () => {
+            ears.frames++;
+            if (++n === 2 && ears.line) {
+              const text = ears.line;
+              ears.line = null;
+              o.onTurn({ turn: 0, text, final: true });
+            }
+          },
+          close: async () => {},
+        };
+      },
+    };
+    const quiet: SpokenVoice = {
+      name: 'quiet',
+      speak: async (_t, onAudio) => onAudio(new Uint8Array(480)),
+    };
     handle = createServer({
+      spokenReply: { listener, voices: { 1: quiet, 2: null }, gemini: null } as never,
       port: 0,
       dataDir: join(dir, 'data'),
       widgetDistDir: widgetDist,
@@ -314,8 +337,11 @@ async function main(): Promise<void> {
         const r = (await cdp.evaluate(`(() => {
           const s = document.getElementById('board-lead-chat-mode');
           const b = s && s.getBoundingClientRect();
-          return b && b.width > 0 ? { value: s.value } : null;
-        })()`)) as { value: string } | null;
+          // Margin box: the checkbox carries the browser's default margin.
+          const edge = (el) => el.getBoundingClientRect().right + parseFloat(getComputedStyle(el).marginRight);
+          const t = document.getElementById('board-push-toggle');
+          return b && b.width > 0 ? { value: s.value, right: edge(s), toggleRight: edge(t) } : null;
+        })()`)) as { value: string; right: number; toggleRight: number } | null;
         return r;
       });
       if (shots) {
@@ -341,10 +367,24 @@ async function main(): Promise<void> {
         return r.bar ? r : null;
       });
       const said = `Read me the next one at ${width}`;
-      await cdp.evaluate(`window.__hear(${JSON.stringify(said)})`);
+      const opensBefore = ears.opens;
+      ears.line = said;
       const heard = await until(
-        'the lead hears the spoken line',
+        'the lead hears the spoken question',
         () => leadStream.voice.find((v) => v.transcript === said) ?? null,
+      );
+      const reply = `Spoken answer at ${width}: the ferry task.`;
+      await post(`/workspaces/${ws}/voice-queue/${heard.queueId}/answer`, {
+        agentId: LEAD.agentId,
+        text: reply,
+      });
+      const answered = await until('the spoken answer in the bar', async () => {
+        const r = (await cdp.evaluate(READ)) as Read;
+        return r.barText.includes(reply) ? r : null;
+      });
+      // Said, then the next question listens by itself: a second listener.
+      const relistened = await until('listening again', () =>
+        ears.opens >= opensBefore + 2 ? ears.opens - opensBefore : null,
       );
       if (shots) {
         const png = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
@@ -355,27 +395,30 @@ async function main(): Promise<void> {
           Buffer.from(png.data, 'base64'),
         );
       }
-      const starts = Number(await cdp.evaluate('window.__recStarts || 0'));
       await tap(cdp, out.button as Rect);
       const off = await until('the bar back in', async () => {
         const r = (await cdp.evaluate(READ)) as Read;
         return r.bar ? null : r;
       });
       const snap = (await (await fetch(`${base}/workspaces/${ws}/lead-chat`)).json()) as {
-        messages: Array<{ text: string; via?: string }>;
+        messages: Array<{ text: string; via?: string; role: string }>;
       };
       voice.push({
         width,
         settingsDefault: row.value,
+        settingsRight: row.right,
+        toggleRight: row.toggleRight,
         settingsStored: stored,
         button: out.button,
         bar: out.bar,
         barText: out.barText,
         viewport: out.viewport,
-        recognitionStarts: starts,
-        recognitionStops: Number(await cdp.evaluate('window.__recStops || 0')),
+        framesHeard: ears.frames,
+        listens: relistened,
         leadHeard: heard.transcript ?? null,
         storedVia: snap.messages.find((m) => m.text === said)?.via ?? null,
+        answerInBar: answered.barText.includes(reply),
+        answerStored: snap.messages.some((m) => m.role === 'agent' && m.text === reply),
         barGone: off.bar === null,
       });
       await cdp.evaluate(`localStorage.removeItem('cw.lead-chat.mode')`);

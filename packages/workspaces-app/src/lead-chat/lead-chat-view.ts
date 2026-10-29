@@ -38,8 +38,12 @@ export interface LeadChatViewModel {
   meId: string;
   open: boolean;
   barOut: boolean;
+  /** Voice is on: the mic is listening, or the lead is answering what it
+   *  heard. */
   listening: boolean;
-  /** What recognition has heard of the line in progress. */
+  /** Where the spoken question is (`lead-chat-voice.ts`); absent is listening. */
+  voice?: 'listening' | 'working' | 'speaking';
+  /** What the listener has heard of the question in progress. */
   heard: string;
   /** A one-line notice: a send that failed, a blocked microphone. */
   notice: string;
@@ -90,7 +94,7 @@ export function barLines(
       who: x.role === 'agent' ? x.author.name : 'You',
       text: x.text.replace(/\s+/g, ' '),
     }));
-  if (m.listening) {
+  if (m.listening && (m.voice ?? 'listening') === 'listening') {
     lines.push({ who: 'You', text: m.heard || 'Listening…', dim: !m.heard });
   } else if (lines.length === 0) {
     lines.push({ who: m.lead?.name ?? 'Your agents', text: 'Tap to open the chat', dim: true });
@@ -101,10 +105,13 @@ export function barLines(
 /** The line under the list: who is working on what, or what went wrong. */
 export function statusLine(m: LeadChatViewModel): string {
   if (m.notice) return m.notice;
+  const lead = m.lead?.name ?? 'Your lead';
+  if (m.listening && m.voice === 'working') return `${lead} is working on it`;
+  if (m.listening && m.voice === 'speaking') return `${lead} is answering`;
   if (m.listening) return m.heard ? `Heard: ${m.heard}` : 'Listening…';
   const last = m.messages.at(-1);
   if (last?.role === 'person' && last.state === 'sent') {
-    return `${m.lead?.name ?? 'Your lead'} is working on it`;
+    return `${lead} is working on it`;
   }
   return '';
 }

@@ -944,7 +944,11 @@ In the app, `workspaces-app/src/lead-chat/` (a new top-level directory) is
 the client, the shadow-DOM button, bar and panel, and the per-device Chat
 first / Voice first choice the Settings Voice row writes; the board mounts it
 in its nav dock, the doc page floats it bottom-left, and the mock host loads
-`lead-chat-page.ts` as its own `/app/lead-chat.js`.
+`lead-chat-page.ts` as its own `/app/lead-chat.js`. Its voice
+(`lead-chat-voice.ts`) is the board mic's path: the mic streams over
+`WS /workspaces/<ws>/voice/converse` with the lead named in `start`, so the
+audio reaches only this server and the listener it already uses. There is no
+browser speech recognition, because Chrome's sends the audio to Google.
 
 **A mock or app that talks.** A page served in a board's frame can speak,
 listen and post to its own dev server through

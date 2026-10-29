@@ -1,16 +1,16 @@
 /**
  * The lead chat on a page, driven by taps: Chat first opens the panel with
- * the cursor in the composer; Voice first brings out the bar and listens, and
- * a line heard goes to the lead marked as said; the next tap closes it all;
- * a tap on the bar grows it into the panel. The client and the recognition
- * are fakes — no network, no microphone.
+ * the cursor in the composer; Voice first brings out the bar and listens on
+ * the converse socket, addressed to the lead; the next tap closes it all;
+ * a tap on the bar grows it into the panel. The client, the converse socket
+ * and the microphone are fakes — no network, no device.
  */
 import type { LeadChatMessage } from '@claude-workspaces/core/lead-chat';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LeadChatClient, LeadChatState } from '../src/lead-chat/lead-chat-client.ts';
 import { LEAD_CHAT_MODE_KEY, type ModeStorage } from '../src/lead-chat/lead-chat-mode.ts';
 import { type LeadChatMount, mountLeadChat } from '../src/lead-chat/lead-chat-mount.ts';
-import type { RecognitionLike, RecognitionResultEvent } from '../src/voice-capture.ts';
+import { fakeVoice, settle } from './lead-chat-voice-fakes.ts';
 
 const LEAD = { agentId: 'harborlight-lead', name: 'Harborlight Lead' };
 const ME = { id: 'known-bryan', name: 'Bryan', kind: 'known' };
@@ -48,23 +48,6 @@ function fakeClient(canTalk = true) {
   return { client, sent, push };
 }
 
-class FakeRecognition implements RecognitionLike {
-  started = 0;
-  stopped = 0;
-  onresult: ((ev: RecognitionResultEvent) => void) | null = null;
-  onend: (() => void) | null = null;
-  onerror: ((ev: unknown) => void) | null = null;
-  start() {
-    this.started++;
-  }
-  stop() {
-    this.stopped++;
-  }
-  hear(transcript: string, isFinal: boolean) {
-    this.onresult?.({ resultIndex: 0, results: [{ 0: { transcript }, isFinal }] });
-  }
-}
-
 function memoryStorage(mode?: string): ModeStorage {
   const m = new Map<string, string>(mode ? [[LEAD_CHAT_MODE_KEY, mode]] : []);
   return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) };
@@ -79,7 +62,7 @@ afterEach(() => {
 
 function mount(opts: { mode?: string; canTalk?: boolean; dock?: boolean } = {}) {
   const fake = fakeClient(opts.canTalk ?? true);
-  const rec = new FakeRecognition();
+  const voice = fakeVoice();
   const dock = opts.dock ? document.createElement('span') : undefined;
   if (dock) document.body.append(dock);
   mounted = mountLeadChat({
@@ -89,10 +72,10 @@ function mount(opts: { mode?: string; canTalk?: boolean; dock?: boolean } = {}) 
     ...(dock ? { dock } : {}),
     client: fake.client,
     storage: memoryStorage(opts.mode),
-    createRecognition: () => rec,
+    voice: voice.seams,
     reducedMotion: () => true,
   });
-  return { ...fake, rec, view: mounted.view };
+  return { ...fake, voice, view: mounted.view };
 }
 
 describe('the lead chat on a page', () => {
@@ -138,46 +121,50 @@ describe('the lead chat on a page', () => {
     expect(view.list.textContent).toContain('The email field.');
   });
 
-  it('Voice first: a tap brings out the bar and listens; a line heard goes as said', async () => {
-    const { view, rec, sent } = mount({ mode: 'voice' });
+  it('Voice first: a tap brings out the bar and listens to the lead; the next tap stops', async () => {
+    const { view, voice, sent } = mount({ mode: 'voice' });
     view.button.click();
     expect(view.bar.hidden).toBe(false);
     expect(view.pane.hidden).toBe(true);
-    expect(rec.started).toBe(1);
     expect(view.button.dataset.listening).toBe('true');
+    await settle();
+    const ws = voice.socket();
+    ws.open();
+    expect(ws.messages()[0]).toMatchObject({ type: 'start', agent: LEAD.agentId });
+    expect(voice.mic.starts).toBe(1);
 
-    rec.hear('read me the', false);
+    ws.serve({ type: 'heard', text: 'read me the' });
     expect(view.bar.textContent).toContain('read me the');
-    rec.hear('read me the next one', true);
-    await Promise.resolve();
-    expect(sent.map((s) => [s.text, s.via])).toEqual([['read me the next one', 'voice']]);
-    // Recognition ends itself after a silence; listening goes on.
-    rec.onend?.();
-    expect(rec.started).toBe(2);
+    ws.serve({ type: 'turn-end', text: 'read me the next one' });
+    // The server writes the spoken turn into the chat; the page sends nothing.
+    expect(sent).toEqual([]);
 
     view.button.click();
     expect(view.bar.hidden).toBe(true);
-    expect(rec.stopped).toBe(1);
     expect(view.button.dataset.listening).toBe('false');
+    expect(ws.messages().at(-1)).toEqual({ type: 'stop' });
   });
 
-  it('grows the bar into the panel on a tap, still listening', () => {
-    const { view, rec } = mount({ mode: 'voice' });
+  it('grows the bar into the panel on a tap, still listening', async () => {
+    const { view, voice } = mount({ mode: 'voice' });
     view.button.click();
+    await settle();
     view.bar.click();
     expect(view.pane.hidden).toBe(false);
     expect(view.bar.hidden).toBe(true);
-    expect(rec.stopped).toBe(0);
+    expect(voice.mic.stops).toBe(0);
     expect(view.mic.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('the composer mic turns listening on and off in Chat first', () => {
-    const { view, rec } = mount();
+  it('the composer mic turns listening on and off in Chat first', async () => {
+    const { view, voice } = mount();
     view.button.click();
     view.mic.click();
-    expect(rec.started).toBe(1);
+    await settle();
+    expect(voice.mic.starts).toBe(1);
     view.mic.click();
-    expect(rec.stopped).toBe(1);
+    expect(voice.mic.stops).toBe(1);
+    expect(voice.socket().closed).toBe(true);
     expect(view.pane.hidden).toBe(false);
   });
 

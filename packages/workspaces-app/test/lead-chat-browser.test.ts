@@ -80,7 +80,7 @@ describe.skipIf(CHROME === null)('the lead chat in a browser', () => {
     }
   });
 
-  it('Voice first, chosen in Settings: the bar comes out of the button, and a heard line reaches the lead as said', () => {
+  it('Voice first, chosen in Settings: the bar comes out of the button, and a spoken question reaches the lead over the voice socket and its answer comes back live', () => {
     const { voice } = result();
     expect(voice.map((v) => v.width)).toEqual([1180, 430]);
     for (const v of voice) {
@@ -100,11 +100,14 @@ describe.skipIf(CHROME === null)('the lead chat in a browser', () => {
       }
       expect(v.settingsDefault, at).toBe('chat');
       expect(v.settingsStored, at).toBe('voice');
-      expect(v.recognitionStarts, at).toBe(1);
+      expect(v.settingsRight, at).toBe(v.toggleRight);
+      expect(v.framesHeard, at).toBeGreaterThan(0);
       expect(v.leadHeard, at).toBe(`Read me the next one at ${v.width}`);
       expect(v.storedVia, at).toBe('voice');
+      expect(v.answerInBar, at).toBe(true);
+      expect(v.answerStored, at).toBe(true);
+      expect(v.listens, at).toBeGreaterThanOrEqual(2);
       expect(v.barGone, at).toBe(true);
-      expect(v.recognitionStops, at).toBe(1);
     }
   });
 });

@@ -10,22 +10,25 @@
  * While anything is out, the next tap closes it and stops listening. A tap
  * on the bar grows it into the panel.
  *
- * Listening is the browser's own speech recognition, so it costs nothing and
- * needs no socket: what is heard is sent as a message marked as said. The
- * lead's answer arrives as text in the same chat. Spoken replies stay with
- * the board's own mic.
+ * Listening is the board mic's own path (`lead-chat-voice.ts`): the
+ * microphone streams to this server over the converse socket, which hears it
+ * and hands each question to the lead alone. The server writes the spoken
+ * turn and the lead's answer into the chat, so they arrive on the same stream
+ * as a typed message, and the answer is also said aloud.
  *
  * The button is drawn only for a reader who may talk to the lead — the
  * board's owner — so nobody else is offered a composer that refuses.
  */
-import {
-  type RecognitionLike,
-  type VoiceContext,
-  defaultRecognitionFactory,
-} from '../voice-capture.ts';
+import type { VoiceContext } from '../voice-capture.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
 import { type ModeStorage, deviceStorage, readLeadChatMode } from './lead-chat-mode.ts';
 import { type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
+import {
+  type LeadVoice,
+  type LeadVoiceOpts,
+  type LeadVoiceState,
+  createLeadVoice,
+} from './lead-chat-voice.ts';
 
 export interface LeadChatMountOpts {
   workspaceId: string;
@@ -38,7 +41,10 @@ export interface LeadChatMountOpts {
   /** Injected by tests. */
   client?: LeadChatClient;
   storage?: ModeStorage | null;
-  createRecognition?: () => RecognitionLike | null;
+  /** The voice path's seams; tests pass fakes for the socket and the mic. */
+  voice?: Partial<
+    Omit<LeadVoiceOpts, 'workspaceId' | 'author' | 'getContext' | 'agent' | 'onChange'>
+  >;
   reducedMotion?: () => boolean;
 }
 
@@ -65,12 +71,11 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   if (!opts.dock) doc.documentElement.style.setProperty('--lc-agent-room', '56px');
   const client = opts.client ?? createLeadChatClient({ workspaceId: opts.workspaceId });
   const storage = opts.storage === undefined ? deviceStorage() : opts.storage;
-  const createRecognition = opts.createRecognition ?? defaultRecognitionFactory;
   const reduced =
     opts.reducedMotion ?? (() => win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
-  const ui = { open: false, bar: false, listening: false, heard: '', notice: '' };
-  let rec: RecognitionLike | null = null;
+  const ui = { open: false, bar: false, notice: '' };
+  let heard: LeadVoiceState = { phase: 'off', heard: '', notice: '' };
 
   const render = (): void => {
     const s = client.state();
@@ -83,9 +88,10 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       meId: opts.author.id,
       open: ui.open,
       barOut: ui.bar,
-      listening: ui.listening,
-      heard: ui.heard,
-      notice: ui.notice,
+      listening: heard.phase !== 'off',
+      ...(heard.phase !== 'off' ? { voice: heard.phase } : {}),
+      heard: heard.heard,
+      notice: ui.notice || heard.notice,
     });
   };
   client.onChange(render);
@@ -97,73 +103,21 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     return res.ok;
   };
 
-  const stopListening = (): void => {
-    ui.listening = false;
-    ui.heard = '';
-    const r = rec;
-    rec = null;
-    if (r) {
-      r.onend = null;
-      r.onresult = null;
-      try {
-        r.stop();
-      } catch {
-        // Already stopped.
-      }
-    }
-  };
-
+  const voice: LeadVoice = createLeadVoice({
+    ...opts.voice,
+    workspaceId: opts.workspaceId,
+    author: opts.author,
+    getContext: () => opts.getContext?.(),
+    agent: () => client.state().lead?.agentId,
+    onChange: (v) => {
+      heard = v;
+      render();
+    },
+  });
+  const stopListening = (): void => voice.stop();
   const startListening = (): void => {
-    if (ui.listening) return;
-    const r = createRecognition();
-    if (!r) {
-      ui.notice = 'This browser cannot listen. Type to your lead instead.';
-      render();
-      return;
-    }
-    rec = r;
-    ui.listening = true;
     ui.notice = '';
-    r.onresult = (ev) => {
-      let interim = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const res = ev.results[i];
-        if (!res) continue;
-        const said = res[0].transcript.trim();
-        if (res.isFinal) {
-          if (said) void deliver(said, 'voice');
-        } else {
-          interim += `${said} `;
-        }
-      }
-      ui.heard = interim.trim();
-      render();
-    };
-    r.onerror = (ev) => {
-      const code = (ev as { error?: string } | null)?.error;
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        stopListening();
-        ui.notice = 'The microphone is blocked for this page.';
-        render();
-      }
-    };
-    // Recognition ends itself after a silence; listening goes on until the
-    // reader stops it.
-    r.onend = () => {
-      if (rec !== r) return;
-      try {
-        r.start();
-      } catch {
-        stopListening();
-        render();
-      }
-    };
-    try {
-      r.start();
-    } catch {
-      stopListening();
-    }
-    render();
+    voice.start();
   };
 
   const grow = (from: DOMRect | null): void => {
@@ -228,9 +182,8 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   view.bar.addEventListener('click', () => openPane(view.bar.getBoundingClientRect()));
   view.close.addEventListener('click', closeAll);
   view.mic.addEventListener('click', () => {
-    if (ui.listening) stopListening();
+    if (voice.state().phase !== 'off') stopListening();
     else startListening();
-    render();
   });
   view.send.addEventListener('click', () => void sendTyped());
   view.composer.addEventListener('input', () => {
@@ -252,7 +205,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   return {
     view,
     destroy() {
-      stopListening();
+      voice.destroy();
       client.close();
       doc.removeEventListener('keydown', onKey);
       win.removeEventListener('resize', onResize);
