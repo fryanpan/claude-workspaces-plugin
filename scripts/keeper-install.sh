@@ -158,8 +158,9 @@ for want in /usr/bin/nc -U "$K/run/keeper.sock" 127.0.0.1 ::1 "$PORT"; do
 done
 ok "the port plist names nc, the socket, 127.0.0.1 and ::1 on $PORT"
 if [ "$(keeper plist port)" != "$PORT_PLIST" ]; then
-  print -r -- "   NOTE: this release would write a different port plist. Reloading it frees the"
-  print -r -- "   address for a moment, so the script leaves it; see \"Updating the keeper\" in keeper.md."
+  print -r -- "   NOTE: this release would write a different port plist. Reloading it frees the address"
+  print -r -- "   for a moment, so the script leaves the old one. To reload it, write the new plist with"
+  print -r -- "   'keeper-bin.ts plist port', boot out and bootstrap $PORT_JOB, then clear localhost's site data."
 fi
 
 step "7. The keeper job"
