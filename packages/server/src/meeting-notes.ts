@@ -78,6 +78,7 @@ import {
   retractNotice,
   retractQuotaNotice,
 } from './notes-notice.ts';
+import { recentSpeech } from './notes-recent-speech.ts';
 import { type NoteReference, matchReferences } from './notes-references.ts';
 import { type MeetingSpend, meetingSpend } from './notes-spend.ts';
 import {
@@ -357,6 +358,9 @@ export interface NotesComposeInput {
    * missed twice is counted lost rather than offered a third time.
    */
   missed?: readonly NotesTurn[];
+  /** The previous tick's speech, as context the note-taker must not note
+   *  again (`notes-recent-speech.ts`). Absent on a meeting's first tick. */
+  recent?: readonly NotesTurn[];
   /**
    * An extra block of instruction for THIS tick, rendered into the prompt just
    * before the outline.
@@ -1724,6 +1728,7 @@ export function beginNotesSession(
       priorRaw = raw;
       if (deps.captureIntents) {
         const captureStart = clock();
+      const recent = recentSpeech(priorTurns, turns);
         try {
           const captured = await deps.captureIntents({
             docId: ids.docId,
@@ -1891,6 +1896,7 @@ export function beginNotesSession(
         outline,
         ...(notesHeadingId !== undefined ? { notesHeadingId } : {}),
         ...(humanNotes.length > 0 ? { humanNotes } : {}),
+        ...(recent.length > 0 ? { recent } : {}),
         ...(context ? { context } : {}),
         ...(taskLinks.length > 0 ? { taskLinks } : {}),
         ...(docLinks.length > 0 ? { docLinks } : {}),
