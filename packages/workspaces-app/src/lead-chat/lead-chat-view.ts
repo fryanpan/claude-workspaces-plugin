@@ -13,6 +13,12 @@
  * one, stopping at the board's tab bar so the button stays in reach.
  */
 import type { LeadChatLead, LeadChatMessage } from '@claude-workspaces/core/lead-chat';
+import {
+  MEETING_STYLES,
+  type MeetingView,
+  type MeetingViewModel,
+  createMeetingView,
+} from './lead-chat-meeting-view.ts';
 import { BUTTON_STYLES, LAYER_STYLES } from './lead-chat-styles.ts';
 
 const SPARKLE =
@@ -28,6 +34,7 @@ export const NARROW_MAX = 1100;
  *  be measured. */
 export const CORNER_ROOM = 72;
 const BAR_H_NARROW = 50;
+const IDLE_RUN = { phase: 'idle', note: '', partial: '' } as const;
 const PANEL_W = 440;
 
 export interface LeadChatViewModel {
@@ -47,6 +54,8 @@ export interface LeadChatViewModel {
   heard: string;
   /** A one-line notice: a send that failed, a blocked microphone. */
   notice: string;
+  /** The board's meeting, when one runs; absent draws no meeting. */
+  meeting?: MeetingViewModel;
 }
 
 export interface LeadChatView {
@@ -58,6 +67,11 @@ export interface LeadChatView {
   mic: HTMLButtonElement;
   send: HTMLButtonElement;
   close: HTMLButtonElement;
+  /** "Start a meeting", in the header while no meeting runs. */
+  start: HTMLButtonElement;
+  meeting: MeetingView;
+  /** The layer's shadow root, which the meeting wizard draws into. */
+  root: ShadowRoot;
   render(m: LeadChatViewModel): void;
   /** Re-measure and place the bar and the panel. */
   place(): void;
@@ -145,7 +159,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   layer.dataset.leadChat = 'layer';
   const root = layer.attachShadow({ mode: 'open' });
   const style = make(doc, 'style');
-  style.textContent = LAYER_STYLES;
+  style.textContent = LAYER_STYLES + MEETING_STYLES;
 
   const bar = make(doc, 'button', 'lc-bar');
   bar.type = 'button';
@@ -168,7 +182,10 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   close.setAttribute('aria-label', 'Close');
   close.title = 'Close';
   close.innerHTML = CLOSE;
-  head.append(title, close);
+  const start = make(doc, 'button', 'lc-start', 'Start a meeting');
+  start.type = 'button';
+  const meeting = createMeetingView(doc);
+  head.append(title, meeting.head, start, close);
   const list = make(doc, 'div', 'lc-list');
   list.setAttribute('role', 'log');
   list.setAttribute('aria-live', 'polite');
@@ -188,7 +205,7 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
   compose.append(composer, mic, send);
   const readonly = make(doc, 'p', 'lc-readonly', 'Only the board’s owner talks to its lead.');
   readonly.hidden = true;
-  pane.append(head, list, status, compose, readonly);
+  pane.append(head, meeting.notes, list, status, compose, readonly);
   root.append(style, bar, pane);
   doc.body.append(layer);
 
@@ -308,6 +325,9 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
     mic,
     send,
     close,
+    start,
+    meeting,
+    root,
     render(m) {
       const out = m.open || m.barOut;
       button.setAttribute('aria-expanded', String(out));
@@ -324,6 +344,15 @@ export function createLeadChatView(opts: LeadChatViewOpts): LeadChatView {
       who.textContent = m.lead ? `with ${m.lead.name}` : m.loaded ? 'No lead on this board' : '';
       if (m.open) renderList(m);
       status.textContent = statusLine(m);
+      const meetingOn = !!m.meeting?.meeting;
+      title.hidden = meetingOn;
+      start.hidden = meetingOn || !m.canTalk || !m.loaded;
+      meeting.render(
+        m.meeting ?? { meeting: null, run: IDLE_RUN, recording: false, ending: false },
+      );
+      // In a meeting the room's voice is the meeting's; the lead hears a
+      // line that opens with "Lead,", so the chat's own mic steps aside.
+      mic.hidden = meetingOn;
       compose.hidden = !m.canTalk;
       readonly.hidden = m.canTalk || !m.loaded;
       mic.setAttribute('aria-pressed', String(m.listening));

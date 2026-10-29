@@ -57,3 +57,41 @@ export interface LeadChatRun {
   surfaces: SurfaceRun[];
   voice: VoiceRun[];
 }
+
+/** One page move of the recording tab, as `lead-chat-meeting-browser-driver.ts` measured it. */
+export interface MeetingMove {
+  surface: string;
+  /** The longest stretch the engine heard nothing, across the move. */
+  gapMs: number;
+  /** Frames the new page delivered at once when its socket came back. */
+  burstFrames: number;
+  /** The new page needed a tap before its microphone ran. */
+  tapped: boolean;
+  engineReopened: boolean;
+  headShown: boolean;
+  notesKept: boolean;
+  paneOpen: boolean;
+  nav?: Rect | null;
+  navLinks?: string[];
+  frame?: Rect | null;
+  buttonOnTop?: boolean;
+}
+
+export interface MeetingSizeRun {
+  width: number;
+  wizard: Rect | null;
+  headText: string;
+  head: Rect | null;
+  pane: Rect | null;
+  viewport: { width: number; height: number };
+  /** From the engine hearing a line to the line on screen. */
+  recorderMs: number;
+  watcherMs: number;
+  moves: MeetingMove[];
+  framesAfterEnd: number;
+  endedOnServer: boolean;
+}
+
+export interface MeetingBrowserRun {
+  sizes: MeetingSizeRun[];
+}

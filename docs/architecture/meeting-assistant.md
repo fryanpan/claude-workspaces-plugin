@@ -186,6 +186,29 @@ true` when the server took it.
   the doc's lock for a moment. Past the window the strip lands exactly where it
   used to — "The connection to the meeting was lost", mic released.
 
+### A meeting that outlives its page: the lead chat (2026-10-29)
+
+The lead chat's Start a meeting runs this same recording from whatever page
+of the board is open, and the page is expected to change under it. The board
+holds the meeting (`lead-chat/meeting.ts`): its notes doc, the browser tab that
+holds the microphone, the people in it and the lines said. The socket, the
+held-audio bank and the backoff above are `meeting-link.ts`, lifted out of the
+strip so both drive one copy.
+
+- **A page move is a resume.** Leaving a page closes its socket without a
+  `stop`; the next page of the same tab reads the meeting, sees its own
+  recorder token (per tab, in session storage) and connects with `resume:
+  <meetingId>`. Measured in headless Chrome over five moves each: the engine
+  heard no audio for 98–351ms per move at 1180x820 and 100–268ms at 430x932
+  (`lead-chat-meeting-browser.test.ts` prints the figures). The new page's
+  bank starts empty, so that stretch of speech is lost, not held.
+- **iPad Safari needs a tap per move.** An audio context there starts only
+  inside a gesture; a resumed page whose context is still suspended after
+  1.5s shows "Tap to keep recording", and any tap on the page starts it.
+  Chrome needs none.
+- **"No notes" is `notes: false` on `start`.** The relay opens no notes
+  pipeline and no handoff; the transcript is still kept, in a doc of its own.
+
 ### Why a meeting socket closed (2026-09-15)
 
 A meeting that dropped its socket five times left nothing in the server log

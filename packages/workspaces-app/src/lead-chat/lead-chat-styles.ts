@@ -22,6 +22,8 @@ button:hover { background: var(--bg-hover, #f6f8fa); }
 button:focus-visible { outline: 2px solid var(--accent, #2e7dd7); outline-offset: 2px; }
 button[aria-expanded="true"] { border-color: var(--accent, #2e7dd7); }
 button[data-listening="true"] { background: #c96442; border-color: #c96442; color: #fff; }
+button { position: relative; }
+button[data-meeting="true"]::after { content: ""; position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: #d1242f; border: 2px solid var(--bg, #fff); }
 svg { display: block; width: 22px; height: 22px; pointer-events: none; }
 `;
 
