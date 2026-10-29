@@ -1,6 +1,6 @@
 import { contextMatches } from '@claude-workspaces/core/anchor/context';
 import { readLinkedItem } from '@claude-workspaces/core/linked-item';
-import type { AnchorContext, LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
+import type { LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
 import { escapeHtml as esc } from '@claude-workspaces/core/ui-shared';
 import type * as Y from 'yjs';
 import { seenStore } from './comment-seen-store.ts';
@@ -10,6 +10,7 @@ import {
   type ViewModel,
   type ViewRow,
   buildView,
+  contextOf,
   isNewTo,
   openCounts,
   pageKey,
@@ -59,13 +60,6 @@ import type { FeedbackWidgetEl } from './widget.ts';
 /** The bridge's line to the board's bar around a mock (`mock-bridge.ts`). */
 interface HostBar {
   tell(state: { open: boolean; fresh: boolean }): void;
-}
-
-/** The context a thread was made in, an orphan's from its original anchor. */
-function contextOf(t: Thread): AnchorContext | undefined {
-  const a = t.anchor;
-  if (a.kind === 'orphan') return (a.original as { context?: AnchorContext }).context;
-  return 'context' in a ? a.context : undefined;
 }
 
 /**
@@ -236,14 +230,13 @@ export function mountPageList(el: FeedbackWidgetEl): void {
       list
         ?.querySelector(`[data-thread-id="${CSS.escape(t.id)}"]`)
         ?.scrollIntoView({ block: 'nearest' });
-    // A card with an exchange in it can be taller than the list, so the
-    // reply box and its button come into view last, once laid out. The list
-    // scrolls by hand: scrollIntoView would move the page under it too.
+    // A card with an exchange can be taller than the list: bring its reply
+    // box into view, by hand, since scrollIntoView moves the page too.
     const reply = () => {
       const box = list?.querySelector('.thread.active .thread-popover .actions');
-      if (!list || !box) return;
-      const over = box.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
-      if (over > 0) list.scrollTop += over;
+      const over =
+        list && box ? box.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom : 0;
+      if (list && over > 0) list.scrollTop += over;
     };
     reply();
     requestAnimationFrame(reply);

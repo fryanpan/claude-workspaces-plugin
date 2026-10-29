@@ -39,6 +39,13 @@ export function pageName(key: string, linkText?: string): string {
   return seg ? decodeURIComponent(seg).replace(/[-_]/g, ' ') : 'Home';
 }
 
+/** The context a thread was made in, an orphan's from its original anchor. */
+export function contextOf(t: Thread): AnchorContext | undefined {
+  const a = t.anchor;
+  if (a.kind === 'orphan') return (a.original as { context?: AnchorContext }).context;
+  return 'context' in a ? a.context : undefined;
+}
+
 /** The record of what this reader has seen: thread id → the latest
  *  comment's time when they last opened it. */
 export type SeenMap = Record<string, number>;
