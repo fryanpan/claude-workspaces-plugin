@@ -30,8 +30,9 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { type Dirent, realpathSync, statSync } from 'node:fs';
-import { readdir, readlink, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { lstat, readdir, readlink, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { shortHash } from './bind-meta.ts';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
 export const MAX_ROOTS = 32;
@@ -84,11 +85,23 @@ export class BoardSocketRoots {
       readBinds(raw?.binds, this.binds);
       readBinds(raw?.archived, this.archived);
     } catch {
-      // Unreadable is the same as empty: every lead bind is refused.
+      // Unreadable: no root is registered, so every lead bind is refused, and
+      // the records of the sets leads already bound are lost with it. So the
+      // guard fails closed on every lead set id (`isLeadSetId`), and nothing
+      // is written over the file, which may only be mid-edit or misread.
+      if (existsSync(this.path)) {
+        this.broken = true;
+        console.error(
+          `[board-socket-roots] ${this.path} could not be read; refusing every lead's set until it can`,
+        );
+      }
     }
     this.boards = boards;
     return boards;
   }
+
+  /** Set when the file exists and cannot be read: see `load`. */
+  private broken = false;
 
   rootsOf(boardId: string): string[] {
     return [...(this.load()[boardId] ?? [])];
@@ -121,6 +134,7 @@ export class BoardSocketRoots {
         if (a !== b && b.startsWith(`${a}/`))
           return { ok: false, error: `${b} is inside ${a}; a root may not hold another` };
     const boards = this.load();
+    if (this.broken) return { ok: false, error: 'the roots file cannot be read' };
     boards[boardId] = resolved;
     this.save();
     return { ok: true, roots: [...resolved] };
@@ -141,6 +155,7 @@ export class BoardSocketRoots {
   /** Remember a set a lead bound, so every later use of it is re-checked. */
   recordBind(setId: string, board: string, root: string): void {
     this.load();
+    if (this.broken) return;
     const had = this.binds[setId];
     if (had?.board === board && had.root === root) return;
     this.binds[setId] = { board, root };
@@ -169,6 +184,7 @@ export class BoardSocketRoots {
     to: Record<string, LeadBindRecord>,
   ): void {
     this.load();
+    if (this.broken) return;
     const record = from[setId];
     if (record === undefined) return;
     to[setId] = record;
@@ -188,8 +204,11 @@ export class BoardSocketRoots {
     return [...Object.values(this.binds), ...Object.values(this.archived)].filter(under);
   }
 
-  /** Whether `path` is under a root a lead bound: the guard's business. */
-  covers(path: string, _setId?: string): boolean {
+  /** Whether `path` is under a root a lead bound: the guard's business.
+   *  With the file unreadable, every lead set is, wherever it is. */
+  covers(path: string, setId?: string): boolean {
+    this.load();
+    if (this.broken && setId !== undefined && isLeadSetId(setId)) return true;
     return this.recordsOver(path).length > 0;
   }
 
@@ -200,14 +219,16 @@ export class BoardSocketRoots {
    * its way below the root, the one place a walled lead may make links
    * (`scripts/lead-sandbox-wall.ts`). A lead's own set also needs its root
    * still registered for the board; that check alone is keyed by the set,
-   * so dropping a root stops the lead's set and not the owner's. A caller
-   * that cannot name its set is held to every record's registration.
+   * so dropping a root stops the lead's set and leaves serving an owner's
+   * set and an owner's lone doc, which names no set, on the same folder.
    */
   admits(path: string, setId?: string, now = Date.now()): boolean {
+    this.load();
+    if (this.broken && setId !== undefined && isLeadSetId(setId)) return false;
     for (const record of this.recordsOver(path)) {
       const { root } = record;
       if (path.slice(root.length).split('/').includes('node_modules')) return false;
-      const own = setId === undefined || this.binds[setId] === record;
+      const own = setId !== undefined && this.binds[setId] === record;
       if (own && !this.rootsOf(record.board).includes(root)) return false;
       const cached = this.verdicts.get(root);
       let ok: boolean;
@@ -231,7 +252,9 @@ export class BoardSocketRoots {
    * file not there yet, `real` is its nearest existing folder, resolved, so
    * a write cannot create a file through a linked parent.
    */
-  landsInside(path: string, real: string, _setId?: string): boolean {
+  landsInside(path: string, real: string, setId?: string): boolean {
+    this.load();
+    if (this.broken && setId !== undefined && isLeadSetId(setId)) return false;
     return this.recordsOver(path).every(({ root }) => real === root || real.startsWith(`${root}/`));
   }
 
@@ -251,6 +274,21 @@ export class BoardSocketRoots {
 }
 
 /** The most entries `linkOutOf` will look at before it gives up. */
+/** Every set a lead binds has an id of this shape (`leadSetId`). */
+const LEAD_SET_PREFIX = 'lead-';
+
+/** The set id a lead's bind of `root` gets: `lead-`, the folder's name, and
+ *  a hash of the root AND the board, so no other board's set shares it. */
+export function leadSetId(root: string, board: string): string {
+  const base = basename(root).replace(/[^a-zA-Z0-9_.\-]/g, '-') || 'workspace';
+  return `${LEAD_SET_PREFIX}${base}-${shortHash(`${root}\0${board}`)}`;
+}
+
+/** Whether `setId` has the shape only a lead's bind gives. */
+export function isLeadSetId(setId: string): boolean {
+  return setId.startsWith(LEAD_SET_PREFIX);
+}
+
 export const LINK_SCAN_MAX = 200_000;
 
 /**
@@ -264,11 +302,15 @@ export const LINK_SCAN_MAX = 200_000;
  * only descends stays inside whatever folder it is moved with. Links are
  * not followed, and `node_modules` folders are not walked: a walled lead
  * may make links there (`scripts/lead-sandbox-wall.ts`), and the guard
- * refuses every path through one.
+ * refuses every path through one. A file with a second name is refused
+ * too, since a hard link resolves inside the root wherever its other name
+ * is; inside `.git`, where a local clone shares object files, that is left
+ * to the guard, which refuses a read of one.
  */
 export async function linkOutOf(root: string): Promise<string | 'too-many' | null> {
   const inside = (p: string) => p === root || p.startsWith(`${root}/`);
   const queue = [root];
+  const inGit = (p: string) => p.slice(root.length).split('/').includes('.git');
   let seen = 0;
   for (let dir = queue.pop(); dir !== undefined; dir = queue.pop()) {
     let entries: Dirent[];
@@ -291,6 +333,10 @@ export async function linkOutOf(root: string): Promise<string | 'too-many' | nul
         } catch {}
         const climbs = isAbsolute(target) || target.split('/').includes('..');
         if (real === null || !inside(real) || climbs) return path.slice(root.length + 1);
+      } else if (entry.isFile() && !inGit(path)) {
+        try {
+          if ((await lstat(path)).nlink > 1) return path.slice(root.length + 1);
+        } catch {}
       }
     }
   }

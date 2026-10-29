@@ -16,16 +16,13 @@
  * local sockets are not touched.
  *
  * In its own projects, the folders it may bind (`board-socket-roots.ts`),
- * three more rules hold what the server does there:
- * - no symlink or hard link outside a `node_modules` folder, since the
- *   server reads and writes through what it finds there; a package manager
- *   needs links in `node_modules`, the server refuses every path through
- *   one, and a `node_modules` folder may not be renamed or removed, so
- *   nothing made in it moves out;
- * - no regular file named `config` or `config.worktree`, the two files git
- *   reads settings from in a repository's git folder. The server runs git in
- *   these folders, and such a setting can name a program
- *   (`core.fsmonitor`, a filter) that git then runs as the server.
+ * it may make no new symlink or hard link outside a `node_modules` folder,
+ * since the server reads and writes through what it finds there. A package
+ * manager needs links in `node_modules`; the server refuses every path
+ * through one, and a `node_modules` folder may not be renamed or removed,
+ * so nothing made in it moves out. The server runs no git in a folder a
+ * lead bound (`packages/server/src/git-hardening.ts`), so git's settings
+ * files are left writable.
  *
  * Off unless a lead's config sets `boardWall`. A walled lead is launched with
  * `CW_BOARD_SOCKET` naming its own board's socket, which its MCP relay dials
@@ -90,7 +87,6 @@ function projectRules(project: string, realpath: (path: string) => string): stri
       `(deny file-write-create (require-all (vnode-type SYMLINK) (subpath ${sbQuote(d)}) ${NOT_NODE_MODULES})) ; no new symlink in a project`,
       `(deny file-link (require-all (subpath ${sbQuote(d)}) ${NOT_NODE_MODULES})) ; no new hard link in a project`,
       `(deny file-write-unlink (regex #"^${re}(/.*)?/node_modules$")) ; node_modules stays where it is`,
-      `(deny file-write* (require-all (vnode-type REGULAR-FILE) (regex #"^${re}(/.*)?/config(\\.worktree)?$"))) ; no git settings file`,
     ];
   });
 }

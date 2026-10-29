@@ -360,7 +360,7 @@ s.on('error', (e) => console.log(e.code));`,
     expect(existsSync(join(app, 'node_modules', '.bin', 'harbor-tool'))).toBe(true);
   });
 
-  it('writes no git settings file, and still commits and adds a worktree', () => {
+  it('still commits, adds a worktree and sets git config in its project', () => {
     const repo = join(project, 'repo');
     mkdirSync(repo);
     const git = (profile: string | null, args: string[]) =>
@@ -372,14 +372,7 @@ s.on('error', (e) => console.log(e.code));`,
     const id = ['-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid'];
     expect(git(walled, [...id, 'commit', '-q', '--allow-empty', '-m', 'one'])).toBe(0);
     expect(git(walled, ['worktree', 'add', '-q', join(repo, 'wt'), '-b', 'wt'])).toBe(0);
-    expect(git(walled, ['config', 'core.fsmonitor', '/bin/true'])).not.toBe(0);
-    // A git folder of the lead's own making reads `config` too.
-    const run = (profile: string, argv: string[]) =>
-      spawnSync(SANDBOX_EXEC, ['-f', profile, ...argv], { cwd: project, encoding: 'utf8' }).status;
-    expect(run(walled, ['/bin/sh', '-c', `echo x > ${join(project, 'config')}`])).not.toBe(0);
-    expect(existsSync(join(project, 'config'))).toBe(false);
-    // The control: without the wall the setting is written.
-    expect(git(unwalled, ['config', 'core.fsmonitor', '/bin/true'])).toBe(0);
+    expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).toBe(0);
   });
 
   it('fails a check row whose path has no socket behind it, which proves nothing', () => {

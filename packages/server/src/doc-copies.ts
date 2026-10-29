@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkoutBranch } from './doc-origin-repo.ts';
-import { hardenedGitArgs } from './git-hardening.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 import type { RepoRegistry } from './repo-registry.ts';
 
 /**
@@ -115,10 +115,8 @@ function isUncommitted(
 ): boolean | undefined {
   const left = remainingMs();
   if (left <= 0) return undefined;
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_') && v !== undefined) env[k] = v;
-  }
+  if (gitBarred(root)) return undefined;
+  const env = hardenedGitEnv();
   try {
     const res = spawnSync('git', hardenedGitArgs(['status', '--porcelain', '--', relPath]), {
       cwd: root,

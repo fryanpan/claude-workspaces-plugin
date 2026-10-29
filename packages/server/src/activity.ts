@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
 import type { ActorKind } from './actor-identity.ts';
 import { type EventDevice, stampEventOrigin } from './event-origin.ts';
-import { hardenedGitArgs } from './git-hardening.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /**
  * The "hands-on activity" event stream. One JSON object per line, append-only,
@@ -191,12 +191,15 @@ const repoCache = new Map<string, EventDocRepo | null>();
 function gitRepoFor(dir: string): EventDocRepo | null {
   if (repoCache.has(dir)) return repoCache.get(dir) ?? null;
   let result: EventDocRepo | null = null;
+  if (gitBarred(dir)) return null;
   try {
     const top = spawnSync('git', hardenedGitArgs(['-C', dir, 'rev-parse', '--show-toplevel']), {
+      env: hardenedGitEnv(),
       encoding: 'utf8',
     });
     if (top.status === 0 && typeof top.stdout === 'string' && top.stdout.trim()) {
       const remote = spawnSync('git', hardenedGitArgs(['-C', dir, 'remote', 'get-url', 'origin']), {
+        env: hardenedGitEnv(),
         encoding: 'utf8',
       });
       if (remote.status === 0 && typeof remote.stdout === 'string' && remote.stdout.trim()) {

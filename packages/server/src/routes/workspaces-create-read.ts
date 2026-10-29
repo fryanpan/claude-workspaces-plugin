@@ -1,17 +1,10 @@
-/**
- * Creating a board or binding a folder, the diff review beside it, and the two reads of a board.
- *
- * Lifted verbatim out of `createServer`'s request closure; the handlers
- * read their collaborators off `WorkspaceRoutesContext` instead of the scope.
- */
-import { basename } from 'node:path';
 import { classifyActor } from '../actor-identity.ts';
 import {
   ATTACHMENT_PRIVACY_ERROR,
   parseAttachmentPrivacy,
   privacyNote,
 } from '../attachment-privacy.ts';
-import { shortHash } from '../bind-meta.ts';
+import { leadSetId } from '../board-socket-roots.ts';
 import { restIs } from '../middleware/workspace-scope.ts';
 import { browserCannotBindBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import {
@@ -441,13 +434,6 @@ interface LeadBind {
   /** The registered root the folder resolved to: what is bound. */
   root: string;
   setId: string;
-}
-
-/** The set id a lead's bind of `root` gets: the folder's name, and a hash of
- *  the root AND the board, so no other board's set shares it. */
-function leadSetId(root: string, board: string): string {
-  const base = basename(root).replace(/[^a-zA-Z0-9_.\-]/g, '-') || 'workspace';
-  return `${base}-${shortHash(`${root}\0${board}`)}`;
 }
 
 /**

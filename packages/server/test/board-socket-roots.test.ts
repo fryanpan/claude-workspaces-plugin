@@ -5,17 +5,27 @@
  */
 import { afterAll, describe, expect, it } from 'bun:test';
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { BoardSocketRoots, MAX_ROOTS, boardSocketRootsPath } from '../src/board-socket-roots.ts';
+import { dirname, join } from 'node:path';
+import {
+  BoardSocketRoots,
+  MAX_ROOTS,
+  boardSocketRootsPath,
+  isLeadSetId,
+  leadSetId,
+  linkOutOf,
+} from '../src/board-socket-roots.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'bs-roots-')));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -85,6 +95,8 @@ describe('BoardSocketRoots', () => {
     roots.set('w-harbor', []);
     expect(roots.admits(file, 's-lead', later())).toBe(false);
     expect(roots.admits(file, 's-owner', later())).toBe(true);
+    // So does an owner's lone doc, which names no set.
+    expect(roots.admits(file, undefined, later())).toBe(true);
 
     // Swapping the root for a link stops every set under it.
     renameSync(lead, `${lead}.moved`);
@@ -96,5 +108,39 @@ describe('BoardSocketRoots', () => {
     expect(roots.covers(file, 's-owner')).toBe(true);
     expect(roots.admits(file, 's-owner', later())).toBe(false);
     expect(roots.landsInside(file, join(riverbend, 'plan.md'), 's-owner')).toBe(false);
+  });
+
+  it('fails closed on every lead set when its file cannot be read, and writes nothing over it', () => {
+    const path = boardSocketRootsPath(join(root, 'f'));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '{ not json');
+    const roots = new BoardSocketRoots(path);
+    const lead = leadSetId(harborlight, 'w-harbor');
+    expect(isLeadSetId(lead)).toBe(true);
+    const file = join(harborlight, 'docs', 'plan.md');
+    expect(roots.covers(file, lead)).toBe(true);
+    expect(roots.admits(file, lead)).toBe(false);
+    // The control: an owner's set on the same folder is no guard's business.
+    expect(roots.covers(file, 's-owner')).toBe(false);
+    expect(roots.set('w-harbor', [harborlight]).ok).toBe(false);
+    roots.recordBind(lead, 'w-harbor', harborlight);
+    expect(readFileSync(path, 'utf8')).toBe('{ not json');
+  });
+});
+
+describe('linkOutOf', () => {
+  it('refuses a file with a second name, except inside .git', async () => {
+    const dir = join(root, 'link-scan');
+    mkdirSync(join(dir, '.git', 'objects'), { recursive: true });
+    writeFileSync(join(dir, 'plan.md'), '# harborlight\n');
+    linkSync(join(dir, 'plan.md'), join(dir, '.git', 'objects', 'shared'));
+    // Inside .git the second name is left to the guard; the first name is not.
+    expect(await linkOutOf(dir)).toBe('plan.md');
+    const clean = join(root, 'link-scan-clean');
+    mkdirSync(join(clean, '.git', 'objects'), { recursive: true });
+    writeFileSync(join(root, 'outside.md'), '# riverbend\n');
+    linkSync(join(root, 'outside.md'), join(clean, '.git', 'objects', 'shared'));
+    writeFileSync(join(clean, 'plan.md'), '# harborlight\n');
+    expect(await linkOutOf(clean)).toBeNull();
   });
 });

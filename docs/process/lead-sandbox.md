@@ -142,14 +142,12 @@ folder, and renaming or removing a `node_modules` folder: the server reads
 and writes the projects a lead binds, and a link the lead made in one, or
 made elsewhere and moved in, would carry the server outside it. `bun
 install` and `npm install` still work, since their links are in
-`node_modules`, and the server refuses every path through one. It also
-denies writing a regular file named `config` or `config.worktree` there,
-because the server runs git in those folders and a git setting can name a
-program git runs. The costs: a walled lead cannot check out a repository
-whose tracked files include symlinks, cannot `git init`, `git clone`,
-`git config`, `git remote add` or `git push -u` inside its projects (each
-writes a git `config`), and cannot keep any other file named `config`
-there. Commits, branches and `git worktree add` work. The folder is the config's top-level
+`node_modules`, and the server refuses every path through one. The server
+runs no git in a folder a lead bound, so the lead's git settings stay
+writable: commits, `git push -u`, `git config` and `git worktree add` work.
+The cost: a walled lead cannot check out a repository whose tracked files
+include symlinks outside `node_modules`, and cannot rename or delete a
+`node_modules` folder. The folder is the config's top-level
 `boardSocketDir`, or `/private/tmp/cw-<uid>-boards` when unset; a folder too
 long for a socket path is refused. A server on prod's port, 8787, opens the
 sockets in the default folder unless started with `CW_BOARD_SOCKETS=0`; any

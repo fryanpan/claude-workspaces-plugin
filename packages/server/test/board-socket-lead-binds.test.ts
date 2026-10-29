@@ -18,7 +18,9 @@
  * machine, which is any reader the server answers. Fixtures synthetic.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -271,6 +273,38 @@ describe('the guard holds only the lead’s own sets', () => {
     const back = await tcp(`${at}/unarchive`, { method: 'POST', body: '{}' });
     expect(back.status, await back.clone().text()).toBe(200);
     expect(Object.keys(recorded().binds)).toContain(setId);
+  }, 30_000);
+});
+
+describe('git in a lead’s root', () => {
+  it('runs no program the repository names, through the bind and a file open', async () => {
+    const root = project('harbor-git');
+    const marker = join(workDir, 'harbor-git-ran');
+    const hook = join(workDir, 'harbor-git-hook.sh');
+    writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+    chmodSync(hook, 0o755);
+    const git = (...args: string[]) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+    git('init', '-q');
+    writeFileSync(join(root, '.gitattributes'), '*.md filter=harbor\n');
+    git('add', '.');
+    git('-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'x');
+    git('config', 'core.fsmonitor', hook);
+    git('config', 'filter.harbor.clean', `${hook}; cat`);
+    // Positive control: plain git in the same repo runs the planted program.
+    writeFileSync(join(root, 'notes.md'), '# harbor-git notes\n\nEdited.\n');
+    git('status', '--porcelain');
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+
+    await setRoots([root]);
+    const bound = await leadBind(root);
+    expect(bound.status, await bound.clone().text()).toBe(200);
+    const { setId, listed } = (await bound.json()) as { setId: string; listed: string[] };
+    // Listed by a walk, since no git runs here.
+    expect(listed).toEqual(['later.md', 'notes.md']);
+    const opened = await openFile(setId, 'notes.md');
+    expect(opened.status, await opened.clone().text()).toBe(200);
+    expect(existsSync(marker)).toBe(false);
   }, 30_000);
 });
 

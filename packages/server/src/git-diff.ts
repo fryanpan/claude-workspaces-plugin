@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import type { DiffFileStatus } from '@claude-workspaces/core';
-import { hardenedGitArgs } from './git-hardening.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /**
  * Git plumbing for diff reviews. Every call shells out with an argv array
@@ -25,11 +25,16 @@ interface GitResult {
   stderr: string;
 }
 
+/** What a read answers where no git may run (`git-hardening.ts`). */
+const BARRED: GitResult = { ok: false, stdout: '', stderr: 'git is not run in this folder' };
+
 /** A git read: yields each argv (without `-C <repo>`), receives its result. */
 type GitSteps<T> = Generator<string[], T, GitResult>;
 
 function gitSync(repo: string, args: string[]): GitResult {
+  if (gitBarred(repo)) return BARRED;
   const res = spawnSync('git', hardenedGitArgs(['-C', repo, ...args]), {
+    env: hardenedGitEnv(),
     encoding: 'utf8',
     maxBuffer: MAX_GIT_BUFFER,
   });
@@ -49,12 +54,14 @@ function gitSync(repo: string, args: string[]): GitResult {
 const GIT_ASYNC_TIMEOUT_MS = 30_000;
 
 function gitAsync(repo: string, args: string[]): Promise<GitResult> {
+  if (gitBarred(repo)) return Promise.resolve(BARRED);
   return new Promise((resolve) => {
     execFile(
       'git',
       hardenedGitArgs(['-C', repo, ...args]),
       {
         encoding: 'utf8',
+        env: hardenedGitEnv(),
         maxBuffer: MAX_GIT_BUFFER,
         timeout: GIT_ASYNC_TIMEOUT_MS,
         killSignal: 'SIGKILL',

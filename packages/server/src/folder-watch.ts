@@ -66,7 +66,7 @@ import { attachmentIdOf } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
 import { isExcluded, normalizeExcludes } from './bind-meta.ts';
 import { diffFilesAsync } from './git-diff.ts';
-import { hardenedGitArgs } from './git-hardening.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /** Quiet time that closes a burst. */
 export const SETTLE_MS = 150;
@@ -226,13 +226,14 @@ const LISTING_DEADLINE_MS = 3_000;
 
 /** `git ls-files` as a child process; null outside a repo or on failure. */
 async function gitListing(root: string): Promise<Set<string> | null> {
+  if (gitBarred(root)) return null;
   try {
     const proc = Bun.spawn(
       [
         'git',
         ...hardenedGitArgs(['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard']),
       ],
-      { stdout: 'pipe', stderr: 'ignore' },
+      { stdout: 'pipe', stderr: 'ignore', env: hardenedGitEnv() },
     );
     const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
     if (code !== 0) return null;
