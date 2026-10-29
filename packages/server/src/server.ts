@@ -60,6 +60,7 @@ import { originOfHeaders, withEventOrigin } from './event-origin.ts';
 import { type FolderWatches, createFolderWatches, liveSourceOf } from './folder-watch.ts';
 import { createFrameHost } from './frame-host.ts';
 import { frameKeys } from './frame-ticket.ts';
+import { personProofOf, refuseStaleSignIn } from './fresh-signin.ts';
 import { GithubHub, githubHubPath } from './github-hub.ts';
 import { taskDeepLink } from './home-brief.ts';
 import { homeFeedOf } from './home-feed.ts';
@@ -1929,6 +1930,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     clientKeyFor,
     isSecureRequest,
     sessionIdentityFor,
+    sessionSignedInAtFor,
     refreshSession,
   } = createIdentitySetup({
     dataDir,
@@ -2994,6 +2996,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     localOnlyGate,
     attributeRequest,
     requireSignInToWrite,
+    freshSignInGate: (req, pathname, admitted) =>
+      refuseStaleSignIn(
+        req,
+        pathname,
+        personProofOf(admitted, sessionIdentityFor(req), sessionSignedInAtFor(req)),
+        { shares, now: Date.now() },
+      ),
     authShareRoutesCtx,
     voiceAgentLlmRoutesCtx,
     recallWebhookRoutesCtx,

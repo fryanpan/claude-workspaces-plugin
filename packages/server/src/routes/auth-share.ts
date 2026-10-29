@@ -558,6 +558,31 @@ export async function handleAuthShareRoutes(
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
   }
 
+  // --- "Sign in again", for a destructive action refused as stale ---
+  // (fresh-signin.ts). The page navigates here and comes back to `next`
+  // having signed in afresh. An Access person loses this host's Access
+  // token, so the edge sends them through Access, which mints a new one with
+  // a new `iat`; a person on the board's own sign-in goes to `/signin`, whose
+  // login mints a session with a new `signedInAt`. It ends no session and
+  // grants nothing: the worst a page that links here can do is make its
+  // visitor sign in again.
+  if (pathname === '/api/auth/reauth' && req.method === 'GET') {
+    const next = sameOriginPath(rq.url.searchParams.get('next'));
+    const headers = new Headers({ 'cache-control': 'no-store' });
+    if (accessIdentityFor() !== null) {
+      headers.set('location', next);
+      headers.append(
+        'set-cookie',
+        'CF_Authorization=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None',
+      );
+    } else if (sessionIdentityFor(req) !== null && emailCodeSignIn) {
+      headers.set('location', `/signin?next=${encodeURIComponent(next)}`);
+    } else {
+      headers.set('location', next);
+    }
+    return new Response(null, { status: 302, headers });
+  }
+
   if (pathname === '/api/auth/profile' && req.method === 'POST') {
     // The one write the sign-in flow makes about a person: their chosen
     // display name. Session-gated, and ONLY the session decides whose —
@@ -1179,4 +1204,13 @@ export async function handleAuthShareRoutes(
   }
 
   return undefined;
+}
+
+/**
+ * `next` as a same-origin path, or `/`. An absolute or scheme-relative value
+ * would make the redirect above an open one, and browsers read `\` as `/`.
+ */
+export function sameOriginPath(raw: string | null): string {
+  if (!raw || !/^\/(?![/\\])/.test(raw) || /[\r\n]/.test(raw)) return '/';
+  return raw;
 }

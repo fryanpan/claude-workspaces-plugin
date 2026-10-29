@@ -28,6 +28,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/attachments/*` | GET, POST, PUT, DELETE | `routes/wrong-prefix.ts` | trusted-local |  |
 | `/api/auth/logout` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/profile` | POST | `routes/auth-share.ts` | trusted-local |  |
+| `/api/auth/reauth` | GET | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/session` | GET | `routes/auth-share.ts` | share-scope |  |
 | `/api/auth/start` | POST | `routes/auth-share.ts` | trusted-local |  |
 | `/api/auth/verify` | POST | `routes/auth-share.ts` | trusted-local |  |

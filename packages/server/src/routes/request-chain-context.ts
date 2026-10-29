@@ -73,6 +73,13 @@ export interface RequestChainContext {
   localOnlyGate: Parameters<typeof addressesLocalOnlySet>[1];
   attributeRequest: RequestAttribution['attributeRequest'];
   requireSignInToWrite: boolean;
+  /** The fresh-sign-in refusal for a person's counted action, or null
+   *  (`fresh-signin.ts`). */
+  freshSignInGate: (
+    req: Request,
+    pathname: string,
+    admitted: AttributableRequest,
+  ) => Promise<Response | null>;
   authShareRoutesCtx: AuthShareRoutesContext;
   voiceAgentLlmRoutesCtx: VoiceAgentLlmRoutesContext;
   recallWebhookRoutesCtx: RecallWebhookRoutesContext;
