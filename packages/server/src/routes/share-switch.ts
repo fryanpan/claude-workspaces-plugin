@@ -67,7 +67,14 @@ export interface ShareSwitchRequest {
   provenIdentityFor: () => IdentityRecord | null;
 }
 
-/** Did this request prove it is the machine's owner? A loopback agent proves nobody. */
+/**
+ * Did this request prove it is the machine's owner? A loopback agent proves
+ * nobody. No same-origin half, unlike `share/owner-proof.ts`: every caller is
+ * under `/api/share/`, where `routes/auth-share.ts` has already refused any
+ * request a browser sent (`browserCannotOperateBody`), so a local dev
+ * server's page carrying the owner's cookie never gets this far, and a
+ * same-origin test here would refuse every caller that does.
+ */
 export function provedOwner(rq: ShareSwitchRequest): boolean {
   const proven = rq.provenIdentityFor();
   return proven !== null && isOwnerActor({ id: proven.id });

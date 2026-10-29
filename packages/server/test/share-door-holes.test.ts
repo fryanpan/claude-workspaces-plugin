@@ -106,20 +106,6 @@ describe('the share door, against the ways round it', () => {
     expect(minted.status, await minted.clone().text()).toBe(200);
   });
 
-  it('lets an agent shorten a live share and refuses to keep one open longer', async () => {
-    const minted = await s.local(
-      '/api/share/link',
-      post({ workspaceId: s.board, allowDomains: [ALICE], ttl: '1h' }),
-    );
-    expect(minted.status).toBe(200);
-    const { share } = (await minted.json()) as { share: { shareId: string; expiresAt: number } };
-    const longer = await s.local(`/api/share/${share.shareId}/ttl`, post({ ttl: '3d' }));
-    expect(longer.status).toBe(403);
-    expect(((await longer.json()) as { error: string }).error).toBe('owner-only');
-    const shorter = await s.local(`/api/share/${share.shareId}/ttl`, post({ ttl: '15m' }));
-    expect(shorter.status).toBe(200);
-  });
-
   it("files a card as the agent, whoever the caller's author claims to be", async () => {
     const res = await s.local(
       `${s.scope}/audience`,

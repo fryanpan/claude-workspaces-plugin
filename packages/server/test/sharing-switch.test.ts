@@ -237,6 +237,24 @@ describe('the sharing switch, for one board and for all of them', () => {
       expect((await status()).closedBoards).toEqual([closing]);
     });
 
+    it("does not reopen it for the owner's cookie on a local dev server's page", async () => {
+      // Same-site with this server, so the owner's cookie rides along. A page
+      // may not change sharing at all (`browserCannotOperateBody`).
+      const r = await req('/api/share/enabled', OWNER_HOST, {
+        method: 'POST',
+        headers: {
+          ...CF_RAY,
+          'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
+          'content-type': 'application/json',
+          'sec-fetch-site': 'same-site',
+          origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({ workspaceId: closing, enabled: true }),
+      });
+      expect(r.status).toBe(403);
+      expect((await status()).closedBoards).toEqual([closing]);
+    });
+
     it('reopens that board for the owner', async () => {
       const r = await postOwner('/api/share/enabled', { workspaceId: closing, enabled: true });
       expect(r.status).toBe(200);

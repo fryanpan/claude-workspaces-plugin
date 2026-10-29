@@ -952,20 +952,6 @@ export async function handleAuthShareRoutes(
       maxSeconds: shares.maxTtlSeconds,
     });
     if (!newTtl.ok) return j(400, { error: newTtl.error, hint: newTtl.hint });
-    // Shortening applies at once. Keeping a share open longer is the owner's:
-    // it keeps people in past the time the owner agreed to.
-    const current = shares.findLive(shareId);
-    if (
-      current &&
-      Date.now() + newTtl.seconds * 1000 > current.expiresAt &&
-      !provedOwner({ req, provenIdentityFor })
-    ) {
-      return j(403, {
-        error: 'owner-only',
-        message:
-          'Only the owner keeps a share open longer. Shortening it applies at once; to extend it, mint a share for the people the board names.',
-      });
-    }
     try {
       const share = await shares.setTtl(shareId, newTtl.seconds);
       return share

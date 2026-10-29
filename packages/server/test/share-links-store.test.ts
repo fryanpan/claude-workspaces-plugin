@@ -397,6 +397,24 @@ describe('the share-link store', () => {
       const next = new ShareLinks({ dataDir });
       next.seedFromOlderShares(older);
       expect(next.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([REVIEWER]);
+      // Emptied is still an audience: the owner's last removal stays removed.
+      next.removeFromAudience(BOARD, REVIEWER);
+      const later = new ShareLinks({ dataDir });
+      later.seedFromOlderShares(older);
+      expect(later.audienceOf(BOARD)?.entries).toEqual([]);
+    });
+
+    it('seeds a board the older shares let people into when there was never a registry', () => {
+      // No share-links.json at all, so no migration runs on this boot.
+      const empty = mkdtempSync(join(tmpdir(), 'share-links-none-'));
+      try {
+        const fresh = new ShareLinks({ dataDir: empty });
+        expect(fresh.audienceOf(BOARD)).toBeUndefined();
+        fresh.seedFromOlderShares([{ workspaceId: BOARD, allowDomains: [REVIEWER] }]);
+        expect(fresh.audienceOf(BOARD)?.entries.map((e) => e.match)).toEqual([REVIEWER]);
+      } finally {
+        rmSync(empty, { recursive: true, force: true });
+      }
     });
   });
 

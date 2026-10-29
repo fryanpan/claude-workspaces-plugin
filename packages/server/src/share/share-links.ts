@@ -339,18 +339,29 @@ export class ShareLinks {
   }
 
   /**
-   * Seed the audiences from the older Cloudflare shares' allow lists, once:
-   * only on the load that ran the migration. Those shares admit on the
-   * collaboration hostname, which now also checks the board's audience, so
-   * without this the upgrade would shut out the people they let in.
+   * Seed the audiences from the older Cloudflare shares' allow lists. Those
+   * shares admit on the collaboration hostname, which now also checks the
+   * board's audience, so without this the upgrade would shut out the people
+   * they let in.
+   *
+   * A board with no audience record at all is seeded on any boot: a
+   * deployment that never had a share-link registry runs no migration, and
+   * its older shares are the only list there is. On the boot that ran the
+   * migration, the allow lists are also merged into the audiences it just
+   * built. Every other boot leaves an existing audience alone, emptied or
+   * not, so the owner's removals since stay removed.
    */
   seedFromOlderShares(
     shares: ReadonlyArray<{ workspaceId: string; allowDomains?: readonly string[] }>,
   ): void {
-    if (!this.migratedThisBoot) return;
+    const merge = this.migratedThisBoot;
     this.migratedThisBoot = false;
+    const untouched = new Set(
+      shares.map((s) => s.workspaceId).filter((ws) => this.audienceOf(ws) === undefined),
+    );
     const now = Date.now();
     for (const share of shares) {
+      if (!merge && !untouched.has(share.workspaceId)) continue;
       const parsed = parseShareAudience(share.allowDomains ?? []);
       const entries = parsed.ok ? (parsed.audience ?? []) : [];
       if (entries.length === 0) continue;

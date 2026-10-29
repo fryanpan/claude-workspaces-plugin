@@ -87,6 +87,23 @@ describe('the sentence a card says', () => {
     expect(long).toContain(`"${'x'.repeat(59)}…"`);
   });
 
+  it('drops the format characters that reorder a line, and a landing id that is not an id', () => {
+    const line = accessChangeLine({
+      op: 'share-link',
+      workspaceId: 'w-riverbend',
+      entries: [],
+      link: {
+        label: 'Notes\u202e for nobody\u200b',
+        ttlSeconds: 900,
+        landing: { kind: 'task', id: 't-1\u202e) and lets everyone in (' },
+      },
+    });
+    expect(line).toBe(
+      'Mints a share link "Notes for nobody", open for 15 minutes, opening on a task.',
+    );
+    expect(line).not.toMatch(/[\u200b\u202e]/u);
+  });
+
   it('names reopening a board and unlocking one', () => {
     expect(accessChangeLine({ op: 'open-board', workspaceId: 'w-riverbend' })).toBe(
       'Turns sharing back on for this board, so the people it names can sign in again.',

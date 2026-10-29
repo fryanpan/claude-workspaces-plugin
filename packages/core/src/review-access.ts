@@ -44,16 +44,21 @@ function entryWords(entries: readonly string[]): string {
   return entries.map((e) => (e.startsWith('@') ? `everyone at ${e}` : e)).join(', ');
 }
 
+/** A landing id the card names: an id's own characters, nothing that reads
+ *  as words. Anything else is left off the line. */
+const LANDING_ID = /^[A-Za-z0-9_:.-]{1,64}$/;
+
 /** Longest label a card quotes. */
 export const ACCESS_LABEL_MAX = 60;
 
 /**
- * A label as a card quotes it: no control characters or quote marks, so it
- * cannot close its own quotes and add words of its own, and capped.
+ * A label as a card quotes it: no control or format characters (the bidi
+ * overrides and zero-width marks among them) and no quote marks, so it cannot
+ * close its own quotes, add words of its own or reorder the line, and capped.
  */
 export function quotedLabel(label: string): string {
   const clean = label
-    .replace(/[\p{Cc}"“”'‘’`]/gu, '')
+    .replace(/[\p{Cc}\p{Cf}"“”'‘’`]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
   return clean.length > ACCESS_LABEL_MAX ? `${clean.slice(0, ACCESS_LABEL_MAX - 1)}…` : clean;
@@ -100,7 +105,7 @@ export function accessChangeLine(change: ReviewAccessChange): string {
           ? `open for ${ttlWords(link.ttlSeconds)}`
           : 'open until it is revoked',
         link.landing
-          ? `opening on ${LANDING_WORD[link.landing.kind] ?? 'one thing on the board'}${link.landing.id ? ` (${link.landing.id})` : ''}`
+          ? `opening on ${LANDING_WORD[link.landing.kind] ?? 'one thing on the board'}${link.landing.id && LANDING_ID.test(link.landing.id) ? ` (${link.landing.id})` : ''}`
           : '',
       ].filter((p) => p !== '');
       return `${parts.join(', ')}.`;
