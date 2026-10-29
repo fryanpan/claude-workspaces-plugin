@@ -62,7 +62,7 @@ import { signInRequiredBody } from '../middleware/write-gate.ts';
 import { socketViaOf } from '../mockup-frame.ts';
 import { parseMuxCursor } from '../mux-cursor.ts';
 import type { RecallMeetingRelay } from '../recall-meeting.ts';
-import { redactBoardEventForVisitor } from '../share/redact-board-events.ts';
+import { visitorBoardFrame } from '../share/redact-board-events.ts';
 import type { UpgradeData } from '../socket-handlers.ts';
 import { channelForWatchKey, openAgentMuxStream } from '../sse-mux.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
@@ -731,7 +731,8 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
         // A share visitor's stream carries the §3.3 visitor-contract view
         // of every board event (display names, projected tasks) — the SSE
         // feed is the second door next to the ws doc, and redacting one
-        // transport but not the other is how the DocMeta leak shipped.
+        // transport but not the other is how the DocMeta leak shipped. It
+        // carries no lead-chat frame at all (`visitorBoardFrame`).
         // An agent's MCP child names itself here; a browser tab does not.
         // A visitor never counts as one — their stream is authorized by a
         // share, and letting a share-bearer claim an agentId would let an
@@ -741,7 +742,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
           sse,
           `ws~${workspaceId}`,
           visitorShareId ?? undefined,
-          visitor ? redactBoardEventForVisitor : offBox(req) ? offBoxView : undefined,
+          visitor ? visitorBoardFrame : offBox(req) ? offBoxView : undefined,
           streamAgentId,
           sseLastEventId(req, url),
           visitorMemberKey ?? undefined,
