@@ -179,6 +179,9 @@ describe('resumeHeld', () => {
       { request: { ...ARCHIVE, method: 'PATCH' }, page: PAGE, at: 1_000 },
       { request: { ...ARCHIVE, verb: 7 }, page: PAGE, at: 1_000 },
       { request: { ...ARCHIVE, url: '/api/auth/logout' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, url: '/workspaces/../api/auth/logout' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, url: '/workspaces/%2e%2e/api/auth/logout' }, page: PAGE, at: 1_000 },
+      { request: { ...ARCHIVE, url: '/workspaces/./w-1/docs/d-1' }, page: PAGE, at: 1_000 },
       { request: ARCHIVE, page: PAGE, at: 1_000, who: 'id-bob' },
     ];
     for (const held of planted) {

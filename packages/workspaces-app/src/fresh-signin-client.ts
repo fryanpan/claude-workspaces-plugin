@@ -164,10 +164,29 @@ function isHeldRequest(r: CountedRequest): boolean {
   return (
     METHODS.includes(r.method) &&
     typeof r.url === 'string' &&
-    /^\/(?:workspaces|api\/share)\//.test(r.url) &&
-    !/[\s\\]/.test(r.url) &&
+    isCountedPath(r.url) &&
     [r.verb, r.gerund, r.noun, r.name].every((w) => typeof w === 'string')
   );
+}
+
+/**
+ * A path under one of the two prefixes every counted route sits under, that
+ * a browser sends exactly as written: no dot segment (`..`, `%2e`), backslash
+ * or whitespace that `fetch` would resolve to some other route.
+ */
+function isCountedPath(url: string): boolean {
+  if (/[\s\\]|%2e/i.test(url)) return false;
+  const base = 'http://same-origin.invalid';
+  try {
+    const u = new URL(url, base);
+    return (
+      u.origin === base &&
+      `${u.pathname}${u.search}` === url &&
+      /^\/(?:workspaces|api\/share)\//.test(u.pathname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** One card in the identity prompt's frame. True for the primary button. */
