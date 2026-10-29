@@ -86,7 +86,11 @@ async function apply({ argv, env, out, err }: RunIo): Promise<number> {
   // read on its own: without them every run would read as an update.
   const apps: ExistingApp[] = [];
   for (const a of listed) {
-    apps.push(owned.has(a.name) ? await api<ExistingApp>('GET', `${access}/apps/${a.id}`) : a);
+    apps.push(
+      owned.has(a.name)
+        ? await api<ExistingApp>('GET', `${access}/apps/${encodeURIComponent(a.id)}`)
+        : a,
+    );
   }
 
   const decision = decide(cfg, account, apps, tokens);
@@ -119,7 +123,7 @@ async function apply({ argv, env, out, err }: RunIo): Promise<number> {
 
   const audOf = new Map<string, string>();
   for (const [label, id] of idOf) {
-    const app = await api<ExistingApp>('GET', `${access}/apps/${id}`);
+    const app = await api<ExistingApp>('GET', `${access}/apps/${encodeURIComponent(id)}`);
     if (!app.aud) throw new Error(`board ${label} was read back with no aud`);
     audOf.set(label, app.aud);
   }

@@ -218,7 +218,12 @@ export function decide(
       return;
     }
     steps.push({ label, name: body.name, action: 'update', id: existing.id, changed });
-    writes.push({ label, method: 'PUT', path: `${appsPath}/${existing.id}`, body: resolved });
+    writes.push({
+      label,
+      method: 'PUT',
+      path: `${appsPath}/${encodeURIComponent(existing.id)}`,
+      body: resolved,
+    });
   });
 
   if (refusals.length > 0) return { ok: false, refusals };
