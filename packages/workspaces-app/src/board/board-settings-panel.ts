@@ -1,3 +1,4 @@
+import { deviceStorage, readLeadChatMode, writeLeadChatMode } from '../lead-chat/lead-chat-mode.ts';
 import { letInRequest, resumeAccessWrite, sendAccessWrite } from './access-writes.ts';
 /**
  * The workspace settings panel: the three controls inside it, what each one
@@ -17,7 +18,6 @@ import { letInRequest, resumeAccessWrite, sendAccessWrite } from './access-write
  * and the open flag arrives as a two-thunk accessor rather than as the
  * `BoardState` it actually lives on.
  */
-import { deviceStorage, readLeadChatMode, writeLeadChatMode } from '../lead-chat/lead-chat-mode.ts';
 import {
   type BoardMembersView,
   type BoardRole,
