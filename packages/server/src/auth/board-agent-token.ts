@@ -23,6 +23,13 @@
  * nothing — and is still written mode 600. A revoked record is kept, marked,
  * never deleted.
  *
+ * One kind of record is never written at all: the token the server mints for
+ * a session opened on a board's own socket (`mintHeld`,
+ * `connector/board-token-lease.ts`). Its value never leaves this process, so
+ * its record lives only here too, and is gone when it is revoked or the
+ * process ends, with the session it served. Records of that label which an
+ * earlier release did write are dropped as the file is read.
+ *
  * It expires (`BOARD_AGENT_TOKEN_TTL_MS`, carried in the value), and the
  * holder renews it from off the machine without anyone minting by hand:
  * `POST /api/board-tokens/refresh`, presenting the live token, answers a
@@ -138,12 +145,17 @@ export interface BoardTokenRecord {
   revokedAt?: number;
 }
 
+/** The label on a token held for a board socket session (`mintHeld`). */
+export const BOARD_SOCKET_SESSION_LABEL = 'board socket session';
+
 export function boardTokensPath(dataDir: string): string {
   return join(dataDir, 'board-agent-tokens.json');
 }
 
 export class BoardAgentTokens {
   private records: BoardTokenRecord[] | null = null;
+  /** The tokens held for board socket sessions, in this process only. */
+  private readonly held = new Map<string, BoardTokenRecord>();
 
   constructor(
     private readonly path: string,
@@ -157,7 +169,9 @@ export class BoardAgentTokens {
     try {
       const raw = existsSync(this.path) ? JSON.parse(readFileSync(this.path, 'utf8')) : null;
       const list: unknown[] = Array.isArray(raw?.tokens) ? raw.tokens : [];
-      this.records = list.filter(isRecord);
+      // 0.1.327 wrote one record per board socket session, and revoked it
+      // when the session ended; the value is gone with that process.
+      this.records = list.filter(isRecord).filter((r) => r.label !== BOARD_SOCKET_SESSION_LABEL);
     } catch {
       this.records = [];
     }
@@ -193,16 +207,47 @@ export class BoardAgentTokens {
   }
 
   /**
+   * A token for a board socket session: the same format and the same checks,
+   * with its record kept in this process and never written. Revoking it
+   * deletes it.
+   */
+  mintHeld(
+    agentId: string,
+    boardId: string,
+  ): { record: BoardTokenRecord; token: string; expiresAt: number } {
+    if (!AGENT_ID.test(agentId)) throw new Error('bad agentId');
+    if (!BOARD_ID.test(boardId)) throw new Error('bad boardId');
+    const record: BoardTokenRecord = {
+      id: this.newId(),
+      agentId,
+      boardId,
+      label: BOARD_SOCKET_SESSION_LABEL,
+      createdAt: this.now(),
+    };
+    this.held.set(record.id, record);
+    return { record: { ...record }, ...this.sign(record) };
+  }
+
+  /** Whether a token id is one `mintHeld` minted and still holds. */
+  isHeld(tokenId: string): boolean {
+    return this.held.has(tokenId);
+  }
+
+  private find(id: string): BoardTokenRecord | undefined {
+    return this.held.get(id) ?? this.load().find((x) => x.id === id);
+  }
+
+  /**
    * A fresh value for the record a live token names, with a new expiry. The
    * caller has already verified the token it was handed (`verify`), so this
    * only re-reads the record: one revoked in between refreshes nothing.
    */
   refresh(grant: BoardAgentClaims): { token: string; expiresAt: number } | null {
-    const r = this.load().find((x) => x.id === grant.tokenId);
+    const r = this.find(grant.tokenId);
     if (!r || r.revokedAt !== undefined) return null;
     if (r.agentId !== grant.agentId || r.boardId !== grant.boardId) return null;
     r.refreshedAt = this.now();
-    this.save();
+    if (!this.held.has(r.id)) this.save();
     return this.sign(r);
   }
 
@@ -212,13 +257,19 @@ export class BoardAgentTokens {
     return { token: mintToken(boardAgentToken, claims, this.key()), expiresAt };
   }
 
+  /** Every record, the held ones included, so the operator can revoke any. */
   list(): BoardTokenRecord[] {
-    return this.load().map((r) => ({ ...r }));
+    return [...this.load(), ...this.held.values()].map((r) => ({ ...r }));
   }
 
   /** The record, or null when there is none. Revoking twice keeps the first
-   *  time. */
+   *  time. A held token is deleted. */
   revoke(id: string): BoardTokenRecord | null {
+    const kept = this.held.get(id);
+    if (kept) {
+      this.held.delete(id);
+      return { ...kept, revokedAt: this.now() };
+    }
     const r = this.load().find((x) => x.id === id);
     if (!r) return null;
     if (r.revokedAt === undefined) {
@@ -238,7 +289,7 @@ export class BoardAgentTokens {
     const claims = tokenClaims(boardAgentToken, bearer, this.key(), this.now());
     if (!claims) return null;
     if (claims.expiresAt === null && !legacyBoardAgentToken.accepted) return null;
-    const r = this.load().find((x) => x.id === claims.tokenId);
+    const r = this.find(claims.tokenId);
     if (!r || r.revokedAt !== undefined) return null;
     if (r.agentId !== claims.agentId || r.boardId !== claims.boardId) return null;
     if (claims.expiresAt === null) legacyBoardAgentToken.warn(r.id);

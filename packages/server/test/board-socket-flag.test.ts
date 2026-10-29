@@ -1,7 +1,7 @@
 /**
  * The server flag for board sockets (`resolveBoardSocketDir` in
- * server-config.ts, passed by bin.ts): off unless asked, and on it opens one
- * socket per board.
+ * server-config.ts, passed by bin.ts): on by default for prod's port, off
+ * for any other unless asked, and on it opens one socket per board.
  *
  * Driven through `resolveServerConfig` and `createServer` with the config
  * handed over the way bin.ts hands it, rather than by booting bin.ts, which
@@ -41,7 +41,13 @@ async function boot(env: NodeJS.ProcessEnv, arg: ArgReader = noArgs) {
   const root = mkdtempSync(join(tmpdir(), 'bsf-'));
   cleanup.push(root);
   const dataDir = join(root, 'data');
-  const cfg = resolveServerConfig({ env: { CW_DATA_DIR: dataDir, ...env }, repoRoot: root, arg });
+  // PORT is never prod's unless a case says so: on 8787 the default folder,
+  // the one prod uses, would be opened.
+  const cfg = resolveServerConfig({
+    env: { CW_DATA_DIR: dataDir, PORT: '0', ...env },
+    repoRoot: root,
+    arg,
+  });
   const { boardSocketDir } = cfg;
   handle = createServer({ port: 0, dataDir, ...(boardSocketDir ? { boardSocketDir } : {}) });
   const base = `http://127.0.0.1:${handle.port}`;
@@ -57,7 +63,25 @@ async function boot(env: NodeJS.ProcessEnv, arg: ArgReader = noArgs) {
 }
 
 describe('the board socket flag', () => {
-  it('is off by default: no folder named, none made', async () => {
+  it('is on by default for prod’s port, and CW_BOARD_SOCKETS=0 turns it off', () => {
+    const fallback = `/private/tmp/cw-${FAKE_UID}-boards`;
+    expect(resolveBoardSocketDir({}, noArgs, FAKE_UID, 8787)).toBe(fallback);
+    expect(
+      resolveBoardSocketDir({ CW_BOARD_SOCKETS: '0' }, noArgs, FAKE_UID, 8787),
+    ).toBeUndefined();
+    // A staging port shares the default folder only when asked.
+    expect(resolveBoardSocketDir({}, noArgs, FAKE_UID, 8788)).toBeUndefined();
+    expect(resolveBoardSocketDir({ CW_BOARD_SOCKETS: '1' }, noArgs, FAKE_UID, 8788)).toBe(fallback);
+    // Asked for by the config bin.ts reads, with no PORT given (prod's).
+    const cfg = resolveServerConfig({
+      env: { CW_DATA_DIR: '/nonexistent-data' },
+      repoRoot: '/nonexistent-repo',
+      arg: noArgs,
+    });
+    expect(cfg.boardSocketDir).toBe(`/private/tmp/cw-${process.getuid?.() ?? 0}-boards`);
+  });
+
+  it('is off by default on any other port: no folder named, none made', async () => {
     expect(resolveBoardSocketDir({}, noArgs, FAKE_UID)).toBeUndefined();
     expect(resolveBoardSocketDir({ CW_BOARD_SOCKETS: '0' }, noArgs, FAKE_UID)).toBeUndefined();
     const { cfg, root } = await boot({});

@@ -2,6 +2,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
 
@@ -157,8 +158,9 @@ export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): 
   // The readdir fallback has no ignore file to honour, so it is only for a
   // folder git says is not a repository. A git that failed inside a work tree
   // (a timeout, an exhausted buffer, "dubious ownership") would otherwise
-  // list the repo's ignored `service-account.json` and `secrets.yaml`.
-  if (repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
+  // list the repo's ignored `service-account.json` and `secrets.yaml`. A
+  // root no git may run in (`gitBarred`) is walked, as it always was.
+  if (!gitBarred(root) && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
   return readdirRecursive(root, root, skipped);
 }
 
@@ -176,12 +178,8 @@ type RepoKind = 'work-tree' | 'not-a-repo';
 const repoKinds = new Map<string, 'work-tree'>();
 
 /** What `git rev-parse --is-inside-work-tree` said, or null when it could not say. */
-function repoKindOf(res: {
-  error?: Error | null;
-  status: number | null;
-  stdout?: string;
-  stderr?: string;
-}): RepoKind | null {
+type GitAnswer = { error?: Error | null; status: number | null; stdout?: string; stderr?: string };
+function repoKindOf(res: GitAnswer): RepoKind | null {
   // No git on this machine at all: nothing can be a repository to it.
   if ((res.error as NodeJS.ErrnoException | null | undefined)?.code === 'ENOENT') {
     return 'not-a-repo';
@@ -196,11 +194,7 @@ function repoKindOf(res: {
 function repoKindSync(root: string): RepoKind | null {
   const kept = repoKinds.get(root);
   if (kept) return kept;
-  const res = spawnSync('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], {
-    encoding: 'utf8',
-    timeout: GIT_TIMEOUT.ms,
-    killSignal: 'SIGKILL',
-  });
+  const res = spawnSync('git', REV_PARSE(root), gitOptions());
   const kind = repoKindOf(res);
   if (kind === 'work-tree') repoKinds.set(root, kind);
   return kind;
@@ -210,34 +204,33 @@ async function repoKindAsync(root: string): Promise<RepoKind | null> {
   const kept = repoKinds.get(root);
   if (kept) return kept;
   const kind = await new Promise<RepoKind | null>((resolve) => {
-    execFile(
-      'git',
-      ['-C', root, 'rev-parse', '--is-inside-work-tree'],
-      { encoding: 'utf8', timeout: GIT_TIMEOUT.ms, killSignal: 'SIGKILL' },
-      (err, stdout, stderr) => {
-        // An exit code is a number; a spawn failure or a kill is not.
-        const code: unknown = err ? (err as { code?: unknown }).code : 0;
-        resolve(
-          repoKindOf({
-            error: err,
-            status: typeof code === 'number' ? code : null,
-            stdout,
-            stderr,
-          }),
-        );
-      },
-    );
+    execFile('git', REV_PARSE(root), gitOptions(), (err, stdout, stderr) => {
+      // An exit code is a number; a spawn failure or a kill is not.
+      const code: unknown = err ? (err as { code?: unknown }).code : 0;
+      const status = typeof code === 'number' ? code : null;
+      resolve(repoKindOf({ error: err, status, stdout, stderr }));
+    });
   });
   if (kind === 'work-tree') repoKinds.set(root, kind);
   return kind;
 }
 
-/**
- * How long any `git` this module runs may take before it is killed and
- * counts as failed. An object
- * so a test can shorten it; nothing else writes it.
- */
+/** How long any git here may run before it is killed and counts as failed. */
 export const GIT_TIMEOUT = { ms: 30_000 };
+
+/** Every git here: hardened (`git-hardening.ts`), and killed past the limit. */
+function gitOptions() {
+  return {
+    env: hardenedGitEnv(),
+    encoding: 'utf8' as const,
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: GIT_TIMEOUT.ms,
+    killSignal: 'SIGKILL' as const,
+  };
+}
+
+const REV_PARSE = (root: string) =>
+  hardenedGitArgs(['-C', root, 'rev-parse', '--is-inside-work-tree']);
 
 /** Forget every root's repository answer. Tests only. */
 export function clearRepoKinds(): void {
@@ -273,23 +266,23 @@ export async function scanFolderPathsAsync(
   root: string,
   include: readonly string[] = [],
 ): Promise<string[]> {
-  const rels = await new Promise<string[] | null>((resolve) => {
-    execFile(
-      'git',
-      ['-C', root, 'ls-files', '-z', ...LISTING_ARGS],
-      {
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-        // A hung git is a failed one, so the cache's in-flight mark clears.
-        timeout: GIT_TIMEOUT.ms,
-        killSignal: 'SIGKILL',
-      },
-      (err, stdout) => resolve(err ? null : stdout.split('\0').filter((rel) => rel !== '')),
-    );
-  });
+  const barred = gitBarred(root);
+  const rels = barred
+    ? null
+    : await new Promise<string[] | null>((resolve) => {
+        // A hung git is killed (`gitOptions`), so the cache's in-flight mark clears.
+        execFile(
+          'git',
+          hardenedGitArgs(['-C', root, 'ls-files', '-z', ...LISTING_ARGS]),
+          gitOptions(),
+          (err, stdout) => resolve(err ? null : stdout.split('\0').filter((rel) => rel !== '')),
+        );
+      });
   let files: string[];
   if (rels !== null) files = admitGitListed(root, rels, null);
-  else if ((await repoKindAsync(root)) === 'not-a-repo') files = readdirRecursive(root, root, null);
+  else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {
+    files = readdirRecursive(root, root, null);
+  }
   // Rejects, so the cache keeps the listing it had (see `listFolderOrThrow`).
   else throw new GitListingFailed(root);
   return toSortedRel(root, withIncluded(root, files, include));
@@ -370,14 +363,10 @@ function normalizeIncludePath(raw: string): string | null {
 
 /** `git ls-files -z <args>` under `root`, or null when git cannot answer. */
 function gitLsFiles(root: string, args: string[]): string[] | null {
+  if (gitBarred(root)) return null;
   let res: ReturnType<typeof spawnSync>;
   try {
-    res = spawnSync('git', ['-C', root, 'ls-files', '-z', ...args], {
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-      timeout: GIT_TIMEOUT.ms,
-      killSignal: 'SIGKILL',
-    });
+    res = spawnSync('git', hardenedGitArgs(['-C', root, 'ls-files', '-z', ...args]), gitOptions());
   } catch {
     return null;
   }

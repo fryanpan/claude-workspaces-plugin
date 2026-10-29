@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import type { DiffFileStatus } from '@claude-workspaces/core';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /**
  * Git plumbing for diff reviews. Every call shells out with an argv array
@@ -24,11 +25,16 @@ interface GitResult {
   stderr: string;
 }
 
+/** What a read answers where no git may run (`git-hardening.ts`). */
+const BARRED: GitResult = { ok: false, stdout: '', stderr: 'git is not run in this folder' };
+
 /** A git read: yields each argv (without `-C <repo>`), receives its result. */
 type GitSteps<T> = Generator<string[], T, GitResult>;
 
 function gitSync(repo: string, args: string[]): GitResult {
-  const res = spawnSync('git', ['-C', repo, ...args], {
+  if (gitBarred(repo)) return BARRED;
+  const res = spawnSync('git', hardenedGitArgs(['-C', repo, ...args]), {
+    env: hardenedGitEnv(),
     encoding: 'utf8',
     maxBuffer: MAX_GIT_BUFFER,
   });
@@ -48,12 +54,14 @@ function gitSync(repo: string, args: string[]): GitResult {
 const GIT_ASYNC_TIMEOUT_MS = 30_000;
 
 function gitAsync(repo: string, args: string[]): Promise<GitResult> {
+  if (gitBarred(repo)) return Promise.resolve(BARRED);
   return new Promise((resolve) => {
     execFile(
       'git',
-      ['-C', repo, ...args],
+      hardenedGitArgs(['-C', repo, ...args]),
       {
         encoding: 'utf8',
+        env: hardenedGitEnv(),
         maxBuffer: MAX_GIT_BUFFER,
         timeout: GIT_ASYNC_TIMEOUT_MS,
         killSignal: 'SIGKILL',
@@ -188,7 +196,16 @@ type DiffFilesResult = { ok: true; files: DiffFileEntry[] } | { ok: false; error
 
 function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFilesResult> {
   const range = target ? [base, target] : [base];
-  const ns = yield ['diff', '--name-status', '-z', '-M', ...range, '--'];
+  const ns = yield [
+    'diff',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--name-status',
+    '-z',
+    '-M',
+    ...range,
+    '--',
+  ];
   if (!ns.ok) return { ok: false, error: ns.stderr.trim() || 'git diff failed' };
 
   const files: DiffFileEntry[] = [];
@@ -232,7 +249,16 @@ function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFile
   }
 
   // Join in line counts; numstat reports "-\t-" for binary files.
-  const num = yield ['diff', '--numstat', '-z', '-M', ...range, '--'];
+  const num = yield [
+    'diff',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--numstat',
+    '-z',
+    '-M',
+    ...range,
+    '--',
+  ];
   if (num.ok) {
     const counts = parseNumstat(num.stdout);
     for (const f of files) {
@@ -253,6 +279,8 @@ function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFile
     // a separate flag and both are needed to describe "a formatter ran".
     const ws = yield [
       'diff',
+      '--no-ext-diff',
+      '--no-textconv',
       '-w',
       '--ignore-blank-lines',
       '--numstat',

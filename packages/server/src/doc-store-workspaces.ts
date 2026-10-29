@@ -59,6 +59,15 @@ import {
 } from './review-archive.ts';
 import { boundFiles } from './slow-fs.ts';
 
+/** A set's bound folder, unless the bound-file guard now refuses it (a
+ *  walled lead's folder that no longer resolves to itself, `slow-fs.ts`
+ *  `boundFiles.guards`): then the set reads as gone, its names included. */
+function liveRoot(members: DocMeta[]): string | undefined {
+  const member = members.find((m) => m.workspaceRoot);
+  const root = member?.workspaceRoot;
+  return member && root && boundFiles.guards.allows(root) ? root : undefined;
+}
+
 /**
  * What the workspace surface needs from the doc lifecycle. Deliberately
  * verbs rather than the maps behind them: `residentDoc` is the doc map,
@@ -247,7 +256,7 @@ export class DocStoreWorkspaces {
     error?: 'not-found';
   } {
     const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
-    const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
+    const root = liveRoot(members);
     if (!root || !existsSync(root)) return { ok: false, error: 'not-found' };
     // A changed file can carry BOTH its diff member and its companion
     // editable markdown doc on the same relPath — the diff member is the
@@ -299,7 +308,7 @@ export class DocStoreWorkspaces {
     | { ok: false; error: 'not-found' | 'bad-path' | 'not-listed' | 'unavailable' }
   > {
     const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
-    const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
+    const root = liveRoot(members);
     if (!root) return { ok: false, error: 'not-found' };
     const clean = normalizeRel(relPath);
     const abs = join(root, clean);
@@ -434,7 +443,7 @@ export class DocStoreWorkspaces {
     if (cut <= 0) return null;
     const setId = docId.slice(0, cut);
     const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
-    const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
+    const root = liveRoot(members);
     if (!root) return null;
     const excludes = workspaceExcludes(members);
     for (const rel of listedFiles(root, workspaceIncludes(members))) {
@@ -472,7 +481,7 @@ export class DocStoreWorkspaces {
       }
   > {
     const members = this.p.list().filter((m) => attachmentIdOf(m) === setId);
-    const root = members.find((m) => m.workspaceRoot)?.workspaceRoot;
+    const root = liveRoot(members);
     if (!root) return { ok: false, error: 'not-found' };
     const clean = normalizeRel(relPath);
     const abs = join(root, clean);
@@ -592,7 +601,8 @@ export class DocStoreWorkspaces {
     const byRel = new Map<string, { meta: DocMeta; openCount: number; threadCount: number }>();
     for (const meta of this.p.list()) {
       if (attachmentIdOf(meta) !== setId) continue;
-      if (!workspaceRoot && meta.workspaceRoot) workspaceRoot = meta.workspaceRoot;
+      if (!workspaceRoot && meta.workspaceRoot && boundFiles.guards.allows(meta.workspaceRoot))
+        workspaceRoot = meta.workspaceRoot;
       const key = meta.relPath ?? meta.docId;
       const { open, total } = this.p.threadCounts(meta.docId);
       const prev = byRel.get(key);

@@ -184,6 +184,7 @@ describe('the door', () => {
     proxiedVerifier: null,
     grantFor: () => grant,
     workspacesOf,
+    held: () => false,
     j,
     ...over,
   });
