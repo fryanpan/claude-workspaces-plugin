@@ -21,12 +21,22 @@ const STORED = `${Buffer.from('sk-ant-oat01-test-harborlight-0000').toString('ba
 function configFile(boardWall: boolean): string {
   const project = join(root, 'dev', 'harborlight');
   mkdirSync(project, { recursive: true });
+  for (const d of [join(root, 'shared'), join(project, 'inner')]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(root, 'allowed-file'), '');
   const file = join(root, `config-${boardWall}.json`);
   writeFileSync(
     file,
     JSON.stringify({
       boardSocketDir: SOCKETS,
-      leads: [{ name: 'harborlight-lead', projects: [project], boardWall, boardId: 'w-harbor' }],
+      leads: [
+        {
+          name: 'harborlight-lead',
+          projects: [project],
+          allow: [join(root, 'shared'), join(project, 'inner'), join(root, 'allowed-file')],
+          boardWall,
+          boardId: 'w-harbor',
+        },
+      ],
     }),
   );
   return file;
@@ -73,9 +83,15 @@ describe('launching a walled lead', () => {
     expect(r.said).not.toContain('warning');
   });
 
-  it('registers its projects, resolved, as the folders it can write', () => {
+  it('registers its projects and allowed folders, resolved, as the folders it can write', () => {
     const r = launch(true);
-    expect(r.registered).toEqual([['w-harbor', [realpathSync(join(root, 'dev', 'harborlight'))]]]);
+    // The folder inside the project is held by the project; the file is not a folder.
+    expect(r.registered).toEqual([
+      [
+        'w-harbor',
+        [realpathSync(join(root, 'shared')), realpathSync(join(root, 'dev', 'harborlight'))],
+      ],
+    ]);
   });
 
   it('says so, and launches nothing, when the server does not take the list', () => {

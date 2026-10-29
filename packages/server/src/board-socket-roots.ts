@@ -169,9 +169,9 @@ export class BoardSocketRoots {
   static readonly ROOT_VERDICT_MS = 1_000;
   private verdicts = new Map<string, { at: number; ok: boolean }>();
 
-  /** The most folder spellings `spellDir` keeps, least recently used out. */
+  /** The most path spellings `spell` keeps, least recently used out. */
   static readonly SPELLINGS_MAX = 16_384;
-  /** The most links `spellDir` follows for one path, as the kernel's. */
+  /** The most links `spell` follows for one path, as the kernel's. */
   private static readonly LINKS_MAX = 32;
   private spellings = new Map<string, string>();
 
@@ -180,17 +180,18 @@ export class BoardSocketRoots {
   }
 
   /**
-   * A folder as the roots are spelled, or null when it could not be told.
+   * A path as the roots are spelled, or null when it could not be told.
    * Walked one name at a time from `/`: a name that is a link is replaced by
    * where it points and walked on, any other name takes its on-disk letter
    * case, and the walk stops at the first point at or under a root, taking
    * the rest as typed. So a link above a root (`~/dev` onto a data volume),
    * an owner's link into a project and a case variant all reach the root's
    * spelling, and no link below a root, which the lead can make, is ever
-   * followed. Answers are kept until the roots change; only folders off
-   * every root or above one are kept, and those are the owner's.
+   * followed. Answers are kept until the roots change; only paths off
+   * every root or above one are kept, and those are the owner's. A missing
+   * name is spelled as typed and not kept, so it is asked again.
    */
-  private spellDir(dir: string, links = 0): string | null {
+  private spell(dir: string, links = 0): string | null {
     if (dir === '/' || this.under(dir)) return dir;
     const hit = this.spellings.get(dir);
     if (hit !== undefined) {
@@ -198,7 +199,7 @@ export class BoardSocketRoots {
       this.spellings.set(dir, hit);
       return hit;
     }
-    const parent = this.spellDir(dirname(dir), links);
+    const parent = this.spell(dirname(dir), links);
     if (parent === null) return null;
     const next = join(parent, basename(dir));
     if (this.under(parent)) return next;
@@ -207,7 +208,7 @@ export class BoardSocketRoots {
       if (lstatSync(next).isSymbolicLink()) {
         if (links >= BoardSocketRoots.LINKS_MAX) return null;
         const target = readlinkSync(next);
-        out = this.spellDir(resolve(parent, target), links + 1);
+        out = this.spell(resolve(parent, target), links + 1);
       } else out = this.realpath(next);
     } catch (err) {
       // Not there: spelled as typed, and asked again next time. Any other
@@ -223,15 +224,12 @@ export class BoardSocketRoots {
     return out;
   }
 
-  /**
-   * `path` as the roots are spelled (`spellDir` on its folder), or null
-   * when that could not be told. The last name is not resolved: for a file
-   * that would be one blocking call per bound file on the main thread.
-   */
+  /** `path` as the roots are spelled, its last name included, or null when
+   *  that could not be told. The first ask for a path, at bind or on load,
+   *  pays the lookups; every later ask is answered from `spellings`. */
   private spelled(path: string): string | null {
-    if (this.allRoots().length === 0 || this.under(path)) return path;
-    const folder = this.spellDir(dirname(path));
-    return folder === null ? null : join(folder, basename(path));
+    if (this.allRoots().length === 0) return path;
+    return this.spell(path);
   }
 
   /** The roots that hold `path`, however it is spelled; null when the
@@ -259,7 +257,7 @@ export class BoardSocketRoots {
     const holds = (d: string) =>
       d === '/' || roots.some((root) => root === d || root.startsWith(`${d}/`));
     if (holds(dir)) return true;
-    const spelled = this.spellDir(dir);
+    const spelled = this.spell(dir);
     return spelled === null || holds(spelled);
   }
 

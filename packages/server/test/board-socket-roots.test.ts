@@ -134,6 +134,23 @@ describe('BoardSocketRoots', () => {
     expect(fresh.covers(join(riverbend, 'sub', 'plan.md'))).toBe(false);
   });
 
+  it('guards a path whose link into a root is two levels down, at a folder or at the file', () => {
+    const lead = join(root, 'harbor-deep');
+    mkdirSync(join(lead, 'docs'), { recursive: true });
+    writeFileSync(join(lead, 'docs', 'plan.md'), 'x');
+    const off = join(root, 'deep-off', 'one');
+    mkdirSync(off, { recursive: true });
+    symlinkSync(join(lead, 'docs'), join(off, 'two'));
+    symlinkSync(join(lead, 'docs', 'plan.md'), join(off, 'plan-link.md'));
+    writeFileSync(join(off, 'own.md'), 'x');
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'dp')));
+    roots.set('w-harbor', [lead]);
+    expect(roots.covers(join(off, 'two', 'plan.md'))).toBe(true);
+    expect(roots.covers(join(off, 'plan-link.md'))).toBe(true);
+    // The control: a plain file beside them is off every root.
+    expect(roots.covers(join(off, 'own.md'))).toBe(false);
+  });
+
   it('reads a folder it could not spell as a lead’s, and asks again next time', () => {
     const off = join(riverbend, 'flaky');
     mkdirSync(off, { recursive: true });
@@ -152,7 +169,7 @@ describe('BoardSocketRoots', () => {
     expect(roots.covers(file)).toBe(false);
   });
 
-  it('resolves no file and no folder twice, for a path off every root', () => {
+  it('resolves no name twice, for a path off every root', () => {
     const asked: string[] = [];
     const counted = (p: string) => {
       asked.push(p);
@@ -162,10 +179,12 @@ describe('BoardSocketRoots', () => {
     roots.set('w-harbor', [harborlight]);
     asked.length = 0;
     const off = join(riverbend, 'notes', 'plan.md');
+    mkdirSync(dirname(off), { recursive: true });
+    writeFileSync(off, 'x');
     expect(roots.covers(off)).toBe(false);
-    // The folders on the way, once each, and never the file itself.
-    expect(asked).not.toContain(off);
-    expect(asked.length).toBeGreaterThan(0);
+    // Each name on the way, the file included, once.
+    expect(asked).toContain(off);
+    expect(new Set(asked).size).toBe(asked.length);
     const first = asked.length;
     for (let i = 0; i < 5; i++) roots.covers(off);
     expect(asked.length).toBe(first);

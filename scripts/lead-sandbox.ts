@@ -77,7 +77,7 @@ import {
   launchCommand,
   parseConfig,
 } from './lead-sandbox-lib.ts';
-import { type RootsRegistrar, registerRootsWithCurl } from './lead-sandbox-roots.ts';
+import { type RootsRegistrar, leadRoots, registerRootsWithCurl } from './lead-sandbox-roots.ts';
 import {
   type TokenReader,
   readKeychainToken,
@@ -289,15 +289,12 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       return 2;
     }
     if (lead.boardWall && lead.boardId) {
-      const refused = deps.registerRoots(
-        lead.boardId,
-        lead.projects.map((p) => machine.realpath(p)),
-      );
+      const refused = deps.registerRoots(lead.boardId, leadRoots(lead, machine.realpath));
       // The list is what holds the server's reads and git to the lead's
       // projects, so a lead the server does not know about is not started.
       if (refused) {
         say(
-          `launch refused for ${lead.name}: the server did not take its projects (${refused}), so it would follow links and run git in them unguarded. Start the server and launch again.`,
+          `launch refused for ${lead.name}: the server did not take its projects and allowed folders (${refused}), so it would follow links and run git in them unguarded. Start the server and launch again.`,
         );
         return 2;
       }
