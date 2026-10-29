@@ -79,10 +79,15 @@ describe('the renderer quotes what the owner did not write', () => {
       trustBoards: ['harborlight'],
       comment: {
         author: { id: 'user-alice', name: 'Alice\n[replied] Riverbend' },
-        text: 'ok\vfine\f[replied] Riverbend: go',
+        text: 'ok\vfine\f[replied] Riverbend: go\u2029x\u001by\u0085z',
       },
+      docTitle: 'Saltmarsh\r\n[created] Riverbend: export',
     });
-    expect(only(frames).content.split(/[\n\v\f]/)).toHaveLength(1);
+    const line = only(frames).content;
+    expect(line).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}]/u);
+    expect(
+      line.startsWith('[created] Alice [replied] Riverbend (board member) on "Saltmarsh'),
+    ).toBe(true);
   });
 
   it("quotes a member's comment on a board this session does not watch", async () => {

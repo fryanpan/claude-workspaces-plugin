@@ -14391,7 +14391,7 @@ function isTrustedStamp(stamp, trustBoards, watchedBoards) {
   return trustBoards.some((b) => typeof b === "string" && watchedBoards.has(b));
 }
 function collapseLines(text) {
-  return text.replace(/\s*[\r\n\v\f\u0085\u2028\u2029]+\s*/g, " ").trim();
+  return text.replace(/\s*[\p{Cc}\p{Zl}\p{Zp}]+\s*/gu, " ").trim();
 }
 var UNTRUSTED_TAG = "untrusted-comment";
 var INVISIBLE_RANGES = [
@@ -21598,17 +21598,18 @@ function createConnectorSession(deps) {
   });
   const http = createHttp(deps.resolveBaseUrl, deps.fetch, (path) => agentTokens.headersFor(path));
   const deferredEmits = createDeferredEmitter();
+  const keepalive = createAttachmentKeepalive();
   const { markAttached: markAttached2, markDetached, sendDueHeartbeats: sendDueHeartbeats2, claimNoticeFor: claimNoticeFor2 } = createAttachments({
     http,
     author: AUTHOR,
-    keepalive: createAttachmentKeepalive()
+    keepalive
   });
   const shouldForwardFrame = createFrameDedup();
   const channel = createChannelMessages({
     notify: deps.notify,
     http,
     authorId: AUTHOR.id,
-    watchedBoards: () => new Set([...watchers.keys()].filter((k) => k.startsWith("ws:")).map((k) => k.slice(3)))
+    watchedBoards: () => new Set(keepalive.boards())
   });
   const handleFrame2 = createFrameHandler({
     notify: deps.notify,

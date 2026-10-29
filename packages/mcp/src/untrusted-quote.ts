@@ -26,7 +26,7 @@
 /**
  * Whether a stamp renders unwrapped. `owner` always does. `member` (Bryan,
  * 29 Oct: every member of a board directs its lead) does only when this
- * session watches one of the boards the server decided it against: the doc's
+ * session is attached to one of the boards the server decided it against: the doc's
  * own channel reaches any agent watching the doc, and a member of the board
  * that holds it is not a member of the board this agent leads.
  */
@@ -43,7 +43,7 @@ export function isTrustedStamp(
 /** A member's comment on one line, so no part of it can start a channel
  *  line of its own (a "\n[replied] Bryan: …" forgery). */
 export function collapseLines(text: string): string {
-  return text.replace(/\s*[\r\n\v\f\u0085\u2028\u2029]+\s*/g, ' ').trim();
+  return text.replace(/\s*[\p{Cc}\p{Zl}\p{Zp}]+\s*/gu, ' ').trim();
 }
 
 /** The marker name. One spelling, so the neutraliser and the wrapper agree. */

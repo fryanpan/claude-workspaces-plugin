@@ -1076,7 +1076,7 @@ board the doc reaches admits at that moment (`packages/server/src/comment-trust.
 asking `audienceMemberOf` in `board-membership.ts`). Never by display name,
 which a visitor types. A `member` stamp carries the boards it was decided
 against (`trustBoards`), and the child trusts it only on a board the session
-watches. The MCP child renders both as ordinary lines and quotes
+is attached to. The MCP child renders both as ordinary lines and quotes
 every other comment, an unstamped one and an unknown stamp inside a labelled
 `untrusted-comment` block whose markers a comment cannot forge
 (`packages/mcp/src/untrusted-quote.ts`).

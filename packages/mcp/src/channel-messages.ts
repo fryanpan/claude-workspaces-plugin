@@ -71,8 +71,8 @@ export interface ChannelDeps {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;
   /** This session's agent id, read only to suppress its own events. */
   authorId: string;
-  /** The boards this session watches (`ws:<id>` keys). A `member` stamp is
-   *  trusted only on one of them; absent, no member is. */
+  /** The boards this session is attached to. A `member` stamp is trusted
+   *  only on one of them; absent, no member is. */
   watchedBoards?: () => ReadonlySet<string>;
   /** Injectable so a test can assert a rendered `sent_at` without a race. */
   now?: () => number;

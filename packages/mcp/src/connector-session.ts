@@ -143,10 +143,11 @@ export function createConnectorSession(deps: ConnectorSessionDeps): ConnectorSes
 
   /** See attachments.ts — the heartbeat rides real tool calls because that is
    *  the only honest evidence this agent is alive AND working. */
+  const keepalive = createAttachmentKeepalive();
   const { markAttached, markDetached, sendDueHeartbeats, claimNoticeFor } = createAttachments({
     http,
     author: AUTHOR,
-    keepalive: createAttachmentKeepalive(),
+    keepalive,
   });
 
   /** Shared across every stream in this session — see frame-dedup.ts. */
@@ -157,9 +158,10 @@ export function createConnectorSession(deps: ConnectorSessionDeps): ConnectorSes
     notify: deps.notify,
     http,
     authorId: AUTHOR.id,
-    // Read per frame: a board watched or dropped mid-session counts at once.
-    watchedBoards: () =>
-      new Set([...watchers.keys()].filter((k) => k.startsWith('ws:')).map((k) => k.slice(3))),
+    // The boards this session is ATTACHED to, not every ws: key it watches:
+    // a restored or stale watch on another board must not trust that board's
+    // members. Read per frame, so an attach or a leave counts at once.
+    watchedBoards: () => new Set(keepalive.boards()),
   });
 
   /** See frame-handler.ts for the ordering it keeps. */
