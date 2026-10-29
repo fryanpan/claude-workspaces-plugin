@@ -120,6 +120,23 @@ describe('the access page', () => {
     expect(document.querySelector('#acc-answered .acc-done strong')?.textContent).toBe('Approved');
   });
 
+  it('asks for a recent sign-in before approving, and Cancel leaves the card waiting', async () => {
+    const { page, send } = mount();
+    send.mockResolvedValueOnce({ ok: false, status: 403, data: { error: 'confirm-required' } });
+    await page.render();
+    (document.querySelector('[data-answer="approve"]') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('.fresh-signin-prompt h2')?.textContent).toBe(
+        "Confirm it's you",
+      ),
+    );
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('.fresh-signin-prompt button')];
+    cancel.find((b) => b.textContent === 'Cancel')?.click();
+    await page.settled();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll('#acc-proposals .board-decide')).toHaveLength(1);
+  });
+
   it('draws a proposal filed elsewhere when the page is told something changed', async () => {
     const quiet: AccessData = { ...DATA, proposals: [] };
     const { page } = mount({ reads: [quiet, DATA] });

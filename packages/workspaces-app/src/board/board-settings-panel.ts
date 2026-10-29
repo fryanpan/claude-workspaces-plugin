@@ -1,3 +1,4 @@
+import { letInRequest, resumeAccessWrite, sendAccessWrite } from './access-writes.ts';
 /**
  * The workspace settings panel: the three controls inside it, what each one
  * reads and writes, and when the panel itself opens and closes.
@@ -205,11 +206,10 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       });
       return res.ok;
     },
+    // Letting someone in asks for a recent sign-in (`access-writes.ts`).
     add: async (match) => {
-      const res = await send(`/workspaces/${encodeURIComponent(workspaceId)}/audience`, 'POST', {
-        add: [match],
-      });
-      return accessWriteOf(res);
+      const res = await sendAccessWrite(letInRequest(workspaceId, match), send, showToast);
+      return res ? accessWriteOf(res) : { ok: false, message: 'Nothing changed.' };
     },
     toast: showToast,
     onRole: (role: BoardRole | null) => {
@@ -301,6 +301,10 @@ export function wireBoardSettingsPanel(deps: BoardSettingsPanelDeps): {
       () => showToast('Workspace URL copied'),
       () => showToast(deps.href()),
     );
+  });
+  // Back from "Sign in again": offer the access change this page held.
+  void resumeAccessWrite(send, showToast).then(async (sent) => {
+    if (sent && deps.isOpen()) await members.refresh();
   });
   return {
     membersChanged: () => {

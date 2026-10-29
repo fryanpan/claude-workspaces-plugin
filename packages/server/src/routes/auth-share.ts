@@ -567,6 +567,31 @@ export async function handleAuthShareRoutes(
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
   }
 
+  // --- "Sign in again", for a destructive action refused as stale ---
+  // (fresh-signin.ts). The page navigates here and comes back to `next`
+  // having signed in afresh. An Access person loses this host's Access
+  // token, so the edge sends them through Access, which mints a new one with
+  // a new `iat`; a person on the board's own sign-in goes to `/signin`, whose
+  // login mints a session with a new `signedInAt`. It ends no session and
+  // grants nothing: the worst a page that links here can do is make its
+  // visitor sign in again.
+  if (pathname === '/api/auth/reauth' && req.method === 'GET') {
+    const next = sameOriginPath(rq.url.searchParams.get('next'));
+    const headers = new Headers({ 'cache-control': 'no-store' });
+    if (accessIdentityFor() !== null) {
+      headers.set('location', next);
+      headers.append(
+        'set-cookie',
+        'CF_Authorization=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=None',
+      );
+    } else if (sessionIdentityFor(req) !== null && emailCodeSignIn) {
+      headers.set('location', `/signin?next=${encodeURIComponent(next)}`);
+    } else {
+      headers.set('location', next);
+    }
+    return new Response(null, { status: 302, headers });
+  }
+
   if (pathname === '/api/auth/profile' && req.method === 'POST') {
     // The one write the sign-in flow makes about a person: their chosen
     // display name. Session-gated, and ONLY the session decides whose —
@@ -1233,4 +1258,24 @@ export async function handleAuthShareRoutes(
   }
 
   return undefined;
+}
+
+/**
+ * `next` as a same-origin path, or `/`. An absolute or scheme-relative value
+ * would make the redirect above an open one, and browsers read `\` as `/`.
+ */
+export function sameOriginPath(raw: string | null): string {
+  // Whitespace and control characters too: a browser drops a tab from a
+  // Location, so `/\t/evil.example` would arrive as `//evil.example`.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing them is the point
+  if (!raw || !/^\/(?![/\\])/.test(raw) || /[\s\x00-\x1f\x7f\\]/.test(raw)) return '/';
+  // And resolved the way a browser resolves a Location, against a stand-in
+  // origin: anything that lands elsewhere is not a path on this one.
+  const base = 'http://same-origin.invalid';
+  try {
+    const u = new URL(raw, base);
+    return u.origin === base ? `${u.pathname}${u.search}${u.hash}` : '/';
+  } catch {
+    return '/';
+  }
 }

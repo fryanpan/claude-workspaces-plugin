@@ -22,6 +22,12 @@
 
 import { escapeHtml } from '@claude-workspaces/core';
 import {
+  approveRequest,
+  letInRequest,
+  resumeAccessWrite,
+  sendAccessWrite,
+} from '../board/access-writes.ts';
+import {
   type AccessWriteResult,
   type BoardAudienceEntry,
   type BoardMemberEntry,
@@ -228,7 +234,15 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
         const path =
           `/workspaces/${encodeURIComponent(p.workspaceId)}/tasks/${encodeURIComponent(p.taskId)}` +
           `/review-items/${encodeURIComponent(p.reviewItemId)}/access`;
-        const res = await deps.api.send(path, 'POST', { decision, access: p.change });
+        // Approving widens who is in, so it asks for a recent sign-in.
+        const res =
+          decision === 'approve'
+            ? await sendAccessWrite(approveRequest(path, p.change, p.line), deps.api.send, toast)
+            : await deps.api.send(path, 'POST', { decision, access: p.change });
+        if (!res) {
+          await reload();
+          return;
+        }
         const said = res.data?.message;
         toast(
           res.ok
@@ -359,8 +373,12 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
       buttonClass: 'prompt-btn',
       read: async () => deps.api.readBoard(b.workspaceId),
       remove: async (match) => (await audience({ remove: [match] })).ok,
-      add: async (match): Promise<AccessWriteResult> =>
-        accessWriteOf(await audience({ add: [match] })),
+      add: async (match): Promise<AccessWriteResult> => {
+        const res = await track(
+          sendAccessWrite(letInRequest(b.workspaceId, match), deps.api.send, toast),
+        );
+        return res ? accessWriteOf(res) : { ok: false, message: 'Nothing changed.' };
+      },
       toast,
     });
     handle.show(viewFor(b));
@@ -429,6 +447,12 @@ export function mountAccessPage(root: HTMLElement, deps: AccessPageDeps): Access
       boardKey = '';
       lists.clear();
       await reload();
+      // Back from "Sign in again": offer the access change this page held.
+      void track(
+        resumeAccessWrite(deps.api.send, toast).then(async (sent) => {
+          if (sent) await reload();
+        }),
+      );
       // Arriving from a board's settings opens on that board.
       const ws = route.workspaceId;
       if (route.section === 'all' && ws && lists.has(ws)) {
