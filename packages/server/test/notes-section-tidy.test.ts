@@ -193,6 +193,18 @@ describe('the same topic heading twice under one Meeting notes section', () => {
     expect(bullets(ydoc)).toHaveLength(2);
   });
 
+  it('folds a reworded repeat, the topic the reader sees twice', async () => {
+    const doc = NOTES_WITH_TWIN.replace(
+      '### Note-taker performance\n\n- Two of them',
+      '### Performance of the note-taker\n\n- Two of them',
+    );
+    const { store, ydoc } = docStoreFrom(doc, ['## Meeting notes']);
+    const result = await cleanup(store, idOf(store, 'Meeting notes'));
+    expect(result.merged).toBe(1);
+    expect(headings(ydoc)).not.toContain('Performance of the note-taker');
+    expect(bullets(ydoc)).toHaveLength(2);
+  });
+
   it('CONTROL: two different topics both stay', async () => {
     const doc = NOTES_WITH_TWIN.replace(
       '### Note-taker performance\n\n- Two of them',
