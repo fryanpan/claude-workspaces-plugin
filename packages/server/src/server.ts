@@ -49,6 +49,7 @@ import { type BrowserSentryConfig } from './browser-sentry.ts';
 import { ChatAudit } from './chat-audit.ts';
 import { planBoardReading } from './coach/week-plan.ts';
 import { wireCoach } from './coach/wiring.ts';
+import { boardTokenLease } from './connector/board-token-lease.ts';
 import { type ConnectorHost, createConnectorHost } from './connector/host.ts';
 import { hostedSessionFactory } from './connector/session-factory.ts';
 import { loadConnectorSnapshot, saveConnectorSnapshot } from './connector/snapshot.ts';
@@ -2538,14 +2539,27 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * `/events/agent/<id>` answers with, and calls REST over loopback like the
    * stdio child did, so every REST gate sees what it always saw.
    */
+  /** Whether a watch key is on one board: the board, one of its tasks, or a doc it holds. */
+  const watchKeyOnBoard = (key: string, boardId: string): boolean => {
+    if (key === `ws:${boardId}`) return true;
+    if (key.startsWith('task:')) {
+      return taskStore.getTask(key.slice('task:'.length))?.workspaceId === boardId;
+    }
+    return shareWorkspacesOf(key).includes(boardId);
+  };
   const connectorHost = createConnectorHost({
     createSession: hostedSessionFactory({
       baseUrl: () => `http://127.0.0.1:${server.port}`,
-      openAgentEvents: (agentId, lastEventId) =>
+      // A session opened on a board's socket reads only that board's keys.
+      openAgentEvents: (agentId, lastEventId, boardId) =>
         openAgentMuxStream({
           bus: sse,
           agentId,
-          keys: () => agentWatches.list(agentId, watchKeyExists).watches.map((w) => w.key),
+          keys: () =>
+            agentWatches
+              .list(agentId, watchKeyExists)
+              .watches.map((w) => w.key)
+              .filter((key) => boardId === undefined || watchKeyOnBoard(key, boardId)),
           channelFor: (key) => channelForWatchKey(key, canonicalDocId),
           cursors: parseMuxCursor(lastEventId ?? undefined),
           onWatchSetChanged: (cb) => agentWatches.onChange(agentId, cb),
@@ -2555,6 +2569,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       // identity is the one `/mcp`'s own gate already settled: it took that
       // agent's token to get in.
       mintAgentToken: (agentId) => mintAgentToken(agentId, agentTokenKeyFor()),
+      // A board socket session's REST calls carry a board token kept here,
+      // never handed to the lead (connector/board-token-lease.ts).
+      boardToken: (agentId, boardId) =>
+        boardTokenLease(boardAgentTokens, agentId, boardId, (line) => console.error(line)),
       log: (...args) => console.error('[connector]', ...args),
     }),
     fallbackPluginVersion: () => readReleasedPluginVersion() ?? '0.0.0',
@@ -2573,13 +2591,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     watchKeyExists,
     watchCoverageFor,
     canonicalDocId,
-    watchKeyOnBoard: (key, boardId) => {
-      if (key === `ws:${boardId}`) return true;
-      if (key.startsWith('task:')) {
-        return taskStore.getTask(key.slice('task:'.length))?.workspaceId === boardId;
-      }
-      return shareWorkspacesOf(key).includes(boardId);
-    },
+    watchKeyOnBoard,
     agentTokenKey: agentTokenKeyFor,
     requireAgentToken,
     warnLegacyAgentCaller,
@@ -3012,6 +3024,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     workspaceRoutesCtx,
     taskRoutesCtx,
     connectorHost,
+    // Forward reference: the board sockets are opened below.
+    boardOfSocket: (req) => boardSockets?.boardOf(req) ?? null,
     agentTokenKeyFor,
     agentIdentityRoutesCtx,
     boardTokenRoutesCtx,
@@ -3083,9 +3097,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     websocket: socketHandlers,
   });
 
-  // One socket per live board (board-sockets.ts), only when asked for: no
-  // caller passes the folder yet but a test, until a lead's relay can use it.
-  // Kept in step with the boards as they are made, archived and deleted.
+  // One socket per live board (board-sockets.ts), only when asked for:
+  // bin.ts passes the folder when `--board-socket-dir`, `CW_BOARD_SOCKET_DIR`
+  // or `CW_BOARD_SOCKETS=1` says so (server-config.ts). Kept in step with the boards as they are made, archived and deleted.
   const boardSockets = opts.boardSocketDir
     ? openBoardSockets({ dir: opts.boardSocketDir, handle: handleWithOrigin, j })
     : null;
