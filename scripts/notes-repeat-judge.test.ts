@@ -183,6 +183,35 @@ describe('modelCall', () => {
     });
     expect(await call('the notes')).toEqual({ repeat: true });
     expect(sent.tool_choice).toEqual({ type: 'auto' });
+    expect(sent.messages).toEqual([{ role: 'user', content: 'the notes' }]);
     expect(booked).toEqual(['claude-sonnet-5-5']);
+  });
+
+  it('sends a cached head before the question when given one', async () => {
+    let sent: Record<string, unknown> = {};
+    const call = modelCall({
+      key: { kind: 'key', value: 'test-not-a-real-key' },
+      model: 'claude-opus-5-5',
+      system: 'sys',
+      tool: { name: 'record_quotes' },
+      maxTokens: 100,
+      cached: 'The notes: Harborlight',
+      book: () => {},
+      fetchImpl: (async (_url: unknown, init: RequestInit) => {
+        sent = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ content: [] }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    // A reply with no tool call is no answer.
+    expect(await call('The ideas: 1. x')).toBeNull();
+    expect(sent.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'The notes: Harborlight', cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: 'The ideas: 1. x' },
+        ],
+      },
+    ]);
   });
 });

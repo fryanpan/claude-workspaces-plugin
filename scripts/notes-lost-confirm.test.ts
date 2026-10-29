@@ -3,7 +3,7 @@
  * text here is made up. The repo is public.
  */
 import { describe, expect, it } from 'vitest';
-import { parseQuotes, quoteCarries } from './notes-lost-confirm.ts';
+import { confirmLost, parseQuotes, quoteCarries } from './notes-lost-confirm.ts';
 
 const NOTES = [
   '## Harborlight',
@@ -52,5 +52,32 @@ describe('parseQuotes', () => {
       ),
     ).toBeNull();
     expect(parseQuotes({ quotes: [{ n: 1, quote: 3 }] }, 1)).toBeNull();
+  });
+});
+
+describe('confirmLost', () => {
+  it('credits an idea only through a quote the notes hold, and asks twice before giving up', async () => {
+    const asked: string[] = [];
+    const replies: unknown[] = [
+      { quotes: 'not a list' },
+      {
+        quotes: [
+          { n: 1, quote: 'says Harborlight opens on Monday' },
+          { n: 2, quote: 'Riverbend ships on Friday' },
+        ],
+      },
+    ];
+    const out = await confirmLost(
+      async (user) => {
+        asked.push(user);
+        return replies.shift();
+      },
+      ['Harborlight opens Monday', 'Riverbend ships Friday'],
+      NOTES,
+    );
+    expect(out).toEqual([true, false]);
+    expect(asked).toHaveLength(2);
+    expect(asked[0]).toContain('2. Riverbend ships Friday');
+    expect(await confirmLost(async () => null, ['x'], NOTES)).toBeNull();
   });
 });

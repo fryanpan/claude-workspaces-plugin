@@ -20,8 +20,7 @@
  * this pass changed.
  */
 
-import type { SummaryCredential } from '../packages/server/src/summarize.ts';
-import { type ToolSpec, callTool } from './notes-eval-ideas.ts';
+import type { ToolSpec } from './notes-eval-ideas.ts';
 
 /** The fewest words a quote needs to carry an idea. */
 const MIN_QUOTE_WORDS = 3;
@@ -60,7 +59,7 @@ export function parseQuotes(input: unknown, count: number): string[] | null {
   return out.every((q) => q !== null) ? (out as string[]) : null;
 }
 
-const CONFIRM_SYSTEM = [
+export const CONFIRM_SYSTEM = [
   'You are checking meeting notes for ideas a first reader said were missing.',
   '',
   'For each numbered idea, find the ONE line of the notes that says this',
@@ -75,7 +74,7 @@ const CONFIRM_SYSTEM = [
   'Answer with the record_quotes tool: one entry per idea, in order.',
 ].join('\n');
 
-const CONFIRM_TOOL: ToolSpec = {
+export const CONFIRM_TOOL: ToolSpec = {
   name: 'record_quotes',
   description: 'Give, per idea, the line of the notes that carries it, or an empty quote.',
   input_schema: {
@@ -94,29 +93,30 @@ const CONFIRM_TOOL: ToolSpec = {
   },
 };
 
+/** The confirmer: Opus, because on two hand-labelled replays it credited
+ *  5 of 7 ideas rightly where Sonnet credited 5 of 9. */
+export const CONFIRM_MODEL = 'claude-opus-5-5';
+
+/** The notes the confirmer reads, sent once per meeting as a cached head. */
+export function confirmHead(notes: string): string {
+  return `The notes:\n${notes || '(the notes are empty)'}`;
+}
+
 /**
  * Which of these lost ideas a quoted line shows to be carried after all.
- * Null when the reply could not be read twice; the caller then keeps the
- * first verdict.
+ * `call` is a model call whose cached head is `confirmHead(notes)`. Null
+ * when the reply could not be read twice; the caller then keeps the first
+ * verdict.
  */
 export async function confirmLost(
-  key: SummaryCredential,
+  call: (user: string) => Promise<unknown>,
   ideas: readonly string[],
   notes: string,
 ): Promise<boolean[] | null> {
   if (ideas.length === 0) return [];
-  const head = `The notes:\n${notes || '(the notes are empty)'}`;
   const user = `The ideas:\n${ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n')}`;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const out = await callTool(
-      key,
-      CONFIRM_SYSTEM,
-      user,
-      CONFIRM_TOOL,
-      300 + ideas.length * 80,
-      head,
-    );
-    const quotes = parseQuotes(out, ideas.length);
+    const quotes = parseQuotes(await call(user), ideas.length);
     if (quotes) return quotes.map((q) => quoteCarries(q, notes));
   }
   return null;

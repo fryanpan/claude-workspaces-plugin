@@ -289,6 +289,8 @@ export function modelCall(opts: {
   system: string;
   tool: { name: string };
   maxTokens: number;
+  /** Sent before each user message behind a cache mark, when given. */
+  cached?: string;
   /** Books one reply's `usage` block, as `SpendMeter.book` does. */
   book: (model: string, usage: Record<string, unknown> | undefined) => void;
   fetchImpl?: typeof fetch;
@@ -309,7 +311,18 @@ export function modelCall(opts: {
         tools: [opts.tool],
         tool_choice: { type: 'auto' },
         output_config: { effort: opts.model === CHECK_MODEL ? 'low' : 'medium' },
-        messages: [{ role: 'user', content: user }],
+        messages: [
+          {
+            role: 'user',
+            content:
+              opts.cached === undefined
+                ? user
+                : [
+                    { type: 'text', text: opts.cached, cache_control: { type: 'ephemeral' } },
+                    { type: 'text', text: user },
+                  ],
+          },
+        ],
       }),
     });
     if (!res.ok) {

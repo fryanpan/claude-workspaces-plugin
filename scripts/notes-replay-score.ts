@@ -25,8 +25,8 @@
  * LOST IS READ TWICE. Each idea the first judge calls lost is shown to a
  * second call that must copy the line carrying it (`notes-lost-confirm.ts`);
  * `lostShare` is after that pass and `rawLostShare` before it.
- * `--reuse-raw` takes the first reading from an earlier score.json of the
- * same notes instead of paying for it again.
+ * `--reuse-raw` takes the first lost-idea reading and the repeat count from
+ * an earlier score.json of the same notes instead of paying for them again.
  *
  * The truth dir and the run dirs hold meeting words, so both must be outside
  * the repository. The console prints numbers only.
@@ -49,7 +49,13 @@ import { readKeychainPassword } from '../packages/server/src/share/keychain.ts';
 import type { SummaryCredential } from '../packages/server/src/summarize.ts';
 import { EVAL_CREDENTIAL_HELP, resolveEvalCredentialFrom } from './eval-credential.ts';
 import { judgeCarried, listIdeas, setIdeaUsageSink } from './notes-eval-ideas.ts';
-import { confirmLost } from './notes-lost-confirm.ts';
+import {
+  CONFIRM_MODEL,
+  CONFIRM_SYSTEM,
+  CONFIRM_TOOL,
+  confirmHead,
+  confirmLost,
+} from './notes-lost-confirm.ts';
 import {
   CHECK_MODEL,
   CHECK_SYSTEM,
@@ -155,12 +161,21 @@ async function confirmAll(
   notes: string,
   meter: SpendMeter,
 ): Promise<{ stillLost: string[]; foundCarried: string[] }> {
+  const call = modelCall({
+    key,
+    model: CONFIRM_MODEL,
+    system: CONFIRM_SYSTEM,
+    tool: CONFIRM_TOOL,
+    maxTokens: 6_000,
+    cached: confirmHead(notes),
+    book: meter.book.bind(meter),
+  });
   const stillLost: string[] = [];
   const foundCarried: string[] = [];
   for (let i = 0; i < lostIdeas.length; i += CONFIRM_BATCH) {
     const batch = lostIdeas.slice(i, i + CONFIRM_BATCH);
     if (meter.over) throw new Error(`spend cap $${meter.capUsd} reached while confirming`);
-    const carried = await confirmLost(key, batch, notes);
+    const carried = await confirmLost(call, batch, notes);
     batch.forEach((idea, j) => (carried?.[j] ? foundCarried : stillLost).push(idea));
   }
   return { stillLost, foundCarried };
@@ -244,29 +259,31 @@ async function scoreRun(
         if (meter.over) throw new Error(`spend cap $${meter.capUsd} reached while judging repeats`);
         return call(user);
       };
-    paraphrases = await judgeRepeats(
-      notes,
-      guarded(
-        modelCall({
-          key,
-          model: PROPOSE_MODEL,
-          system: PROPOSE_SYSTEM,
-          tool: PROPOSE_TOOL,
-          maxTokens: 8_000,
-          book,
-        }),
-      ),
-      guarded(
-        modelCall({
-          key,
-          model: CHECK_MODEL,
-          system: CHECK_SYSTEM,
-          tool: CHECK_TOOL,
-          maxTokens: 3_000,
-          book,
-        }),
-      ),
-    );
+    paraphrases =
+      (reuseRaw ? previousParaphrases(runDir) : null) ??
+      (await judgeRepeats(
+        notes,
+        guarded(
+          modelCall({
+            key,
+            model: PROPOSE_MODEL,
+            system: PROPOSE_SYSTEM,
+            tool: PROPOSE_TOOL,
+            maxTokens: 8_000,
+            book,
+          }),
+        ),
+        guarded(
+          modelCall({
+            key,
+            model: CHECK_MODEL,
+            system: CHECK_SYSTEM,
+            tool: CHECK_TOOL,
+            maxTokens: 3_000,
+            book,
+          }),
+        ),
+      ));
     console.error(`score: ${run.docId} judged for $${(meter.spentUsd - before).toFixed(3)}`);
   }
   const goals = scoreGoals({
@@ -309,6 +326,24 @@ async function scoreRun(
   };
   writeFileSync(join(runDir, 'score.json'), `${JSON.stringify(score, null, 2)}\n`);
   return score;
+}
+
+/** The repeat judge's reading from an earlier score.json of these notes. */
+function previousParaphrases(runDir: string): Awaited<ReturnType<typeof judgeRepeats>> | null {
+  const path = join(runDir, 'score.json');
+  if (!existsSync(path)) return null;
+  const prev = JSON.parse(readFileSync(path, 'utf8')) as {
+    paraphrasePairs?: Array<{ heading: string; note: number; restates: number }> | null;
+    paraphraseNotes?: { notes: number; judged: number; unchecked?: number } | null;
+  };
+  if (!prev.paraphrasePairs || !prev.paraphraseNotes) return null;
+  return {
+    notes: prev.paraphraseNotes.notes,
+    judgedNotes: prev.paraphraseNotes.judged,
+    repeats: prev.paraphrasePairs.length,
+    unchecked: prev.paraphraseNotes.unchecked ?? 0,
+    pairs: prev.paraphrasePairs,
+  };
 }
 
 /** The first judge's reading from an earlier score.json of these notes. */
