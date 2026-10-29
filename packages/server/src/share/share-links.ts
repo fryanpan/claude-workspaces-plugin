@@ -48,6 +48,14 @@ import {
 import { join } from 'node:path';
 import { normalizeEmail } from '@claude-workspaces/core';
 
+import {
+  type BoardAudience,
+  addAudienceEntries,
+  boardAudienceAdmits,
+  removeFromAudience,
+  seedAudiences,
+  storedAudiences,
+} from './board-audience.ts';
 import { type BoardRole, DEFAULT_BOARD_ROLE, normalizeBoardRole } from './board-role.ts';
 import { audienceAdmits, storedAudience } from './share-audience.ts';
 import type { ShareLanding } from './share-landing.ts';
@@ -152,12 +160,16 @@ export interface CreateShareLinkReq {
 interface Persisted {
   links: ShareLinkRecord[];
   members: ShareLinkMember[];
+  /** Absent on a registry written before audiences existed: `load` seeds
+   *  them from the members (`board-audience.ts`). */
+  audiences?: BoardAudience[];
 }
 
 export class ShareLinks {
   private readonly dataDir: string;
   private links: ShareLinkRecord[] = [];
   private members: ShareLinkMember[] = [];
+  private audiences: BoardAudience[] = [];
 
   constructor(opts: { dataDir: string }) {
     this.dataDir = opts.dataDir;
@@ -264,7 +276,14 @@ export class ShareLinks {
     // visitor's page identical whatever went wrong.
     if (who === '') return { ok: false, state: 'unknown' };
     // Refused before anything is written: no member row, no redemption.
-    if (!audienceAdmits(link.allowDomains, who)) return { ok: false, state: 'outside-audience' };
+    // The board's audience as well as the link's: a link only ever invites
+    // someone the board already names.
+    if (
+      !audienceAdmits(link.allowDomains, who) ||
+      !boardAudienceAdmits(this.audienceOf(link.workspaceId), who)
+    ) {
+      return { ok: false, state: 'outside-audience' };
+    }
     const added = this.addMember(link.workspaceId, who, linkId, now, link.role);
     if (added) {
       link.redemptions.push({ email: who, at: now });
@@ -297,9 +316,59 @@ export class ShareLinks {
     return row && this.admitted(row) ? row : null;
   }
 
-  /** Lists show who is in, so a row the gate refuses is not listed. */
+  /** Lists show who is in, so a row the gate refuses is not listed. Both
+   *  audiences: the link's, and the board's. */
   private admitted(row: ShareLinkMember): boolean {
-    return audienceAdmits(this.get(row.viaLinkId)?.allowDomains, row.email);
+    return (
+      audienceAdmits(this.get(row.viaLinkId)?.allowDomains, row.email) &&
+      boardAudienceAdmits(this.audienceOf(row.workspaceId), row.email)
+    );
+  }
+
+  /** The board's audience, or undefined when it has none, which admits nobody. */
+  audienceOf(workspaceId: string): BoardAudience | undefined {
+    return this.audiences.find((a) => a.workspaceId === workspaceId);
+  }
+
+  /** Every board's audience. */
+  allAudiences(): BoardAudience[] {
+    return this.audiences.slice();
+  }
+
+  /** Let these entries in. Already parsed by `parseShareAudience`. */
+  addToAudience(
+    workspaceId: string,
+    matches: readonly string[],
+    by: string,
+    now = Date.now(),
+  ): BoardAudience {
+    const next = addAudienceEntries(
+      this.audienceOf(workspaceId) ?? { workspaceId, entries: [] },
+      matches,
+      by,
+      now,
+    );
+    this.putAudience(next);
+    return next;
+  }
+
+  /**
+   * Take an address or an `@domain` out of the audience, and with it the
+   * member rows it no longer admits. Answers the addresses that lost access,
+   * so the caller can hang up what they have open.
+   */
+  removeFromAudience(workspaceId: string, match: string): string[] {
+    const current = this.audienceOf(workspaceId);
+    if (!current) return [];
+    this.putAudience(removeFromAudience(current, match));
+    return this.members
+      .filter((m) => m.workspaceId === workspaceId && !this.admitted(m))
+      .map((m) => m.email);
+  }
+
+  private putAudience(next: BoardAudience): void {
+    this.audiences = [...this.audiences.filter((a) => a.workspaceId !== next.workspaceId), next];
+    this.save();
   }
 
   /** Every member of a workspace, in the order they arrived. */
@@ -381,6 +450,12 @@ export class ShareLinks {
     const before = this.members.length;
     this.members = this.members.filter((m) => !(m.workspaceId === workspaceId && m.email === who));
     if (this.members.length === before) return false;
+    // And out of the audience, so the link they came through cannot let them
+    // straight back in: their exact entry goes, a domain records them.
+    const audience = this.audienceOf(workspaceId);
+    if (audience) {
+      this.audiences = this.audiences.map((a) => (a === audience ? removeFromAudience(a, who) : a));
+    }
     this.save();
     return true;
   }
@@ -493,10 +568,41 @@ export class ShareLinks {
           return row;
         })
         .filter((m) => m.email !== '');
+      if (Array.isArray(parsed?.audiences)) {
+        this.audiences = storedAudiences(parsed.audiences);
+      } else {
+        this.migrateToAudiences();
+      }
     } catch {
       this.links = [];
       this.members = [];
+      this.audiences = [];
     }
+  }
+
+  /**
+   * The one-time upgrade of a registry written before audiences existed.
+   * Every board is given an audience of the people already in, by exact
+   * address, plus what any live link's own audience named — so nobody loses
+   * access. An invited Owner becomes an ordinary member: the seat that
+   * changes who is in is Bryan's alone now (29 Oct).
+   */
+  private migrateToAudiences(): void {
+    const now = Date.now();
+    const admitted = this.members.filter((m) =>
+      audienceAdmits(this.get(m.viaLinkId)?.allowDomains, m.email),
+    );
+    this.audiences = seedAudiences(
+      admitted,
+      this.links.map((l) => ({
+        workspaceId: l.workspaceId,
+        live: this.state(l.linkId, now) === 'live',
+        ...(l.allowDomains ? { allowDomains: l.allowDomains } : {}),
+      })),
+      now,
+    );
+    this.members = this.members.map(({ role: _role, ...rest }) => rest);
+    this.save();
   }
 
   /**
@@ -513,7 +619,11 @@ export class ShareLinks {
    */
   private save(): void {
     const path = join(this.dataDir, REGISTRY_FILENAME);
-    const state: Persisted = { links: this.links, members: this.members };
+    const state: Persisted = {
+      links: this.links,
+      members: this.members,
+      audiences: this.audiences,
+    };
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: SECRET_MODE });
     chmodSync(tmp, SECRET_MODE); // an existing tmp keeps its old mode otherwise

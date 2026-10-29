@@ -96,6 +96,7 @@ describe('the sharing switch, for one board and for all of them', () => {
     const created = await postLocal('/workspaces', { name });
     expect(created.status).toBe(200);
     const id = ((await created.json()) as { workspace: { id: string } }).workspace.id;
+    handle.shareLinks.addToAudience(id, [MEMBER, LATE_MEMBER], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId: id });
     expect(minted.status, await minted.clone().text()).toBe(200);
     const linkId = ((await minted.json()) as { link: { linkId: string } }).link.linkId;

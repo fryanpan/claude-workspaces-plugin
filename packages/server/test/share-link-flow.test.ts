@@ -129,6 +129,8 @@ describe('share links over HTTP', () => {
     workspaceId: string,
     extra: Record<string, unknown> = {},
   ): Promise<{ linkId: string; url: string }> => {
+    // The board names the partner domain: a link only invites its audience.
+    handle.shareLinks.addToAudience(workspaceId, ['@partner.example'], 'Bryan');
     const r = await postLocal('/api/share/workspace', { workspaceId, ...extra });
     expect(r.status, await r.clone().text()).toBe(200);
     const body = (await r.json()) as { link: { linkId: string }; url: string };
@@ -1309,6 +1311,7 @@ describe('share links over HTTP', () => {
         body: JSON.stringify({ name: 'Switch board' }),
       });
       const probeBoard = ((await made.json()) as { workspace: { id: string } }).workspace.id;
+      probe.shareLinks.addToAudience(probeBoard, ['@partner.example'], 'Bryan');
       const minted = await fetch(`${probeBase}/api/share/workspace`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1356,6 +1359,7 @@ describe('share links over HTTP', () => {
         body: JSON.stringify({ name: 'Share-link-only board' }),
       });
       const probeBoard = ((await made.json()) as { workspace: { id: string } }).workspace.id;
+      probe.shareLinks.addToAudience(probeBoard, ['@partner.example'], 'Bryan');
       const minted = await fetch(`${probeBase}/api/share/workspace`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1722,6 +1726,7 @@ describe('share links over HTTP', () => {
       // One hostname redeems, and it is not this one.
       const after = migrated();
       const port = after.port;
+      after.shareLinks.addToAudience(oldBoard, [STRANGER], 'Bryan');
       const minted = await fetch(`http://127.0.0.1:${port}/api/share/workspace`, {
         method: 'POST',
         headers: { host: `localhost:${port}`, 'content-type': 'application/json' },

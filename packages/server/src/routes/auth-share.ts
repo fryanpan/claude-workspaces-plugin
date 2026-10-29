@@ -632,6 +632,9 @@ export async function handleAuthShareRoutes(
             : l,
         ),
       members: shareLinks.allMembers(),
+      // Who each board admits at all (`board-audience.ts`). A link only
+      // invites inside its board's audience.
+      audiences: shareLinks.allAudiences(),
       sharing: sharingGate.status(),
     });
   }
@@ -1082,8 +1085,9 @@ export async function handleAuthShareRoutes(
         link,
         url,
         // Said on every reply, so the caller can tell the person who it was
-        // shared with: `anyone-who-signs-in`, or the list it applied.
-        audience: allowDomains ?? 'anyone-who-signs-in',
+        // shared with: the list it applied, or `board-audience` — a link
+        // with no audience of its own invites whoever the board names.
+        audience: allowDomains ?? 'board-audience',
       });
     } catch (err) {
       return j(400, { error: err instanceof Error ? err.message : 'create_share_link_failed' });

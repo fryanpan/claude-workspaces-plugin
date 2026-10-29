@@ -171,6 +171,7 @@ describe('revoking access hangs up a collaboration-hostname socket', () => {
 
   /** Mint a share link on this boot and redeem it, making `email` a member. */
   const redeemLinkFor = async (boardId: string, email: string) => {
+    handle.shareLinks.addToAudience(boardId, [email], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId: boardId });
     expect(minted.status, await minted.clone().text()).toBe(200);
     const { link } = (await minted.json()) as { link: { linkId: string } };

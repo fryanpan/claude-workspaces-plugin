@@ -163,6 +163,7 @@ describe('the level is enforced by the API', () => {
     // Two people come in through links: one left at the default level, one
     // minted as an Owner — the ROLE ON THE LINK, so a board can hand out a
     // second owner without a second round trip.
+    handle.shareLinks.addToAudience(board, [REGULAR, PROMOTED], 'Bryan');
     const plain = await jj<{ link: { linkId: string } }>(
       await postLocal('/api/share/workspace', { workspaceId: board }),
     );

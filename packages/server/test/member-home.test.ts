@@ -115,6 +115,7 @@ describe('a member at the main address', () => {
   };
 
   const redeem = async (workspaceId: string, email: string) => {
+    handle.shareLinks.addToAudience(workspaceId, [email], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId });
     expect(minted.status, await minted.clone().text()).toBe(200);
     const { link } = (await minted.json()) as { link: { linkId: string } };

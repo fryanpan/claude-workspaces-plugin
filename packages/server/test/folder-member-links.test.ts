@@ -140,6 +140,7 @@ describe('a link to a folder member nobody has opened', () => {
     const include = [MP4_A, MP4_B];
     set = await bind(repo('recordings'), { include });
     privateSet = await bind(repo('private-recordings'), { include, privacy: 'local-only' });
+    handle.shareLinks.addToAudience(board, [MEMBER], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId: board });
     expect(minted.status, await minted.clone().text()).toBe(200);
     const linkId = ((await minted.json()) as { link: { linkId: string } }).link.linkId;

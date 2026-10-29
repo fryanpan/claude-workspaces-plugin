@@ -173,6 +173,7 @@ describe('a secret ask, answered by the board owner', () => {
       )
     ).workspace.id;
 
+    handle.shareLinks.addToAudience(board, [REGULAR], 'Bryan');
     const link = await jj<{ link: { linkId: string } }>(
       await postLocal('/api/share/workspace', { workspaceId: board }),
     );

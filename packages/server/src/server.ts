@@ -150,6 +150,7 @@ import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './route
 import { captureServerError } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { collabMembershipEnded } from './share/collab-member-key.ts';
+import type { ShareLinks } from './share/share-links.ts';
 import { Shares } from './share/shares.ts';
 import { SharingGate } from './share/sharing-gate.ts';
 import { SHARING_NOTICE_ACTOR, SharingNotice, rankFallbackBoards } from './sharing-notice.ts';
@@ -309,6 +310,10 @@ export interface ServerHandle {
    *  test can count them after the last page leaves. */
   folderWatches: FolderWatches;
   shares: Shares | null;
+  /** The share-link store: links, members and each board's audience.
+   *  Exposed so a test can name who a board admits without a person's
+   *  browser, which is the only other door that may (`board-audience.ts`). */
+  shareLinks: ShareLinks;
   /** Hang up every websocket and SSE stream whose share is no longer live,
    *  and every widget door socket whose board token is dead. Runs on a 60s
    *  interval; exposed so tests exercise the real sweep. */
@@ -3387,6 +3392,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     dispatchReports,
     folderWatches,
     shares,
+    shareLinks,
     sweepDeadShares,
     appVoice: { mint: mintAppVoice },
     // Exactly what the interval does, exposed for the same reason

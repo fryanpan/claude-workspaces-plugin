@@ -94,7 +94,11 @@ describe('a board locked never-shareable', () => {
       },
     });
   const boardPath = (id: string) => `/workspaces/${encodeURIComponent(id)}?format=json`;
-  const mintWorkspace = (id: string) => postLocal('/api/share/workspace', { workspaceId: id });
+  // The board names the member first: a link only invites its audience.
+  const mintWorkspace = (id: string) => {
+    handle.shareLinks.addToAudience(id, [MEMBER], 'Bryan');
+    return postLocal('/api/share/workspace', { workspaceId: id });
+  };
   const lock = (locked: boolean) =>
     postLocal('/api/share/lock', { workspaceId: board, locked, reason: 'private folder' });
 

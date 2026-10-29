@@ -108,6 +108,7 @@ describe('ending share access closes an open meeting socket', () => {
 
   /** Mint a link for the board and redeem it as `email`, making a member. */
   const admit = async (email: string): Promise<Record<string, string>> => {
+    handle.shareLinks.addToAudience(board, [email], 'Bryan');
     const minted = await postLocal('/api/share/workspace', { workspaceId: board });
     expect(minted.status, await minted.clone().text()).toBe(200);
     const { link } = (await minted.json()) as { link: { linkId: string } };
