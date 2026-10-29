@@ -150,18 +150,14 @@ export const DEFAULT_NOTES_CADENCE_MS = 6_000;
  * How many uncarried words of a turn a ceiling tick holds back while it
  * waits for the sentence they are in to end.
  *
- * WHY A CEILING TICK CUTS AT A SENTENCE END. It used to carry every word the
- * engine had committed to, which is usually the middle of a sentence. The
- * note-taker then wrote the half it had ("is describing an export; not
- * finished yet") and, a few seconds later, a second note for the other half.
- * Replayed over four recorded meetings that left one placeholder note in
- * every eight and turned single answers into a dozen bullets. A slice that
- * ends where a sentence ends is something a person said, so it is written
- * as one.
+ * WHY A CEILING TICK CUTS AT A SENTENCE END. Carrying every committed word
+ * cut mid-sentence: the note-taker wrote the half it had, then a second note
+ * for the rest. Replayed over four recorded meetings that left one
+ * placeholder note in eight and turned single answers into a dozen bullets.
+ * A slice that ends where a sentence ends is written as one note.
  *
- * FIFTY WORDS, about twenty seconds of speech: an engine that never
- * punctuates its partials still gets a note inside the ceiling's reason for
- * existing, at the old cost of a fragment.
+ * FIFTY WORDS, about twenty seconds of speech, so an engine that never
+ * punctuates still gets a note, at the old cost of a fragment.
  */
 export const CEILING_HOLD_WORDS = 50;
 
