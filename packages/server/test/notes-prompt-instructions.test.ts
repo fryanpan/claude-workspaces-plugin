@@ -36,6 +36,10 @@ import { input } from './notes-compose-input.ts';
  *   four recorded meetings left about one note in eight saying its point was
  *   not finished yet. Measured by `bun run notes:replay` on those meetings;
  *   `notes-pending-clauses.ts` is the deterministic backstop.
+ * - "Keep the specifics a point turns on" (2026-10-28), after the same
+ *   replays judged about one idea in six lost, most of them present in the
+ *   notes without the name, number or done-or-pending state the idea turned
+ *   on. Measured by `bun run notes:replay` on those meetings.
  * A further rule goes in the same way: change both copies, and say here what
  * it was measured against.
  */
