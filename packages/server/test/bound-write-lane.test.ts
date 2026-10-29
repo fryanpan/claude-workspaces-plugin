@@ -148,7 +148,9 @@ describe('the bound-file write lane', () => {
     // first, because reading a pipe that took its place would block.
     expect(statSync(path).isFile()).toBe(true);
     expect(readFileSync(path, 'utf8')).toBe('version two\nversion one\nfirst line\n');
-    expect(readdirSync(dataDir).filter((f) => f.endsWith('.cw-flush~'))).toEqual([]);
+    expect(
+      readdirSync(dataDir).filter((f) => /\.cw-(flush|pool-write)-[0-9a-f]+~$/.test(f)),
+    ).toEqual([]);
     expect(settled).toBe(false);
 
     // Let the pool write go: it lands through a temp file of its own, past

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkoutBranch } from './doc-origin-repo.ts';
+import { hardenedGitArgs } from './git-hardening.ts';
 import type { RepoRegistry } from './repo-registry.ts';
 
 /**
@@ -119,7 +120,7 @@ function isUncommitted(
     if (!k.startsWith('GIT_') && v !== undefined) env[k] = v;
   }
   try {
-    const res = spawnSync('git', ['status', '--porcelain', '--', relPath], {
+    const res = spawnSync('git', hardenedGitArgs(['status', '--porcelain', '--', relPath]), {
       cwd: root,
       env,
       encoding: 'utf8',

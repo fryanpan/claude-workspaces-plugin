@@ -264,6 +264,7 @@ export const ROUTE_TEMPLATES: readonly (readonly string[])[] = [
   ['api', 'board-tokens'],
   ['api', 'board-tokens', 'refresh'],
   ['api', 'board-tokens', ':id', 'revoke'],
+  ['api', 'board-sockets', ':id', 'roots'],
   ['api', 'github-push-keys'],
   ['api', 'attachments'],
   ['api', 'calendar', 'events'],

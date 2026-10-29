@@ -1,3 +1,4 @@
+import { hardenedGitArgs } from './git-hardening.ts';
 /**
  * Where a file went, according to git.
  *
@@ -48,14 +49,14 @@ function renameScanOf(checkoutRoot: string): Map<string, string> {
   try {
     const res = spawnSync(
       'git',
-      [
+      hardenedGitArgs([
         'log',
         '--diff-filter=R',
         '--name-status',
         '--format=',
         '-M',
         `--max-count=${RENAME_SCAN_COMMITS}`,
-      ],
+      ]),
       {
         cwd: checkoutRoot,
         env,

@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import type { DiffFileStatus } from '@claude-workspaces/core';
+import { hardenedGitArgs } from './git-hardening.ts';
 
 /**
  * Git plumbing for diff reviews. Every call shells out with an argv array
@@ -28,7 +29,7 @@ interface GitResult {
 type GitSteps<T> = Generator<string[], T, GitResult>;
 
 function gitSync(repo: string, args: string[]): GitResult {
-  const res = spawnSync('git', ['-C', repo, ...args], {
+  const res = spawnSync('git', hardenedGitArgs(['-C', repo, ...args]), {
     encoding: 'utf8',
     maxBuffer: MAX_GIT_BUFFER,
   });
@@ -51,7 +52,7 @@ function gitAsync(repo: string, args: string[]): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       'git',
-      ['-C', repo, ...args],
+      hardenedGitArgs(['-C', repo, ...args]),
       {
         encoding: 'utf8',
         maxBuffer: MAX_GIT_BUFFER,
@@ -188,7 +189,16 @@ type DiffFilesResult = { ok: true; files: DiffFileEntry[] } | { ok: false; error
 
 function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFilesResult> {
   const range = target ? [base, target] : [base];
-  const ns = yield ['diff', '--name-status', '-z', '-M', ...range, '--'];
+  const ns = yield [
+    'diff',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--name-status',
+    '-z',
+    '-M',
+    ...range,
+    '--',
+  ];
   if (!ns.ok) return { ok: false, error: ns.stderr.trim() || 'git diff failed' };
 
   const files: DiffFileEntry[] = [];
@@ -232,7 +242,16 @@ function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFile
   }
 
   // Join in line counts; numstat reports "-\t-" for binary files.
-  const num = yield ['diff', '--numstat', '-z', '-M', ...range, '--'];
+  const num = yield [
+    'diff',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--numstat',
+    '-z',
+    '-M',
+    ...range,
+    '--',
+  ];
   if (num.ok) {
     const counts = parseNumstat(num.stdout);
     for (const f of files) {
@@ -253,6 +272,8 @@ function* diffFilesSteps(base: string, target: string | null): GitSteps<DiffFile
     // a separate flag and both are needed to describe "a formatter ran".
     const ws = yield [
       'diff',
+      '--no-ext-diff',
+      '--no-textconv',
       '-w',
       '--ignore-blank-lines',
       '--numstat',

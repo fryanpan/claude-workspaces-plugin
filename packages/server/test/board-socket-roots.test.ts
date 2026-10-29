@@ -4,7 +4,15 @@
  * bind being held to it, are `board-socket-lead.test.ts`.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BoardSocketRoots, MAX_ROOTS, boardSocketRootsPath } from '../src/board-socket-roots.ts';
@@ -52,5 +60,41 @@ describe('BoardSocketRoots', () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
     // Stored resolved: the link's target, never the link.
     expect(new BoardSocketRoots(path).rootsOf('w-harbor')).toEqual([riverbend]);
+  });
+
+  it('holds every set under a lead root to it, an owner set and an archived one too', () => {
+    const lead = join(root, 'harbor-guard');
+    mkdirSync(join(lead, 'docs'), { recursive: true });
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'e')));
+    roots.set('w-harbor', [lead]);
+    roots.recordBind('s-lead', 'w-harbor', lead);
+    const file = join(lead, 'docs', 'plan.md');
+    let now = 1_000_000;
+    const later = () => (now += 2 * BoardSocketRoots.ROOT_VERDICT_MS);
+
+    // The controls: both sets read, and a file outside is no guard's business.
+    expect(roots.admits(file, 's-lead', later())).toBe(true);
+    expect(roots.covers(file, 's-owner')).toBe(true);
+    expect(roots.admits(file, 's-owner', later())).toBe(true);
+    expect(roots.covers(join(riverbend, 'x.md'), 's-owner')).toBe(false);
+
+    // A path through node_modules, where the lead may make links, is refused.
+    expect(roots.admits(join(lead, 'node_modules', 'pkg', 'x.md'), 's-owner', later())).toBe(false);
+
+    // Dropping the root stops the lead's set, and not the owner's.
+    roots.set('w-harbor', []);
+    expect(roots.admits(file, 's-lead', later())).toBe(false);
+    expect(roots.admits(file, 's-owner', later())).toBe(true);
+
+    // Swapping the root for a link stops every set under it.
+    renameSync(lead, `${lead}.moved`);
+    symlinkSync(`${lead}.moved`, lead);
+    expect(roots.admits(file, 's-owner', later())).toBe(false);
+
+    // Archived, the record still covers its root.
+    roots.archiveBind('s-lead');
+    expect(roots.covers(file, 's-owner')).toBe(true);
+    expect(roots.admits(file, 's-owner', later())).toBe(false);
+    expect(roots.landsInside(file, join(riverbend, 'plan.md'), 's-owner')).toBe(false);
   });
 });

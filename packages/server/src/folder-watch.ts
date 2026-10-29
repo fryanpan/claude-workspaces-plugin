@@ -66,6 +66,7 @@ import { attachmentIdOf } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
 import { isExcluded, normalizeExcludes } from './bind-meta.ts';
 import { diffFilesAsync } from './git-diff.ts';
+import { hardenedGitArgs } from './git-hardening.ts';
 
 /** Quiet time that closes a burst. */
 export const SETTLE_MS = 150;
@@ -227,7 +228,10 @@ const LISTING_DEADLINE_MS = 3_000;
 async function gitListing(root: string): Promise<Set<string> | null> {
   try {
     const proc = Bun.spawn(
-      ['git', '-C', root, 'ls-files', '--cached', '--others', '--exclude-standard'],
+      [
+        'git',
+        ...hardenedGitArgs(['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard']),
+      ],
       { stdout: 'pipe', stderr: 'ignore' },
     );
     const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);

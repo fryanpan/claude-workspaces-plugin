@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
+import { hardenedGitArgs } from './git-hardening.ts';
 import { realPathUnder } from './safe-path.ts';
 
 /** Filesystem scanning + file-type gating for folder binds. */
@@ -223,7 +224,7 @@ function normalizeIncludePath(raw: string): string | null {
 
 /** `git ls-files -z <args>` under `root`, or null when git cannot answer. */
 function gitLsFiles(root: string, args: string[]): string[] | null {
-  const res = spawnSync('git', ['-C', root, 'ls-files', '-z', ...args], {
+  const res = spawnSync('git', hardenedGitArgs(['-C', root, 'ls-files', '-z', ...args]), {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });

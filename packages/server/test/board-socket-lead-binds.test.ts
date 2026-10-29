@@ -277,13 +277,28 @@ describe('the guard holds only the lead’s own sets', () => {
 describe('links at the bind, and media after it', () => {
   it('refuses a root holding a link out of it, and keeps one that stays inside', async () => {
     const root = project('harbor-links');
-    symlinkSync(join(root, 'notes.md'), join(root, 'notes-link.md'));
+    symlinkSync('notes.md', join(root, 'notes-link.md'));
+    // A package manager's links are its own: node_modules is skipped here,
+    // and every path under it is refused when read or written.
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    symlinkSync(secrets, join(root, 'node_modules', '.bin', 'tool'));
     await setRoots([root]);
-    // The control: a link that stays inside binds.
+    // The control: a relative link that stays inside binds.
     const kept = await leadBind(root);
     expect(kept.status, await kept.clone().text()).toBe(200);
     symlinkSync(secrets, join(root, 'keys'));
     const refused = await leadBind(root, { exclude: ['later.md'] });
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain('a link that leads out of it');
+  }, 30_000);
+
+  it('refuses a link that climbs, because moving its folder moves where it lands', async () => {
+    const root = project('harbor-climb');
+    mkdirSync(join(root, 'deep'));
+    // Inside today: deep/up -> ../notes.md. Rename deep's parent and it is not.
+    symlinkSync('../notes.md', join(root, 'deep', 'up.md'));
+    await setRoots([root]);
+    const refused = await leadBind(root);
     expect(refused.status).toBe(403);
     expect(await refused.text()).toContain('a link that leads out of it');
   }, 30_000);

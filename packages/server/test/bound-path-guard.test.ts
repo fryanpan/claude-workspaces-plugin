@@ -24,8 +24,10 @@ import {
   PathGuards,
   nearestRealpathSync,
   readChecked,
+  readCheckedSync,
   readRangeChecked,
   writeChecked,
+  writeCheckedSync,
 } from '../src/bound-path-guard.ts';
 import { makeFifo } from './fifo.ts';
 
@@ -118,6 +120,43 @@ describe('writeChecked and a link at the temp file’s old name', () => {
     expect(readFileSync(join(outside, 'keys.md'), 'utf8')).toBe('riverbend secret\n');
     expect(readdirSync(outside).filter((f) => f.includes('cw-pool-write'))).toEqual([]);
   });
+});
+
+describe('readCheckedSync', () => {
+  it('reads inside, and refuses a linked folder, a second name and a pipe', () => {
+    expect(readCheckedSync(join(inside, 'sub', 'plan.md'), under(inside))).toContain('harborlight');
+    expect(() => readCheckedSync(join(inside, 'linked', 'keys.md'), under(inside))).toThrow(
+      GuardRefused,
+    );
+    linkSync(join(outside, 'keys.md'), join(inside, 'sub', 'keys-sync.md'));
+    expect(() => readCheckedSync(join(inside, 'sub', 'keys-sync.md'), under(inside))).toThrow(
+      GuardRefused,
+    );
+    const pipe = join(inside, 'sub', 'pipe-sync.md');
+    makeFifo(pipe);
+    expect(() => readCheckedSync(pipe, under(inside))).toThrow(GuardRefused);
+  });
+});
+
+describe('writeCheckedSync, for the shutdown flush and the export', () => {
+  for (const lane of ['flush', 'export'] as const) {
+    it(`${lane}: writes inside past a link at the old temp name, and nothing outside`, () => {
+      const victim = join(outside, `victim-${lane}.md`);
+      writeFileSync(victim, 'riverbend keep\n');
+      const path = join(inside, 'sub', `${lane}.md`);
+      writeFileSync(path, '# harborlight\n');
+      symlinkSync(victim, `${path}.cw-${lane}~`);
+      writeCheckedSync(path, '# harborlight\n\nRevised.\n', lane, under(inside));
+      expect(readFileSync(path, 'utf8')).toContain('Revised.');
+      expect(readFileSync(victim, 'utf8')).toBe('riverbend keep\n');
+
+      const before = readdirSync(outside).sort();
+      expect(() =>
+        writeCheckedSync(join(inside, 'linked', `${lane}.md`), 'leaked\n', lane, under(inside)),
+      ).toThrow(GuardRefused);
+      expect(readdirSync(outside).sort()).toEqual(before);
+    });
+  }
 });
 
 describe('readRangeChecked', () => {

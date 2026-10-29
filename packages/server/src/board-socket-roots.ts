@@ -30,7 +30,7 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { type Dirent, realpathSync, statSync } from 'node:fs';
-import { readdir, realpath } from 'node:fs/promises';
+import { readdir, readlink, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
@@ -177,35 +177,38 @@ export class BoardSocketRoots {
   }
 
   /**
-   * The lead binds that hold `path`. Asked for a set, only that set's own
-   * record, so a set the owner bound on the same folder is never held to a
-   * lead's root. Asked without one, every record whose root holds the path:
-   * a caller that cannot name the set is held to all of them.
+   * Every lead record, live or archived, whose root holds `path`, whatever
+   * set the path is read for. Containment is judged over all of them: a set
+   * the owner bound in a folder the lead can write is exposed to the same
+   * swapped links, and an owner's file lands inside the root anyway.
    */
-  private bindsOver(path: string, setId?: string): LeadBindRecord[] {
+  private recordsOver(path: string): LeadBindRecord[] {
     this.load();
     const under = ({ root }: LeadBindRecord) => path === root || path.startsWith(`${root}/`);
-    if (setId !== undefined) {
-      const own = this.binds[setId];
-      return own && under(own) ? [own] : [];
-    }
-    return Object.values(this.binds).filter(under);
+    return [...Object.values(this.binds), ...Object.values(this.archived)].filter(under);
   }
 
-  /** Whether `path` (of `setId`, when the caller knows it) is under a
-   *  root a lead bound: the guard's business. */
-  covers(path: string, setId?: string): boolean {
-    return this.bindsOver(path, setId).length > 0;
+  /** Whether `path` is under a root a lead bound: the guard's business. */
+  covers(path: string, _setId?: string): boolean {
+    return this.recordsOver(path).length > 0;
   }
 
   /**
-   * The main-thread half of the guard (`bound-path-guard.ts` `PathGuards`): a path
-   * under a lead's bind needs the root still registered for that board and
-   * still resolving to itself, so no link has been swapped in for it.
+   * The main-thread half of the guard (`bound-path-guard.ts` `PathGuards`).
+   * A path under a lead's root needs that root still resolving to itself,
+   * so no link has been swapped in for it, and no `node_modules` folder on
+   * its way below the root, the one place a walled lead may make links
+   * (`scripts/lead-sandbox-wall.ts`). A lead's own set also needs its root
+   * still registered for the board; that check alone is keyed by the set,
+   * so dropping a root stops the lead's set and not the owner's. A caller
+   * that cannot name its set is held to every record's registration.
    */
   admits(path: string, setId?: string, now = Date.now()): boolean {
-    for (const { board, root } of this.bindsOver(path, setId)) {
-      if (!this.rootsOf(board).includes(root)) return false;
+    for (const record of this.recordsOver(path)) {
+      const { root } = record;
+      if (path.slice(root.length).split('/').includes('node_modules')) return false;
+      const own = setId === undefined || this.binds[setId] === record;
+      if (own && !this.rootsOf(record.board).includes(root)) return false;
       const cached = this.verdicts.get(root);
       let ok: boolean;
       if (cached && now - cached.at < BoardSocketRoots.ROOT_VERDICT_MS) ok = cached.ok;
@@ -228,10 +231,8 @@ export class BoardSocketRoots {
    * file not there yet, `real` is its nearest existing folder, resolved, so
    * a write cannot create a file through a linked parent.
    */
-  landsInside(path: string, real: string, setId?: string): boolean {
-    return this.bindsOver(path, setId).every(
-      ({ root }) => real === root || real.startsWith(`${root}/`),
-    );
+  landsInside(path: string, real: string, _setId?: string): boolean {
+    return this.recordsOver(path).every(({ root }) => real === root || real.startsWith(`${root}/`));
   }
 
   private save(): void {
@@ -253,12 +254,17 @@ export class BoardSocketRoots {
 export const LINK_SCAN_MAX = 200_000;
 
 /**
- * The first symlink under `root` that leads outside it (or nowhere), as a
- * path relative to the root; `'too-many'` past {@link LINK_SCAN_MAX}
- * entries; null when every link stays inside. Links are not followed, so a
- * folder link is judged by where it leads and not walked. A walled lead may
- * make no link (`scripts/lead-sandbox-wall.ts`), so this is about the ones
- * already there when it binds.
+ * The first symlink under `root` a lead could turn outward, as a path
+ * relative to the root; `'too-many'` past {@link LINK_SCAN_MAX} entries;
+ * null when there is none. A link is refused when it leads outside the
+ * root or nowhere, and also when its target is absolute or climbs with
+ * `..`: the lead may rename the folders around a relative link, which
+ * creates no link and so is not refused by its profile, and a `../x` that
+ * lands inside today can land outside after one `mv`. A link whose target
+ * only descends stays inside whatever folder it is moved with. Links are
+ * not followed, and `node_modules` folders are not walked: a walled lead
+ * may make links there (`scripts/lead-sandbox-wall.ts`), and the guard
+ * refuses every path through one.
  */
 export async function linkOutOf(root: string): Promise<string | 'too-many' | null> {
   const inside = (p: string) => p === root || p.startsWith(`${root}/`);
@@ -274,13 +280,17 @@ export async function linkOutOf(root: string): Promise<string | 'too-many' | nul
     for (const entry of entries) {
       if (++seen > LINK_SCAN_MAX) return 'too-many';
       const path = join(dir, entry.name);
-      if (entry.isDirectory()) queue.push(path);
-      else if (entry.isSymbolicLink()) {
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules') queue.push(path);
+      } else if (entry.isSymbolicLink()) {
+        let target = '';
         let real: string | null = null;
         try {
+          target = await readlink(path);
           real = await realpath(path);
         } catch {}
-        if (real === null || !inside(real)) return path.slice(root.length + 1);
+        const climbs = isAbsolute(target) || target.split('/').includes('..');
+        if (real === null || !inside(real) || climbs) return path.slice(root.length + 1);
       }
     }
   }

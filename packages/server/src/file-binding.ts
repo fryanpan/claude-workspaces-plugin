@@ -21,17 +21,7 @@
  * bound-doc sync behaviour rests on, and this file moved them without
  * touching them.
  */
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type DocMeta,
@@ -842,7 +832,8 @@ export class FileBindings {
       return { ok: false, error: 'read-failed' };
     }
     const fileExists = () => (pre ? pre.exists : existsSync(abs));
-    const readFile = () => (pre ? (pre.text ?? '') : readFileSync(abs, 'utf8'));
+    const readFile = () =>
+      pre ? (pre.text ?? '') : boundFiles.guards.readSync(abs, attachmentIdOf(doc.meta));
     let seeded = false;
     let seedText: string | undefined;
     if (fragment.length === 0 && fileExists()) {
@@ -1117,7 +1108,7 @@ export class FileBindings {
     let text = '';
     if (fileExists()) {
       try {
-        text = pre ? (pre.text ?? '') : readFileSync(abs, 'utf8');
+        text = pre ? (pre.text ?? '') : boundFiles.guards.readSync(abs, attachmentIdOf(doc.meta));
       } catch (err) {
         console.error(`[doc-store] read failed for ${abs}:`, err);
         return { ok: false, error: 'read-failed' };
@@ -1425,9 +1416,7 @@ export class FileBindings {
       const md = prose.serializeFragmentToMarkdown(prose.getProseFragment(doc.ydoc));
       try {
         mkdirSync(dirname(absPath), { recursive: true });
-        const tmp = `${absPath}.cw-export~`;
-        writeFileSync(tmp, md);
-        renameSync(tmp, absPath);
+        boundFiles.guards.writeSync(absPath, md, 'export', attachmentIdOf(doc.meta));
         // The export just changed the answer the preread carried, and a
         // preread saying "not there" would leave the attach unbound and the
         // poll unarmed. Drop it: the path has answered a write, so the
@@ -1960,8 +1949,7 @@ export class FileBindings {
     }
     let md: string;
     try {
-      if (!boundFiles.guards.landsAllowedSync(binding.path, binding.setId)) throw new Error();
-      md = readFileSync(binding.path, 'utf8');
+      md = boundFiles.guards.readSync(binding.path, binding.setId);
     } catch {
       return { ok: false, error: 'missing' };
     }
@@ -2038,9 +2026,8 @@ export class FileBindings {
       // retries once the backoff lapses.
       if (boundFiles.quarantined(binding.path)) return 'missing';
       if (!existsSync(binding.path)) return 'missing';
-      if (!boundFiles.guards.landsAllowedSync(binding.path, binding.setId)) return 'missing';
       try {
-        md = readFileSync(binding.path, 'utf8');
+        md = boundFiles.guards.readSync(binding.path, binding.setId);
       } catch (err) {
         console.error(`[doc-store] read failed for ${binding.path}:`, err);
         return 'missing';
@@ -2461,18 +2448,13 @@ export class FileBindings {
       // thread must not report its own bytes as the file's content once this
       // one has landed on top of them.
       binding.writeSeq = (binding.writeSeq ?? 0) + 1;
-      let target = binding.path;
-      try {
-        target = realpathSync(binding.path);
-      } catch {}
       // A LANE of its own, never the pool writer's temp path. Both can be
       // live at the same moment — SIGTERM arriving while a write-back sits on
       // the thread pool is precisely the case this branch exists for — and
       // two writers filling one temp file interleave their bytes into it,
-      // which the rename then publishes as the user's document.
-      const tmp = `${target}.cw-flush~`;
-      writeFileSync(tmp, bytes);
-      renameSync(tmp, target);
+      // which the rename then publishes as the user's document. Every temp
+      // name is random and created new (`bound-path-guard.ts`).
+      boundFiles.guards.writeSync(binding.path, bytes, 'flush', binding.setId);
       binding.lastWritten = md;
       binding.diskSource = written;
       // Record our own write's mtime so the poll doesn't treat the

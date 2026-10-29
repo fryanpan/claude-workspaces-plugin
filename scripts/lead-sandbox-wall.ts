@@ -13,8 +13,19 @@
  * board. A walled lead may connect to its own board's socket and to no other
  * socket in that folder, and may write nothing there, so it can neither
  * reach another board's socket nor link one in under its own name. Its other
- * local sockets are not touched. It may make no symlink or hard link at
- * all, since the server follows links in the folders a lead binds.
+ * local sockets are not touched.
+ *
+ * In its own projects, the folders it may bind (`board-socket-roots.ts`),
+ * three more rules hold what the server does there:
+ * - no symlink or hard link outside a `node_modules` folder, since the
+ *   server reads and writes through what it finds there; a package manager
+ *   needs links in `node_modules`, the server refuses every path through
+ *   one, and a `node_modules` folder may not be renamed or removed, so
+ *   nothing made in it moves out;
+ * - no regular file named `config` or `config.worktree`, the two files git
+ *   reads settings from in a repository's git folder. The server runs git in
+ *   these folders, and such a setting can name a program
+ *   (`core.fsmonitor`, a filter) that git then runs as the server.
  *
  * Off unless a lead's config sets `boardWall`. A walled lead is launched with
  * `CW_BOARD_SOCKET` naming its own board's socket, which its MCP relay dials
@@ -30,6 +41,8 @@ export interface WalledLead {
   boardWall: boolean;
   /** The board it works on; required when `boardWall` is set. */
   boardId?: string;
+  /** Its own project folders, which the server may read and write for it. */
+  projects?: readonly string[];
 }
 
 /**
@@ -61,12 +74,25 @@ export function boardWallRules(
     ...ends.map(
       (d) => `(deny file-write* (subpath ${sbQuote(d)})) ; no link to another board's socket`,
     ),
-    // The server reads and writes the folders this lead binds
-    // (`board-socket-roots.ts`), so a link the lead made in one would carry
-    // the server outside it. It may make neither kind anywhere.
-    '(deny file-write-create (vnode-type SYMLINK)) ; no new symlink',
-    '(deny file-link) ; no new hard link',
+    ...(lead.projects ?? []).flatMap((p) => projectRules(p, realpath)),
   ];
+}
+
+/** Outside `node_modules`, at any depth. */
+const NOT_NODE_MODULES = '(require-not (regex #"/node_modules(/|$)"))';
+
+/** The rules for one project folder, at each of its spellings. */
+function projectRules(project: string, realpath: (path: string) => string): string[] {
+  return socketDirEnds(project, realpath).flatMap((d) => {
+    sbQuote(d);
+    const re = d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return [
+      `(deny file-write-create (require-all (vnode-type SYMLINK) (subpath ${sbQuote(d)}) ${NOT_NODE_MODULES})) ; no new symlink in a project`,
+      `(deny file-link (require-all (subpath ${sbQuote(d)}) ${NOT_NODE_MODULES})) ; no new hard link in a project`,
+      `(deny file-write-unlink (regex #"^${re}(/.*)?/node_modules$")) ; node_modules stays where it is`,
+      `(deny file-write* (require-all (vnode-type REGULAR-FILE) (regex #"^${re}(/.*)?/config(\\.worktree)?$"))) ; no git settings file`,
+    ];
+  });
 }
 
 /** The folder, resolved, and its other spelling across `/tmp` and `/private/tmp`. */

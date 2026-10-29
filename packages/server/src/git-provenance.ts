@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
+import { hardenedGitArgs } from './git-hardening.ts';
 
 /**
  * Was the content a reconcile is about to overwrite written by GIT rather
@@ -95,7 +96,7 @@ function git(
     if (!k.startsWith('GIT_') && v !== undefined) env[k] = v;
   }
   try {
-    const res = spawnSync('git', args, {
+    const res = spawnSync('git', hardenedGitArgs(args), {
       cwd,
       env,
       input,
@@ -184,6 +185,9 @@ export function classifyExternalContent(
   // working-tree→blob conversion a checkout inverted on the way in, so a
   // repository using filters still classifies correctly instead of silently
   // reading `unknown` forever.
+  // That filter is code named in the repository's config, so this trusts the
+  // config: under a walled lead's roots the sandbox refuses writes to it
+  // (`scripts/lead-sandbox-wall.ts`), and `git-hardening.ts` covers the rest.
   const hashArgs = rel
     ? ['hash-object', '-t', 'blob', '--path', rel, '--stdin']
     : ['hash-object', '-t', 'blob', '--stdin'];

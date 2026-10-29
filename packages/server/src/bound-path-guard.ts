@@ -11,10 +11,20 @@
  */
 import { randomBytes } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
-import { constants, realpathSync } from 'node:fs';
+import {
+  constants,
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs';
 import { type FileHandle, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, sep } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { stampOf } from './file-stamp.ts';
 
 /**
@@ -171,7 +181,12 @@ export async function writeChecked(
   try {
     target = await realpath(path);
   } catch {}
-  const tmp = `${target}.cw-pool-write-${randomBytes(6).toString('hex')}~`;
+  // Judge the folder first, so a refused write makes no file outside at all;
+  // the check after the open is the one a swap cannot get past.
+  if (lands && !lands(join(await realpath(dirname(target)), basename(target)))) {
+    throw new GuardRefused(path);
+  }
+  const tmp = tempBeside(target, 'pool-write');
   // Read-write: /dev/fd/<n> refuses an lstat on a write-only descriptor.
   const fh = await open(tmp, TEMP_FLAGS, 0o644);
   try {
@@ -190,6 +205,74 @@ export async function writeChecked(
     throw err;
   }
   return stat(target, { bigint: true });
+}
+
+/** The temp file's name beside `target`, for one writer's lane: random,
+ *  so nothing can be planted at it ahead of the write. */
+function tempBeside(target: string, lane: 'pool-write' | 'flush' | 'export'): string {
+  return `${target}.cw-${lane}-${randomBytes(6).toString('hex')}~`;
+}
+
+/** `openChecked` on the calling thread, for the synchronous reads. */
+function openCheckedSync(path: string, lands: (real: string) => boolean): number {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.nlink > 1 || !lands(realpathSync(`/dev/fd/${fd}`))) {
+      throw new GuardRefused(path);
+    }
+    return fd;
+  } catch (err) {
+    closeSync(fd);
+    throw err;
+  }
+}
+
+/** `readChecked` on the calling thread: the attach without a preread, the
+ *  reparse and the synchronous reconcile. Unguarded, a plain read. */
+export function readCheckedSync(path: string, lands: ((real: string) => boolean) | null): string {
+  if (!lands) return readFileSync(path, 'utf8');
+  const fd = openCheckedSync(path, lands);
+  try {
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** `writeChecked` on the calling thread, through a temp file of `lane`'s
+ *  own: the shutdown flush and the export of a file not there yet. */
+export function writeCheckedSync(
+  path: string,
+  text: string,
+  lane: 'flush' | 'export',
+  lands: ((real: string) => boolean) | null,
+): void {
+  let target = path;
+  try {
+    target = realpathSync(path);
+  } catch {}
+  if (lands && !lands(join(realpathSync(dirname(target)), basename(target)))) {
+    throw new GuardRefused(path);
+  }
+  const tmp = tempBeside(target, lane);
+  const fd = openSync(tmp, TEMP_FLAGS, 0o644);
+  try {
+    if (lands && !lands(realpathSync(`/dev/fd/${fd}`))) throw new GuardRefused(path);
+    const bytes = Buffer.from(text, 'utf8');
+    let at = 0;
+    while (at < bytes.length) at += writeSync(fd, bytes, at, bytes.length - at);
+    closeSync(fd);
+    renameSync(tmp, target);
+  } catch (err) {
+    try {
+      closeSync(fd);
+    } catch {}
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw err;
+  }
 }
 
 /**
@@ -246,6 +329,21 @@ export class PathGuards {
   ): Promise<Uint8Array<ArrayBuffer>> | null {
     if (!this.covers(path, setId)) return null;
     return readRangeChecked(path, start, end, (real) => this.landsAll(path, real, setId));
+  }
+
+  /** `read` on the calling thread; throws `GuardRefused` where a guard
+   *  refuses the path. */
+  readSync(path: string, setId?: string): string {
+    if (!this.allows(path, setId)) throw new GuardRefused(path);
+    const lands = (real: string) => this.landsAll(path, real, setId);
+    return readCheckedSync(path, this.covers(path, setId) ? lands : null);
+  }
+
+  /** `write` on the calling thread, through `lane`'s own temp file. */
+  writeSync(path: string, text: string, lane: 'flush' | 'export', setId?: string): void {
+    if (!this.allows(path, setId)) throw new GuardRefused(path);
+    const lands = (real: string) => this.landsAll(path, real, setId);
+    writeCheckedSync(path, text, lane, this.covers(path, setId) ? lands : null);
   }
 
   /** Write a bound file, checked where a guard covers it. */

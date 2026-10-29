@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -304,7 +305,7 @@ s.on('error', (e) => console.log(e.code));`,
     expect(existsSync(join(boards, 'w-plant.sock'))).toBe(false);
   });
 
-  it('may make no symlink or hard link, and still writes a plain file', () => {
+  it('may make no symlink or hard link in its project, and still writes a plain file', () => {
     const run = (profile: string, argv: string[]) =>
       spawnSync(SANDBOX_EXEC, ['-f', profile, ...argv], { cwd: project, encoding: 'utf8' }).status;
     const target = join(project, 'plan.md');
@@ -319,6 +320,66 @@ s.on('error', (e) => console.log(e.code));`,
     // Without the wall the same two links are made.
     expect(run(unwalled, ['/bin/ln', '-s', '/etc', join(project, 'open-sym')])).toBe(0);
     expect(run(unwalled, ['/bin/ln', target, join(project, 'open-hard')])).toBe(0);
+  });
+
+  it('makes links in node_modules, which a package manager needs, and moves none of it out', () => {
+    const run = (profile: string, argv: string[]) =>
+      spawnSync(SANDBOX_EXEC, ['-f', profile, ...argv], { cwd: project, encoding: 'utf8' }).status;
+    const bin = join(project, 'node_modules', '.bin');
+    mkdirSync(bin, { recursive: true });
+    expect(run(walled, ['/bin/ln', '-s', '../tool/cli.js', join(bin, 'tool')])).toBe(0);
+    // Moved out, a link would land where the server reads.
+    expect(run(walled, ['/bin/mv', join(bin, 'tool'), join(project, 'tool')])).not.toBe(0);
+    expect(run(walled, ['/bin/mv', join(project, 'node_modules'), join(project, 'nm')])).not.toBe(
+      0,
+    );
+    expect(lstatSync(join(project, 'node_modules', '.bin', 'tool')).isSymbolicLink()).toBe(true);
+    // The control: without the wall the folder moves.
+    expect(run(unwalled, ['/bin/mv', join(project, 'node_modules'), join(project, 'nm')])).toBe(0);
+    expect(run(unwalled, ['/bin/mv', join(project, 'nm'), join(project, 'node_modules')])).toBe(0);
+  });
+
+  it('runs bun install, with the links it makes in node_modules', () => {
+    const app = join(project, 'app');
+    const dep = join(app, 'dep');
+    mkdirSync(join(dep, 'bin'), { recursive: true });
+    writeFileSync(
+      join(dep, 'package.json'),
+      JSON.stringify({ name: 'harbor-dep', version: '1.0.0', bin: { 'harbor-tool': 'bin/t.js' } }),
+    );
+    writeFileSync(join(dep, 'bin', 't.js'), '#!/usr/bin/env node\n');
+    writeFileSync(
+      join(app, 'package.json'),
+      JSON.stringify({ name: 'harbor-app', dependencies: { 'harbor-dep': 'file:./dep' } }),
+    );
+    const res = spawnSync(SANDBOX_EXEC, ['-f', walled, 'bun', 'install'], {
+      cwd: app,
+      encoding: 'utf8',
+    });
+    expect(res.status, res.stderr).toBe(0);
+    expect(existsSync(join(app, 'node_modules', '.bin', 'harbor-tool'))).toBe(true);
+  });
+
+  it('writes no git settings file, and still commits and adds a worktree', () => {
+    const repo = join(project, 'repo');
+    mkdirSync(repo);
+    const git = (profile: string | null, args: string[]) =>
+      spawnSync(profile ? SANDBOX_EXEC : 'git', profile ? ['-f', profile, 'git', ...args] : args, {
+        cwd: repo,
+        encoding: 'utf8',
+      }).status;
+    expect(git(null, ['init', '-q'])).toBe(0);
+    const id = ['-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid'];
+    expect(git(walled, [...id, 'commit', '-q', '--allow-empty', '-m', 'one'])).toBe(0);
+    expect(git(walled, ['worktree', 'add', '-q', join(repo, 'wt'), '-b', 'wt'])).toBe(0);
+    expect(git(walled, ['config', 'core.fsmonitor', '/bin/true'])).not.toBe(0);
+    // A git folder of the lead's own making reads `config` too.
+    const run = (profile: string, argv: string[]) =>
+      spawnSync(SANDBOX_EXEC, ['-f', profile, ...argv], { cwd: project, encoding: 'utf8' }).status;
+    expect(run(walled, ['/bin/sh', '-c', `echo x > ${join(project, 'config')}`])).not.toBe(0);
+    expect(existsSync(join(project, 'config'))).toBe(false);
+    // The control: without the wall the setting is written.
+    expect(git(unwalled, ['config', 'core.fsmonitor', '/bin/true'])).toBe(0);
   });
 
   it('fails a check row whose path has no socket behind it, which proves nothing', () => {
