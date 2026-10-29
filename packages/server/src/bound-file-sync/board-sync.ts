@@ -16,6 +16,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { configuredHostFetch } from '../outbound-fetch.ts';
 import { type MirrorMark, type MirrorSocket, createDocMirror } from './doc-mirror.ts';
 import type { SyncConfig } from './sync-config.ts';
 
@@ -77,9 +78,12 @@ export function startBoardSync(opts: BoardSyncOptions) {
       : {}),
   });
 
+  // The board's origin is the operator's own config, so it is the one host allowed.
+  const toBoard = configuredHostFetch([config.baseUrl]);
+
   async function renew(): Promise<void> {
     try {
-      const res = await fetch(`${config.baseUrl}/api/board-tokens/refresh`, {
+      const res = await toBoard(`${config.baseUrl}/api/board-tokens/refresh`, {
         method: 'POST',
         headers: headers(),
         redirect: 'manual',
