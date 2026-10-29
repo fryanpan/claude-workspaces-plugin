@@ -76,6 +76,7 @@ import { LANDING_CHANGED_EVENT, LANDING_CHANNEL, createLandingChanges } from './
 import { renderRemoteReview } from './landing-remote.ts';
 import { LeadChat } from './lead-chat/lead-chat.ts';
 import { LeadChatLog } from './lead-chat/log.ts';
+import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
@@ -1532,6 +1533,14 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     broadcast: (workspaceId, frame) =>
       sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
     newId: () => cryptoId('lc'),
+  });
+  // The meeting a board's lead chat runs (`lead-chat/meeting.ts`), on the
+  // same page-only channel.
+  const leadChatMeetings = new LeadChatMeetings({
+    dataDir,
+    broadcast: (workspaceId, frame) =>
+      sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true }),
+    newId: () => cryptoId('lcm'),
   });
   const spokenEngines = opts.spokenReply ?? {
     listener: null,
@@ -3037,6 +3046,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     spokenRelay,
     spokenTimings,
     leadChat,
+    leadChatMeetings,
     featuresOff: opts.featuresOff ?? {},
     authorizeAgent: (req, agentId) =>
       authorizeAgentCaller({

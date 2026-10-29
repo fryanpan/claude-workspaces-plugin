@@ -620,6 +620,7 @@ export class MeetingRelay {
             ? { meetingId: msg.resume, ...(msg.heldMs !== undefined ? { heldMs: msg.heldMs } : {}) }
             : undefined,
           msg.handoff === true,
+          msg.notes !== false,
         ),
       );
       return;
@@ -955,6 +956,7 @@ export class MeetingRelay {
     source?: MeetingCaptureSource,
     resume?: { meetingId: string; heldMs?: number },
     handoff = false,
+    takeNotes = true,
   ): Promise<void> {
     if (conn.state !== 'idle') return;
     // Before any refusal below can return: a socket may start a SECOND
@@ -1011,7 +1013,12 @@ export class MeetingRelay {
     // A doc somebody is already recording is refused below as before, rather
     // than handed a second notes doc, and a press while the notes doc itself
     // is recording is sent to that same notes doc.
-    if (handoff && resume === undefined && this.deps.store.active(docId) === undefined) {
+    if (
+      handoff &&
+      takeNotes &&
+      resume === undefined &&
+      this.deps.store.active(docId) === undefined
+    ) {
       const moved = this.deps.notes?.handOffNotesDoc?.(
         docId,
         (d) => this.deps.store.active(d) !== undefined,
@@ -1097,7 +1104,9 @@ export class MeetingRelay {
     // before the handshake so the closure below can feed it, but it holds no
     // resource until a turn arrives — abandoning it on a failed handshake
     // leaks nothing.
-    const notesDeps = this.deps.notes;
+    // A meeting that asked for no notes (`notes: false`) gets no pipeline at
+    // all, so nothing is composed and nothing is written into the doc.
+    const notesDeps = takeNotes ? this.deps.notes : undefined;
     // Held as a local, not read back off `conn`: `stop()` detaches the conn's
     // fields BEFORE awaiting the engine close, and the close is what settles
     // the turn in progress — the meeting's last sentence must still have a
