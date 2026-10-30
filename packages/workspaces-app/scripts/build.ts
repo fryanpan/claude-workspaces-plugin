@@ -52,6 +52,7 @@ const HASHED = [
   'voice-page.js',
   'landing.js',
   'coach.js',
+  'lead-chat.js',
   'whiteboard.js',
   'sentry.js',
   'sw.js',
@@ -256,25 +257,27 @@ async function emit(buildId: string): Promise<boolean> {
     return false;
   }
 
-  // The coach's card over a mock or a dev server: its own entry (served at
-  // /app/coach.js by the host page renderMockHost draws), because the host
-  // loads nothing else of the app's. No splitting: one module and the card.
-  const coachResult = await Bun.build({
-    entrypoints: [join(pkgRoot, 'src', 'coach-page.ts')],
-    outdir: dist,
-    target: 'browser',
-    format: 'esm',
-    splitting: false,
-    sourcemap: 'external',
-    define,
-    naming: { entry: 'coach.js', chunk: '[name]-[hash].js', asset: '[name].[ext]' },
-    minify: process.env.NODE_ENV !== 'dev' && !isWatch,
-  });
-  if (!coachResult.success) {
-    console.error('coach build failed:');
-    for (const m of coachResult.logs) console.error(m);
-    if (!isWatch) process.exit(1);
-    return false;
+  // What a mock or a dev server's host page loads (renderMockHost): the
+  // coach's card and the lead chat, `src/<name>-page.ts` → `<name>.js`, each
+  // its own unsplit entry because the host loads nothing else of the app's.
+  for (const name of ['coach', 'lead-chat']) {
+    const entry = `${name}.js`;
+    const result = await Bun.build({
+      entrypoints: [join(pkgRoot, 'src', `${name}-page.ts`)],
+      outdir: dist,
+      target: 'browser',
+      format: 'esm',
+      splitting: false,
+      sourcemap: 'external',
+      define,
+      naming: { entry, chunk: '[name]-[hash].js', asset: '[name].[ext]' },
+      minify: process.env.NODE_ENV !== 'dev' && !isWatch,
+    });
+    if (!result.success) {
+      for (const m of [`${entry} build failed:`, ...result.logs]) console.error(m);
+      if (!isWatch) process.exit(1);
+      return false;
+    }
   }
 
   // The whiteboard page: its own entry, React and Excalidraw split behind it.

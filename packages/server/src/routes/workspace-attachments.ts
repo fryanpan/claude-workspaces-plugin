@@ -76,6 +76,7 @@ export async function handleWorkspaceAttachments(
     safeJson,
     watchKeyExists,
     spokenRelay,
+    leadChat,
     authorizeAgent,
   } = ctx;
   const { req, pathname, visitor } = rq;
@@ -376,7 +377,11 @@ export async function handleWorkspaceAttachments(
     }
     return j(200, {
       ok: true,
-      delivered: spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId),
+      // A typed lead-chat message first: its question is in the log, so its
+      // answer lands however long the lead took. Then a socket or a meeting.
+      delivered:
+        leadChat.answer(workspaceId, entryId, text, agentId) ||
+        spokenRelay.answerRequest(workspaceId, entryId, text, minute, agentId),
     });
   }
   const wsAgentDetachMatch = pathname.match(/^\/workspaces\/([^/]+)\/agents\/([^/]+)$/);

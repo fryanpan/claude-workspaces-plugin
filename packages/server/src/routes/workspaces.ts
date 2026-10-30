@@ -24,6 +24,7 @@ import { handleWorkspaceEmbeds } from './workspace-embeds.ts';
 import { handleWorkspaceGoals } from './workspace-goals.ts';
 import { handleWorkspaceHome } from './workspace-home.ts';
 import { handleWorkspaceKeepMoving } from './workspace-keep-moving.ts';
+import { handleWorkspaceLeadChat } from './workspace-lead-chat.ts';
 import { handleWorkspaceManifest } from './workspace-manifest.ts';
 import { handleWorkspaceMembers } from './workspace-members.ts';
 import { handleWorkspaceNext } from './workspace-next.ts';
@@ -60,6 +61,9 @@ export async function handleWorkspaceRoutes(
     // The keep-moving verdicts. Anchored on its one path segment; position
     // carries no behaviour.
     handleWorkspaceKeepMoving(ctx, rq) ??
+    // The board's chat with its lead. Anchored on its one `lead-chat`
+    // segment; position carries no behaviour.
+    (await handleWorkspaceLeadChat(ctx, rq)) ??
     (await handleWorkspaceNext(ctx, rq)) ??
     // Reads the board's goals and plan docs to answer "is somebody already
     // planning this". Above the settings block only because that is where it

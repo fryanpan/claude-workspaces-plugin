@@ -171,6 +171,9 @@ export function parseMeetingClientMessage(raw: unknown): MeetingClientMessage | 
       ...(held !== undefined ? { heldMs: held } : {}),
       // A first start only: a resume already has its meeting and its doc.
       ...(m.handoff === true && resume === undefined ? { handoff: true } : {}),
+      // Only the literal `false` turns the note-taker off; anything else is
+      // a client that never heard of the field, and gets notes.
+      ...(m.notes === false ? { notes: false as const } : {}),
     };
   }
   return null;

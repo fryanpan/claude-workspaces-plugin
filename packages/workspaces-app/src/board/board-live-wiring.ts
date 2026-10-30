@@ -81,7 +81,9 @@ export interface BoardLiveDeps {
   location: Pick<BootLocation, 'assign'>;
 }
 
-export function wireBoardLive(deps: BoardLiveDeps): void {
+/** Returns the board's feed so the lead chat listens on it rather than
+ *  opening a second connection to the same URL. */
+export function wireBoardLive(deps: BoardLiveDeps): { stream: EventSource } {
   const {
     workspaceId,
     user,
@@ -315,4 +317,5 @@ export function wireBoardLive(deps: BoardLiveDeps): void {
     onStatus: streamStatus,
     onView: (view) => renderLiveStaleNotice(staleNotice, view),
   });
+  return { stream: es };
 }

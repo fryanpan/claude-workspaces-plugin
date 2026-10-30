@@ -390,6 +390,7 @@ async function serveApp(
           items: [],
           visitor: rq.visitor,
           coachHref: assetHref(assets, 'coach.js'),
+          leadChatHref: assetHref(assets, 'lead-chat.js'),
           frame: ctx.frameHost?.frameFor(req, rq.visitor, workspaceId, rq.mayMintAppVoice) ?? null,
         }),
         ctx.browserSentry,

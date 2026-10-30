@@ -299,6 +299,14 @@ export type MeetingClientMessage =
        * a doc the page shows rather than among the person's paragraphs.
        */
       handoff?: boolean;
+      /**
+       * `false`: record and transcribe, but write no notes into the doc —
+       * the lead chat's "No notes" meeting, which still keeps its
+       * transcript and still hears "Lead, …". Absent is notes, which is
+       * every client built before the field. Sent on every leg, a resume
+       * included: the relay decides per leg.
+       */
+      notes?: false;
     }
   | { type: 'stop' }
   /**

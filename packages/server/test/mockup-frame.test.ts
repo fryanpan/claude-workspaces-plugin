@@ -154,7 +154,7 @@ describe('the frame and host helpers', () => {
     expect(plain).toContain('<title>Lemons &amp; limes</title>');
   });
 
-  it("draws the link back to the board for a share visitor and nothing over the owner's mock", () => {
+  it("draws the board's pages beside the owner's mock, and only the link back for a share visitor", () => {
     const args = {
       workspaceId: 'board one',
       docId: 'd-mock',
@@ -165,30 +165,21 @@ describe('the frame and host helpers', () => {
     const owner = renderMockHost({ ...args, visitor: false });
     const visitor = renderMockHost({ ...args, visitor: true });
     expect(owner).not.toContain('cw-board-link');
+    const hrefs = [...owner.matchAll(/<nav class="cw-host-nav[\s\S]*?<\/nav>/g)]
+      .flatMap((m) => [...m[0].matchAll(/href="([^"]+)"[^>]*title="([^"]+)"/g)])
+      .map((m) => [m[2], m[1]]);
+    expect(hrefs).toEqual([
+      ['Home', '/workspaces/board%20one/home'],
+      ['Tasks', '/workspaces/board%20one'],
+      ['Library', '/workspaces/board%20one/library'],
+      ['Activity', '/workspaces/board%20one/activity'],
+    ]);
+    // A share visitor reaches the board by the one link; the pages beside
+    // the frame are the board's own, which a visitor's share may not hold.
+    expect(visitor).not.toContain('cw-host-nav');
     expect(visitor).toContain(
       '<a class="cw-board-link" href="/workspaces/board%20one" aria-label="Back to the board">',
     );
-    // The pill, its rule and the title's room for it are all the flag adds.
-    const stripped = visitor
-      .replace(/\.cw-board-link\{[^}]*\}/, '')
-      .replace('.cw-bar-title{padding-left:84px}', '')
-      .replace(/<a class="cw-board-link"[^>]*>[^<]*<\/a>/, '');
-    expect(stripped).toBe(owner);
-  });
-
-  it("loads the coach's card over the owner's mock, naming its board and doc, and never a visitor's", () => {
-    const args = {
-      workspaceId: 'w-harbor',
-      docId: 'd-mock',
-      html: '<html><head><title>Harborlight mock</title></head><body></body></html>',
-      url: new URL('http://b.test/workspaces/w-harbor/mockups/d-mock'),
-      items: [],
-      coachHref: '/app/coach-0123456789abcdef.js',
-    };
-    expect(renderMockHost({ ...args, visitor: false })).toContain(
-      '<script type="module" src="/app/coach-0123456789abcdef.js" data-coach-page data-workspace-id="w-harbor" data-doc-id="d-mock"></script>',
-    );
-    expect(renderMockHost({ ...args, visitor: true })).not.toContain('coach');
   });
 });
 

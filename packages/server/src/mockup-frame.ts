@@ -52,6 +52,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { WriteVia } from '@claude-workspaces/core';
+import { BOARD_NAV_ICONS, BOARD_NAV_TABS, boardNavPath } from '@claude-workspaces/core/board-nav';
 import { MOCK_FRAME_PARAM } from '@claude-workspaces/core/page-thread-link';
 import { FRAME_TICKET_PARAM } from './frame-ticket.ts';
 import { isWithinRoot } from './safe-path.ts';
@@ -217,13 +218,52 @@ const BAR = (title: string): string =>
   '<span>Comments</span><span class="cw-new" data-cw-new hidden></span></button></div>';
 
 /**
+ * The board's four pages, for the owner's host page: a rail on the left above
+ * 1100px, a bar along the foot at or under it, the frame taking the rest. A
+ * mock is a page of the board like any other, so the way to the board's
+ * other pages is where it is on them (`BOARD_NAV_TABS` in core, which the
+ * board's own rail draws from). Plain links: the host carries no app bundle.
+ * Classed `board-nav` as well, which is how the lead chat's sheet finds the
+ * bar it has to stop above.
+ */
+const NAV_RAIL_W = 58;
+const NAV_BAR_H = 54;
+/** The bar above the frame (`BAR`), which the rail sits beside. */
+const BAR_H = 44;
+function hostNav(workspaceId: string): { style: string; html: string } {
+  const links = BOARD_NAV_TABS.map(
+    (t) =>
+      `<a href="${escapeAttr(boardNavPath(workspaceId, t.nav))}" title="${t.label}">` +
+      `${BOARD_NAV_ICONS[t.nav]}<span>${t.label}</span></a>`,
+  ).join('');
+  return {
+    style:
+      '.cw-host-nav{position:fixed;z-index:800;display:flex;box-sizing:border-box;background:#f6f8fa;' +
+      'font:600 11px/14px -apple-system,BlinkMacSystemFont,system-ui,sans-serif}' +
+      '.cw-host-nav a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;' +
+      'color:#57606a;text-decoration:none;-webkit-tap-highlight-color:transparent}' +
+      '.cw-host-nav a:hover{color:#1f2328}.cw-host-nav svg{width:20px;height:20px;display:block}' +
+      `@media (min-width:1101px){.cw-host-nav{top:0;left:0;bottom:0;width:${NAV_RAIL_W}px;flex-direction:column;` +
+      'padding:8px 0;gap:2px;border-right:1px solid #d1d9e0}.cw-host-nav a{height:54px}' +
+      `.cw-bar{margin-left:${NAV_RAIL_W}px}` +
+      `iframe{margin-left:${NAV_RAIL_W}px;width:calc(100% - ${NAV_RAIL_W}px)}}` +
+      `@media (max-width:1100px){:root{--doc-dock-h:${NAV_BAR_H}px}.cw-host-nav{left:0;right:0;bottom:0;` +
+      `height:calc(${NAV_BAR_H}px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);` +
+      'border-top:1px solid #d1d9e0}.cw-host-nav a{flex:1}' +
+      `iframe{height:calc(100% - ${BAR_H}px - ${NAV_BAR_H}px - env(safe-area-inset-bottom,0px))}}`,
+    html: `<nav class="cw-host-nav board-nav" aria-label="Workspace pages">${links}</nav>`,
+  };
+}
+
+/**
  * The host page. It draws the board's bar and one frame under it — and, for a
  * share visitor only, one link in the bar back to the board the mock is
  * filed on: a reader who arrived on a mock or a dev server from a share link
- * had no way to the board but the address bar. The owner's page has no such
- * link; it loads the
- * coach's card (`coachHref`), which the sandboxed frame cannot show, and the
- * card stops itself for anyone but the owner. Its script builds
+ * had no way to the board but the address bar. The owner's page draws the
+ * board's nav beside the frame instead (`hostNav`), so neither sits over the
+ * mock; it loads the coach's card (`coachHref`) and the lead chat
+ * (`leadChatHref`), which the sandboxed frame cannot show, and each stops
+ * itself for anyone but the owner. Its script builds
  * the frame, so it can hand the frame the reader's display name before the
  * widget inside reads it (see `mock-host.ts`).
  */
@@ -238,6 +278,8 @@ export function renderMockHost(args: {
   visitor: boolean;
   /** The coach card's script, on every page but a share visitor's. */
   coachHref?: string;
+  /** The lead chat's script (`lead-chat-page.ts`), on the same pages. */
+  leadChatHref?: string;
   /**
    * The frame-only hostname (`frame-host.ts`), when this page frames its
    * attachment there: the frame's address is the same path on that origin
@@ -248,7 +290,9 @@ export function renderMockHost(args: {
   frame?: { origin: string; ticket: string } | null;
 }): string {
   const title = TITLE.exec(args.html)?.[1]?.trim() ?? '';
-  const boardLink = args.visitor ? BOARD_LINK(args.workspaceId) : { style: '', anchor: '' };
+  const boardLink = args.visitor
+    ? BOARD_LINK(args.workspaceId)
+    : (({ style, html }) => ({ style, anchor: html }))(hostNav(args.workspaceId));
   const items = JSON.stringify(args.items.map((i) => [i.taskId, i.reviewItemId]));
   const sandbox = args.frame ? FRAME_HOST_SANDBOX : MOCK_FRAME_SANDBOX;
   const src = args.frame
@@ -260,6 +304,11 @@ export function renderMockHost(args: {
       ? `<script type="module" src="${escapeAttr(args.coachHref)}" data-coach-page` +
         ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"></script>`
       : '';
+  const leadChat =
+    args.leadChatHref && !args.visitor
+      ? `<script type="module" src="${escapeAttr(args.leadChatHref)}" data-lead-chat-page` +
+        ` data-workspace-id="${escapeAttr(args.workspaceId)}" data-doc-id="${escapeAttr(args.docId)}"></script>`
+      : '';
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -268,7 +317,7 @@ export function renderMockHost(args: {
     // board's origin. Entities in the mock's title still read as written.
     `<title>${title.replace(/</g, '&lt;')}</title>` +
     '<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}' +
-    `iframe{border:0;width:100%;height:calc(100% - 44px);display:block}${BAR_STYLE}${boardLink.style}</style></head><body>` +
+    `iframe{border:0;width:100%;height:calc(100% - ${BAR_H}px);display:block}${BAR_STYLE}${boardLink.style}</style></head><body>` +
     boardLink.anchor +
     BAR(title) +
     `<iframe data-cw-mock-frame sandbox="${sandbox}" allow="microphone"` +
@@ -276,6 +325,7 @@ export function renderMockHost(args: {
     `<script src="/widget/mock-host.js" data-workspace-id="${escapeAttr(args.workspaceId)}"` +
     ` data-doc-id="${escapeAttr(args.docId)}" data-items="${escapeAttr(items)}"></script>` +
     coach +
+    leadChat +
     '</body></html>'
   );
 }

@@ -24,6 +24,7 @@ import { browserDeviceEnv, syncDeviceContext } from '../device-context.ts';
 import { boardSocketUrl, docSocketUrl } from '../doc-path.ts';
 import { ensureUserIdentity, sessionAnswerOf } from '../identity-prompt.ts';
 import { wireKeyboardInset } from '../keyboard-inset.ts';
+import { mountLeadChat } from '../lead-chat/lead-chat-mount.ts';
 import { createPromptsApi } from '../settings/prompts-api.ts';
 import {
   fetchWriteAccess,
@@ -55,7 +56,7 @@ import {
   type DoneWindow,
   isTaskArchived,
 } from './board-model.ts';
-import { type BoardNav, paneForNav } from './board-presence-model.ts';
+import { type BoardNav, paneForNav, voiceBoardContext } from './board-presence-model.ts';
 import { createBoardProjection, initialBoardState } from './board-projection.ts';
 import { mountBoardPromptsPane } from './board-prompts-pane.ts';
 import { createBoardQueueOpeners } from './board-queue-open.ts';
@@ -740,7 +741,7 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
   //
   // The ydoc observers, the awareness feed, the SSE listeners and the catch-up
   // are `board-live-wiring.ts`, called here so subscription order is unchanged.
-  wireBoardLive({
+  const live = wireBoardLive({
     workspaceId,
     user,
     state,
@@ -873,6 +874,15 @@ export async function bootBoard(env: BoardBootEnv): Promise<void> {
       ),
     // Swaps in the spoken reply when the server can speak one.
     spoken: {},
+  });
+  // The chat with the board's lead, its button beside the mic (`lead-chat/`).
+  mountLeadChat({
+    workspaceId,
+    author,
+    dock: el('board-lead-chat'),
+    stream: live.stream,
+    getContext: () =>
+      voiceBoardContext(state.detailTaskId, null, state.detailThreadId, state.reviewItems),
   });
 
   // Gmail-style row shortcuts — the handler lives in board-shortcuts.ts so a
