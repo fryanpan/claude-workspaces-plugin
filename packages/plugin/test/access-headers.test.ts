@@ -11,7 +11,12 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type Fetch, readKeychainSecret, serverFetch } from '../hooks/lib/access-headers.ts';
+import {
+  type Fetch,
+  RETRY_AFTER_MS,
+  readKeychainSecret,
+  serverFetch,
+} from '../hooks/lib/access-headers.ts';
 import { runHook } from '../hooks/lib/agent-notes.ts';
 import { runPromptHook } from '../hooks/lib/prompt-mark.ts';
 
@@ -128,6 +133,7 @@ describe('a redirect', () => {
     path: string;
     id: string | undefined;
     secret: string | undefined;
+    auth: string | undefined;
   }
   let seen: Seen[];
   let home: Server;
@@ -143,6 +149,7 @@ describe('a redirect', () => {
         path: req.url ?? '',
         id: h('cf-access-client-id'),
         secret: h('cf-access-client-secret'),
+        auth: h('authorization'),
       });
       route(req, res);
     });
@@ -161,6 +168,9 @@ describe('a redirect', () => {
         res.end();
       } else if (req.url === '/leave') {
         res.writeHead(307, { location: `${awayBase}/landed` });
+        res.end();
+      } else if (req.url === '/see-other') {
+        res.writeHead(303, { location: `${awayBase}/other` });
         res.end();
       } else {
         res.end('{}');
@@ -183,23 +193,82 @@ describe('a redirect', () => {
       () => homeBase,
       reader,
     );
-    expect((await f(`${homeBase}/same`)).status).toBe(200);
-    expect((await f(`${homeBase}/leave`, { method: 'POST', body: '{}' })).status).toBe(200);
-    expect(seen.map((s) => [s.server, s.path, s.id ?? null, s.secret ?? null])).toEqual([
-      ['home', '/same', CLIENT_ID, SECRET],
-      ['home', '/landed', CLIENT_ID, SECRET],
-      ['home', '/leave', CLIENT_ID, SECRET],
-      ['away', '/landed', null, null],
+    // The agent's bearer rides along, as the MCP child's requests carry it.
+    const bearer = { authorization: 'Bearer at2.fixture' };
+    expect((await f(`${homeBase}/same`, { headers: bearer })).status).toBe(200);
+    const post = { method: 'POST', body: '{}', headers: bearer };
+    expect((await f(`${homeBase}/leave`, post)).status).toBe(200);
+    expect((await f(`${homeBase}/see-other`, post)).status).toBe(200);
+    const row = (s: Seen) => [s.server, s.path, s.id ?? null, s.secret ?? null, s.auth ?? null];
+    const AT2 = 'Bearer at2.fixture';
+    expect(seen.map(row)).toEqual([
+      ['home', '/same', CLIENT_ID, SECRET, AT2],
+      ['home', '/landed', CLIENT_ID, SECRET, AT2],
+      ['home', '/leave', CLIENT_ID, SECRET, AT2],
+      ['away', '/landed', null, null, null],
+      ['home', '/see-other', CLIENT_ID, SECRET, AT2],
+      ['away', '/other', null, null, null],
     ]);
   });
 });
 
 describe('the Keychain read', () => {
-  it('gives up after its timeout rather than waiting on a dialog', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cw-keychain-slow-'));
-    const slow = join(dir, 'security');
-    writeFileSync(slow, '#!/bin/sh\nsleep 5\necho never\n');
-    chmodSync(slow, 0o755);
-    expect(() => readKeychainSecret(SERVICE, 100, slow)).toThrow(/no Keychain entry/);
+  const script = (body: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'cw-keychain-'));
+    const bin = join(dir, 'security');
+    writeFileSync(bin, `#!/bin/sh\n${body}\n`);
+    chmodSync(bin, 0o755);
+    return bin;
+  };
+
+  it('gives up after its timeout rather than waiting on a dialog, and says it timed out', () => {
+    const slow = script('sleep 5\necho never');
+    expect(() => readKeychainSecret(SERVICE, 100, slow)).toThrow(/timed out/);
+  });
+
+  it('says an entry is missing when the read answers that', () => {
+    expect(() => readKeychainSecret(SERVICE, 5000, script('exit 44'))).toThrow(/no Keychain entry/);
+  });
+
+  it('tries a failed read again after the backoff, and says each failure once', async () => {
+    let clock = 0;
+    let reads = 0;
+    let fails = true;
+    const flaky = () => {
+      reads++;
+      if (fails) throw new Error('locked');
+      return SECRET;
+    };
+    const calls: Call[] = [];
+    const logs: string[] = [];
+    const f = serverFetch(
+      ACCESS,
+      capture(calls) as Fetch,
+      (l) => logs.push(l),
+      () => 'https://harborlight.example',
+      flaky,
+      () => clock,
+    );
+    const url = 'https://harborlight.example/api/x';
+    await f(url);
+    await f(url); // inside the backoff: not read again
+    clock += RETRY_AFTER_MS;
+    await f(url); // read again, fails the same way: not said again
+    clock += RETRY_AFTER_MS;
+    fails = false;
+    await f(url);
+    await f(url); // a success is kept
+    expect(reads).toBe(3);
+    expect(calls.map(pair)).toEqual([
+      [null, null],
+      [null, null],
+      [null, null],
+      [CLIENT_ID, SECRET],
+      [CLIENT_ID, SECRET],
+    ]);
+    expect(logs).toEqual([
+      `Access headers off: the Keychain service ${SERVICE} could not be read`,
+      'sending the Access service token on requests to the server',
+    ]);
   });
 });

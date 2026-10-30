@@ -23,13 +23,15 @@
  * There is no plain-env secret, as there is none for the sync. The secret is
  * read from Keychain at the first request that would carry it, with a
  * timeout, so a consent dialog cannot hang a child's start or a hook's turn.
+ * A failed read is tried again after RETRY_AFTER_MS; only a success is kept.
  *
  * Neither value is ever logged, thrown or returned in a tool result: every
  * message below names a variable or the Keychain service, never a value.
  *
  * Where the headers go: only to the origin of the configured base URL, and
  * only when that origin is https or loopback. A redirect is followed here,
- * hop by hop, so a hop to any other origin goes without them.
+ * hop by hop, so a hop to any other origin goes without them, and without
+ * the caller's `authorization`, `cookie` and `proxy-authorization`.
  */
 import { spawnSync } from 'node:child_process';
 
@@ -49,9 +51,33 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const ID_HEADER = 'cf-access-client-id';
 const SECRET_HEADER = 'cf-access-client-secret';
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+/** What native fetch strips on a redirect to another origin, plus the pair. */
+const CREDENTIAL_HEADERS = [
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+  ID_HEADER,
+  SECRET_HEADER,
+];
+/** How long a failed read waits before the next request tries again. */
+export const RETRY_AFTER_MS = 60_000;
 const MAX_REDIRECTS = 5;
 /** How long a Keychain read may take before it counts as unreadable. */
 export const KEYCHAIN_TIMEOUT_MS = 10_000;
+
+/** Why a Keychain read failed. Carries the service name, never a value. */
+export class KeychainReadError extends Error {
+  constructor(
+    readonly kind: 'missing' | 'timed-out',
+    service: string,
+  ) {
+    super(
+      kind === 'timed-out'
+        ? `the Keychain read for the service ${service} timed out or was killed`
+        : `no Keychain entry for the service ${service}`,
+    );
+  }
+}
 
 /** `security find-generic-password -s <service> -w`, as the sync reads it. */
 export function readKeychainSecret(
@@ -64,7 +90,10 @@ export function readKeychainSecret(
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: timeoutMs,
   });
-  if (r.status !== 0) throw new Error(`no Keychain entry for the service ${service}`);
+  // A timeout kills the read: no status, a signal, and ETIMEDOUT on r.error.
+  const code = (r.error as { code?: unknown } | undefined)?.code;
+  if (r.signal !== null || code === 'ETIMEDOUT') throw new KeychainReadError('timed-out', service);
+  if (r.status !== 0) throw new KeychainReadError('missing', service);
   return r.stdout.trim();
 }
 
@@ -85,7 +114,12 @@ export function accessTokenFrom(
   let clientSecret: string;
   try {
     clientSecret = readSecret(service).trim();
-  } catch {
+  } catch (e) {
+    // Only this module's own errors are worded; an injected reader's message
+    // is never repeated, since it could hold anything.
+    if (e instanceof KeychainReadError && e.kind === 'timed-out') {
+      return { error: `the Keychain service ${service} timed out` };
+    }
     return { error: `the Keychain service ${service} could not be read` };
   }
   if (!clientSecret) return { error: `the Keychain service ${service} holds an empty value` };
@@ -146,15 +180,16 @@ export function withAccessHeaders(
     }
     return token() !== null;
   };
-  const once = (init: RequestInit | undefined, carry: boolean) => {
+  /** One hop's request. Off the start origin it carries no credential at all,
+   *  the caller's bearer and cookies included, as native fetch would do. */
+  const once = (init: RequestInit | undefined, sameOrigin: boolean) => {
     const headers = new Headers(init?.headers);
-    const t = carry ? token() : null;
-    if (t) {
+    const t = sameOrigin ? token() : null;
+    if (!sameOrigin) {
+      for (const h of CREDENTIAL_HEADERS) headers.delete(h);
+    } else if (t) {
       headers.set(ID_HEADER, t.clientId);
       headers.set(SECRET_HEADER, t.clientSecret);
-    } else {
-      headers.delete(ID_HEADER);
-      headers.delete(SECRET_HEADER);
     }
     return { ...init, headers };
   };
@@ -164,11 +199,12 @@ export function withAccessHeaders(
     if (init?.redirect !== undefined && init.redirect !== 'follow') {
       return fetch(url, once(init, true));
     }
+    const start = new URL(url).origin;
     let current = url;
     let req: RequestInit = init ?? {};
     for (let hop = 0; ; hop++) {
       const res = await fetch(current, {
-        ...once(req, carries(current)),
+        ...once(req, new URL(current).origin === start),
         redirect: 'manual',
       });
       const location = res.headers.get('location');
@@ -191,20 +227,30 @@ export function serverFetch(
   log: (line: string) => void,
   baseUrl: () => string,
   readSecret: SecretReader = (service) => readKeychainSecret(service),
+  now: () => number = Date.now,
 ): Fetch {
   if (!env.CW_ACCESS_CLIENT_ID?.trim() && !env.CW_ACCESS_SECRET_SERVICE?.trim()) return fetch;
-  let resolved: AccessToken | null | undefined;
+  // Only a token is kept. A failure (a dialog nobody answered, a locked
+  // Keychain) is tried again once RETRY_AFTER_MS has passed, and each kind
+  // of failure is said once rather than at every retry.
+  let held: AccessToken | null = null;
+  let retryAt = 0;
+  const said = new Set<string>();
   const token = (): AccessToken | null => {
-    if (resolved !== undefined) return resolved;
+    if (held || now() < retryAt) return held;
     const t = accessTokenFrom(env, readSecret);
-    if (t !== null && 'error' in t) {
-      log(`Access headers off: ${t.error}`);
-      resolved = null;
-    } else {
-      if (t) log('sending the Access service token on requests to the server');
-      resolved = t;
+    if (t === null) return null;
+    if ('error' in t) {
+      retryAt = now() + RETRY_AFTER_MS;
+      if (!said.has(t.error)) {
+        said.add(t.error);
+        log(`Access headers off: ${t.error}`);
+      }
+      return null;
     }
-    return resolved;
+    log('sending the Access service token on requests to the server');
+    held = t;
+    return held;
   };
   return withAccessHeaders(fetch, token, baseUrl, log);
 }
