@@ -36,8 +36,15 @@ export interface ShareProofServer {
   scope: string;
   /** An agent, or anything else on this machine: loopback, no proof. */
   local: (path: string, init?: RequestInit) => Promise<Response>;
-  /** The owner's own browser. `browser` replaces the same-origin headers. */
-  owner: (path: string, init?: RequestInit, browser?: Record<string, string>) => Promise<Response>;
+  /** The owner's own browser. `browser` replaces the same-origin headers;
+   *  `signedInSecondsAgo` dates the Access token's `iat`, so a sign-in can
+   *  be older than the fresh-sign-in window, as an all-day session is. */
+  owner: (
+    path: string,
+    init?: RequestInit,
+    browser?: Record<string, string>,
+    signedInSecondsAgo?: number,
+  ) => Promise<Response>;
   /** A share visitor holding a token from the share application. */
   visitor: (email: string, path: string, init?: RequestInit) => Promise<Response>;
   /** Mint a link as an agent and redeem it as `email`; the redeem's status. */
@@ -70,12 +77,12 @@ export async function startShareProofServer(
   publicJwk.alg = 'RS256';
   publicJwk.use = 'sig';
   const jwks: JSONWebKeySet = { keys: [publicJwk] };
-  const signJwt = (aud: string, email: string) =>
+  const signJwt = (aud: string, email: string, issuedAt?: number) =>
     new SignJWT({ email })
       .setProtectedHeader({ alg: 'RS256', kid: KID })
       .setIssuer(`https://${TEAM_DOMAIN}`)
       .setAudience(aud)
-      .setIssuedAt()
+      .setIssuedAt(issuedAt ?? Math.floor(Date.now() / 1000))
       .setExpirationTime(Math.floor(Date.now() / 1000) + 600)
       .setSubject('cf-access-share-proof')
       .sign(privateKey);
@@ -104,6 +111,7 @@ export async function startShareProofServer(
     path: string,
     init: RequestInit = {},
     browser: Record<string, string> = SAME_ORIGIN,
+    signedInSecondsAgo = 0,
   ) =>
     req(path, OWNER_HOST, {
       ...init,
@@ -111,7 +119,11 @@ export async function startShareProofServer(
         ...((init.headers as Record<string, string>) ?? {}),
         ...CF_RAY,
         'x-forwarded-proto': 'https',
-        'cf-access-jwt-assertion': await signJwt(OWNER_AUD, OWNER_EMAIL),
+        'cf-access-jwt-assertion': await signJwt(
+          OWNER_AUD,
+          OWNER_EMAIL,
+          Math.floor(Date.now() / 1000) - signedInSecondsAgo,
+        ),
         ...browser,
       },
     });

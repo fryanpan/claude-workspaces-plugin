@@ -9,6 +9,9 @@
  * at once, from an agent too, because taking access away never waits.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   AGENT,
   type ShareProofServer,
@@ -266,6 +269,52 @@ describe('access changes an agent proposes and the owner approves', () => {
     expect(approved.status).toBe(200);
     expect(((await approved.json()) as { url?: string }).url).toContain('/s/');
     expect(await audience()).toContain('@riverbend.example');
+  });
+
+  // 30 Oct: the owner, signed in through Access that morning, tapped Approve
+  // on his phone and was refused. Approving widens who is in, so it asks for
+  // a sign-in from the last ten minutes, and an all-day Access session's token
+  // is older than that. The refusal must say so (the page then asks "Confirm
+  // it's you"); the same Approve from a fresh sign-in lands.
+  it('asks an owner signed in hours ago to confirm, and applies a fresh Approve of a link to a doc', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'access-door-doc-'));
+    const file = join(dir, 'release-notes.md');
+    writeFileSync(file, '# Release notes\n\nDraft.\n');
+    const filed = await readJson<{ docId: string }>(
+      await s.local(
+        `${s.scope}/docs`,
+        post({ docId: 'release-notes', type: 'markdown', sourceUrl: file }),
+      ),
+    );
+    expect((await s.local(`${s.scope}/docs:attach`, post({ docId: filed.docId }))).status).toBe(
+      200,
+    );
+    const res = await s.local(
+      '/api/share/workspace',
+      post({
+        workspaceId: s.board,
+        allowDomains: ['reviewer@example.com'],
+        landing: { kind: 'doc', id: filed.docId },
+        taskId,
+        why: 'They review the notes.',
+        createdBy: 'Riverbend Bot',
+      }),
+    );
+    expect(res.status).toBe(202);
+    const { reviewItemId } = (await res.json()) as Proposal;
+    const change = (await item(reviewItemId))?.access;
+    const approve = post({ decision: 'approve', access: change });
+
+    const stale = await s.owner(accessPath(reviewItemId), approve, undefined, 3 * 60 * 60);
+    expect(stale.status).toBe(403);
+    expect(((await stale.json()) as { error: string }).error).toBe('confirm-required');
+    expect((await item(reviewItemId))?.answer).toBeUndefined();
+
+    const fresh = await s.owner(accessPath(reviewItemId), approve);
+    expect(fresh.status).toBe(200);
+    expect(((await fresh.json()) as { url?: string }).url).toContain('/s/');
+    expect(await audience()).toContain('reviewer@example.com');
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('removes an address at once, and a domain keeps out the one it was asked to', async () => {
