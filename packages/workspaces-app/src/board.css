@@ -6836,7 +6836,8 @@ label.board-sched-chip:hover {
 .board-detail-body > :last-child {
   margin-bottom: 0;
 }
-.board-detail-body ul {
+.board-detail-body ul,
+.board-detail-body ol {
   margin: 6px 0;
   padding-left: 20px;
 }
@@ -7073,6 +7074,7 @@ label.board-sched-chip:hover {
 }
 .board-note-body p,
 .board-note-body ul,
+.board-note-body ol,
 .board-note-body pre {
   margin: 0 0 6px;
 }
