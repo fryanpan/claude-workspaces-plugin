@@ -6,6 +6,8 @@ import type { Node as ProseNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import * as Y from 'yjs';
+import { listMarkup } from './list-markup.ts';
+import { segmentMarkup } from './segment-markup.ts';
 import { tableMarkup } from './table-markup.ts';
 
 /**
@@ -91,65 +93,6 @@ interface BlockEntry {
   node: ProseNode;
   mdFrom: number;
   mdTo: number;
-}
-
-/** Flattened text of a block with a per-character PM position index, so a
- *  markdown word-diff segment can be located in the rendered doc. */
-interface FlatIndex {
-  text: string;
-  pos: number[];
-}
-
-function flatIndex(block: ProseNode, blockPos: number): FlatIndex {
-  let text = '';
-  const pos: number[] = [];
-  block.descendants((child, rel) => {
-    if (child.isText && child.text) {
-      const abs = blockPos + 1 + rel;
-      for (let k = 0; k < child.text.length; k++) {
-        text += child.text[k];
-        pos.push(abs + k);
-      }
-      return true;
-    }
-    // Separate nested textblocks (list items, table cells) so a token can't
-    // falsely match across a boundary.
-    if (child.isTextblock && text.length > 0 && !text.endsWith(' ')) {
-      text += ' ';
-      pos.push(blockPos + 1 + rel);
-    }
-    return true;
-  });
-  return { text, pos };
-}
-
-/** Strip markdown syntax a serialized token carries but the rendered text
- *  doesn't (emphasis, code ticks, list bullets, heading hashes, links). */
-function cleanToken(token: string): string {
-  const stripped = token.replace(/^[#>*_`~[\]()!-]+/, '').replace(/[*_`~[\]()]+$/, '');
-  // Ordered-list numbering ("1.") exists only in the markdown source.
-  if (/^\d+\.$/.test(stripped)) return '';
-  return stripped;
-}
-
-/** Locate a diff segment's words in the flat text, at/after `from`. Returns
- *  the covered [start, end) char range, or null when nothing matched. */
-function matchTokens(
-  flat: string,
-  from: number,
-  segText: string,
-): { start: number; end: number } | null {
-  const tokens = (segText.match(/\S+/g) ?? []).map(cleanToken).filter((t) => t !== '');
-  if (tokens.length === 0) return null;
-  const start = flat.indexOf(tokens[0], from);
-  if (start === -1) return null;
-  let end = start + tokens[0].length;
-  for (let i = 1; i < tokens.length; i++) {
-    const idx = flat.indexOf(tokens[i], end);
-    if (idx === -1) break; // partial match — cover what we found
-    end = idx + tokens[i].length;
-  }
-  return { start, end };
 }
 
 /**
@@ -263,24 +206,24 @@ export function computeLiveMarkup(
       continue;
     }
 
-    // 'changed': walk the word-diff segments through the block's flat text.
-    const flat = flatIndex(owner.node, owner.pmFrom);
-    let cursor = 0;
-    for (const seg of block.segments) {
-      if (seg.kind === 'del') {
-        deletions.push({
-          pos: flat.pos[Math.min(cursor, flat.pos.length - 1)] ?? owner.pmFrom + 1,
-          deletedMarkdown: seg.text,
-        });
-        continue;
-      }
-      const m = matchTokens(flat.text, cursor, seg.text);
-      if (!m) continue; // syntax-only segment (e.g. bare `**`) — nothing rendered to mark
-      if (seg.kind === 'ins') {
-        insRanges.push({ from: flat.pos[m.start], to: flat.pos[m.end - 1] + 1 });
-      }
-      cursor = m.end;
-    }
+    // 'changed': a list is compared item by item (list-markup.ts), so a
+    // search that loses its place cannot mark an unchanged item; any other
+    // block walks the word-diff segments through its text.
+    const edit =
+      listMarkup(
+        block.segments
+          .filter((s) => s.kind !== 'ins')
+          .map((s) => s.text)
+          .join(''),
+        block.segments
+          .filter((s) => s.kind !== 'del')
+          .map((s) => s.text)
+          .join(''),
+        owner.node,
+        owner.pmFrom,
+      ) ?? segmentMarkup(owner.node, owner.pmFrom, block.segments);
+    insRanges.push(...edit.insRanges);
+    deletions.push(...edit.deletions);
   }
   flushDels(doc.content.size);
 
