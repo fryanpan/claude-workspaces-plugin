@@ -412,4 +412,53 @@ describe('serving a mock', () => {
     expect((await answer(plain, true)).status).toBe(200);
     expect((await answer(gated, false)).status).toBe(200);
   });
+
+  it("refuses an owner-only ask on the mock's own doc thread answered from inside the mock", async () => {
+    const mock = await bindMock('harbour-map');
+    const ask = async (headline: string, ownerOnly: boolean) => {
+      const made = (await post(`/workspaces/${ws}/docs/${mock}/threads`, {
+        author: AGENT,
+        text: headline,
+        anchor: { kind: 'subject' },
+        review: {
+          shape: 'decision',
+          headline,
+          detail: 'The map goes on the harbour office wall.',
+          options: [
+            { id: 'o-yes', label: 'Yes' },
+            { id: 'o-no', label: 'No' },
+          ],
+          ...(ownerOnly ? { ownerOnly: true } : {}),
+        },
+      })) as { thread: { id: string; comments: Array<{ id: string }> } };
+      return { threadId: made.thread.id, commentId: made.thread.comments[0]?.id ?? '' };
+    };
+    const plain = await ask('Is the north pier labelled?', false);
+    const gated = await ask('Send the map to the harbour office?', true);
+    const answer = (t: { threadId: string; commentId: string }, relayed: boolean) =>
+      fetch(`${base}/workspaces/${ws}/docs/${mock}/threads/${t.threadId}/answer`, {
+        method: 'POST',
+        headers: {
+          host: `localhost:${handle.port}`,
+          'content-type': 'application/json',
+          ...REVIEWER_PROOF,
+          ...(relayed ? { 'x-cw-via': 'mock-frame' } : {}),
+        },
+        body: JSON.stringify({
+          author: REVIEWER,
+          text: 'Yes',
+          optionId: 'o-yes',
+          commentId: t.commentId,
+        }),
+      });
+    const refused = await answer(gated, true);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { message?: string }).message).toBe(
+      'Answer this on the board, not from a mock.',
+    );
+    // CONTROLS: a relayed answer to the plain ask lands, and so does the
+    // owner-only one answered from the board.
+    expect((await answer(plain, true)).status).toBe(200);
+    expect((await answer(gated, false)).status).toBe(200);
+  });
 });

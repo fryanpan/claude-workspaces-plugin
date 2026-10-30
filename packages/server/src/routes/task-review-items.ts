@@ -76,14 +76,9 @@ export async function handleTaskReviewItems(
   const workspaceId = scope?.workspaceId ?? '';
   const ownerOnlyDenial = (taskId: string, reviewItemId: string): Response | null => {
     const review = taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId)?.review;
-    // Never from inside a mock: its scripts reach the board through the host
-    // as the reader, so on the owner's own screen a page an agent wrote could
-    // answer for them. The host never relays one (`mockup-linked-items.ts`);
-    // this holds if it ever does.
-    if (review?.ownerOnly === true && writeViaOf(req) === 'mock-frame') {
-      return j(403, { error: 'owner_only', message: 'Answer this on the board, not from a mock.' });
-    }
-    return refuseOwnerOnlyWrite(review, workspaceId, requireOwner);
+    // The host never relays one out of a mock (`mockup-linked-items.ts`);
+    // `writeViaOf` holds if it ever does.
+    return refuseOwnerOnlyWrite(review, workspaceId, requireOwner, writeViaOf(req));
   };
   // ── A ticket's review items: 0..n, several possibly open at once ────
   //

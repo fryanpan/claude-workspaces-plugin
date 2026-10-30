@@ -283,10 +283,13 @@ export async function handleDocThreadRoutes(
 
   const ownerOnlyDenial = (threadId: string, commentId: string): Response | null => {
     const comment = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
+    // A mock's frame may post on its own doc's threads, but not on an
+    // owner-only ask there (`refuseOwnerOnlyWrite`).
     return refuseOwnerOnlyWrite(
       comment?.review,
       rq.scope?.workspaceId ?? resolveWorkspaceForDoc(docId) ?? '',
       rq.requireOwner,
+      via,
     );
   };
   const threadIdMatch = rest.match(/^threads\/([^/]+)(\/.*)?$/);
