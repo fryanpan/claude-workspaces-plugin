@@ -11,6 +11,8 @@
     "machine:deploy": "bun run infra/project-machine/deploy.ts",
     "machine:restore": "bun run infra/project-machine/restore-machine.ts",
     "machine:drill": "bun run infra/project-machine/drill.ts",
+    "machine:move-board": "bun run infra/project-machine/move-board.ts",
+    "machine:sync-board": "bun run packages/server/src/bound-file-sync/sync-bin.ts",
     "router:deploy": "bun run infra/board-router-worker/deploy.ts",
     "access:plan": "bun run infra/access-apps/plan.ts",
     "access:apply": "bun run infra/access-apps/apply.ts",

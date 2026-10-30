@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { TaskStoreEvent } from '../src/tasks.ts';
 import {
   AGENT,
+  SHARE_HOST,
   type ShareProofServer,
   post,
   readJson,
@@ -84,15 +85,26 @@ describe('the approver record on a review-item answer', () => {
 
   it("records a member's proven address as the approver, and hands the agent the line", async () => {
     const itemId = await fileItem('Halve the nightly cache?');
+    const press = post({
+      text: 'Go ahead',
+      answeredWith: 'o-yes',
+      // A body may claim any address; the record must not read it.
+      author: { id: 'someone-else', name: 'Alice', email: 'bob@saltmarsh.example' },
+    });
     const res = await s.visitor(
       MEMBER,
       `${s.scope}/tasks/${taskId}/review-items/${itemId}/answer`,
-      post({
-        text: 'Go ahead',
-        answeredWith: 'o-yes',
-        // A body may claim any address; the record must not read it.
-        author: { id: 'someone-else', name: 'Alice', email: 'bob@saltmarsh.example' },
-      }),
+      {
+        ...press,
+        // Pressed on the share page itself, through the tunnel, as a browser
+        // marks it: a person's answer counts only from that person's own page.
+        headers: {
+          ...(press.headers as Record<string, string>),
+          'x-forwarded-proto': 'https',
+          origin: `https://${SHARE_HOST}`,
+          'sec-fetch-site': 'same-origin',
+        },
+      },
     );
     expect(res.status).toBe(200);
     const answer = await answerOf(itemId);

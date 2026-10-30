@@ -171,14 +171,24 @@ describe('A. a board socket is held to its board', () => {
       expect((await on(harborlight, path, bearer(at1))).status, path).toBe(403);
   });
 
-  it('is refused a board closed to outside visitors', async () => {
+  it('is still admitted when its board is closed to outside visitors, and held to it', async () => {
     h.sharingGate.setBoardEnabled(harborlight, false);
     try {
-      expect((await on(harborlight, `/workspaces/${harborlight}/tasks`)).status).toBe(403);
+      // The socket is the board's own lead, not an outside visitor.
+      expect((await on(harborlight, `/workspaces/${harborlight}/tasks`)).status).toBe(200);
+      expect((await on(harborlight, `/workspaces/${riverbend}/tasks`)).status).toBe(403);
     } finally {
       h.sharingGate.setBoardEnabled(harborlight, true);
     }
-    expect((await on(harborlight, `/workspaces/${harborlight}/tasks`)).status).toBe(200);
+  });
+
+  it('is refused another board while that board is closed', async () => {
+    h.sharingGate.setBoardEnabled(riverbend, false);
+    try {
+      expect((await on(harborlight, `/workspaces/${riverbend}/tasks`)).status).toBe(403);
+    } finally {
+      h.sharingGate.setBoardEnabled(riverbend, true);
+    }
   });
 
   it('a trusted-local caller over TCP still reaches every board (the control)', async () => {

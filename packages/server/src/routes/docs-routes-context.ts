@@ -30,6 +30,7 @@ import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { LinkedDockItem } from '../mockup-linked-items.ts';
 import type { ReadyWorkNudger } from '../ready-nudge.ts';
 import type { GateRunOpts, ThreadReviewGate } from '../review-gate-types.ts';
+import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ScopedEditGuard } from '../scoped-edit-guard.ts';
 import type { BoardRole } from '../share/board-role.ts';
 import type { ThreadSummarizer } from '../summarize.ts';
@@ -301,6 +302,10 @@ export interface DocRouteRequest {
    *  or a board's own socket did (`tokenId` is then `BOARD_SOCKET_TOKEN_ID`),
    *  or null/absent when neither did. */
   boardAgent?: { agentId: string; boardId: string; tokenId?: string } | null;
+  /** What this request proved about a person, read by every door that
+   *  records an answer (`review-items/answer-proof.ts`). Undefined refuses
+   *  every person's answer. */
+  answerProof?: AnswerProofInputs;
 }
 
 /**

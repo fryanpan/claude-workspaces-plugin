@@ -22,7 +22,7 @@
  * ack. An ack that names a transition is what a router which wrote nothing
  * would also produce; the log row is what makes the attribution real.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public. No live model call: the classification is
  * stubbed at the injected `voiceComplete` seam.
  */
@@ -33,9 +33,10 @@ import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { eventsLogPath, voiceQueuePath } from '../src/tasks.ts';
 import { type AgentStream, openWorkspaceStream } from './agent-stream.ts';
+import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 
 /** A person: `classifyActor` reads `kind: 'known'` as `person`. */
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+const PERSON = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
 /** The hazard actor — no `kind` at all, which `classifyActor` reads as an
  *  AGENT. Every write it could make would be misattributed, so it makes none. */
 const KINDLESS = { id: 'u-rowan', name: 'Rowan', color: '#d72e7d' };
@@ -105,23 +106,26 @@ describe('voice actions (§3.8): status and assignee, on the speaker’s authori
       },
     });
 
-  const post = (path: string, body: unknown) =>
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     local(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
 
-  const voice = (workspaceId: string, body: unknown) =>
-    post(`/workspaces/${workspaceId}/voice`, body);
+  const voice = (workspaceId: string, body: unknown, headers: Record<string, string> = {}) =>
+    post(`/workspaces/${workspaceId}/voice`, body, headers);
+  /** Alice signed in on the board page: only a proven speaker's answer records. */
+  let speaker: SignedInPerson;
 
   const say = async (
     workspaceId: string,
     transcript: string,
     context: unknown,
     author: unknown = PERSON,
+    headers: Record<string, string> = {},
   ): Promise<{ route: string; ack: string; navigate?: string; detail?: string[] }> => {
-    const r = await voice(workspaceId, { transcript, context, author });
+    const r = await voice(workspaceId, { transcript, context, author }, headers);
     expect(r.status).toBe(200);
     return (await r.json()) as {
       route: string;
@@ -217,6 +221,7 @@ describe('voice actions (§3.8): status and assignee, on the speaker’s authori
         return completeImpl();
       },
     });
+    speaker = signedInPerson(handle, dataDir, `localhost:${handle.port}`, { name: 'Alice' });
     base = `http://127.0.0.1:${handle.port}`;
 
     const ws = await post('/workspaces', {
@@ -374,15 +379,15 @@ describe('voice actions (§3.8): status and assignee, on the speaker’s authori
 
       expect(body.route).toBe('fast-path-action');
       expect(body.ack).toContain('Benchmark the crawler');
-      expect(body.ack).toContain('Jordan');
-      expect(handle.tasks.getTask(assignTaskId)?.assignee).toBe('Jordan');
+      expect(body.ack).toContain('Alice');
+      expect(handle.tasks.getTask(assignTaskId)?.assignee).toBe('Alice');
 
       const assigned = audit(boardId).filter(
         (r) => r.event === 'task.assigned' && r.taskId === assignTaskId,
       );
       expect(assigned).toHaveLength(1);
       expect(assigned[0]?.from).toBe('human');
-      expect(assigned[0]?.to).toBe('Jordan');
+      expect(assigned[0]?.to).toBe('Alice');
       expect(assigned[0]?.actor?.kind).toBe('person');
     });
   });
@@ -426,7 +431,8 @@ describe('voice actions (§3.8): status and assignee, on the speaker’s authori
     it('answers when EXACTLY ONE open item is in scope, verbatim and as the speaker', async () => {
       const said = 'go with the shorter clause, it reads better on mobile';
       classify({ kind: 'action', action: 'answer-review', id: oneItemDocId });
-      const body = await say(boardId, said, { surface: 'doc', docId: oneItemDocId });
+      const ctx = { surface: 'doc', docId: oneItemDocId };
+      const body = await say(boardId, said, ctx, speaker.user, speaker.headers);
 
       expect(body.route).toBe('fast-path-action');
 
@@ -436,7 +442,7 @@ describe('voice actions (§3.8): status and assignee, on the speaker’s authori
       const comments = threads[0]?.comments ?? [];
       expect(comments).toHaveLength(2);
       expect(comments[1]?.text).toBe(said);
-      expect(comments[1]?.author?.id).toBe(PERSON.id);
+      expect(comments[1]?.author?.id).toBe(speaker.user.id);
     });
 
     it('with TWO open items in scope it writes NOTHING and hands the utterance to the agent', async () => {

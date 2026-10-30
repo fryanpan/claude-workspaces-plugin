@@ -20,6 +20,12 @@
  * mints and keeps in its own process (`connector/board-token-lease.ts`). So
  * the relay a walled lead runs needs no token of its own.
  *
+ * The socket is a lead's (`middleware/lead-scope.ts`), so on this board it
+ * also reaches task notes and the plugin hooks' notes and prompt marks,
+ * which `collabScope` refuses a member. The doc list, a whole-doc rewrite
+ * and a folder bind stay refused: each has the server act on files the
+ * lead can write.
+ *
  * Every other case reaches `collabScope` with the socket's board as the only board
  * it is a member of, plus, for a named agent, its own watch set cut to that
  * board (`routes/agent-identity.ts`, `boardWatches`). An agent's stream
@@ -29,6 +35,7 @@
 import type { BoardAgentClaims } from '../auth/board-agent-token.ts';
 import { boardAgentMemberKey } from '../auth/board-agent-token.ts';
 import { type ShareTarget, collabScope } from './host-guard.ts';
+import { leadScopeAllows } from './lead-scope.ts';
 import { isBrowserRequest } from './write-gate.ts';
 
 /**
@@ -81,6 +88,7 @@ export function boardSocketScopeAllows(
       agentId !== null && decoded(watches[1] ?? '') === agentId && (m === 'GET' || m === 'POST')
     );
   }
+  if (leadScopeAllows(pathname, method, boardId, workspacesOf)) return true;
   const scope = collabScope(pathname, method, {
     workspacesOf,
     isMember: (workspaceId) => workspaceId === boardId,

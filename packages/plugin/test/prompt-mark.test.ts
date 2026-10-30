@@ -149,6 +149,28 @@ describe('the mark', () => {
   });
 });
 
+describe('a lead behind the board wall', () => {
+  it('posts its mark over its board’s socket, and never asks for the joined board', async () => {
+    const calls: { url: string; unix?: string }[] = [];
+    const ok = await runPromptHook(JSON.stringify({ prompt: 'hello' }), {
+      env: { CW_AGENT_NAME: 'Harborlight lead', CW_BOARD_SOCKET: '/private/tmp/b/w-harbor.sock' },
+      discoveryPort: () => 8799,
+      joinedBoard: true,
+      fetch: (async (url: string, init: RequestInit & { unix?: string }) => {
+        calls.push({ url, unix: init.unix });
+        return new Response(null, { status: 202 });
+      }) as unknown as typeof fetch,
+    });
+    expect(ok).toBe(true);
+    expect(calls).toEqual([
+      {
+        url: 'http://board/workspaces/w-harbor/agents/Harborlight%20lead/prompts',
+        unix: '/private/tmp/b/w-harbor.sock',
+      },
+    ]);
+  });
+});
+
 describe('Remote Control', () => {
   it('marks every prompt from a bridged session as remote, and none from a terminal', async () => {
     const bodies: Record<string, unknown>[] = [];

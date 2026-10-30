@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BOARD_SOCKET_BASE_URL,
   DEFAULT_BASE_URL,
   POST_TIMEOUT_MS,
   blockDecision,
@@ -412,5 +413,54 @@ describe('runHook — the thin main, end to end', () => {
     expect(logged[0]).toContain('tool_input');
     expect(logged[0]).not.toContain('node_modules');
     expect(logged[0]).not.toContain('sess-abc1');
+  });
+});
+
+describe('runHook — a lead behind the board wall', () => {
+  const SOCKET = '/private/tmp/cw-boards/w-harbor.sock';
+  const payload = JSON.stringify({ ...STOP, last_assistant_message: 'Ended the turn.' });
+
+  it('posts over its board’s socket, to the board the socket names', async () => {
+    const calls: Call[] = [];
+    await runHook('turn', payload, {
+      env: { CW_AGENT_NAME: 'Harborlight lead', CW_BOARD_SOCKET: SOCKET },
+      fetch: fakeFetch(calls),
+      now: () => NOW,
+      discoveryPort: () => 8799,
+      joinedBoard: true,
+    });
+    // One call: no joined-board lookup, which a socket refuses.
+    expect(calls.map((c) => c.url)).toEqual([
+      `${BOARD_SOCKET_BASE_URL}/workspaces/w-harbor/agents/Harborlight%20lead/notes`,
+    ]);
+    expect((calls[0]?.init as { unix?: string }).unix).toBe(SOCKET);
+  });
+
+  it('keeps the launch’s board, and the socket even when a base URL is given', async () => {
+    const calls: Call[] = [];
+    await runHook('turn', payload, {
+      env: { CW_AGENT_NAME: 'Harborlight lead', CW_BOARD_SOCKET: SOCKET, CW_WORKSPACE_ID: 'w-x' },
+      fetch: fakeFetch(calls),
+      now: () => NOW,
+      baseUrl: () => 'http://127.0.0.1:8787',
+    });
+    expect(calls.map((c) => c.url)).toEqual([
+      `${BOARD_SOCKET_BASE_URL}/workspaces/w-x/agents/Harborlight%20lead/notes`,
+    ]);
+    expect((calls[0]?.init as { unix?: string }).unix).toBe(SOCKET);
+  });
+
+  it('control: with no socket it dials the port, with no unix option', async () => {
+    const calls: Call[] = [];
+    await runHook('turn', payload, {
+      env: { CW_AGENT_NAME: 'Harborlight lead', CW_WORKSPACE_ID: 'w-harbor' },
+      fetch: fakeFetch(calls),
+      now: () => NOW,
+      discoveryPort: () => 8799,
+    });
+    expect(calls.map((c) => c.url)).toEqual([
+      'http://127.0.0.1:8799/workspaces/w-harbor/agents/Harborlight%20lead/notes',
+    ]);
+    expect((calls[0]?.init as { unix?: string }).unix).toBeUndefined();
   });
 });

@@ -18,6 +18,7 @@ import type { ReviewPayload, Thread, User } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { ThreadSummarizer } from '../src/summarize.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const AGENT: User = {
@@ -26,7 +27,10 @@ const AGENT: User = {
   kind: 'known',
   color: '#888888',
 };
-const PERSON: User = { id: 'known-jordan', name: 'Jordan', kind: 'known', color: '#2e7dd7' };
+/** Alice, signed in on the board page in `beforeAll`: a person's answer is
+ *  recorded only from that person's own proven request. */
+let PERSON: User = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
+let personHeaders: Record<string, string> = {};
 
 const BODY = '# Onboarding\n\nthe trial banner sits above the fold\n';
 const SNIPPET = 'trial banner';
@@ -55,10 +59,14 @@ let dataDir: string;
 let base: string;
 let seq = 0;
 
+/** Alice's requests carry Alice's sign-in; everyone else's carry none. */
 const post = (path: string, body: unknown) =>
   fetch(`${base}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...((body as { author?: User } | null)?.author?.id === PERSON.id ? personHeaders : {}),
+    },
     body: JSON.stringify(body),
   });
 
@@ -104,6 +112,12 @@ beforeAll(async () => {
   handle = createServer({ port: 0, dataDir });
   base = `http://127.0.0.1:${handle.port}`;
   WS = await seedBoard(base);
+  const alice = signedInPerson(handle, dataDir, base, {
+    email: 'alice@harborlight.example',
+    name: 'Alice',
+  });
+  PERSON = alice.user;
+  personHeaders = alice.headers;
 });
 afterAll(async () => {
   await handle.stop();
@@ -646,7 +660,7 @@ describe("a person's plain reply answers the item it lands on", () => {
       primaryDocId,
       seeded.id,
       commentId,
-      { ...PERSON, id: 'known-sam', name: 'Sam' },
+      { ...PERSON, id: 'known-bob', name: 'Bob' },
       'Leave it as it is.',
       undefined,
       { onlyIfUnanswered: true },

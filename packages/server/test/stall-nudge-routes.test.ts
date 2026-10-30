@@ -1,3 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * The stall wake, end to end: a real board, a real attached lead holding a
  * real stream, and the server's own interval pass.
@@ -10,19 +14,20 @@
  * never receives it. Every one of those can be right in isolation while the
  * feature delivers nothing, which is what this file is for.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { STALL_EVENT } from '../src/stall-nudge.ts';
 import { seedGoalsOverHttp } from './goal-seed.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Signed in on the board page in `beforeEach`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON = { id: 'known-alice', name: 'Alice', kind: 'person' };
+const signIns = new Map<string, Record<string, string>>();
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 type Frame = { event: string; data?: Record<string, unknown> };
@@ -113,7 +118,10 @@ describe('the board tells its lead which rows have stopped', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: JSON.stringify(body),
     });
   /** Fail with the server's own words rather than with `undefined` three
@@ -134,6 +142,12 @@ describe('the board tells its lead which rows have stopped', () => {
     handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: 0 });
     base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
+    const signed = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = signed.user;
+    signIns.set(PERSON.id, signed.headers);
   });
 
   afterEach(async () => {
@@ -174,7 +188,7 @@ describe('the board tells its lead which rows have stopped', () => {
   /**
    * One agent-owned row on the board, in `todo` or `in-progress`.
    *
-   * Filed by the lead and vetted by Jordan, which is the real two-step rather
+   * Filed by the lead and vetted by Alice, which is the real two-step rather
    * than a shortcut: an agent's own row starts in `triage`, and no dispatch
    * read returns those — a test that skipped the vetting would be asserting
    * over a row the loop never sees.

@@ -45,6 +45,16 @@ also carry no cookie, so behind Access they cannot reach the board at all.
    page that proved nobody also gets one, because that is the local,
    trusted case. A share or collab visitor gets none, and so does a
    signed-in person who is not the owner.
+
+   A frame on the frame-only hostname cannot prove anyone this way: its
+   document request carries the `cw_frame` cookie, not the board's. So the
+   host page, whose request does carry the reader's cookie, makes this
+   decision and writes it into the frame ticket (`frame-ticket.ts`). The
+   cookie the ticket is traded for keeps it, and the frame gets a token
+   only when its cookie says the host page's reader could have had one. A
+   ticket names a board, not a doc, so the verdict covers that board's
+   frames for the cookie's twelve hours; the token it leads to still names
+   the one doc the frame was served for.
 4. **The socket checks again at the upgrade.** `refuseAppVoice` refuses
    these, in this order:
    - a share visitor: 403

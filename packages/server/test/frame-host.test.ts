@@ -68,6 +68,15 @@ describe('the frame hostname setting', () => {
       ok: false,
       reason: 'other_frame_host',
     });
+    // The host page's app voice verdict rides in the ticket, off by default.
+    expect(
+      checkFrameTicket('k', target?.ticket, 'harborlight.frames.test', 'w-harbor'),
+    ).toMatchObject({ ok: true, appVoice: false });
+    const voiced = fh.frameFor(on('harborlight.board.test'), false, 'w-harbor', true);
+    expect(
+      checkFrameTicket('k', voiced?.ticket, 'harborlight.frames.test', 'w-harbor'),
+    ).toMatchObject({ ok: true, appVoice: true });
+    expect(fh.frameFor(on('harborlight.board.test'), true, 'w-harbor', true)).toBeNull();
     expect(fh.frameFor(on('harborlight.board.test:443'), false, 'w-harbor')?.origin).toBe(
       'https://harborlight.frames.test',
     );

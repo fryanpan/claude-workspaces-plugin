@@ -36,33 +36,12 @@
  * consumed on first use, never served twice.
  */
 import type { BigIntStats } from 'node:fs';
-import { readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { basename, sep } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { GuardRefused, PathGuards, isEnoent, redactBoundPath } from './bound-path-guard.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
 import { stampOf } from './file-stamp.ts';
 
-/**
- * Home-relative folders whose full paths must not reach a log line. The files
- * most likely to appear in a quarantine line live in a cloud-sync folder, and
- * these logs get pasted into tickets and PR bodies. Only these two are
- * redacted: a bound doc under a checkout is the ordinary case, and its path is
- * what makes the line useful.
- */
-const PRIVATE_ROOTS = ['Dropbox', 'Documents'];
-
-/**
- * A path safe to log: the basename alone under a private root, else the path.
- * Exported so the test runs the real function rather than a copy of its rule.
- */
-export function redactBoundPath(path: string): string {
-  const home = homedir();
-  for (const root of PRIVATE_ROOTS) {
-    const prefix = `${home}${sep}${root}${sep}`;
-    if (path.startsWith(prefix)) return `<${root}>/${basename(path)}`;
-  }
-  return path;
-}
+export { redactBoundPath };
 
 /**
  * The deadline and the backoff live in `doc-store-timings.ts`, scaled with
@@ -117,17 +96,12 @@ export const BOUND_READ_FRESH_MS = 5_000;
 export type BoundReadResult =
   | { status: 'ok'; exists: false }
   | { status: 'ok'; exists: true; text: string; mtimeMs: number; size: number }
-  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' };
+  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' | 'refused' };
 
 export type BoundStatResult =
   | { status: 'ok'; exists: false }
   | { status: 'ok'; exists: true; mtimeMs: number; size: number }
-  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' };
-
-function isEnoent(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException | undefined)?.code;
-  return code === 'ENOENT' || code === 'ENOTDIR';
-}
+  | { status: 'unavailable'; reason: 'timeout' | 'busy' | 'backoff' | 'error' | 'refused' };
 
 /** The errno of a failed syscall, for the quarantine line's reason. */
 function errnoOf(err: unknown): string | undefined {
@@ -168,6 +142,13 @@ class BoundFileReader {
    * deadline and back down if the call ever does land.
    */
   private leaked = 0;
+  /**
+   * Rules every bound read, stat and write must pass. The server adds one
+   * for the folders a walled lead can write (`board-socket-roots.ts`);
+   * `bound-path-guard.ts` says how each use is checked.
+   */
+  readonly guards = new PathGuards();
+
   /** The poll's stat. A field only so a test can hold one pending. */
   private statFile = (path: string): Promise<BigIntStats> => stat(path, { bigint: true });
   /** Just-completed reads, waiting to be consumed by the hydrate that asked. */
@@ -223,12 +204,13 @@ class BoundFileReader {
     const keep = opts.keep !== false;
     const blocked = this.gate(path);
     if (blocked) return blocked;
-    const raced = await this.race('read', path, async () => {
-      const [text, st] = await Promise.all([readFile(path, 'utf8'), stat(path, { bigint: true })]);
-      return { text, ...stampOf(st) };
-    });
+    const raced = await this.race('read', path, () => this.guards.read(path));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
+      if (raced.err instanceof GuardRefused) {
+        this.noteUnusable(path, raced.err, 'read');
+        return { status: 'unavailable', reason: 'refused' };
+      }
       if (isEnoent(raced.err)) {
         const gone: Extract<BoundReadResult, { status: 'ok' }> = { status: 'ok', exists: false };
         if (keep) this.keepFresh(path, gone);
@@ -266,6 +248,9 @@ class BoundFileReader {
     const hit = this.fresh.get(path);
     if (!hit) return undefined;
     this.fresh.delete(path);
+    // Under a walled lead's project the hydrate reads again through the
+    // guard: the folders on the way may have changed since these bytes.
+    if (this.guards.covers(path)) return undefined;
     return Date.now() - hit.at > BOUND_READ_FRESH_MS ? undefined : hit.result;
   }
 
@@ -302,16 +287,7 @@ class BoundFileReader {
   async write(path: string, text: string): Promise<BoundStatResult> {
     const blocked = this.gate(path);
     if (blocked) return blocked;
-    const raced = await this.race('read', path, async () => {
-      let target = path;
-      try {
-        target = await realpath(path);
-      } catch {}
-      const tmp = `${target}.cw-pool-write~`;
-      await writeFile(tmp, text);
-      await rename(tmp, target);
-      return stat(target, { bigint: true });
-    });
+    const raced = await this.race('read', path, () => this.guards.write(path, text));
     if (raced.kind === 'late') return { status: 'unavailable', reason: 'timeout' };
     if (raced.kind === 'failed') {
       // No backoff here, and this is where the write differs from the read.
@@ -329,7 +305,10 @@ class BoundFileReader {
       // branch above — a wedged write holds a pool thread exactly like a
       // wedged read.
       this.noteUnusable(path, raced.err, 'written');
-      return { status: 'unavailable', reason: 'error' };
+      return {
+        status: 'unavailable',
+        reason: raced.err instanceof GuardRefused ? 'refused' : 'error',
+      };
     }
     return { status: 'ok', exists: true, ...stampOf(raced.value) };
   }
@@ -381,9 +360,17 @@ class BoundFileReader {
     this.statFile = fn ?? ((path) => stat(path, { bigint: true }));
   }
 
-  private gate(path: string): { status: 'unavailable'; reason: 'backoff' | 'busy' } | undefined {
+  private gate(
+    path: string,
+  ): { status: 'unavailable'; reason: 'backoff' | 'busy' | 'refused' } | undefined {
+    // The cheap answers first: a quarantined path makes no syscall at all,
+    // and the guard may resolve the folders on its way.
     if (this.quarantined(path)) return { status: 'unavailable', reason: 'backoff' };
     if (this.leaked >= BOUND_READ_MAX_OVERDUE) return { status: 'unavailable', reason: 'busy' };
+    if (!this.guards.allows(path)) {
+      this.noteUnusable(path, new GuardRefused(path), 'read');
+      return { status: 'unavailable', reason: 'refused' };
+    }
     return undefined;
   }
 
@@ -407,7 +394,7 @@ class BoundFileReader {
     }
     console.error(
       `[slow-fs] ${redactBoundPath(path)} could not be ${verb}; the doc keeps its .ydoc content`,
-      err,
+      err instanceof GuardRefused ? err.message : err,
     );
   }
 

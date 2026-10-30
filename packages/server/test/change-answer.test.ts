@@ -12,9 +12,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task, TaskStoreEvent } from '../src/tasks.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
-const ALICE = { id: 'known-alice', name: 'Alice', kind: 'known', color: '#2e7dd7' };
-const BOB = { id: 'known-bob', name: 'Bob', kind: 'known', color: '#d72e7d' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let ALICE: { id: string; name: string; kind?: string; color?: string } = { id: '', name: 'Alice' };
+/** Bob, signed in on the board page: replaced with the signed identity at boot. */
+let BOB: { id: string; name: string; kind?: string; color?: string } = { id: '', name: 'Bob' };
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const AGENT = { id: 'agent-riverbend', name: 'Riverbend', kind: 'known', color: '#888888' };
 
 describe('changing an answer', () => {
@@ -26,7 +33,7 @@ describe('changing an answer', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}/workspaces/${boardId}/${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: JSON.stringify(body),
     });
   const ok = async <T>(res: Response): Promise<T> => {
@@ -38,6 +45,18 @@ describe('changing an answer', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cw-change-answer-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const aliceSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    ALICE = aliceSigned.user;
+    PROOF.set(aliceSigned.user.id, aliceSigned.headers);
+    const bobSigned = signedInPerson(handle, dataDir, base, {
+      email: 'bob@harborlight.example',
+      name: 'Bob',
+    });
+    BOB = bobSigned.user;
+    PROOF.set(bobSigned.user.id, bobSigned.headers);
     const res = await fetch(`${base}/workspaces`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -93,6 +93,19 @@ describe('keeper-bin', () => {
     expect(keeper(['enroll'], env).out).toContain(`:${port}/enroll/`);
   });
 
+  // keeper-install.sh checks `keeper port` against ^[0-9]+$. Run under sudo
+  // from a terminal, bun coloured a console.log'd number, and the install
+  // stopped with "keeper port printed '33205', not a number".
+  it('port prints bare digits even when colour is forced', () => {
+    const env = { CW_KEEPER_DIR: storeDir('port-colour', 0o700), FORCE_COLOR: '1' };
+    const r = keeper(['port'], env);
+    if (r.status !== 0) {
+      expect(r.out).toContain('unsafe:');
+      return;
+    }
+    expect(r.out).toMatch(/^[0-9]+\n$/);
+  });
+
   it('check names a store others can open', () => {
     const r = keeper(['check'], { CW_KEEPER_DIR: storeDir('loose', 0o755) });
     expect(r.status).toBe(1);

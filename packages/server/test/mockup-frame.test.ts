@@ -31,6 +31,7 @@ import {
   writeViaOf,
 } from '../src/mockup-frame.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
 describe('the frame and host helpers', () => {
@@ -323,11 +324,12 @@ describe('serving a mock through its host, and stamping what the frame sends', (
     );
     expect(items).toEqual([[taskId, filed.item.id]]);
 
-    // A ticket answer through the relay carries the mark; the task stores it.
+    // A signed-in reviewer's answer through the relay carries the mark; the task stores it.
+    const reviewer = signedInPerson(handle, dataDir, `localhost:${handle.port}`, PERSON);
     await post(
       `/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/answer`,
-      { author: PERSON, text: 'Readable.' },
-      RELAYED,
+      { author: reviewer.user, text: 'Readable.' },
+      { ...reviewer.headers, ...RELAYED },
     );
     const answered = handle.tasks.listReviewItems(taskId).find((r) => r.id === filed.item.id);
     expect(answered?.answer?.via).toBe('mock-frame');

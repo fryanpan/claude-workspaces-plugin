@@ -120,6 +120,10 @@ export async function handleDispatchAndNoteRoutes(
     proposeAllowRule,
   } = ctx;
   const { req, scope, visitor, authorFor } = rq;
+  // A visitor that is this board's own lead (`middleware/lead-scope.ts`) is
+  // the session whose notes these are, so the two notes routes below let it
+  // through on that board. Every other route here refuses it as a visitor.
+  const noteVisitor = visitor && rq.leadBoard !== rq.scope?.workspaceId ? visitor : null;
   const promptMark = await handlePromptMarkRoute(ctx, rq);
   if (promptMark) return promptMark;
   // --- REST: builder dispatches ---
@@ -273,7 +277,7 @@ export async function handleDispatchAndNoteRoutes(
   // 202 to match: a status is fire-and-forget for the poster too.
   const taskNotesMatch = matchRest(scope, /^tasks\/([^/]+)\/notes$/);
   if (taskNotesMatch) {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
+    if (noteVisitor) return j(403, { error: 'not available to share visitors' });
     if (req.method !== 'POST') return j(405, { error: 'method not allowed' });
     const taskId = decodeURIComponent(taskNotesMatch[1] ?? '');
     const raw = await safeJson(req);
@@ -327,7 +331,7 @@ export async function handleDispatchAndNoteRoutes(
     // share host reaches here today, and this keeps a later
     // allowlisting from letting an external reviewer write a session's
     // words onto a board row, or read them off one.
-    if (visitor) return j(403, { error: 'not available to share visitors' });
+    if (noteVisitor) return j(403, { error: 'not available to share visitors' });
     const agent = decodeURIComponent(agentNotesMatch[1] ?? '').trim();
     if (agent.length === 0 || agent.length > 200) return j(400, { error: 'bad agent' });
     if (isSharedAgentName(agent)) {

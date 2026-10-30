@@ -15,6 +15,7 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
 import type { PageLoadLog } from '../page-loads.ts';
 import type { FeaturesOff } from '../project-profile.ts';
+import type { AnswerProofInputs } from '../review-items/answer-proof.ts';
 import type { ReviewItemRow } from '../review-queue.ts';
 import type { AccessProposals } from '../share/access-proposals.ts';
 import type { BoardRole } from '../share/board-role.ts';
@@ -248,6 +249,9 @@ export interface WorkspaceRouteRequest {
   provenIdentityFor?: () => IdentityRecord | null;
   /** The origin this request was served on; see `share/owner-proof.ts`. */
   requestOriginFor?: () => string;
+  /** What this request proved about a person, for the spoken answer door
+   *  (`review-items/answer-proof.ts`). Undefined proves nobody. */
+  answerProof?: AnswerProofInputs;
 }
 
 /**

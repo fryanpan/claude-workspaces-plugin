@@ -22,8 +22,17 @@ import { join } from 'node:path';
 import { agentNoteLogPath } from '../src/agent-note-log.ts';
 import { localDay } from '../src/chat-audit.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 const NOMAD = { id: 'agent-nomad', name: 'Nomad', kind: 'agent' };
 
@@ -49,10 +58,15 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
   let dataDir: string;
   let WS = '';
 
+  // A restart moves the port, so the proof's origin is the server's current one.
+  const proofHere = (body: unknown): Record<string, string> => {
+    const proof = proofFor(body);
+    return proof.cookie ? { ...proof, origin: new URL(base).origin } : {};
+  };
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofHere(body) },
       body: JSON.stringify(body),
     });
   const jj = async <T>(res: Response): Promise<T> => {
@@ -100,6 +114,12 @@ describe('an end-of-turn note when the agent holds several in-progress rows', ()
     dataDir = mkdtempSync(join(tmpdir(), 'turn-note-many-rows-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     const { workspace } = await jj<{ workspace: { id: string } }>(
       await post('/workspaces', { name: 'turn-notes', leadAgentId: LEAD.id }),
     );

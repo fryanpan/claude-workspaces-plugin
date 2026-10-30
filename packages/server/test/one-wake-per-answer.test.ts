@@ -1,3 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 /**
  * One act by a person on an agent's review item costs that agent one turn.
  *
@@ -23,17 +27,18 @@
  *
  * All fixtures synthetic; port 0; no production server is touched.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { User } from '@claude-workspaces/core';
 import { type ChannelNotification, createChannelMessages } from '../../mcp/src/channel-messages.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { type FrameListener, listenFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
 
 const AGENT = { id: 'agent-harborlight', name: 'Harborlight', kind: 'agent' };
-const PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
+/** Signed in on the board page in `beforeEach`: a person's answer is recorded
+ *  only from that person's own proven request. */
+let PERSON = { id: 'known-reviewer', name: 'Reviewer', kind: 'person' };
+const signIns = new Map<string, Record<string, string>>();
 const TITLE = 'Agent can rebuild the Riverbend index nightly';
 const HEADLINE = 'Which key should the nightly rebuild sort on?';
 const DETAIL = 'The existing key keeps old links working; a fresh key halves the rebuild time.';
@@ -49,7 +54,10 @@ describe('one act on a review item wakes its filer once', () => {
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...signIns.get((body as { author?: User } | undefined)?.author?.id ?? ''),
+      },
       body: JSON.stringify(body),
     });
   const jj = async <T>(res: Response): Promise<T> => {
@@ -128,6 +136,12 @@ describe('one act on a review item wakes its filer once', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'one-wake-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const signed = signedInPerson(handle, dataDir, base, {
+      email: 'reviewer@harborlight.example',
+      name: 'Reviewer',
+    });
+    PERSON = signed.user;
+    signIns.set(PERSON.id, signed.headers);
     const { workspace } = await jj<{ workspace: { id: string; leadAgentId?: string } }>(
       await post('/workspaces', { name: 'Riverbend search', leadAgentId: AGENT.id }),
     );

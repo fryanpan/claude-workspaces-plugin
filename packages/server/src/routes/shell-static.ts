@@ -406,7 +406,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           visitor: Boolean(visitor),
           coachHref: assetHref(readAppAssetManifest(markdownAppDist), 'coach.js'),
           leadChatHref: assetHref(readAppAssetManifest(markdownAppDist), 'lead-chat.js'),
-          frame: frameHost?.frameFor(req, Boolean(visitor), workspaceId) ?? null,
+          frame: frameHost?.frameFor(req, Boolean(visitor), workspaceId, mayMintAppVoice) ?? null,
         }),
         browserSentry,
         'mockup',

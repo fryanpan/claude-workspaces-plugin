@@ -13,6 +13,7 @@
  * not on the share member allowlist, so a share visitor never reaches it.
  */
 import { matchRest } from '../middleware/workspace-scope.ts';
+import { PERSON_PROOF_REQUIRED, unprovenPersonAnswer } from '../review-items/answer-proof.ts';
 import {
   GRANT_ANSWER_DENIAL,
   SECRET_ANSWER_DENIAL,
@@ -45,6 +46,8 @@ export async function handleTaskReviewAnswerUndo(
   const author = authorFor(body?.author);
   if (!author) return j(400, { error: 'author required' });
   if (isCategoryAuthor(author)) return refuseCategoryAuthor();
+  // Taking back a person's answer is that person's, on the same proof.
+  if (unprovenPersonAnswer(author, rq.answerProof)) return j(403, PERSON_PROOF_REQUIRED);
   const res = taskStore.undoTaskReviewAnswer(taskId, reviewItemId, { actor: author });
   if (!res.ok) {
     if (res.error === 'answered-by-other') return j(409, res);

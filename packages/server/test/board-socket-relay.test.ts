@@ -191,14 +191,20 @@ describe('A. the relay on its board socket', () => {
     await child.handshake();
     expect((await child.callTool('list_tasks', { workspaceId: harborlight })).isError).toBe(false);
 
-    // The server minted one for this agent and board, and keeps it.
-    const records = JSON.parse(readFileSync(boardTokensPath(dataDir), 'utf8')) as {
+    // The server minted one for this agent and board, and keeps it in memory.
+    const listed = (await (await fetch(`${base}/api/board-tokens`)).json()) as {
       tokens: BoardTokenRecord[];
     };
-    const held = records.tokens.filter(
+    const held = listed.tokens.filter(
       (r) => r.label === BOARD_SOCKET_SESSION_LABEL && r.revokedAt === undefined,
     );
     expect(held.map((r) => [r.agentId, r.boardId])).toContainEqual([AGENT_ID, harborlight]);
+    // And never on disk, so a session leaves no record behind.
+    const path = boardTokensPath(dataDir);
+    const saved = existsSync(path)
+      ? (JSON.parse(readFileSync(path, 'utf8')) as { tokens: BoardTokenRecord[] }).tokens
+      : [];
+    expect(saved.filter((r) => r.label === BOARD_SOCKET_SESSION_LABEL)).toEqual([]);
 
     const env = environmentOf(child.pid);
     // The positive control: this is the relay's environment, read.

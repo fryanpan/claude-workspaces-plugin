@@ -18,11 +18,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type DecisionAnsweredPayload, decisionAnsweredLine } from '../../mcp/src/decision-line.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { type Frame, listenFrames } from './sse-frames.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 
 const CLAUSE = 'walk its links as the propagation checklist';
@@ -42,7 +51,7 @@ describe('the decision.answered wake only sends its reader to links that exist',
   const post = (path: string, body: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: JSON.stringify(body),
     });
 
@@ -58,6 +67,12 @@ describe('the decision.answered wake only sends its reader to links that exist',
     dataDir = mkdtempSync(join(tmpdir(), 'review-answered-links-'));
     handle = createServer({ port: 0, dataDir });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     WS = await seedBoard(base);
     const { workspace } = await jj<{ workspace: { id: string; leadAgentId?: string } }>(
       await post('/workspaces', { name: 'index-rebuild', leadAgentId: LEAD.id }),
@@ -99,7 +114,7 @@ describe('the decision.answered wake only sends its reader to links that exist',
         author: LEAD,
       }),
     );
-    // Jordan answers, so the lead is a different party and does get woken.
+    // Alice answers, so the lead is a different party and does get woken.
     await jj(
       await post(`/workspaces/${WS}/tasks/${task.id}/answer`, {
         text: 'After the freeze.',

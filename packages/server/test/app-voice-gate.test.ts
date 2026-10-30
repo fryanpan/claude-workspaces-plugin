@@ -21,7 +21,13 @@ import { createServer } from '../src/server.ts';
 import type { UpgradeData } from '../src/socket-handlers.ts';
 
 const KEY = appVoiceTokenKey('a-test-cookie-key');
-const OWNER_SPEAKS = { visitor: false, ownerProven: true, anyoneProven: true, mustSignIn: false };
+const OWNER_SPEAKS = {
+  visitor: false,
+  ownerProven: true,
+  anyoneProven: true,
+  mustSignIn: false,
+  frameGrant: false,
+};
 
 describe('who is handed a token with the frame', () => {
   it('the owner, signed in, and a local page where nobody has to sign in', () => {
@@ -32,6 +38,7 @@ describe('who is handed a token with the frame', () => {
         ownerProven: false,
         anyoneProven: false,
         mustSignIn: false,
+        frameGrant: false,
       }),
     ).toBe(true);
   });
@@ -45,8 +52,23 @@ describe('who is handed a token with the frame', () => {
         ownerProven: false,
         anyoneProven: false,
         mustSignIn: true,
+        frameGrant: false,
       }),
     ).toBe(false);
+  });
+
+  it("a frame on the frame hostname whose host page's reader was given one", () => {
+    const framed = {
+      visitor: false,
+      ownerProven: false,
+      anyoneProven: false,
+      mustSignIn: true,
+      frameGrant: true,
+    };
+    expect(mayMintAppVoice(framed)).toBe(true);
+    // A person proof on the frame request itself still decides first.
+    expect(mayMintAppVoice({ ...framed, visitor: true })).toBe(false);
+    expect(mayMintAppVoice({ ...framed, anyoneProven: true })).toBe(false);
   });
 
   it('writes the seed only into a page that loads the client', () => {

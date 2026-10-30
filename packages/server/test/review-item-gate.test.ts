@@ -24,9 +24,18 @@ import type { ReviewJudgeInput, ReviewJudgeVerdict } from '../src/review-judge.t
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { REVIEW_ITEM_HELD_EVENT, STALL_EVENT } from '../src/stall-nudge.ts';
 import { projectTask } from '../src/task-projection.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
-const PERSON = { id: 'known-jordan', name: 'Jordan', kind: 'person' };
+/** Alice, signed in on the board page: replaced with the signed identity at boot. */
+let PERSON: { id: string; name: string; kind?: string; color?: string } = {
+  id: '',
+  name: 'Alice',
+};
+/** The proof headers each signed-in person sends, keyed by author id. */
+const PROOF = new Map<string, Record<string, string>>();
+const proofFor = (body: unknown): Record<string, string> =>
+  PROOF.get((body as { author?: { id?: string } } | undefined)?.author?.id ?? '') ?? {};
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
 const FILER = { id: 'agent-index-keeper', name: 'Index Keeper', kind: 'agent' };
 
@@ -159,7 +168,7 @@ describe('the review-item quality gate', () => {
   const post = (path: string, body?: unknown) =>
     fetch(`${base}${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...proofFor(body) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   const put = (path: string, body: unknown) =>
@@ -190,6 +199,12 @@ describe('the review-item quality gate', () => {
       stallNudgeQuietMs: 60 * 60_000,
     });
     base = `http://127.0.0.1:${handle.port}`;
+    const personSigned = signedInPerson(handle, dataDir, base, {
+      email: 'alice@harborlight.example',
+      name: 'Alice',
+    });
+    PERSON = personSigned.user;
+    PROOF.set(personSigned.user.id, personSigned.headers);
     WS = await seedBoard(base);
   });
 
@@ -1097,7 +1112,7 @@ describe('the review-item quality gate', () => {
         await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
           author: FILER,
           anchor: { kind: 'subject' },
-          text: 'Jordan — which one?',
+          text: 'Alice — which one?',
           review: BAD,
         }),
       );
@@ -1116,7 +1131,7 @@ describe('the review-item quality gate', () => {
         await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
           author: FILER,
           anchor: { kind: 'subject' },
-          text: 'Jordan — which cache size?',
+          text: 'Alice — which cache size?',
           review: GOOD,
         }),
       );
@@ -1140,7 +1155,7 @@ describe('the review-item quality gate', () => {
       const weak = await jj<ThreadReply>(
         await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads/${threadId}/comments`, {
           author: FILER,
-          text: 'Jordan — which one?',
+          text: 'Alice — which one?',
           review: BAD,
         }),
       );
@@ -1154,7 +1169,7 @@ describe('the review-item quality gate', () => {
       const good = await jj<ThreadReply>(
         await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads/${threadId}/comments`, {
           author: FILER,
-          text: 'Jordan — which cache size?',
+          text: 'Alice — which cache size?',
           review: GOOD,
         }),
       );
@@ -1179,7 +1194,7 @@ describe('the review-item quality gate', () => {
       const weak = await jj<ThreadReply>(
         await post(`/workspaces/${workspaceId}/docs/${docId}/threads/by_find`, {
           author: FILER,
-          text: 'Jordan — which one?',
+          text: 'Alice — which one?',
           find: 'index rebuild',
           review: BAD,
         }),
@@ -1196,7 +1211,7 @@ describe('the review-item quality gate', () => {
         await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
           author: FILER,
           anchor: { kind: 'subject' },
-          text: 'Jordan — which one?',
+          text: 'Alice — which one?',
           review: BAD,
         }),
       );
@@ -1242,7 +1257,7 @@ describe('the review-item quality gate', () => {
           await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
             author: FILER,
             anchor: { kind: 'subject' },
-            text: 'Jordan — which cache size?',
+            text: 'Alice — which cache size?',
             review: GOOD,
           }),
         );
@@ -1261,7 +1276,7 @@ describe('the review-item quality gate', () => {
         await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
           author: FILER,
           anchor: { kind: 'subject' },
-          text: 'Jordan — which one?',
+          text: 'Alice — which one?',
           review: { ...BAD, judge: { at: 1, verdict: 'ok', reason: 'self-certified' } },
         }),
       );
@@ -1281,7 +1296,7 @@ describe('the review-item quality gate', () => {
             await post(`/workspaces/${workspaceId}/docs/task:${taskId}/threads`, {
               author: FILER,
               anchor: { kind: 'subject' },
-              text: 'Jordan — which one?',
+              text: 'Alice — which one?',
               review: BAD,
             }),
           );
@@ -1315,7 +1330,7 @@ describe('the review-item quality gate', () => {
       const body = {
         author: FILER,
         anchor: { kind: 'subject' },
-        text: 'Jordan — which one?',
+        text: 'Alice — which one?',
         review: BAD,
         requestId: 'rq-1',
       };

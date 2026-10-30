@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
 /**
  * Was the content a reconcile is about to overwrite written by GIT rather
@@ -90,12 +91,10 @@ function git(
   const left = remainingMs();
   // Budget already spent — don't start another subprocess just to abandon it.
   if (left <= 0) return { ok: false, stdout: '' };
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_') && v !== undefined) env[k] = v;
-  }
+  if (gitBarred(cwd)) return { ok: false, stdout: '' };
+  const env = hardenedGitEnv();
   try {
-    const res = spawnSync('git', args, {
+    const res = spawnSync('git', hardenedGitArgs(args), {
       cwd,
       env,
       input,
@@ -106,11 +105,8 @@ function git(
       // that ignores SIGTERM blocks this synchronous call for as long as it
       // likes. Measured: a child running `trap '' TERM; sleep 30` held the
       // event loop for 30,352ms against this 1,200ms budget; the same child
-      // under SIGKILL returns on time. This is not a tail risk here, because
-      // `--path` below deliberately invokes the repository's configured clean
-      // filter, which is arbitrary user-configured code under no obligation to
-      // handle SIGTERM. SIGKILL cannot be trapped, so the budget becomes
-      // enforceable rather than advisory.
+      // under SIGKILL returns on time. SIGKILL cannot be trapped, so the
+      // budget becomes enforceable rather than advisory.
       killSignal: 'SIGKILL',
       maxBuffer: 8 * 1024 * 1024,
     });
@@ -165,8 +161,7 @@ export function classifyExternalContent(
   const name = basename(resolved);
   const remainingMs = deadlineFrom(budgetMs);
 
-  // Repo-relative path, so the message names the file the way git does — and
-  // so the hash below can apply this path's clean filter, if it has one.
+  // Repo-relative path, so the message names the file the way git does.
   // `--literal-pathspecs`: a basename is a FILENAME here, never a pattern.
   // Without it git reads `* ? [` as globs — `-- 'a?.md'` matches both `a1.md`
   // and `ab.md`, and taking `[0]` would name a different file — and a leading
@@ -179,14 +174,11 @@ export function classifyExternalContent(
   const rel = listed.ok ? listed.stdout.split('\n')[0].trim() : '';
 
   // Hash through git rather than reimplementing it, so sha1 and sha256
-  // repositories are both handled without asking which one this is. With
-  // `--path`, git applies that path's clean filter — which is the same
-  // working-tree→blob conversion a checkout inverted on the way in, so a
-  // repository using filters still classifies correctly instead of silently
-  // reading `unknown` forever.
-  const hashArgs = rel
-    ? ['hash-object', '-t', 'blob', '--path', rel, '--stdin']
-    : ['hash-object', '-t', 'blob', '--stdin'];
+  // repositories are both handled without asking which one this is.
+  // `--no-filters`, and no `--path`: a clean filter is a program the
+  // repository's config names, and this read must run none. A file a filter
+  // changes on checkout therefore reads `unknown`.
+  const hashArgs = ['hash-object', '-t', 'blob', '--no-filters', '--stdin'];
   const hashed = git(cwd, hashArgs, remainingMs, content);
   const hash = hashed.stdout.trim();
   if (!hashed.ok || !isObjectId(hash)) return { source: 'unknown' };

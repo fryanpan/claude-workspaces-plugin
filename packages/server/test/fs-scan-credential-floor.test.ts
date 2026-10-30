@@ -23,7 +23,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearListingCache, isListedFile, scanFolderPaths } from '../src/fs-scan.ts';
+import { clearListingCache, isListedFile } from '../src/fs-listing.ts';
+import { scanFolderPaths } from '../src/fs-scan.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoard } from './workspace-seed.ts';
 

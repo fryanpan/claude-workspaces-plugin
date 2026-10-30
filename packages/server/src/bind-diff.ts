@@ -31,7 +31,8 @@ import {
 } from './diff-groups.ts';
 import { isReservedDocId } from './doc-ids.ts';
 import { canonicalRepoRoot, findWorktreeRoot } from './doc-origin-repo.ts';
-import { MAX_SKIPPED, browseEntry, landsOnListed, scanFolderReport } from './fs-scan.ts';
+import { browseEntry, landsOnListed } from './fs-listing.ts';
+import { MAX_SKIPPED, scanFolderReport } from './fs-scan.ts';
 import {
   type DiffFileEntry,
   diffFilesAsync,

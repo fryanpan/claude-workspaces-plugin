@@ -13,6 +13,7 @@
  */
 import { handleAgentIdentityRoutes } from './agent-identity.ts';
 import { handleAppRoutes } from './apps.ts';
+import { handleBoardSocketRootsRoutes } from './board-socket-roots.ts';
 import { handleBoardTokenRoutes } from './board-tokens.ts';
 import { handleChatAuditRoutes } from './chat-audit-routes.ts';
 import { handleDocMoveRoute } from './doc-move.ts';
@@ -57,6 +58,7 @@ export async function serveBoardRoutes(
     agentTokenKeyFor,
     agentIdentityRoutesCtx,
     boardTokenRoutesCtx,
+    boardSocketRootsRoutesCtx,
     chatAuditRoutesCtx,
     repoRoutesCtx,
     loadReportRoutesCtx,
@@ -68,8 +70,15 @@ export async function serveBoardRoutes(
     meetingCalendarRoutesCtx,
   } = ctx;
   const { req, url, pathname, scope, gate, attribution } = rq;
-  const { visitor, boardAgent, metaFor, roleFor, requireOwner } = gate;
+  const { visitor, boardAgent, leadBoard, metaFor, roleFor, requireOwner } = gate;
   const { authorFor, refuseCategoryAuthor, withTaskChips, provenIdentityFor } = attribution;
+  /** What this request proved about a person, for the answer doors. */
+  const answerProof = {
+    req,
+    provenIdentityFor,
+    widgetIdentity: attribution.widgetIdentity,
+    requestOrigin: () => policyFor(req).requestOrigin,
+  };
 
   // --- REST: run the summary backfill on request --- see
   // ./routes/ops.ts. Same chain position as before the split: above the
@@ -162,6 +171,7 @@ export async function serveBoardRoutes(
       requireOwner,
       provenIdentityFor,
       requestOriginFor: () => policyFor(req).requestOrigin,
+      answerProof,
     });
     if (handled) return handled;
   }
@@ -186,6 +196,7 @@ export async function serveBoardRoutes(
       requireOwner,
       provenIdentityFor,
       requestOriginFor: () => policyFor(req).requestOrigin,
+      answerProof,
     });
     if (handled) return handled;
   }
@@ -264,6 +275,16 @@ export async function serveBoardRoutes(
     });
     if (handled) return handled;
   }
+  // --- REST: the folders a board's walled lead can write --- see
+  // ./routes/board-socket-roots.ts. One exact family of paths.
+  {
+    const handled = await handleBoardSocketRootsRoutes(boardSocketRootsRoutesCtx, {
+      req,
+      pathname,
+      visitor,
+    });
+    if (handled) return handled;
+  }
   // --- REST: builder dispatches, and a session's notes on the row it
   // holds --- see ./routes/dispatch-and-notes.ts. Same chain position
   // as before the split: after the agent merge route, before chat-audit.
@@ -274,6 +295,7 @@ export async function serveBoardRoutes(
       pathname,
       url,
       visitor,
+      leadBoard,
       authorFor,
       refuseCategoryAuthor,
       roleFor,
@@ -435,6 +457,7 @@ export async function serveBoardRoutes(
       pathname,
       visitor,
       boardAgent: gate.boardAgent,
+      answerProof,
       authorFor,
       refuseCategoryAuthor,
       roleFor,

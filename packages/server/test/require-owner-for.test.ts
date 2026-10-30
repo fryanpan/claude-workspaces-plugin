@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import {
   AGENT,
+  SHARE_HOST,
   type ShareProofServer,
   post,
   readJson,
@@ -79,7 +80,7 @@ describe('requireOwnerFor', () => {
   it("takes the owner's list from their own page, and files a named step owner-only", async () => {
     const res = await s.owner(
       `${s.scope}/settings`,
-      post({ requireOwnerFor: ['push', 'jira'], author: { id: 'x', name: 'Owner' } }, 'PUT'),
+      post({ requireOwnerFor: ['push', 'jira'], author: { id: 'x', name: 'Alice' } }, 'PUT'),
     );
     expect(res.status).toBe(200);
     expect((await settings()).requireOwnerFor).toEqual(['push', 'jira']);
@@ -90,13 +91,27 @@ describe('requireOwnerFor', () => {
     expect(open.review.ownerOnly).toBeUndefined();
 
     // A member may not answer the reserved one; they may answer the other.
-    const answer = (id: string) =>
-      s.visitor(
-        MEMBER,
-        `${s.scope}/tasks/${taskId}/review-items/${id}/answer`,
-        post({ text: 'Go ahead', answeredWith: 'o-yes', author: { id: 'x', name: 'Alice' } }),
-      );
-    expect((await answer(reserved.id)).status).toBe(403);
+    // Both from the share page itself, as her browser sends a press; the
+    // visitor carries no x-forwarded-proto, so the server reads it as http.
+    const answer = (id: string) => {
+      const init = post({
+        text: 'Go ahead',
+        answeredWith: 'o-yes',
+        author: { id: 'x', name: 'Alice' },
+      });
+      return s.visitor(MEMBER, `${s.scope}/tasks/${taskId}/review-items/${id}/answer`, {
+        ...init,
+        headers: {
+          ...(init.headers as Record<string, string>),
+          origin: `http://${SHARE_HOST}`,
+          'sec-fetch-site': 'same-origin',
+        },
+      });
+    };
+    const refused = await answer(reserved.id);
+    expect(refused.status).toBe(403);
+    // Refused for the step being the owner's, not for a missing proof.
+    expect(((await refused.json()) as { error: string }).error).not.toBe('person-proof-required');
     expect((await answer(open.id)).status).toBe(200);
   });
 });

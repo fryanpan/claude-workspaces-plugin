@@ -7,7 +7,7 @@
  * is asserted end-to-end here: send it over HTTP, read the stored effect
  * back over HTTP.
  *
- * All fixtures are synthetic — invented names in the jordan@partner.example
+ * All fixtures are synthetic — invented names in the alice@partner.example
  * register. The repo is public.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import type { Task } from '../src/tasks.ts';
 import { type GoalIds, seedGoalsOverHttp } from './goal-seed.ts';
+import { signedInPerson } from './signed-in-person.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 const PERSON = { id: 'known-bryan', name: 'Bryan', kind: 'known', color: '#2e7dd7' };
@@ -44,10 +45,10 @@ describe('board workspace + task routes', () => {
       },
     });
 
-  const post = (path: string, body: unknown) =>
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     local(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
 
@@ -1084,6 +1085,13 @@ describe('board workspace + task routes', () => {
       const t = await post(`/workspaces/${wsId}/tasks`, { author: AGENT, title: 'Ship it' });
       const taskId = ((await t.json()) as { task: { id: string } }).task.id;
       const bodyDoc = encodeURIComponent(`task:${taskId}`);
+      // A reader signed in on the board page: only a proven person's reply can
+      // answer, so an unproven one would keep the card for the wrong reason.
+      // The page's origin is the Host `local` names, not the socket's.
+      const reader = signedInPerson(handle, dataDir, `localhost:${handle.port}`, {
+        email: 'alice@harborlight.example',
+        name: 'Alice',
+      });
 
       const made = await post(`/workspaces/${WS}/docs/${bodyDoc}/threads`, {
         author: AGENT,
@@ -1107,10 +1115,11 @@ describe('board workspace + task routes', () => {
 
       // The reader says something that is not an answer — the exact act that
       // used to delete the card.
-      const chat = await post(`/workspaces/${WS}/docs/${bodyDoc}/threads/${threadId}/comments`, {
-        author: PERSON,
-        text: 'Reading this now, one sec.',
-      });
+      const chat = await post(
+        `/workspaces/${WS}/docs/${bodyDoc}/threads/${threadId}/comments`,
+        { author: reader.user, text: 'Reading this now, one sec.' },
+        reader.headers,
+      );
       expect(chat.status).toBe(200);
 
       const still = (await (await local(`/workspaces/${wsId}/review-items`)).json()) as {
@@ -1125,11 +1134,11 @@ describe('board workspace + task routes', () => {
       // Answering does clear it — the positive control, without which a route
       // that had simply stopped dropping anything would pass the assertion
       // above.
-      const answered = await post(`/workspaces/${WS}/docs/${bodyDoc}/threads/${threadId}/answer`, {
-        author: PERSON,
-        text: 'Neither — dim them on mobile only.',
-        commentId,
-      });
+      const answered = await post(
+        `/workspaces/${WS}/docs/${bodyDoc}/threads/${threadId}/answer`,
+        { author: reader.user, text: 'Neither — dim them on mobile only.', commentId },
+        reader.headers,
+      );
       expect(answered.status, await answered.clone().text()).toBe(200);
       const gone = await local(`/workspaces/${wsId}/review-items`);
       expect(((await gone.json()) as { items: unknown[] }).items).toEqual([]);

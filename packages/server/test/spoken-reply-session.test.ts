@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { SpokenServerMessage } from '@claude-workspaces/core/spoken-reply';
+import { isUnprovenActor } from '../src/review-items/answer-proof.ts';
 import { SpokenAnswerer, type SpokenBoard } from '../src/spoken-reply/answer.ts';
 import type {
   GeminiLive,
@@ -20,6 +21,7 @@ import {
 import { SpokenTimings } from '../src/spoken-reply/timings.ts';
 import type { SpokenVoice } from '../src/spoken-reply/tts.ts';
 import type { TranscriptionEngine, TranscriptionOpenOpts } from '../src/transcribe.ts';
+import type { VoiceActor } from '../src/voice-action.ts';
 import { waitFor } from './wait-for.ts';
 
 const BOARD: SpokenBoard = {
@@ -420,5 +422,68 @@ describe('SpokenSession, setup 3', () => {
     g.events.onAudio(new Uint8Array(4));
     expect(h.audio).toEqual([4]);
     expect(h.types()).toEqual(['audio-start', 'audio-end']);
+  });
+});
+
+/** A socket whose upgrade proved `provenActor`, recording what the board heard. */
+function hearingSession(provenActor: VoiceActor | null) {
+  const heard: VoiceActor[] = [];
+  const board: SpokenBoard = {
+    ...BOARD,
+    async handle(ws, req) {
+      heard.push(req.actor as VoiceActor);
+      return BOARD.handle(ws, req);
+    },
+  };
+  const session = new SpokenSession({
+    engines: {
+      listener: fakeListener().engine,
+      voices: { 1: fakeVoice().voice, 2: null },
+      gemini: null,
+    },
+    answerer: new SpokenAnswerer(board, 'w1'),
+    timings: new SpokenTimings(undefined, () => {}),
+    provenActor,
+    readOnly: false,
+    parseContext: () => undefined,
+    sendJson: () => {},
+    sendAudio: () => {},
+  });
+  const say = async (text: string): Promise<VoiceActor | undefined> => {
+    const n = heard.length;
+    session.onText(JSON.stringify({ type: 'say', text }));
+    await waitFor(() => heard.length > n, { describe: 'the say reached the board' });
+    return heard[n];
+  };
+  return { session, say };
+}
+
+describe('SpokenSession, the actor an answer is recorded for', () => {
+  const OWNER_CLAIM = { id: 'known-bryan', name: 'Bryan', kind: 'person' };
+
+  it('a say before any start frame reaches the board as an unproven actor', async () => {
+    // The actor before `start` was a shared, unmarked object whose kind reads as a person's.
+    const s = hearingSession(null);
+    expect(isUnprovenActor((await s.say('Ship today.')) as VoiceActor)).toBe(true);
+  });
+
+  it("a start frame's author is a claim: marked unproven when the upgrade proved nobody", async () => {
+    const s = hearingSession(null);
+    s.session.onText(
+      JSON.stringify({ type: 'start', setup: 1, mode: 'hold', author: OWNER_CLAIM }),
+    );
+    const actor = await s.say('Ship today.');
+    expect(actor?.id).toBe('known-bryan');
+    expect(isUnprovenActor(actor as VoiceActor)).toBe(true);
+  });
+
+  it("POSITIVE CONTROL: the upgrade's proven actor is used unmarked, whatever the frame claims", async () => {
+    const s = hearingSession({ id: 'known-alice', name: 'Alice' });
+    s.session.onText(
+      JSON.stringify({ type: 'start', setup: 1, mode: 'hold', author: OWNER_CLAIM }),
+    );
+    const actor = await s.say('Ship today.');
+    expect(actor?.id).toBe('known-alice');
+    expect(isUnprovenActor(actor as VoiceActor)).toBe(false);
   });
 });
