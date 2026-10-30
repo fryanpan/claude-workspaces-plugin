@@ -300,6 +300,14 @@ After a move the board's agent needs a board agent token minted on the
 machine, and its GitHub events need the five steps above, run for the
 machine.
 
+To reach the moved board, the agent's session also needs the project's Access
+service token. Launch it with `CW_BASE_URL` set to the machine's URL,
+`CW_ACCESS_CLIENT_ID` set to the token's client id, and
+`CW_ACCESS_SECRET_SERVICE` set to the Keychain service that holds its secret.
+The MCP child and the plugin's hooks then send both `cf-access-client-*`
+headers on their requests to that URL's origin, and to no other. The launcher
+uses the node relay, because the compiled relay cannot read Keychain.
+
 ## Bound files after the move
 
 On the Mac a doc can be bound to a `.md` in a repo, and the server keeps the

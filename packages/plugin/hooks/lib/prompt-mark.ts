@@ -1,3 +1,4 @@
+import type { SecretReader } from './access-headers.ts';
 /**
  * Prompt marks — the pure half of the plugin's UserPromptSubmit hook.
  *
@@ -145,6 +146,8 @@ export interface PromptHookDeps {
   /** With no board in the env, ask the server which board the session
    *  joined (`joined-board.ts`). */
   joinedBoard?: boolean;
+  /** The Access secret's reader; Keychain when omitted. */
+  readSecret?: SecretReader;
 }
 
 /** Read stdin, decide, post. Answers whether a mark was delivered; never throws. */
@@ -157,7 +160,12 @@ export async function runPromptHook(stdin: string, deps: PromptHookDeps): Promis
       remote: isRemoteControl(deps.env),
     });
     if ('skip' in decision) return false;
-    const transport = resolveTransport(deps.env, deps.discoveryPort, deps.fetch ?? fetch);
+    const transport = resolveTransport(
+      deps.env,
+      deps.discoveryPort,
+      deps.fetch ?? fetch,
+      deps.readSecret,
+    );
     if (!transport) return false;
     const workspaceId = await boardOf(deps.env, transport, decision.post.agent, deps.joinedBoard);
     if (!workspaceId) return false;
