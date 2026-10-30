@@ -105,6 +105,7 @@ export function isEnoent(err: unknown): boolean {
 /** Darwin's `O_NOFOLLOW_ANY`: the open fails if any component is a link. */
 const O_NOFOLLOW_ANY = 0x20000000;
 const CHECKED_OPEN = constants.O_RDONLY | constants.O_NONBLOCK | O_NOFOLLOW_ANY;
+const UTF8 = new TextDecoder('utf-8', { ignoreBOM: true }); // keeps a BOM, as readFileSync does
 /** The most text a guarded read returns. Past it a file is not a doc. */
 export const GUARDED_TEXT_MAX = 16 * 1024 * 1024;
 
@@ -417,7 +418,7 @@ export class PathGuards {
    *  covers it. Throws as `readFileSync` does, and `GuardRefused`. */
   readBoundedSync(path: string, max: number): string | 'too-large' {
     const bytes = this.readBoundedBytesSync(path, max);
-    return bytes === 'too-large' ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('utf8');
+    return bytes === 'too-large' ? bytes : UTF8.decode(bytes);
   }
 
   /** `readBoundedSync`, as bytes. */
