@@ -383,7 +383,9 @@ s.on('error', (e) => console.log(e.code));`,
     expect(existsSync(join(app, 'node_modules', '.bin', 'harbor-tool'))).toBe(true);
   });
 
-  it('still commits, adds a worktree and sets git config in its project', () => {
+  // Git settings run commands in the owner's own git, so a lead may not set
+  // them (`gitCodeRegex`): `push -u` and tracking setup fail with it.
+  it('still commits and adds a worktree, and cannot set git config, in its project', () => {
     const repo = join(project, 'repo');
     mkdirSync(repo);
     const git = (profile: string | null, args: string[]) =>
@@ -395,7 +397,8 @@ s.on('error', (e) => console.log(e.code));`,
     const id = ['-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid'];
     expect(git(walled, [...id, 'commit', '-q', '--allow-empty', '-m', 'one'])).toBe(0);
     expect(git(walled, ['worktree', 'add', '-q', join(repo, 'wt'), '-b', 'wt'])).toBe(0);
-    expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).toBe(0);
+    expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).not.toBe(0);
+    expect(git(null, ['config', 'branch.wt.remote', 'origin'])).toBe(0); // the control
   });
 
   it('fails a check row whose path has no socket behind it, which proves nothing', () => {
