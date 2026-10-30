@@ -108,6 +108,7 @@ async function boot(name: string, shareLinks = true): Promise<Org> {
   };
   const aud = { owner: `aud-${x}-owner`, collab: `aud-${x}-collab`, share: `aud-${x}-share` };
   const llmSecret = `fixture-llm-secret-${x}-0123456789abcdef`;
+  const webhookSecret = `whsec_${btoa(`cross-server-${x}`)}`;
   const handle = createServer({
     port: 0,
     dataDir,
@@ -127,7 +128,7 @@ async function boot(name: string, shareLinks = true): Promise<Org> {
     },
     homeFeedClientId: `feed-${x}.access`,
     recallCallbackHost: hosts.callback,
-    meetingBotWebhookSecret: `whsec_${btoa(`cross-server-${x}`)}`,
+    meetingBotWebhookSecret: webhookSecret,
     spokenReply: {
       listener: null,
       voices: { 1: null, 2: null },
@@ -150,7 +151,7 @@ async function boot(name: string, shareLinks = true): Promise<Org> {
     hosts,
     aud,
     feedClientId: `feed-${x}.access`,
-    webhookSecret: `whsec_${btoa(`cross-server-${x}`)}`,
+    webhookSecret,
     llmSecret,
   };
   const made = await local(org, '/workspaces', { name: `${name} board` });
@@ -230,10 +231,10 @@ describe("the home feed's service token stamp", () => {
       ).toBe(200);
       expect(
         (await at(other, other.hosts.owner, feed(other), { headers: stamp(jwt) })).status,
-      ).not.toBe(200);
+      ).toBe(403);
       expect(
         (await at(other, other.hosts.owner, feed(other), { headers: stamp(otherId) })).status,
-      ).not.toBe(200);
+      ).toBe(403);
     });
   }
 });
@@ -386,27 +387,30 @@ describe('a Recall webhook signature', () => {
 });
 
 describe("setup 4's ElevenLabs secret", () => {
-  const ask = async (org: Org, secret: string) =>
-    (
-      await at(org, org.hosts.callback, VOICE_AGENT_LLM_PATH, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
-        body: JSON.stringify({
-          model: 'claude-workspaces',
-          stream: true,
-          messages: [{ role: 'user', content: 'status' }],
-          elevenlabs_extra_body: { cw_session: '0'.repeat(32) },
-        }),
-      })
-    ).status;
+  const ask = async (org: Org, secret: string) => {
+    const res = await at(org, org.hosts.callback, VOICE_AGENT_LLM_PATH, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}` },
+      body: JSON.stringify({
+        model: 'claude-workspaces',
+        stream: true,
+        messages: [{ role: 'user', content: 'status' }],
+        elevenlabs_extra_body: { cw_session: '0'.repeat(32) },
+      }),
+    });
+    return { status: res.status, error: ((await res.json()) as { error: string }).error };
+  };
 
   for (const d of DIRECTIONS) {
     it(d, async () => {
       const [issuer, other] = pair(d);
       // Past the secret, refused only for naming no open session.
-      expect(await ask(issuer, issuer.llmSecret)).toBe(404);
-      expect(await ask(other, other.llmSecret)).toBe(404);
-      expect(await ask(other, issuer.llmSecret)).toBe(401);
+      expect(await ask(issuer, issuer.llmSecret)).toEqual({
+        status: 404,
+        error: 'unknown_session',
+      });
+      expect(await ask(other, other.llmSecret)).toEqual({ status: 404, error: 'unknown_session' });
+      expect(await ask(other, issuer.llmSecret)).toEqual({ status: 401, error: 'unauthorized' });
     });
   }
 });

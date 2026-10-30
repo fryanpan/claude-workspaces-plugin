@@ -15,6 +15,10 @@
  *     is refused there. This is what a hostile server's operator can make
  *     with the key file they hold, and the case that isolates the key.
  *
+ * Check 2 alone is not enough for a board-scoped type: the value names the
+ * issuer's board, so the other server would refuse it for that reason too.
+ * Checks 3 and 4 are what show the key, not the board, is the wall.
+ *
  * Every credential type a server issues or accepts, and where each is
  * minted. "Covered here" means the four checks above run over HTTP.
  *
@@ -54,11 +58,22 @@
  *    server's key file only. Covered by key file, no route.
  *  - Widget popup token `wt1`: retired, refused on every server whoever
  *    signed it, so there is no acceptance to control against. Not covered.
+ *  - Signed share URL (`share/url-signing.ts`, its own `share-url.key`):
+ *    retired, no caller but its own test. Not covered.
  *
  * Kept as state, not signed:
  *  - Email login code (`auth/email-code.ts`), salted hash per server.
  *    Started on both servers for the same address; each code is presented
- *    to the other. Covered here.
+ *    to the other, which refuses it as a wrong code for its own pending
+ *    one, and each server's own code is accepted. Covered here.
+ *  - Recall's per-bot socket token (`GET /recall/<token>`,
+ *    `recall-meeting.ts`): 128 random bits held in the process that sent
+ *    the bot, no key, so it cannot verify anywhere else. Minting one needs
+ *    a bot sent to a call. Not covered.
+ *
+ * Covered by format, on one route each: `at1` is also accepted on `/mcp`
+ * (`routes/mcp-connector.ts`), and `gp1` over the tunnel rides beside the
+ * home feed's service token check (the edge file covers that check).
  *
  * Signed or proved by someone other than the server, with a per-server
  * setting: the Access stamp for a person and for a service token (the home
@@ -325,6 +340,9 @@ for (const wall of WALLS) {
         expect(await wall.accepts(other, issued)).toBe(false);
 
         const own = await wall.mint(other);
+        // HMAC is deterministic: re-signing under the right key gives the
+        // same bytes, so `resign` uses the server's own key derivation.
+        expect(resign(wall.format, own, other)).toBe(own);
         expect(await wall.accepts(other, resign(wall.format, own, other))).toBe(true);
         expect(await wall.accepts(other, resign(wall.format, own, issuer))).toBe(false);
       });
