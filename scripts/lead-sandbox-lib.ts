@@ -69,34 +69,20 @@ export const CLAUDE_READ_WRITE = ['.claude', '.local/state/claude'];
 export const CLAUDE_READ = ['.local/bin', CLAUDE_INSTALL, '.bun', 'Library/Keychains'];
 
 /**
- * What under `~/.claude` an unsandboxed session later runs or obeys:
- * settings (hooks, MCP servers, the status line), plugin and skill code,
- * instructions, and the shell snapshot and env files each Bash call
- * sources. Readable, never writable, after every other rule, with
- * `~/.claude.json` (its MCP servers) and the `~/.claude` folder itself, so
- * it cannot be renamed away, edited and put back. Measured on 2.1.302: a
- * `claude -p` with every write under `~/.claude` refused still signed in
- * and ran a Bash call.
+ * What under `~/.claude` a lead may read and not write, and the transcript
+ * slug rule, are shared with the server (`packages/core/src/lead-wall.ts`).
+ * The folders and `~/.claude` itself are written after every other rule, with
+ * `~/.claude.json` (its MCP servers), so nothing can be renamed away, edited
+ * and put back.
  */
-export const CLAUDE_CODE_FOLDERS = [
-  'hooks',
-  'plugins',
-  'skills',
-  'agents',
-  'commands',
-  'rules',
-  'output-styles',
-  'shell-snapshots',
-  'session-env',
-];
-
-/**
- * The folders under `~/.claude` that the server and its supervisor read and
- * replace by name, current name first. Read only to a lead, after every other
- * rule. Its hooks and MCP children only read them; a hook marker it cannot
- * create reads as already seen.
- */
-export const SERVER_STATE_FOLDERS = ['claude-workspaces', 'live-feedback'];
+import {
+  CLAUDE_CODE_FOLDERS,
+  CLAUDE_READ_ONLY_FILES,
+  CLAUDE_READ_ONLY_FOLDERS,
+  SERVER_STATE_FOLDERS,
+  transcriptSlug,
+} from '../packages/core/src/lead-wall.ts';
+export { CLAUDE_CODE_FOLDERS, CLAUDE_READ_ONLY_FOLDERS, SERVER_STATE_FOLDERS, transcriptSlug };
 
 /**
  * The files in a project's git folders that make the owner's own git run a
@@ -178,11 +164,6 @@ interface Rule {
   last?: true;
 }
 
-/** Claude Code's name for a project's transcript folder: every other character a dash. */
-export function transcriptSlug(path: string): string {
-  return path.replace(/[^a-zA-Z0-9]/g, '-');
-}
-
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -216,9 +197,13 @@ function rulesFor(
   });
 
   // Other projects' transcripts and scratch folders are other projects' data.
-  const transcripts = `${m.home}/.claude/projects`;
+  // From both ends of `~/.claude`, like claudeCodeRules: a `projects` folder
+  // not made yet resolves to itself, and a lead would make it at the far end
+  // of the link, where a rule on the near end denies nothing (measured).
+  const claude = under(m.home, '.claude');
+  const transcripts = [...new Set([claude, m.realpath(claude)])].map((e) => `${e}/projects`);
   const scratch = `/private/tmp/claude-${m.uid}`;
-  add('deny', transcripts, 'other projects');
+  for (const t of transcripts) add('deny', t, 'other projects');
   add('deny', scratch, 'other projects');
   // Claude Code opens the scratch root itself at start (measured: EPERM on
   // open without this). It lists the other projects' folder names, not
@@ -232,7 +217,7 @@ function rulesFor(
     add('write', p, 'own project');
     const slugs = new Set([transcriptSlug(p), transcriptSlug(m.realpath(p))]);
     for (const slug of slugs) {
-      for (const root of [transcripts, scratch]) {
+      for (const root of [...transcripts, scratch]) {
         // The project's own folder, and one per worktree launched inside it.
         const regex = `^${escapeRegex(m.realpath(root))}/${escapeRegex(slug)}(--claude-worktrees-[^/]+)?(/|$)`;
         rules.push({ access: 'write', filter: { regex, under: root }, why: 'own transcripts' });
@@ -294,26 +279,16 @@ function claudeCodeRules(m: Machine): Rule[] {
   // that does not exist yet resolves to itself, and a lead would create it
   // at the far end of the symlink, where nothing denies it (measured).
   for (const end of new Set([claude, m.realpath(claude)])) {
-    for (const rel of CLAUDE_CODE_FOLDERS)
+    // What runs outside the sandbox, what the server reads by name (the
+    // discovery file, the hook markers, board-sync's state), and the plans.
+    for (const rel of CLAUDE_READ_ONLY_FOLDERS)
       rules.push({ access: 'nowrite', filter: { subpath: `${end}/${rel}` }, why, last: true });
-    rules.push({ access: 'nowrite', filter: { literal: `${end}/CLAUDE.md` }, why, last: true });
-    // settings.json, settings.local.json and the files they are replaced
-    // through: Claude Code's own temp names, and the server's `.settings…`.
-    for (const name of ['settings', '\\.settings'])
+    // CLAUDE.md, the settings, and every name they are replaced through.
+    for (const name of CLAUDE_READ_ONLY_FILES)
       rules.push({
         access: 'nowrite',
-        filter: { regex: `^${escapeRegex(end)}/${name}[^/]*$`, under: claude },
+        filter: { regex: `^${escapeRegex(end)}/${name}$`, under: claude },
         why,
-        last: true,
-      });
-    // What the server, its hooks and the MCP children read by name: the
-    // discovery file (a FIFO there hangs prod, a link redirects its publish),
-    // the hook markers, and board-sync's state, which holds its token.
-    for (const rel of SERVER_STATE_FOLDERS)
-      rules.push({
-        access: 'nowrite',
-        filter: { subpath: `${end}/${rel}` },
-        why: 'read by the server',
         last: true,
       });
     rules.push({

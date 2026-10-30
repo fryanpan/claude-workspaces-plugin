@@ -20,6 +20,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { leadWritesUnderClaude } from '../packages/core/src/lead-wall.ts';
 import {
   type Machine,
   SANDBOX_EXEC,
@@ -58,6 +59,8 @@ describe.skipIf(!HAVE_SANDBOX)('what the server reads, under the real sandbox-ex
     join(home, 'Library'),
     join(twin, '.claude', 'claude-workspaces', 'board-sync'),
     join(twin, '.claude', 'live-feedback'),
+    // The launcher makes it before the wall goes up (`writeProfile`).
+    join(twin, '.claude', 'projects'),
   ])
     mkdirSync(d, { recursive: true });
   // `~/.claude` links onto the data volume, as on the owner's Mac.
@@ -171,6 +174,62 @@ describe.skipIf(!HAVE_SANDBOX)('what the server reads, under the real sandbox-ex
     } finally {
       for (const d of [own, ownWorktree, other]) rmSync(d, { recursive: true, force: true });
       if (made) rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  // The server refuses what a lead can write under ~/.claude and reads the
+  // rest (`leadWritesUnderClaude`); the profile is built from the same lists.
+  const ownSlug = transcriptSlug(harborlight);
+  const otherSlug = transcriptSlug(join(home, 'dev', 'riverbend'));
+  const underClaude: Array<[string, boolean]> = [
+    [`projects/${otherSlug}/memory/MEMORY.md`, false],
+    [`projects/${otherSlug}/session.jsonl`, false],
+    [`projects/${ownSlug}/memory/MEMORY.md`, true],
+    [`projects/${ownSlug}--claude-worktrees-wt/session.jsonl`, true],
+    ['plans/plan.md', false],
+    ['rules/rule.md', false],
+    ['plugins/planted/run.sh', false],
+    ['skills/planted/SKILL.md', false],
+    ['CLAUDE.md', false],
+    ['settings.local.json', false],
+    ['claude-workspaces/server.json', false],
+    ['history.jsonl', true],
+    ['todos/todo.json', true],
+  ];
+  const writeUnder = (profile: string, rel: string) => {
+    const path = join(claudeDir, rel);
+    return spawnSync(
+      SANDBOX_EXEC,
+      ['-f', profile, '/bin/sh', '-c', `mkdir -p "$(dirname '${path}')" && echo x > '${path}'`],
+      { cwd: harborlight, encoding: 'utf8' },
+    ).status;
+  };
+
+  it('writes under ~/.claude exactly where the server says a lead can', () => {
+    const slugs = new Set([ownSlug]);
+    for (const [rel, writable] of underClaude) {
+      expect(leadWritesUnderClaude(rel, slugs), `server: ${rel}`).toBe(writable);
+      expect(writeUnder(profileFile, rel) === 0, `wall: ${rel}`).toBe(writable);
+    }
+  });
+
+  it("writes another project's memory, the plans, rules or plugins once its rule is removed (the mutation control)", () => {
+    const text = readFileSync(profileFile, 'utf8');
+    for (const [drop, rel] of [
+      [/\(subpath "[^"]*\/\.claude\/projects"\)/, `projects/${otherSlug}/memory/MEMORY.md`],
+      [/\(subpath "[^"]*\/\.claude\/plans"\)/, 'plans/plan.md'],
+      [/\(subpath "[^"]*\/\.claude\/rules"\)/, 'rules/rule.md'],
+      [/\(subpath "[^"]*\/\.claude\/plugins"\)/, 'plugins/planted/run.sh'],
+    ] as const) {
+      const mutated = join(root, 'mutated.sb');
+      writeFileSync(
+        mutated,
+        text
+          .split('\n')
+          .filter((l) => !drop.test(l))
+          .join('\n'),
+      );
+      expect(writeUnder(mutated, rel), String(drop)).toBe(0);
     }
   });
 });

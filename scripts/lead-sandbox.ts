@@ -121,6 +121,9 @@ function gitProxyFiles(lead: Lead, config: LeadSandboxConfig): Record<string, st
 
 function writeProfile(lead: Lead, config: LeadSandboxConfig, guard: string[]): string {
   mkdirSync(profileDir, { recursive: true, mode: 0o700 });
+  // Made outside the wall, which denies the lead every write to it but its
+  // own folders: one the lead made would be the lead's.
+  mkdirSync(join(machine.home, '.claude', 'projects'), { recursive: true, mode: 0o700 });
   const path = profilePath(lead);
   writeFileSync(path, buildProfile(lead, config, machine, guard), { mode: 0o600 });
   return path;

@@ -23,6 +23,7 @@
     "./counted-routes": "./src/counted-routes.ts",
     "./discovery-file": "./src/discovery-file.ts",
     "./safe-file": "./src/safe-file.ts",
+    "./lead-wall": "./src/lead-wall.ts",
     "./done-when": "./src/done-when.ts",
     "./done-when-refusal": "./src/done-when-refusal.ts",
     "./env-names": "./src/env-names.ts",

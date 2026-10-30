@@ -34,6 +34,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import {
+  isOwnSlug,
+  leadWritesUnderClaude,
+  transcriptSlug,
+} from '@claude-workspaces/core/lead-wall';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
 export const MAX_ROOTS = 32;
@@ -44,15 +49,17 @@ export function boardSocketRootsPath(dataDir: string): string {
 }
 
 /**
- * Folders a walled lead can write that are not roots, given its roots:
- * `~/.claude` (most of it is writable; the wall makes only the parts an
- * unsandboxed session obeys read-only), and the scratch folders Claude Code
- * gives a session launched in a root or a worktree of one
- * (`/private/tmp/claude-<uid>/<slug>`, the same rule as the wall's in
- * `scripts/lead-sandbox-lib.ts`). The server refuses bound reads, bound
- * writes and git under them for every caller: their bytes are the lead's,
- * and the server's own files there (the discovery file, the settings temp)
- * are read and written by name through `@claude-workspaces/core/safe-file`.
+ * Folders outside every root that a walled lead's wall still touches, given
+ * its roots. `'lead'`: the parts of `~/.claude` it may write
+ * (`leadWritesUnderClaude`, the list its profile is built from) and the
+ * scratch folders Claude Code gives a session launched in a root or a
+ * worktree of one (`/private/tmp/claude-<uid>/<slug>`). Their bytes are the
+ * lead's: bound reads, bound writes and git there are refused for every
+ * caller, and the server's own files there (the discovery file, the settings
+ * temp) are read and written by name through `@claude-workspaces/core/safe-file`.
+ * `'owner'`: the rest of `~/.claude`, which the lead cannot write. Docs bound
+ * there still read, through the guard's checked open, so what is opened is a
+ * regular file, opened without blocking, that lands nowhere the lead writes.
  */
 export interface LeadShadows {
   home: string;
@@ -75,14 +82,15 @@ export function defaultLeadShadows(): LeadShadows {
   return { home: homedir(), uid: process.getuid?.() ?? -1, realpath };
 }
 
-/** Claude Code's name for a folder's transcript and scratch folders. */
-export function transcriptSlug(path: string): string {
-  return path.replace(/[^a-zA-Z0-9]/g, '-');
-}
+export type ShadowZone = 'lead' | 'owner';
 
-/** Whether `path` is in a lead-writable folder that is not a root. */
-export function inLeadShadow(path: string, roots: readonly string[], s: LeadShadows): boolean {
-  if (roots.length === 0) return false;
+/** Which shadow `path` is in, or null for none (see `LeadShadows`). */
+export function leadShadowZone(
+  path: string,
+  roots: readonly string[],
+  s: LeadShadows,
+): ShadowZone | null {
+  if (roots.length === 0) return null;
   const inside = (p: string, dir: string) => p === dir || p.startsWith(`${dir}/`);
   const both = (p: string): string[] => {
     try {
@@ -91,26 +99,23 @@ export function inLeadShadow(path: string, roots: readonly string[], s: LeadShad
       return [p];
     }
   };
-  const claude = both(join(s.home, '.claude'));
-  if (claude.some((d) => inside(path, d))) return true;
-  const scratch = [`/private/tmp/claude-${s.uid}`, `/tmp/claude-${s.uid}`];
-  const at = scratch.find((d) => path.startsWith(`${d}/`));
-  if (!at) return false;
-  const first = (path.slice(at.length + 1).split('/')[0] ?? '').replace(
-    /--claude-worktrees-.*$/,
-    '',
-  );
   const homes = both(s.home);
+  const slugs = new Set<string>();
   for (const root of roots) {
-    const spellings = new Set([root]);
+    slugs.add(transcriptSlug(root));
     // A root is stored resolved; the lead may have been launched by its
     // home-spelled name, whose slug differs (`~` linked onto a data volume).
     for (const h of homes)
       for (const other of homes)
-        if (h !== other && inside(root, h)) spellings.add(other + root.slice(h.length));
-    for (const sp of spellings) if (first === transcriptSlug(sp)) return true;
+        if (h !== other && inside(root, h)) slugs.add(transcriptSlug(other + root.slice(h.length)));
   }
-  return false;
+  for (const claude of both(join(s.home, '.claude')))
+    if (inside(path, claude))
+      return leadWritesUnderClaude(path.slice(claude.length + 1), slugs) ? 'lead' : 'owner';
+  const scratch = [`/private/tmp/claude-${s.uid}`, `/tmp/claude-${s.uid}`];
+  const at = scratch.find((d) => path.startsWith(`${d}/`));
+  if (!at) return null;
+  return isOwnSlug(path.slice(at.length + 1).split('/')[0] ?? '', slugs) ? 'lead' : null;
 }
 
 export type RootsWrite = { ok: true; roots: string[] } | { ok: false; error: string };
@@ -136,13 +141,16 @@ export class BoardSocketRoots {
     private readonly shadows: LeadShadows = defaultLeadShadows(),
   ) {}
 
-  /** Whether `path` is in a folder a walled lead writes that is no root. */
-  private shadowed(path: string): boolean {
+  /** Which shadow `path` is in, by either spelling; `'lead'` wins. */
+  private zone(path: string): ShadowZone | null {
     const roots = this.allRoots();
-    if (roots.length === 0) return false;
-    if (inLeadShadow(path, roots, this.shadows)) return true;
+    if (roots.length === 0) return null;
+    const first = leadShadowZone(path, roots, this.shadows);
+    if (first === 'lead') return first;
     const spelled = this.spelled(path);
-    return spelled !== null && spelled !== path && inLeadShadow(spelled, roots, this.shadows);
+    const second =
+      spelled !== null && spelled !== path ? leadShadowZone(spelled, roots, this.shadows) : null;
+    return second ?? first;
   }
 
   /** Whether the file exists and cannot be read; loads it first. */
@@ -345,7 +353,7 @@ export class BoardSocketRoots {
    *  file unreadable, every path is. */
   covers(path: string): boolean {
     if (this.isBroken()) return true;
-    if (this.shadowed(path)) return true;
+    if (this.zone(path) !== null) return true;
     const over = this.rootsOver(path);
     return over === null || over.length > 0;
   }
@@ -371,7 +379,8 @@ export class BoardSocketRoots {
    */
   admits(path: string, now = Date.now()): boolean {
     if (this.isBroken()) return false;
-    if (this.shadowed(path)) return false;
+    const zone = this.zone(path);
+    if (zone !== null) return zone === 'owner';
     const p = this.spelled(path);
     if (p === null) return false;
     const over = this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
@@ -402,7 +411,11 @@ export class BoardSocketRoots {
    */
   landsInside(path: string, real: string): boolean {
     if (this.isBroken()) return false;
-    if (this.shadowed(path) || this.shadowed(real)) return false;
+    const zone = this.zone(path);
+    if (zone === 'lead' || this.zone(real) === 'lead') return false;
+    // The owner's part of `~/.claude` may link out (a CLAUDE.md kept in a
+    // dotfiles repo), but never into a folder the lead writes.
+    if (zone === 'owner') return this.rootsOver(real)?.length === 0;
     const over = this.rootsOver(path);
     if (over === null) return false;
     return over.every((root) => real === root || real.startsWith(`${root}/`));

@@ -308,13 +308,13 @@ describe('folders a walled lead writes that are no root', () => {
     new BoardSocketRoots(boardSocketRootsPath(join(root, name)), undefined, undefined, shadows);
   const slug = harborlight.replace(/[^a-zA-Z0-9]/g, '-');
 
-  it('refuses ~/.claude and the lead’s own scratch folders once a root is registered', () => {
+  it('refuses what the lead writes in ~/.claude, and its own scratch folders, once a root is registered', () => {
     const roots = make('shadow');
     // No walled lead on the machine: nothing is refused (control).
     expect(roots.covers(join(home, '.claude', 'claude-workspaces', 'x.md'))).toBe(false);
     expect(roots.set('w-harbor', [harborlight]).ok).toBe(true);
     for (const p of [
-      join(home, '.claude', 'claude-workspaces', 'x.md'),
+      join(home, '.claude', 'notes.md'),
       join(home, '.claude', 'projects', slug, 'memory', 'a.md'),
       `${scratch}/${slug}/mock.html`,
       `/tmp/claude-4242/${slug}--claude-worktrees-t-1/mock.html`,
