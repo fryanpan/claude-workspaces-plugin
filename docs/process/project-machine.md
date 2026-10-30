@@ -185,7 +185,9 @@ Mac signs in from (`scripts/lead-sandbox-token.ts`). It holds the token that
 `claude setup-token` prints, BASE64. `--claude-account <label>` reads
 `claude-lead-oauth-token.<label>` instead, for a lead that signs in as another
 of the owner's accounts. Without the item the deploy says `no lead agent runs`
-and the machine runs the board alone.
+and the machine runs the board alone. Like every secret, the sign-in is set
+once: to change the account or a token, `fly secrets unset
+CLAUDE_CODE_OAUTH_TOKEN --app cw-<project>` and run the deploy again.
 
 - **Its user.** The session runs as `lead`, with an environment the
   entrypoint builds from nothing: its sign-in, `CW_BASE_URL=http://127.0.0.1:8787`,

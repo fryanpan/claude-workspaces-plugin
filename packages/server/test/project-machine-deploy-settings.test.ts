@@ -301,6 +301,11 @@ describe('machine:deploy sets the project settings', () => {
     };
     await deployProject(labelled, false, undefined, opts);
     expect(readFileSync(imported, 'utf8')).toBe(`CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}\n`);
+    // A machine that already has a sign-in keeps it, and the run says so.
+    flySecrets([...requiredSecrets('quick', false, true), ...ALL]);
+    expect(await deployProject(labelled, true, undefined, opts)).toEqual([]);
+    expect(output.join('\n')).toContain('CLAUDE_CODE_OAUTH_TOKEN is already set');
+    flySecrets([...requiredSecrets('quick'), ...ALL]);
 
     rmSync(imported);
     keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN} riverbend`);

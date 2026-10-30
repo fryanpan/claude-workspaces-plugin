@@ -22,7 +22,8 @@
  *   the lead agent's Claude Code sign-in as CLAUDE_CODE_OAUTH_TOKEN, only
  *   when the Keychain holds `claude-lead-oauth-token` (or, with
  *   `--claude-account <label>`, `claude-lead-oauth-token.<label>`); without
- *   it no lead runs on the machine
+ *   it no lead runs on the machine. Set once, like every secret: another
+ *   account takes `fly secrets unset CLAUDE_CODE_OAUTH_TOKEN` first
  *   the owner's address, the public address and the Access settings
  *   (`settings.ts`), from the Keychain, `access.local.json` and Cloudflare;
  *   each one whose source is missing is skipped with a line saying why
@@ -44,6 +45,7 @@ import type { CloudflareApi } from './cloudflare.ts';
 import {
   type Action,
   type BucketCredential,
+  LEAD_TOKEN_ENTRY,
   LEAD_TOKEN_SECRET,
   ORG_KEY_SECRET,
   type ObservedMachine,
@@ -369,6 +371,10 @@ export async function deployProject(
     }
   }
   for (const line of found.skipped) console.log(`[deploy] not set: ${line}`);
+  if (cfg.keychain.leadToken !== LEAD_TOKEN_ENTRY && observed.secrets.has(LEAD_TOKEN_SECRET))
+    console.log(
+      `[deploy] ${LEAD_TOKEN_SECRET} is already set, so ${cfg.keychain.leadToken} is not read; fly secrets unset it first to change the account`,
+    );
   if (!observed.keychain.has(cfg.keychain.leadToken) && !observed.secrets.has(LEAD_TOKEN_SECRET))
     console.log(
       `[deploy] not set: ${LEAD_TOKEN_SECRET}: the Keychain has no ${cfg.keychain.leadToken}, so no lead agent runs on the machine`,
