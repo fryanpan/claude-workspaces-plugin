@@ -491,16 +491,23 @@ export async function handleDocCreateListRoutes(
     const bySet = setId ? byWorkspace.filter((m) => attachmentIdOf(m) === setId) : byWorkspace;
     const docs = bySet.filter((m) => matchesDocFilters(m, q));
     const decorate = (m: DocMeta) => withReviewUrl(m, homeForDocIndexed(boardIndex, m));
+    // Only a board's lead reaches this as a visitor (`middleware/lead-scope.ts`),
+    // and it gets the meta a visitor gets: no paths on this machine.
+    const { visitor } = rq;
+    const shown = (m: DocMeta): unknown => (visitor ? rq.metaFor(decorate(m)) : decorate(m));
     if (q.limit === undefined) {
-      return j(200, { docs: docs.map(decorate) });
+      return j(200, { docs: docs.map(shown) });
     }
-    const project = q.full
-      ? decorate
-      : (m: DocMeta) =>
-          compactDocRow(decorate(m), {
+    const project: (m: DocMeta) => unknown = q.full
+      ? shown
+      : (m: DocMeta) => {
+          const row = compactDocRow(decorate(m), {
             boardId: homeForDocIndexed(boardIndex, m),
             threads: docStore.threadCounts(m.docId),
           });
+          if (visitor) row.sourceUrl = undefined;
+          return row;
+        };
     return j(200, {
       ...pageDocs(docs, { limit: q.limit, cursor: q.cursor }, project),
       full: q.full,

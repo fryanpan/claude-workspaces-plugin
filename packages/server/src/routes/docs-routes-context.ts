@@ -116,6 +116,9 @@ export function parseSuggestionAuthor(
 export interface DocRoutesContext {
   /** Doc store — every route here is an operation on one. */
   docStore: DocStore;
+  /** Whether `path` is under one of `boardId`'s registered roots
+   *  (`board-socket-roots.ts`), for a lead's rewrite of a bound doc. */
+  leadWritable: (boardId: string, path: string) => boolean;
   /** The board task store — doc↔board membership, and the rows a doc carries. */
   taskStore: TaskStore;
   /** The ydoc projection of the store, refreshed after writes that emit no
@@ -306,6 +309,9 @@ export interface DocRouteRequest {
    *  or a board's own socket did (`tokenId` is then `BOARD_SOCKET_TOKEN_ID`),
    *  or null/absent when neither did. */
   boardAgent?: { agentId: string; boardId: string; tokenId?: string } | null;
+  /** The board this request is that board's lead on (the admission gate's
+   *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
+  leadBoard?: string | null;
   /** The identity Access or the session cookie proved, or null — never a
    *  body's claim or an agent token. Read with `requestOriginFor` for owner
    *  proof (`share/owner-proof.ts`). Optional so a caller that does not pass

@@ -2745,6 +2745,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * scope. Built once — every collaborator in it is long-lived.
    */
   const docRoutesCtx: DocRoutesContext = {
+    leadWritable: (boardId, path) => {
+      const c = boardSocketRoots.containedOf(path);
+      return c !== null && boardSocketRoots.rootFor(boardId, c.root) !== null;
+    },
     boardIsShared,
     docStore,
     taskStore,
@@ -3052,6 +3056,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
     chatAudit,
     shareLinks,
     accessProposals,

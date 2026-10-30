@@ -41,6 +41,9 @@ import type { ParallelismCapView } from './task-routes-context.ts';
 export interface WorkspaceRoutesContext {
   /** The board store — boards, their goals, their tasks and their agents. */
   taskStore: TaskStore;
+  /** The registered root `folderPath` resolves to, when it is one of the
+   *  board's (`board-socket-roots.ts`); else null. */
+  leadBindRoot: (boardId: string, folderPath: string) => string | null;
   /** The ydoc projection of the store, refreshed by hand after the writes
    *  that emit no store event (attach, unfile, archive-in-place). */
   taskProjection: TaskProjection;
@@ -252,6 +255,9 @@ export interface WorkspaceRouteRequest {
   /** What this request proved about a person, for the spoken answer door
    *  (`review-items/answer-proof.ts`). Undefined proves nobody. */
   answerProof?: AnswerProofInputs;
+  /** The board this request is that board's lead on (the admission gate's
+   *  `leadBoard`, `middleware/lead-scope.ts`), or null/absent. */
+  leadBoard?: string | null;
 }
 
 /**

@@ -24,6 +24,12 @@ const allows = (path: string, method: string) =>
 
 /** Each new path, on Harborlight and the same path on Riverbend. */
 const CASES: Array<[string, string, string]> = [
+  ['GET', `/workspaces/${HARBORLIGHT}/docs`, `/workspaces/${RIVERBEND}/docs`],
+  [
+    'POST',
+    `/workspaces/${HARBORLIGHT}/docs/harbor-plan/content`,
+    `/workspaces/${RIVERBEND}/docs/river-plan/content`,
+  ],
   [
     'POST',
     `/workspaces/${HARBORLIGHT}/agents/Harborlight%20Lead/notes`,
@@ -53,11 +59,14 @@ describe('leadScopeAllows', () => {
     expect(allows(`/workspaces/${HARBORLIGHT}/tasks/t-river/notes`, 'POST')).toBe(false);
   });
 
-  it('refuses the tree tools: the doc list, a rewrite and a folder bind', () => {
-    expect(allows(`/workspaces/${HARBORLIGHT}/docs`, 'GET')).toBe(false);
-    expect(allows(`/workspaces/${HARBORLIGHT}/docs/harbor-plan/content`, 'POST')).toBe(false);
-    expect(allows('/workspaces', 'POST')).toBe(false);
+  it('reaches the folder bind path, which names no board; the route holds its body', () => {
+    expect(allows('/workspaces', 'POST')).toBe(true);
     expect(allows('/workspaces', 'GET')).toBe(false);
+  });
+
+  it('refuses a rewrite of another board’s doc spelled under its own board', () => {
+    expect(allows(`/workspaces/${HARBORLIGHT}/docs/river-plan/content`, 'POST')).toBe(false);
+    expect(allows(`/workspaces/${HARBORLIGHT}/docs/harbor-plan/content`, 'GET')).toBe(false);
   });
 
   it('names its verbs, and nothing else', () => {
