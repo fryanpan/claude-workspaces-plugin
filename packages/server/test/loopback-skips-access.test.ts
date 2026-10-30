@@ -50,11 +50,12 @@ describe('whole-server Access mode with loopbackSkipsAccess', () => {
     expect(r.status).toBe(200);
   });
 
-  it('still refuses a request that came through the Cloudflare edge', async () => {
+  it('never classifies a request through the Cloudflare edge as local (the cf-ray veto)', async () => {
     const r = await fetch(`http://127.0.0.1:${on.handle.port}/workspaces/${on.ws}?format=json`, {
       headers: { 'cf-ray': '8f00000000000000-SJC' },
     });
-    expect(r.status).not.toBe(200);
+    expect(r.status).toBe(403);
+    expect(((await r.json()) as { error: string }).error).toBe('unknown_host');
   });
 
   it('is off by default: the same loopback caller needs a token', async () => {

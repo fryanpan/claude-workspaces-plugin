@@ -268,6 +268,11 @@ export function resolveServerConfig(opts: {
    */
   const boardSocketDir = resolveBoardSocketDir(env, arg, undefined, requestedPort);
 
+  /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
+  const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
+    (env.CW_LOOPBACK_SKIPS_ACCESS ?? '').trim().toLowerCase(),
+  );
+
   /**
    * ACCESS-ONLY browser hosts. Default ON (Bryan, 2026-09-02: *"Let's make
    * everyone go through cloudflare access. No internal hole."*).
@@ -287,10 +292,6 @@ export function resolveServerConfig(opts: {
    * CLOSED, and an unset variable is the secure default rather than the old
    * behaviour.
    */
-  /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
-  const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
-    (env.CW_LOOPBACK_SKIPS_ACCESS ?? '').trim().toLowerCase(),
-  );
   const accessOnlyBrowserHosts = !['0', 'false', 'no', 'off'].includes(
     (env.CW_ACCESS_ONLY_BROWSER_HOSTS ?? '').trim().toLowerCase(),
   );
