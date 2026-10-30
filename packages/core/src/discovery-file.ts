@@ -10,7 +10,7 @@
  * a throwaway HOME rather than by spawning servers.
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type DiscoveryEntry,
@@ -18,6 +18,7 @@ import {
   shouldReleaseDiscovery,
 } from './discovery-owner.ts';
 import { DISCOVERY_FILE, discoveryDir, resolveDiscoveryFile } from './machine-paths.ts';
+import { readSmallFile, replaceFile } from './safe-file.ts';
 
 export type { DiscoveryEntry };
 
@@ -37,12 +38,17 @@ export function pidIsAlive(pid: number): boolean {
  *
  * A corrupt file reads as null deliberately: it names no owner, so treating
  * it as one would wedge the slot shut until somebody deleted it by hand.
+ * So does a FIFO, a link or an oversized file (`safe-file.ts`): a walled
+ * lead can write `~/.claude`, and a plain read of a FIFO here once held
+ * prod's main thread.
  */
 export function readDiscovery(home: string): DiscoveryEntry | null {
   const path = resolveDiscoveryFile(home, existsSync);
   if (!path) return null;
+  const text = readSmallFile(path);
+  if (text === null) return null;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    const parsed = JSON.parse(text);
     if (typeof parsed?.port !== 'number' || typeof parsed?.pid !== 'number') return null;
     return parsed as DiscoveryEntry;
   } catch {
@@ -67,7 +73,9 @@ export function publishDiscovery(args: {
   if (!shouldClaimDiscovery({ existing, ourPort: port, isAlive })) return 'declined';
   const dir = discoveryDir(home);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(
+  // Through a temp file and a rename, so a link left at the name is
+  // replaced rather than written through.
+  replaceFile(
     join(dir, DISCOVERY_FILE),
     `${JSON.stringify({ port, pid, startedAt: new Date().toISOString() }, null, 2)}\n`,
   );

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // packages/mcp/src/relay/main.ts
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 
 // packages/core/src/env-names.ts
@@ -42,7 +42,54 @@ function resolveDiscoveryFile(home, exists) {
   return discoveryCandidates(home).find(exists);
 }
 
+// packages/core/src/safe-file.ts
+import {
+  constants,
+  closeSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  renameSync,
+  unlinkSync,
+  writeSync
+} from "node:fs";
+var SMALL_FILE_MAX = 64 * 1024;
+function readSmallFile(path, max = SMALL_FILE_MAX) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > max)
+      return null;
+    const buf = Buffer.alloc(max + 1);
+    let at = 0;
+    for (;; ) {
+      const n = readSync(fd, buf, at, buf.length - at, at);
+      if (n === 0)
+        break;
+      at += n;
+      if (at > max)
+        return null;
+    }
+    return buf.subarray(0, at).toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+var TEMP_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+
 // packages/mcp/src/http-client.ts
+function readDiscoveryText(path) {
+  return readSmallFile(path) ?? "";
+}
 function resolveBaseUrl(deps) {
   const override = readRenamedEnv(deps.env, "CW_BASE_URL");
   if (override)
@@ -566,7 +613,7 @@ var relay = createRelay({
   cwd: process.cwd(),
   homedir,
   existsSync,
-  readFileSync,
+  readFileSync: readDiscoveryText,
   fetch: boardSocket ? unixSocketFetch(boardSocket) : (url, init) => fetch(url, init),
   ...boardSocket ? { boardSocket } : {},
   write: (line) => {

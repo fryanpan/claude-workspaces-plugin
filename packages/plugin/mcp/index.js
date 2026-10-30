@@ -6518,7 +6518,7 @@ var require_dist = __commonJS((exports, module) => {
 
 // packages/mcp/src/mcp.ts
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 
 // node_modules/.bun/zod@4.3.6/node_modules/zod/v4/core/core.js
@@ -15529,7 +15529,54 @@ function resolveDiscoveryFile(home, exists) {
   return discoveryCandidates(home).find(exists);
 }
 
+// packages/core/src/safe-file.ts
+import {
+  constants,
+  closeSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  renameSync,
+  unlinkSync,
+  writeSync
+} from "node:fs";
+var SMALL_FILE_MAX = 64 * 1024;
+function readSmallFile(path, max = SMALL_FILE_MAX) {
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > max)
+      return null;
+    const buf = Buffer.alloc(max + 1);
+    let at = 0;
+    for (;; ) {
+      const n = readSync(fd, buf, at, buf.length - at, at);
+      if (n === 0)
+        break;
+      at += n;
+      if (at > max)
+        return null;
+    }
+    return buf.subarray(0, at).toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+var TEMP_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+
 // packages/mcp/src/http-client.ts
+function readDiscoveryText(path) {
+  return readSmallFile(path) ?? "";
+}
 function resolveBaseUrl(deps) {
   const override = readRenamedEnv(deps.env, "CW_BASE_URL");
   if (override)
@@ -21728,9 +21775,14 @@ function createConnectorSession(deps) {
 }
 
 // packages/mcp/src/mcp.ts
-var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
+var resolveBaseUrl2 = () => resolveBaseUrl({
+  env: process.env,
+  homedir,
+  existsSync,
+  readFileSync: readDiscoveryText
+});
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.335";
+var PLUGIN_VERSION = "0.1.337";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

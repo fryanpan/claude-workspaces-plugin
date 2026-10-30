@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -9,7 +9,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { resolveAgentAuthor } from './author.ts';
 import { CONNECTOR_INSTRUCTIONS } from './connector-instructions.ts';
 import { createConnectorSession } from './connector-session.ts';
-import { resolveBaseUrl as baseUrlFrom } from './http-client.ts';
+import { resolveBaseUrl as baseUrlFrom, readDiscoveryText } from './http-client.ts';
 
 /**
  * Thin MCP server that proxies tool calls to a running feedback server
@@ -36,7 +36,13 @@ import { resolveBaseUrl as baseUrlFrom } from './http-client.ts';
  */
 
 /** Resolved per request, not frozen at module load — see http-client.ts. */
-const resolveBaseUrl = () => baseUrlFrom({ env: process.env, homedir, existsSync, readFileSync });
+const resolveBaseUrl = () =>
+  baseUrlFrom({
+    env: process.env,
+    homedir,
+    existsSync,
+    readFileSync: readDiscoveryText,
+  });
 
 const AUTHOR = resolveAgentAuthor(process.env);
 /**
@@ -50,7 +56,7 @@ const AUTHOR = resolveAgentAuthor(process.env);
  * bundle than the deploy source would install. A second literal would be a
  * fourth version site, and this file's history is that version sites drift.
  */
-const PLUGIN_VERSION = '0.1.335';
+const PLUGIN_VERSION = '0.1.337';
 
 /**
  * One nonce per PROCESS, minted at module load and sent on every attach.

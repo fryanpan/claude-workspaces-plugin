@@ -5,8 +5,9 @@
  * packages/plugin/bin/claude-workspaces-mcp.sh for when it runs instead of
  * the compiled relay.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { readDiscoveryText } from '../http-client.ts';
 import { createRelay } from './relay-core.ts';
 import { unixSocketFetch } from './unix-fetch.ts';
 
@@ -18,7 +19,7 @@ const relay = createRelay({
   cwd: process.cwd(),
   homedir,
   existsSync,
-  readFileSync,
+  readFileSync: readDiscoveryText,
   fetch: boardSocket ? unixSocketFetch(boardSocket) : (url, init) => fetch(url, init),
   ...(boardSocket ? { boardSocket } : {}),
   write: (line) => {

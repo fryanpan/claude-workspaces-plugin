@@ -101,6 +101,18 @@ the list stays whole without anyone remembering to extend it. The scrub floors
 either side of it — key-targeted, then id-shaped — stay in
 `core/src/trace-privacy.ts`, which re-exports the function.
 
+**A file somebody else can write is read and replaced through one module.**
+A walled lead runs as the owner's user and can write parts of `~/.claude` and
+its own projects, so a file there may be a FIFO (a plain read blocks forever)
+or a link (a plain write lands at its target). `core/src/safe-file.ts`, a new
+top-level core module and, with `discovery-file.ts`, the exception to core's
+no-I/O rule, holds the two moves: a non-blocking, no-follow read of a small
+regular file, and a replace through a random-named `O_EXCL` temp file whose
+inode is checked before the rename. The server, the plugin's hooks and the MCP
+children all read the discovery file through it. Inside a walled lead's roots
+the server's own reads go through `PathGuards` (`server/src/bound-path-guard.ts`)
+instead, which also refuses `~/.claude` and the lead's scratch folders.
+
 **Two callers wanting the same thing share one read.** The board shell mounts
 `<meeting-banner>` in each pane, so the calendar read is
 `workspaces-app/src/calendar-events-source.ts` rather than the element: it
