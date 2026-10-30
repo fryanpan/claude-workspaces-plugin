@@ -17,6 +17,13 @@
  * (`scripts/lead-sandbox-wall.ts`), and a path through `node_modules` is
  * refused here.
  *
+ * A root stays covered after it leaves its board's list (`walled`): what a
+ * lead planted in a project — git settings that run a program, links, FIFOs
+ * — stays when the lead is relaunched with other projects, its board is
+ * retired, or the project moves to another lead. Nothing here removes an
+ * entry from `walled`; clearing one is an owner's edit of the file, after
+ * checking the project.
+ *
  * `scripts/lead-sandbox.ts` writes the list when it launches a walled lead,
  * from the projects that lead's profile already opens to it, through
  * `PUT /api/board-sockets/<board>/roots` (`routes/board-socket-roots.ts`),
@@ -25,6 +32,7 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
@@ -35,11 +43,72 @@ export function boardSocketRootsPath(dataDir: string): string {
   return join(dataDir, 'board-socket-roots.json');
 }
 
+/**
+ * Folders a walled lead can write that are not roots, given its roots:
+ * `~/.claude` (most of it is writable; the wall makes only the parts an
+ * unsandboxed session obeys read-only), and the scratch folders Claude Code
+ * gives a session launched in a root or a worktree of one
+ * (`/private/tmp/claude-<uid>/<slug>`, the same rule as the wall's in
+ * `scripts/lead-sandbox-lib.ts`). The server refuses bound reads, bound
+ * writes and git under them for every caller: their bytes are the lead's,
+ * and the server's own files there (the discovery file, the settings temp)
+ * are read and written by name through `@claude-workspaces/core/safe-file`.
+ */
+export interface LeadShadows {
+  home: string;
+  uid: number;
+  realpath: (p: string) => string;
+}
+
+export function defaultLeadShadows(): LeadShadows {
+  return { home: homedir(), uid: process.getuid?.() ?? -1, realpath: realpathSync.native };
+}
+
+/** Claude Code's name for a folder's transcript and scratch folders. */
+export function transcriptSlug(path: string): string {
+  return path.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+/** Whether `path` is in a lead-writable folder that is not a root. */
+export function inLeadShadow(path: string, roots: readonly string[], s: LeadShadows): boolean {
+  if (roots.length === 0) return false;
+  const inside = (p: string, dir: string) => p === dir || p.startsWith(`${dir}/`);
+  const both = (p: string): string[] => {
+    try {
+      return [p, s.realpath(p)];
+    } catch {
+      return [p];
+    }
+  };
+  const claude = both(join(s.home, '.claude'));
+  if (claude.some((d) => inside(path, d))) return true;
+  const scratch = [`/private/tmp/claude-${s.uid}`, `/tmp/claude-${s.uid}`];
+  const at = scratch.find((d) => path.startsWith(`${d}/`));
+  if (!at) return false;
+  const first = (path.slice(at.length + 1).split('/')[0] ?? '').replace(
+    /--claude-worktrees-.*$/,
+    '',
+  );
+  const homes = both(s.home);
+  for (const root of roots) {
+    const spellings = new Set([root]);
+    // A root is stored resolved; the lead may have been launched by its
+    // home-spelled name, whose slug differs (`~` linked onto a data volume).
+    for (const h of homes)
+      for (const other of homes)
+        if (h !== other && inside(root, h)) spellings.add(other + root.slice(h.length));
+    for (const sp of spellings) if (first === transcriptSlug(sp)) return true;
+  }
+  return false;
+}
+
 export type RootsWrite = { ok: true; roots: string[] } | { ok: false; error: string };
 
 export class BoardSocketRoots {
   private boards: Record<string, string[]> | null = null;
-  /** Every board's roots together, kept beside `boards`. */
+  /** Every folder ever registered for any board: see the header. */
+  private walled: string[] = [];
+  /** Every board's roots, and every folder once walled, kept beside `boards`. */
   private flat: string[] = [];
   /** Set when the file exists and cannot be read: see `load`. */
   private broken = false;
@@ -53,7 +122,17 @@ export class BoardSocketRoots {
     private readonly path: string,
     private readonly realpath: (p: string) => string = realpathSync.native,
     private readonly now: () => number = Date.now,
+    private readonly shadows: LeadShadows = defaultLeadShadows(),
   ) {}
+
+  /** Whether `path` is in a folder a walled lead writes that is no root. */
+  private shadowed(path: string): boolean {
+    const roots = this.allRoots();
+    if (roots.length === 0) return false;
+    if (inLeadShadow(path, roots, this.shadows)) return true;
+    const spelled = this.spelled(path);
+    return spelled !== null && spelled !== path && inLeadShadow(spelled, roots, this.shadows);
+  }
 
   /** Whether the file exists and cannot be read; loads it first. */
   private isBroken(): boolean {
@@ -85,9 +164,15 @@ export class BoardSocketRoots {
     }
     if (this.boards) return this.boards;
     const boards: Record<string, string[]> = Object.create(null);
+    const walled: string[] = [];
     try {
       if (existsSync(this.path)) {
-        const listed: unknown = JSON.parse(readFileSync(this.path, 'utf8'))?.boards;
+        const file: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
+        const listed: unknown = (file as { boards?: unknown } | null)?.boards;
+        const once: unknown = (file as { walled?: unknown } | null)?.walled ?? [];
+        if (!Array.isArray(once) || !once.every((r) => typeof r === 'string' && isAbsolute(r)))
+          throw new Error('walled: not a list of absolute paths');
+        walled.push(...(once as string[]));
         // Any shape but the one `save` writes is unreadable, not empty: a
         // list read as "no roots" would leave a lead's projects unguarded.
         if (!listed || typeof listed !== 'object' || Array.isArray(listed))
@@ -112,7 +197,8 @@ export class BoardSocketRoots {
       }
     }
     this.boards = boards;
-    this.flat = Object.values(boards).flat();
+    this.walled = unique([...walled, ...Object.values(boards).flat()]);
+    this.flat = this.walled;
     this.spellings.clear();
     return boards;
   }
@@ -121,7 +207,7 @@ export class BoardSocketRoots {
     return [...(this.load()[boardId] ?? [])];
   }
 
-  /** Every board's roots together. */
+  /** Every board's roots together, and every folder once walled. */
   private allRoots(): string[] {
     this.load();
     return this.flat;
@@ -156,7 +242,8 @@ export class BoardSocketRoots {
     const boards = this.load();
     if (this.broken) return { ok: false, error: 'the roots file cannot be read' };
     boards[boardId] = resolved;
-    this.flat = Object.values(boards).flat();
+    this.walled = unique([...this.walled, ...resolved]);
+    this.flat = this.walled;
     this.verdicts.clear();
     this.spellings.clear();
     this.save();
@@ -247,6 +334,7 @@ export class BoardSocketRoots {
    *  file unreadable, every path is. */
   covers(path: string): boolean {
     if (this.isBroken()) return true;
+    if (this.shadowed(path)) return true;
     const over = this.rootsOver(path);
     return over === null || over.length > 0;
   }
@@ -272,6 +360,7 @@ export class BoardSocketRoots {
    */
   admits(path: string, now = Date.now()): boolean {
     if (this.isBroken()) return false;
+    if (this.shadowed(path)) return false;
     const p = this.spelled(path);
     if (p === null) return false;
     const over = this.allRoots().filter((root) => p === root || p.startsWith(`${root}/`));
@@ -302,6 +391,7 @@ export class BoardSocketRoots {
    */
   landsInside(path: string, real: string): boolean {
     if (this.isBroken()) return false;
+    if (this.shadowed(path) || this.shadowed(real)) return false;
     const over = this.rootsOver(path);
     if (over === null) return false;
     return over.every((root) => real === root || real.startsWith(`${root}/`));
@@ -310,8 +400,15 @@ export class BoardSocketRoots {
   private save(): void {
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ boards: this.load() }, null, 2), { mode: 0o600 });
+    const boards = this.load();
+    writeFileSync(tmp, JSON.stringify({ boards, walled: this.walled }, null, 2), {
+      mode: 0o600,
+    });
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
   }
+}
+
+function unique(paths: string[]): string[] {
+  return [...new Set(paths)];
 }

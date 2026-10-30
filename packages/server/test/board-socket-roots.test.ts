@@ -270,3 +270,61 @@ describe('BoardSocketRoots', () => {
     expect(missing.covers(anywhere)).toBe(false);
   });
 });
+
+describe('a project a lead has left', () => {
+  // Everything a lead planted in a project (git settings that run a program,
+  // links, FIFOs) stays when the project leaves its list: a relaunch with
+  // other projects, a retired board, a move to another lead. So a folder
+  // once walled stays covered, and no git runs there, after it leaves.
+  it('stays covered after its board’s list drops it, across a restart', () => {
+    const path = boardSocketRootsPath(join(root, 'sticky'));
+    const roots = new BoardSocketRoots(path);
+    expect(roots.set('w-harbor', [harborlight]).ok).toBe(true);
+    expect(roots.set('w-harbor', [riverbend]).ok).toBe(true);
+    expect(roots.rootsOf('w-harbor')).toEqual([riverbend]);
+    expect(roots.covers(join(harborlight, 'docs', 'plan.md'))).toBe(true);
+    expect(roots.holdsRoot(dirname(harborlight))).toBe(true);
+    const reread = new BoardSocketRoots(path);
+    expect(reread.covers(join(harborlight, 'docs', 'plan.md'))).toBe(true);
+    expect(reread.covers(join(riverbend, 'x.md'))).toBe(true);
+  });
+
+  it('stays covered when another board takes the list over', () => {
+    const roots = new BoardSocketRoots(boardSocketRootsPath(join(root, 'sticky-2')));
+    expect(roots.set('w-harbor', [harborlight]).ok).toBe(true);
+    expect(roots.set('w-harbor', []).ok).toBe(true);
+    expect(roots.covers(join(harborlight, 'docs'))).toBe(true);
+    // A folder never walled is still not covered (control).
+    expect(roots.covers(join(root, 'elsewhere', 'x.md'))).toBe(false);
+  });
+});
+
+describe('folders a walled lead writes that are no root', () => {
+  const home = join(root, 'home');
+  const scratch = '/private/tmp/claude-4242';
+  mkdirSync(join(home, '.claude', 'claude-workspaces'), { recursive: true });
+  const shadows = { home, uid: 4242, realpath: (p: string) => realpathSync.native(p) };
+  const make = (name: string) =>
+    new BoardSocketRoots(boardSocketRootsPath(join(root, name)), undefined, undefined, shadows);
+  const slug = harborlight.replace(/[^a-zA-Z0-9]/g, '-');
+
+  it('refuses ~/.claude and the lead’s own scratch folders once a root is registered', () => {
+    const roots = make('shadow');
+    // No walled lead on the machine: nothing is refused (control).
+    expect(roots.covers(join(home, '.claude', 'claude-workspaces', 'x.md'))).toBe(false);
+    expect(roots.set('w-harbor', [harborlight]).ok).toBe(true);
+    for (const p of [
+      join(home, '.claude', 'claude-workspaces', 'x.md'),
+      join(home, '.claude', 'projects', slug, 'memory', 'a.md'),
+      `${scratch}/${slug}/mock.html`,
+      `/tmp/claude-4242/${slug}--claude-worktrees-t-1/mock.html`,
+    ]) {
+      expect(roots.covers(p), p).toBe(true);
+      expect(roots.admits(p), p).toBe(false);
+    }
+    // Another project's scratch folder is not the lead's (control).
+    const other = `${scratch}/${riverbend.replace(/[^a-zA-Z0-9]/g, '-')}/mock.html`;
+    expect(roots.covers(other)).toBe(false);
+    expect(roots.admits(other)).toBe(true);
+  });
+});
