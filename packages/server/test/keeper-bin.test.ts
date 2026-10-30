@@ -106,6 +106,20 @@ describe('keeper-bin', () => {
     expect(r.out).toMatch(/^[0-9]+\n$/);
   });
 
+  it('check names the credentials and apps it holds, never a value', () => {
+    const env = { CW_KEEPER_DIR: storeDir('held', 0o700) };
+    const value = `test-fly-${crypto.randomUUID()}`;
+    if (keeper(['import', 'fly-org-token'], env, value).status !== 0) return; // guard refused, as above
+    keeper(['adopt', 'cw-harborlight'], env);
+    const r = keeper(['check'], env);
+    expect(r.out).toContain('credentials: fly-org-token\n');
+    expect(r.out).toContain('apps: cw-harborlight\n');
+    expect(r.out.trim().split('\n').at(-1)).toMatch(/^store: ok/);
+    expect(r.out).not.toContain(value);
+    const empty = keeper(['check'], { CW_KEEPER_DIR: storeDir('held-none', 0o700) });
+    expect(empty.out).toContain('credentials: none\napps: none\n');
+  });
+
   it('check names a store others can open', () => {
     const r = keeper(['check'], { CW_KEEPER_DIR: storeDir('loose', 0o755) });
     expect(r.status).toBe(1);

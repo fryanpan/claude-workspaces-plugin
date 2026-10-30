@@ -122,6 +122,10 @@ if [ -n "${ACCESS_TUNNEL_HOSTS}" ] && { [ -z "${ACCESS_TEAM_DOMAIN}" ] || [ -z "
     exit 1
 fi
 
+# The keeper's address (docs/process/keeper.md). Same contract as the rest:
+# baked in, empty by default, reverted by a reinstall without it.
+KEEPER_URL="${CW_KEEPER_URL:-}"
+
 # The operator's OWN public hostnames: through the tunnel, behind an Access
 # application, and then the whole product — not the share surface. A third
 # list, separate from TRUSTED_HOSTS and from the collaboration list above,
@@ -170,6 +174,7 @@ echo "[install] owner:    $([ -n "${OWNER_EMAIL}" ] && echo 'email set' || echo 
 echo "[install] sharing:  ${SHARE_PUBLIC_HOSTNAME:-<link mode off>}"
 echo "[install] collab:   ${ACCESS_TUNNEL_HOSTS:-<off>}"
 echo "[install] operator: ${PROXIED_TRUSTED_HOSTS:-<off>}"
+echo "[install] keeper:   ${KEEPER_URL:-<off>}"
 
 DOMAIN="gui/$(id -u)"
 
@@ -237,6 +242,7 @@ sed \
     -e "s|{{PROXIED_TRUSTED_EMAILS}}|${PROXIED_TRUSTED_EMAILS}|g" \
     -e "s|{{ACCESS_TEAM_DOMAIN}}|${ACCESS_TEAM_DOMAIN}|g" \
     -e "s|{{ACCESS_AUD}}|${ACCESS_AUD}|g" \
+    -e "s|{{KEEPER_URL}}|${KEEPER_URL}|g" \
     "${TEMPLATE}" > "${PLIST_DEST}"
 
 if ! bootstrap_with_retry "${DOMAIN}" "${PLIST_DEST}"; then
