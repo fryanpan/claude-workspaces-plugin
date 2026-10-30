@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The project machine's one process tree: the board server on loopback, the
 # Cloudflare Tunnel it is reached through, a loopback health check, and the
-# backup loop. If any of them exits, everything stops and the machine exits,
+# backup loop. The lead agent's user and folder are set up here too. If any of them exits, everything stops and the machine exits,
 # and Fly's restart policy starts it again.
 #
 # This shell stays root and supervises; each child runs as its own user and
@@ -12,6 +12,8 @@
 #   cwtunnel  cloudflared, with the tunnel token and nothing else.
 #   cwbackup  the backup upload, with the bucket credential and nothing else
 #             (backup-once.sh).
+#   lead      the lead agent's Claude Code session (lead.sh), with its own
+#             sign-in and the board's loopback address, and nothing else.
 #
 # A user's processes can read each other's environment (/proc/<pid>/environ),
 # so a secret kept from the server has to live under another uid, not merely
@@ -26,8 +28,12 @@ export CW_DATA_DIR="${CW_DATA_DIR:-$DATA_ROOT/cw}"
 PORT=8787
 APP=/app
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=run-as.sh
+. "$HERE/run-as.sh"
 
 TRANSCRIPTS="${BACKUP_TRANSCRIPTS_DIR:-$DATA_ROOT/claude-projects}"
+# The lead's working folder and transcripts, on the volume.
+LEAD_ROOT="$DATA_ROOT/lead"
 
 if [ "$(id -u)" != 0 ]; then
   echo "[machine] entrypoint.sh must start as root, to run each child as its own user" >&2
@@ -42,23 +48,25 @@ fi
 # A volume from before this rule had /data owned by cw; this takes it back.
 chown root:root "$DATA_ROOT"
 chmod 0755 "$DATA_ROOT"
-for d in "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude; do
+for d in "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT"; do
   if [ -L "$d" ]; then
     echo "[machine] $d is a symlink; refusing to start" >&2
     exit 2
   fi
 done
-mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
+mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT"
 # Claude Code writes session transcripts to ~/.claude/projects. The home
 # directory is the image's and does not survive a restart, so that one
 # folder is a link onto the volume, where backup.ts snapshots it. The
 # rest of ~/.claude (credentials among it) stays off the volume and out
 # of every backup.
-ln -sfn "$TRANSCRIPTS" /home/cw/.claude/projects
-chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" /home/cw/.claude
-
-# shellcheck source=run-as.sh
-. "$HERE/run-as.sh"
+ln -sfn "$TRANSCRIPTS" "$HOMES/cw/.claude/projects"
+chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude"
+chown -h lead:lead "$LEAD_ROOT"
+# Each user's folders are its own: the lead runs as another user so that it
+# cannot read the server's data dir, which holds the board's tokens and keys,
+# except through the server.
+chmod 0700 "$CW_DATA_DIR" "$TRANSCRIPTS" "$LEAD_ROOT"
 
 log() { echo "[machine] $(date -u +%FT%TZ) $*"; }
 

@@ -3,8 +3,13 @@
 # subshell: `( drop_secrets; run_as cw … ) &`.
 
 # The secrets the board server must never hold. Its own Claude key and its
-# Access settings are not here: those are the server's to use.
-MACHINE_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN TUNNEL_TOKEN BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY)
+# Access settings are not here: those are the server's to use. The lead's
+# Claude Code sign-in is the lead's alone (lead.sh).
+MACHINE_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN TUNNEL_TOKEN BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY CLAUDE_CODE_OAUTH_TOKEN)
+
+# Where the users' homes are. Overridable only so a test can run this off a
+# machine.
+HOMES="${CW_MACHINE_HOME_ROOT:-/home}"
 
 drop_secrets() {
   local s
@@ -25,6 +30,6 @@ only_env() {
 run_as() {
   local user=$1
   shift
-  export HOME="/home/$user" USER="$user" LOGNAME="$user"
+  export HOME="$HOMES/$user" USER="$user" LOGNAME="$user"
   exec setpriv --reuid="$user" --regid="$user" --init-groups -- "$@"
 }
