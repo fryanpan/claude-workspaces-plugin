@@ -28,8 +28,7 @@
  *
  * Calm: nothing moves, pulses or wears a count.
  */
-import type { User } from '@claude-workspaces/core';
-import type { ReviewPayload } from '@claude-workspaces/core';
+import type { ReviewPayload, User } from '@claude-workspaces/core';
 import {
   type DockItem,
   type LinkedDockItem,
