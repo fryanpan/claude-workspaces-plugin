@@ -227,6 +227,68 @@ describe('editing the rows of a table in a bound doc', () => {
     expect(rows()).toHaveLength(3);
   });
 
+  it('removing the header row is refused, so the editor and the file keep one header', () => {
+    const res = docStore.findAndReplace('ferries', {
+      find: '| Route | Boats | Note |',
+      replace: '',
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('header row');
+    expect(rows()[0]).toEqual(['Route', 'Boats', 'Note']);
+  });
+
+  it('adding a row above the header is refused for the same reason', () => {
+    const res = docStore.findAndReplace('ferries', {
+      find: '| Route | Boats | Note |',
+      replace: '| Riverbend | 3 | daily |\n| Route | Boats | Note |',
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('header row');
+    expect(rows()).toHaveLength(3);
+  });
+
+  it('a row can be added directly below the header', () => {
+    const res = docStore.findAndReplace('ferries', {
+      find: '| Route | Boats | Note |',
+      replace: '| Route | Boats | Note |\n| Riverbend | 3 | daily |',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(rows().map((r) => r[0])).toEqual(['Route', 'Riverbend', 'Harborlight', 'Saltmarsh']);
+  });
+
+  it('removing a row that holds a pending suggestion is refused', () => {
+    const suggested = docStore.createSuggestion('ferries', {
+      find: 'weekends only',
+      replace: 'weekdays only',
+      author: { id: 'a-bob', name: 'Bob', color: '#993366' },
+    });
+    expect(suggested.ok).toBe(true);
+
+    const res = docStore.findAndReplace('ferries', {
+      find: '| Saltmarsh | 1 | weekends only |',
+      replace: '',
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('pending suggestion');
+    expect(rows()).toHaveLength(3);
+    expect(docStore.listSuggestions('ferries')).toHaveLength(1);
+  });
+
+  it('a whitespace-only replace is refused rather than read as a removal', () => {
+    const res = docStore.findAndReplace('ferries', {
+      find: '| Saltmarsh | 1 | weekends only |',
+      replace: '  \n',
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('table-shape-mismatch');
+    expect(rows()).toHaveLength(3);
+  });
+
   it('insert_blocks_at_anchor on a word in a cell inserts after the table, not into the cell', async () => {
     const anchor = docStore.createAgentAnchor('ferries', { find: 'weekends only' });
     if (!anchor.anchorId) throw new Error(`anchor: ${anchor.error}`);

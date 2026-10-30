@@ -739,6 +739,51 @@ function planRows(findRows: string[][], replaceRows: string[][]): Array<number |
   return plan;
 }
 
+/** Does any text under `node` carry a pending suggestion? */
+function holdsSuggestion(node: Y.XmlElement): boolean {
+  return node
+    .toArray()
+    .some((child) =>
+      child instanceof Y.XmlText
+        ? (child.toDelta() as Array<{ attributes?: Record<string, unknown> }>).some((op) =>
+            Object.keys(op.attributes ?? {}).some((k) => SUGGEST_MARK_KEYS.has(k)),
+          )
+        : child instanceof Y.XmlElement && holdsSuggestion(child),
+    );
+}
+
+/**
+ * Why a row change must not be made, or null when it may.
+ *
+ * The header row is refused because the editor and the file would disagree
+ * about it: the editor shows a header only on cells built as `tableHeader`,
+ * while the serializer writes whatever row is first as the header. Removing
+ * the header, or adding a row above it, left the two showing different
+ * headers. A row holding a pending suggestion is refused because removing
+ * it would destroy the suggestion with no one deciding it.
+ */
+function rowChangeRefusal(
+  rows: Y.XmlElement[],
+  plan: Array<number | null>,
+  taken: ReadonlySet<number>,
+): string | null {
+  const table = rows[0]?.parent;
+  if (!(table instanceof Y.XmlElement)) return null;
+  if (table.toArray().indexOf(rows[0] as Y.XmlElement) === 0 && plan[0] !== 0) {
+    return (
+      'That replace would remove the header row or add a row above it. Keep the header ' +
+      'as the first replace row (you may change its cells), and add or remove body rows only.'
+    );
+  }
+  if (rows.some((row, r) => !taken.has(r) && holdsSuggestion(row))) {
+    return (
+      'That replace would remove a row holding a pending suggestion. Accept or reject the ' +
+      'suggestion first (list_suggestions names it), then remove the row.'
+    );
+  }
+  return null;
+}
+
 /**
  * Structural find/replace for pipe-table rows. Returns null when `find` is
  * not table-shaped (the caller reports its normal no-match); otherwise a
@@ -767,7 +812,8 @@ function tryTableRowReplace(
   if (!findRows) return null;
 
   // An empty replace removes the matched rows.
-  const replaceRows = opts.replace.trim() === '' ? [] : parsePipeRows(opts.replace);
+  // Only the empty string removes; whitespace is refused like any other non-row.
+  const replaceRows = opts.replace === '' ? [] : parsePipeRows(opts.replace);
   const cols = findRows[0]?.length ?? 0;
   if (
     !replaceRows ||
@@ -846,6 +892,12 @@ function tryTableRowReplace(
     replaceRows.length === findRows.length
       ? replaceRows.map((_, i) => i)
       : planRows(findRows, replaceRows);
+  const taken = new Set(plan.filter((p): p is number => p !== null));
+  for (const match of chosen) {
+    const refusal = rowChangeRefusal(match.rows, plan, taken);
+    if (refusal)
+      return { ok: false, error: 'table-shape-mismatch', message: refusal, warning: refusal };
+  }
 
   doc.transact(() => {
     // Last match first, so a row added or removed in one match never moves
@@ -869,7 +921,6 @@ function tryTableRowReplace(
         });
       });
       // Rows no replacement row took are removed, last first so each index holds.
-      const taken = new Set(plan.filter((p): p is number => p !== null));
       for (let r = match.rows.length - 1; r >= 0; r--) {
         if (!taken.has(r)) table.delete(start + r, 1);
       }
@@ -877,12 +928,12 @@ function tryTableRowReplace(
       // row's index is `start` plus its place among the replacement rows.
       plan.forEach((from, to) => {
         if (from !== null) return;
-        const name = start + to === 0 ? 'tableHeader' : 'tableCell';
+        // A body cell: `rowChangeRefusal` keeps the header row first.
         const row = new Y.XmlElement('tableRow');
         row.insert(
           0,
           (replaceRows[to] ?? []).map((text) => {
-            const cell = new Y.XmlElement(name);
+            const cell = new Y.XmlElement('tableCell');
             cell.insert(0, tableCellBlocks(text));
             return cell;
           }),

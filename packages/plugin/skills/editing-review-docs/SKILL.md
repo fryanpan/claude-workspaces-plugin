@@ -63,8 +63,9 @@ Pick the smallest tool that does the job:
   cells compared by text, whitespace ignored, so a row quoted from the
   `.md` works. Every replace row keeps the find's cell count, but the
   row count may change: find a row and replace it with that row plus a
-  new one to add a row, or with `""` to remove it. Threads in unchanged
-  cells stay attached. Use
+  new one to add a row, or with exactly `""` to remove it. The header
+  row stays first, and a row holding a pending suggestion cannot be
+  removed. Threads in unchanged cells stay attached. Use
   `contextBefore`/`contextAfter` to disambiguate when the same string
   appears more than once. **Gotcha:** `find_and_replace` operates on
   text, not block structure — if your replacement empties a containing
