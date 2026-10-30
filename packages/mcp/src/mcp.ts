@@ -105,6 +105,7 @@ const session = createConnectorSession({
     process.env,
     (url, init) => fetch(url, init),
     (line) => console.error(`[mcp] ${line}`),
+    resolveBaseUrl,
   ),
   log: (...args) => console.error(...args),
 });

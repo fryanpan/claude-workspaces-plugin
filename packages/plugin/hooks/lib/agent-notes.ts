@@ -1,3 +1,4 @@
+import { type SecretReader, readKeychainSecret, serverFetch } from './access-headers.ts';
 import { findJoinedBoard } from './joined-board.ts';
 /**
  * Agent notes — the pure half of the plugin's Stop and PermissionDenied
@@ -136,10 +137,33 @@ export function readBoardSocket(env: EnvLike): string | undefined {
   return socket ? socket : undefined;
 }
 
+/**
+ * `fetchImpl` with the Access service token on requests to `baseUrl`, when
+ * the session names one (`access-headers.ts`). Silent: a hook's stderr is
+ * not where a misconfiguration is read, and the MCP child says it already.
+ * The Keychain read is capped at the hook's own POST budget, so a consent
+ * dialog cannot hold the turn.
+ */
+export function withAccess(
+  env: EnvLike,
+  fetchImpl: typeof fetch,
+  baseUrl: string,
+  readSecret?: SecretReader,
+): typeof fetch {
+  return serverFetch(
+    env,
+    (url, init) => fetchImpl(url, init),
+    () => {},
+    () => baseUrl,
+    readSecret ?? ((service) => readKeychainSecret(service, POST_TIMEOUT_MS)),
+  ) as typeof fetch;
+}
+
 export function resolveTransport(
   env: EnvLike,
   discoveryPort?: () => number | undefined,
   fetchImpl: typeof fetch = fetch,
+  readSecret?: SecretReader,
 ): HookTransport | undefined {
   const socket = readBoardSocket(env);
   if (socket) {
@@ -154,7 +178,7 @@ export function resolveTransport(
     };
   }
   const baseUrl = resolveBaseUrl(env, discoveryPort);
-  return baseUrl ? { baseUrl, fetch: fetchImpl } : undefined;
+  return baseUrl ? { baseUrl, fetch: withAccess(env, fetchImpl, baseUrl, readSecret) } : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +328,8 @@ export interface HookDeps {
   /** With no board in the env, ask the server which board the session
    *  joined (`joined-board.ts`). */
   joinedBoard?: boolean;
+  /** The Access secret's reader; Keychain when omitted. */
+  readSecret?: SecretReader;
 }
 
 /**
@@ -346,10 +372,12 @@ export async function runHook(
       kind === 'turn' ? decideTurnNote(payload, ctx) : decideDenialNote(payload, ctx);
     if ('skip' in decision) return undefined;
     const fetchImpl = deps.fetch ?? fetch;
-    let transport = resolveTransport(deps.env, deps.discoveryPort, fetchImpl);
+    let transport = resolveTransport(deps.env, deps.discoveryPort, fetchImpl, deps.readSecret);
     if (deps.baseUrl && !readBoardSocket(deps.env)) {
       const baseUrl = deps.baseUrl();
-      transport = baseUrl ? { baseUrl, fetch: fetchImpl } : undefined;
+      transport = baseUrl
+        ? { baseUrl, fetch: withAccess(deps.env, fetchImpl, baseUrl, deps.readSecret) }
+        : undefined;
     }
     if (!transport) return undefined;
     const workspaceId = await boardOf(deps.env, transport, decision.post.agent, deps.joinedBoard);

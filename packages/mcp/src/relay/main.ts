@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { serverFetch } from '../access-headers.ts';
+import { resolveBaseUrl } from '../http-client.ts';
 import { createRelay } from './relay-core.ts';
 import { unixSocketFetch } from './unix-fetch.ts';
 
@@ -27,6 +28,7 @@ const relay = createRelay({
         process.env,
         (url, init) => fetch(url, init),
         (line) => console.error(`[relay] ${line}`),
+        () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync }),
       ),
   ...(boardSocket ? { boardSocket } : {}),
   write: (line) => {

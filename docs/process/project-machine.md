@@ -304,9 +304,9 @@ To reach the moved board, the agent's session also needs the project's Access
 service token. Launch it with `CW_BASE_URL` set to the machine's URL,
 `CW_ACCESS_CLIENT_ID` set to the token's client id, and
 `CW_ACCESS_SECRET_SERVICE` set to the Keychain service that holds its secret.
-The MCP child then sends both `cf-access-client-*` headers on every request,
-and the launcher uses the node relay, because the compiled relay cannot read
-Keychain.
+The MCP child and the plugin's hooks then send both `cf-access-client-*`
+headers on their requests to that URL's origin, and to no other. The launcher
+uses the node relay, because the compiled relay cannot read Keychain.
 
 ## Bound files after the move
 

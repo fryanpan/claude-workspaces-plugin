@@ -128,7 +128,13 @@ async function driveFullChild(env: Record<string, string>, logs: string[]) {
     processId: 'process-riverbend',
     notify: async () => {},
     resolveBaseUrl: () => base,
-    fetch: serverFetch(env, realFetch, (l) => logs.push(l), reader),
+    fetch: serverFetch(
+      env,
+      realFetch,
+      (l) => logs.push(l),
+      () => base,
+      reader,
+    ),
     log: (...args) => logs.push(args.map(String).join(' ')),
   });
   try {
@@ -156,7 +162,13 @@ async function driveRelay(env: Record<string, string>, logs: string[]) {
     homedir: () => '/nonexistent',
     existsSync: () => false,
     readFileSync: () => '',
-    fetch: serverFetch(env, realFetch, (l) => logs.push(l), reader),
+    fetch: serverFetch(
+      env,
+      realFetch,
+      (l) => logs.push(l),
+      () => base,
+      reader,
+    ),
     write: (line) => written.push(line),
     log: (...args) => logs.push(args.map(String).join(' ')),
     initWaitMs: 2000,
@@ -220,8 +232,15 @@ describe('the secret is never said', () => {
     const toolResult = await driveFullChild(ACCESS_ENV, logs);
     const relayOut = await driveRelay(ACCESS_ENV, logs);
     // A refusal from Access, and a server that is gone, both produce errors.
-    const refusing = serverFetch(ACCESS_ENV, realFetch, (l) => logs.push(l), reader);
-    await refusing('http://127.0.0.1:1/', {}).catch((e: unknown) => logs.push(String(e)));
+    const gone = 'http://127.0.0.1:1';
+    const refusing = serverFetch(
+      ACCESS_ENV,
+      realFetch,
+      (l) => logs.push(l),
+      () => gone,
+      reader,
+    );
+    await refusing(`${gone}/`, {}).catch((e: unknown) => logs.push(String(e)));
     const said = [...logs, toolResult, relayOut].join('\n');
     expect(logs.length).toBeGreaterThan(0);
     expect(said).not.toContain(SECRET);
@@ -246,7 +265,7 @@ describe('the secret is never said', () => {
     expect(JSON.stringify(unreadable)).not.toContain(SECRET);
   });
 
-  it('keeps the secret off a plain-http origin that is not loopback', async () => {
+  it('keeps the secret off another scheme of the base origin', async () => {
     const urls: string[] = [];
     const headersOf: Headers[] = [];
     const capture: Fetch = async (url, init) => {
@@ -254,7 +273,13 @@ describe('the secret is never said', () => {
       headersOf.push(new Headers(init?.headers));
       return new Response('{}');
     };
-    const f = serverFetch(ACCESS_ENV, capture, () => {}, reader);
+    const f = serverFetch(
+      ACCESS_ENV,
+      capture,
+      () => {},
+      () => 'https://saltmarsh.example',
+      reader,
+    );
     await f('http://saltmarsh.example/api/x');
     await f('https://saltmarsh.example/api/x');
     expect(headersOf.map((h) => h.get('cf-access-client-secret'))).toEqual([null, SECRET]);
@@ -294,6 +319,8 @@ describe('the launcher under Access', () => {
       // Control: without Access the stand-in build is taken.
       expect(choice({})).toMatch(/^compiled /);
       expect(choice({ CW_ACCESS_CLIENT_ID: CLIENT_ID })).toBe('node-relay');
+      // Half configured still reaches the node relay, which says what is missing.
+      expect(choice({ CW_ACCESS_SECRET_SERVICE: SERVICE })).toBe('node-relay');
     },
   );
 });

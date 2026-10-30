@@ -4,15 +4,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 
-// packages/mcp/src/access-headers.ts
+// packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
 var CLIENT_ID = /^[A-Za-z0-9._-]{1,256}\.access$/;
 var SERVICE = /^[A-Za-z0-9._-]{1,128}$/;
 var LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
-function readKeychainSecret(service) {
-  const r = spawnSync("security", ["find-generic-password", "-s", service, "-w"], {
+var ID_HEADER = "cf-access-client-id";
+var SECRET_HEADER = "cf-access-client-secret";
+var REDIRECTS = new Set([301, 302, 303, 307, 308]);
+var MAX_REDIRECTS = 5;
+var KEYCHAIN_TIMEOUT_MS = 1e4;
+function readKeychainSecret(service, timeoutMs = KEYCHAIN_TIMEOUT_MS, bin = "security") {
+  const r = spawnSync(bin, ["find-generic-password", "-s", service, "-w"], {
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"]
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: timeoutMs
   });
   if (r.status !== 0)
     throw new Error(`no Keychain entry for the service ${service}`);
@@ -42,38 +48,103 @@ function accessTokenFrom(env, readSecret) {
     return { error: `the Keychain service ${service} holds an empty value` };
   return { clientId, clientSecret };
 }
-function reachesAccess(url) {
+function originOf(url) {
   try {
-    const u = new URL(url);
-    return u.protocol === "https:" || u.protocol === "http:" && LOOPBACK.has(u.hostname);
+    return new URL(url);
   } catch {
-    return false;
+    return null;
   }
 }
-function withAccessHeaders(fetch2, token) {
-  if (!token)
-    return fetch2;
-  return (url, init) => {
-    if (!reachesAccess(url))
-      return fetch2(url, init);
+function safeOrigin(u) {
+  return u.protocol === "https:" || u.protocol === "http:" && LOOPBACK.has(u.hostname);
+}
+function redirected(init, status) {
+  const method = (init.method ?? "GET").toUpperCase();
+  if (status === 303 || (status === 301 || status === 302) && method === "POST") {
+    const { body: _body, ...rest } = init;
+    return { ...rest, method: "GET" };
+  }
+  return init;
+}
+function withAccessHeaders(fetch2, token, baseUrl, log) {
+  let saidPlain = false;
+  const carries = (url) => {
+    let base;
+    try {
+      base = originOf(baseUrl());
+    } catch {
+      return false;
+    }
+    const target = originOf(url);
+    if (!base || !target || target.origin !== base.origin)
+      return false;
+    if (!safeOrigin(base)) {
+      if (!saidPlain) {
+        saidPlain = true;
+        log("Access headers dropped: the base URL is plain http on a host that is not loopback");
+      }
+      return false;
+    }
+    return token() !== null;
+  };
+  const once = (init, carry) => {
     const headers = new Headers(init?.headers);
-    headers.set("cf-access-client-id", token.clientId);
-    headers.set("cf-access-client-secret", token.clientSecret);
-    return fetch2(url, { ...init, headers });
+    const t = carry ? token() : null;
+    if (t) {
+      headers.set(ID_HEADER, t.clientId);
+      headers.set(SECRET_HEADER, t.clientSecret);
+    } else {
+      headers.delete(ID_HEADER);
+      headers.delete(SECRET_HEADER);
+    }
+    return { ...init, headers };
+  };
+  return async (url, init) => {
+    if (!carries(url))
+      return fetch2(url, init);
+    if (init?.redirect !== undefined && init.redirect !== "follow") {
+      return fetch2(url, once(init, true));
+    }
+    let current = url;
+    let req = init ?? {};
+    for (let hop = 0;; hop++) {
+      const res = await fetch2(current, {
+        ...once(req, carries(current)),
+        redirect: "manual"
+      });
+      const location = res.headers.get("location");
+      if (!REDIRECTS.has(res.status) || !location)
+        return res;
+      if (hop >= MAX_REDIRECTS) {
+        await res.body?.cancel().catch(() => {});
+        throw new Error(`more than ${MAX_REDIRECTS} redirects`);
+      }
+      await res.body?.cancel().catch(() => {});
+      req = redirected(req, res.status);
+      current = new URL(location, current).toString();
+    }
   };
 }
-function serverFetch(env, fetch2, log, readSecret = readKeychainSecret) {
-  const token = accessTokenFrom(env, readSecret);
-  if (token === null)
+function serverFetch(env, fetch2, log, baseUrl, readSecret = (service) => readKeychainSecret(service)) {
+  if (!env.CW_ACCESS_CLIENT_ID?.trim() && !env.CW_ACCESS_SECRET_SERVICE?.trim())
     return fetch2;
-  if ("error" in token) {
-    log(`Access headers off: ${token.error}`);
-    return fetch2;
-  }
-  log("sending the Access service token on every request to the server");
-  return withAccessHeaders(fetch2, token);
+  let resolved;
+  const token = () => {
+    if (resolved !== undefined)
+      return resolved;
+    const t = accessTokenFrom(env, readSecret);
+    if (t !== null && "error" in t) {
+      log(`Access headers off: ${t.error}`);
+      resolved = null;
+    } else {
+      if (t)
+        log("sending the Access service token on requests to the server");
+      resolved = t;
+    }
+    return resolved;
+  };
+  return withAccessHeaders(fetch2, token, baseUrl, log);
 }
-
 // packages/core/src/env-names.ts
 var ENV_RENAMES = [
   ["FEEDBACK_BASE_URL", "CW_BASE_URL"],
@@ -637,7 +708,7 @@ var relay = createRelay({
   homedir,
   existsSync,
   readFileSync,
-  fetch: boardSocket ? unixSocketFetch(boardSocket) : serverFetch(process.env, (url, init) => fetch(url, init), (line) => console.error(`[relay] ${line}`)),
+  fetch: boardSocket ? unixSocketFetch(boardSocket) : serverFetch(process.env, (url, init) => fetch(url, init), (line) => console.error(`[relay] ${line}`), () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync })),
   ...boardSocket ? { boardSocket } : {},
   write: (line) => {
     process.stdout.write(`${line}
