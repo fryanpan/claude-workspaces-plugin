@@ -22,6 +22,7 @@ import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
 import { parseHostAudiences } from './middleware/cf-access.ts';
+import { parseRefusedUids } from './middleware/loopback-uid-door.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -267,6 +268,13 @@ export function resolveServerConfig(opts: {
    * rather than stopping the server.
    */
   const boardSocketDir = resolveBoardSocketDir(env, arg, undefined, requestedPort);
+
+  /** `CW_BOARD_SOCKET_SHARED=<boardId>`: see ServerOptions.boardSocketShared. */
+  const boardSocketShared = env.CW_BOARD_SOCKET_SHARED?.trim() || undefined;
+  /** `CW_BOARD_SOCKET_GROUP=<gid>`: see ServerOptions.boardSocketGroup. */
+  const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
+  /** `CW_LOOPBACK_REFUSED_UIDS=10004`: see ServerOptions.loopbackRefusedUids. */
+  const loopbackRefusedUids = parseRefusedUids(env.CW_LOOPBACK_REFUSED_UIDS);
 
   /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
   const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
@@ -687,8 +695,11 @@ export function resolveServerConfig(opts: {
     requireSignInToWrite,
     requireAgentToken,
     boardSocketDir,
+    boardSocketShared,
+    boardSocketGroup,
     accessOnlyBrowserHosts,
     loopbackSkipsAccess,
+    loopbackRefusedUids,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,
@@ -749,6 +760,15 @@ export function resolveBoardSocketDir(
     return undefined;
   }
   return dir;
+}
+
+/** A gid, or undefined for unset. Anything else is an error, not a guess. */
+function parseGid(raw: string | undefined): number | undefined {
+  const s = (raw ?? '').trim();
+  if (s === '') return undefined;
+  if (!/^\d{1,10}$/.test(s))
+    throw new Error(`CW_BOARD_SOCKET_GROUP: ${JSON.stringify(s)} is not a gid`);
+  return Number(s);
 }
 
 function pathOrNull(p: string): string | null {
