@@ -76,7 +76,9 @@ It reads what exists and does only what is missing:
    rule on the bucket that expires snapshots after 30 days, since the machine
    cannot delete.
 6. The machine's secrets, set through `fly secrets import` on stdin so no
-   value is ever an argument.
+   value is ever an argument. Each is set only when `fly secrets list` does
+   not name it yet; a dry run prints each name and where its value comes
+   from, never the value.
 7. The image, built by Fly's remote builder from `git archive <ref>` (HEAD by
    default), so no local `node_modules`, data dir or uncommitted file is in
    it. It is labelled with the commit; a run on the same commit and size does
@@ -84,6 +86,37 @@ It reads what exists and does only what is missing:
 
 A run over a finished project prints `nothing to do`. The last lines name the
 machine, its commit and size, and the tunnel address.
+
+### The owner and Access settings
+
+The same step gives the server what it needs to admit its owner on the
+project's own hostname:
+
+| Setting | From |
+| --- | --- |
+| `CW_OWNER_EMAIL` | the Keychain's `cw-board-owner-email` |
+| `CW_PUBLIC_BASE_URL` | `https://` and the project's first host in `infra/access-apps/access.local.json` |
+| `CF_ACCESS_TEAM_DOMAIN` | the account's Access organization (`auth_domain`) |
+| `CF_ACCESS_AUD` | the Access application `board <project>` |
+| `CF_ACCESS_HOST_AUDS` | each of the project's hosts, to that audience |
+| `CW_PROXIED_TRUSTED_HOSTS` | the project's hosts |
+
+The account is the one the Cloudflare token sees; a token that sees more than
+one stops the run. The token needs Access: Apps and Policies Read and Access:
+Organizations, Identity Providers, and Groups Read on the account. Through
+the keeper both reads run without a passkey. `--access-config <path>` reads another file in place of
+`access.local.json`. A project that file does not list gets only the owner
+address. A project whose Access application does not exist yet (`bun run
+access:apply --apply` makes it) gets the owner and the public address, and
+the run says which settings it left unset; it does not fail. Two applications
+of the name stop the run before anything changes.
+
+Not set by deploy: `CW_PROXIED_TRUSTED_EMAILS`, which defaults to
+`CW_OWNER_EMAIL`, and the share settings (`CF_ACCESS_SHARE_AUD`,
+`CW_SHARE_LINK_HOSTS`, `CF_SHARE_BASE_HOSTNAME`, `CF_ACCOUNT_ID`), which need
+a share application this repo does not make per project. A setting that
+exists is never set again, so a value that changed (an application made
+again, a host added) takes `fly secrets unset <name>` and another run.
 
 Volume size: 1 GB holds a board; a project with a staging site wants 20. Fly
 keeps its own daily volume snapshots for five days on top of these backups.
@@ -125,8 +158,9 @@ lines name the origin hostname and the entry to add to the router's
 The Cloudflare token needs, on top of what `router:deploy` uses: Cloudflare
 Tunnel Edit and Access: Apps and Policies Read on the account, and DNS Edit on
 the zone. What stays a person's step: the project's Access application on its
-own hostname, the router entry, and the server's `CW_PROXIED_TRUSTED_HOSTS` and
-Access settings (board router README, "Each project's side").
+own hostname (`bun run access:apply --apply`) and the router entry. The
+server's `CW_PROXIED_TRUSTED_HOSTS` and Access settings are set by deploy
+("The owner and Access settings", above).
 
 ### Checking it
 
@@ -220,7 +254,11 @@ machine. In order:
 
 1. Fingerprints the board on the Mac's server: each doc's text, every thread
    and comment on its docs and rows, its tasks, and the lines of its event and
-   agent-note logs (`board-print.ts`).
+   agent-note logs (`board-print.ts`). A doc in the board's `docIds` whose
+   content and threads both answer 404 is a dangling id: it is fingerprinted
+   as missing, the export carries the id with no files, and the line
+   `source:` says how many there are. A doc whose content answers 404 while
+   its threads answer stops the move.
 2. Stops, changing nothing, if the machine already holds the board.
 3. Exports it (`board-bundle.ts`) and fingerprints the source again. If the
    board changed while it was read, it stops: quiet the board's agents first.
@@ -261,6 +299,14 @@ nudge stamps (rebuilt), the owner's analytics logs, and archived docs.
 After a move the board's agent needs a board agent token minted on the
 machine, and its GitHub events need the five steps above, run for the
 machine.
+
+To reach the moved board, the agent's session also needs the project's Access
+service token. Launch it with `CW_BASE_URL` set to the machine's URL,
+`CW_ACCESS_CLIENT_ID` set to the token's client id, and
+`CW_ACCESS_SECRET_SERVICE` set to the Keychain service that holds its secret.
+The MCP child and the plugin's hooks then send both `cf-access-client-*`
+headers on their requests to that URL's origin, and to no other. The launcher
+uses the node relay, because the compiled relay cannot read Keychain.
 
 ## Bound files after the move
 

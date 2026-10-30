@@ -7,7 +7,8 @@
  */
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { readDiscoveryText } from '../http-client.ts';
+import { serverFetch } from '../access-headers.ts';
+import { readDiscoveryText, resolveBaseUrl } from '../http-client.ts';
 import { createRelay } from './relay-core.ts';
 import { unixSocketFetch } from './unix-fetch.ts';
 
@@ -20,7 +21,21 @@ const relay = createRelay({
   homedir,
   existsSync,
   readFileSync: readDiscoveryText,
-  fetch: boardSocket ? unixSocketFetch(boardSocket) : (url, init) => fetch(url, init),
+  // A board socket is on this machine and never behind Access.
+  fetch: boardSocket
+    ? unixSocketFetch(boardSocket)
+    : serverFetch(
+        process.env,
+        (url, init) => fetch(url, init),
+        (line) => console.error(`[relay] ${line}`),
+        () =>
+          resolveBaseUrl({
+            env: process.env,
+            homedir,
+            existsSync,
+            readFileSync: readDiscoveryText,
+          }),
+      ),
   ...(boardSocket ? { boardSocket } : {}),
   write: (line) => {
     process.stdout.write(`${line}\n`);

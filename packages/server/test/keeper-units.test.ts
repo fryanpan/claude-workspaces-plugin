@@ -217,8 +217,10 @@ describe('cloudflare policy', () => {
     });
   });
 
-  it('CONTROL: every read the sharing, tunnel and router callers make is routine', () => {
+  it('CONTROL: every read the sharing, tunnel, settings and router callers make is routine', () => {
     for (const path of [
+      '/accounts?page=1&per_page=50',
+      '/accounts/abc/access/organizations',
       '/accounts/abc/access/apps?domain=share.example.com',
       '/accounts/abc/access/apps?page=2&per_page=50',
       '/zones?name=example.com',

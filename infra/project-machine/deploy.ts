@@ -4,7 +4,7 @@
  *
  *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
- *       [--router-config <path>]
+ *       [--router-config <path>] [--access-config <path>]
  *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
@@ -19,6 +19,9 @@
  *   the org's Anthropic key as CW_ORG_ANTHROPIC_API_KEY, only when the
  *   Keychain holds `cw-<name>-anthropic-api-key`; without it the server
  *   refuses every Claude call
+ *   the owner's address, the public address and the Access settings
+ *   (`settings.ts`), from the Keychain, `access.local.json` and Cloudflare;
+ *   each one whose source is missing is skipped with a line saying why
  *
  * With `--tunnel named` it first sets up the project's Cloudflare tunnel
  * `cw-<name>`, its ingress and its origin hostname (`tunnel.ts`), then gives
@@ -33,6 +36,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { CloudflareApi } from './cloudflare.ts';
 import {
   type Action,
   type BucketCredential,
@@ -48,6 +52,7 @@ import {
   writeOnlyPolicy,
 } from './deploy-plan.ts';
 import {
+  cloudflareClient,
   fly,
   flyJson,
   flyLive,
@@ -56,6 +61,7 @@ import {
   keychainHas,
   keychainRead,
 } from './mac-ops.ts';
+import { type Setting, readSettings } from './settings.ts';
 import { generateSnapshotKeys, recipientOf } from './snapshot.ts';
 import {
   attachPolicy,
@@ -71,6 +77,7 @@ const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
 const PREFIX = 'snapshots/';
 const KEEP_DAYS = 30;
 const ROUTER_CONFIG = join(REPO, 'infra', 'board-router-worker', 'router.local.json');
+const ACCESS_CONFIG = join(REPO, 'infra', 'access-apps', 'access.local.json');
 
 function arg(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -197,6 +204,8 @@ function deploy(cfg: ProjectConfig): void {
 
 interface RunContext {
   org: string;
+  /** The per-project settings this run found a source for, by name. */
+  settings: ReadonlyMap<string, Setting>;
   /** The tunnel token, when this run has a named tunnel. */
   tunnelToken?: () => Promise<string>;
 }
@@ -250,7 +259,10 @@ async function act(cfg: ProjectConfig, a: Action, ctx: RunContext): Promise<void
     case 'set-secrets': {
       const lines: string[] = [];
       for (const n of a.names) {
-        if (n !== TUNNEL_TOKEN_SECRET) {
+        const setting = ctx.settings.get(n);
+        if (setting) {
+          lines.push(`${n}=${setting.value()}`);
+        } else if (n !== TUNNEL_TOKEN_SECRET) {
           lines.push(`${n}=${secretValue(cfg, n)}`);
         } else if (ctx.tunnelToken) {
           lines.push(`${n}=${await ctx.tunnelToken()}`);
@@ -286,21 +298,36 @@ function describe(a: Action): string {
       : a.kind;
 }
 
+export interface DeployOptions {
+  /** `access.local.json`, which names the project's hosts. */
+  accessConfig?: string;
+  /** The Cloudflare API the settings are read through; a test's stand-in. */
+  cloudflare?: () => CloudflareApi;
+}
+
 export async function deployProject(
   cfg: ProjectConfig,
   dryRun: boolean,
   routerConfig = ROUTER_CONFIG,
+  opts: DeployOptions = {},
 ): Promise<Action[]> {
-  // Cloudflare is read first: a named tunnel that cannot be set up stops the
-  // run before Fly is touched.
+  // Cloudflare is read first: a named tunnel that cannot be set up, or
+  // Access settings that cannot be read, stop the run before Fly is touched.
   const tunnel: NamedTunnel | undefined =
     cfg.tunnel === 'named' ? await prepareTunnel(cfg, routerConfig) : undefined;
+  const found = await readSettings(cfg.project, {
+    accessConfigPath: opts.accessConfig ?? ACCESS_CONFIG,
+    cloudflare: opts.cloudflare ?? (() => cloudflareClient('machine:deploy (Access settings)')),
+    keychainHas,
+    keychainRead,
+  });
+  const settings = new Map<string, Setting>(found.settings.map((s) => [s.name, s]));
   const org = keychainRead('fly-org-slug').trim();
   // A new tunnel has a new token, so an existing secret holds the old one.
   const refresh = tunnel?.actions.some((a) => a.kind === 'create-tunnel')
     ? [TUNNEL_TOKEN_SECRET]
     : [];
-  const actions = plan(cfg, await observe(cfg), refresh);
+  const actions = plan(cfg, await observe(cfg), refresh, [...settings.keys()]);
   if (tunnel) {
     console.log(
       tunnel.actions.length === 0
@@ -313,8 +340,16 @@ export async function deployProject(
       ? `[deploy] ${cfg.app} is up to date at ${cfg.imageLabel.slice(0, 9)}: nothing to do`
       : `[deploy] ${cfg.app}: ${actions.map(describe).join(', ')}`,
   );
+  for (const a of actions) {
+    if (a.kind !== 'set-secrets') continue;
+    for (const n of a.names) {
+      const s = settings.get(n);
+      if (s) console.log(`[deploy]   ${n} from ${s.from}`);
+    }
+  }
+  for (const line of found.skipped) console.log(`[deploy] not set: ${line}`);
   if (dryRun) return actions;
-  const ctx: RunContext = { org };
+  const ctx: RunContext = { org, settings };
   if (tunnel) {
     const id = await tunnel.apply();
     ctx.tunnelToken = () => tunnel.token(id);
@@ -358,7 +393,9 @@ async function main(): Promise<void> {
     tunnel: arg(args, 'tunnel') as TunnelMode | undefined,
   });
   const routerConfig = arg(args, 'router-config') ?? ROUTER_CONFIG;
-  const done = await deployProject(cfg, args.includes('--dry-run'), routerConfig);
+  const done = await deployProject(cfg, args.includes('--dry-run'), routerConfig, {
+    accessConfig: arg(args, 'access-config') ?? ACCESS_CONFIG,
+  });
   if (cfg.tunnel === 'named') {
     const names = routerNames(cfg, routerConfig);
     console.log(`[deploy] origin hostname: ${names.origin}`);

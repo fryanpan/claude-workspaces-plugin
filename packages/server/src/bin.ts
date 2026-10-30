@@ -76,6 +76,7 @@ const {
   requireAgentToken,
   boardSocketDir,
   accessOnlyBrowserHosts,
+  loopbackSkipsAccess,
   emailCodeSignIn,
   ownerEmail,
   trustedHosts,
@@ -266,6 +267,7 @@ while (!handle) {
       requireAgentToken,
       ...(boardSocketDir ? { boardSocketDir } : {}),
       accessOnlyBrowserHosts,
+      loopbackSkipsAccess,
       emailCodeSignIn,
       ...(ownerEmail ? { ownerEmail } : {}),
       // Browser Sentry DSN — box config, never the repo (see ServerOptions).

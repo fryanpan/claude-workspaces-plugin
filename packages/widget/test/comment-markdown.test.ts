@@ -1,3 +1,4 @@
+import { dockSheetHtml, wireDockSheet } from '@claude-workspaces/core/review-dock';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { mountDiffView } from '../src/edit/edit-diff-view.ts';
@@ -124,5 +125,39 @@ describe('the popover, once comment markdown is mounted', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(body.querySelector('ins')?.textContent).toBe('Works');
     expect(body.querySelector('strong, li')).toBeNull();
+  });
+
+  it("redraws an ask's round from its markdown, links the sheet already drew kept", async () => {
+    const detail =
+      'The **north pier** window needs a decision.\n\n' +
+      '1. **Ten minutes.** Matches the [tide notes](/workspaces/w-harbor/docs/d-tide).\n' +
+      '2. **Fifteen minutes.** Gives the crew room.';
+    const w = widgetWith([]);
+    mountCommentMarkdown(w);
+    const scrim = document.createElement('div');
+    scrim.className = 'cw-dock-scrim';
+    scrim.innerHTML = dockSheetHtml({
+      threadId: 'r-window',
+      commentId: '',
+      review: { shape: 'decision', headline: 'Ten or fifteen?', detail },
+      by: 'Riverbend',
+      ts: 0,
+      answered: false,
+    });
+    w.shadow.append(scrim);
+    // The sheet's own wiring runs first and turns the links into anchors.
+    wireDockSheet(scrim, { send: async () => true, onAnswered: () => {} });
+    await new Promise((r) => setTimeout(r, 0));
+    const body = scrim.querySelector<HTMLElement>('.cw-round-body');
+    expect(body?.querySelector('p strong')?.textContent).toBe('north pier');
+    const items = [...(body?.querySelectorAll('ol > li') ?? [])];
+    expect(items.map((li) => li.querySelector('strong')?.textContent)).toEqual([
+      'Ten minutes.',
+      'Fifteen minutes.',
+    ]);
+    const a = items[0]?.querySelector('a');
+    expect(a?.textContent).toBe('tide notes');
+    expect(a?.getAttribute('href')).toBe(`${location.origin}/workspaces/w-harbor/docs/d-tide`);
+    expect(body?.textContent).not.toMatch(/\*\*|\]\(/);
   });
 });

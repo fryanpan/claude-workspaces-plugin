@@ -55,7 +55,7 @@ export interface MoveResult {
 }
 
 const summary = (p: BoardPrint): string =>
-  `docs ${p.docs.count}, threads ${p.threads.count}, tasks ${p.tasks.count}, events ${p.events.lines} line(s), notes ${p.notes.lines} line(s)`;
+  `docs ${p.docs.count} (${p.dangling.length} dangling doc id(s)), threads ${p.threads.count}, tasks ${p.tasks.count}, events ${p.events.lines} line(s), notes ${p.notes.lines} line(s)`;
 
 /** Asks the source server, on loopback, to archive the board. Reversible. */
 async function archiveSource(source: MoveSource, boardId: string, to: string): Promise<void> {

@@ -268,6 +268,11 @@ export function resolveServerConfig(opts: {
    */
   const boardSocketDir = resolveBoardSocketDir(env, arg, undefined, requestedPort);
 
+  /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
+  const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
+    (env.CW_LOOPBACK_SKIPS_ACCESS ?? '').trim().toLowerCase(),
+  );
+
   /**
    * ACCESS-ONLY browser hosts. Default ON (Bryan, 2026-09-02: *"Let's make
    * everyone go through cloudflare access. No internal hole."*).
@@ -683,6 +688,7 @@ export function resolveServerConfig(opts: {
     requireAgentToken,
     boardSocketDir,
     accessOnlyBrowserHosts,
+    loopbackSkipsAccess,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,
@@ -720,19 +726,21 @@ export type ServerConfig = ReturnType<typeof resolveServerConfig>;
  * folder: a staging server sharing it would unlink prod's sockets as stale.
  * And only a server that bound its port opens it (`createServer` opens the
  * sockets after `Bun.serve`), so a second server started on 8787 fails before
- * it touches them.
+ * it touches them. The default is macOS only: the folder is under `/private`,
+ * which a Linux project machine cannot create, and its server crashed at boot.
  */
 export function resolveBoardSocketDir(
   env: NodeJS.ProcessEnv,
   arg: ArgReader,
   uid: number = process.getuid?.() ?? 0,
   port?: number,
+  platform: NodeJS.Platform = process.platform,
 ): string | undefined {
   const named = arg('board-socket-dir', env.CW_BOARD_SOCKET_DIR?.trim() || undefined);
   const flag = (env.CW_BOARD_SOCKETS ?? '').trim().toLowerCase();
   const on = ['1', 'true', 'yes', 'on'].includes(flag);
   const off = ['0', 'false', 'no', 'off'].includes(flag);
-  const byDefault = flag === '' && port === BOARD_SERVER_PORTS[0];
+  const byDefault = flag === '' && port === BOARD_SERVER_PORTS[0] && platform === 'darwin';
   const dir = named ?? (on || (byDefault && !off) ? defaultBoardSocketDir(uid) : undefined);
   if (dir === undefined) return undefined;
   const refused = boardSocketDirError(dir);
