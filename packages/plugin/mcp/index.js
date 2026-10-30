@@ -17149,7 +17149,7 @@ var TOOL_LIST = {
     },
     {
       name: "find_and_replace",
-      description: "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. Inside a table cell, <br> in replace is a line break. An edit to a block a human changed after your last get_doc is refused with 409 stale-write. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
+      description: "Replace plain text in a doc with other plain text. find matches plain text, not markdown, and marks are kept; pipe-table row syntax matches table rows. To add a row, find one row and replace it with that row plus the new row; to remove a row, replace it with exactly the empty string (whitespace is refused). Every replace row needs the same number of cells as the find. The header row stays first, and a row with a pending suggestion cannot be removed. A thread in an unchanged cell stays attached. Disambiguate repeats with contextBefore, contextAfter, occurrence or replaceAll. A no-match quotes the doc's actual characters. replace stays inside one block; block-level markdown is refused with block-markdown-in-replacement. Inside a table cell, <br> in replace is a line break. An edit to a block a human changed after your last get_doc is refused with 409 stale-write. With suggest, replace parses inline markdown unless parseInlineMarks is false.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17290,7 +17290,7 @@ var TOOL_LIST = {
     },
     {
       name: "insert_blocks_after_thread",
-      description: "Insert new blocks after the block holding a thread's anchor. It takes markdown, so use it for a new section, paragraph, list, quote or code. insert_after_thread is the inline sibling. An anchor inside a list item nests the new blocks under that item unless you pass placement top-level.",
+      description: "Insert new blocks after the block holding a thread's anchor. It takes markdown, so use it for a new section, paragraph, list, quote or code. insert_after_thread is the inline sibling. An anchor inside a list item nests the new blocks under that item unless you pass placement top-level. An anchor inside a table cell inserts after the table; add a row with find_and_replace.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17381,7 +17381,7 @@ var TOOL_LIST = {
     },
     {
       name: "apply_block_edits",
-      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. Markdown in each edit is parsed either way.",
+      description: "Apply several block-addressed edits as ONE transaction. Use it for more than one change: separate calls can leave half of them applied. Address blocks by the ids read_doc_outline returned, never by quoting text. Replacing or deleting a block no longer marked yours returns it as a suggestion, except a blank line, an image or a rule, which change directly because a suggestion cannot carry them. To add, edit or remove a row of a table, use find_and_replace on its pipe rows, not replace_block on the table. Markdown in each edit is parsed either way.",
       inputSchema: {
         type: "object",
         properties: {
@@ -17439,7 +17439,7 @@ var TOOL_LIST = {
     },
     {
       name: "insert_blocks_at_anchor",
-      description: "Parse markdown and insert the resulting blocks after the block holding an anchor. Use it for a new section, sub-heading or table, which edit_at_anchor cannot make. An anchor inside a list item nests the blocks under that item unless you pass placement top-level.",
+      description: "Parse markdown and insert the resulting blocks after the block holding an anchor. Use it for a new section, sub-heading or table, which edit_at_anchor cannot make. An anchor inside a list item nests the blocks under that item unless you pass placement top-level. An anchor inside a table cell inserts after the table; add a row with find_and_replace.",
       inputSchema: {
         type: "object",
         properties: {
@@ -21937,7 +21937,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.338";
+var PLUGIN_VERSION = "0.1.340";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",

@@ -51,6 +51,12 @@ export type BlockPlacement = 'after-block' | 'top-level';
  * - 'top-level': after the anchor's TOP-LEVEL block, at fragment level —
  *   "after the whole list / table / blockquote". For an anchor already in
  *   a top-level block the two placements are identical.
+ *
+ * An anchor inside a table cell inserts after the TABLE under either
+ * placement. A cell holds one line of a pipe row, so a block spliced into it
+ * was written to disk as `<br>`-joined cell text — on 30 Oct an agent's new
+ * paragraph landed inside the cell it anchored on. Rows are added with
+ * find_and_replace on pipe rows instead.
  */
 export function insertBlocksAfterAnchor(
   doc: Y.Doc,
@@ -72,7 +78,7 @@ export function insertBlocksAfterAnchor(
   // walkProse guarantees topBlock is set for any segment with a block, but
   // fall through to the after-block path rather than crash if it isn't.
   const topLevel = opts.placement === 'top-level' && seg.topBlock != null;
-  const block = topLevel ? (seg.topBlock as Y.XmlElement) : seg.block;
+  const block = topLevel ? (seg.topBlock as Y.XmlElement) : (tableOf(seg.block) ?? seg.block);
   const parent = (topLevel ? fragment : block.parent) as Y.XmlFragment | Y.XmlElement | null;
   if (!parent) return { ok: false, error: 'no-host-block' };
   const siblings = parent.toArray();
@@ -86,6 +92,14 @@ export function insertBlocksAfterAnchor(
     parent.insert(idx + 1, blocks);
   }, opts.transactionOrigin ?? 'agent');
   return { ok: true };
+}
+
+/** The table `el` sits inside, or null when it sits in none. */
+function tableOf(el: Y.XmlElement): Y.XmlElement | null {
+  for (let t: unknown = el; t instanceof Y.XmlElement; t = t.parent) {
+    if (t.nodeName === 'table') return t;
+  }
+  return null;
 }
 
 /**

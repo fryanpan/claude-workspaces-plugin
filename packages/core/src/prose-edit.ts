@@ -695,15 +695,107 @@ const TABLE_NO_MATCH_WARNING =
   'structural changes.';
 
 /**
+ * Which find row each replacement row rewrites: an index into `findRows`, or
+ * null for a row to add. A find row no entry names is removed.
+ *
+ * Rows the two lists share unchanged are paired first (a longest common
+ * subsequence), so adding a row above or below one never rewrites it. The
+ * rows left between two such pairs are paired in order, which is an edit of
+ * the live row — its unchanged cells keep their anchors — and any surplus
+ * is added or removed. The pairing only ever moves forward, so kept rows
+ * keep their order.
+ */
+function planRows(findRows: string[][], replaceRows: string[][]): Array<number | null> {
+  const same = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((cell, i) => normCell(cell) === normCell(b[i] ?? ''));
+  const n = findRows.length;
+  const m = replaceRows.length;
+  // lcs[i][j]: the longest run of shared rows in findRows[i..] and replaceRows[j..].
+  const lcs = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const row = lcs[i] as number[];
+      row[j] = same(findRows[i] ?? [], replaceRows[j] ?? [])
+        ? (lcs[i + 1]?.[j + 1] ?? 0) + 1
+        : Math.max(lcs[i + 1]?.[j] ?? 0, row[j + 1] ?? 0);
+    }
+  }
+  const pairs: Array<[number, number]> = [];
+  for (let i = 0, j = 0; i < n && j < m; ) {
+    if (same(findRows[i] ?? [], replaceRows[j] ?? [])) pairs.push([i++, j++]);
+    else if ((lcs[i + 1]?.[j] ?? 0) >= (lcs[i]?.[j + 1] ?? 0)) i++;
+    else j++;
+  }
+  pairs.push([n, m]);
+  const plan = new Array<number | null>(m).fill(null);
+  let fi = 0;
+  let rj = 0;
+  for (const [pi, pj] of pairs) {
+    for (let k = 0; fi + k < pi && rj + k < pj; k++) plan[rj + k] = fi + k;
+    if (pj < m) plan[pj] = pi;
+    fi = pi + 1;
+    rj = pj + 1;
+  }
+  return plan;
+}
+
+/** Does any text under `node` carry a pending suggestion? */
+function holdsSuggestion(node: Y.XmlElement): boolean {
+  return node
+    .toArray()
+    .some((child) =>
+      child instanceof Y.XmlText
+        ? (child.toDelta() as Array<{ attributes?: Record<string, unknown> }>).some((op) =>
+            Object.keys(op.attributes ?? {}).some((k) => SUGGEST_MARK_KEYS.has(k)),
+          )
+        : child instanceof Y.XmlElement && holdsSuggestion(child),
+    );
+}
+
+/**
+ * Why a row change must not be made, or null when it may.
+ *
+ * The header row is refused because the editor and the file would disagree
+ * about it: the editor shows a header only on cells built as `tableHeader`,
+ * while the serializer writes whatever row is first as the header. Removing
+ * the header, or adding a row above it, left the two showing different
+ * headers. A row holding a pending suggestion is refused because removing
+ * it would destroy the suggestion with no one deciding it.
+ */
+function rowChangeRefusal(
+  rows: Y.XmlElement[],
+  plan: Array<number | null>,
+  taken: ReadonlySet<number>,
+): string | null {
+  const table = rows[0]?.parent;
+  if (!(table instanceof Y.XmlElement)) return null;
+  if (table.toArray().indexOf(rows[0] as Y.XmlElement) === 0 && plan[0] !== 0) {
+    return (
+      'That replace would remove the header row or add a row above it. Keep the header ' +
+      'as the first replace row (you may change its cells), and add or remove body rows only.'
+    );
+  }
+  if (rows.some((row, r) => !taken.has(r) && holdsSuggestion(row))) {
+    return (
+      'That replace would remove a row holding a pending suggestion. Accept or reject the ' +
+      'suggestion first (list_suggestions names it), then remove the row.'
+    );
+  }
+  return null;
+}
+
+/**
  * Structural find/replace for pipe-table rows. Returns null when `find` is
  * not table-shaped (the caller reports its normal no-match); otherwise a
  * terminal ReplaceResult.
  *
  * Matching compares cells by text, whitespace-normalized, so the caller's
- * padding never matters. The replacement must keep the find's shape (same
- * rows, same cells per row) — changed cells are rewritten with inline
- * markdown parsed, exactly as the table parser treats cell text; untouched
- * cells keep their content, marks, and anchors.
+ * padding never matters. The replacement keeps the find's cells per row but
+ * may hold more or fewer rows, which is how an agent adds or removes a row
+ * (an empty replace removes them all). `planRows` pairs each replacement row
+ * with a live row: changed cells are rewritten with inline markdown parsed,
+ * exactly as the table parser treats cell text, and untouched cells keep
+ * their content, marks, and anchors.
  */
 function tryTableRowReplace(
   doc: Y.Doc,
@@ -719,21 +811,21 @@ function tryTableRowReplace(
   const findRows = parsePipeRows(opts.find);
   if (!findRows) return null;
 
-  const replaceRows = parsePipeRows(opts.replace);
+  // An empty replace removes the matched rows.
+  // Only the empty string removes; whitespace is refused like any other non-row.
+  const replaceRows = opts.replace === '' ? [] : parsePipeRows(opts.replace);
+  const cols = findRows[0]?.length ?? 0;
   if (
     !replaceRows ||
-    replaceRows.length !== findRows.length ||
-    replaceRows.some((r, i) => r.length !== (findRows[i]?.length ?? -1))
+    findRows.some((r) => r.length !== cols) ||
+    replaceRows.some((r) => r.length !== cols)
   ) {
-    return {
-      ok: false,
-      error: 'table-shape-mismatch',
-      warning:
-        'The find matched table-row syntax, so the replace must be table rows of ' +
-        'the same shape (same row count, same cells per row). To add or remove ' +
-        'rows/columns use insert_blocks_at_anchor / delete_block_at_anchor — ' +
-        'not set_doc_content.',
-    };
+    const message =
+      `The find matched table-row syntax, so the replace must be table rows of ${cols} ` +
+      'cells each, the same as the find. It may hold more rows than the find to add a ' +
+      'row, fewer to remove one, or be empty to remove the matched rows. To add or ' +
+      'remove a column, edit every row this way — not with set_doc_content.';
+    return { ok: false, error: 'table-shape-mismatch', message, warning: message };
   }
 
   // Greedy, non-overlapping scan per table, tables in document order.
@@ -781,12 +873,45 @@ function tryTableRowReplace(
     chosen = [found[0] as { rows: Y.XmlElement[] }];
   }
 
+  // Counted per table across every chosen match: replaceAll can empty a
+  // table with several matches none of which covers it alone.
+  const removed = new Map<unknown, number>();
+  for (const m of chosen) {
+    const t = m.rows[0]?.parent;
+    removed.set(t, (removed.get(t) ?? 0) + m.rows.length);
+  }
+  const emptiesTable = [...removed].some(([t, n]) => t instanceof Y.XmlElement && t.length === n);
+  if (replaceRows.length === 0 && emptiesTable) {
+    const message =
+      'That replace would remove every row of the table. To remove the table, use ' +
+      'delete_block_at_anchor on a word in it.';
+    return { ok: false, error: 'table-shape-mismatch', message, warning: message };
+  }
+  // The same number of rows is an edit of each in place, as it always was.
+  const plan =
+    replaceRows.length === findRows.length
+      ? replaceRows.map((_, i) => i)
+      : planRows(findRows, replaceRows);
+  const taken = new Set(plan.filter((p): p is number => p !== null));
+  for (const match of chosen) {
+    const refusal = rowChangeRefusal(match.rows, plan, taken);
+    if (refusal)
+      return { ok: false, error: 'table-shape-mismatch', message: refusal, warning: refusal };
+  }
+
   doc.transact(() => {
-    for (const match of chosen) {
-      match.rows.forEach((row, r) => {
+    // Last match first, so a row added or removed in one match never moves
+    // a match still to be written in the same table.
+    for (const match of [...chosen].reverse()) {
+      const table = match.rows[0]?.parent;
+      if (!(table instanceof Y.XmlElement)) continue;
+      const start = table.toArray().indexOf(match.rows[0] as Y.XmlElement);
+      plan.forEach((from, to) => {
+        if (from === null) return;
+        const row = match.rows[from] as Y.XmlElement;
         rowCells(row).forEach((cell, c) => {
-          const before = findRows[r]?.[c] ?? '';
-          const after = replaceRows[r]?.[c] ?? '';
+          const before = findRows[from]?.[c] ?? '';
+          const after = replaceRows[to]?.[c] ?? '';
           // An unchanged cell is left alone — its marks and anchors survive.
           if (normCell(before) === normCell(after)) return;
           // Built the way the parser builds a cell, so the `<br>` breaks and
@@ -794,6 +919,26 @@ function tryTableRowReplace(
           cell.delete(0, cell.length);
           cell.insert(0, tableCellBlocks(after));
         });
+      });
+      // Rows no replacement row took are removed, last first so each index holds.
+      for (let r = match.rows.length - 1; r >= 0; r--) {
+        if (!taken.has(r)) table.delete(start + r, 1);
+      }
+      // The kept rows now sit from `start` in replacement order, so a new
+      // row's index is `start` plus its place among the replacement rows.
+      plan.forEach((from, to) => {
+        if (from !== null) return;
+        // A body cell: `rowChangeRefusal` keeps the header row first.
+        const row = new Y.XmlElement('tableRow');
+        row.insert(
+          0,
+          (replaceRows[to] ?? []).map((text) => {
+            const cell = new Y.XmlElement('tableCell');
+            cell.insert(0, tableCellBlocks(text));
+            return cell;
+          }),
+        );
+        table.insert(start + to, [row]);
       });
     }
   }, opts.transactionOrigin ?? 'agent');
