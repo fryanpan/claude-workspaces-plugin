@@ -11,8 +11,11 @@
 #   CW_ORG_ANTHROPIC_API_KEY      this org's own Anthropic key; without it every
 #                                 Claude call is refused (project-profile.ts)
 #   CLAUDE_CODE_OAUTH_TOKEN       the lead agent's Claude Code sign-in, from the
-#                                 Keychain's claude-lead-oauth-token; without it
-#                                 no lead runs (lead.sh)
+#                                 Keychain's claude-lead-oauth-token
+#   CW_LEAD_BOARD                 the board the lead leads; without it and the
+#                                 sign-in no lead runs (entrypoint.sh)
+#   CW_LEAD_GITHUB_DEPLOY_KEY     the project repo's deploy key, BASE64; only the
+#                                 lead holds it (entrypoint.sh, lead.sh)
 # Per-project settings, also Fly secrets so no project's values are committed.
 # deploy.ts sets these (settings.ts names each one's source):
 #   BACKUP_RECIPIENT, BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET
@@ -29,6 +32,8 @@
 #                                 transcription, ElevenLabs and Gemini
 #   CW_LEAD_AGENT_NAME            the lead's agent name; `<project>-lead` unless set
 #   CW_LEAD_REMOTE_CONTROL        `1` starts the lead's session with Remote Control
+#   CW_LEAD_MEMORY_MAX            the lead's cgroup memory ceiling; 1280M unless set
+# (each read by entrypoint.sh, which passes the lead only what it uses)
 #
 # Claude calls spend CW_ORG_ANTHROPIC_API_KEY and nothing else: never a Mac
 # Keychain item, another org's key or a gh login. The server removes any such

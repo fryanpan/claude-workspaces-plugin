@@ -12,6 +12,7 @@ scripts that stand it up. How to run them is
 | `bun run machine:drill --project <name>-test` | the Mac | Backs up, destroys the machine and volume, redeploys, restores, and compares the docs |
 | `entrypoint.sh`, `run-as.sh` | the machine | The process tree, supervised as root: the server as `cw`, cloudflared as `cwtunnel`, the lead agent as `lead`, so no child's user holds another's secrets |
 | `lead.sh` | the machine | Keeps the lead agent's Claude Code session running in tmux, and starts it again within a minute when it ends |
+| `github-known-hosts.txt` | the machine | GitHub's SSH host keys, pinned for the lead's git over SSH |
 | `backup-once.sh`, `backup.ts` | the machine | One backup (data dir, with its events and agent notes, plus Claude Code transcripts): snapshot as `cw`, upload as `cwbackup`, so the server's user never holds the bucket credential |
 | `store-uploader.ts`, `store-upload.ts` | any machine running sessions | Every 5 minutes, sends the new lines of each Claude Code transcript and analytics log to the transcript store, each sealed to its board's key; local-only boards never leave. Not installed anywhere yet |
 | `drill-probe.ts` | the machine | Seeds the drill board and fingerprints its docs, on loopback |
