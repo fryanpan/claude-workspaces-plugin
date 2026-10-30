@@ -38,7 +38,7 @@ When you save the file, an open page swaps in the new round without reloading. T
 ```
 
 - The board calls each `DOMContentLoaded` and `load` listener the new round's inline scripts add, and an `onload` they set, once after the swap, because the page does not reload and the browser does not fire those events again. Scripts loaded by `src` and `type="module"` scripts run later, so this call misses them. In those scripts, read `window.cwRoundState` or listen for `cw-round-arrived`.
-- `cw-round-arrived` fires on `window` after the swap. Its `e.detail.state` holds the same value.
+- `cw-round-arrived` fires on `window` after the swap. Its `e.detail.state` holds the same value. Add that listener with `{ once: true }`, or an earlier round's code runs again on the new page.
 - If more than one round added a `cw-round-leaving` listener, the listener added last sets the value that is kept.
 
 ## Done criteria this workflow adds to the task
