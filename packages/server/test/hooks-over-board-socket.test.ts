@@ -4,12 +4,13 @@
  *
  * `board-socket-hooks.test.ts` proves the Stop hook under the real wall, but
  * only where `sandbox-exec` exists, so a Linux runner never runs it and it
- * covers one hook of three. Here no sandbox is needed: the port the session
- * would otherwise dial is closed, so a request that arrives on the socket
- * could not have taken the TCP path. The control is an unwalled session with
- * no socket, whose requests reach a listening port and never the socket.
+ * covers one hook of three. Here no sandbox is needed. The listener on the
+ * socket records only what arrives on the socket, so a hit there is the
+ * socket path taken; the port the session would otherwise dial is closed, so
+ * the hook has no working TCP route to fall back on. The control is an
+ * unwalled session, whose post reaches a listening port.
  *
- * The two hooks that make no server call, SessionStart and the two
+ * The three hooks that make no server call, SessionStart and the two
  * auto-approvers, are not here: they read only local files.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -20,6 +21,9 @@ import { join, resolve } from 'node:path';
 const HOOKS = resolve(import.meta.dir, '../../plugin/hooks');
 const AGENT = 'Harborlight Lead';
 const BOARD = 'w-harbor';
+const OTHER = 'w-riverbend';
+const agentPath = (board: string, verb: string) =>
+  `/workspaces/${board}/agents/${encodeURIComponent(AGENT)}/${verb}`;
 
 interface Hit {
   method: string;
@@ -56,22 +60,23 @@ const CASES = [
   {
     hook: 'stop-note.ts',
     stdin: { session_id: 's-1', last_assistant_message: 'Charted the Harborlight berths.' },
-    path: `/workspaces/${BOARD}/agents/${encodeURIComponent(AGENT)}/notes`,
+    path: (board: string) => agentPath(board, 'notes'),
   },
   {
     hook: 'permission-denied-note.ts',
     stdin: { session_id: 's-1', tool_name: 'WebFetch' },
-    path: `/workspaces/${BOARD}/agents/${encodeURIComponent(AGENT)}/notes`,
+    path: (board: string) => agentPath(board, 'notes'),
   },
   {
     hook: 'prompt-mark.ts',
     stdin: { session_id: 's-1', prompt: 'chart the Riverbend berths' },
-    path: `/workspaces/${BOARD}/agents/${encodeURIComponent(AGENT)}/prompts`,
+    path: (board: string) => agentPath(board, 'prompts'),
   },
 ] as const;
 
-/** Run a hook script as Claude Code does, and wait for it to exit. */
-async function runHook(hook: string, stdin: unknown, env: Record<string, string>): Promise<number> {
+/** Run a hook script as Claude Code does, and wait for it to exit. Its exit
+ *  code says nothing: `hookMain` exits 0 on every path. */
+async function runHook(hook: string, stdin: unknown, env: Record<string, string>): Promise<void> {
   const proc = Bun.spawn([process.execPath, join(HOOKS, hook)], {
     stdin: new Blob([JSON.stringify(stdin)]),
     stdout: 'ignore',
@@ -79,7 +84,7 @@ async function runHook(hook: string, stdin: unknown, env: Record<string, string>
     // HOME is a throwaway, so no discovery file names a port.
     env: { PATH: '/usr/bin:/bin', HOME: homeDir, CW_AGENT_NAME: AGENT, ...env },
   });
-  return proc.exited;
+  await proc.exited;
 }
 
 let homeDir: string;
@@ -88,7 +93,7 @@ let socketDir: string;
 beforeAll(() => {
   homeDir = mkdtempSync(join(tmpdir(), 'hooks-sock-home-'));
   // Short, so the socket path fits sun_path on macOS.
-  socketDir = mkdtempSync(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'hs-'));
+  socketDir = mkdtempSync(join(process.platform === 'darwin' ? '/private/tmp' : '/tmp', 'hs-'));
 });
 
 afterAll(() => {
@@ -102,28 +107,43 @@ describe('a walled session’s hooks, with the board server’s port closed', ()
       const listener = recorder({ unix: socket });
       try {
         const env = { CW_BOARD_SOCKET: socket, CW_BASE_URL: `http://127.0.0.1:${closedPort()}` };
-        expect(await runHook(c.hook, c.stdin, env)).toBe(0);
-        expect(listener.hits).toEqual([{ method: 'POST', path: c.path }]);
+        await runHook(c.hook, c.stdin, env);
+        expect(listener.hits).toEqual([{ method: 'POST', path: c.path(BOARD) }]);
       } finally {
         listener.stop();
       }
     }, 20_000);
   }
+
+  // The launch's board wins over the socket's name (`boardOf`); the server,
+  // not the hook, holds the request to the socket's board, which
+  // `board-socket-hooks.test.ts` proves under the wall.
+  it('names the launch’s board over the socket’s, and still sends it on the socket', async () => {
+    const socket = join(socketDir, `${BOARD}.sock`);
+    const listener = recorder({ unix: socket });
+    try {
+      const env = {
+        CW_BOARD_SOCKET: socket,
+        CW_WORKSPACE_ID: OTHER,
+        CW_BASE_URL: `http://127.0.0.1:${closedPort()}`,
+      };
+      for (const c of CASES) await runHook(c.hook, c.stdin, env);
+      expect(listener.hits).toEqual(CASES.map((c) => ({ method: 'POST', path: c.path(OTHER) })));
+    } finally {
+      listener.stop();
+    }
+  }, 30_000);
 });
 
 describe('control: an unwalled session’s hooks', () => {
   for (const c of CASES) {
-    it(`${c.hook} dials the port and never the socket`, async () => {
-      const socket = join(socketDir, `${BOARD}.sock`);
-      const onSocket = recorder({ unix: socket });
+    it(`${c.hook} posts over the port`, async () => {
       const onPort = recorder({ port: 0 });
       try {
         const env = { CW_BASE_URL: `http://127.0.0.1:${onPort.port}`, CW_WORKSPACE_ID: BOARD };
-        expect(await runHook(c.hook, c.stdin, env)).toBe(0);
-        expect(onPort.hits).toEqual([{ method: 'POST', path: c.path }]);
-        expect(onSocket.hits).toEqual([]);
+        await runHook(c.hook, c.stdin, env);
+        expect(onPort.hits).toEqual([{ method: 'POST', path: c.path(BOARD) }]);
       } finally {
-        onSocket.stop();
         onPort.stop();
       }
     }, 20_000);
