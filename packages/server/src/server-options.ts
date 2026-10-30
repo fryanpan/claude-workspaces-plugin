@@ -74,6 +74,13 @@ export interface ServerOptions {
    * enough for a socket path (`boardSocketDirError`).
    */
   boardSocketDir?: string;
+  /**
+   * The one board whose socket another user of this machine may open: its
+   * socket is mode 666 and the folder 710, so a member of the folder's group
+   * (a project machine's lead, `infra/project-machine/entrypoint.sh`) reaches
+   * that socket and can list none. Unset, every socket is this user's alone.
+   */
+  boardSocketShared?: string;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,
@@ -163,6 +170,15 @@ export interface ServerOptions {
    * with a LAN name stays gated.
    */
   loopbackSkipsAccess?: boolean;
+  /**
+   * Loopback TCP from these uids is refused before anything else reads it
+   * (`middleware/loopback-uid-door.ts`). A project machine names its lead's
+   * uid (`CW_LOOPBACK_REFUSED_UIDS`), so the lead reaches its board only
+   * through that board's socket. Empty, nothing is refused.
+   */
+  loopbackRefusedUids?: number[];
+  /** Tests only: who owns a loopback caller's socket, in place of `/proc/net/tcp`. */
+  peerUid?: (peer: { address: string; port: number }, serverPort: number) => number | null;
   /**
    * Whether this server offers its OWN emailed-code sign-in: the `/signin`
    * page and the `/api/auth/start` + `/api/auth/verify` routes.

@@ -22,6 +22,7 @@ import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { parseFrameOrigin, sameSiteHosts } from './frame-host.ts';
 import { parseHostAudiences } from './middleware/cf-access.ts';
+import { parseRefusedUids } from './middleware/loopback-uid-door.ts';
 import { signInToWriteFromEnv } from './middleware/write-gate.ts';
 import { normalizePublicBaseUrl } from './public-host.ts';
 import { normalizeRecallCallbackHost } from './recall.ts';
@@ -267,6 +268,11 @@ export function resolveServerConfig(opts: {
    * rather than stopping the server.
    */
   const boardSocketDir = resolveBoardSocketDir(env, arg, undefined, requestedPort);
+
+  /** `CW_BOARD_SOCKET_SHARED=<boardId>`: see ServerOptions.boardSocketShared. */
+  const boardSocketShared = env.CW_BOARD_SOCKET_SHARED?.trim() || undefined;
+  /** `CW_LOOPBACK_REFUSED_UIDS=10004`: see ServerOptions.loopbackRefusedUids. */
+  const loopbackRefusedUids = parseRefusedUids(env.CW_LOOPBACK_REFUSED_UIDS);
 
   /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
   const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
@@ -687,8 +693,10 @@ export function resolveServerConfig(opts: {
     requireSignInToWrite,
     requireAgentToken,
     boardSocketDir,
+    boardSocketShared,
     accessOnlyBrowserHosts,
     loopbackSkipsAccess,
+    loopbackRefusedUids,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,

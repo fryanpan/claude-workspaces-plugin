@@ -9,6 +9,13 @@
  * `request-admission.ts` reads that record, never the Host header, and
  * `middleware/board-socket-door.ts` holds the request to that board.
  *
+ * One board's socket may be shared with another user of this machine
+ * (`shared`): that socket is mode 666 and the folder 710, so a member of the
+ * folder's group opens that socket by name and cannot list the folder to find
+ * another. A project machine's lead reaches its board this way
+ * (`infra/project-machine/entrypoint.sh`), and `middleware/loopback-uid-door.ts`
+ * refuses it every TCP way in.
+ *
  * A request here has no peer address (Bun's `requestIP` answers null for a
  * unix socket), so every loopback-only check further down the chain refuses
  * it as well. Websocket upgrades are refused: the upgrade routes call the TCP
@@ -65,6 +72,8 @@ export interface BoardSocketsOptions {
   handle: (req: Request) => Promise<Response | undefined>;
   j: (status: number, body: unknown) => Response;
   log?: (line: string) => void;
+  /** The one board whose socket other users may open (see the header). */
+  shared?: string;
 }
 
 export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
@@ -72,7 +81,7 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
   const log = opts.log ?? ((line: string) => console.error(line));
   const refused = boardSocketDirError(dir);
   if (refused) throw new Error(refused);
-  ensurePrivateDir(dir);
+  ensurePrivateDir(dir, opts.shared ? 0o710 : 0o700);
   const boardFor = new WeakMap<Request, string>();
   const listeners = new Map<string, { stop: (closeActive?: boolean) => void }>();
 
@@ -92,9 +101,10 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
           return (await handle(req)) ?? j(500, { error: 'board_socket_no_response' });
         },
       });
-      // Only this user may connect. A sandboxed lead runs as the same user;
-      // its profile, not the file mode, is what tells one lead from another.
-      chmodSync(path, 0o600);
+      // Only this user may connect, but for the shared board's socket, which
+      // the folder's mode keeps to its group. A sandboxed lead runs as the
+      // same user; its profile, not the file mode, tells one lead from another.
+      chmodSync(path, boardId === opts.shared ? 0o666 : 0o600);
       listeners.set(boardId, server);
     } catch (err) {
       log(`[board-sockets] could not open ${path}: ${err instanceof Error ? err.message : err}`);
@@ -124,15 +134,16 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
 /**
  * Make the folder, or take one that exists, only if it is a real folder this
  * user owns; then nobody else may enter it. Another user's folder at a
- * guessable `/private/tmp` path is refused, never used.
+ * guessable `/private/tmp` path is refused, never used. `mode` is 700, or
+ * 710 when one socket is shared: the group may then enter, and not list.
  */
-function ensurePrivateDir(dir: string): void {
+function ensurePrivateDir(dir: string, mode: number): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const st = lstatSync(dir);
   const uid = process.getuid?.();
   if (!st.isDirectory() || (uid !== undefined && st.uid !== uid))
     throw new Error(`board socket folder ${dir} is not a folder this user owns`);
-  chmodSync(dir, 0o700);
+  chmodSync(dir, mode);
 }
 
 /**
