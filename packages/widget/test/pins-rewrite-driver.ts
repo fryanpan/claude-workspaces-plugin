@@ -198,6 +198,9 @@ async function run(
     await cdp.evaluate(`((anchors) => {
       const doc = document.querySelector('${TAG}').client.ydoc;
       const who = { id: 'known-r', name: 'Alice', kind: 'known', color: '#7a5cc4' };
+      // The reader has read every thread already, so none sits under New.
+      const seen = Object.fromEntries(Object.keys(anchors).map((id) => [id, Number.MAX_SAFE_INTEGER]));
+      localStorage.setItem('cfw:seen:pins-rewrite', JSON.stringify(seen));
       for (const [threadId, anchor] of Object.entries(anchors)) {
         window.__core.createThread(doc, { threadId, anchor, createdBy: who, firstComment: { id: 'c-' + threadId, text: 'Note on ' + threadId } });
       }

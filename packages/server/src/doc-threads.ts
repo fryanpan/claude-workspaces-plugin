@@ -3,6 +3,7 @@ import {
   type AnchorRefresh,
   type DeliveryStamp,
   type ElementAnchor,
+  type LinkedReviewItem,
   type PageEdit,
   type PageSuggestion,
   type ReviewAnswerUndone,
@@ -15,7 +16,8 @@ import {
   applyReviewRevision,
   contentKind,
   createThread,
-  listThreads,
+  listThreadsWithLinks,
+  postLinkedReply,
   prose,
   reinstateReview,
   reviewAnswered,
@@ -158,6 +160,9 @@ export class DocThreads {
       /** New words an agent proposes for the page — see `PageSuggestion`.
        *  New threads only, like `pageEdits`. */
       pageSuggestion?: PageSuggestion;
+      /** A review item, maybe on another board, this reply points at — see
+       *  `LinkedReviewItem`. Replies only. */
+      linkedItem?: LinkedReviewItem;
       /** This reply was a partial answer: the item's questions it left open,
        *  carried on the frame so a watching filer is told. */
       openParts?: string[];
@@ -195,13 +200,16 @@ export class DocThreads {
       });
       return t;
     }
-    const comment = schemaPostReply(doc.ydoc, threadId, {
+    const reply = {
       id: randomId(),
       author,
       text,
       ...(opts?.review ? { review: opts.review } : {}),
       ...(opts?.via ? { via: opts.via } : {}),
-    });
+    };
+    const comment = opts?.linkedItem
+      ? postLinkedReply(doc.ydoc, threadId, { ...reply, linkedItem: opts.linkedItem })
+      : schemaPostReply(doc.ydoc, threadId, reply);
     if (!comment) return null;
     // A PERSON replying to a resolved thread is continuing the conversation,
     // so the thread reopens. It has to: the drawer's default "Open" tab drops
@@ -924,14 +932,14 @@ export class DocThreads {
   listThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {
     const doc = this.p.docForRead(docId);
     if (!doc) return [];
-    const all = listThreads(doc.ydoc);
+    const all = listThreadsWithLinks(doc.ydoc);
     return filter?.status ? all.filter((t) => t.status === filter.status) : all;
   }
 
   getThread(docId: string, threadId: string): Thread | null {
     const doc = this.p.docForRead(docId);
     if (!doc) return null;
-    return listThreads(doc.ydoc).find((t) => t.id === threadId) ?? null;
+    return listThreadsWithLinks(doc.ydoc).find((t) => t.id === threadId) ?? null;
   }
 
   /**

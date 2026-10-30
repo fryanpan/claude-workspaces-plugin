@@ -193,14 +193,15 @@ export function mountSuggestions(widget: FeedbackWidgetEl): void {
   style.textContent = SUGGEST_CSS;
   shadow.append(style);
   let pinned: string | null = null;
-  document.addEventListener(
-    'click',
-    (ev) => {
-      const pin = (ev.target as Element | null)?.closest?.('.cfw-pin') as HTMLElement | null;
-      pinned = pin?.dataset.threadId ?? null;
-    },
-    true,
-  );
+  const tapped = (ev: Event): void => {
+    const pin = (ev.target as Element | null)?.closest?.('.cfw-pin') as HTMLElement | null;
+    pinned = pin?.dataset.threadId ?? null;
+  };
+  // On pointerdown as well: the comment view opens a pin's thread from a
+  // click listener of its own, and a real tap runs the scan between that
+  // listener and this one, so the click alone would name the last pin.
+  document.addEventListener('pointerdown', tapped, true);
+  document.addEventListener('click', tapped, true);
   const scan = (): void => {
     for (const pop of shadow.querySelectorAll<HTMLElement>('.thread-popover'))
       decorate(widget, pop, pinned ?? widget.activeThread);

@@ -180,6 +180,20 @@ export async function handleDocsTool(
       );
       return ok(res);
     }
+    case 'link_review_item': {
+      const { docId, threadId, item, text } = a as {
+        docId: string;
+        threadId: string;
+        item: unknown;
+        text?: string;
+      };
+      const res = await http(
+        'POST',
+        `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/linked-items`,
+        { author: AUTHOR, item, ...(text !== undefined ? { text } : {}) },
+      );
+      return ok(res);
+    }
     case 'edit_comment': {
       const { docId, threadId, commentId, text, reason } = a as {
         docId: string;

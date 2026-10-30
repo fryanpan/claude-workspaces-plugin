@@ -183,11 +183,39 @@ const BOARD_LINK = (workspaceId: string): { style: string; anchor: string } => (
     '.cw-board-link{position:fixed;top:8px;left:8px;z-index:2147483646;padding:4px 10px;' +
     'border-radius:999px;border:1px solid rgba(0,0,0,.14);background:rgba(255,255,255,.94);' +
     'color:#1f2328;font:500 13px/18px system-ui,-apple-system,sans-serif;text-decoration:none;' +
-    'box-shadow:0 1px 3px rgba(0,0,0,.12)}',
+    'box-shadow:0 1px 3px rgba(0,0,0,.12)}' +
+    // It stands at the bar's left, so the bar's title starts after it.
+    '.cw-bar-title{padding-left:84px}',
   anchor:
     `<a class="cw-board-link" href="/workspaces/${escapeAttr(encodeURIComponent(workspaceId))}"` +
     ' aria-label="Back to the board">← Board</a>',
 });
+
+/**
+ * The board's bar above the frame: the mock's title, and Comments on the
+ * right, where a doc keeps it (the owner, 2026-10-29: "Can we put this in the
+ * same place as for docs? Top bar on the right"). `mock-host.ts` runs the
+ * button; the dot beside its label is steady, and its room is kept when it
+ * is hidden so the label never moves.
+ */
+const BAR_STYLE =
+  '.cw-bar{height:44px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;' +
+  'background:#fff;border-bottom:1px solid #d1d5da;font:13px/18px system-ui,-apple-system,sans-serif;color:#57606a}' +
+  '.cw-bar-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#1b1f23;font-weight:600}' +
+  '.cw-comments{min-height:36px;padding:0 12px;border:1px solid #d1d5da;border-radius:6px;background:#fff;color:#1b1f23;' +
+  'font:inherit;display:inline-flex;align-items:center;gap:6px;cursor:pointer}' +
+  '.cw-comments:hover{border-color:#2e7dd7}' +
+  '.cw-comments[aria-pressed=true]{border-color:#2e7dd7;color:#2e7dd7;box-shadow:inset 0 0 0 1px #2e7dd7}' +
+  '.cw-new{display:inline-block;width:8px;height:8px;border-radius:50%;background:#5b3f8f}' +
+  '.cw-new[hidden]{display:inline-block;visibility:hidden}';
+
+const BAR = (title: string): string =>
+  `<div class="cw-bar"><span class="cw-bar-title">${title.replace(/</g, '&lt;')}</span>` +
+  '<button class="cw-comments" data-cw-comments aria-pressed="false" title="Comments">' +
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"' +
+  ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+  '<span>Comments</span><span class="cw-new" data-cw-new hidden></span></button></div>';
 
 /**
  * The board's four pages, for the owner's host page: a rail on the left above
@@ -200,6 +228,8 @@ const BOARD_LINK = (workspaceId: string): { style: string; anchor: string } => (
  */
 const NAV_RAIL_W = 58;
 const NAV_BAR_H = 54;
+/** The bar above the frame (`BAR`), which the rail sits beside. */
+const BAR_H = 44;
 function hostNav(workspaceId: string): { style: string; html: string } {
   const links = BOARD_NAV_TABS.map(
     (t) =>
@@ -215,23 +245,25 @@ function hostNav(workspaceId: string): { style: string; html: string } {
       '.cw-host-nav a:hover{color:#1f2328}.cw-host-nav svg{width:20px;height:20px;display:block}' +
       `@media (min-width:1101px){.cw-host-nav{top:0;left:0;bottom:0;width:${NAV_RAIL_W}px;flex-direction:column;` +
       'padding:8px 0;gap:2px;border-right:1px solid #d1d9e0}.cw-host-nav a{height:54px}' +
+      `.cw-bar{margin-left:${NAV_RAIL_W}px}` +
       `iframe{margin-left:${NAV_RAIL_W}px;width:calc(100% - ${NAV_RAIL_W}px)}}` +
       `@media (max-width:1100px){:root{--doc-dock-h:${NAV_BAR_H}px}.cw-host-nav{left:0;right:0;bottom:0;` +
       `height:calc(${NAV_BAR_H}px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);` +
       'border-top:1px solid #d1d9e0}.cw-host-nav a{flex:1}' +
-      `iframe{height:calc(100% - ${NAV_BAR_H}px - env(safe-area-inset-bottom,0px))}}`,
+      `iframe{height:calc(100% - ${BAR_H}px - ${NAV_BAR_H}px - env(safe-area-inset-bottom,0px))}}`,
     html: `<nav class="cw-host-nav board-nav" aria-label="Workspace pages">${links}</nav>`,
   };
 }
 
 /**
- * The host page. It draws one frame the size of the window — and, for a
- * share visitor only, one link over it back to the board the mock is filed
- * on: a reader who arrived on a mock or a dev server from a share link had no
- * way to the board but the address bar. The owner's page draws the board's
- * nav beside the frame instead (`hostNav`), so neither sits over the mock; it loads the
- * coach's card (`coachHref`) and the lead chat (`leadChatHref`), which the
- * sandboxed frame cannot show, and each stops itself for anyone but the owner. Its script builds
+ * The host page. It draws the board's bar and one frame under it — and, for a
+ * share visitor only, one link in the bar back to the board the mock is
+ * filed on: a reader who arrived on a mock or a dev server from a share link
+ * had no way to the board but the address bar. The owner's page draws the
+ * board's nav beside the frame instead (`hostNav`), so neither sits over the
+ * mock; it loads the coach's card (`coachHref`) and the lead chat
+ * (`leadChatHref`), which the sandboxed frame cannot show, and each stops
+ * itself for anyone but the owner. Its script builds
  * the frame, so it can hand the frame the reader's display name before the
  * widget inside reads it (see `mock-host.ts`).
  */
@@ -285,8 +317,9 @@ export function renderMockHost(args: {
     // board's origin. Entities in the mock's title still read as written.
     `<title>${title.replace(/</g, '&lt;')}</title>` +
     '<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}' +
-    `iframe{border:0;width:100%;height:100%;display:block}${boardLink.style}</style></head><body>` +
+    `iframe{border:0;width:100%;height:calc(100% - ${BAR_H}px);display:block}${BAR_STYLE}${boardLink.style}</style></head><body>` +
     boardLink.anchor +
+    BAR(title) +
     `<iframe data-cw-mock-frame sandbox="${sandbox}" allow="microphone"` +
     ` title="${escapeAttr(title || 'Mock')}" data-src="${escapeAttr(src)}"></iframe>` +
     `<script src="/widget/mock-host.js" data-workspace-id="${escapeAttr(args.workspaceId)}"` +

@@ -73,6 +73,19 @@ describe('what a frame may fetch through the host', () => {
     expect(ok('fetch', 'POST', 'http://board.test/api/deploy')).toBe(false);
   });
 
+  it('never relays a linked review item, so the owner viewing a mock cannot be made to link one', () => {
+    // The route trusts the owner's own same-origin fetch on a shared board
+    // (`server/src/routes/doc-thread-linked-item.ts`). A mock a member wrote
+    // runs in the owner's view, so a relayed call would carry that proof.
+    for (const method of ['POST', 'post', 'PUT']) {
+      expect(ok('fetch', method, `${DOC}/threads/th-1/linked-items`)).toBe(false);
+    }
+    expect(ok('fetch', 'POST', `${DOC}/threads/th-1/linked-items/`)).toBe(false);
+    expect(ok('fetch', 'POST', `${DOC}/threads/th-1/linked-items?x=1`)).toBe(false);
+    // CONTROL: the same thread's reply path relays.
+    expect(ok('fetch', 'POST', `${DOC}/threads/th-1/comments`)).toBe(true);
+  });
+
   it('allows answering only the ticket items the server docked on this mock', () => {
     const item = (t: string, r: string) =>
       `http://board.test/workspaces/w-stand/tasks/${t}/review-items/${r}/answer`;
