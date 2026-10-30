@@ -10,6 +10,9 @@
 #   CW_SENTRY_SERVER_DSN          optional
 #   CW_ORG_ANTHROPIC_API_KEY      this org's own Anthropic key; without it every
 #                                 Claude call is refused (project-profile.ts)
+#   CLAUDE_CODE_OAUTH_TOKEN       the lead agent's Claude Code sign-in, from the
+#                                 Keychain's claude-lead-oauth-token; without it
+#                                 no lead runs (lead.sh)
 # Per-project settings, also Fly secrets so no project's values are committed.
 # deploy.ts sets these (settings.ts names each one's source):
 #   BACKUP_RECIPIENT, BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET
@@ -24,6 +27,8 @@
 #   CW_PROXIED_TRUSTED_EMAILS     defaults to CW_OWNER_EMAIL
 #   CW_PROJECT_PROFILE            `standard` unless set; `claude-only` turns off
 #                                 transcription, ElevenLabs and Gemini
+#   CW_LEAD_AGENT_NAME            the lead's agent name; `<project>-lead` unless set
+#   CW_LEAD_REMOTE_CONTROL        `1` starts the lead's session with Remote Control
 #
 # Claude calls spend CW_ORG_ANTHROPIC_API_KEY and nothing else: never a Mac
 # Keychain item, another org's key or a gh login. The server removes any such

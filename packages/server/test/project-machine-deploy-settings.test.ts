@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 import {
+  LEAD_TOKEN_ENTRY,
   type Observed,
   plan,
   projectConfig,
@@ -32,6 +33,8 @@ import {
 import { deployProject } from '../../../infra/project-machine/deploy.ts';
 import { SETTING_NAMES } from '../../../infra/project-machine/settings.ts';
 import { lifecycleXml } from '../../../infra/project-machine/tigris.ts';
+import { storedSecretService } from '../../../packages/core/src/secret-name.ts';
+import { TOKEN_SERVICE } from '../../../scripts/lead-sandbox-token.ts';
 
 const REPO = join(import.meta.dir, '..', '..', '..');
 const HEAD = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], {
@@ -47,6 +50,7 @@ const HOST = 'riverbend-workspaces.harborlight.test';
 const ALT_HOST = 'riverbend.harborlight.test';
 const OWNER = 'alice@harborlight.test';
 const ORG_KEY = 'sk-ant-fixture-riverbend-org';
+const LEAD_TOKEN = 'sk-ant-oat-fixture-riverbend-lead';
 
 const tmp = mkdtempSync(join(tmpdir(), 'pm-deploy-settings-'));
 const bin = join(tmp, 'bin');
@@ -264,6 +268,57 @@ describe('machine:deploy sets the project settings', () => {
     flySecrets([...requiredSecrets('quick'), ...ALL]);
     await run(false);
     expect(readFileSync(imported, 'utf8')).toBe(`CW_ORG_ANTHROPIC_API_KEY=${ORG_KEY}\n`);
+  });
+
+  it('sets the lead’s sign-in once, from the Keychain, and never prints it', async () => {
+    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
+    flySecrets([...requiredSecrets('quick'), ...ALL]);
+    expect(await run(true)).toEqual([
+      { kind: 'set-secrets', names: ['CLAUDE_CODE_OAUTH_TOKEN'] },
+      { kind: 'deploy' },
+    ]);
+    await run(false);
+    expect(readFileSync(imported, 'utf8')).toBe(`CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}\n`);
+    expect(flyCallLines().join('\n')).not.toContain(LEAD_TOKEN);
+    expect(output.join('\n')).not.toContain(LEAD_TOKEN);
+    // Set once: a machine that has it is left alone.
+    flySecrets([...requiredSecrets('quick', false, true), ...ALL]);
+    expect(await run(true)).toEqual([]);
+  });
+
+  it('reads a labelled account’s sign-in, and refuses one that is not a token without quoting it', async () => {
+    const labelled = projectConfig({
+      project: 'riverbend',
+      imageLabel: HEAD,
+      claudeAccount: 'work',
+    });
+    expect(labelled.keychain.leadToken).toBe(`${LEAD_TOKEN_ENTRY}.work`);
+    keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN}\n`);
+    flySecrets([...requiredSecrets('quick'), ...ALL]);
+    const opts = {
+      accessConfig,
+      cloudflare: () => cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
+    };
+    await deployProject(labelled, false, undefined, opts);
+    expect(readFileSync(imported, 'utf8')).toBe(`CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}\n`);
+
+    rmSync(imported);
+    keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN} riverbend`);
+    const failed = await deployProject(labelled, false, undefined, opts).catch((e: Error) => e);
+    expect(String(failed)).toContain(`${LEAD_TOKEN_ENTRY}.work does not hold a token`);
+    expect(String(failed)).not.toContain(LEAD_TOKEN);
+    expect(existsSync(imported)).toBe(false);
+  });
+
+  it('says no lead will run when the Keychain has no sign-in for one', async () => {
+    await run(true);
+    expect(output.join('\n')).toContain(
+      `CLAUDE_CODE_OAUTH_TOKEN: the Keychain has no ${LEAD_TOKEN_ENTRY}, so no lead agent runs`,
+    );
+  });
+
+  it('reads the same Keychain item the walled lead on the Mac signs in from', () => {
+    expect(storedSecretService(LEAD_TOKEN_ENTRY)).toBe(TOKEN_SERVICE);
   });
 
   it('skips the Access settings, and says so, when the project has no Access application', async () => {

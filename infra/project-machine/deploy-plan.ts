@@ -28,9 +28,16 @@ export interface ProjectConfig {
   /**
    * Keychain entries, under the `claude-workspaces-secret.` prefix. The
    * script makes the first three. `orgKey` is the org's own Anthropic key,
-   * which only a person can provide; the machine gets it only when it exists.
+   * and `leadToken` the lead agent's Claude Code sign-in; only a person can
+   * provide either, and the machine gets each only when it exists.
    */
-  keychain: { identity: string; bucketAdmin: string; writer: string; orgKey: string };
+  keychain: {
+    identity: string;
+    bucketAdmin: string;
+    writer: string;
+    orgKey: string;
+    leadToken: string;
+  };
 }
 
 export interface ConfigInput {
@@ -41,10 +48,23 @@ export interface ConfigInput {
   vmSize?: string;
   vmMemoryMb?: number;
   tunnel?: TunnelMode;
+  /** The `claudeAccounts` label whose Claude Code token the lead signs in with. */
+  claudeAccount?: string;
 }
 
 const PROJECT_NAME = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
+const ACCOUNT_LABEL = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/**
+ * The Keychain entry the walled lead on the Mac signs in from
+ * (`scripts/lead-sandbox-token.ts`, `TOKEN_SERVICE`): the token from
+ * `claude setup-token`, BASE64. A labelled account's is `<entry>.<label>`.
+ */
+export const LEAD_TOKEN_ENTRY = 'claude-lead-oauth-token';
+
+/** The Fly secret the lead's Claude Code signs in with (entrypoint.sh, lead.sh). */
+export const LEAD_TOKEN_SECRET = 'CLAUDE_CODE_OAUTH_TOKEN';
 
 export function projectConfig(input: ConfigInput): ProjectConfig {
   const { project } = input;
@@ -67,6 +87,9 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
   if (input.tunnel !== undefined && input.tunnel !== 'quick' && input.tunnel !== 'named') {
     throw new Error(`tunnel must be quick or named, got "${input.tunnel}"`);
   }
+  if (input.claudeAccount !== undefined && !ACCOUNT_LABEL.test(input.claudeAccount)) {
+    throw new Error(`claude account must be a-z, 0-9 and -, got "${input.claudeAccount}"`);
+  }
   const app = `cw-${project}`;
   return {
     project,
@@ -85,6 +108,9 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
       bucketAdmin: `${app}-bucket-admin`,
       writer: `${app}-backup-writer`,
       orgKey: `${app}-anthropic-api-key`,
+      leadToken: input.claudeAccount
+        ? `${LEAD_TOKEN_ENTRY}.${input.claudeAccount}`
+        : LEAD_TOKEN_ENTRY,
     },
   };
 }
@@ -126,11 +152,13 @@ export const ORG_KEY_SECRET = 'CW_ORG_ANTHROPIC_API_KEY';
 
 /**
  * The Fly secrets the machine needs, by tunnel mode, plus the org's Anthropic
- * key when one was provided. Without it the server refuses every Claude call.
+ * key when one was provided (without it the server refuses every Claude
+ * call) and the lead's sign-in when one was (without it no lead runs).
  */
-export function requiredSecrets(tunnel: TunnelMode, orgKey = false): string[] {
+export function requiredSecrets(tunnel: TunnelMode, orgKey = false, leadToken = false): string[] {
   return [
     ...(orgKey ? [ORG_KEY_SECRET] : []),
+    ...(leadToken ? [LEAD_TOKEN_SECRET] : []),
     'BACKUP_RECIPIENT',
     'BACKUP_S3_ENDPOINT',
     'BACKUP_S3_BUCKET',
@@ -162,7 +190,11 @@ export function plan(
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once.
   const names = [
-    ...requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey)),
+    ...requiredSecrets(
+      cfg.tunnel,
+      obs.keychain.has(cfg.keychain.orgKey),
+      obs.keychain.has(cfg.keychain.leadToken),
+    ),
     ...settings,
   ].filter((n) => !obs.secrets.has(n) || refresh.includes(n));
   if (names.length > 0) actions.push({ kind: 'set-secrets', names });
