@@ -254,7 +254,11 @@ machine. In order:
 
 1. Fingerprints the board on the Mac's server: each doc's text, every thread
    and comment on its docs and rows, its tasks, and the lines of its event and
-   agent-note logs (`board-print.ts`).
+   agent-note logs (`board-print.ts`). A doc in the board's `docIds` whose
+   content and threads both answer 404 is a dangling id: it is fingerprinted
+   as missing, the export carries the id with no files, and the line
+   `source:` says how many there are. A doc whose content answers 404 while
+   its threads answer stops the move.
 2. Stops, changing nothing, if the machine already holds the board.
 3. Exports it (`board-bundle.ts`) and fingerprints the source again. If the
    board changed while it was read, it stops: quiet the board's agents first.
