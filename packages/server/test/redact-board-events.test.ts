@@ -224,3 +224,13 @@ describe('visitorBoardFrame', () => {
     expect(out).toEqual({ event: 'task.created', actor: { name: 'Alice', kind: 'known' } });
   });
 });
+
+describe('the lead chat meeting on a visitor’s feed', () => {
+  it('sends a share visitor none of the meeting or its lines', () => {
+    for (const event of ['lead-chat.meeting', 'lead-chat.meeting-line']) {
+      expect(
+        visitorBoardFrame({ event, workspaceId: 'w-1', line: { text: 'Lead, …' } }),
+      ).toBeUndefined();
+    }
+  });
+});

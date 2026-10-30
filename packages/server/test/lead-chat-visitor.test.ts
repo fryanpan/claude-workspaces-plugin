@@ -7,10 +7,14 @@
  * dropped, not redacted, because the whole frame is the conversation.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LEAD_CHAT_EVENT } from '@claude-workspaces/core/lead-chat';
+import {
+  LEAD_CHAT_EVENT,
+  LEAD_CHAT_MEETING_EVENT,
+  LEAD_CHAT_MEETING_LINE_EVENT,
+} from '@claude-workspaces/core/lead-chat';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { type AccessHarness, accessHarness, mintAccessShare } from './access-share.ts';
 import { waitFor } from './wait-for.ts';
@@ -123,6 +127,67 @@ describe('the lead chat and a share visitor', () => {
       await waitFor(() => owner.events.includes(LEAD_CHAT_EVENT), {
         describe: "owner's page shown the chat",
       });
+      // Positive control: the visitor's stream is open and live.
+      await waitFor(() => visitor.events.includes('task.created'), {
+        describe: 'visitor stream got the later task frame',
+      });
+      expect(visitor.events.filter((e) => e.startsWith('lead-chat.'))).toEqual([]);
+    } finally {
+      visitor.close();
+      owner.close();
+    }
+  });
+
+  it("gives the owner's page the meeting and the visitor's stream none of it", async () => {
+    const notes = join(dataDir, 'riverbend-sync.md');
+    writeFileSync(notes, '# Riverbend sync\n');
+    const made = await local(`/workspaces/${boardId}/docs`, {
+      docId: 'riverbend-sync',
+      sourceUrl: notes,
+      title: 'Riverbend sync',
+    });
+    const docId = ((await made.json()) as { docId: string }).docId;
+    const minted = await mintAccessShare(
+      base,
+      { ...access, shareLinks: handle.shareLinks },
+      boardId,
+    );
+    const streamUrl = `${base}/workspaces/${boardId}/events:stream`;
+    const visitor = await boardStream(streamUrl, minted.headers);
+    const owner = await boardStream(streamUrl, { host: `localhost:${handle.port}` });
+    const meetingPath = `/workspaces/${boardId}/lead-chat/meeting`;
+    try {
+      const started = await local(meetingPath, {
+        action: 'start',
+        author: BRYAN,
+        docId,
+        docTitle: 'Riverbend sync',
+        notes: 'existing',
+        source: 'mic',
+        speakers: 'conversation',
+        recorder: 'rec-1',
+      });
+      expect(started.status).toBe(201);
+      const { meeting } = (await started.json()) as { meeting: { id: string } };
+      const said = await local(meetingPath, {
+        action: 'line',
+        author: BRYAN,
+        id: meeting.id,
+        turn: 0,
+        who: 'Bryan',
+        text: 'The Saltmarsh slipway opens at nine.',
+      });
+      expect(said.status).toBe(200);
+      const filed = await local(`/workspaces/${boardId}/tasks`, {
+        author: BRYAN,
+        title: 'Harborlight ferry times',
+      });
+      expect(filed.status).toBe(200);
+
+      await waitFor(() => owner.events.includes(LEAD_CHAT_MEETING_LINE_EVENT), {
+        describe: "owner's page shown the meeting line",
+      });
+      expect(owner.events).toContain(LEAD_CHAT_MEETING_EVENT);
       // Positive control: the visitor's stream is open and live.
       await waitFor(() => visitor.events.includes('task.created'), {
         describe: 'visitor stream got the later task frame',

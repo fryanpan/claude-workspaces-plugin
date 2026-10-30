@@ -11,6 +11,8 @@
  * lives behind the Record Audio button now.)
  */
 
+import { BOARD_NAV_ICONS } from '@claude-workspaces/core/board-nav';
+
 /** The opening attributes every icon shares. Split from the closing ones so a
  *  glyph reads as `<svg ${SVG} ${SVG_ENDS}>…` at the call site. */
 export const SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"';
@@ -68,10 +70,10 @@ export const SPEECH_ICON = `<svg ${SVG} ${SVG_ENDS}><path d="M21 15a2 2 0 0 1-2 
  *  settings page's — and a module importing the shell to reach a string
  *  would import the whole shell. */
 export const NAV_ICONS = {
-  home: `<svg ${SVG} ${SVG_ENDS}><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>`,
-  tasks: `<svg ${SVG} ${SVG_ENDS}><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg>`,
-  activity: `<svg ${SVG} ${SVG_ENDS}><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>`,
-  library: `<svg ${SVG} ${SVG_ENDS}><path d="M5 4.5h9l5 5V19.5H5z"/><path d="M14 4.5v5h5"/><path d="M8.5 13h7M8.5 16.5h7"/></svg>`,
+  home: BOARD_NAV_ICONS.home,
+  tasks: BOARD_NAV_ICONS.tasks,
+  activity: BOARD_NAV_ICONS.activity,
+  library: BOARD_NAV_ICONS.library,
   collapse: `<svg ${SVG} ${SVG_ENDS}><polyline points="14 6 8 12 14 18"/></svg>`,
   expand: `<svg ${SVG} ${SVG_ENDS}><polyline points="10 6 16 12 10 18"/></svg>`,
   share: `<svg ${SVG} ${SVG_ENDS}><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="m8.3 10.8 7.4-4.3M8.3 13.2l7.4 4.3"/></svg>`,

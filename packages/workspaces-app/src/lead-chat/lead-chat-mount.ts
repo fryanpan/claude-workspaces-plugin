@@ -21,6 +21,7 @@
  */
 import type { VoiceContext } from '../voice-capture.ts';
 import { type LeadChatClient, createLeadChatClient } from './lead-chat-client.ts';
+import { type LeadMeetingSeams, wireLeadMeeting } from './lead-chat-meeting-wiring.ts';
 import { type ModeStorage, deviceStorage, readLeadChatMode } from './lead-chat-mode.ts';
 import { type LeadChatView, createLeadChatView } from './lead-chat-view.ts';
 import {
@@ -43,6 +44,12 @@ export interface LeadChatMountOpts {
   /** Injected by tests. */
   client?: LeadChatClient;
   storage?: ModeStorage | null;
+  /** Per tab: which tab records the board's meeting. Defaults to the
+   *  page's session storage. */
+  session?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null;
+  /** The meeting's seams; tests pass fakes for the socket, the mic and the
+   *  board's docs. */
+  meeting?: LeadMeetingSeams;
   /** The voice path's seams; tests pass fakes for the socket and the mic. */
   voice?: Partial<
     Omit<LeadVoiceOpts, 'workspaceId' | 'author' | 'getContext' | 'agent' | 'onChange'>
@@ -56,6 +63,14 @@ export interface LeadChatMount {
 }
 
 const GROW_MS = 200;
+
+function tabStorage(win: Window): Storage | null {
+  try {
+    return win.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   const doc = opts.document ?? document;
@@ -99,9 +114,16 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
       ...(heard.phase !== 'off' ? { voice: heard.phase } : {}),
       heard: heard.heard,
       notice: ui.notice || heard.notice,
+      ...(meet ? { meeting: meet.model() } : {}),
     });
+    view.button.dataset.meeting = String(!!s.meeting);
   };
-  client.onChange(render);
+  // Assigned below; the first renders run before the meeting is wired.
+  let meet: ReturnType<typeof wireLeadMeeting> | null = null;
+  client.onChange(() => {
+    meet?.sync();
+    render();
+  });
 
   const deliver = async (text: string, via: 'chat' | 'voice'): Promise<boolean> => {
     const res = await client.send(text, opts.author, opts.getContext?.(), via);
@@ -144,12 +166,12 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     );
   };
 
-  const openPane = (from: DOMRect | null): void => {
+  const openPane = (from: DOMRect | null, focus = true): void => {
     ui.open = true;
     ui.bar = false;
     render();
     grow(from);
-    view.composer.focus();
+    if (focus) view.composer.focus();
   };
 
   const closeAll = (): void => {
@@ -205,6 +227,26 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
     }
   });
   doc.addEventListener('keydown', onKey);
+  meet = wireLeadMeeting({
+    document: doc,
+    workspaceId: opts.workspaceId,
+    author: opts.author,
+    client,
+    view,
+    ...(opts.getContext ? { getContext: opts.getContext } : {}),
+    session: opts.session === undefined ? tabStorage(win) : opts.session,
+    ...(opts.meeting ? { seams: opts.meeting } : {}),
+    changed: render,
+    openPane: () => {
+      if (!ui.open) openPane(null, false);
+    },
+    paneOpen: () => ui.open,
+    notice: (text) => {
+      ui.notice = text;
+      render();
+    },
+  });
+  meet.sync();
   const onResize = (): void => view.place();
   win.addEventListener('resize', onResize);
   render();
@@ -212,6 +254,7 @@ export function mountLeadChat(opts: LeadChatMountOpts): LeadChatMount {
   return {
     view,
     destroy() {
+      meet?.destroy();
       voice.destroy();
       client.close();
       doc.removeEventListener('keydown', onKey);

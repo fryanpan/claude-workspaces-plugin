@@ -9,6 +9,7 @@ import type { HomeBriefStore } from '../home-brief.ts';
 import type { IdentityRecord } from '../identities.ts';
 import type { KeepMovingVerdict } from '../keep-moving-verdict.ts';
 import type { LeadChat } from '../lead-chat/lead-chat.ts';
+import type { LeadChatMeetings } from '../lead-chat/meeting.ts';
 import type { MeetingRetention } from '../meeting-home.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
@@ -64,6 +65,8 @@ export interface WorkspaceRoutesContext {
   spokenTimings: SpokenTimings;
   /** The board's chat with its lead: the log, and the answers it waits on. */
   leadChat: LeadChat;
+  /** The meeting each board's lead chat is running. */
+  leadChatMeetings: LeadChatMeetings;
   /** What the pages say about features this server's profile turned off. */
   featuresOff: FeaturesOff;
   /** Whether this request speaks for `agentId`: on this machine, with its

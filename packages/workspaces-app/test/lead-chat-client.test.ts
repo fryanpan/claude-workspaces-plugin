@@ -3,7 +3,11 @@
  * frame from the board stream in place, folds the POST's own answer in once,
  * and reads again when a dropped stream comes back.
  */
-import type { LeadChatMessage } from '@claude-workspaces/core/lead-chat';
+import {
+  LEAD_CHAT_MEETING_EVENT,
+  LEAD_CHAT_MEETING_LINE_EVENT,
+  type LeadChatMessage,
+} from '@claude-workspaces/core/lead-chat';
 import { describe, expect, it } from 'vitest';
 import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
 
@@ -168,5 +172,44 @@ describe('the lead chat client', () => {
     expect(client.state().messages.map((m) => m.id)).toEqual(['s']);
     client.close();
     expect([opened, feed.closed]).toEqual([0, false]);
+  });
+
+  it('shows the board’s meeting from the read, and every line and end from the stream', async () => {
+    const meeting = {
+      id: 'lcm-1',
+      startedAt: 1,
+      by: { id: 'known-bryan', name: 'Bryan' },
+      docId: 'd-salt',
+      docTitle: 'Saltmarsh notes',
+      notes: 'existing',
+      source: 'mic',
+      speakers: 'conversation',
+      recorder: 'rec-1',
+      people: [],
+      lines: [],
+    };
+    const { client, stream } = setup([{ lead: null, messages: [], canTalk: true, meeting }]);
+    await settle();
+    expect(client.state().meeting?.id).toBe('lcm-1');
+    const line = { turn: 0, who: 'Alice', text: 'The slipway opens at nine.', ts: 2 };
+    stream().fire(LEAD_CHAT_MEETING_LINE_EVENT, {
+      workspaceId: 'w-harbor',
+      meeting: 'lcm-1',
+      line,
+    });
+    // A line for another board's meeting, or an older meeting, changes nothing.
+    stream().fire(LEAD_CHAT_MEETING_LINE_EVENT, {
+      workspaceId: 'w-harbor',
+      meeting: 'lcm-0',
+      line: { ...line, turn: 1 },
+    });
+    stream().fire(LEAD_CHAT_MEETING_LINE_EVENT, {
+      workspaceId: 'w-other',
+      meeting: 'lcm-1',
+      line: { ...line, turn: 2 },
+    });
+    expect(client.state().meeting?.lines).toEqual([line]);
+    stream().fire(LEAD_CHAT_MEETING_EVENT, { workspaceId: 'w-harbor', meeting: null });
+    expect(client.state().meeting).toBeNull();
   });
 });
