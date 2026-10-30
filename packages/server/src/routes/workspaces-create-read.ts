@@ -19,6 +19,7 @@ import {
 } from '../share/redact-workspace.ts';
 import { summarizeGoals } from '../task-queue.ts';
 import { isRetired, retiredNotice } from '../tasks.ts';
+import { treeFsMode } from '../tree-fs.ts';
 import { wantsJson } from '../workspace-path.ts';
 import type { WorkspaceRouteRequest, WorkspaceRoutesContext } from './workspace-routes-context.ts';
 
@@ -173,8 +174,8 @@ export async function handleWorkspaceCreateRead(
       // bind could never set one. (/api/diffs already forwarded it.)
       exclude: Array.isArray(body?.exclude) ? (body.exclude as string[]) : undefined,
       maxFiles: typeof body?.maxFiles === 'number' ? Number(body.maxFiles) : undefined,
-      owner: body?.owner as string | undefined,
-      // A lead's claim of who produced the set is not taken.
+      // A lead's claims of who owns and who produced the set are not taken.
+      owner: lead ? undefined : (body?.owner as string | undefined),
       producedBy: lead
         ? undefined
         : (body?.producedBy as { agentId?: string; sessionId?: string } | undefined),
@@ -443,6 +444,10 @@ function refuseLeadBind(
 ): { error: string; message: string } | LeadBind {
   const refuse = (message: string) => ({ error: 'out_of_lead_scope', message });
   if (leadBoard === null) return refuse('Only a board’s lead may bind a folder from here.');
+  // The bind is safe only because its reads and writes are contained; where
+  // the contained calls are not (any platform but macOS on arm64), refuse.
+  if (treeFsMode() !== 'contained')
+    return refuse('A lead’s folder bind needs the contained file calls, which this server lacks.');
   const folderPath = body?.folderPath;
   if (typeof folderPath !== 'string' || folderPath === '')
     return refuse('A lead may bind a folder here, and not create a board.');
@@ -450,6 +455,8 @@ function refuseLeadBind(
     return refuse('A lead binds a folder onto its own board only.');
   if (body?.setId !== undefined || body?.workspaceId !== undefined)
     return refuse('A lead may not re-file an attachment set by id.');
+  if (body?.privacy !== undefined && body.privacy !== 'local-only')
+    return refuse('A lead may keep a set local-only, and may not make it shareable.');
   const { maxFiles } = body;
   if (
     maxFiles !== undefined &&

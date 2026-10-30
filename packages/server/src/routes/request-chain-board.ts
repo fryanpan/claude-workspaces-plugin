@@ -458,6 +458,7 @@ export async function serveBoardRoutes(
       url,
       pathname,
       visitor,
+      leadBoard,
       boardAgent: gate.boardAgent,
       answerProof,
       authorFor,

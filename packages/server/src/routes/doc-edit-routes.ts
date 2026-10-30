@@ -14,6 +14,7 @@
  */
 import type { prose } from '@claude-workspaces/core';
 import { taskIdOfBodyDoc } from '../task-projection.ts';
+import { treeFsMode } from '../tree-fs.ts';
 import {
   type DocResourceRouteRequest,
   type DocRoutesContext,
@@ -124,6 +125,10 @@ export async function handleDocEditRoutes(
 ): Promise<Response | undefined> {
   const { docStore, taskStore, j, safeJson, rewriteTaskBody } = ctx;
   const { req, docId, rest, visitor, authorFor } = rq;
+  if (rest === 'content' && req.method === 'POST' && rq.leadBoard) {
+    const refused = leadRewriteRefusal(ctx, rq, rq.leadBoard);
+    if (refused) return j(403, { error: 'out_of_lead_scope', message: refused });
+  }
   // Whole-doc rewrite through the live doc — the safe replacement for
   // Write-the-bound-file + reparse_from_disk, which raced the
   // write-back and clobbered (see docs/research/2026-08-03 review).
@@ -375,4 +380,28 @@ export async function handleDocEditRoutes(
     return res.ok ? j(200, res) : j(409, res);
   }
   return undefined;
+}
+
+/**
+ * Why a board's lead may not rewrite this doc, or null. The lead scope
+ * (`middleware/lead-scope.ts`) already holds the doc to the lead's board,
+ * but a doc there may be bound to a file of the owner's outside every root
+ * the lead can write, which the write-back would then write as the owner. So
+ * a task's description and a doc bound to no file are open; a bound doc
+ * only when its file is under one of that board's roots and the contained
+ * calls are there to write it (`tree-fs.ts`).
+ */
+function leadRewriteRefusal(
+  ctx: DocRoutesContext,
+  rq: DocResourceRouteRequest,
+  board: string,
+): string | null {
+  if (taskIdOfBodyDoc(rq.docId)) return null;
+  const path = ctx.docStore.boundPathOf(rq.docId) ?? rq.doc.meta.sourceUrl;
+  if (path === undefined) return null;
+  if (treeFsMode() !== 'contained')
+    return 'A lead may rewrite a file-backed doc only where the contained file calls are.';
+  if (!ctx.leadWritable(board, path))
+    return 'A lead may rewrite a file-backed doc only when its file is under one of its board’s folders.';
+  return null;
 }

@@ -116,6 +116,9 @@ export function parseSuggestionAuthor(
 export interface DocRoutesContext {
   /** Doc store — every route here is an operation on one. */
   docStore: DocStore;
+  /** Whether `path` is under one of `boardId`'s registered roots
+   *  (`board-socket-roots.ts`), for a lead's rewrite of a bound doc. */
+  leadWritable: (boardId: string, path: string) => boolean;
   /** The board task store — doc↔board membership, and the rows a doc carries. */
   taskStore: TaskStore;
   /** The ydoc projection of the store, refreshed after writes that emit no
