@@ -13669,6 +13669,76 @@ class StdioServerTransport {
   }
 }
 
+// packages/mcp/src/access-headers.ts
+import { spawnSync } from "node:child_process";
+var CLIENT_ID = /^[A-Za-z0-9._-]{1,256}\.access$/;
+var SERVICE = /^[A-Za-z0-9._-]{1,128}$/;
+var LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+function readKeychainSecret(service) {
+  const r = spawnSync("security", ["find-generic-password", "-s", service, "-w"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (r.status !== 0)
+    throw new Error(`no Keychain entry for the service ${service}`);
+  return r.stdout.trim();
+}
+function accessTokenFrom(env, readSecret) {
+  const clientId = env.CW_ACCESS_CLIENT_ID?.trim() ?? "";
+  const service = env.CW_ACCESS_SECRET_SERVICE?.trim() ?? "";
+  if (!clientId && !service)
+    return null;
+  if (!clientId)
+    return { error: "CW_ACCESS_SECRET_SERVICE is set without CW_ACCESS_CLIENT_ID" };
+  if (!service)
+    return { error: "CW_ACCESS_CLIENT_ID is set without CW_ACCESS_SECRET_SERVICE" };
+  if (!CLIENT_ID.test(clientId))
+    return { error: "CW_ACCESS_CLIENT_ID is not an Access client id" };
+  if (!SERVICE.test(service)) {
+    return { error: "CW_ACCESS_SECRET_SERVICE must name a Keychain service" };
+  }
+  let clientSecret;
+  try {
+    clientSecret = readSecret(service).trim();
+  } catch {
+    return { error: `the Keychain service ${service} could not be read` };
+  }
+  if (!clientSecret)
+    return { error: `the Keychain service ${service} holds an empty value` };
+  return { clientId, clientSecret };
+}
+function reachesAccess(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" || u.protocol === "http:" && LOOPBACK.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+function withAccessHeaders(fetch2, token) {
+  if (!token)
+    return fetch2;
+  return (url, init) => {
+    if (!reachesAccess(url))
+      return fetch2(url, init);
+    const headers = new Headers(init?.headers);
+    headers.set("cf-access-client-id", token.clientId);
+    headers.set("cf-access-client-secret", token.clientSecret);
+    return fetch2(url, { ...init, headers });
+  };
+}
+function serverFetch(env, fetch2, log, readSecret = readKeychainSecret) {
+  const token = accessTokenFrom(env, readSecret);
+  if (token === null)
+    return fetch2;
+  if ("error" in token) {
+    log(`Access headers off: ${token.error}`);
+    return fetch2;
+  }
+  log("sending the Access service token on every request to the server");
+  return withAccessHeaders(fetch2, token);
+}
+
 // packages/core/src/env-names.ts
 var ENV_RENAMES = [
   ["FEEDBACK_BASE_URL", "CW_BASE_URL"],
@@ -21767,7 +21837,7 @@ function createConnectorSession(deps) {
 // packages/mcp/src/mcp.ts
 var resolveBaseUrl2 = () => resolveBaseUrl({ env: process.env, homedir, existsSync, readFileSync });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.336";
+var PLUGIN_VERSION = "0.1.338";
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
@@ -21787,7 +21857,7 @@ var session = createConnectorSession({
   processId: PROCESS_ID,
   notify: (n) => server.notification(n),
   resolveBaseUrl: resolveBaseUrl2,
-  fetch: (url, init) => fetch(url, init),
+  fetch: serverFetch(process.env, (url, init) => fetch(url, init), (line) => console.error(`[mcp] ${line}`)),
   log: (...args) => console.error(...args)
 });
 server.setRequestHandler(ListToolsRequestSchema, async () => session.listTools());

@@ -145,6 +145,11 @@ and every step down is silent and safe:
 3. The full stdio child. It is used with `CW_MCP_RELAY=0` (the rollback
    lever), or when the session's name, board or directory is not ASCII.
 
+A board behind Cloudflare Access (`CW_ACCESS_CLIENT_ID` set) skips step 1.
+The node relay and the full child each wrap their one fetch with
+`mcp/src/access-headers.ts`, which reads the service token's secret from
+Keychain and adds both Access headers to every request.
+
 Either relay does four things. It mints the agent's token at
 `GET /api/agent-token`, and every `/mcp` request carries the session's
 identity headers and that token. It holds a push while a tool call is in

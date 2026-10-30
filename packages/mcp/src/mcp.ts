@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { serverFetch } from './access-headers.ts';
 import { resolveAgentAuthor } from './author.ts';
 import { CONNECTOR_INSTRUCTIONS } from './connector-instructions.ts';
 import { createConnectorSession } from './connector-session.ts';
@@ -33,6 +34,8 @@ import { resolveBaseUrl as baseUrlFrom } from './http-client.ts';
  *   CW_AUTHOR      — fallback author key/name (default: agent)
  *   CW_WORKSPACE_ID — the board a bare post_status (no taskId) lands on;
  *                          the same setting the Stop hook reads
+ *   CW_ACCESS_CLIENT_ID, CW_ACCESS_SECRET_SERVICE — a board behind Cloudflare
+ *                          Access; see access-headers.ts
  */
 
 /** Resolved per request, not frozen at module load — see http-client.ts. */
@@ -50,7 +53,7 @@ const AUTHOR = resolveAgentAuthor(process.env);
  * bundle than the deploy source would install. A second literal would be a
  * fourth version site, and this file's history is that version sites drift.
  */
-const PLUGIN_VERSION = '0.1.336';
+const PLUGIN_VERSION = '0.1.338';
 
 /**
  * One nonce per PROCESS, minted at module load and sent on every attach.
@@ -97,7 +100,12 @@ const session = createConnectorSession({
   processId: PROCESS_ID,
   notify: (n) => server.notification(n),
   resolveBaseUrl,
-  fetch: (url, init) => fetch(url, init),
+  // The one fetch for REST, the token mint and the event stream alike.
+  fetch: serverFetch(
+    process.env,
+    (url, init) => fetch(url, init),
+    (line) => console.error(`[mcp] ${line}`),
+  ),
   log: (...args) => console.error(...args),
 });
 
