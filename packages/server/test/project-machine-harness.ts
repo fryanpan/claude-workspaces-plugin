@@ -3,7 +3,7 @@
  * container, shared by `project-machine-entrypoint.test.ts` and
  * `project-machine-lead.test.ts`.
  *
- * `id`, `setpriv`, `bun`, `cloudflared`, `claude`, `tmux` and the
+ * `id`, `setpriv`, `bun`, `cloudflared`, `claude`, `tmux`, `git` and the
  * file-ownership commands are stubs on PATH. The `setpriv` stub records the
  * user it was asked for, and every program it starts records that user, its
  * arguments and its whole environment.
@@ -104,7 +104,10 @@ exec "$@"`,
     `${record}\necho $$ >> "${log}/.claude-pids"\n[ -e "${log}/.claude-exits" ] && exit 1\nexec /bin/sleep 1000`,
   );
   // tmux, as far as lead.sh uses it: a session is its one command, and it
-  // exists while that command runs.
+  // exists while that command runs. As in tmux, a command given as one word
+  // runs through the user's shell ($SHELL, else the login shell, which for
+  // the machine's users is nologin), and one given as several words runs
+  // directly.
   write(
     'tmux',
     `state="${log}/.tmux"; /bin/mkdir -p "$state"
@@ -112,8 +115,14 @@ cmd=$1; shift
 case $cmd in
   new-session)
     name=""
-    while [ $# -gt 1 ]; do case $1 in -s) name=$2; shift 2;; -x|-y|-c) shift 2;; *) shift;; esac; done
-    ( exec /bin/sh -c "$1" ) </dev/null >/dev/null 2>&1 &
+    while [ $# -gt 0 ]; do case $1 in -d) shift;; -s) name=$2; shift 2;; -x|-y|-c) shift 2;; *) break;; esac; done
+    if [ $# -eq 1 ]; then
+      # Bash fills in SHELL when the environment has none; tmux would not.
+      sh=$(/usr/bin/printenv SHELL || echo /usr/sbin/nologin)
+      ( exec "$sh" -c "$1" ) </dev/null >/dev/null 2>&1 &
+    else
+      ( exec "$@" ) </dev/null >/dev/null 2>&1 &
+    fi
     echo $! > "$state/$name.pid" ;;
   has-session)
     p=$(cat "$state/$2.pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null ;;
@@ -121,8 +130,15 @@ case $cmd in
     for f in "$state"/*.pid; do kill "$(cat "$f")" 2>/dev/null; done; exit 0 ;;
 esac`,
   );
-  // The first backup waits an hour; everything else that sleeps waits long.
-  write('sleep', 'case $1 in 3600) exit 0;; *) exec /bin/sleep 1000;; esac');
+  // The first backup waits an hour, and root's wait before it starts the
+  // lead's supervisor again is 10s: both pass at once. Everything else that
+  // sleeps waits long.
+  write(
+    'sleep',
+    'case $1 in 3600) exit 0;; 10) exec /bin/sleep 0.2;; *) exec /bin/sleep 1000;; esac',
+  );
+  // git, as far as lead.sh uses it: its arguments, one line per call.
+  write('git', `echo "\${STUB_UID:-root} $*" >> "${log}/.git"`);
   for (const name of ['mkdir', 'ln']) write(name, 'exit 0');
   // Each line is the user it ran as and its arguments; a symlink among them
   // adds a line of its own.

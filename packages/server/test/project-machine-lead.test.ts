@@ -18,13 +18,15 @@
  * was written, not here.
  */
 import { afterAll, describe, expect, it } from 'bun:test';
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execSync, spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -46,6 +48,9 @@ import { waitFor } from './wait-for.ts';
 const entrypoint = join(machineDir, 'entrypoint.sh');
 const leadScript = join(machineDir, 'lead.sh');
 const LEAD_TOKEN = 'sk-ant-oat-fixture-riverbend-lead';
+const BOARD = 'w-riverbend';
+const DEPLOY_KEY =
+  '-----BEGIN OPENSSH PRIVATE KEY-----\nfixture-deploy-key-harborlight\n-----END OPENSSH PRIVATE KEY-----\n';
 
 if (BASH === null) console.warn('[project-machine-lead] SKIPPED: no bash 4.3+ on PATH');
 
@@ -84,18 +89,43 @@ const alive = (pid: number) => {
   }
 };
 
+/** A cgroup v2 root with the memory controller, as the kernel would show it. */
+function cgroupRoot(root: string): string {
+  const cg = join(root, 'cgroup');
+  mkdirSync(join(cg, 'cw-lead'), { recursive: true });
+  writeFileSync(join(cg, 'cgroup.controllers'), 'cpuset cpu io memory pids\n');
+  writeFileSync(join(cg, 'cgroup.subtree_control'), '');
+  writeFileSync(join(cg, 'cw-lead', 'memory.oom.group'), '0\n');
+  return cg;
+}
+
+/** The entrypoint, on a machine that has a lead: a sign-in and a board. */
+function leadMachine(extra: Record<string, string> = {}, prepare?: (volume: string) => void) {
+  const s = stubs(scratch, '0', ['mkdir', 'ln']);
+  prepare?.(s.volume);
+  const homes = join(s.root, 'home');
+  mkdirSync(join(homes, 'lead'), { recursive: true });
+  const run = start([entrypoint], {
+    ...machineEnv(s.bin, s.volume),
+    CW_MACHINE_HOME_ROOT: homes,
+    CLAUDE_CODE_OAUTH_TOKEN: LEAD_TOKEN,
+    CW_LEAD_BOARD: BOARD,
+    CW_LEAD_GITHUB_DEPLOY_KEY: Buffer.from(DEPLOY_KEY).toString('base64'),
+    FLY_APP_NAME: 'cw-riverbend',
+    ...extra,
+  });
+  return { ...s, ...run, homes };
+}
+
 describe.skipIf(BASH === null)('the lead on the machine', () => {
-  it('runs as lead, with its sign-in and none of the machine’s other secrets', async () => {
-    // The real mkdir and ln: the lead makes its own folders on the volume.
-    const { root, bin, log, volume } = stubs(scratch, '0', ['mkdir', 'ln']);
-    const homes = join(root, 'home');
-    mkdirSync(join(homes, 'lead'), { recursive: true });
-    start([entrypoint], {
-      ...machineEnv(bin, volume),
-      CW_MACHINE_HOME_ROOT: homes,
-      CLAUDE_CODE_OAUTH_TOKEN: LEAD_TOKEN,
-      FLY_APP_NAME: 'cw-riverbend',
+  it('runs as lead, with its sign-in, its board’s socket and its deploy key, and nothing else', async () => {
+    const cg = cgroupRoot(mkdtempSync(join(scratch, 'cg-')));
+    // A copy set aside by a restore, and a link dressed as one.
+    const m = leadMachine({ CW_MACHINE_CGROUP_ROOT: cg }, (volume) => {
+      mkdirSync(join(volume, 'cw.before-restore-1'));
+      symlinkSync(scratch, join(volume, 'link.before-restore-2'));
     });
+    const { log, volume, homes } = m;
     await waitFor(
       () =>
         find(readRecords(log).recs, 'claude').length > 0 &&
@@ -110,13 +140,17 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(lead?.argv).toBe('claude --plugin-dir /app/packages/plugin');
     // POSITIVE CONTROL: the recorder sees the one secret the lead holds.
     expect(lead?.env.get('CLAUDE_CODE_OAUTH_TOKEN')).toBe(LEAD_TOKEN);
-    expect(lead?.env.get('CW_BASE_URL')).toBe('http://127.0.0.1:8787');
+    // Its board, through that board's socket, and no TCP address to call.
+    expect(lead?.env.get('CW_BOARD_SOCKET')).toBe(`${volume}/boards/${BOARD}.sock`);
+    expect(lead?.env.get('CW_WORKSPACE_ID')).toBe(BOARD);
     expect(lead?.env.get('CW_AGENT_NAME')).toBe('riverbend-lead');
     expect(lead?.env.get('HOME')).toBe(join(homes, 'lead'));
+    expect(lead?.env.get('SHELL')).toBe('/bin/bash');
     expect(lead?.env.get('DISABLE_AUTOUPDATER')).toBe('1');
 
     // Nothing else of root's: not the server's key, not the tunnel's or the
-    // bucket's. An allowlist, so a new machine secret is kept out too.
+    // bucket's. An allowlist, so a new machine secret is kept out too. The
+    // deploy key is in its file, not in the session's environment.
     const others = [...Object.values(SECRETS), ...Object.values(SERVER_OWN)];
     expect(
       [...(lead?.env.values() ?? [])].filter((v) => others.some((s) => v.includes(s))),
@@ -126,60 +160,135 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
       [
         'CLAUDE_CODE_OAUTH_TOKEN',
         'CW_AGENT_NAME',
-        'CW_BASE_URL',
+        'CW_BOARD_SOCKET',
         'CW_LEAD_ROOT',
+        'CW_WORKSPACE_ID',
         'DISABLE_AUTOUPDATER',
         'HOME',
         'LOGNAME',
         'PATH',
+        'SHELL',
         'STUB_UID',
         'TERM',
         'USER',
       ].sort(),
     );
 
-    // ...and the sign-in is the lead's alone: no process of the server's
-    // user holds it.
-    const cw = recs.filter((r) => r.uid === 'cw');
-    expect(cw.length).toBeGreaterThan(0);
-    expect(cw.filter((r) => [...r.env.values()].some((v) => v.includes(LEAD_TOKEN)))).toEqual([]);
+    // The deploy key: the lead's file, 0600, and git told to use only it.
+    const keyFile = join(homes, 'lead', '.ssh', 'github_deploy_key');
+    expect(readFileSync(keyFile, 'utf8')).toBe(DEPLOY_KEY);
+    expect(statSync(keyFile).mode & 0o777).toBe(0o600);
+    expect(lines(log, '.git')).toEqual([
+      `lead config --global core.sshCommand ssh -i ${keyFile} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes`,
+    ]);
+
+    // The sign-in and the deploy key are the lead's alone: no process of any
+    // other user (the server, the tunnel) holds either.
+    const encodedKey = Buffer.from(DEPLOY_KEY).toString('base64');
+    const notLead = recs.filter((r) => r.uid !== 'lead');
+    expect(notLead.filter((r) => r.uid === 'cw').length).toBeGreaterThan(0);
+    expect(notLead.filter((r) => r.uid === 'cwtunnel').length).toBeGreaterThan(0);
+    expect(
+      notLead.filter((r) =>
+        [...r.env.values()].some((v) => v.includes(LEAD_TOKEN) || v.includes(encodedKey)),
+      ),
+    ).toEqual([]);
     // No secret is an argument, which any user can read.
     expect(
-      [...recs.map((r) => r.argv), ...setprivArgv].filter((a) => a.includes(LEAD_TOKEN)),
+      [...recs.map((r) => r.argv), ...setprivArgv].filter(
+        (a) => a.includes(LEAD_TOKEN) || a.includes(encodedKey),
+      ),
     ).toEqual([]);
 
-    // The server's folders are closed to the lead, and the lead's to the server.
+    // The server opens the board sockets, shares the lead's board's, and
+    // refuses the lead's uid over TCP.
+    const [server] = find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'));
+    expect(server?.env.get('CW_BOARD_SOCKET_DIR')).toBe(`${volume}/boards`);
+    expect(server?.env.get('CW_BOARD_SOCKET_SHARED')).toBe(BOARD);
+    expect(server?.env.get('CW_LOOPBACK_REFUSED_UIDS')).toBe('10004');
+
+    // The server's folders are closed to the lead, and the lead's to the
+    // server; the socket folder lets the lead's group through, not list.
     expect(lines(log, '.chown')).toContain(`root -h lead:lead ${volume}/lead`);
-    expect(lines(log, '.chmod')).toContain(
-      `root 0700 ${volume}/cw ${volume}/claude-projects ${volume}/lead`,
-    );
+    expect(lines(log, '.chown')).toContain(`root -h cw:lead ${volume}/boards`);
+    const chmods = lines(log, '.chmod');
+    expect(chmods).toContain(`root 0700 ${volume}/cw ${volume}/claude-projects ${volume}/lead`);
+    expect(chmods).toContain(`root 0710 ${volume}/boards`);
+    expect(chmods).toContain(`root 0700 ${volume}/cw.before-restore-1`);
+    expect(chmods.filter((c) => c.includes('link.before-restore'))).toEqual([]);
+
+    // The lead's memory has a ceiling of its own, and the lead is in it.
+    expect(readFileSync(join(cg, 'cgroup.subtree_control'), 'utf8').trim()).toBe('+memory');
+    expect(readFileSync(join(cg, 'cw-lead', 'memory.max'), 'utf8').trim()).toBe('1280M');
+    expect(readFileSync(join(cg, 'cw-lead', 'memory.oom.group'), 'utf8').trim()).toBe('1');
+    expect(Number(readFileSync(join(cg, 'cw-lead', 'cgroup.procs'), 'utf8'))).toBeGreaterThan(0);
+    expect(m.out.join('')).toContain("the lead's memory is capped at 1280M");
+
     // Nobody is at the terminal to answer the first-run questions.
     const seeded = JSON.parse(readFileSync(join(homes, 'lead', '.claude.json'), 'utf8'));
     expect(seeded.hasCompletedOnboarding).toBe(true);
     expect(seeded.projects[`${volume}/lead/work`].hasTrustDialogAccepted).toBe(true);
   }, 30_000);
 
-  it('starts no lead when the machine has no sign-in for one', async () => {
-    const { bin, log, volume } = stubs(scratch, '0');
-    const { out } = start([entrypoint], machineEnv(bin, volume));
-    await waitFor(() => out.join('').includes('no lead agent runs'), {
+  it('starts no lead when the machine has no sign-in for one, or no board', async () => {
+    for (const env of [{}, { CLAUDE_CODE_OAUTH_TOKEN: LEAD_TOKEN }] as Record<string, string>[]) {
+      const { bin, log, volume } = stubs(scratch, '0');
+      const { out } = start([entrypoint], { ...machineEnv(bin, volume), ...env });
+      await waitFor(() => out.join('').includes('no lead agent runs'), {
+        timeout: 20_000,
+        describe: 'the entrypoint to pass the lead by',
+      });
+      await waitFor(() => find(readRecords(log).recs, 'cloudflared').length > 0, {
+        timeout: 20_000,
+        describe: 'the tunnel to start',
+      });
+      const { recs, setprivArgv } = readRecords(log);
+      expect(find(recs, 'claude')).toEqual([]);
+      expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toEqual([]);
+    }
+  }, 45_000);
+
+  it('starts the lead’s supervisor again when the lead kills it, and leaves the server running', async () => {
+    // No cgroup at this root: the lead runs uncapped, and says so.
+    const m = leadMachine({ CW_MACHINE_CGROUP_ROOT: join(scratch, 'no-cgroup') });
+    await waitFor(() => lines(m.log, '.claude-pids').length === 1, {
       timeout: 20_000,
-      describe: 'the entrypoint to pass the lead by',
+      describe: 'the first session',
     });
-    await waitFor(() => find(readRecords(log).recs, 'cloudflared').length > 0, {
+    expect(m.out.join('')).toContain("the lead's memory is NOT capped");
+    const supervisors = () =>
+      execSync('ps -Ao pid=,pgid=,command=', { encoding: 'utf8' })
+        .split('\n')
+        .map((l) => l.trim().split(/\s+/))
+        .filter(
+          ([, pgid, ...cmd]) =>
+            Number(pgid) === m.child.pid && cmd.join(' ').includes('lead.sh supervise'),
+        )
+        .map(([pid]) => Number(pid));
+    const [first] = supervisors();
+    expect(first).toBeGreaterThan(0);
+    // What the lead could do: it owns its supervisor.
+    process.kill(first as number, 'SIGKILL');
+    await waitFor(() => m.out.join('').includes('session already running; watching it'), {
       timeout: 20_000,
-      describe: 'the tunnel to start',
+      describe: 'a new supervisor to take the session over',
     });
-    const { recs, setprivArgv } = readRecords(log);
-    expect(find(recs, 'claude')).toEqual([]);
-    expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toEqual([]);
-  }, 30_000);
+    expect(m.out.join('')).toContain("the lead's supervisor exited");
+    const { recs, setprivArgv } = readRecords(m.log);
+    expect(setprivArgv.filter((a) => a.includes('--reuid=lead'))).toHaveLength(2);
+    // The same session, not a second one, and the server and tunnel once each.
+    expect(lines(m.log, '.claude-pids')).toHaveLength(1);
+    expect(find(recs, 'bun').filter((r) => r.argv.includes('bin.ts'))).toHaveLength(1);
+    expect(find(recs, 'cloudflared')).toHaveLength(1);
+    expect(m.child.exitCode).toBeNull();
+  }, 45_000);
 });
 
 /** lead.sh supervise on its own, as the lead user would run it, on the pretend clock. */
 function supervisor() {
   const s = stubs(scratch, '0', ['mkdir', 'ln'], {
-    sleep: `echo "$1" >> "$CLOCK.sleeps"; echo $(( $(cat "$CLOCK") + $1 )) > "$CLOCK"; exec /bin/sleep 0.01`,
+    // Moved into place, so a reader never sees the clock half written.
+    sleep: `echo "$1" >> "$CLOCK.sleeps"; echo $(( $(cat "$CLOCK") + $1 )) > "$CLOCK.$$"; /bin/mv "$CLOCK.$$" "$CLOCK"; exec /bin/sleep 0.01`,
     date: `if [ "$1" = +%s ]; then cat "$CLOCK"; else exec /bin/date "$@"; fi`,
   });
   const clock = join(s.log, '.clock');

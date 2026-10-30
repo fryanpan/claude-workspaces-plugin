@@ -40,7 +40,7 @@ RUN apt-get update \
 FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14e08a5afcf4a1436cd89
 # Every home is 0700: a user's files are its own.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git tini tmux \
+  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --uid 10001 --create-home --shell /usr/sbin/nologin cw \
   && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
@@ -48,6 +48,9 @@ RUN apt-get update \
   && useradd --uid 10004 --create-home --shell /usr/sbin/nologin lead \
   && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
+# The lead clones and pushes its project's repo over SSH with a deploy key
+# (lead.sh); GitHub's host keys are pinned, not learned on first use.
+COPY infra/project-machine/github-known-hosts.txt /etc/ssh/ssh_known_hosts
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 COPY --from=build /app /app
 WORKDIR /app

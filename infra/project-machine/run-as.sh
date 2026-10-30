@@ -4,8 +4,8 @@
 
 # The secrets the board server must never hold. Its own Claude key and its
 # Access settings are not here: those are the server's to use. The lead's
-# Claude Code sign-in is the lead's alone (lead.sh).
-MACHINE_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN TUNNEL_TOKEN BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY CLAUDE_CODE_OAUTH_TOKEN)
+# Claude Code sign-in and deploy key are the lead's alone (lead.sh).
+MACHINE_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN TUNNEL_TOKEN BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY CLAUDE_CODE_OAUTH_TOKEN CW_LEAD_GITHUB_DEPLOY_KEY)
 
 # Where the users' homes are. Overridable only so a test can run this off a
 # machine.
