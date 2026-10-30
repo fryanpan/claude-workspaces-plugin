@@ -12,14 +12,14 @@
  *   else, never blocks and never throws.
  * - `replaceFile` writes a temp file with a random name, created new
  *   (`O_EXCL`) and never through a link (`O_NOFOLLOW`), checks the name still
- *   holds the file it wrote, then renames it over the target. A link at the
+ *   holds the file and the bytes it wrote, then renames it over the target. A link at the
  *   target is replaced, never followed.
  *
  * These guard the LAST name only. A folder on the way that is itself a link
  * is followed, so the folders that matter must be ones the lead cannot
  * write; the wall makes them read-only (`scripts/lead-sandbox-lib.ts`).
  */
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   constants,
   closeSync,
@@ -76,11 +76,15 @@ export function isPlainFile(path: string): boolean {
 
 const TEMP_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 
-/** A temp file written beside its target, not yet renamed into place. */
+/** A temp file written beside its target, not yet renamed into place:
+ *  its inode and a digest of what was written to it. */
 export interface PendingTemp {
   tmp: string;
   ino: number;
+  digest: string;
 }
+
+const digestOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /** Write `text` to a new random-named temp file beside `path`: created new
  *  (`O_EXCL`), never through a link (`O_NOFOLLOW`). Throws when it cannot,
@@ -94,7 +98,7 @@ export function writeTempBeside(path: string, text: string, mode = 0o644): Pendi
     const bytes = Buffer.from(text, 'utf8');
     let at = 0;
     while (at < bytes.length) at += writeSync(fd, bytes, at, bytes.length - at);
-    return { tmp, ino: fstatSync(fd).ino };
+    return { tmp, ino: fstatSync(fd).ino, digest: digestOf(bytes) };
   } catch (err) {
     unlinkQuietly(tmp);
     throw err;
@@ -103,12 +107,15 @@ export function writeTempBeside(path: string, text: string, mode = 0o644): Pendi
   }
 }
 
-/** Rename a pending temp over `path`, if its name still holds the file that
- *  was written; otherwise remove whatever is at the name and throw. */
+/** Rename a pending temp over `path`, if its name still holds the file and
+ *  the bytes that were written; otherwise remove whatever is at the name and
+ *  throw. The bytes are compared because the inode is no proof: the temp may
+ *  be rewritten in place, and Linux gives a new file the inode just freed. */
 export function commitTemp(pending: PendingTemp, path: string): void {
   try {
     const st = lstatSync(pending.tmp);
-    if (!st.isFile() || st.ino !== pending.ino)
+    const text = st.isFile() && st.ino === pending.ino ? readSmallFile(pending.tmp, st.size) : null;
+    if (text === null || digestOf(Buffer.from(text, 'utf8')) !== pending.digest)
       throw new Error(`${pending.tmp} was replaced before the rename`);
     renameSync(pending.tmp, path);
   } catch (err) {

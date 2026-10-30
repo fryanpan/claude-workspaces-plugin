@@ -63,12 +63,18 @@ describe('replacing a file through a temp beside it', () => {
     expect(isPlainFile(at('link.json'))).toBe(true);
   });
 
-  it('refuses a temp swapped before the rename, and removes it', () => {
-    const pending = writeTempBeside(at('swapped.json'), 'mine');
-    unlinkSync(pending.tmp);
-    writeFileSync(pending.tmp, 'planted');
-    expect(() => commitTemp(pending, at('swapped.json'))).toThrow(/replaced before the rename/);
-    expect(isPlainFile(at('swapped.json'))).toBe(false);
+  // Linux hands a new file the inode just freed, so an unlink and a fresh
+  // file can keep the number; writing in place keeps it everywhere.
+  it.each([
+    ['replaced by a new file', (tmp: string) => (unlinkSync(tmp), writeFileSync(tmp, 'planted'))],
+    ['rewritten in place', (tmp: string) => writeFileSync(tmp, 'planted')],
+    ['rewritten in place, same length', (tmp: string) => writeFileSync(tmp, 'evil')],
+  ])('refuses a temp %s before the rename, and removes it', (_how, swap) => {
+    const target = at('swapped.json');
+    const pending = writeTempBeside(target, 'mine');
+    swap(pending.tmp);
+    expect(() => commitTemp(pending, target)).toThrow(/replaced before the rename/);
+    expect(isPlainFile(target)).toBe(false);
     expect(isPlainFile(pending.tmp)).toBe(false);
   });
 
