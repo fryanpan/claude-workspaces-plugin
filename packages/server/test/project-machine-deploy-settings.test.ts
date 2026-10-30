@@ -24,6 +24,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { cloudflareApi } from '../../../infra/project-machine/cloudflare.ts';
 import {
+  type Action,
+  LEAD_SECRETS,
   LEAD_TOKEN_ENTRY,
   type Observed,
   plan,
@@ -270,53 +272,120 @@ describe('machine:deploy sets the project settings', () => {
     expect(readFileSync(imported, 'utf8')).toBe(`CW_ORG_ANTHROPIC_API_KEY=${ORG_KEY}\n`);
   });
 
-  it('sets the lead’s sign-in once, from the Keychain, and never prints it', async () => {
+  const BOARD = 'w-riverbend';
+  const KEY_ENTRY = 'riverbend-deploy-key';
+  const DEPLOY_KEY =
+    '-----BEGIN OPENSSH PRIVATE KEY-----\nZml4dHVyZS1kZXBsb3kta2V5LWhhcmJvcmxpZ2h0\n-----END OPENSSH PRIVATE KEY-----';
+  const ENCODED = Buffer.from(`${DEPLOY_KEY}\n`).toString('base64');
+  const withLead = (input: Partial<Parameters<typeof projectConfig>[0]> = {}) =>
+    deployProject(
+      projectConfig({ project: 'riverbend', imageLabel: HEAD, vmMemoryMb: 2048, ...input }),
+      false,
+      undefined,
+      {
+        accessConfig,
+        cloudflare: () =>
+          cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
+      },
+    );
+  const dry = (input: Partial<Parameters<typeof projectConfig>[0]> = {}) =>
+    deployProject(
+      projectConfig({ project: 'riverbend', imageLabel: HEAD, vmMemoryMb: 2048, ...input }),
+      true,
+      undefined,
+      {
+        accessConfig,
+        cloudflare: () =>
+          cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
+      },
+    );
+  const secretsSet = (actions: Action[]) =>
+    actions.find((a) => a.kind === 'set-secrets')?.names ?? [];
+
+  it('gives a machine with no board to lead no sign-in, though the Keychain has one', async () => {
     keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
     flySecrets([...requiredSecrets('quick'), ...ALL]);
-    expect(await run(true)).toEqual([
-      { kind: 'set-secrets', names: ['CLAUDE_CODE_OAUTH_TOKEN'] },
-      { kind: 'deploy' },
-    ]);
-    await run(false);
-    expect(readFileSync(imported, 'utf8')).toBe(`CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}\n`);
-    expect(flyCallLines().join('\n')).not.toContain(LEAD_TOKEN);
-    expect(output.join('\n')).not.toContain(LEAD_TOKEN);
-    // Set once: a machine that has it is left alone.
-    flySecrets([...requiredSecrets('quick', false, true), ...ALL]);
     expect(await run(true)).toEqual([]);
+    expect(output.join('\n')).toContain('no --lead-board, so no lead agent runs');
   });
 
-  it('reads a labelled account’s sign-in, and refuses one that is not a token without quoting it', async () => {
-    const labelled = projectConfig({
-      project: 'riverbend',
-      imageLabel: HEAD,
-      claudeAccount: 'work',
-    });
-    expect(labelled.keychain.leadToken).toBe(`${LEAD_TOKEN_ENTRY}.work`);
-    keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN}\n`);
+  it('sets the lead’s board, sign-in and deploy key on stdin, and never prints them', async () => {
+    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN}\n`);
+    keychain(KEY_ENTRY, `${DEPLOY_KEY}\n`);
     flySecrets([...requiredSecrets('quick'), ...ALL]);
-    const opts = {
-      accessConfig,
-      cloudflare: () => cloudflareApi(TOKEN, { base: `http://127.0.0.1:${server.port}/client/v4` }),
-    };
-    await deployProject(labelled, false, undefined, opts);
-    expect(readFileSync(imported, 'utf8')).toBe(`CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}\n`);
-    // A machine that already has a sign-in keeps it, and the run says so.
-    flySecrets([...requiredSecrets('quick', false, true), ...ALL]);
-    expect(await deployProject(labelled, true, undefined, opts)).toEqual([]);
-    expect(output.join('\n')).toContain('CLAUDE_CODE_OAUTH_TOKEN is already set');
-    flySecrets([...requiredSecrets('quick'), ...ALL]);
+    await withLead({ leadBoard: BOARD, githubDeployKey: KEY_ENTRY });
+    expect(readFileSync(imported, 'utf8').split('\n').filter(Boolean)).toEqual([
+      `CLAUDE_CODE_OAUTH_TOKEN=${LEAD_TOKEN}`,
+      `CW_LEAD_BOARD=${BOARD}`,
+      `CW_LEAD_GITHUB_DEPLOY_KEY=${ENCODED}`,
+    ]);
+    for (const value of [LEAD_TOKEN, ENCODED, 'Zml4dHVyZS1kZXBsb3kta2V5']) {
+      expect(flyCallLines().join('\n')).not.toContain(value);
+      expect(output.join('\n')).not.toContain(value);
+    }
+    // Set once: a run that names no source leaves the lead's secrets alone.
+    flySecrets([...requiredSecrets('quick', false, LEAD_SECRETS), ...ALL]);
+    expect(secretsSet(await dry())).toEqual([]);
+    // A run that names a source sets that secret again.
+    expect(secretsSet(await dry({ githubDeployKey: KEY_ENTRY }))).toEqual([
+      'CW_LEAD_GITHUB_DEPLOY_KEY',
+    ]);
+  });
 
-    rmSync(imported);
-    keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN} riverbend`);
-    const failed = await deployProject(labelled, false, undefined, opts).catch((e: Error) => e);
-    expect(String(failed)).toContain(`${LEAD_TOKEN_ENTRY}.work does not hold a token`);
-    expect(String(failed)).not.toContain(LEAD_TOKEN);
+  it('sets a newly named account’s sign-in again, and --refresh-lead sets all three', async () => {
+    keychain(`${LEAD_TOKEN_ENTRY}.work`, `${LEAD_TOKEN}\n`);
+    keychain(KEY_ENTRY, DEPLOY_KEY);
+    flySecrets([...requiredSecrets('quick', false, LEAD_SECRETS), ...ALL]);
+    expect(
+      projectConfig({ project: 'riverbend', imageLabel: HEAD, claudeAccount: 'work' }).keychain
+        .leadToken,
+    ).toBe(`${LEAD_TOKEN_ENTRY}.work`);
+    expect(secretsSet(await dry({ claudeAccount: 'work' }))).toEqual(['CLAUDE_CODE_OAUTH_TOKEN']);
+    expect(
+      secretsSet(
+        await dry({
+          claudeAccount: 'work',
+          leadBoard: BOARD,
+          githubDeployKey: KEY_ENTRY,
+          refreshLead: true,
+        }),
+      ),
+    ).toEqual(LEAD_SECRETS);
+  });
+
+  it('refuses a sign-in or a deploy key that is not one, without quoting it', async () => {
+    flySecrets([...requiredSecrets('quick'), ...ALL]);
+    keychain(LEAD_TOKEN_ENTRY, `${LEAD_TOKEN} riverbend`);
+    const badToken = await withLead({ leadBoard: BOARD }).catch((e: Error) => e);
+    expect(String(badToken)).toContain(`${LEAD_TOKEN_ENTRY} does not hold a token`);
+    expect(String(badToken)).not.toContain(LEAD_TOKEN);
+    keychain(LEAD_TOKEN_ENTRY, LEAD_TOKEN);
+    keychain(KEY_ENTRY, 'ssh-ed25519 AAAAfixture-public-half-riverbend');
+    const badKey = await withLead({ leadBoard: BOARD, githubDeployKey: KEY_ENTRY }).catch(
+      (e: Error) => e,
+    );
+    expect(String(badKey)).toContain(`${KEY_ENTRY} does not hold an OpenSSH private key`);
+    expect(String(badKey)).not.toContain('AAAAfixture');
     expect(existsSync(imported)).toBe(false);
+    expect(() =>
+      projectConfig({ project: 'riverbend', imageLabel: HEAD, leadBoard: 'w/../x' }),
+    ).toThrow('board id');
+  });
+
+  it('refuses a machine too small for its lead, before any change', async () => {
+    keychain(LEAD_TOKEN_ENTRY, LEAD_TOKEN);
+    flySecrets([...requiredSecrets('quick'), ...ALL]);
+    await expect(dry({ leadBoard: BOARD, vmMemoryMb: 512 })).rejects.toThrow(
+      'needs --memory 2048 or more (got 512)',
+    );
+    // An existing lead counts too: its board and sign-in are already set.
+    flySecrets([...requiredSecrets('quick', false, LEAD_SECRETS), ...ALL]);
+    await expect(run(true)).rejects.toThrow('needs --memory 2048');
+    expect(flyCallLines().some((l) => l.startsWith('secrets import'))).toBe(false);
   });
 
   it('says no lead will run when the Keychain has no sign-in for one', async () => {
-    await run(true);
+    await dry({ leadBoard: BOARD });
     expect(output.join('\n')).toContain(
       `CLAUDE_CODE_OAUTH_TOKEN: the Keychain has no ${LEAD_TOKEN_ENTRY}, so no lead agent runs`,
     );
