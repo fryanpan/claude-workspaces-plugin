@@ -85,6 +85,7 @@ import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { wireMeetings } from './meeting-wiring.ts';
 import { isLoopbackAddress } from './middleware/host-guard.ts';
+import { loopbackUidDoor } from './middleware/loopback-uid-door.ts';
 import { isBrowserRequest } from './middleware/write-gate.ts';
 import { boardLinkedItems } from './mockup-linked-items.ts';
 import { MountStore } from './mount-store.ts';
@@ -3113,9 +3114,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
    * Bun’s specificity matching, still orders the eight adjacencies whose
    * comments call them load-bearing.
    */
+  // Loopback TCP from a refused user (a project machine's lead) is answered
+  // here, before any check that trusts a loopback peer reads it.
+  const refuseLoopbackUid = loopbackUidDoor(opts.loopbackRefusedUids ?? [], opts.peerUid);
+
   /** The device and location a browser request's analytics rows carry, in
    *  scope for exactly as long as the request is (event-origin.ts). */
   function handleWithOrigin(req: Request): Promise<Response | undefined> {
+    const refusedCaller = refuseLoopbackUid(server.requestIP(req), server.port ?? 0);
+    if (refusedCaller) return Promise.resolve(j(403, { error: refusedCaller }));
     const origin = originOfHeaders(req.headers, isBrowserRequest(req.headers));
     // Registered HERE rather than inside `handleRequest`, which has several
     // early returns and a hoisted inner `route` declaration that a wrapping
@@ -3243,7 +3250,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   // bin.ts passes the folder when `--board-socket-dir`, `CW_BOARD_SOCKET_DIR`
   // or `CW_BOARD_SOCKETS=1` says so (server-config.ts). Kept in step with the boards as they are made, archived and deleted.
   const boardSockets = opts.boardSocketDir
-    ? openBoardSockets({ dir: opts.boardSocketDir, handle: handleWithOrigin, j })
+    ? openBoardSockets({
+        dir: opts.boardSocketDir,
+        handle: handleWithOrigin,
+        j,
+        // Shared only with a group to share it with: never with every user.
+        ...(opts.boardSocketShared && opts.boardSocketGroup !== undefined
+          ? { shared: { board: opts.boardSocketShared, gid: opts.boardSocketGroup } }
+          : {}),
+      })
     : null;
   const syncBoardSockets = () =>
     boardSockets?.sync(

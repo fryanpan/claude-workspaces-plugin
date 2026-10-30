@@ -1890,6 +1890,15 @@ credential names it must not hold. On one, `summarize.ts`'s lookup reads only
 `server-deps.ts` strips the other names from the environment before building
 anything. On the Mac every answer is "nothing changes".
 
+On a project machine the board's lead agent is a Claude Code session beside
+the server, not part of it (`infra/project-machine/lead.sh`). It reaches the
+server through its board's unix socket (`CW_BOARD_SOCKET`), as a walled lead
+on the Mac does, and runs as a user of its own, so it holds none of the
+server's credentials and the server holds none of its.
+`middleware/loopback-uid-door.ts` joins the HTTP row and moves no boundary:
+it refuses loopback TCP from that user, by uid, at the front door. The runbook is
+[docs/process/project-machine.md](../process/project-machine.md).
+
 `claude-key-slot.ts` joins the SERVICES row and moves no boundary, because
 it holds one piece of process state the domain row's purity bar would not
 take. It names the slot a credential came out of — the Keychain service or
