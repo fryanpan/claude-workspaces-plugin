@@ -94,14 +94,22 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
     }
     removeStaleSocket(path);
     try {
-      const server = Bun.serve({
-        unix: path,
-        async fetch(req) {
-          if (req.headers.get('upgrade')) return j(403, { error: 'board_socket_no_upgrade' });
-          boardFor.set(req, boardId);
-          return (await handle(req)) ?? j(500, { error: 'board_socket_no_response' });
-        },
-      });
+      // Bound under umask 077, so the socket is never more open than this
+      // user's, even before the mode below is set.
+      const umask = process.umask(0o077);
+      let server: ReturnType<typeof Bun.serve>;
+      try {
+        server = Bun.serve({
+          unix: path,
+          async fetch(req) {
+            if (req.headers.get('upgrade')) return j(403, { error: 'board_socket_no_upgrade' });
+            boardFor.set(req, boardId);
+            return (await handle(req)) ?? j(500, { error: 'board_socket_no_response' });
+          },
+        });
+      } finally {
+        process.umask(umask);
+      }
       // Only this user may connect, but for the shared board's socket, which
       // its group may too. A sandboxed lead on the Mac runs as the same user;
       // its profile, not the file mode, tells one lead from another.

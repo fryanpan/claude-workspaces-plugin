@@ -72,8 +72,23 @@ describe('A. finding the caller in the kernel tables', () => {
     expect(peerUidFromTables([TCP4], 41000, 8788)).toBeNull();
     const remote = TCP4.replace('0100007F:A028 0100007F:2253', '0A00000A:A028 0100007F:2253');
     expect(peerUidFromTables([remote], 41000, 8787)).toBeNull();
-    const twice = `${TCP4}\n   3: 0100007F:A028 0100007F:2253 06 00000000:00000000 00:00000000 00000000 10001 0 6 1 0`;
+    const twice = `${TCP4}\n   3: 0100007F:A028 0100007F:2253 01 00000000:00000000 00:00000000 00000000 10001 0 6 1 0`;
     expect(peerUidFromTables([twice], 41000, 8787)).toBeNull();
+  });
+
+  it('reads no uid from a socket no process holds, which the kernel lists as uid 0', () => {
+    // The lead wrote its request and closed: its end is TIME_WAIT (or an
+    // orphan), printed with uid 0 and inode 0. Root's 0 must not answer.
+    const closed = [
+      HEADER,
+      '   0: 0100007F:A028 0100007F:2253 06 00000000:00000000 03:00001770 00000000     0        0 0 3 0',
+      '   1: 0100007F:A02B 0100007F:2253 05 00000000:00000000 00:00000000 00000000     0        0 0 2 0',
+    ].join('\n');
+    expect(peerUidFromTables([closed], 41000, 8787)).toBeNull();
+    expect(peerUidFromTables([closed], 41003, 8787)).toBeNull();
+    // A leftover TIME_WAIT row beside a live connection on the same ports
+    // is ignored, so the live one still answers.
+    expect(peerUidFromTables([TCP4, closed], 41000, 8787)).toBe(LEAD);
     expect(peerUidFromTables([], 41000, 8787)).toBeNull();
   });
 

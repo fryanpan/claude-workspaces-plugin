@@ -13,7 +13,8 @@
  * list every socket with its owner's uid; the caller's end of this connection
  * is the row whose local port is the peer's port and whose remote port is the
  * server's. A caller cannot choose that uid. When no single row answers — the
- * tables cannot be read, or no row or several rows match — the request is
+ * tables cannot be read, no live row matches (the caller closed its socket:
+ * see `peerUidFromTables`), or rows of several uids match — the request is
  * refused: this door fails closed, and is only switched on where the refused
  * users exist (`CW_LOOPBACK_REFUSED_UIDS`).
  *
@@ -51,6 +52,11 @@ function hexIsLoopback(hex: string): boolean {
 /**
  * The uid in the tables' one row for the caller's end of the connection
  * from `peerPort` to `serverPort`, or null when no single uid answers.
+ *
+ * Only a row with an inode counts: a socket no process holds any more (one
+ * in TIME_WAIT, or an orphan the caller closed straight after writing its
+ * request) is listed with uid 0 and inode 0, and reading that 0 as root
+ * would let a closed-early request from any user through as root's.
  */
 export function peerUidFromTables(
   tables: readonly string[],
@@ -64,7 +70,9 @@ export function peerUidFromTables(
       const local = f[1]?.split(':');
       const remote = f[2]?.split(':');
       const uid = Number(f[7]);
+      const inode = f[9];
       if (local?.length !== 2 || remote?.length !== 2 || !Number.isInteger(uid)) continue;
+      if (inode === undefined || !/^\d+$/.test(inode) || /^0+$/.test(inode)) continue;
       const [localAddr = '', localPort = ''] = local;
       const [remoteAddr = '', remotePort = ''] = remote;
       if (Number.parseInt(localPort, 16) !== peerPort) continue;
