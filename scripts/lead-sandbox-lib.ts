@@ -91,6 +91,26 @@ export const CLAUDE_CODE_FOLDERS = [
 ];
 
 /**
+ * The folders under `~/.claude` that the server and its supervisor read and
+ * replace by name, current name first. Read only to a lead, after every other
+ * rule. Its hooks and MCP children only read them; a hook marker it cannot
+ * create reads as already seen.
+ */
+export const SERVER_STATE_FOLDERS = ['claude-workspaces', 'live-feedback'];
+
+/**
+ * The files in a project's git folders that make the owner's own git run a
+ * command: `config` (`core.hooksPath`, `core.fsmonitor`, filter drivers),
+ * `config.worktree`, `info/attributes` (which filters apply) and `hooks/`. A
+ * lead that wrote one would run code outside the wall the next time the
+ * owner, or an unwalled session, ran git in that project. At any depth, so a
+ * nested repo and a worktree's own folder are covered.
+ */
+export function gitCodeRegex(projectEnd: string): string {
+  return `^${escapeRegex(projectEnd)}/(.*/)?\\.git/((worktrees/[^/]+/)?config(\\.worktree)?|info/attributes|hooks(/.*)?)$`;
+}
+
+/**
  * The tmux server's socket folder, at both spellings: `/tmp` is a symlink
  * to `/private/tmp`, and a rule on one end alone matches nothing (measured).
  * A lead that reached the socket could `tmux send-keys` into an unsandboxed
@@ -232,6 +252,14 @@ function rulesFor(
   for (const parent of parents)
     if (!theirs.some((t) => parent === t || parent.startsWith(`${t}/`)))
       rules.push({ access: 'list', filter: { literal: parent }, why: 'bun needs its env' });
+  for (const p of lead.projects)
+    for (const end of new Set([p, m.realpath(p)]))
+      rules.push({
+        access: 'nowrite',
+        filter: { regex: gitCodeRegex(end), under: p },
+        why: 'git runs it outside the wall',
+        last: true,
+      });
   for (const p of lead.allow) add('write', p, 'config allow');
   for (const p of lead.allowRead) add('read', p, 'config allowRead');
   for (const p of gitProxyPaths(lead, m.home)) {
@@ -269,11 +297,29 @@ function claudeCodeRules(m: Machine): Rule[] {
     for (const rel of CLAUDE_CODE_FOLDERS)
       rules.push({ access: 'nowrite', filter: { subpath: `${end}/${rel}` }, why, last: true });
     rules.push({ access: 'nowrite', filter: { literal: `${end}/CLAUDE.md` }, why, last: true });
-    // settings.json, settings.local.json and the files they are replaced through.
+    // settings.json, settings.local.json and the files they are replaced
+    // through: Claude Code's own temp names, and the server's `.settings…`.
+    for (const name of ['settings', '\\.settings'])
+      rules.push({
+        access: 'nowrite',
+        filter: { regex: `^${escapeRegex(end)}/${name}[^/]*$`, under: claude },
+        why,
+        last: true,
+      });
+    // What the server, its hooks and the MCP children read by name: the
+    // discovery file (a FIFO there hangs prod, a link redirects its publish),
+    // the hook markers, and board-sync's state, which holds its token.
+    for (const rel of SERVER_STATE_FOLDERS)
+      rules.push({
+        access: 'nowrite',
+        filter: { subpath: `${end}/${rel}` },
+        why: 'read by the server',
+        last: true,
+      });
     rules.push({
-      access: 'nowrite',
-      filter: { regex: `^${escapeRegex(end)}/settings[^/]*$`, under: claude },
-      why,
+      access: 'deny',
+      filter: { subpath: `${end}/${SERVER_STATE_FOLDERS[0]}/board-sync` },
+      why: 'board-sync token',
       last: true,
     });
   }
