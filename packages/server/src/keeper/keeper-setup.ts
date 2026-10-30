@@ -19,7 +19,15 @@
  * retiring the old tokens, is deliberately not here: that one is Bryan's.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { SECRET_ACCOUNT, storedSecretService } from '../../../core/src/secret-name.ts';
 import { API_HEADER, HELD_HEADER } from './keeper-http.ts';
@@ -350,9 +358,12 @@ export function withKeeperUrl(xml: string, url: string): string | null {
   );
 }
 
+/** Replace a file in one rename, keeping its mode (600 for a new one). */
 function atomicWrite(path: string, text: string): void {
   const tmp = `${path}.keeper-setup.tmp`;
-  writeFileSync(tmp, text, { mode: 0o600 });
+  const mode = existsSync(path) ? statSync(path).mode & 0o777 : 0o600;
+  writeFileSync(tmp, text, { mode });
+  chmodSync(tmp, mode);
   renameSync(tmp, path);
 }
 

@@ -14,6 +14,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,6 +36,8 @@ const NEW_CF = 'test-cf-new-Saltmarsh';
 const PASTED_CF = 'test-cf-pasted-Alice';
 const ACCOUNT = 'acct0123456789';
 const PORT = '45678';
+// The fake fetch answers it; nothing connects to it.
+const KEEPER = 'http://localhost:45678';
 const LABEL = 'com.example.board';
 const SECRETS = [FLY_TOKEN, OLD_CF, NEW_CF, PASTED_CF, ACCOUNT];
 
@@ -140,6 +143,7 @@ esac\n`,
 </plist>
 `,
   );
+  chmodSync(plist, 0o644);
   const settings = join(home, '.claude', 'settings.json');
   writeFileSync(settings, `${JSON.stringify({ env: { KEEP: '1' }, theme: 'dark' }, null, 2)}\n`);
   // The store as the keeper leaves it: a file this user cannot open.
@@ -205,7 +209,7 @@ function fakeFetch(w: World, cf: Cf): typeof fetch {
             pollToken: 'poll1',
             hold: 'project.create',
             summary: 'fly apps create cw-keeper-probe',
-            approveUrl: `http://localhost:${PORT}/approve/req1`,
+            approveUrl: `${KEEPER}/approve/req1`,
           },
           202,
           { 'x-cw-keeper-held': '1' },
@@ -297,14 +301,15 @@ describe('keeper-setup', () => {
     // Both callers point at the keeper; the rest of settings.json is kept.
     const settings = JSON.parse(readFileSync(w.settings, 'utf8'));
     expect(settings).toEqual({
-      env: { KEEP: '1', CW_KEEPER_URL: `http://localhost:${PORT}` },
+      env: { KEEP: '1', CW_KEEPER_URL: KEEPER },
       theme: 'dark',
     });
+    expect(statSync(w.plist).mode & 0o777).toBe(0o644);
     expect(readFileSync(w.plist, 'utf8')).toMatch(
-      new RegExp(`<key>CW_KEEPER_URL</key>\\s*<string>http://localhost:${PORT}</string>`),
+      new RegExp(`<key>CW_KEEPER_URL</key>\\s*<string>${KEEPER}</string>`),
     );
 
-    expect(r.out).toContain(`http://localhost:${PORT}/approve/req1`);
+    expect(r.out).toContain(`${KEEPER}/approve/req1`);
     expect(r.out).toContain('Permission denied');
     expect(r.out).toContain('The keeper is set up');
     // No value in any output or any argv.

@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
+import { configuredHostFetch, fixedHostFetch } from '../outbound-fetch.ts';
 import { runKeeperSetup } from './keeper-setup.ts';
 
 const ROOT = '/Users/cw-relay/keeper';
@@ -54,6 +55,17 @@ async function readSecret(prompt: string): Promise<string> {
   }
 }
 
+/**
+ * Cloudflare through the vendor guard; the keeper's own loopback origin, the
+ * only other host this asks, through the configured-host guard as
+ * `keeper-client.ts` does.
+ */
+const guardedFetch = ((input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const viaKeeper = url.hostname === 'localhost' && url.protocol === 'http:';
+  return (viaKeeper ? configuredHostFetch([url.origin]) : fixedHostFetch)(input, init);
+}) as typeof fetch;
+
 const home = homedir();
 const env = {
   PATH: `${join(ROOT, 'bin')}:/usr/bin:/bin:/usr/sbin:/sbin`,
@@ -72,7 +84,7 @@ process.exit(
     label: LABEL,
     env,
     dryRun: args.includes('--dry-run'),
-    fetch,
+    fetch: guardedFetch,
     readSecret,
     print: (line) => console.log(line),
   }),
