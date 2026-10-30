@@ -186,6 +186,7 @@ export async function serveTopLevelRoutes(
     visitor,
     visitorHome,
     ownerProven: ownerProven(),
+    isBoardOwner: (workspaceId) => gate.requireOwner(workspaceId) === null,
     mayMintAppVoice: rq.mayMintAppVoice(),
   });
   if (shell) return shell;

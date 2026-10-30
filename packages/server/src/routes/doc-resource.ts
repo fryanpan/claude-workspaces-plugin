@@ -143,9 +143,10 @@ export async function handleDocResourceCore(
     // Who the Make Plan float names ("Ask <lead> to create a plan").
     const lead = boardWs ? taskStore.getWorkspace(boardWs)?.leadAgentId : undefined;
     // The open ticket items linking this doc, for its dock: off the board in
-    // the path, where the page posts its answer, and never for a visitor.
+    // the path, never for a visitor, and owner-only ones only for the owner.
     const itemsBoard = visitor ? undefined : (scope?.workspaceId ?? boardWs ?? undefined);
-    const linkedItems = itemsBoard ? ctx.pageOpened(itemsBoard, docId) : [];
+    const owner = itemsBoard !== undefined && rq.requireOwner(itemsBoard) === null;
+    const linkedItems = itemsBoard ? ctx.pageOpened(itemsBoard, docId, owner) : [];
     return j(200, {
       meta: metaFor({ ...doc.meta, lastActivityAt: docStore.activityAt(docId) }),
       ...(taskRefs.length > 0 ? { tasks: taskRefs } : {}),

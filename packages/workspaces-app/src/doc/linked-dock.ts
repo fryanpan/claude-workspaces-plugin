@@ -37,6 +37,7 @@ import {
   dockRounds,
   dockSheetHtml,
   linkedDockItems,
+  refusalOf,
   wireDockSheet,
 } from '@claude-workspaces/core/review-dock';
 import { dockStyles } from '@claude-workspaces/core/review-dock-styles';
@@ -89,8 +90,9 @@ export interface LinkedDockOptions {
   scope: MountScope;
   /** The answer and Mark read requests; injected so a test sees what went
    *  over the wire.
-   *  Resolves true when the server took the answer. */
-  post?: (path: string, body: Record<string, unknown>) => Promise<boolean>;
+   *  Resolves true when the server took the answer, else false or the
+   *  server's own sentence for the refusal. */
+  post?: (path: string, body: Record<string, unknown>) => Promise<boolean | string>;
 }
 
 /**
@@ -115,13 +117,13 @@ function renderRoundBodies(scrim: HTMLElement, review: ReviewPayload): void {
   });
 }
 
-async function defaultPost(path: string, body: Record<string, unknown>): Promise<boolean> {
+async function defaultPost(path: string, body: Record<string, unknown>): Promise<boolean | string> {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return res.ok;
+  return refusalOf(res);
 }
 
 export function mountLinkedDock(opts: LinkedDockOptions): void {
@@ -205,7 +207,7 @@ export function mountLinkedDock(opts: LinkedDockOptions): void {
         .catch(() => false)
         .then((ok) => {
           if (scope.disposed) return;
-          if (!ok) {
+          if (ok !== true) {
             btn.disabled = false;
             return;
           }

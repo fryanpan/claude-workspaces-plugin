@@ -150,4 +150,38 @@ describe("a doc's record and the ticket items that link it", () => {
     );
     expect((await record(linkedDoc)).body).not.toHaveProperty('linkedItems');
   });
+
+  it('carries an owner-only item for the owner, answered in place, and not for a visitor', async () => {
+    const filed = (await post(`/workspaces/${ws}/tasks/${taskId}/review-items`, {
+      author: AGENT,
+      review: {
+        shape: 'decision',
+        headline: 'Publish the dock schedule to the harbour office?',
+        detail: `The [schedule](/workspaces/${ws}/docs/${unlinkedDoc}) is ready.`,
+        options: [
+          { id: 'o-yes', label: 'Publish' },
+          { id: 'o-no', label: 'Hold it' },
+        ],
+        ownerOnly: true,
+      },
+    })) as { item: { id: string }; held?: boolean };
+    if (filed.held) {
+      await post(`/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/release`, {
+        author: READER,
+      });
+    }
+    // The machine's owner, on loopback: answered on the doc page itself.
+    const owner = await record(unlinkedDoc);
+    expect(owner.body.linkedItems).toEqual([
+      expect.objectContaining({ taskId, reviewItemId: filed.item.id }),
+    ]);
+    expect(owner.body.linkedItems?.[0]).not.toHaveProperty('answerAt');
+    const share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, ws);
+    const visitor = await record(unlinkedDoc, {
+      host: share.host,
+      'cf-access-jwt-assertion': share.jwt,
+    });
+    expect(visitor.status).toBe(200);
+    expect(visitor.body).not.toHaveProperty('linkedItems');
+  });
 });

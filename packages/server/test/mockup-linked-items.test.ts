@@ -109,6 +109,75 @@ describe('the ticket items a mock page carries', () => {
     expect(run('d-board', [task([item({ review: linking('d-board') })])])).toHaveLength(1);
   });
 
+  describe('an owner-only item', () => {
+    const ownerOnly = (over: Partial<ReviewPayload> = {}) =>
+      item({ review: { ...linking('d-board'), ownerOnly: true, ...over } });
+    const asOwner = (
+      rows: Array<ReturnType<typeof task>>,
+      page: 'doc' | 'mock',
+      docId = 'd-board',
+    ) =>
+      linkedTaskItems({
+        docId,
+        tasks: rows.map((r) => r.task),
+        reviewsOf: (id) => rows.find((r) => r.task.id === id)?.reviews ?? [],
+        canonical: (id) => id,
+        owner: true,
+        ownerAnswersHere: page === 'doc',
+        answerAt: (taskId) => `/workspaces/w-stand?task=${taskId}`,
+      });
+
+    it('goes to the owner alone, answered in place on the doc page', () => {
+      expect(run('d-board', [task([ownerOnly()])])).toEqual([]);
+      const got = asOwner([task([ownerOnly()])], 'doc');
+      expect(got).toHaveLength(1);
+      expect(got[0]?.answerAt).toBeUndefined();
+    });
+
+    it('is answered on the board from a mock, whose scripts must not answer it', () => {
+      const [onMock] = asOwner([task([ownerOnly()])], 'mock');
+      expect(onMock?.answerAt).toBe('/workspaces/w-stand?task=t-stand');
+      // The ask's words end with the link there, which the dock renders.
+      expect(onMock?.review.detail).toMatch(
+        /\n\n\[Answer on the board\]\(\/workspaces\/w-stand\?task=t-stand\)$/,
+      );
+      // Without a board link to send it to, a mock leaves it off.
+      const bare = linkedTaskItems({
+        docId: 'd-board',
+        tasks: [task([ownerOnly()]).task],
+        reviewsOf: () => [ownerOnly()],
+        canonical: (id) => id,
+        owner: true,
+      });
+      expect(bare).toEqual([]);
+    });
+
+    it('is answered on the board when its answer has a door of its own', () => {
+      const access = item({
+        review: { ...linking('d-board'), shape: 'decision', ownerOnly: true },
+        access: { op: 'add-audience', workspaceId: 'w-stand', entries: ['ops@example.com'] },
+      });
+      expect(asOwner([task([access])], 'doc')[0]?.answerAt).toBe(
+        '/workspaces/w-stand?task=t-stand',
+      );
+      expect(asOwner([task([ownerOnly({ shape: 'secret' })])], 'doc')[0]?.answerAt).toBeDefined();
+    });
+
+    it('docks a proposed share link on the doc it opens on', () => {
+      const link = item({
+        review: { shape: 'decision', headline: 'Mints a link.', detail: 'Why.', ownerOnly: true },
+        access: {
+          op: 'share-link',
+          workspaceId: 'w-stand',
+          entries: [],
+          link: { landing: { kind: 'doc', id: 'd-notes' } },
+        },
+      });
+      expect(asOwner([task([link])], 'doc', 'd-notes')).toHaveLength(1);
+      expect(asOwner([task([link])], 'doc', 'd-board')).toEqual([]);
+    });
+  });
+
   it('writes no block for no items, and escapes a headline that tries to close it', () => {
     expect(linkedItemsEmbed([])).toBe('');
     const embed = linkedItemsEmbed([
@@ -244,5 +313,43 @@ describe('serving a mock', () => {
       text: 'Readable.',
     });
     expect(block(await local(linkedMock))).toBeNull();
+  });
+
+  it('hands the owner an owner-only item linking this mock, to answer on the board', async () => {
+    const filed = (await post(`/workspaces/${ws}/tasks/${taskId}/review-items`, {
+      author: AGENT,
+      review: {
+        shape: 'decision',
+        headline: 'Publish the menu card to the street?',
+        detail: `See [the menu](/workspaces/${ws}/mockups/${unlinkedMock}).`,
+        options: [
+          { id: 'o-yes', label: 'Publish' },
+          { id: 'o-no', label: 'Hold it' },
+        ],
+        ownerOnly: true,
+      },
+    })) as { item: { id: string }; held?: boolean };
+    if (filed.held) {
+      await post(`/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/release`, {
+        author: REVIEWER,
+      });
+    }
+    // The machine's owner, on loopback.
+    const owner = await fetch(`${base}/workspaces/${ws}/mockups/${unlinkedMock}?cw-frame=1`, {
+      headers: { host: `localhost:${handle.port}` },
+    }).then((r) => r.text());
+    expect(block(owner)).toEqual([
+      expect.objectContaining({
+        reviewItemId: filed.item.id,
+        answerAt: `/workspaces/${ws}?task=${taskId}`,
+      }),
+    ]);
+    // A share visitor is served the same mock without it.
+    const share = await mintAccessShare(base, { ...access, shareLinks: handle.shareLinks }, ws);
+    const visitor = await fetch(`${base}/workspaces/${ws}/mockups/${unlinkedMock}?cw-frame=1`, {
+      headers: { host: share.host, 'cf-access-jwt-assertion': share.jwt },
+    });
+    expect(visitor.status).toBe(200);
+    expect(block(await visitor.text())).toBeNull();
   });
 });
