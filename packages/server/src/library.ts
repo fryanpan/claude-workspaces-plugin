@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import type { Stats } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, posix } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
@@ -13,6 +13,7 @@ import {
   placeAll,
   placedDoc,
 } from './library-location.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * A board's Library: the meetings and the files a person comes to the board to
@@ -485,9 +486,11 @@ export function createMarkdownLister(
       // folder can become a file (ENOTDIR) or lose its permissions (EACCES),
       // and the page owes the reader every other file regardless — so one
       // unreadable path drops its own row rather than the whole listing.
-      let st: ReturnType<typeof statSync> | undefined;
+      let st: Stats | undefined;
       try {
-        st = statSync(join(root, relPath), { throwIfNoEntry: false });
+        // Through the bound-file guard: under a walled lead's project a plain
+        // stat follows a link and shows the size and time of what it names.
+        st = statSafe(join(root, relPath));
       } catch {
         continue;
       }
@@ -496,4 +499,14 @@ export function createMarkdownLister(
     cache.set(root, { at: now(), files });
     return files;
   };
+}
+
+/** A file's stat as the guard answers it, undefined when it is missing. */
+function statSafe(path: string): Stats | undefined {
+  try {
+    return boundFiles.guards.statSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
 }

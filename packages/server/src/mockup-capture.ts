@@ -9,6 +9,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { extname, join } from 'node:path';
+import type { PathGuards } from './bound-path-guard.ts';
+import { boundFiles } from './slow-fs.ts';
+
+/** The largest mock source served live. A page is HTML a person reviews;
+ *  past this it is not one, and the capture answers instead. */
+const MOCKUP_SOURCE_MAX = 16 * 1024 * 1024;
 
 /**
  * A mockup's HTML, captured beside its `.ydoc` so the link outlives the file.
@@ -74,8 +80,13 @@ export type MockupSourceCheck = { ok: true } | { ok: false; reason: string };
  * reach the reviewer as the same blank 404. So this asks for read permission
  * on a regular file, and names which of those failed.
  */
-export function checkMockupSource(path: string): MockupSourceCheck {
+export function checkMockupSource(
+  path: string,
+  guards: PathGuards = boundFiles.guards,
+): MockupSourceCheck {
   if (!existsSync(path)) return { ok: false, reason: 'no such file' };
+  // A folder a walled lead writes: its scratch, or a link out of its root.
+  if (!guards.landsAllowedSync(path)) return { ok: false, reason: 'refused path' };
   try {
     if (!statSync(path).isFile()) return { ok: false, reason: 'not a regular file' };
   } catch (err) {
@@ -95,10 +106,15 @@ export function checkMockupSource(path: string): MockupSourceCheck {
   return { ok: true };
 }
 
-/** The live file's text, or null when it cannot be read. */
-export function readMockupHtml(path: string): string | null {
+/** The live file's text, or null when it cannot be read. Never blocks on a
+ *  FIFO, and where a guard covers the path never follows a link out of it. */
+export function readMockupHtml(
+  path: string,
+  guards: PathGuards = boundFiles.guards,
+): string | null {
   try {
-    return readFileSync(path, 'utf8');
+    const text = guards.readBoundedSync(path, MOCKUP_SOURCE_MAX);
+    return text === 'too-large' ? null : text;
   } catch {
     return null;
   }

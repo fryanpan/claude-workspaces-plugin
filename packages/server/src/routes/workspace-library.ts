@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeDocKey, parseDocKey } from '../doc-key.ts';
 import type { DocStore } from '../doc-store.ts';
@@ -18,6 +18,7 @@ import { type ShareTarget, isLoopbackAddress } from '../middleware/host-guard.ts
 import { type WorkspaceScope, restIs } from '../middleware/workspace-scope.ts';
 import type { MountStore } from '../mount-store.ts';
 import { isWithinRoot } from '../safe-path.ts';
+import { boundFiles } from '../slow-fs.ts';
 import type { TaskProjection } from '../task-projection.ts';
 import type { RunOutputSource } from '../task-run-output.ts';
 import type { BoardWorkspace, TaskStore } from '../tasks.ts';
@@ -266,8 +267,10 @@ function sourcesFor(
 function statBound(path: string | undefined): { mtimeMs: number; birthtimeMs: number } | undefined {
   if (path === undefined || !path.startsWith('/')) return undefined;
   try {
-    const st = statSync(path, { throwIfNoEntry: false });
-    return st?.isFile() ? { mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs } : undefined;
+    // Through the bound-file guard, which never stats a link for where it
+    // points under a walled lead's project.
+    const st = boundFiles.guards.statSync(path);
+    return st.isFile() ? { mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs } : undefined;
   } catch {
     return undefined;
   }

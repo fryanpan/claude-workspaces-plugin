@@ -10,7 +10,7 @@
  * first and asks the same before writing a byte.
  */
 import { randomBytes } from 'node:crypto';
-import type { BigIntStats } from 'node:fs';
+import type { BigIntStats, Stats } from 'node:fs';
 import {
   constants,
   closeSync,
@@ -21,6 +21,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
@@ -182,6 +183,17 @@ export async function readBytesChecked(
       at += bytesRead;
     }
     return { bytes: at === out.length ? out : out.subarray(0, at), st };
+  } finally {
+    await fh.close();
+  }
+}
+
+/** A file's stat, judged as `readChecked` judges one: from the descriptor,
+ *  so a link is never stat'd for where it points and a FIFO never blocks. */
+async function statChecked(path: string, lands: (real: string) => boolean): Promise<BigIntStats> {
+  const fh = await openChecked(path, lands);
+  try {
+    return await fh.stat({ bigint: true });
   } finally {
     await fh.close();
   }
@@ -368,6 +380,46 @@ export class PathGuards {
     if (!this.covers(path)) return null;
     if (!this.allows(path)) return Promise.reject(new GuardRefused(path));
     return readRangeChecked(path, start, end, (real) => this.landsAll(path, real));
+  }
+
+  /** A bound file's stat, from a checked descriptor where a guard covers
+   *  it: a plain stat follows a link and reports the size and time of
+   *  whatever it points at. */
+  stat(path: string): Promise<BigIntStats> {
+    if (!this.allows(path)) return Promise.reject(new GuardRefused(path));
+    if (!this.covers(path)) return stat(path, { bigint: true });
+    return statChecked(path, (real) => this.landsAll(path, real));
+  }
+
+  /** `stat` on the calling thread, as `statSync` answers; throws as it does,
+   *  and `GuardRefused` where a guard refuses the path. */
+  statSync(path: string): Stats {
+    if (!this.allows(path)) throw new GuardRefused(path);
+    if (!this.covers(path)) return statSync(path);
+    const fd = openCheckedSync(path, (real) => this.landsAll(path, real));
+    try {
+      return fstatSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** At most `max` bytes of a bound file's text on the calling thread, or
+   *  `'too-large'`: never blocking on a FIFO, and checked where a guard
+   *  covers it. Throws as `readFileSync` does, and `GuardRefused`. */
+  readBoundedSync(path: string, max: number): string | 'too-large' {
+    if (!this.allows(path)) throw new GuardRefused(path);
+    const fd = this.covers(path)
+      ? openCheckedSync(path, (real) => this.landsAll(path, real))
+      : openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      const st = fstatSync(fd);
+      if (!st.isFile()) throw new GuardRefused(path);
+      if (st.size > max) return 'too-large';
+      return readFileSync(fd, 'utf8');
+    } finally {
+      closeSync(fd);
+    }
   }
 
   /** `read` on the calling thread; throws `GuardRefused` where a guard

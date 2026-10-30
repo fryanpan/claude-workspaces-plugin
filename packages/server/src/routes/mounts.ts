@@ -350,6 +350,9 @@ export async function handleMountRoutes(
      * could not be written — a rejected settings call changing behaviour,
      * which is worse than the failure it was reporting.
      */
+    if (mounts.refuses(folderAbs)) {
+      return j(400, { error: 'meetings folder could not be mounted', mountError: 'refused-path' });
+    }
     try {
       mkdirSync(folderAbs, { recursive: true });
     } catch (err) {
