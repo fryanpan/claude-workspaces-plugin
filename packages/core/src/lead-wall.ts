@@ -53,6 +53,25 @@ export function transcriptSlug(path: string): string {
   return path.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
+/**
+ * The transcript and scratch folder names of a lead's projects, as the wall
+ * opens them: each project as the config spells it and resolved, since
+ * Claude Code names the folders for the path a session is launched by. The
+ * launcher sends these to the server with the lead's roots, so the server
+ * need not guess which links a home folder holds.
+ */
+export function projectSlugs(
+  projects: readonly string[],
+  realpath: (p: string) => string,
+): string[] {
+  return [...new Set(projects.flatMap((p) => [transcriptSlug(p), transcriptSlug(realpath(p))]))];
+}
+
+/** Whether `name` could be a transcript folder name: what `transcriptSlug` makes. */
+export function isSlug(name: unknown): name is string {
+  return typeof name === 'string' && /^[A-Za-z0-9-]{1,1024}$/.test(name);
+}
+
 /** Whether a transcript or scratch folder name is one of `slugs`, or a
  *  worktree launched inside one. */
 export function isOwnSlug(name: string, slugs: ReadonlySet<string>): boolean {

@@ -36,6 +36,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   isOwnSlug,
+  isSlug,
   leadWritesUnderClaude,
   transcriptSlug,
 } from '@claude-workspaces/core/lead-wall';
@@ -89,6 +90,7 @@ export function leadShadowZone(
   path: string,
   roots: readonly string[],
   s: LeadShadows,
+  named: readonly string[] = [],
 ): ShadowZone | null {
   if (roots.length === 0) return null;
   const inside = (p: string, dir: string) => p === dir || p.startsWith(`${dir}/`);
@@ -100,7 +102,8 @@ export function leadShadowZone(
     }
   };
   const homes = both(s.home);
-  const slugs = new Set<string>();
+  // `named`: the folder names the launcher said the wall opens (`projectSlugs`).
+  const slugs = new Set<string>(named);
   for (const root of roots) {
     slugs.add(transcriptSlug(root));
     // A root is stored resolved; the lead may have been launched by its
@@ -126,6 +129,9 @@ export class BoardSocketRoots {
   private walled: string[] = [];
   /** Every board's roots, and every folder once walled, kept beside `boards`. */
   private flat: string[] = [];
+  /** Every transcript and scratch folder name a wall ever opened to a lead,
+   *  kept as `walled` is: what a lead wrote there stays its. */
+  private slugs: string[] = [];
   /** Set when the file exists and cannot be read: see `load`. */
   private broken = false;
   /** The broken file's mtime, and when it was last asked: see `load`. */
@@ -145,11 +151,13 @@ export class BoardSocketRoots {
   private zone(path: string): ShadowZone | null {
     const roots = this.allRoots();
     if (roots.length === 0) return null;
-    const first = leadShadowZone(path, roots, this.shadows);
+    const first = leadShadowZone(path, roots, this.shadows, this.slugs);
     if (first === 'lead') return first;
     const spelled = this.spelled(path);
     const second =
-      spelled !== null && spelled !== path ? leadShadowZone(spelled, roots, this.shadows) : null;
+      spelled !== null && spelled !== path
+        ? leadShadowZone(spelled, roots, this.shadows, this.slugs)
+        : null;
     return second ?? first;
   }
 
@@ -184,6 +192,7 @@ export class BoardSocketRoots {
     if (this.boards) return this.boards;
     const boards: Record<string, string[]> = Object.create(null);
     const walled: string[] = [];
+    const named: string[] = [];
     try {
       if (existsSync(this.path)) {
         const file: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
@@ -192,6 +201,10 @@ export class BoardSocketRoots {
         if (!Array.isArray(once) || !once.every((r) => typeof r === 'string' && isAbsolute(r)))
           throw new Error('walled: not a list of absolute paths');
         walled.push(...(once as string[]));
+        const slugs: unknown = (file as { slugs?: unknown } | null)?.slugs ?? [];
+        if (!Array.isArray(slugs) || !slugs.every(isSlug))
+          throw new Error('slugs: not a list of folder names');
+        named.push(...slugs);
         // Any shape but the one `save` writes is unreadable, not empty: a
         // list read as "no roots" would leave a lead's projects unguarded.
         if (!listed || typeof listed !== 'object' || Array.isArray(listed))
@@ -218,6 +231,7 @@ export class BoardSocketRoots {
     this.boards = boards;
     this.walled = unique([...walled, ...Object.values(boards).flat()]);
     this.flat = this.walled;
+    this.slugs = unique(named);
     this.spellings.clear();
     return boards;
   }
@@ -235,10 +249,13 @@ export class BoardSocketRoots {
   /**
    * Replace a board's list. Each entry must be an absolute path to a folder
    * that exists, and is stored resolved; `/` is refused, since it would make
-   * the list mean nothing.
+   * the list mean nothing. `slugs`, when sent, are added to the folder names
+   * held as the lead's; a launcher older than them sends none.
    */
-  set(boardId: string, roots: unknown): RootsWrite {
+  set(boardId: string, roots: unknown, slugs: unknown = []): RootsWrite {
     if (!Array.isArray(roots)) return { ok: false, error: 'roots must be a list of folders' };
+    if (!Array.isArray(slugs) || slugs.length > 2 * MAX_ROOTS || !slugs.every(isSlug))
+      return { ok: false, error: 'slugs must be a list of transcript folder names' };
     if (roots.length > MAX_ROOTS) return { ok: false, error: `at most ${MAX_ROOTS} roots` };
     const resolved: string[] = [];
     for (const r of roots) {
@@ -263,6 +280,7 @@ export class BoardSocketRoots {
     boards[boardId] = resolved;
     this.walled = unique([...this.walled, ...resolved]);
     this.flat = this.walled;
+    this.slugs = unique([...this.slugs, ...slugs]);
     this.verdicts.clear();
     this.spellings.clear();
     this.save();
@@ -425,9 +443,13 @@ export class BoardSocketRoots {
     mkdirSync(dirname(this.path), { recursive: true });
     const tmp = `${this.path}.tmp`;
     const boards = this.load();
-    writeFileSync(tmp, JSON.stringify({ boards, walled: this.walled }, null, 2), {
-      mode: 0o600,
-    });
+    writeFileSync(
+      tmp,
+      JSON.stringify({ boards, walled: this.walled, slugs: this.slugs }, null, 2),
+      {
+        mode: 0o600,
+      },
+    );
     chmodSync(tmp, 0o600);
     renameSync(tmp, this.path);
   }

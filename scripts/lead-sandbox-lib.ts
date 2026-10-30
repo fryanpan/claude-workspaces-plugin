@@ -80,6 +80,7 @@ import {
   CLAUDE_READ_ONLY_FILES,
   CLAUDE_READ_ONLY_FOLDERS,
   SERVER_STATE_FOLDERS,
+  projectSlugs,
   transcriptSlug,
 } from '../packages/core/src/lead-wall.ts';
 export { CLAUDE_CODE_FOLDERS, CLAUDE_READ_ONLY_FOLDERS, SERVER_STATE_FOLDERS, transcriptSlug };
@@ -239,8 +240,7 @@ function rulesFor(
   });
   for (const p of lead.projects) {
     add('write', p, 'own project');
-    const slugs = new Set([transcriptSlug(p), transcriptSlug(m.realpath(p))]);
-    for (const slug of slugs) {
+    for (const slug of projectSlugs([p], m.realpath)) {
       for (const root of [...transcripts, scratch]) {
         // The project's own folder, and one per worktree launched inside it.
         const regex = `^${escapeRegex(m.realpath(root))}/${escapeRegex(slug)}(--claude-worktrees-[^/]+)?(/|$)`;

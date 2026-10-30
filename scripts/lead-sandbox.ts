@@ -58,6 +58,7 @@ import {
 } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { projectSlugs } from '../packages/core/src/lead-wall.ts';
 import { ensureGitProxyFiles, gitProxyEnv, gitProxyLeadDir } from './git-proxy-lead.ts';
 import {
   boardSocketRows,
@@ -304,7 +305,11 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
       return 2;
     }
     if (lead.boardWall && lead.boardId) {
-      const refused = deps.registerRoots(lead.boardId, leadRoots(lead, machine.realpath));
+      const refused = deps.registerRoots(
+        lead.boardId,
+        leadRoots(lead, machine.realpath),
+        projectSlugs(lead.projects, machine.realpath),
+      );
       // The list is what holds the server's reads and git to the lead's
       // projects, so a lead the server does not know about is not started.
       if (refused) {
