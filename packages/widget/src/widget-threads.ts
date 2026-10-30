@@ -66,8 +66,11 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
     if (t.anchor.kind !== 'element' && t.anchor.kind !== 'orphan') continue;
     const statusBase: 'open' | 'resolved' | 'orphan' =
       t.status === 'resolved' ? 'resolved' : 'open';
+    // A resolved thread stays resolved whether or not it has a spot: a
+    // spot-less one counted as `orphan` was counted open, and listed as new.
+    const lost = statusBase === 'resolved' ? statusBase : 'orphan';
     if (t.anchor.kind === 'orphan') {
-      annotated.push({ thread: t, status: 'orphan', el: null });
+      annotated.push({ thread: t, status: lost, el: null });
       continue;
     }
     // Pinned when the anchor's captured context matches the current page /
@@ -84,7 +87,7 @@ export function renderThreadsInto(el: FeedbackWidgetEl): void {
     if (!res.ok) {
       // Only a thread made in this very state has lost its spot; one made in
       // another may simply not be drawn in this one.
-      annotated.push({ thread: t, status: exact ? 'orphan' : statusBase, el: null });
+      annotated.push({ thread: t, status: exact ? lost : statusBase, el: null });
       continue;
     }
     annotated.push({ thread: t, status: statusBase, el: res.element });
