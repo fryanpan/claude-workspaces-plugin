@@ -244,7 +244,9 @@ What the lead can reach:
   with no cgroup v2 memory controller logs `the lead's memory is NOT capped`.
 
 **When it ends.** `lead.sh` checks the tmux session every 5 seconds and starts
-a new session (not a resumed one) after 5s, then 10, 20, 40 and 50s for ends
+the session again, resuming the last conversation in `/data/lead/work`
+(`claude --continue`) once one exists, so a restart or a deploy keeps the
+lead's context; the first boot starts fresh. It waits 5s, then 10, 20, 40 and 50s for ends
 in a row, so a restart comes within a minute. After six quick ends in a row
 (each under five minutes) it tries every ten minutes; a session that lasts
 five minutes resets the count. Root starts `lead.sh` itself again 10s after
@@ -266,7 +268,8 @@ pinned Claude Code build).
 
 Still unchecked on a real machine: whether a `setup-token` sign-in allows
 Remote Control; whether Claude Code asks anything on its first run that the
-seeded `~/.claude.json` does not answer; the session's memory; whether a Fly
+seeded `~/.claude.json` does not answer; whether `--continue` and
+`--remote-control` work together; the session's memory; whether a Fly
 machine offers the cgroup memory controller; and the MCP relay over the
 board socket under the image's bun. Attach once after the first deploy and
 look. The session runs in Claude Code's default permission mode, so it asks

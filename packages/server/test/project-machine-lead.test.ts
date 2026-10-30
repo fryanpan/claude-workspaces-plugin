@@ -318,9 +318,23 @@ describe.skipIf(BASH === null)('the lead supervisor', () => {
       timeout: 10_000,
       describe: 'the first session',
     });
+    // The first boot has no conversation, so it starts fresh.
+    const argvs = () =>
+      readRecords(sup.log)
+        .recs.filter((r) => r.argv.startsWith('claude '))
+        .map((r) => r.argv);
+    expect(argvs()).toEqual(['claude --plugin-dir /app/packages/plugin']);
+    // The session wrote its conversation where Claude Code keeps one for
+    // its working folder; the restart resumes it.
+    const work = join(sup.volume, 'lead', 'work');
+    const convo = join(sup.volume, 'lead', 'claude-projects', work.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(convo, { recursive: true });
+    writeFileSync(join(convo, 'session-riverbend.jsonl'), '{}\n');
     const [first] = sup.pids() as [number];
     process.kill(first, 'SIGKILL');
     await waitFor(() => sup.pids().length === 2, { timeout: 10_000, describe: 'a second session' });
+    await waitFor(() => argvs().length === 2, { timeout: 10_000, describe: 'its record' });
+    expect(argvs()).toContain('claude --plugin-dir /app/packages/plugin --continue');
     // The 5s check, then the first wait: inside a minute.
     expect(sup.delays()).toEqual([5]);
     expect(existsSync(join(sup.home, '.claude', 'projects'))).toBe(true);

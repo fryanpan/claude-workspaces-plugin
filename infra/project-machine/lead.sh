@@ -10,7 +10,8 @@
 #   lead.sh supervise   keep the session running; start it again when it ends
 #   lead.sh session     what runs inside tmux: Claude Code itself
 #
-# A session that ends is started again after a wait that doubles from 5s up
+# A session that ends is started again, resuming its last conversation
+# (`--continue`) once there is one, after a wait that doubles from 5s up
 # to 50s, so with the 5s check a restart comes within a minute. Six quick
 # ends in a row (each under 5 minutes) mean the session cannot start, and
 # from then on it is tried every 10 minutes. A session that lasted 5 minutes
@@ -69,6 +70,13 @@ session() {
   unset CW_LEAD_GITHUB_DEPLOY_KEY
   # The plugin is the image's own copy, from the same commit as the server.
   local args=(--plugin-dir "$APP/packages/plugin")
+  # A restart, a deploy included, resumes the last conversation in this
+  # folder rather than costing the lead its context. Claude Code keeps it
+  # under ~/.claude/projects, in a folder named for the working folder with
+  # every character but letters and digits turned to -; the first boot has
+  # none and starts fresh.
+  local convo="$HOME/.claude/projects/${WORK//[^a-zA-Z0-9]/-}"
+  if compgen -G "$convo/*.jsonl" >/dev/null; then args+=(--continue); fi
   if [ "${CW_LEAD_REMOTE_CONTROL:-}" = 1 ]; then args+=(--remote-control "$CW_AGENT_NAME"); fi
   exec claude "${args[@]}"
 }
