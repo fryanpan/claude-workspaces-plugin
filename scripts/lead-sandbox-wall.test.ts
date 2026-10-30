@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { type Server, createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BOARD_SERVER_PORTS, STAGING_PORTS } from '../packages/server/src/reserved-ports.ts';
 import {
@@ -384,9 +384,8 @@ s.on('error', (e) => console.log(e.code));`,
   });
 
   // Git settings run commands in the owner's own git, so a lead may not set
-  // them (`gitCodeRegex`): `push -u` and tracking setup fail with it. It
-  // may add a worktree under `.claude/worktrees/` (`gitWorktreeCreateRegex`).
-  it('still commits and adds a worktree, and cannot set git config, in its project', () => {
+  // them (`gitCodeRegex`): `push -u`, tracking setup and `worktree add` fail with it.
+  it('still commits, and cannot set git config or add a worktree, in its project', () => {
     const repo = join(project, 'repo');
     mkdirSync(repo);
     const git = (profile: string | null, args: string[]) =>
@@ -397,11 +396,11 @@ s.on('error', (e) => console.log(e.code));`,
     expect(git(null, ['init', '-q'])).toBe(0);
     const id = ['-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid'];
     expect(git(walled, [...id, 'commit', '-q', '--allow-empty', '-m', 'one'])).toBe(0);
-    const wt = join(repo, '.claude', 'worktrees', 'wt');
-    expect(git(walled, ['worktree', 'add', '-q', wt, '-b', 'wt'])).toBe(0);
-    expect(git(walled, ['-C', wt, ...id, 'commit', '-q', '--allow-empty', '-m', 'two'])).toBe(0);
-    // Anywhere else a `.git` file could point the owner's git in that folder at anything.
-    expect(git(walled, ['worktree', 'add', '-q', join(repo, 'elsewhere'), '-b', 'x'])).not.toBe(0);
+    // A worktree's `.git` file names its git folder, so one a lead made could
+    // point anybody's git there at a config the lead wrote.
+    for (const wt of [join(repo, '.claude', 'worktrees', 'wt'), join(repo, 'elsewhere')])
+      expect(git(walled, ['worktree', 'add', '-q', wt, '-b', basename(wt)])).not.toBe(0);
+    expect(git(null, ['worktree', 'add', '-q', join(repo, 'ctl'), '-b', 'ctl'])).toBe(0); // the control
     expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).not.toBe(0);
     expect(git(null, ['config', 'branch.wt.remote', 'origin'])).toBe(0); // the control
   });
