@@ -10,12 +10,20 @@
 #   CW_SENTRY_SERVER_DSN          optional
 #   CW_ORG_ANTHROPIC_API_KEY      this org's own Anthropic key; without it every
 #                                 Claude call is refused (project-profile.ts)
-# Per-project settings, also set with `fly secrets set` so no project's values
-# are committed: BACKUP_RECIPIENT, BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET,
-# CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CW_PROXIED_TRUSTED_HOSTS,
-# CW_PROXIED_TRUSTED_EMAILS, CW_OWNER_EMAIL, CW_PUBLIC_BASE_URL, and
-# CW_PROJECT_PROFILE (`standard` unless set; `claude-only` turns off
-# transcription, ElevenLabs and Gemini).
+# Per-project settings, also Fly secrets so no project's values are committed.
+# deploy.ts sets these (settings.ts names each one's source):
+#   BACKUP_RECIPIENT, BACKUP_S3_ENDPOINT, BACKUP_S3_BUCKET
+#   CW_OWNER_EMAIL                the Keychain's cw-board-owner-email
+#   CW_PUBLIC_BASE_URL            https:// and the project's first host in
+#                                 infra/access-apps/access.local.json
+#   CF_ACCESS_TEAM_DOMAIN         the account's Access organization
+#   CF_ACCESS_AUD                 the Access application "board <project>"
+#   CF_ACCESS_HOST_AUDS           the project's hosts, each to that audience
+#   CW_PROXIED_TRUSTED_HOSTS      the project's hosts
+# A person sets these with `fly secrets set` when wanted:
+#   CW_PROXIED_TRUSTED_EMAILS     defaults to CW_OWNER_EMAIL
+#   CW_PROJECT_PROFILE            `standard` unless set; `claude-only` turns off
+#                                 transcription, ElevenLabs and Gemini
 #
 # Claude calls spend CW_ORG_ANTHROPIC_API_KEY and nothing else: never a Mac
 # Keychain item, another org's key or a gh login. The server removes any such

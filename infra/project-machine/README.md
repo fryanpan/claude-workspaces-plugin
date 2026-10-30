@@ -7,7 +7,7 @@ scripts that stand it up. How to run them is
 
 | Script | Run where | What it does |
 | --- | --- | --- |
-| `bun run machine:deploy --project <name>` | the Mac | Creates or updates the app, volume, backup keys, bucket, write-only credential, secrets and machine, and with `--tunnel named` the Cloudflare tunnel, its ingress and its origin hostname (`tunnel.ts`). A second run changes nothing |
+| `bun run machine:deploy --project <name>` | the Mac | Creates or updates the app, volume, backup keys, bucket, write-only credential, secrets (the owner and Access settings among them, `settings.ts`) and machine, and with `--tunnel named` the Cloudflare tunnel, its ingress and its origin hostname (`tunnel.ts`). A second run changes nothing |
 | `bun run machine:restore --project <name>` | the Mac | Puts the newest snapshot back onto the machine; the old data dir is moved aside |
 | `bun run machine:drill --project <name>-test` | the Mac | Backs up, destroys the machine and volume, redeploys, restores, and compares the docs |
 | `entrypoint.sh`, `run-as.sh` | the machine | The process tree, supervised as root: the server as `cw`, cloudflared as `cwtunnel`, so the server's user never holds the tunnel token |
