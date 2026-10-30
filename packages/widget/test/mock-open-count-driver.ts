@@ -5,7 +5,8 @@
  *
  * The mock is one page. Alice leaves four threads on it: one stays open, one
  * is resolved where its element still stands, and two are resolved on
- * elements a later round of the mock took away. The reader opens the mock
+ * elements a later round of the mock took away; the agent replies on each
+ * before resolving it, as an agent closes a thread. The reader opens the mock
  * through the board's mock route, then loads it again, so every thread they
  * have not opened is new to them. The driver reads the view's count, its New
  * list and its page chip. Then, with the page open, the open thread is
@@ -145,7 +146,9 @@ async function main(): Promise<void> {
         await thread('fees', 'P', 'Saltmarsh port fee', 'Is this fee per person?'),
       ],
     };
+    // As an agent closes them: a reply, then a resolve, both over REST.
     for (const id of [ids.resolvedHere, ...ids.resolvedGone]) {
+      await post(`${threads}/${id}/comments`, { author: agent, text: 'Done in this round.' });
       await post(`${threads}/${id}/resolve`, { author: agent });
     }
 
