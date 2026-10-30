@@ -40,6 +40,9 @@ export interface DockItem {
    * `reviewItemId`, and the answer goes to the ticket's own answer route.
    */
   taskId?: string;
+  /** Where this item is answered instead, when this page may not answer it:
+   *  the sheet draws no controls, and the ask's detail links there. */
+  answerAt?: string;
 }
 
 /**
@@ -55,6 +58,8 @@ export interface LinkedDockItem {
   /** A run's output item waiting on the file this page holds: the reader
    *  may close it with Mark read rather than a typed answer. */
   markRead?: true;
+  /** See `DockItem.answerAt`. */
+  answerAt?: string;
 }
 
 /** The server's list as dock items. Anything that is not a list is none. */
@@ -68,6 +73,7 @@ export function linkedDockItems(list: unknown): DockItem[] {
     ts: i.ts,
     answered: false,
     taskId: i.taskId,
+    answerAt: i.answerAt,
   }));
 }
 
@@ -135,8 +141,10 @@ export function threadAsk(t: Thread): DockItem | null {
  */
 export function dockItems(threads: Thread[], linked: DockItem[] = []): DockItem[] {
   // A linked ticket item has already passed the Home queue's membership on
-  // the server; the owner-only rule below is still the dock's own to apply.
-  const items = linked.filter((i) => !i.review.ownerOnly);
+  // the server, and its owner-only rule too: the server hands an owner-only
+  // item only to the owner (`mockup-linked-items.ts`), because it knows who
+  // is reading and the page's threads below do not.
+  const items = [...linked];
   for (const t of threads) {
     const item = threadAsk(t);
     // An OWNER-ONLY ask never docks. The widget is a guest on somebody else's
@@ -202,6 +210,9 @@ export function answerHtml(item: DockItem): string {
       said ? `<span>${escape(said)}</span>` : ''
     }</div>`;
   }
+  // Answered elsewhere: nothing this page could send. The server ended the
+  // ask's words with the link there (`mockup-linked-items.ts`).
+  if (item.answerAt) return '';
   const options = item.review.options ?? [];
   const choices = options.length
     ? `<div class="cw-answer-choices">${options
@@ -292,6 +303,19 @@ export function linkInto(el: Element): void {
 }
 
 /**
+ * A page's answer request: true when it landed, false when it was refused,
+ * or the server's own sentence for the refusal, which the sheet shows.
+ */
+export type AnswerSend = (text: string, optionId?: string) => Promise<boolean | string>;
+
+/** The refusal sentence in a failed answer's JSON body, or false. */
+export async function refusalOf(res: Response): Promise<true | string | false> {
+  if (res.ok) return true;
+  const body = (await res.json().catch(() => null)) as { message?: unknown } | null;
+  return typeof body?.message === 'string' && body.message ? body.message : false;
+}
+
+/**
  * Make an open sheet work: render the ask's inline links, close on the scrim
  * or ×, answer on an option or the send button, and say so when the answer
  * was refused.
@@ -302,7 +326,7 @@ export function linkInto(el: Element): void {
  */
 export function wireDockSheet(
   scrim: HTMLElement,
-  opts: { send: (text: string, optionId?: string) => Promise<boolean>; onAnswered: () => void },
+  opts: { send: AnswerSend; onAnswered: () => void },
 ): void {
   const close = (): void => scrim.remove();
   scrim.addEventListener('click', (ev) => {
@@ -321,7 +345,7 @@ export function wireDockSheet(
  */
 export function wireAnswer(
   scrim: HTMLElement,
-  opts: { send: (text: string, optionId?: string) => Promise<boolean>; onAnswered: () => void },
+  opts: { send: AnswerSend; onAnswered: () => void },
   close?: () => void,
 ): void {
   for (const body of Array.from(scrim.querySelectorAll('.cw-round-body'))) linkInto(body);
@@ -337,10 +361,10 @@ export function wireAnswer(
     inFlight = true;
     const ok = await opts.send(text, optionId).catch(() => false);
     inFlight = false;
-    if (!ok) {
+    if (ok !== true) {
       if (err) {
         err.hidden = false;
-        err.textContent = 'Couldn’t answer — try again.';
+        err.textContent = ok || 'Couldn’t answer — try again.';
       }
       return;
     }

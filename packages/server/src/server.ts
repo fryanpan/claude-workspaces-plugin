@@ -2500,13 +2500,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     libraryRunOutputSource(libraryRoutesCtx, (id) => taskStore.getWorkspace(id));
   runOutputSource = libraryOutputSource;
   // The doc page's open of the file a doc holds, and what its dock offers.
-  const pageOpened = (ws: string, docId: string) => {
+  const pageOpened = (ws: string, docId: string, owner: boolean) => {
     // The project walk is paid only on a board with a run's item standing.
     const waiting = taskStore.listTasks(ws).some((t) => t.schedule?.state?.output?.item);
     const relPath = waiting ? libraryOutputSource().fileOf(ws, docId) : undefined;
     if (relPath !== undefined) noteOpened(ws, relPath);
     const readable = relPath === undefined ? undefined : itemsLinking(taskStore, ws, relPath);
-    return boardLinkedItems(ws, docId, taskStore, docStore, readable);
+    return boardLinkedItems(ws, docId, taskStore, docStore, readable, owner);
   };
 
   /** The migration verb: one board doc into its project's folder, same doc. */
