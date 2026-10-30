@@ -135,13 +135,15 @@ describe('the mic wears the nav’s icon convention', () => {
     // `.voice-mic` carried `font-size: 19px` and `.board-quick-mic` carried 16px
     // to size an emoji. An SVG ignores both, so leaving them set is how the
     // next reader concludes the glyph is still text. A button with no
-    // font-size of its own computes `inherit` here; one that declares a size
-    // computes the pixels — which is what the control below pins.
+    // font-size of its own takes its parent's (`button { font: inherit }`), so
+    // each sits in a parent at a size no rule uses; one that declares a size
+    // reads something else — which is what the control below pins.
+    const parent = attach('', { attrs: { style: 'font-size: 37px' } });
     for (const host of ['voice-mic', 'board-huddle-start']) {
-      const button = attach(host, { tag: 'button' });
+      const button = attach(host, { tag: 'button', parent });
       const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       button.appendChild(glyph);
-      expect(styleOf(button).fontSize, `.${host} still sizes a glyph as text`).toBe('inherit');
+      expect(styleOf(button).fontSize, `.${host} still sizes a glyph as text`).toBe('37px');
       const box = styleOf(glyph);
       expect(
         Number.parseFloat(box.width),
@@ -151,12 +153,15 @@ describe('the mic wears the nav’s icon convention', () => {
     }
     // Controls: a glyph in a button nobody styles is left at its intrinsic
     // size — the failure the rule above prevents — and a rule that DOES set a
-    // font-size reads as pixels, so the `inherit` reads are not vacuous.
+    // font-size of its own reads its own size inside the same parent, so the
+    // 37px reads are not vacuous.
     const stray = attach('voice-mic-nonexistent', { tag: 'button' });
     const strayGlyph = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     stray.appendChild(strayGlyph);
     expect(styleOf(strayGlyph).width).toBe('');
-    expect(styleOf(attach('meeting-speaker-pill', { tag: 'span' })).fontSize).toMatch(/px$/);
+    const pill = styleOf(attach('meeting-speaker-pill', { tag: 'span', parent })).fontSize;
+    expect(pill).toMatch(/px$/);
+    expect(pill).not.toBe('37px');
   });
 });
 
