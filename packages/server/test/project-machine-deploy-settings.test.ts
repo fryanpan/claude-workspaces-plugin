@@ -351,6 +351,10 @@ describe('machine:deploy sets the project settings', () => {
         }),
       ),
     ).toEqual(LEAD_SECRETS);
+    // Without the board it would set again, it refuses rather than set less.
+    expect(() =>
+      projectConfig({ project: 'riverbend', imageLabel: HEAD, refreshLead: true }),
+    ).toThrow('needs --lead-board');
   });
 
   it('refuses a sign-in or a deploy key that is not one, without quoting it', async () => {

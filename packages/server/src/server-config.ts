@@ -271,6 +271,8 @@ export function resolveServerConfig(opts: {
 
   /** `CW_BOARD_SOCKET_SHARED=<boardId>`: see ServerOptions.boardSocketShared. */
   const boardSocketShared = env.CW_BOARD_SOCKET_SHARED?.trim() || undefined;
+  /** `CW_BOARD_SOCKET_GROUP=<gid>`: see ServerOptions.boardSocketGroup. */
+  const boardSocketGroup = parseGid(env.CW_BOARD_SOCKET_GROUP);
   /** `CW_LOOPBACK_REFUSED_UIDS=10004`: see ServerOptions.loopbackRefusedUids. */
   const loopbackRefusedUids = parseRefusedUids(env.CW_LOOPBACK_REFUSED_UIDS);
 
@@ -694,6 +696,7 @@ export function resolveServerConfig(opts: {
     requireAgentToken,
     boardSocketDir,
     boardSocketShared,
+    boardSocketGroup,
     accessOnlyBrowserHosts,
     loopbackSkipsAccess,
     loopbackRefusedUids,
@@ -757,6 +760,15 @@ export function resolveBoardSocketDir(
     return undefined;
   }
   return dir;
+}
+
+/** A gid, or undefined for unset. Anything else is an error, not a guess. */
+function parseGid(raw: string | undefined): number | undefined {
+  const s = (raw ?? '').trim();
+  if (s === '') return undefined;
+  if (!/^\d{1,10}$/.test(s))
+    throw new Error(`CW_BOARD_SOCKET_GROUP: ${JSON.stringify(s)} is not a gid`);
+  return Number(s);
 }
 
 function pathOrNull(p: string): string | null {

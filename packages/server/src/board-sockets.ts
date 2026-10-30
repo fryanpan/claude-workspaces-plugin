@@ -9,10 +9,11 @@
  * `request-admission.ts` reads that record, never the Host header, and
  * `middleware/board-socket-door.ts` holds the request to that board.
  *
- * One board's socket may be shared with another user of this machine
- * (`shared`): that socket is mode 666 and the folder 710, so a member of the
- * folder's group opens that socket by name and cannot list the folder to find
- * another. A project machine's lead reaches its board this way
+ * One board's socket may be shared with the members of one group
+ * (`shared`): that socket is given to the group, mode 660, and the folder is
+ * mode 710, so a member opens that socket by name and cannot list the folder
+ * to find another. Every other user is refused both. The server's user must
+ * be a member of the group to give the socket to it. A project machine's lead reaches its board this way
  * (`infra/project-machine/entrypoint.sh`), and `middleware/loopback-uid-door.ts`
  * refuses it every TCP way in.
  *
@@ -21,7 +22,7 @@
  * it as well. Websocket upgrades are refused: the upgrade routes call the TCP
  * server's `upgrade`, which cannot take a connection this listener accepted.
  */
-import { chmodSync, lstatSync, mkdirSync, unlinkSync } from 'node:fs';
+import { chmodSync, chownSync, lstatSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** A unix socket path, NUL included, must fit `sun_path`: 104 bytes on macOS. */
@@ -72,8 +73,8 @@ export interface BoardSocketsOptions {
   handle: (req: Request) => Promise<Response | undefined>;
   j: (status: number, body: unknown) => Response;
   log?: (line: string) => void;
-  /** The one board whose socket other users may open (see the header). */
-  shared?: string;
+  /** The one board whose socket the group's members may open (see the header). */
+  shared?: { board: string; gid: number };
 }
 
 export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
@@ -81,7 +82,7 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
   const log = opts.log ?? ((line: string) => console.error(line));
   const refused = boardSocketDirError(dir);
   if (refused) throw new Error(refused);
-  ensurePrivateDir(dir, opts.shared ? 0o710 : 0o700);
+  ensurePrivateDir(dir, opts.shared?.gid);
   const boardFor = new WeakMap<Request, string>();
   const listeners = new Map<string, { stop: (closeActive?: boolean) => void }>();
 
@@ -102,9 +103,21 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
         },
       });
       // Only this user may connect, but for the shared board's socket, which
-      // the folder's mode keeps to its group. A sandboxed lead runs as the
-      // same user; its profile, not the file mode, tells one lead from another.
-      chmodSync(path, boardId === opts.shared ? 0o666 : 0o600);
+      // its group may too. A sandboxed lead on the Mac runs as the same user;
+      // its profile, not the file mode, tells one lead from another.
+      // A socket whose mode could not be set is closed, never left open.
+      try {
+        if (boardId === opts.shared?.board) {
+          if (lstatSync(path).gid !== opts.shared.gid) chownSync(path, ownUid(), opts.shared.gid);
+          chmodSync(path, 0o660);
+        } else {
+          chmodSync(path, 0o600);
+        }
+      } catch (err) {
+        server.stop(true);
+        removeStaleSocket(path);
+        throw err;
+      }
       listeners.set(boardId, server);
     } catch (err) {
       log(`[board-sockets] could not open ${path}: ${err instanceof Error ? err.message : err}`);
@@ -134,16 +147,26 @@ export function openBoardSockets(opts: BoardSocketsOptions): BoardSockets {
 /**
  * Make the folder, or take one that exists, only if it is a real folder this
  * user owns; then nobody else may enter it. Another user's folder at a
- * guessable `/private/tmp` path is refused, never used. `mode` is 700, or
- * 710 when one socket is shared: the group may then enter, and not list.
+ * guessable `/private/tmp` path is refused, never used. With a socket shared
+ * with group `gid`, the folder is that group's, mode 710: the group may enter
+ * and not list. Otherwise it is mode 700.
  */
-function ensurePrivateDir(dir: string, mode: number): void {
+function ensurePrivateDir(dir: string, gid?: number): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const st = lstatSync(dir);
   const uid = process.getuid?.();
   if (!st.isDirectory() || (uid !== undefined && st.uid !== uid))
     throw new Error(`board socket folder ${dir} is not a folder this user owns`);
-  chmodSync(dir, mode);
+  if (gid !== undefined && st.gid !== gid) chownSync(dir, ownUid(), gid);
+  chmodSync(dir, gid === undefined ? 0o700 : 0o710);
+}
+
+/**
+ * This user's uid, for a chown that changes only the group: Bun's `chownSync`
+ * refuses -1 ("leave it") with EPERM, measured in the project machine's image.
+ */
+function ownUid(): number {
+  return process.getuid?.() ?? -1;
 }
 
 /**

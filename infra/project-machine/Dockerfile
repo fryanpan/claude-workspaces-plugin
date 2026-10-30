@@ -38,7 +38,9 @@ RUN apt-get update \
   && install -m 0755 /tmp/package/claude /usr/local/bin/claude
 
 FROM oven/bun:1.3.10-debian@sha256:367842b35abbdf23f39e23c71f3a08eee940ff2679a14e08a5afcf4a1436cd89
-# Every home is 0700: a user's files are its own.
+# Every home is 0700: a user's files are its own. `cwboard` holds the server
+# and the lead and nobody else: the lead's board socket is that group's
+# (entrypoint.sh).
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini tmux \
   && rm -rf /var/lib/apt/lists/* \
@@ -46,6 +48,9 @@ RUN apt-get update \
   && useradd --uid 10002 --create-home --shell /usr/sbin/nologin cwtunnel \
   && useradd --uid 10003 --create-home --shell /usr/sbin/nologin cwbackup \
   && useradd --uid 10004 --create-home --shell /usr/sbin/nologin lead \
+  && groupadd --gid 10010 cwboard \
+  && usermod -aG cwboard cw \
+  && usermod -aG cwboard lead \
   && chmod 0700 /home/cw /home/cwtunnel /home/cwbackup /home/lead
 COPY --from=claude /usr/local/bin/claude /usr/local/bin/claude
 # The lead clones and pushes its project's repo over SSH with a deploy key

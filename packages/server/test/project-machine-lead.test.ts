@@ -206,11 +206,12 @@ describe.skipIf(BASH === null)('the lead on the machine', () => {
     expect(server?.env.get('CW_BOARD_SOCKET_DIR')).toBe(`${volume}/boards`);
     expect(server?.env.get('CW_BOARD_SOCKET_SHARED')).toBe(BOARD);
     expect(server?.env.get('CW_LOOPBACK_REFUSED_UIDS')).toBe('10004');
+    expect(server?.env.get('CW_BOARD_SOCKET_GROUP')).toBe('10010');
 
     // The server's folders are closed to the lead, and the lead's to the
     // server; the socket folder lets the lead's group through, not list.
     expect(lines(log, '.chown')).toContain(`root -h lead:lead ${volume}/lead`);
-    expect(lines(log, '.chown')).toContain(`root -h cw:lead ${volume}/boards`);
+    expect(lines(log, '.chown')).toContain(`root -h cw:cwboard ${volume}/boards`);
     const chmods = lines(log, '.chmod');
     expect(chmods).toContain(`root 0700 ${volume}/cw ${volume}/claude-projects ${volume}/lead`);
     expect(chmods).toContain(`root 0710 ${volume}/boards`);

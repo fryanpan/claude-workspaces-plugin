@@ -200,7 +200,9 @@ bun run machine:deploy --project <project> --memory 2048 \
 - A machine with a lead needs `--memory 2048` or more; the deploy refuses a
   smaller one.
 - Each is set once, like every secret. A run that names a source sets that
-  secret again, and `--refresh-lead` sets all three again from their sources.
+  secret again. `--refresh-lead` also sets the default account's sign-in
+  again, and needs `--lead-board`; a deploy key is set again only when
+  `--github-deploy-key` names it.
 
 What the lead can reach:
 
@@ -212,8 +214,11 @@ What the lead can reach:
   tunnel token or the bucket credential, and no other user's process holds
   its sign-in or deploy key. The server's data dir is mode 700.
 - **Its board, and no other.** The server listens on one unix socket per
-  board in `/data/boards`, which is `cw:lead` mode 710: the lead may enter it
-  and may not list it. Only the lead's board's socket is mode 666. A request
+  board in `/data/boards`, which is `cw:cwboard` mode 710; the group
+  `cwboard` holds `cw` and `lead` and nobody else. The lead may enter the
+  folder and may not list it. Only the lead's board's socket is the group's,
+  mode 660, and every other socket is `cw`'s, mode 600, so `cwtunnel` and
+  `cwbackup` reach none. A request
   on that socket is held to that board (`middleware/board-socket-door.ts`),
   which is how a walled lead on the Mac reaches its board too. The server
   refuses every loopback TCP request from the lead's uid

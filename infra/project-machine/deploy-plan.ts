@@ -124,6 +124,9 @@ export function projectConfig(input: ConfigInput): ProjectConfig {
       `lead board must be a board id (A-Z, a-z, 0-9, _ and -), got "${input.leadBoard}"`,
     );
   }
+  if (input.refreshLead && input.leadBoard === undefined) {
+    throw new Error('--refresh-lead sets the board again, so it needs --lead-board');
+  }
   // A secret this run names a source for is set again: that is the point of
   // naming it.
   const leadRefresh = input.refreshLead

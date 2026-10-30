@@ -3254,7 +3254,10 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         dir: opts.boardSocketDir,
         handle: handleWithOrigin,
         j,
-        ...(opts.boardSocketShared ? { shared: opts.boardSocketShared } : {}),
+        // Shared only with a group to share it with: never with every user.
+        ...(opts.boardSocketShared && opts.boardSocketGroup !== undefined
+          ? { shared: { board: opts.boardSocketShared, gid: opts.boardSocketGroup } }
+          : {}),
       })
     : null;
   const syncBoardSockets = () =>

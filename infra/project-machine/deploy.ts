@@ -413,6 +413,14 @@ export async function deployProject(
     console.log(
       `[deploy] not set: ${LEAD_TOKEN_SECRET}: the Keychain has no ${cfg.keychain.leadToken}, so no lead agent runs on the machine`,
     );
+  if (
+    cfg.leadRefresh.includes(LEAD_DEPLOY_KEY_SECRET) &&
+    cfg.keychain.deployKey === undefined &&
+    observed.secrets.has(LEAD_DEPLOY_KEY_SECRET)
+  )
+    console.log(
+      `[deploy] not set again: ${LEAD_DEPLOY_KEY_SECRET}: no --github-deploy-key names its source`,
+    );
   if (cfg.keychain.deployKey !== undefined && !lead.includes(LEAD_DEPLOY_KEY_SECRET))
     console.log(
       `[deploy] not set: ${LEAD_DEPLOY_KEY_SECRET}: the Keychain has no ${cfg.keychain.deployKey}`,

@@ -12,7 +12,7 @@
  *    uid, and the same server with nobody refused serves it (the control).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chownSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boardSocketPath } from '../src/board-sockets.ts';
@@ -26,6 +26,23 @@ import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedBoardOnHandle } from './workspace-seed.ts';
 
 const LEAD = 10004;
+// A group this user may give its files to, other than its own where one
+// exists, so giving the socket to it is a change the test can see.
+const GROUP = (() => {
+  const probe = join(mkdtempSync(join(tmpdir(), 'ud-gid-')), 'f');
+  writeFileSync(probe, '');
+  const own = process.getgid?.() ?? 0;
+  for (const g of process.getgroups?.() ?? []) {
+    if (g === own) continue;
+    try {
+      chownSync(probe, -1, g);
+      return g;
+    } catch {
+      // Not one this user may give a file to.
+    }
+  }
+  return own;
+})();
 const HEADER =
   '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
 // 127.0.0.1:41000 -> 127.0.0.1:8787 owned by the lead; the server's own end
@@ -122,6 +139,7 @@ describe('B. a server that refuses the lead’s uid', () => {
       },
       boardSocketDir: socketDir,
       boardSocketShared: ws,
+      boardSocketGroup: GROUP,
     });
   });
 
@@ -167,10 +185,14 @@ describe('B. a server that refuses the lead’s uid', () => {
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it('shares that one socket, and the folder only to its group', () => {
-    expect(statSync(boardSocketPath(socketDir, ws)).mode & 0o777).toBe(0o666);
+  it('gives that one socket to its group, mode 660, and nothing to any other user', () => {
+    const shared = statSync(boardSocketPath(socketDir, ws));
+    expect(shared.mode & 0o777).toBe(0o660);
+    expect(shared.gid).toBe(GROUP);
     expect(statSync(boardSocketPath(socketDir, other)).mode & 0o777).toBe(0o600);
-    expect(statSync(socketDir).mode & 0o777).toBe(0o710);
+    const folder = statSync(socketDir);
+    expect(folder.mode & 0o777).toBe(0o710);
+    expect(folder.gid).toBe(GROUP);
   });
 
   it('is read from CW_LOOPBACK_REFUSED_UIDS and CW_BOARD_SOCKET_SHARED', () => {
@@ -179,12 +201,14 @@ describe('B. a server that refuses the lead’s uid', () => {
         CW_DATA_DIR: '/nonexistent-data',
         CW_LOOPBACK_REFUSED_UIDS: '10004',
         CW_BOARD_SOCKET_SHARED: 'w-riverbend',
+        CW_BOARD_SOCKET_GROUP: '10010',
       },
       repoRoot: '/nonexistent-repo',
       arg: (_name: string, fallback?: string) => fallback,
     });
     expect(cfg.loopbackRefusedUids).toEqual([LEAD]);
     expect(cfg.boardSocketShared).toBe('w-riverbend');
+    expect(cfg.boardSocketGroup).toBe(10010);
   });
 });
 

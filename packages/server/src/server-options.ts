@@ -75,12 +75,15 @@ export interface ServerOptions {
    */
   boardSocketDir?: string;
   /**
-   * The one board whose socket another user of this machine may open: its
-   * socket is mode 666 and the folder 710, so a member of the folder's group
-   * (a project machine's lead, `infra/project-machine/entrypoint.sh`) reaches
-   * that socket and can list none. Unset, every socket is this user's alone.
+   * The one board whose socket the members of `boardSocketGroup` may open:
+   * that socket is the group's, mode 660, and the folder 710, so a member (a
+   * project machine's lead, `infra/project-machine/entrypoint.sh`) reaches
+   * that socket and can list none. Without both, every socket is this
+   * user's alone.
    */
   boardSocketShared?: string;
+  /** The gid `boardSocketShared`'s socket is given to. This user must be a member. */
+  boardSocketGroup?: number;
   dataDir?: string;
   /**
    * Email-keyed identity is IN EFFECT (`CW_REQUIRE_EMAIL_AUTH`). Default off,

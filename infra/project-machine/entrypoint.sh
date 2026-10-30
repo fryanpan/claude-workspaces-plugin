@@ -38,10 +38,13 @@ TRANSCRIPTS="${BACKUP_TRANSCRIPTS_DIR:-$DATA_ROOT/claude-projects}"
 LEAD_ROOT="$DATA_ROOT/lead"
 # The lead's uid, fixed in the Dockerfile. The server refuses its TCP calls.
 LEAD_UID=10004
-# One unix socket per board (packages/server/src/board-sockets.ts): cw's,
-# with group lead allowed through, so the lead reaches its own board's socket
-# and no other.
+# One unix socket per board (packages/server/src/board-sockets.ts), in a
+# folder of cw's that group cwboard (cw and lead, fixed in the Dockerfile) may
+# enter and not list. Only the lead's board's socket is that group's, mode
+# 660, so the lead reaches that socket and no other, and no other user
+# reaches any.
 SOCKETS="$DATA_ROOT/boards"
+BOARD_GID=10010
 CGROUP="${CW_MACHINE_CGROUP_ROOT:-/sys/fs/cgroup}"
 LEAD_MEMORY_MAX="${CW_LEAD_MEMORY_MAX:-1280M}"
 
@@ -73,7 +76,7 @@ mkdir -p "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude" "$LEAD_ROOT" "$SOCKET
 ln -sfn "$TRANSCRIPTS" "$HOMES/cw/.claude/projects"
 chown -h cw:cw "$CW_DATA_DIR" "$TRANSCRIPTS" "$HOMES/cw/.claude"
 chown -h lead:lead "$LEAD_ROOT"
-chown -h cw:lead "$SOCKETS"
+chown -h cw:cwboard "$SOCKETS"
 # Each user's folders are its own: the lead runs as another user so that it
 # cannot read the server's data dir, which holds the board's tokens and keys,
 # except through the server. And the server cannot read the lead's folder, so
@@ -115,7 +118,7 @@ fi
 (
   drop_secrets
   export CW_BOARD_SOCKET_DIR="$SOCKETS" CW_BOARD_SOCKET_SHARED="$LEAD_BOARD" \
-    CW_LOOPBACK_REFUSED_UIDS="$LEAD_UID"
+    CW_BOARD_SOCKET_GROUP="$BOARD_GID" CW_LOOPBACK_REFUSED_UIDS="$LEAD_UID"
   run_as cw bun run "$APP/packages/server/src/bin.ts" \
     --port "$PORT" --host 127.0.0.1 --no-port-walk \
     --data-dir "$CW_DATA_DIR" \
