@@ -28,6 +28,7 @@ import {
   boardSocketRows,
   boardWallRows,
   connectFrom,
+  probeRuntime,
   socketConnectFrom,
 } from './lead-sandbox-escapes.ts';
 import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
@@ -278,6 +279,17 @@ s.on('error', (e) => console.log(e.code));`,
         .map((r) => r.says),
     ).toEqual([]);
     expect(at(unwalled).map((r) => r.ok)).toEqual([false, false]);
+  });
+
+  it('probes with node when the check runs under bun, which answers a refusal as ECONNREFUSED', () => {
+    const underBun = probeRuntime({ ...process.versions, bun: '1.3.0' }, '/fixture/bin/bun');
+    expect(underBun).not.toBeNull();
+    expect(connectFrom(underBun ?? '', walled, project, '127.0.0.1', walledPort)).toBe('EPERM');
+    // The control: bun itself cannot tell the wall from an empty port.
+    const bun = spawnSync('/bin/sh', ['-c', 'command -v bun'], { encoding: 'utf8' }).stdout.trim();
+    if (bun !== '') {
+      expect(connectFrom(bun, walled, project, '127.0.0.1', walledPort)).toBe('ECONNREFUSED');
+    }
   });
 
   it("connects to its own board's socket, inside the wall and without it", () => {

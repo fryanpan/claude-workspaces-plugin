@@ -225,6 +225,23 @@ export function escapeRows(
   ];
 }
 
+/**
+ * The runtime the connect probes run under: node, never bun. Bun answers a
+ * connect the sandbox refused with `ECONNREFUSED` (TCP) or `ENOENT` (unix
+ * socket), the codes of an empty port and a missing path, so every wall row
+ * failed on a wall that held. Node answers `EPERM`. Measured 30 Oct under
+ * `sandbox-exec`. Null when no node is on `PATH`.
+ */
+export function probeRuntime(
+  versions: NodeJS.ProcessVersions = process.versions,
+  execPath: string = process.execPath,
+): string | null {
+  if (!versions.bun) return execPath;
+  const r = spawnSync('/bin/sh', ['-c', 'command -v node'], { encoding: 'utf8' });
+  const found = r.status === 0 ? r.stdout.trim() : '';
+  return found === '' ? null : found;
+}
+
 /** What a TCP connect from `runtime` answers, inside `profile` or, with null, outside any. */
 export function connectFrom(
   runtime: string,
@@ -257,7 +274,7 @@ export function boardWallRows(
   cwd: string,
   hosts: readonly string[],
   ports: readonly number[] = BOARD_SERVER_PORTS,
-  runtime: string = process.execPath,
+  runtime: string = probeRuntime() ?? process.execPath,
 ): EscapeRow[] {
   return ports.flatMap((port) =>
     hosts.map((host) => {
@@ -302,7 +319,7 @@ export function boardSocketRows(
   cwd: string,
   own: string,
   others: readonly string[],
-  runtime: string = process.execPath,
+  runtime: string = probeRuntime() ?? process.execPath,
 ): EscapeRow[] {
   const inside = socketConnectFrom(runtime, profile, cwd, own);
   return [
