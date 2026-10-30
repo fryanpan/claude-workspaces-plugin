@@ -251,7 +251,7 @@ describe('editing the rows of a table in a bound doc', () => {
     });
     const disk = readFileSync(path, 'utf8');
     const lines = disk.split('\n');
-    const lastRow = lines.findLastIndex((l) => l.startsWith('|'));
+    const lastRow = lines.length - 1 - [...lines].reverse().findIndex((l) => l.startsWith('|'));
     expect(lines[lastRow]).toContain('Saltmarsh');
     expect(lines.slice(lastRow + 1, lastRow + 3)).toEqual(['', 'Summer sailings start in May.']);
   });

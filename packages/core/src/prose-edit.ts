@@ -827,9 +827,15 @@ function tryTableRowReplace(
     chosen = [found[0] as { rows: Y.XmlElement[] }];
   }
 
-  const emptiesTable = (m: { rows: Y.XmlElement[] }) =>
-    m.rows[0]?.parent instanceof Y.XmlElement && m.rows[0].parent.length === m.rows.length;
-  if (replaceRows.length === 0 && chosen.some(emptiesTable)) {
+  // Counted per table across every chosen match: replaceAll can empty a
+  // table with several matches none of which covers it alone.
+  const removed = new Map<unknown, number>();
+  for (const m of chosen) {
+    const t = m.rows[0]?.parent;
+    removed.set(t, (removed.get(t) ?? 0) + m.rows.length);
+  }
+  const emptiesTable = [...removed].some(([t, n]) => t instanceof Y.XmlElement && t.length === n);
+  if (replaceRows.length === 0 && emptiesTable) {
     const message =
       'That replace would remove every row of the table. To remove the table, use ' +
       'delete_block_at_anchor on a word in it.';
