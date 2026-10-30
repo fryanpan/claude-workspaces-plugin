@@ -244,8 +244,13 @@ each request it accepts and hands it to the same front door, where
 no path. `board-socket-roots.ts` sits beside it as a store: the projects
 each walled lead can write, which `routes/board-socket-roots.ts` sets from
 loopback. `bound-path-guard.ts` is the read and write the bound-file
-reader (`slow-fs.ts`) uses under those roots, each checked by where the
-open file really is. `git-hardening.ts` decides where the server runs no
+reader (`slow-fs.ts`) uses under those roots. On macOS a path under a root
+goes through `tree-fs.ts`, which walks from the root's pinned descriptor one
+name at a time and never follows a link below it (its system calls are bound
+in `tree-fs-native.ts`); `fs-scan-contained.ts` is the folder listing done
+the same way. Every other covered path, and every path off macOS, takes the
+plain-path checks in `bound-path-checked.ts`, judged by where the open file
+really is. `guard-refused.ts` is the one error all of them throw. `git-hardening.ts` decides where the server runs no
 git at all (a repository holding such a project) and the options every
 other git read passes, so a repository's settings cannot make that read
 run a program. `server-options.ts` holds
