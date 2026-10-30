@@ -3052,6 +3052,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     inflight: () => inflight.snapshot(),
   });
   const workspaceRoutesCtx: WorkspaceRoutesContext = {
+    leadBindRoot: (boardId, folderPath) => boardSocketRoots.rootFor(boardId, folderPath),
     chatAudit,
     shareLinks,
     accessProposals,
