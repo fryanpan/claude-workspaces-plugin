@@ -16321,6 +16321,38 @@ var TOOL_LIST = {
       }
     },
     {
+      name: "link_review_item",
+      description: "Attach an existing review item, from any board, to a doc or mock thread. Posts one comment that shows the item’s headline and a link that opens it. The item must already exist: file it first with add_review_item or create_thread.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspaceId: {
+            type: "string",
+            description: "The board the THREAD is on."
+          },
+          docId: { type: "string", description: "The doc or mock the thread is on." },
+          threadId: { type: "string" },
+          item: {
+            type: "object",
+            description: "The item to attach. A ticket item: {workspaceId, taskId, reviewItemId}. A thread item: {workspaceId, docId, threadId}. Its workspaceId is the board the ITEM is on, which may differ from the thread’s.",
+            properties: {
+              workspaceId: { type: "string" },
+              taskId: { type: "string" },
+              reviewItemId: { type: "string" },
+              docId: { type: "string" },
+              threadId: { type: "string" }
+            },
+            required: ["workspaceId"]
+          },
+          text: {
+            type: "string",
+            description: "Optional words shown above the link."
+          }
+        },
+        required: ["workspaceId", "docId", "threadId", "item"]
+      }
+    },
+    {
       name: "edit_comment",
       description: "Replace the words of a posted comment, and keep the old words on its edit trail. Use it to repair a link, a name or a figure. To change what an item asks, use revise_review_item. Text identical to the current text is refused.",
       inputSchema: {
@@ -19132,6 +19164,11 @@ async function handleDocsTool(name, a, ctx) {
     case "post_reply": {
       const { docId, threadId, text, review } = a;
       const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/comments`, { author: AUTHOR, text, ...review !== undefined ? { review } : {} });
+      return ok2(res);
+    }
+    case "link_review_item": {
+      const { docId, threadId, item, text } = a;
+      const res = await http("POST", `${board()}/docs/${encodeURIComponent(docId)}/threads/${encodeURIComponent(threadId)}/linked-items`, { author: AUTHOR, item, ...text !== undefined ? { text } : {} });
       return ok2(res);
     }
     case "edit_comment": {

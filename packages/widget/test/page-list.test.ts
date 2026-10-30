@@ -54,6 +54,9 @@ const rows = (el: FeedbackWidgetEl, section: string): string[] =>
     (r) => r.dataset.threadId ?? '',
   );
 
+/** The spot is scrolled to a frame after the thread opens. */
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+
 describe('the page list', () => {
   it("lists this page's threads newest first, and other pages' after them", () => {
     const el = seeded();
@@ -64,7 +67,7 @@ describe('the page list', () => {
     expect(view?.querySelector('.where')?.textContent).toBe('Another view of this page');
   });
 
-  it('restores the page state a thread was made in, then shows its spot once', () => {
+  it('restores the page state a thread was made in, then shows its spot once', async () => {
     const el = seeded();
     const spy = vi.fn();
     byId('p').scrollIntoView = spy;
@@ -81,6 +84,7 @@ describe('the page list', () => {
     expect(pinOf(el, 't-view')?.hasAttribute('data-hl') ?? false).toBe(false);
     el.currentContext = { url: `${PAGE}?o=ss` };
     renderThreadsInto(el);
+    await frame();
     expect(spy).toHaveBeenCalledTimes(1);
     expect(pinOf(el, 't-view')?.hasAttribute('data-hl')).toBe(true);
     expect(el.shadow.querySelector('.thread-popover')?.textContent).toContain(
@@ -89,18 +93,20 @@ describe('the page list', () => {
 
     // Once: the next render scrolls nowhere, and a tap on the page clears the mark.
     renderThreadsInto(el);
+    await frame();
     expect(spy).toHaveBeenCalledTimes(1);
     byId('h').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
     renderThreadsInto(el);
     expect(pinOf(el, 't-view')?.hasAttribute('data-hl')).toBe(false);
   });
 
-  it('shows a thread on this state of the page without moving the address', () => {
+  it('shows a thread on this state of the page without moving the address', async () => {
     const el = seeded();
     const spy = vi.fn();
     byId('p').scrollIntoView = spy;
     el.shadow.querySelector<HTMLElement>('.thread[data-thread-id="t-new"]')?.click();
     expect(location.search).toBe('?all=1');
+    await frame();
     expect(spy).toHaveBeenCalledTimes(1);
     expect(pinOf(el, 't-new')?.hasAttribute('data-hl')).toBe(true);
   });

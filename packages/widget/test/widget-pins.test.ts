@@ -265,14 +265,15 @@ describe.skipIf(CHROME === null)('pins on a mock', () => {
       ]);
       expect(pin(width, 'resolvedShown', 't-resolved').state).toBe('resolved');
       expect(state('t-review')).toBe('review');
-      // Painted differently: an orange drop, a white one ringed in green, and
-      // an orange one with a white eye.
+      // Painted differently: a purple drop (`STATUS_COLORS.open`, shared with
+      // the comment view's dots and badges), a white one ringed in green, and
+      // a purple one with a white eye.
       const open = pin(width, 'reloaded', 't-space').paint;
       const resolved = pin(width, 'resolvedShown', 't-resolved').paint;
       const review = pin(width, 'reloaded', 't-review').paint;
-      expect(open).toEqual(['rgb(227, 111, 30)', 'none', 'rgb(255, 255, 255)']);
+      expect(open).toEqual(['rgb(91, 63, 143)', 'none', 'rgb(255, 255, 255)']);
       expect(resolved).toEqual(['rgb(255, 255, 255)', 'none', 'rgb(45, 164, 78)']);
-      expect(review[1]).toMatch(/^radial-gradient\(rgb\(255, 255, 255\).*rgb\(227, 111, 30\)/);
+      expect(review[1]).toMatch(/^radial-gradient\(rgb\(255, 255, 255\).*rgb\(91, 63, 143\)/);
       // One style: a drop with no number in it, the same drop on every open
       // thread, one pin per pinned thread.
       expect(l.pins.map((p) => p.text)).toEqual(l.pins.map(() => ''));

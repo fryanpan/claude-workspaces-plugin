@@ -250,6 +250,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/docs/:docId/threads/:threadId/edit-comment` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/insert_after` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/insert_blocks_after` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
+| `/workspaces/:ws/docs/:docId/threads/:threadId/linked-items` | POST | `routes/doc-thread-linked-item.ts` | owner-in-handler | the guard admits `threads/*`; the handler refuses a visitor, since the item may be on a board they were not given |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/promote` | POST | `routes/docs.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/reanchor` | POST | `routes/doc-threads-routes.ts` | share-scope |  |
 | `/workspaces/:ws/docs/:docId/threads/:threadId/reopen` | POST | `routes/doc-threads-routes.ts` | share-scope |  |

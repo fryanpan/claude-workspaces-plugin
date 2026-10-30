@@ -82,6 +82,7 @@ import { clipToWordBoundary } from '../task-title.ts';
 import { handleDocAssetsRoute } from './doc-assets.ts';
 import { handleDocEditRoutes } from './doc-edit-routes.ts';
 import { handleDocResourceCore } from './doc-resource.ts';
+import { handleDocThreadLinkedItemRoute } from './doc-thread-linked-item.ts';
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
 import { handleDocTitleRoute } from './doc-title.ts';
 import { handleDocVoiceFeedbackRoute } from './doc-voice-feedback.ts';
@@ -691,6 +692,7 @@ export async function handleDocResourceRoutes(
     (await handleDocAssetsRoute(ctx, docRq)) ??
     (await handleDocTitleRoute(ctx, docRq)) ??
     (await handleDocVoiceFeedbackRoute(ctx, docRq)) ??
+    (await handleDocThreadLinkedItemRoute(ctx, docRq)) ??
     (await handleDocThreadRoutes(ctx, docRq)) ??
     (await handleDocEditRoutes(ctx, docRq)) ??
     (await handleWhiteboardRoutes(ctx, docRq))

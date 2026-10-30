@@ -1,70 +1,163 @@
-import { contextMatches, samePage } from '@claude-workspaces/core/anchor/context';
-import type { AnchorContext, Thread } from '@claude-workspaces/core/types';
-import { escapeHtml as esc, formatTime } from '@claude-workspaces/core/ui-shared';
+import { contextMatches } from '@claude-workspaces/core/anchor/context';
+import { readLinkedItem } from '@claude-workspaces/core/linked-item';
+import type { LinkedReviewItem, Thread } from '@claude-workspaces/core/types';
+import { escapeHtml as esc } from '@claude-workspaces/core/ui-shared';
+import type * as Y from 'yjs';
+import { seenStore } from './comment-seen-store.ts';
+import { decorateLinked, foldedHtml, openHeadHtml } from './comment-view-card.ts';
+import { PAGE_CSS, VIEW_CSS } from './comment-view-css.ts';
+import {
+  type ViewModel,
+  type ViewRow,
+  buildView,
+  contextOf,
+  isNewTo,
+  openCounts,
+  pageKey,
+  pageName,
+} from './comment-view-model.ts';
+import { mountBadges, pageLinks } from './link-badges.ts';
 import { refreshAnchors } from './widget-anchor-refresh.ts';
 import { goTo, takeGoTo } from './widget-goto.ts';
-import { receipt, threadSnippet } from './widget-thread-text.ts';
+import { IGNORE_ATTR } from './widget-picker.ts';
 import type { ThreadRow } from './widget-threads.ts';
 import type { FeedbackWidgetEl } from './widget.ts';
 
 /**
- * The widget panel's list of threads: this page's, newest first, and a tap
- * on one takes the reader to it.
+ * The comment view: every thread on the doc, the new ones first, then one
+ * group per page, and a tap on one takes the reader to it.
  *
- * The owner, on an app whose controls live in its address: "I can't see where
- * I made comments on the page. It's very disorienting." The list used to hold
- * every thread on the doc, oldest first, and a tap scrolled only when the
- * thread's pin happened to be drawn. Now:
+ * The owner, on a mock with several pages: the popover was hard to read and
+ * showed little of each thread, and comments on other pages were hard to
+ * find. So:
  *
- * - **This page** holds the threads made on this path, in any state of it.
- *   A row made with other controls set says so, and its tap loads that
- *   address (`widget-goto.ts`); the page that loads shows the thread.
- * - **No spot on the page** holds the ones made in this very state whose
- *   element the page no longer has, so a comment never vanishes with it.
- * - **Other pages** holds the rest, each tap going to its page.
+ * - **New** holds every open thread with something from someone else since
+ *   the reader last opened it, from any page. Opening one clears it, and it
+ *   stays where it is until another is opened, so the card does not jump.
+ * - **One group per page** follows, in the order the page links to them
+ *   (`comment-view-model.ts`). The page the reader is on says so; the others
+ *   offer "Go to". A chip per page above the list jumps to its group.
+ * - **A card** shows the first comment and the latest; tapped, it opens in
+ *   place holding the thread's popover — reply, resolve, an ask, a
+ *   suggestion — and the page goes to the thread's page and spot, its pin
+ *   ringed. On a phone the opened thread fills a half-height sheet on its
+ *   own, with "All comments" back to the list where it was.
+ * - **Links** to other pages wear a round count of their open threads
+ *   (`link-badges.ts`).
+ * - Inside a mock on the board, the way in is the Comments button in the
+ *   board's bar above the mock, which shows a steady dot while anything is
+ *   new (`mock-host.ts`); the bridge carries the two messages.
  *
- * Showing a thread scrolls its element to the middle, opens its popover
- * beside its pin and rings the pin. The ring is steady and goes at the next
- * tap on the page: calm, per the owner, so nothing pulses to say where to look.
+ * Opening the view always starts at the top. Calm, per the owner: steady
+ * marks, no counts on New, nothing that pulses. A pin tap opens its thread
+ * here too.
  *
- * It rides in `mic.js` and `mockup-live.js`, with `widget-ask.ts`, and the
+ * It rides in `mic.js` and `mockup-live.js` with `widget-ask.ts`, and the
  * board mounts it beside its mic; the budgeted bundle hands each render's
  * threads to `listHook` and draws no list of its own.
  */
 
-const CSS =
-  '.where{font-size:11px;color:#6e7781;margin-top:4px}' + '[data-section]{display:contents}';
-
-/** The steady ring on the pin being shown, in the page's own sheet: pins are
- *  drawn in the light DOM. */
-const PIN_CSS =
-  '.cfw-pin[data-hl]:after{content:"";position:absolute;left:5px;top:2px;width:34px;height:34px;box-sizing:border-box;border-radius:50%;border:3px solid #2e7dd7}' +
-  '.cfw-pin[data-hl]{opacity:1}';
-
-/** The context a thread was made in, an orphan's from its original anchor. */
-function contextOf(t: Thread): AnchorContext | undefined {
-  const a = t.anchor;
-  if (a.kind === 'orphan') return (a.original as { context?: AnchorContext }).context;
-  return 'context' in a ? a.context : undefined;
+/** The bridge's line to the board's bar around a mock (`mock-bridge.ts`). */
+interface HostBar {
+  tell(state: { open: boolean; fresh: boolean }): void;
 }
 
-/** On the page the reader is on: no page of its own, or this path. */
-function onThisPage(t: Thread, cur: AnchorContext): boolean {
-  const c = contextOf(t);
-  return contextMatches(c, cur) || samePage(c, cur);
+/**
+ * `t` with each comment's linked review item, read off the doc here rather
+ * than by the budgeted bundle's thread reader, which has no bytes left for
+ * it. Read through core's checker, so a malformed one is no item at all.
+ */
+function withLinked(el: FeedbackWidgetEl, t: Thread): Thread {
+  const raw = el.client?.ydoc.getMap('threads').get(t.id) as Y.Map<unknown> | undefined;
+  const cs = raw?.get?.('comments') as Y.Array<Y.Map<unknown>> | undefined;
+  if (!cs?.toArray) return t;
+  const items = new Map<string, LinkedReviewItem>();
+  for (const c of cs.toArray()) {
+    const item = readLinkedItem(c.get?.('linkedItem'));
+    if (item) items.set(String(c.get('id')), item);
+  }
+  if (!items.size) return t;
+  return {
+    ...t,
+    comments: t.comments.map((c) => {
+      const linkedItem = items.get(c.id);
+      return linkedItem ? { ...c, linkedItem } : c;
+    }),
+  };
 }
+
+const narrow = (): boolean => matchMedia('(max-width: 1100px)').matches;
 
 export function mountPageList(el: FeedbackWidgetEl): void {
   if (el.listHook || !el.shadow) return;
+  const shadow = el.shadow;
   const style = document.createElement('style');
-  style.textContent = CSS;
-  el.shadow.append(style);
+  style.textContent = VIEW_CSS;
+  shadow.append(style);
   if (!document.querySelector('style[data-cw-page-list]')) {
-    const pin = document.createElement('style');
-    pin.setAttribute('data-cw-page-list', '');
-    pin.textContent = PIN_CSS;
-    document.head.append(pin);
+    const page = document.createElement('style');
+    page.setAttribute('data-cw-page-list', '');
+    page.textContent = PAGE_CSS;
+    document.head.append(page);
   }
+  const panel = shadow.querySelector<HTMLElement>('.panel');
+  const list = shadow.querySelector<HTMLElement>('.panel-threads');
+  const title = panel?.querySelector('.panel-header .title');
+  if (title) title.textContent = 'Comments';
+  const sub = document.createElement('span');
+  sub.className = 'cw-sub';
+  title?.after(sub);
+  const chips = document.createElement('div');
+  chips.className = 'cw-pages';
+  panel?.querySelector('.panel-header')?.after(chips);
+
+  const badgeLayer = document.createElement('div');
+  badgeLayer.setAttribute(IGNORE_ATTR, '');
+  document.body.append(badgeLayer);
+  const badges = mountBadges(badgeLayer);
+
+  const seen = seenStore(el.opts?.docId ?? '');
+  const inFrame = window.parent !== window;
+  const host = (window as unknown as { cwHostBar?: HostBar }).cwHostBar ?? null;
+  if (host) el.setAttribute('data-cw-host-bar', '');
+
+  /** The thread opened in the view, the one kept under New, the one just
+   *  resolved, and where the list was scrolled before a phone opened one. */
+  let kept: string | null = null;
+  let justResolved: string | null = null;
+  let listScroll = 0;
+  let model: ViewModel | null = null;
+  let threads = new Map<string, Thread>();
+  let lastRows: ThreadRow[] = [];
+  let openPop: (t: Thread) => void = () => {};
+  let drawn = '';
+  /** Watches the opened popover for closing itself; off while a redraw
+   *  takes it away. */
+  let popWatch: MutationObserver | null = null;
+
+  const isOpen = (): boolean => !!panel?.classList.contains('open');
+  const tellHost = (): void => {
+    host?.tell({ open: isOpen(), fresh: !!model?.fresh.some((r) => r.isNew) });
+    document.documentElement.classList.toggle('cw-view-open', inFrame && isOpen());
+  };
+  const toggle: (force?: boolean) => void =
+    el.togglePanel?.bind(el) ?? ((force) => panel?.classList.toggle('open', force ?? !isOpen()));
+  el.togglePanel = (force?: boolean): void => {
+    const was = isOpen();
+    toggle(force);
+    if (isOpen() && !was && list) {
+      // Opening always starts at the top, on New.
+      list.scrollTop = 0;
+    }
+    if (!isOpen()) {
+      el.activeThread = null;
+      drawn = '';
+    }
+    render();
+    tellHost();
+  };
+  addEventListener('cw-comments', () => el.togglePanel());
+
   /** The thread whose pin is ringed, until the next tap on the page. */
   let ringed: string | null = null;
   const ring = (): void => {
@@ -83,6 +176,20 @@ export function mountPageList(el: FeedbackWidgetEl): void {
     },
     true,
   );
+  // A pin opens its thread here rather than in a popover beside it. A dimmed
+  // pin still goes to the state it was made in.
+  document.addEventListener(
+    'click',
+    (ev) => {
+      const pin = (ev.target as Element | null)?.closest?.('.cfw-pin') as HTMLElement | null;
+      const t = pin && !pin.hasAttribute('data-dim') && threads.get(pin.dataset.threadId ?? '');
+      if (!t) return;
+      ev.stopPropagation();
+      if (!isOpen()) toggle(true);
+      show(t);
+    },
+    true,
+  );
 
   /** The thread a `goTo` asked for, until the page is in its state. */
   let wanted: string | null = null;
@@ -96,23 +203,277 @@ export function mountPageList(el: FeedbackWidgetEl): void {
   };
   take();
 
+  const latest = (t: Thread): number => t.comments[t.comments.length - 1]?.ts ?? 0;
+
+  /** Open `t` in the view, on this page: its spot, its pin, its card. */
+  function show(t: Thread): void {
+    if (narrow() && !el.activeThread && list) listScroll = list.scrollTop;
+    if (justResolved !== t.id) justResolved = null;
+    const fresh = model?.fresh.some((r) => r.id === t.id) ?? false;
+    kept = fresh || kept === t.id ? t.id : null;
+    el.activeThread = t.id;
+    ringed = t.id;
+    seen.mark(t.id, latest(t));
+    const spot = el.threadPositions.get(t.id)?.el;
+    // At once rather than smoothly; on a phone into the half the sheet
+    // leaves showing. A frame later, so a page that shows its section on the
+    // same hashchange has laid it out.
+    requestAnimationFrame(() => {
+      spot?.scrollIntoView({ block: narrow() ? 'start' : 'center' });
+      if (narrow()) scrollBy(0, -48);
+    });
+    drawn = '';
+    render();
+    ring();
+    if (narrow() && list) list.scrollTop = 0;
+    else
+      list
+        ?.querySelector(`[data-thread-id="${CSS.escape(t.id)}"]`)
+        ?.scrollIntoView({ block: 'nearest' });
+    // A card with an exchange can be taller than the list: bring its reply
+    // box into view, by hand, since scrollIntoView moves the page too.
+    const reply = () => {
+      const box = list?.querySelector('.thread.active .thread-popover .actions');
+      const over =
+        list && box ? box.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom : 0;
+      if (list && over > 0) list.scrollTop += over;
+    };
+    reply();
+    requestAnimationFrame(reply);
+  }
+
+  /** Go to the page a thread or a page key is on. A move of the fragment
+   *  alone stays on this load; anything else loads the address. */
+  function goToUrl(url: string, threadId: string | null): void {
+    const [path, hash = ''] = url.split(/#(.*)/s);
+    const [here] = (el.currentContext.url ?? '').split('#');
+    if (path === here) {
+      wanted = threadId;
+      location.hash = hash;
+      return;
+    }
+    if (threadId) goTo(url, threadId);
+    else if (/^\/(?![/\\])/.test(url)) location.assign(url);
+  }
+
+  function go(t: Thread): void {
+    const url = contextOf(t)?.url;
+    if (url && url !== el.currentContext?.url && t.anchor.kind !== 'subject') goToUrl(url, t.id);
+    else show(t);
+  }
+
+  function back(): void {
+    el.activeThread = null;
+    drawn = '';
+    render();
+    if (list) list.scrollTop = listScroll;
+  }
+
+  const rowOf = (r: ThreadRow, here: string, read: ReturnType<typeof seen.read>): ViewRow => {
+    const t = r.thread;
+    const ctx = contextOf(t);
+    return {
+      id: t.id,
+      status: r.status,
+      key: t.anchor.kind === 'subject' || !ctx?.url ? here : pageKey(ctx),
+      last: latest(t),
+      isNew: isNewTo(t, el.user?.id, read, seen),
+    };
+  };
+
+  function render(): void {
+    if (!list) return;
+    const cur = el.currentContext ?? {};
+    const here = pageKey(cur);
+    const links = pageLinks();
+    const name = (k: string) => pageName(k, links.get(k)?.[0]?.textContent ?? '');
+    // A reply that lands on the thread the reader has open is read already.
+    const active = el.activeThread ? threads.get(el.activeThread) : undefined;
+    if (active && isOpen()) seen.mark(active.id, latest(active));
+    const read = seen.read();
+    const rows = lastRows.map((r) => rowOf(r, here, read));
+    model = buildView(rows, { here, order: [...links.keys()], kept, justResolved });
+    badges.draw(openCounts(rows), here);
+    const detail = narrow() && !!active && isOpen();
+    panel?.classList.toggle('cw-detail', detail);
+    const sig = JSON.stringify([
+      lastRows.map((r) => [r.thread.id, r.status, r.thread.comments.length, latest(r.thread)]),
+      rows.map((r) => r.isNew),
+      here,
+      el.activeThread,
+      kept,
+      justResolved,
+      el.showResolved,
+      detail,
+      isOpen(),
+    ]);
+    if (sig === drawn) return;
+    drawn = sig;
+    const m = model;
+    sub.textContent = m.open
+      ? `${m.open} open on ${m.pageCount} ${m.pageCount === 1 ? 'page' : 'pages'}`
+      : '';
+    chips.innerHTML = m.pages
+      .map((g) => {
+        const n = g.rows.filter((r) => r.status !== 'resolved').length + g.underNew;
+        const nw = m.fresh.some((r) => r.key === g.key && r.isNew);
+        return `<button class="cw-pchip${g.here ? ' here' : ''}" data-chip="${esc(g.key)}"><span class="cw-newdot"${nw ? '' : ' hidden'}></span>${esc(name(g.key))} <span class="n">${n} open</span></button>`;
+      })
+      .join('');
+    // What is typed in an open thread's reply box survives a redraw.
+    const box = shadow.querySelector<HTMLTextAreaElement>('.thread-popover textarea');
+    const draft = box
+      ? { v: box.value, f: shadow.activeElement === box, s: box.selectionStart }
+      : null;
+    popWatch?.disconnect();
+    shadow.querySelector('.thread-popover')?.remove();
+    const keep = list.scrollTop;
+    list.innerHTML = '';
+    /** `grouped`: under its page's own heading, which names the page. */
+    const card = (r: ViewRow, grouped = false): HTMLElement => {
+      const t = threads.get(r.id) as Thread;
+      const div = document.createElement('div');
+      div.className = `thread status-${r.status}`;
+      div.dataset.threadId = r.id;
+      const ctx = contextOf(t);
+      const where =
+        r.key !== here
+          ? grouped
+            ? ''
+            : `On ${name(r.key)}`
+          : ctx?.url && !contextMatches(ctx, cur)
+            ? 'Another view of this page'
+            : '';
+      if (r.id === el.activeThread) {
+        div.classList.add('active');
+        div.innerHTML = openHeadHtml(t, where);
+      } else {
+        div.innerHTML = foldedHtml(t, el, where);
+        div.addEventListener('click', (ev) => {
+          if ((ev.target as Element).closest('a')) return;
+          go(t);
+        });
+      }
+      return div;
+    };
+    const section = (key: string, head: string, cards: ViewRow[], page?: string): HTMLElement => {
+      const s = document.createElement('div');
+      s.dataset.section = key;
+      if (page !== undefined) s.dataset.page = page;
+      s.innerHTML = `<div class="section-heading">${head}</div>`;
+      for (const r of cards) s.appendChild(card(r, page !== undefined));
+      list.appendChild(s);
+      return s;
+    };
+    if (detail && active) {
+      list.innerHTML =
+        '<div class="cw-back"><button data-back aria-label="Back to all comments">‹ All comments</button></div>';
+      const r = rows.find((x) => x.id === active.id);
+      if (r) list.appendChild(card(r));
+    } else if (!rows.length) {
+      list.innerHTML =
+        '<div class="empty">No comments yet. Tap the bubble, then click anything on the page.</div>';
+    } else {
+      if (m.fresh.length) section('new', 'New', m.fresh);
+      for (const g of m.pages) {
+        const label = esc(name(g.key));
+        const head = g.here
+          ? `${label}<span class="where">· this page</span>`
+          : `${label}<button class="go" data-goto-page="${esc(g.key)}">Go to ${label}</button>`;
+        const s = section(g.here ? 'page' : 'away', head, g.rows, g.key);
+        if (!g.rows.length) {
+          s.insertAdjacentHTML(
+            'beforeend',
+            `<div class="cw-none">${g.underNew ? `${g.underNew} under New` : 'Nothing open here.'}</div>`,
+          );
+        }
+      }
+      if (m.nospot.length) section('nospot', 'No spot on the page', m.nospot);
+      if (m.resolved.length) {
+        const tg = document.createElement('button');
+        tg.className = 'resolved-toggle';
+        tg.textContent = `${el.showResolved ? 'Hide' : 'Show'} resolved (${m.resolved.length})`;
+        tg.addEventListener('click', () => {
+          el.showResolved = !el.showResolved;
+          localStorage.setItem('cfw:showResolved', el.showResolved ? '1' : '0');
+          // Rerender to show or hide the resolved group and its pins
+          el.scheduleRender();
+        });
+        list.appendChild(tg);
+        if (el.showResolved) section('resolved', 'Resolved', m.resolved);
+      }
+    }
+    list.scrollTop = keep;
+    // The opened thread: its popover, drawn by the budgeted bundle, in its card.
+    const slot =
+      active &&
+      list.querySelector<HTMLElement>(`.thread.active[data-thread-id="${CSS.escape(active.id)}"]`);
+    if (active && slot) {
+      openPop(active);
+      const pop = shadow.querySelector<HTMLElement>('.thread-popover');
+      if (pop) {
+        slot.appendChild(pop);
+        decorateLinked(pop, active);
+        wirePopover(pop, active);
+        const ta = pop.querySelector('textarea');
+        if (ta && draft) {
+          ta.value = draft.v;
+          if (draft.f) {
+            ta.focus();
+            ta.setSelectionRange(draft.s, draft.s);
+          }
+        }
+      }
+    }
+    tellHost();
+  }
+
+  /** The popover closes itself after a reply or a resolve; in the view the
+   *  thread stays open, and a resolved one stays in place with Reopen. */
+  function wirePopover(pop: HTMLElement, t: Thread): void {
+    pop.querySelector('.resolve')?.addEventListener('click', () => {
+      justResolved = t.id;
+    });
+    pop.querySelector('.reopen')?.addEventListener('click', () => {
+      justResolved = null;
+    });
+    popWatch = new MutationObserver((_, obs) => {
+      if (pop.isConnected) return;
+      obs.disconnect();
+      drawn = '';
+      el.scheduleRender();
+    });
+    popWatch.observe(pop.parentElement as Node, { childList: true });
+  }
+
+  list?.addEventListener('click', (ev) => {
+    const t = ev.target as Element;
+    if (t.closest('[data-back]')) return back();
+    const gp = t.closest<HTMLElement>('[data-goto-page]');
+    if (gp) {
+      const key = gp.dataset.gotoPage ?? '';
+      const r = model?.pages.find((g) => g.key === key)?.rows[0];
+      const url = r && contextOf(threads.get(r.id) as Thread)?.url;
+      el.activeThread = null;
+      goToUrl(url ?? key.split(' ')[0] ?? '', null);
+    }
+  });
+  chips.addEventListener('click', (ev) => {
+    const c = (ev.target as Element).closest<HTMLElement>('[data-chip]');
+    if (!c || !list) return;
+    const g = [...list.querySelectorAll<HTMLElement>('[data-page]')].find(
+      (s) => s.dataset.page === c.dataset.chip,
+    );
+    g?.scrollIntoView({ block: 'start' });
+  });
+
   el.listHook = (rows, open) => {
-    const show = (t: Thread): void => {
-      ringed = t.id;
-      el.activeThread = t.id;
-      // At once rather than smoothly, so the popover opens beside the spot
-      // where it now is.
-      el.threadPositions.get(t.id)?.el.scrollIntoView({ block: 'center' });
-      open(t);
-      ring();
-    };
-    const go = (t: Thread): void => {
-      const url = contextOf(t)?.url;
-      if (url && url !== el.currentContext?.url && t.anchor.kind !== 'subject') goTo(url, t.id);
-      else show(t);
-    };
+    lastRows = rows.map((r) => ({ ...r, thread: withLinked(el, r.thread) }));
+    threads = new Map(lastRows.map((r) => [r.thread.id, r.thread]));
+    openPop = open;
     take();
-    renderList(el, rows, go);
+    if (el.activeThread && !threads.has(el.activeThread)) el.activeThread = null;
+    render();
     // What each pinned element says now, for the next round of a rewritten mock.
     refreshAnchors(el, rows);
     // Shown once it is listed and the widget's context has caught up with the
@@ -124,93 +485,12 @@ export function mountPageList(el: FeedbackWidgetEl): void {
         : undefined;
     if (row) {
       wanted = null;
-      if (contextMatches(contextOf(row.thread), cur)) show(row.thread);
+      if (contextMatches(contextOf(row.thread), cur)) {
+        if (!isOpen()) toggle(true);
+        show(row.thread);
+      }
     }
     ring();
   };
   el.scheduleRender();
-}
-
-function renderList(el: FeedbackWidgetEl, rows: ThreadRow[], go: (t: Thread) => void): void {
-  const list = el.shadow.querySelector('.panel-threads') as HTMLElement | null;
-  if (!list) return;
-  list.innerHTML = '';
-  if (rows.length === 0) {
-    const e = document.createElement('div');
-    e.className = 'empty';
-    e.textContent = 'No comments yet. Tap the bubble, then click anything on the page.';
-    list.appendChild(e);
-    return;
-  }
-  const cur = el.currentContext ?? {};
-  const newest = [...rows].sort(
-    (a, b) => (b.thread.comments[0]?.ts ?? 0) - (a.thread.comments[0]?.ts ?? 0),
-  );
-  const here = newest.filter((r) => onThisPage(r.thread, cur));
-  const away = newest.filter((r) => !onThisPage(r.thread, cur) && r.status !== 'resolved');
-  const resolved = newest.filter((r) => r.status === 'resolved');
-  const section = (key: string, title: string, group: ThreadRow[]): void => {
-    if (!group.length) return;
-    const s = document.createElement('div');
-    s.dataset.section = key;
-    s.innerHTML = `<div class="section-heading">${title} (${group.length})</div>`;
-    for (const r of group) s.appendChild(renderRow(el, r, cur, go));
-    list.appendChild(s);
-  };
-  section(
-    'page',
-    'This page',
-    here.filter((r) => r.status === 'open'),
-  );
-  section(
-    'nospot',
-    'No spot on the page',
-    here.filter((r) => r.status === 'orphan'),
-  );
-  section('away', 'Other pages', away);
-  if (!resolved.length) return;
-  const toggle = document.createElement('button');
-  toggle.className = 'resolved-toggle';
-  toggle.textContent = `${el.showResolved ? 'Hide' : 'Show'} resolved (${resolved.length})`;
-  toggle.addEventListener('click', () => {
-    el.showResolved = !el.showResolved;
-    localStorage.setItem('cfw:showResolved', el.showResolved ? '1' : '0');
-    // Rerender to show or hide the resolved group and its pins
-    el.scheduleRender();
-  });
-  list.appendChild(toggle);
-  if (el.showResolved) section('resolved', 'Resolved', resolved);
-}
-
-function renderRow(
-  el: FeedbackWidgetEl,
-  r: ThreadRow,
-  cur: AnchorContext,
-  go: (t: Thread) => void,
-): HTMLElement {
-  const t = r.thread;
-  const row = document.createElement('div');
-  row.className = `thread status-${r.status}`;
-  // Which thread, for what the page's scripts add to a row (`widget-ask.ts`).
-  row.dataset.threadId = t.id;
-  if (el.activeThread === t.id) row.classList.add('active');
-  const last = t.comments[t.comments.length - 1];
-  const ctx = contextOf(t);
-  const where = !onThisPage(t, cur)
-    ? `On ${(ctx?.url ?? '').split(/[?#]/)[0]}`
-    : ctx?.url && !contextMatches(ctx, cur)
-      ? 'Another view of this page'
-      : '';
-  row.innerHTML =
-    '<div class="meta">' +
-    '<span class="dot"></span>' +
-    `<span class="author-name">${esc(t.createdBy.name)}</span>` +
-    `<span class="time">${formatTime(last?.ts ?? 0)}</span>` +
-    receipt(last, t, el) +
-    '</div>' +
-    `<div class="snippet">${esc(threadSnippet(t.anchor))}</div>` +
-    `<div class="last">${esc(last?.text ?? '')}</div>` +
-    (where ? `<div class="where">${esc(where)}</div>` : '');
-  row.addEventListener('click', () => go(t));
-  return row;
 }

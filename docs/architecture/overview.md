@@ -52,7 +52,7 @@ flowchart TB
   mcp["mcp<br/>stdio MCP server"]
   subgraph srv["server — one Bun process"]
     edge["HTTP edge<br/>server.ts · routes/ · middleware/ · shells.ts · app-waiting-page.ts · member-home.ts<br/>request-admission · request-attribution · board-sockets<br/>socket-handlers · server-options · feature-module<br/>connector/ (hosted MCP at /mcp)"]
-    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
+    docs["Doc store and attachments<br/>doc-store.ts · binds.ts · file-binding.ts · file-stamp.ts · flat-text-patch.ts<br/>doc-*.ts · doc-origin-repo.ts · doc-key.ts · repo-registry.ts<br/>repo-registry-file.ts · repo-registry-checkouts.ts<br/>doc-thread-merge.ts · doc-identity-plan.ts · doc-identity-migration.ts<br/>doc-identity-renames.ts · doc-identity-journal.ts · doc-identity-check.ts<br/>attachment-backfill.ts<br/>note-list-gap-repair.ts · note-list-gap-corpus.ts<br/>mount-registry.ts · mount-registry-file.ts · mount-scan.ts<br/>mount-reconcile.ts · mount-store.ts · attachment-privacy.ts<br/>mockup-capture.ts · mockup-versions.ts · mockup-live.ts · mockup-widget.ts<br/>mockup-linked-items.ts · linked-review-item.ts · mockup-frame.ts · frame-host.ts · frame-ticket.ts · mockup-page-links.ts · app-proxy.ts · app-outage.ts · page-thread.ts<br/>whiteboard/<br/>bound-file-sync/ (its own process: a moved board's bound files, from the Mac)<br/>yjs-protocol.ts · sse.ts · sse-mux.ts · sse-writer.ts"]
     board["Board<br/>tasks.ts · task-*.ts · review-items/<br/>home-pane.ts · board-membership.ts · activity.ts<br/>library.ts · library-location.ts<br/>review-plan · review-sizing · cross-review-queue · cross-review<br/>review-answer-ledger · board-summary · landing-review · landing-goals · landing-changes<br/>review-size-prefs · review-ranks · ask-feed<br/>home-feed · home-remotes · landing-remote<br/>lead-rank-wiring · held-window · inbox/ · coach/"]
     meet["Meetings<br/>meetings.ts · meeting-*.ts · notes-*.ts<br/>notes-edit-guard.ts · notes-invented-links.ts · notes-scheme-links.ts<br/>notes-method-*.ts · transcribe-*.ts · recall*.ts"]
     keep["Keep-moving<br/>stall-wiring · stall-gate · stall-nudge<br/>stall-escalation · waiting-unfiled-escalation<br/>waiting-unfiled-review · waiting-unfiled-sidecar<br/>waiting-unfiled-routing · waiting-unfiled-frame<br/>waiting-unfiled-filing<br/>unanswered-thread · keep-moving · owner-ask · waiting-unfiled · blockage-lift<br/>keep-moving-verdict · ui-review-gate<br/>stall-frame-news · wake-sent-sets<br/>ready-nudge · ready-gate · ready-release · board-activity"]
@@ -736,6 +736,22 @@ row, which the module uses to mark rows that have an open ask. No new route:
 the answer goes to `…/threads/:id/answer`, which a mock frame's relay already
 allows for this doc alone.
 
+**A thread can carry a review item from another board.** An agent attaches an
+existing item, filed on any board this server holds, to a doc or mock thread
+with `link_review_item`, which posts to `…/threads/:id/linked-items`
+(`routes/doc-thread-linked-item.ts`, closed to share visitors).
+`linked-review-item.ts` (server, beside `mockup-linked-items.ts`) resolves the
+item on its own board, a ticket item from `task.reviews` or a thread's review
+payload, and checks it is on the board the caller named. The route posts one
+comment through the ordinary reply path, so an open page gets it over the
+doc's sync. The comment's `linkedItem` is a snapshot: that board's name, the
+headline and the root-relative link the board opens the item at. Its `text`
+says the same in words for surfaces that render only text. Core's
+`linked-item.ts` reads the stored field and drops one whose link leaves the
+origin. Its `listThreadsWithLinks` is what the server's thread reads call;
+`readThread` leaves the field out, because `schema.ts` ships in the widget's
+budgeted bundle and the reader does not fit under its ceiling.
+
 **The widget's panel lists the threads on the page the reader is on.**
 `widget-page-list.ts` draws the list, this page's threads newest first, then
 the ones with no spot left, then other pages. A tap on a row takes the reader
@@ -748,6 +764,24 @@ controls set gets a dimmed pin. Tapping it loads that address through
 `widget-goto.ts`, which leaves the thread's id in session storage for the next
 render to show. `widget-thread-text.ts` holds the snippet and receipt markup
 that the popover and the list share. No new route and no new fetch.
+
+**On a served mock the list is the comment view.** It shows every open
+thread in the doc, not only this page's: the threads with a reply the reader
+has not opened under New at the top, then one group per page in the order
+the page's own links name them, then the ones with no spot. A pin's tap opens
+its thread in the view, and the popover the budgeted bundle draws moves into
+that thread's card. `comment-view-model.ts` decides the groups without a page,
+`comment-view-card.ts` draws a folded card and a linked item's row,
+`comment-view-css.ts` holds the view's and the page's styles, and
+`link-badges.ts` puts each page's open count on the links to it.
+`comment-seen-store.ts` keeps what this reader has opened under
+`cfw:seen:<docId>`; in a mock's frame `mock-bridge.ts` hands that one key to
+`mock-host.ts`, which keeps it for its own doc only. The board's bar above a
+served mock (`mockup-frame.ts`) carries the Comments button and a steady dot
+for something new: the host posts the frame `{cw:'comments'}` on a tap, and
+the frame answers with `{cw:'comments-state'}` after each render. All of it
+ships in `mockup-live.js` and `mic.js`, outside the budgeted bundle. No new
+route and no new fetch.
 
 **A comment's markdown is drawn rendered in its popover.**
 `widget-comment-markdown.ts` rewrites each popover comment the budgeted bundle

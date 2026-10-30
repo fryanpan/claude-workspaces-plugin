@@ -37,6 +37,13 @@
  * - A link to one thread (`?thread=`, `server/src/page-thread.ts`). The
  *   widget reads it at start, then the address drops it, and the thread's pin
  *   is tapped for the reader.
+ * - The board's Comments button, in the bar the host draws above the frame.
+ *   A tap there reaches the widget as a `cw-comments` event, and the comment
+ *   view tells the host through `window.cwHostBar` whether it is open and
+ *   whether anything is new, for the button's steady dot
+ *   (`widget-page-list.ts`). What the reader has opened, under
+ *   `cfw:seen:` in the storage stand-in, goes to the host like the drafts do,
+ *   so a thread read once is not new again on the next load.
  *
  * Plain script, no imports: it is written into the frame's own bytes, and runs
  * before anything the mock declares. The work is `installBridge`, handed the
@@ -135,9 +142,13 @@ export function installBridge(window: Window & typeof globalThis): void {
     };
   };
   const DRAFT = 'cfw:draft:';
+  const SEEN = 'cfw:seen:';
   const session = new Map<string, string>();
   const keepDraft = (k: string, v: string | null): void => {
     if (k.startsWith(DRAFT)) window.parent.postMessage({ cw: 'draft', k, v }, boardOrigin, []);
+  };
+  const keepSeen = (k: string, v: string | null): void => {
+    if (k.startsWith(SEEN)) window.parent.postMessage({ cw: 'seen', k, v }, boardOrigin, []);
   };
   for (const k of ['localStorage', 'sessionStorage'] as const) {
     try {
@@ -145,12 +156,17 @@ export function installBridge(window: Window & typeof globalThis): void {
       // Real storage — the frame-only hostname's own. The reader's name
       // still comes from the board, so the widget does not ask again.
       if (k === 'localStorage') {
-        for (const [sk, sv] of Object.entries(seed)) window.localStorage.setItem(sk, sv);
+        // What the reader has opened is this hostname's own to keep.
+        for (const [sk, sv] of Object.entries(seed)) {
+          if (!sk.startsWith(SEEN)) window.localStorage.setItem(sk, sv);
+        }
       }
     } catch {
       Object.defineProperty(window, k, {
         value:
-          k === 'localStorage' ? memory(new Map(Object.entries(seed))) : memory(session, keepDraft),
+          k === 'localStorage'
+            ? memory(new Map(Object.entries(seed)), keepSeen)
+            : memory(session, keepDraft),
         configurable: true,
       });
       if (k === 'sessionStorage') askForDrafts();
@@ -339,6 +355,24 @@ export function installBridge(window: Window & typeof globalThis): void {
     }
   }
   window.EventSource = RelayES as unknown as typeof EventSource;
+
+  // --- The board's Comments button ---
+  (window as unknown as { cwHostBar: unknown }).cwHostBar = {
+    tell: (state: { open?: unknown; fresh?: unknown }) =>
+      window.parent.postMessage(
+        { cw: 'comments-state', open: state.open === true, fresh: state.fresh === true },
+        boardOrigin,
+        [],
+      ),
+  };
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('message', (ev) => {
+      const d = ev.data as { cw?: unknown } | null;
+      if (ev.source === window.parent && d?.cw === 'comments') {
+        window.dispatchEvent(new Event('cw-comments'));
+      }
+    });
+  }
 
   // --- A link to one thread ---
   // The widget pins a thread only where the address equals the one it was

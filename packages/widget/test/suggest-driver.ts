@@ -207,9 +207,13 @@ async function main(): Promise<void> {
       [reject]: 'leaves at nine',
     };
     const open = async (id: string) => {
-      // On a phone an open popover covers the other pins: close it first, with its ×.
-      if (await mock.eval(`!!${SHADOW}?.querySelector('.thread-popover')`)) {
-        await tap(cdp, mock, `${SHADOW}.querySelector('.thread-popover .close')`, 'the ×');
+      // On a phone an open thread's sheet covers the other pins: close it
+      // first, with the comment view's "‹ All comments" (or a bare popover's
+      // ×). Wide, the thread sits in the view's column beside the page, and
+      // the next pin's tap replaces it, so there is nothing to close.
+      const closer = `[...(${SHADOW}?.querySelectorAll('[data-back], .thread-popover .close') ?? [])].find((e) => e.getBoundingClientRect().width)`;
+      if (await mock.eval(`!!${closer}`)) {
+        await tap(cdp, mock, closer, 'the way back to all comments');
         await poll('the popover closed', () =>
           mock.eval(`!${SHADOW}?.querySelector('.thread-popover')`).then((v) => v || null),
         );

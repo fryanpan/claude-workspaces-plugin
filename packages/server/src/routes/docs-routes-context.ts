@@ -24,6 +24,7 @@ import type {
 } from '@claude-workspaces/core';
 import type { AnswerCoverage } from '../answer-coverage.ts';
 import type { DocStore, LiveDoc } from '../doc-store.ts';
+import type { IdentityRecord } from '../identities.ts';
 import type { createLeadPresenceMonitor } from '../lead-presence.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
 import type { WorkspaceScope } from '../middleware/workspace-scope.ts';
@@ -156,6 +157,9 @@ export interface DocRoutesContext {
   ) => { id: string; name: string } | null;
   /** The board a doc belongs to, or null. */
   resolveWorkspaceForDoc: (docId: string) => string | null;
+  /** Anyone besides the owner can reach the board: a share link, a member
+   *  who redeemed one, or a share. */
+  boardIsShared: (workspaceId: string) => boolean;
   /**
    * The doc page read this doc's record on a board: a reader's open of the
    * project file it holds (`noteOutputOpened`). Answers what its dock shows —
@@ -302,6 +306,13 @@ export interface DocRouteRequest {
    *  or a board's own socket did (`tokenId` is then `BOARD_SOCKET_TOKEN_ID`),
    *  or null/absent when neither did. */
   boardAgent?: { agentId: string; boardId: string; tokenId?: string } | null;
+  /** The identity Access or the session cookie proved, or null — never a
+   *  body's claim or an agent token. Read with `requestOriginFor` for owner
+   *  proof (`share/owner-proof.ts`). Optional so a caller that does not pass
+   *  it fails closed. */
+  provenIdentityFor?: () => IdentityRecord | null;
+  /** The origin this request was served on, scheme included. */
+  requestOriginFor?: () => string;
   /** What this request proved about a person, read by every door that
    *  records an answer (`review-items/answer-proof.ts`). Undefined refuses
    *  every person's answer. */

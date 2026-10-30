@@ -286,7 +286,10 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
   if (chipPin?.shown) {
     await tapAt(chipPin.tip[0], chipPin.tip[1] - 14);
     await look('pinTapped');
-    await cdp.evaluate(`${SHADOW}.querySelector('.thread-popover .close')?.click()`);
+    // The comment view closes a thread with "‹ All comments" on a phone.
+    await cdp.evaluate(
+      `(${SHADOW}.querySelector('[data-back]') ?? ${SHADOW}.querySelector('.thread-popover .close'))?.click()`,
+    );
   }
   // The page opens the hidden screen, then builds the one that did not exist.
   await cdp.evaluate(`document.getElementById('screen-tides').hidden = false`);
