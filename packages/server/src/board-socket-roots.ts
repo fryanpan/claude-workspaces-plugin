@@ -61,7 +61,18 @@ export interface LeadShadows {
 }
 
 export function defaultLeadShadows(): LeadShadows {
-  return { home: homedir(), uid: process.getuid?.() ?? -1, realpath: realpathSync.native };
+  // Only the home folder and `~/.claude` are resolved, on every guard call:
+  // remembered, so the poll's per-file checks pay no extra syscalls.
+  const seen = new Map<string, string>();
+  const realpath = (p: string): string => {
+    let real = seen.get(p);
+    if (real === undefined) {
+      real = realpathSync.native(p);
+      seen.set(p, real);
+    }
+    return real;
+  };
+  return { home: homedir(), uid: process.getuid?.() ?? -1, realpath };
 }
 
 /** Claude Code's name for a folder's transcript and scratch folders. */
