@@ -19,11 +19,15 @@ function xmlValue(xml: string, tag: string): string | undefined {
   return xml.match(new RegExp(`<${tag}>([^<]*)</${tag}>`))?.[1];
 }
 
-async function iam(admin: BucketCredential, params: Record<string, string>): Promise<string> {
+async function iam(
+  admin: BucketCredential,
+  params: Record<string, string>,
+  iamUrl: string,
+): Promise<string> {
   const body = new URLSearchParams({ ...params, Version: '2010-05-08' }).toString();
   const headers = signRequest({
     method: 'POST',
-    url: TIGRIS_IAM_ENDPOINT,
+    url: iamUrl,
     region: REGION,
     service: 'iam',
     headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
@@ -32,7 +36,7 @@ async function iam(admin: BucketCredential, params: Record<string, string>): Pro
     secretAccessKey: admin.secretAccessKey,
     now: new Date(),
   });
-  const res = await fetch(TIGRIS_IAM_ENDPOINT, { method: 'POST', headers, body });
+  const res = await fetch(iamUrl, { method: 'POST', headers, body });
   const text = await res.text();
   if (!res.ok) {
     const code = xmlValue(text, 'Code') ?? `HTTP ${res.status}`;
@@ -50,18 +54,32 @@ export class IamError extends Error {
   }
 }
 
+/*
+ * Each call takes the IAM endpoint last, defaulting to Tigris's, so a test
+ * can point it at a stand-in on loopback.
+ */
+
 export async function createAccessKey(
   admin: BucketCredential,
+  iamUrl = TIGRIS_IAM_ENDPOINT,
 ): Promise<{ accessKeyId: string; secretAccessKey: string }> {
-  const xml = await iam(admin, { Action: 'CreateAccessKey' });
+  const xml = await iam(admin, { Action: 'CreateAccessKey' }, iamUrl);
   const accessKeyId = xmlValue(xml, 'AccessKeyId');
   const secretAccessKey = xmlValue(xml, 'SecretAccessKey');
   if (!accessKeyId || !secretAccessKey) throw new Error('CreateAccessKey answered without a key');
   return { accessKeyId, secretAccessKey };
 }
 
-export async function deleteAccessKey(admin: BucketCredential, accessKeyId: string): Promise<void> {
-  await iam(admin, { Action: 'DeleteAccessKey', AccessKeyId: accessKeyId, UserName: accessKeyId });
+export async function deleteAccessKey(
+  admin: BucketCredential,
+  accessKeyId: string,
+  iamUrl = TIGRIS_IAM_ENDPOINT,
+): Promise<void> {
+  await iam(
+    admin,
+    { Action: 'DeleteAccessKey', AccessKeyId: accessKeyId, UserName: accessKeyId },
+    iamUrl,
+  );
 }
 
 /** The policy's ARN: made now, or found by name when an earlier run made it. */
@@ -69,19 +87,20 @@ export async function ensurePolicy(
   admin: BucketCredential,
   name: string,
   document: string,
+  iamUrl = TIGRIS_IAM_ENDPOINT,
 ): Promise<string> {
   try {
-    const xml = await iam(admin, {
-      Action: 'CreatePolicy',
-      PolicyName: name,
-      PolicyDocument: document,
-    });
+    const xml = await iam(
+      admin,
+      { Action: 'CreatePolicy', PolicyName: name, PolicyDocument: document },
+      iamUrl,
+    );
     const arn = xmlValue(xml, 'Arn');
     if (!arn) throw new Error('CreatePolicy answered without an Arn');
     return arn;
   } catch (err) {
     if (!(err instanceof IamError) || err.code !== 'EntityAlreadyExists') throw err;
-    const list = await iam(admin, { Action: 'ListPolicies', Scope: 'Local' });
+    const list = await iam(admin, { Action: 'ListPolicies', Scope: 'Local' }, iamUrl);
     for (const member of list.split('<member>')) {
       if (xmlValue(member, 'PolicyName') === name) {
         const arn = xmlValue(member, 'Arn');
@@ -96,8 +115,13 @@ export async function attachPolicy(
   admin: BucketCredential,
   accessKeyId: string,
   policyArn: string,
+  iamUrl = TIGRIS_IAM_ENDPOINT,
 ): Promise<void> {
-  await iam(admin, { Action: 'AttachUserPolicy', UserName: accessKeyId, PolicyArn: policyArn });
+  await iam(
+    admin,
+    { Action: 'AttachUserPolicy', UserName: accessKeyId, PolicyArn: policyArn },
+    iamUrl,
+  );
 }
 
 async function s3(
