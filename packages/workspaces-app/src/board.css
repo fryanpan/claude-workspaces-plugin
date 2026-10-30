@@ -7759,6 +7759,7 @@ label.board-sched-chip:hover {
     white-space: normal;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
   }
   /* TWO ROWS, and Progress on the first — Bryan, approving the strip:
