@@ -20,7 +20,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { type Machine, SANDBOX_EXEC, buildProfile, parseConfig } from './lead-sandbox-lib.ts';
+import {
+  type Machine,
+  SANDBOX_EXEC,
+  buildProfile,
+  parseConfig,
+  transcriptSlug,
+} from './lead-sandbox-lib.ts';
 
 const HAVE_SANDBOX = existsSync(SANDBOX_EXEC);
 if (!HAVE_SANDBOX)
@@ -134,5 +140,37 @@ describe.skipIf(!HAVE_SANDBOX)('what the server reads, under the real sandbox-ex
       expect(sh(plant).status, plant).not.toBe(0);
     expect(readFileSync(join(harborlight, '.git', 'config'), 'utf8')).toBe(configBefore);
     expect(existsSync(join(harborlight, '.git', 'hooks', 'post-checkout'))).toBe(false);
+  });
+
+  it("writes its own scratch folder, and no other project's", () => {
+    // The server reads another project's scratch (a mock an unwalled session
+    // attached), which is only safe while no walled lead can write there.
+    const scratch = `/private/tmp/claude-${m.uid}`;
+    const made = !existsSync(scratch);
+    const own = join(scratch, transcriptSlug(harborlight));
+    const ownWorktree = `${own}--claude-worktrees-walled-probe`;
+    const other = join(scratch, '-walled-probe-riverbend');
+    try {
+      for (const d of [own, ownWorktree, other]) mkdirSync(d, { recursive: true });
+      writeFileSync(join(other, 'mock.html'), '<p>riverbend</p>');
+      expect(sh(`echo x > '${own}/mock.html' && echo x > '${ownWorktree}/mock.html'`).status).toBe(
+        0,
+      ); // the control
+      for (const plant of [
+        `echo x > '${other}/mock.html'`,
+        `echo x > '${other}/new.html'`,
+        `ln -s /etc/hosts '${other}/link.html'`,
+        `mkfifo '${other}/pipe.html'`,
+        `echo x > '/tmp/claude-${m.uid}/-walled-probe-riverbend/via-tmp.html'`,
+        `mkdir '${scratch}/-walled-probe-saltmarsh'`,
+        `mv '${other}' '${own}/taken'`,
+      ])
+        expect(sh(plant).status, plant).not.toBe(0);
+      expect(readFileSync(join(other, 'mock.html'), 'utf8')).toBe('<p>riverbend</p>');
+      expect(existsSync(join(scratch, '-walled-probe-saltmarsh'))).toBe(false);
+    } finally {
+      for (const d of [own, ownWorktree, other]) rmSync(d, { recursive: true, force: true });
+      if (made) rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
