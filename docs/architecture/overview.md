@@ -967,6 +967,28 @@ one model per agent, a voice token of its own, and the same addressed row
 and `answer_voice` wait underneath. Its contract is
 [voice-conversation-api](voice-conversation-api.md).
 
+**The lead chat.** Every board page, doc page and mock host carries an agent
+button that opens one conversation with the board's lead. `lead-chat/` (a new
+top-level server directory) keeps it: `log.ts` is one append-only
+`<board>.lead-chat.jsonl` per board, the latest line per message id winning,
+and `lead-chat.ts` sends a typed message exactly as a turn to one agent by
+name (an addressed row, then one `voice.request` to the lead alone), takes the
+lead's `answer_voice` first in `routes/workspace-attachments.ts`, and writes a
+spoken turn to the lead from the converse socket into the same chat
+(`AgentConversationLog`). Every change goes to the board's pages as a
+`lead-chat.changed` frame and to no agent stream. The route is
+`routes/workspace-lead-chat.ts` (read by a member, written by the owner);
+the message shape is `core/src/lead-chat.ts` (a new top-level core module).
+In the app, `workspaces-app/src/lead-chat/` (a new top-level directory) is
+the client, the shadow-DOM button, bar and panel, and the per-device Chat
+first / Voice first choice the Settings Voice row writes; the board mounts it
+in its nav dock, the doc page floats it bottom-left, and the mock host loads
+`lead-chat-page.ts` as its own `/app/lead-chat.js`. Its voice
+(`lead-chat-voice.ts`) is the board mic's path: the mic streams over
+`WS /workspaces/<ws>/voice/converse` with the lead named in `start`, so the
+audio reaches only this server and the listener it already uses. There is no
+browser speech recognition, because Chrome's sends the audio to Google.
+
 **A mock or app that talks.** A page served in a board's frame can speak,
 listen and post to its own dev server through
 `WS /workspaces/<ws>/docs/<docId>/app-voice`. Its wire is `core/app-voice.ts`

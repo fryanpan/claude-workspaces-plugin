@@ -175,21 +175,6 @@ describe('the frame and host helpers', () => {
       .replace(/<a class="cw-board-link"[^>]*>[^<]*<\/a>/, '');
     expect(stripped).toBe(owner);
   });
-
-  it("loads the coach's card over the owner's mock, naming its board and doc, and never a visitor's", () => {
-    const args = {
-      workspaceId: 'w-harbor',
-      docId: 'd-mock',
-      html: '<html><head><title>Harborlight mock</title></head><body></body></html>',
-      url: new URL('http://b.test/workspaces/w-harbor/mockups/d-mock'),
-      items: [],
-      coachHref: '/app/coach-0123456789abcdef.js',
-    };
-    expect(renderMockHost({ ...args, visitor: false })).toContain(
-      '<script type="module" src="/app/coach-0123456789abcdef.js" data-coach-page data-workspace-id="w-harbor" data-doc-id="d-mock"></script>',
-    );
-    expect(renderMockHost({ ...args, visitor: true })).not.toContain('coach');
-  });
 });
 
 describe('serving a mock through its host, and stamping what the frame sends', () => {

@@ -125,3 +125,22 @@ export function redactBoardEventForVisitor<T extends { event: string }>(payload:
   }
   return out as unknown as T;
 }
+
+/**
+ * Event families a visitor's stream never carries, whatever their fields.
+ *
+ * `lead-chat.*` is the owner's conversation with the board's lead. Both of
+ * its routes refuse a visitor, but its frames ride the board stream a visitor
+ * may open, and the whole frame is the conversation, so there is nothing to
+ * redact it down to.
+ */
+const VISITOR_DROPPED_EVENT = /^lead-chat\./;
+
+/**
+ * A share visitor's copy of one board-stream frame: `undefined` drops it,
+ * otherwise it is `redactBoardEventForVisitor`'s view.
+ */
+export function visitorBoardFrame<T extends { event: string }>(payload: T): T | undefined {
+  if (VISITOR_DROPPED_EVENT.test(payload.event)) return undefined;
+  return redactBoardEventForVisitor(payload);
+}

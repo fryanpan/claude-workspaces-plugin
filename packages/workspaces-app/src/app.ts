@@ -1,7 +1,12 @@
 import type { User } from '@claude-workspaces/core';
 import type { BootLocation, BootStorage, BootWindow } from './boot-env.ts';
 import { type DocBootConnect, startDocBoot } from './doc-cache-boot.ts';
-import { docSocketUrl, workspaceIdFromPath } from './doc-path.ts';
+import {
+  currentWorkspaceId,
+  docIdFromPathOrNull,
+  docSocketUrl,
+  workspaceIdFromPath,
+} from './doc-path.ts';
 import { el } from './doc/chrome-dom.ts';
 import { startDocLoadReport } from './doc/doc-load-report.ts';
 import { wireDocSwitcher } from './doc/doc-switcher.ts';
@@ -99,6 +104,22 @@ export async function bootApp(env: AppBootEnv): Promise<() => void> {
   // lens is already on screen, so there is no text to paint first.
   registerMarkdownMount(async (ctx) => (await loadMarkdownMount()).mountMarkdown(ctx));
   const reportLoad = startDocLoadReport(workspaceIdFromPath(location.pathname));
+  // The chat with the board's lead, once per page rather than per doc: an open
+  // chat stays open as the reader moves between the board's docs. Its own
+  // chunk, after the boot, because it is never the page's content.
+  const board = currentWorkspaceId();
+  if (board) {
+    void import('./lead-chat/lead-chat-mount.ts').then(({ mountLeadChat }) =>
+      mountLeadChat({
+        workspaceId: board,
+        author: { id: user.id, name: user.name, kind: user.kind },
+        getContext: () => {
+          const docId = docIdFromPathOrNull(location.pathname);
+          return docId ? { surface: 'doc', docId } : undefined;
+        },
+      }),
+    );
+  }
   return startRouter({
     user,
     // The answer is already in hand — every mount gets it as a value rather
