@@ -69,6 +69,9 @@ export interface WidthReading {
   };
   /** The bar's dot, once every new thread has been opened. */
   dotAfterAll: boolean;
+  /** The host page's boxes, [left, top, right, bottom]: the bar, the board's
+   *  nav, the frame and the window. */
+  host: { bar: number[] | null; nav: number[] | null; frame: number[] | null; win: number[] };
   /** Where the top page went when the item's link was tapped. */
   followed: string;
 }
@@ -253,6 +256,15 @@ async function main(): Promise<void> {
         frame.eval(`document.querySelectorAll('.cfw-pin').length`).then((n) => (n ? true : null)),
       );
       await frame.eval('(window.__cwBefore = 1)');
+      const host = (await top.eval(`(() => {
+        const box = (s) => {
+          const e = document.querySelector(s);
+          if (!e) return null;
+          const b = e.getBoundingClientRect();
+          return [b.left, b.top, b.right, b.bottom].map(Math.round);
+        };
+        return { bar: box('.cw-bar'), nav: box('.cw-host-nav'), frame: box('iframe[data-cw-mock-frame]'), win: [innerWidth, innerHeight] };
+      })()`)) as WidthReading['host'];
       await tap(cdp, top, `document.querySelector('[data-cw-comments]')`, 'Comments');
       await poll('the view opened', () => frame.eval(`${Q('.panel.open')} ? true : null`));
       const listed = (await poll('the view listed three pages', () =>
@@ -341,6 +353,7 @@ async function main(): Promise<void> {
           hostDot: await hostDot(),
         },
         dotAfterAll: true,
+        host,
         followed: '',
       };
 

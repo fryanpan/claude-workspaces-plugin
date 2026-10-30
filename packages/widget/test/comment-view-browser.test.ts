@@ -44,6 +44,21 @@ describe.skipIf(CHROME === null)('the comment view on a served mock', () => {
     r = JSON.parse(out.stdout.trim().split('\n').pop() ?? '') as Reading;
   }, SUITE_MS);
 
+  it('puts the Comments bar beside the board’s rail at 1180 and above its foot bar at 430', () => {
+    const wide = run('1180').host;
+    // The rail down the left, the bar across the top beside it, the frame under the bar.
+    expect(wide.win).toEqual([1180, 820]);
+    expect(wide.nav).toEqual([0, 0, 58, 820]);
+    expect(wide.bar).toEqual([58, 0, 1180, 44]);
+    expect(wide.frame).toEqual([58, 44, 1180, 820]);
+    const phone = run('430').host;
+    // The bar across the top, the nav along the foot, the frame between them.
+    expect(phone.win).toEqual([430, 932]);
+    expect(phone.bar).toEqual([0, 0, 430, 44]);
+    expect(phone.nav).toEqual([0, 878, 430, 932]);
+    expect(phone.frame).toEqual([0, 44, 430, 878]);
+  });
+
   for (const width of ['1180', '430']) {
     it(
       `lists every open thread under its page, in the nav's order, at ${width} wide`,
