@@ -65,8 +65,10 @@ import { join } from 'node:path';
 import { attachmentIdOf } from '@claude-workspaces/core';
 import type { DocMeta } from '@claude-workspaces/core';
 import { isExcluded, normalizeExcludes } from './bind-meta.ts';
+import { containedRoot } from './fs-scan-contained.ts';
 import { diffFilesAsync } from './git-diff.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
+import { type Contained, listTreeSync } from './tree-fs.ts';
 
 /** Quiet time that closes a burst. */
 export const SETTLE_MS = 150;
@@ -249,6 +251,8 @@ async function gitListing(root: string): Promise<Set<string> | null> {
  * is too big or a directory will not answer.
  */
 async function walkListing(root: string): Promise<Set<string> | null> {
+  const contained = containedRoot(root);
+  if (contained !== null) return containedListing(contained);
   const out = new Set<string>();
   const dirs = [''];
   let seen = 0;
@@ -269,6 +273,25 @@ async function walkListing(root: string): Promise<Set<string> | null> {
     }
   }
   return out;
+}
+
+/** `walkListing` under a walled lead's root, through `tree-fs.ts`: a link
+ *  is neither listed nor entered. Null when the guard refuses the root or
+ *  the walk is too big. */
+function containedListing(c: Contained | 'refused'): Set<string> | null {
+  if (c === 'refused') return null;
+  const base = c.abs === c.root ? '' : `${c.abs.slice(c.root.length + 1)}/`;
+  let listed: ReturnType<typeof listTreeSync>;
+  try {
+    listed = listTreeSync(c, {
+      maxEntries: MAX_WALK_ENTRIES,
+      enter: (_rel, name) => !IGNORED_SEGMENTS.has(name),
+    });
+  } catch {
+    return null;
+  }
+  if (listed === null) return null;
+  return new Set(listed.filter((e) => e.kind === 'file').map((e) => e.rel.slice(base.length)));
 }
 
 /** A listing, or null once `LISTING_DEADLINE_MS` has passed without one. */
