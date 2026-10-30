@@ -40,6 +40,8 @@ import {
   leadWritesUnderClaude,
   transcriptSlug,
 } from '@claude-workspaces/core/lead-wall';
+import { shortHash } from './bind-meta.ts';
+import { type Contained, pinRoot } from './tree-fs.ts';
 
 /** More than any lead's project list; a bound on what one PUT may write. */
 export const MAX_ROOTS = 32;
@@ -278,6 +280,8 @@ export class BoardSocketRoots {
     const boards = this.load();
     if (this.broken) return { ok: false, error: 'the roots file cannot be read' };
     boards[boardId] = resolved;
+    // What each root is now, so a folder later put in its place is refused.
+    for (const root of resolved) pinRoot(root);
     this.walled = unique([...this.walled, ...resolved]);
     this.flat = this.walled;
     this.slugs = unique([...this.slugs, ...slugs]);
@@ -376,6 +380,33 @@ export class BoardSocketRoots {
     return over === null || over.length > 0;
   }
 
+  /** The root `folderPath` resolves to, when it is one of the board's;
+   *  else null. Resolving follows links, so a link to a root names it; a
+   *  folder inside a root, or a link out of one, is no root. */
+  rootFor(boardId: string, folderPath: string): string | null {
+    if (!isAbsolute(folderPath) || folderPath.length > MAX_PATH) return null;
+    let real: string;
+    try {
+      real = this.realpath(folderPath);
+    } catch {
+      return null;
+    }
+    return this.rootsOf(boardId).includes(real) ? real : null;
+  }
+
+  /** The innermost root holding `path` and `path` as the roots spell it,
+   *  for the contained calls (`tree-fs.ts`): every read and write there
+   *  refuses a link anywhere below the root. Null outside every root, in a
+   *  shadow folder (`zone`), and when the spelling cannot be told. */
+  containedOf(path: string): Contained | null {
+    if (this.isBroken() || this.zone(path) !== null) return null;
+    const abs = this.spelled(path);
+    if (abs === null) return null;
+    const over = this.allRoots().filter((root) => abs === root || abs.startsWith(`${root}/`));
+    const root = over.sort((a, b) => b.length - a.length)[0];
+    return root === undefined ? null : { root, abs };
+  }
+
   /** Whether some root sits at or below `dir`: a repository there holds a
    *  lead's folder (`git-hardening.ts`). With the file unreadable, always. */
   holdsRoot(dir: string): boolean {
@@ -457,4 +488,11 @@ export class BoardSocketRoots {
 
 function unique(paths: string[]): string[] {
   return [...new Set(paths)];
+}
+
+/** The set id a lead's bind of `root` gets: `lead-`, the folder's name, and
+ *  a hash of the root AND the board, so no other board's set shares it. */
+export function leadSetId(root: string, board: string): string {
+  const base = basename(root).replace(/[^a-zA-Z0-9_.\-]/g, '-') || 'workspace';
+  return `lead-${base}-${shortHash(`${root}\0${board}`)}`;
 }
