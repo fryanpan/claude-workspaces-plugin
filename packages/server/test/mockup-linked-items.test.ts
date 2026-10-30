@@ -352,4 +352,113 @@ describe('serving a mock', () => {
     expect(visitor.status).toBe(200);
     expect(block(await visitor.text())).toBeNull();
   });
+
+  it("never puts an owner-only item in a mock's relay, and refuses one relayed anyway", async () => {
+    const mock = await bindMock('tide-chart');
+    const file = async (headline: string, ownerOnly: boolean) => {
+      const filed = (await post(`/workspaces/${ws}/tasks/${taskId}/review-items`, {
+        author: AGENT,
+        review: {
+          shape: 'decision',
+          headline,
+          detail: `See [the chart](/workspaces/${ws}/mockups/${mock}).`,
+          options: [
+            { id: 'o-yes', label: 'Yes' },
+            { id: 'o-no', label: 'No' },
+          ],
+          ...(ownerOnly ? { ownerOnly: true } : {}),
+        },
+      })) as { item: { id: string }; held?: boolean };
+      if (filed.held) {
+        await post(`/workspaces/${ws}/tasks/${taskId}/review-items/${filed.item.id}/release`, {
+          author: REVIEWER,
+        });
+      }
+      return filed.item.id;
+    };
+    const plain = await file('Is the low tide line readable?', false);
+    const gated = await file('Publish the tide chart to the harbour office?', true);
+
+    // The host page the owner is served: the frame's relay scope is its
+    // data-items, written by the server. The plain item is in it, so the
+    // check below is about the flag and not about an empty list.
+    const host = await fetch(`${base}/workspaces/${ws}/mockups/${mock}`, {
+      headers: { host: `localhost:${handle.port}`, accept: 'text/html' },
+    }).then((r) => r.text());
+    const attr = host.match(/data-items="([^"]*)"/)?.[1] ?? '';
+    const scope = JSON.parse(attr.replace(/&quot;/g, '"')) as Array<[string, string]>;
+    expect(scope).toContainEqual([taskId, plain]);
+    expect(scope.some(([, id]) => id === gated)).toBe(false);
+
+    // Relayed out of the frame anyway, the owner's own answer is refused.
+    const answer = (id: string, relayed: boolean) =>
+      fetch(`${base}/workspaces/${ws}/tasks/${taskId}/review-items/${id}/answer`, {
+        method: 'POST',
+        headers: {
+          host: `localhost:${handle.port}`,
+          'content-type': 'application/json',
+          ...REVIEWER_PROOF,
+          ...(relayed ? { 'x-cw-via': 'mock-frame' } : {}),
+        },
+        body: JSON.stringify({ author: REVIEWER, text: 'Yes', answeredWith: 'o-yes' }),
+      });
+    const refused = await answer(gated, true);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { message?: string }).message).toBe(
+      'Answer this on the board, not from a mock.',
+    );
+    // CONTROLS: the same answer from the board lands, and so does a relayed
+    // answer to the plain item.
+    expect((await answer(plain, true)).status).toBe(200);
+    expect((await answer(gated, false)).status).toBe(200);
+  });
+
+  it("refuses an owner-only ask on the mock's own doc thread answered from inside the mock", async () => {
+    const mock = await bindMock('harbour-map');
+    const ask = async (headline: string, ownerOnly: boolean) => {
+      const made = (await post(`/workspaces/${ws}/docs/${mock}/threads`, {
+        author: AGENT,
+        text: headline,
+        anchor: { kind: 'subject' },
+        review: {
+          shape: 'decision',
+          headline,
+          detail: 'The map goes on the harbour office wall.',
+          options: [
+            { id: 'o-yes', label: 'Yes' },
+            { id: 'o-no', label: 'No' },
+          ],
+          ...(ownerOnly ? { ownerOnly: true } : {}),
+        },
+      })) as { thread: { id: string; comments: Array<{ id: string }> } };
+      return { threadId: made.thread.id, commentId: made.thread.comments[0]?.id ?? '' };
+    };
+    const plain = await ask('Is the north pier labelled?', false);
+    const gated = await ask('Send the map to the harbour office?', true);
+    const answer = (t: { threadId: string; commentId: string }, relayed: boolean) =>
+      fetch(`${base}/workspaces/${ws}/docs/${mock}/threads/${t.threadId}/answer`, {
+        method: 'POST',
+        headers: {
+          host: `localhost:${handle.port}`,
+          'content-type': 'application/json',
+          ...REVIEWER_PROOF,
+          ...(relayed ? { 'x-cw-via': 'mock-frame' } : {}),
+        },
+        body: JSON.stringify({
+          author: REVIEWER,
+          text: 'Yes',
+          optionId: 'o-yes',
+          commentId: t.commentId,
+        }),
+      });
+    const refused = await answer(gated, true);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { message?: string }).message).toBe(
+      'Answer this on the board, not from a mock.',
+    );
+    // CONTROLS: a relayed answer to the plain ask lands, and so does the
+    // owner-only one answered from the board.
+    expect((await answer(plain, true)).status).toBe(200);
+    expect((await answer(gated, false)).status).toBe(200);
+  });
 });
