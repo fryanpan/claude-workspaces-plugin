@@ -5,7 +5,7 @@
  * the person has signed in within the last ten minutes (`confirm-required`,
  * `server/src/fresh-signin.ts`). Home and the task panel posted it with plain
  * `send`, so on 30 Oct the owner, signed in through Access that morning, read
- * "Posting the reply failed" on his phone and nothing said why. It now goes
+ * "Posting the reply failed" on their phone and nothing said why. It now goes
  * through the same "Confirm it's you" ask the access page uses
  * (`access-writes.ts`); every other answer goes straight through `send`.
  */

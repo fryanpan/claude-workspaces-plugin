@@ -17,9 +17,9 @@
  * board, and a link there at the end of its words in place of its options:
  * the mock's own scripts reach the board through the host as the reader
  * (`mockup-frame.ts`), and an ask only the owner may answer must not be
- * answerable by a page an agent wrote. On the
- * doc page it does too when its answer has a door of its own — an access
- * change, a secret, a grant — which the dock's one answer box is not.
+ * answerable by a page an agent wrote. On the doc page it does too when its
+ * answer has a door of its own — an access change, a secret, a grant — which
+ * the dock's one answer box is not.
  */
 import { type TaskReviewItem, extractWorkspaceLinks } from '@claude-workspaces/core';
 import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';

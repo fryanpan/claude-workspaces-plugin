@@ -2,7 +2,7 @@
  * What a reader is told when the server refuses an answer on a review card.
  *
  * 30 Oct: the owner, signed in through Access hours earlier, tapped Approve on
- * an access card on his phone's Home and read "Posting the reply failed". The
+ * an access card on their phone's Home and read "Posting the reply failed". The
  * server had refused with `confirm-required`, because approving an access
  * change asks for a sign-in from the last ten minutes, and the card's write
  * dropped that answer. These drive the controller's two answer verbs against

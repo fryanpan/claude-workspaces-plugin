@@ -272,7 +272,7 @@ describe('access changes an agent proposes and the owner approves', () => {
   });
 
   // 30 Oct: the owner, signed in through Access that morning, tapped Approve
-  // on his phone and was refused. Approving widens who is in, so it asks for
+  // on their phone and was refused. Approving widens who is in, so it asks for
   // a sign-in from the last ten minutes, and an all-day Access session's token
   // is older than that. The refusal must say so (the page then asks "Confirm
   // it's you"); the same Approve from a fresh sign-in lands.
