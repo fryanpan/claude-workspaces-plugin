@@ -36,6 +36,7 @@ import type { BigIntStats, Stats } from 'node:fs';
 import {
   constants,
   closeSync,
+  fchmodSync,
   fstatSync,
   openSync,
   readFileSync,
@@ -156,10 +157,18 @@ export function setTreeSeamForTest(fn: ((c: Contained) => void) | null): void {
   seam = fn;
 }
 
+/** The device a judged descriptor reports; a test hands back another, as a
+ *  volume mounted on a folder below the root would. */
+let devSeam: ((c: Contained, dev: number) => number) | null = null;
+export function setTreeDevForTest(fn: ((c: Contained, dev: number) => number) | null): void {
+  devSeam = fn;
+}
+
 function judge(fd: number, c: Contained, dev: number, kind: 'file' | 'dir'): BigIntStats {
   seam?.(c);
   const st = fstatSync(fd, { bigint: true });
-  if (Number(st.dev) !== dev) throw new GuardRefused(c.abs, 'it is on another volume');
+  const got = devSeam ? devSeam(c, Number(st.dev)) : Number(st.dev);
+  if (got !== dev) throw new GuardRefused(c.abs, 'it is on another volume');
   if (kind === 'dir' && !st.isDirectory()) throw new GuardRefused(c.abs, 'it is not a folder');
   if (kind === 'file' && (!st.isFile() || st.nlink !== 1n))
     throw new GuardRefused(c.abs, 'it is not a regular file with one name');
@@ -313,7 +322,8 @@ export function listTreeSync(
       continue;
     }
     first = false;
-    const entries = closingOnThrow(fd, () => n.readdirFd(fd, opts.maxEntries - out.length));
+    // `readdirFd` closes `fd` itself, whether it returns or throws.
+    const entries = n.readdirFd(fd, opts.maxEntries - out.length);
     if (entries === null) return null;
     for (const e of entries) {
       const childRel = rel === '' ? e.name : `${rel}/${e.name}`;
@@ -367,17 +377,17 @@ function errnoError(call: string, errno: number, path: string): NodeJS.ErrnoExce
 /** Refuse a target that is a link, or that names an inode with another
  *  name: the write would replace a link, or appear to replace a file
  *  somebody else still reads by its other name. A missing target is fine. */
-function refuseTarget(c: Contained, dev: number): void {
+function refuseTarget(c: Contained, dev: number): number | null {
   let fd: number;
   try {
     refuseDataless(c);
     fd = openNoLink(c.abs, FILE_OPEN);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
   try {
-    judge(fd, c, dev, 'file');
+    return Number(judge(fd, c, dev, 'file').mode) & 0o7777;
   } finally {
     closeSync(fd);
   }
@@ -389,6 +399,9 @@ interface WritePlan {
   dir: string;
   name: string;
   tmpName: string;
+  /** The target's permission bits, which the temp takes, so a rewrite of a
+   *  0600 file stays 0600; 0644 for a new file. */
+  mode: number;
 }
 
 function planWrite(c: Contained, lane: string): WritePlan {
@@ -397,9 +410,9 @@ function planWrite(c: Contained, lane: string): WritePlan {
   const names = namesOf(c);
   const name = names.at(-1);
   if (name === undefined) throw new GuardRefused(c.abs, 'a root is not a file');
-  refuseTarget(c, dev);
+  const mode = refuseTarget(c, dev) ?? 0o644;
   const dir = names.length === 1 ? c.root : `${c.root}/${names.slice(0, -1).join('/')}`;
-  return { n, dev, dir, name, tmpName: tempName(name, lane) };
+  return { n, dev, dir, name, tmpName: tempName(name, lane), mode };
 }
 
 /** The temp file's name beside the target: random, so nothing can be
@@ -434,6 +447,7 @@ export function writeTreeSync(c: Contained, bytes: Uint8Array, lane: string): Bi
     let st: BigIntStats;
     try {
       judge(fd, tmp, p.dev, 'file');
+      fchmodSync(fd, p.mode);
       let at = 0;
       while (at < bytes.length) at += writeSync(fd, bytes, at, bytes.length - at);
       st = fstatSync(fd, { bigint: true });
@@ -460,6 +474,7 @@ export async function writeTree(c: Contained, text: string, lane: string): Promi
     let st: BigIntStats;
     try {
       judge(fh.fd, tmp, p.dev, 'file');
+      await fh.chmod(p.mode);
       await fh.writeFile(text);
       st = await fh.stat({ bigint: true });
     } catch (err) {

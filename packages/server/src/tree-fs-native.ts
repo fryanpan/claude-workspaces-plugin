@@ -22,6 +22,7 @@
  * not load, `treeNative()` is null and stays null.
  */
 import type * as BunFfi from 'bun:ffi';
+import { closeSync } from 'node:fs';
 
 /** `d_type` of a link. */
 export const DT_LNK = 10;
@@ -46,7 +47,8 @@ export interface TreeEntry {
 
 export interface TreeNative {
   /** Every entry of an open folder but `.` and `..`, at most `max`; null
-   *  when there are more. Takes the descriptor: it is closed on return. */
+   *  when there are more. Takes the descriptor: it is closed on every
+   *  return and every throw, so the caller never closes it. */
   readdirFd(fd: number, max: number): TreeEntry[] | null;
   mkdirat(dirFd: number, name: string, mode: number): number;
   unlinkat(dirFd: number, name: string): number;
@@ -60,10 +62,18 @@ export interface TreeNative {
 
 let loaded: TreeNative | null | undefined;
 
-/** The calls, or null off darwin or when they cannot be loaded. */
+/** Whether the offsets above hold. They were measured on arm64; on x86_64
+ *  the plain `readdir` and `lstat` symbols are the 32-bit-inode ones, whose
+ *  structs are laid out differently, so the calls are not loaded there. */
+export function nativeSupported(platform: string, arch: string): boolean {
+  return platform === 'darwin' && arch === 'arm64';
+}
+
+/** The calls, or null where `nativeSupported` says no or they cannot be
+ *  loaded. */
 export function treeNative(): TreeNative | null {
   if (loaded !== undefined) return loaded;
-  loaded = process.platform === 'darwin' ? load() : null;
+  loaded = nativeSupported(process.platform, process.arch) ? load() : null;
   return loaded;
 }
 
@@ -98,7 +108,11 @@ function load(): TreeNative | null {
     return {
       readdirFd(fd, max) {
         const dir = s.fdopendir(fd);
-        if (dir === null) throw Object.assign(new Error('fdopendir failed'), { errno: errno() });
+        if (dir === null) {
+          const e = errno();
+          closeSync(fd);
+          throw Object.assign(new Error('fdopendir failed'), { errno: e });
+        }
         try {
           const out: TreeEntry[] = [];
           for (;;) {
