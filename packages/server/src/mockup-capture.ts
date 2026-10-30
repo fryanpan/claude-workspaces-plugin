@@ -120,6 +120,22 @@ export function readMockupHtml(
   }
 }
 
+/** The most bytes of a mock that is not HTML (an image, an SVG) served. */
+const MOCKUP_FILE_MAX = 64 * 1024 * 1024;
+
+/** A mock that is not HTML, by the same rules as `readMockupHtml`, or null. */
+export function readMockupBytes(
+  path: string,
+  guards: PathGuards = boundFiles.guards,
+): Buffer | null {
+  try {
+    const bytes = guards.readBoundedBytesSync(path, MOCKUP_FILE_MAX);
+    return bytes === 'too-large' ? null : bytes;
+  } catch {
+    return null;
+  }
+}
+
 /** The captured copy, or null when this doc has never been captured. */
 export function readMockupCapture(dataDir: string, docId: string): string | null {
   const path = mockupCapturePath(dataDir, docId);

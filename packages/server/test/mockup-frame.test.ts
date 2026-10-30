@@ -31,6 +31,7 @@ import {
   writeViaOf,
 } from '../src/mockup-frame.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { boundFiles } from '../src/slow-fs.ts';
 import { signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 
@@ -302,6 +303,38 @@ describe('serving a mock through its host, and stamping what the frame sends', (
     const res = await get(`/workspaces/${ws}/mockups/${id}`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-security-policy')).toBe('sandbox');
+  });
+
+  // A guard covers the owner's part of `~/.claude` and admits it, refusing
+  // only what a walled lead writes: such a mock is read, not refused.
+  it('serves an SVG mock a guard covers by its checked read, and refuses one it does not admit', async () => {
+    const dir = join(dataDir, 'guarded');
+    mkdirSync(dir);
+    const svg = join(dir, 'plan.svg');
+    writeFileSync(svg, '<svg xmlns="http://www.w3.org/2000/svg"><text>plan</text></svg>');
+    const id = (
+      (await post(`/workspaces/${ws}/docs`, {
+        docId: 'plan-svg',
+        type: 'mockup',
+        sourceUrl: svg,
+      })) as { docId: string }
+    ).docId;
+    let admit = true;
+    const inDir = (p: string) => p.startsWith(`${dir}/`);
+    const remove = boundFiles.guards.add({
+      covers: inDir,
+      admits: (p) => !inDir(p) || admit,
+      landsInside: () => true,
+    });
+    try {
+      const res = await get(`/workspaces/${ws}/mockups/${id}`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('<text>plan</text>');
+      admit = false;
+      expect((await get(`/workspaces/${ws}/mockups/${id}`)).status).toBe(404);
+    } finally {
+      remove();
+    }
   });
 
   it('lists on the host the ticket items docked on this mock', async () => {

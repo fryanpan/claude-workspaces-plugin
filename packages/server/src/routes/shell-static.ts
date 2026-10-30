@@ -49,6 +49,7 @@ import type { ShareTarget } from '../middleware/host-guard.ts';
 import {
   captureMockup,
   isHtmlMockupSource,
+  readMockupBytes,
   readMockupCapture,
   readMockupHtml,
 } from '../mockup-capture.ts';
@@ -85,7 +86,6 @@ import {
   serveStatic,
   serveStaticUnder,
 } from '../shells.ts';
-import { boundFiles } from '../slow-fs.ts';
 import type { TaskStore } from '../tasks.ts';
 import { renderWhiteboardShell } from '../whiteboard/page-shell.ts';
 import { BOARD_PAGE_PATH, BOARD_PAGE_RESOURCE_PATH } from '../workspace-path.ts';
@@ -338,9 +338,9 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // Sandboxed all the same: an SVG opened by its address is a document that
     // runs its own script on this origin (`mockup-frame.ts`).
     if (!isHtmlMockupSource(source)) {
-      // Read by name, so never from a folder a walled lead writes.
-      if (boundFiles.guards.covers(source)) return notFound();
-      const resp = serveStatic(source);
+      // Read as an HTML mock is: refused where the lead writes, checked
+      // where a guard covers the path, and never blocking on a FIFO.
+      const resp = serveStatic(source, undefined, (p) => readMockupBytes(p));
       return resp ? withHeaders(resp, fileSandboxHeaders(source)) : notFound();
     }
     // An explicit round. `?v=` is a query on the mockup's own address rather

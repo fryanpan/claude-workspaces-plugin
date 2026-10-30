@@ -392,17 +392,15 @@ export class PathGuards {
     return readRangeChecked(path, start, end, (real) => this.landsAll(path, real));
   }
 
-  /** A bound file's stat, from a checked descriptor where a guard covers
-   *  it: a plain stat follows a link and reports the size and time of
-   *  whatever it points at. */
+  /** A bound file's stat, from a checked descriptor where a guard covers it:
+   *  a plain stat follows a link and reports what it points at. */
   stat(path: string): Promise<BigIntStats> {
     if (!this.allows(path)) return Promise.reject(new GuardRefused(path));
     if (!this.covers(path)) return stat(path, { bigint: true });
     return statChecked(path, (real) => this.landsAll(path, real));
   }
 
-  /** `stat` on the calling thread, as `statSync` answers; throws as it does,
-   *  and `GuardRefused` where a guard refuses the path. */
+  /** `stat` on the calling thread; throws as `statSync` does, and `GuardRefused`. */
   statSync(path: string): Stats {
     if (!this.allows(path)) throw new GuardRefused(path);
     if (!this.covers(path)) return statSync(path);
@@ -418,6 +416,12 @@ export class PathGuards {
    *  `'too-large'`: never blocking on a FIFO, and checked where a guard
    *  covers it. Throws as `readFileSync` does, and `GuardRefused`. */
   readBoundedSync(path: string, max: number): string | 'too-large' {
+    const bytes = this.readBoundedBytesSync(path, max);
+    return bytes === 'too-large' ? bytes : bytes.toString('utf8');
+  }
+
+  /** `readBoundedSync`, as bytes. */
+  readBoundedBytesSync(path: string, max: number): Buffer | 'too-large' {
     if (!this.allows(path)) throw new GuardRefused(path);
     const fd = this.covers(path)
       ? openCheckedSync(path, (real) => this.landsAll(path, real))
@@ -426,7 +430,7 @@ export class PathGuards {
       const st = fstatSync(fd);
       if (!st.isFile()) throw new GuardRefused(path);
       if (st.size > max) return 'too-large';
-      return readFileSync(fd, 'utf8');
+      return readFileSync(fd);
     } finally {
       closeSync(fd);
     }

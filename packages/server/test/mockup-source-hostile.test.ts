@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { PathGuards } from '../src/bound-path-guard.ts';
-import { checkMockupSource, readMockupHtml } from '../src/mockup-capture.ts';
+import { checkMockupSource, readMockupBytes, readMockupHtml } from '../src/mockup-capture.ts';
 import { makeFifo } from './fifo.ts';
 
 let dir: string;
@@ -29,6 +29,11 @@ beforeAll(() => {
   writeFileSync(join(outside, 'secret.html'), '<p>owner file</p>');
   writeFileSync(join(root, 'mock.html'), '<p>mock</p>');
   writeFileSync(join(shadow, 'mock.html'), '<p>lead scratch</p>');
+  writeFileSync(join(root, 'mock.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff]));
+  writeFileSync(join(outside, 'secret.png'), Buffer.from([1, 2, 3]));
+  writeFileSync(join(shadow, 'mock.png'), Buffer.from([4]));
+  symlinkSync(join(outside, 'secret.png'), join(root, 'linked.png'));
+  makeFifo(join(outside, 'pipe.png'));
   symlinkSync(join(outside, 'secret.html'), join(root, 'linked.html'));
   makeFifo(join(outside, 'pipe.html'));
   const under = (p: string, d: string) => p === d || p.startsWith(`${d}${sep}`);
@@ -67,6 +72,32 @@ describe('a mock source in a folder a walled lead can write', () => {
         '-e',
         `const m = await import(${JSON.stringify(MODULE)});
          console.log(JSON.stringify(m.readMockupHtml(${JSON.stringify(join(outside, 'pipe.html'))})));`,
+      ],
+      { timeout: 5_000, encoding: 'utf8' },
+    );
+    expect(res.signal).toBe(null);
+    expect(res.stdout.trim()).toBe('null');
+  }, 15_000);
+
+  // A mock that is not HTML (an image, an SVG) is served by its bytes.
+  it('serves a mock that is not HTML by the same rules, bytes intact', () => {
+    expect(readMockupBytes(join(root, 'mock.png'), guards)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff]),
+    ); // the control
+    expect(readMockupBytes(join(outside, 'secret.png'), guards)).toEqual(Buffer.from([1, 2, 3]));
+    expect(readMockupBytes(join(root, 'linked.png'), guards)).toBeNull();
+    expect(readMockupBytes(join(shadow, 'mock.png'), guards)).toBeNull();
+    expect(readMockupBytes(dir, guards)).toBeNull();
+  });
+
+  it('answers null for a FIFO that is not HTML instead of blocking', () => {
+    const MODULE = resolve(__dirname, '../src/mockup-capture.ts');
+    const res = spawnSync(
+      'bun',
+      [
+        '-e',
+        `const m = await import(${JSON.stringify(MODULE)});
+         console.log(JSON.stringify(m.readMockupBytes(${JSON.stringify(join(outside, 'pipe.png'))})));`,
       ],
       { timeout: 5_000, encoding: 'utf8' },
     );
