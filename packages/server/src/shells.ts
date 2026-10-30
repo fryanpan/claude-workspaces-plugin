@@ -183,8 +183,14 @@ function readRegularFile(p: string) {
   }
 }
 
-export function serveStatic(p: string, cacheControl?: string): Response | null {
-  const buf = readRegularFile(p);
+/** `read` answers the bytes, or null for nothing to serve; a mock passes its
+ *  guarded reader (`readMockupBytes`). */
+export function serveStatic(
+  p: string,
+  cacheControl?: string,
+  read: (p: string) => Uint8Array<ArrayBuffer> | null = readRegularFile,
+): Response | null {
+  const buf = read(p);
   if (!buf) return null;
   const ct = CT[extname(p).toLowerCase()] ?? 'application/octet-stream';
   return new Response(buf, {

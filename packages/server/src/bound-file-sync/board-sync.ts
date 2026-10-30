@@ -14,8 +14,9 @@
  * new token in the Keychain gets that one.
  */
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { readSmallFile, replaceFile } from '@claude-workspaces/core/safe-file';
 import { configuredHostFetch } from '../outbound-fetch.ts';
 import { type MirrorMark, type MirrorSocket, createDocMirror } from './doc-mirror.ts';
 import type { SyncConfig } from './sync-config.ts';
@@ -25,12 +26,15 @@ interface State {
   marks: Record<string, MirrorMark>;
 }
 
+/** The most of a state file read back: marks for a board's docs. */
+const STATE_MAX = 4 * 1024 * 1024;
+
 const RENEW_EVERY_MS = 12 * 60 * 60 * 1000;
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 function readState(path: string): State {
   try {
-    const s = JSON.parse(readFileSync(path, 'utf8')) as State;
+    const s = JSON.parse(readSmallFile(path, STATE_MAX) ?? '') as State;
     return { marks: s.marks ?? {}, ...(s.token ? { token: s.token } : {}) };
   } catch {
     return { marks: {} };
@@ -63,11 +67,9 @@ export function startBoardSync(opts: BoardSyncOptions) {
     state.token && state.token.from === from && state.token.value
       ? state.token.value
       : config.boardToken;
-  const save = () => {
-    const tmp = `${statePath}.tmp`;
-    writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
-    renameSync(tmp, statePath);
-  };
+  // Through a random temp name, never through a link: the state folder
+  // has lived where a walled lead can write (`safe-file.ts`).
+  const save = () => replaceFile(statePath, JSON.stringify(state), 0o600);
   const headers = (): Record<string, string> => ({
     authorization: `Bearer ${token}`,
     ...(config.access

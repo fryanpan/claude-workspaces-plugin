@@ -15,8 +15,10 @@ import { spawnSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { BOARD_SERVER_PORTS } from './lead-sandbox-wall.ts';
 
-/** Why the list was not stored, or null once the server holds it. */
-export type RootsRegistrar = (boardId: string, roots: string[]) => string | null;
+/** Why the list was not stored, or null once the server holds it. `slugs`
+ *  are the transcript and scratch folder names the wall opens to the lead
+ *  (`projectSlugs`), which the server refuses as the lead's. */
+export type RootsRegistrar = (boardId: string, roots: string[], slugs: string[]) => string | null;
 
 /**
  * The folders a lead can write, resolved, outermost first: its projects and
@@ -49,7 +51,7 @@ export function rootsUrl(boardId: string, port = BOARD_SERVER_PORTS[0]): string 
 }
 
 /** The real registrar: one `curl` PUT, bounded at five seconds. */
-export const registerRootsWithCurl: RootsRegistrar = (boardId, roots) => {
+export const registerRootsWithCurl: RootsRegistrar = (boardId, roots, slugs) => {
   const r = spawnSync(
     '/usr/bin/curl',
     [
@@ -65,7 +67,7 @@ export const registerRootsWithCurl: RootsRegistrar = (boardId, roots) => {
       '-H',
       'content-type: application/json',
       '--data-binary',
-      JSON.stringify({ roots }),
+      JSON.stringify({ roots, slugs }),
       rootsUrl(boardId),
     ],
     { encoding: 'utf8' },

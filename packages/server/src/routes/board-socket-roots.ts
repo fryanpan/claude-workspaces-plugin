@@ -3,7 +3,7 @@
  * (`board-socket-roots.ts`):
  *
  *   GET /api/board-sockets/<board>/roots   the list
- *   PUT /api/board-sockets/<board>/roots   replace it: `{ roots: string[] }`
+ *   PUT /api/board-sockets/<board>/roots   replace it: `{ roots: string[], slugs?: string[] }`
  *
  * Loopback only, like the board token routes beside it: refused through the
  * edge (`cf-ray`), from a peer that is not loopback, from a browser and from
@@ -59,7 +59,7 @@ export async function handleBoardSocketRootsRoutes(
   if (req.method === 'GET') return j(200, { boardId, roots: ctx.roots.rootsOf(boardId) });
   if (req.method !== 'PUT') return j(405, { error: 'method not allowed' });
   const body = await ctx.safeJson(req);
-  const res = ctx.roots.set(boardId, body?.roots);
+  const res = ctx.roots.set(boardId, body?.roots, body?.slugs ?? []);
   if (!res.ok) return j(400, { error: 'bad_roots', message: res.error });
   return j(200, { ok: true, boardId, roots: res.roots });
 }

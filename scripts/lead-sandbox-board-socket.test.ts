@@ -46,12 +46,14 @@ function launch(boardWall: boolean, refuse: string | null = null) {
   const spawned: { env: NodeJS.ProcessEnv }[] = [];
   const lines: string[] = [];
   const registered: [string, string[]][] = [];
+  const named: string[][] = [];
   const deps: LaunchDeps = {
     platform: 'darwin',
     say: (line) => lines.push(line),
     readToken: (service) => (service === TOKEN_SERVICE ? STORED : null),
-    registerRoots: (boardId, roots) => {
+    registerRoots: (boardId, roots, slugs) => {
       registered.push([boardId, roots]);
+      named.push(slugs);
       return refuse;
     },
     spawn: (_file, _args, opts) => {
@@ -61,7 +63,7 @@ function launch(boardWall: boolean, refuse: string | null = null) {
   };
   const argv = ['--config', configFile(boardWall), '--profiles', join(root, 'profiles')];
   const code = main([...argv, '--lead', 'harborlight-lead', '--', 'claude'], deps);
-  return { code, env: spawned[0]?.env ?? {}, said: lines.join('\n'), registered };
+  return { code, env: spawned[0]?.env ?? {}, said: lines.join('\n'), registered, named };
 }
 
 beforeEach(() => {
@@ -91,6 +93,14 @@ describe('launching a walled lead', () => {
         'w-harbor',
         [realpathSync(join(root, 'shared')), realpathSync(join(root, 'dev', 'harborlight'))],
       ],
+    ]);
+  });
+
+  it('names the transcript folders its wall opens, by both spellings of its project', () => {
+    const project = join(root, 'dev', 'harborlight');
+    const slug = (p: string) => p.replace(/[^a-zA-Z0-9]/g, '-');
+    expect(launch(true).named).toEqual([
+      [...new Set([slug(project), slug(realpathSync(project))])],
     ]);
   });
 

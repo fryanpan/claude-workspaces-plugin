@@ -3,7 +3,15 @@
  * the one-time shape marker, stderr. Everything decided is in
  * `./agent-notes.ts`; this file only wires the process to it.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  constants,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { type NoteKind, blockDecision, runHook } from './agent-notes.ts';
@@ -15,24 +23,62 @@ const DISCOVERY_DIRS = ['claude-workspaces', 'live-feedback'];
 
 export function discoveryPort(): number | undefined {
   for (const dir of DISCOVERY_DIRS) {
-    const path = join(homedir(), '.claude', dir, 'server.json');
-    if (!existsSync(path)) continue;
-    const j = JSON.parse(readFileSync(path, 'utf8')) as { port?: unknown };
+    const text = readSmallFile(join(homedir(), '.claude', dir, 'server.json'));
+    if (text === null) continue;
+    const j = JSON.parse(text) as { port?: unknown };
     if (typeof j.port === 'number') return j.port;
   }
   return undefined;
 }
 
+/** The most of the discovery file read: it is a few dozen bytes. */
+const DISCOVERY_MAX = 64 * 1024;
+
+/**
+ * A regular file's text, never through a link and never blocking on a FIFO,
+ * or null. A walled lead can write `~/.claude`, so the discovery file may be
+ * either; a plain read of a FIFO would hang every session's hook. The same
+ * rule as `@claude-workspaces/core/safe-file`, spelled here because the
+ * installed plugin cannot import it.
+ */
+function readSmallFile(path: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > DISCOVERY_MAX) return null;
+    return readFileSync(fd, 'utf8');
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** A marker per hook so the live payload's key names are logged once per
  *  machine, not once per turn. Best effort: an unwritable marker means the
  *  line repeats, which is noise, not harm. */
-function shapeSeen(kind: NoteKind): boolean {
+export function shapeSeen(kind: NoteKind): boolean {
   try {
     const dir = join(homedir(), '.claude', DISCOVERY_DIRS[0]);
     const marker = join(dir, `hook-shape-${kind}.seen`);
-    if (existsSync(marker)) return true;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(marker, `${new Date().toISOString()}\n`);
+    // Created new and never through a link: a link (even a dangling one) or
+    // any file already at the name fails the open, which reads as seen.
+    const fd = openSync(
+      marker,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o644,
+    );
+    try {
+      writeSync(fd, `${new Date().toISOString()}\n`);
+    } finally {
+      closeSync(fd);
+    }
     return false;
   } catch {
     return true;

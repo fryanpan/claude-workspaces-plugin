@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkoutBranch } from './doc-origin-repo.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
@@ -97,7 +97,7 @@ function hashOf(path: string): string | null {
 
 function mtimeOf(path: string): number {
   try {
-    return statSync(path).mtimeMs;
+    return boundFiles.guards.statSync(path).mtimeMs;
   } catch {
     return 0;
   }

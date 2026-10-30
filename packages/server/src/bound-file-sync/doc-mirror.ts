@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { prose } from '@claude-workspaces/core';
+import { replaceFile } from '@claude-workspaces/core/safe-file';
 import * as decoding from 'lib0/decoding';
 import * as encoding from 'lib0/encoding';
 import * as syncProtocol from 'y-protocols/sync';
@@ -114,7 +115,9 @@ export function createDocMirror(opts: DocMirrorOptions) {
       opts.backupDir,
       `${opts.docId.replace(/[^A-Za-z0-9._-]/g, '_')}.${new Date().toISOString().replace(/[:.]/g, '-')}.${basename(opts.path)}`,
     );
-    writeFileSync(to, text, { mode: 0o600 });
+    // Never through a link at the name: the backup folder has lived where a
+    // walled lead can write.
+    replaceFile(to, text, 0o600);
     opts.log(`${opts.docId}: the doc wins; the file it replaced is kept at ${to}`);
   }
 

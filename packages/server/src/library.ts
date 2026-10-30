@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import type { Stats } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, posix } from 'node:path';
 import type { DocMeta } from '@claude-workspaces/core';
@@ -13,6 +13,7 @@ import {
   placeAll,
   placedDoc,
 } from './library-location.ts';
+import { boundFiles } from './slow-fs.ts';
 
 /**
  * A board's Library: the meetings and the files a person comes to the board to
@@ -481,17 +482,16 @@ export function createMarkdownLister(
     const files: ProjectFile[] = [];
     for (const relPath of scanFolderPaths(root)) {
       if (!isMarkdownPath(relPath)) continue;
-      // `throwIfNoEntry` covers ENOENT alone. Between the walk and this stat a
-      // folder can become a file (ENOTDIR) or lose its permissions (EACCES),
-      // and the page owes the reader every other file regardless — so one
-      // unreadable path drops its own row rather than the whole listing.
-      let st: ReturnType<typeof statSync> | undefined;
+      // Missing, now a file (ENOTDIR) or unreadable (EACCES): one bad path
+      // drops its own row, and the page owes the reader every other file.
+      let st: Stats;
       try {
-        st = statSync(join(root, relPath), { throwIfNoEntry: false });
+        // Guarded: a plain stat follows a link out of a walled lead's project.
+        st = boundFiles.guards.statSync(join(root, relPath));
       } catch {
         continue;
       }
-      if (st?.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs, ...birthOf(st) });
+      if (st.isFile()) files.push({ relPath, mtimeMs: st.mtimeMs, ...birthOf(st) });
     }
     cache.set(root, { at: now(), files });
     return files;

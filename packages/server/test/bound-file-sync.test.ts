@@ -11,11 +11,13 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -181,6 +183,11 @@ describe('bound-file sync', () => {
     );
 
     const before = readFileSync(planPath, 'utf8');
+    // The state folder sits where a walled lead can write: a link left at
+    // the temp name the state used to be saved through must not be followed.
+    mkdirSync(stateDir, { recursive: true });
+    const leadOwned = join(scratch, 'lead-owned.json');
+    symlinkSync(leadOwned, join(stateDir, `${boardId}.json.tmp`));
     const s1 = sync(token);
     await s1.ready;
     await waitFor(() => (s1.synced() ? true : null), {
@@ -191,6 +198,8 @@ describe('bound-file sync', () => {
     expect(existsSync(join(stateDir, 'replaced'))).toBe(false);
     // The state file holds the renewed token, owner-only.
     expect(readdirSync(stateDir)).toContain(`${boardId}.json`);
+    expect(existsSync(leadOwned)).toBe(false);
+    expect(lstatSync(join(stateDir, `${boardId}.json`)).isFile()).toBe(true);
   }, 90_000);
 
   it('writes a remote edit into the file, and sends a file edit to the doc', async () => {
