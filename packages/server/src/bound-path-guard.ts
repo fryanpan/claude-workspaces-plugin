@@ -417,11 +417,11 @@ export class PathGuards {
    *  covers it. Throws as `readFileSync` does, and `GuardRefused`. */
   readBoundedSync(path: string, max: number): string | 'too-large' {
     const bytes = this.readBoundedBytesSync(path, max);
-    return bytes === 'too-large' ? bytes : bytes.toString('utf8');
+    return bytes === 'too-large' ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('utf8');
   }
 
   /** `readBoundedSync`, as bytes. */
-  readBoundedBytesSync(path: string, max: number): Buffer | 'too-large' {
+  readBoundedBytesSync(path: string, max: number): Uint8Array<ArrayBuffer> | 'too-large' {
     if (!this.allows(path)) throw new GuardRefused(path);
     const fd = this.covers(path)
       ? openCheckedSync(path, (real) => this.landsAll(path, real))

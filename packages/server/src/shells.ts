@@ -188,7 +188,7 @@ function readRegularFile(p: string) {
 export function serveStatic(
   p: string,
   cacheControl?: string,
-  read: (p: string) => Buffer | null = readRegularFile,
+  read: (p: string) => Uint8Array<ArrayBuffer> | null = readRegularFile,
 ): Response | null {
   const buf = read(p);
   if (!buf) return null;

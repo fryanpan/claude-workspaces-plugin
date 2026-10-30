@@ -127,7 +127,7 @@ const MOCKUP_FILE_MAX = 64 * 1024 * 1024;
 export function readMockupBytes(
   path: string,
   guards: PathGuards = boundFiles.guards,
-): Buffer | null {
+): Uint8Array<ArrayBuffer> | null {
   try {
     const bytes = guards.readBoundedBytesSync(path, MOCKUP_FILE_MAX);
     return bytes === 'too-large' ? null : bytes;
