@@ -10,9 +10,10 @@ script an agent runs from the Mac; the files are in `infra/project-machine/`.
 
 | Part | What it does |
 | --- | --- |
-| `Dockerfile` | The board server and both browser bundles, plus cloudflared, and three users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload |
+| `Dockerfile` | The board server and both browser bundles, cloudflared, Claude Code (pinned by version and sha512) and tmux, and four users: `cw` for the server, `cwtunnel` for cloudflared, `cwbackup` for the backup upload, `lead` for the lead agent |
 | `fly.toml` | One machine, one volume at `/data`, no public service ports. `deploy.ts` writes the app name and size in at deploy time |
-| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so the server's user cannot read the tunnel token or the bucket credential |
+| `entrypoint.sh` | Stays root and starts the server on `127.0.0.1:8787` as `cw`, the tunnel as `cwtunnel`, the lead agent's supervisor as `lead`, a loopback health check and the backup loop; if any stops, the machine exits and Fly restarts it. Each child gets only its own secrets, so no child's user can read another's |
+| `lead.sh` | Keeps one Claude Code session running in a tmux session named `lead`, and starts it again when it ends (below) |
 | `backup-once.sh`, `backup.ts` | Tars the data dir and the agents' session transcripts and encrypts them to the project's public key as `cw`, then PUTs the file to the bucket as `cwbackup`. Every 6 hours, the first an hour after boot |
 | `restore.ts` | Decrypts a downloaded snapshot onto a data dir (and a transcripts dir) that is missing or empty. Refuses anything else |
 
@@ -174,9 +175,59 @@ half: a project machine is deployed by `machine:deploy`, never by pulling
 itself). Then add the project's boards under the machine's origin hostname in
 the router's `BOARD_ORIGINS`.
 
-The plan's unchecked point belongs here too: whether Claude Code's Remote
-Control session runs on this machine in a long-lived terminal. That needs the
-lead's own user on the machine and is the next task, not this image.
+## The lead agent
+
+The project's lead agent is a Claude Code session on the machine, beside the
+board server. It runs only when the machine has a Claude Code sign-in for it:
+`machine:deploy` sets the Fly secret `CLAUDE_CODE_OAUTH_TOKEN` from the Mac's
+Keychain item `claude-lead-oauth-token`, the same item the walled lead on the
+Mac signs in from (`scripts/lead-sandbox-token.ts`). It holds the token that
+`claude setup-token` prints, BASE64. `--claude-account <label>` reads
+`claude-lead-oauth-token.<label>` instead, for a lead that signs in as another
+of the owner's accounts. Without the item the deploy says `no lead agent runs`
+and the machine runs the board alone.
+
+- **Its user.** The session runs as `lead`, with an environment the
+  entrypoint builds from nothing: its sign-in, `CW_BASE_URL=http://127.0.0.1:8787`,
+  `CW_AGENT_NAME` (`<project>-lead` unless `CW_LEAD_AGENT_NAME` is set) and
+  the updater turned off. It does not hold the server's Claude key, the tunnel
+  token or the bucket credential, and the server does not hold its sign-in.
+  The server's data dir is mode 700, so the lead reads the board only through
+  the server.
+- **Its board.** The plugin is the image's own copy (`--plugin-dir
+  /app/packages/plugin`), from the same commit as the server, so it updates
+  with each deploy rather than from the plugin cache. Its MCP reaches the
+  server on loopback, which the server treats as a local caller.
+- **Its files.** Its working folder is `/data/lead/work` and its transcripts
+  are in `/data/lead/claude-projects`, both on the volume, so they survive a
+  restart. They are not in the snapshots yet: the snapshot runs as `cw`, which
+  cannot read them.
+- **When it ends.** `lead.sh` checks the tmux session every 5 seconds and
+  starts a new session (not a resumed one) after 5s, then 10, 20, 40 and 50s
+  for ends in a row, so a restart comes within a minute. After six quick ends
+  in a row (each under five minutes) it tries every ten minutes. A session
+  that lasts five minutes resets the count.
+- **Memory.** Not measured on a machine yet. A Claude Code session on the Mac
+  holds several hundred MB, so deploy a machine with a lead at
+  `--memory 2048`; the default 512 is for a board alone.
+
+To look at the session (`--pty`, because tmux needs a terminal):
+
+```bash
+fly ssh console --pty --app cw-<project> -C \
+  "setpriv --reuid=lead --regid=lead --init-groups tmux attach -t lead"
+```
+
+Detach with `Ctrl-b d`; exiting Claude Code ends the session, and the
+supervisor starts another. `fly secrets set CW_LEAD_REMOTE_CONTROL=1` starts
+each session with Remote Control, named after the agent.
+
+Still unchecked on a real machine: whether a `setup-token` sign-in allows
+Remote Control, and whether Claude Code asks anything on its first run that
+the seeded `~/.claude.json` does not answer. Attach once after the first
+deploy and look. The session runs in Claude Code's default permission mode,
+so it asks before each tool; nobody answers unless a person attaches or uses
+Remote Control. The lead has no GitHub access.
 
 ## GitHub events for a board here
 
