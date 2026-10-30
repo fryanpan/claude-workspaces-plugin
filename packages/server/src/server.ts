@@ -2043,6 +2043,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinkHosts,
     recallCallbackHost,
     accessOnlyBrowserHosts,
+    loopbackSkipsAccess: opts.loopbackSkipsAccess ?? false,
     proxiedTrustedEmails,
     // Read at request time; the notice is built further down.
     sharingOffDoor: (method, pathname) =>

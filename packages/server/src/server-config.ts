@@ -287,6 +287,10 @@ export function resolveServerConfig(opts: {
    * CLOSED, and an unset variable is the secure default rather than the old
    * behaviour.
    */
+  /** `CW_LOOPBACK_SKIPS_ACCESS=1`: see ServerOptions.loopbackSkipsAccess. */
+  const loopbackSkipsAccess = ['1', 'true', 'yes', 'on'].includes(
+    (env.CW_LOOPBACK_SKIPS_ACCESS ?? '').trim().toLowerCase(),
+  );
   const accessOnlyBrowserHosts = !['0', 'false', 'no', 'off'].includes(
     (env.CW_ACCESS_ONLY_BROWSER_HOSTS ?? '').trim().toLowerCase(),
   );
@@ -683,6 +687,7 @@ export function resolveServerConfig(opts: {
     requireAgentToken,
     boardSocketDir,
     accessOnlyBrowserHosts,
+    loopbackSkipsAccess,
     emailCodeSignIn,
     ownerEmail,
     trustedHosts,

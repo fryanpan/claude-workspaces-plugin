@@ -154,6 +154,16 @@ export interface ServerOptions {
    */
   accessOnlyBrowserHosts?: boolean;
   /**
+   * In whole-server Access mode (an Access audience and no sharing surface),
+   * admit a request from this machine itself without a token: a local Host
+   * from a loopback peer, never through the Cloudflare edge. A project
+   * machine sets it (`CW_LOOPBACK_SKIPS_ACCESS=1` in its fly.toml), because
+   * the server listens on loopback only and its own tools (the board move's
+   * check, the restore drill) read it there. Off by default, so a server
+   * with a LAN name stays gated.
+   */
+  loopbackSkipsAccess?: boolean;
+  /**
    * Whether this server offers its OWN emailed-code sign-in: the `/signin`
    * page and the `/api/auth/start` + `/api/auth/verify` routes.
    *
