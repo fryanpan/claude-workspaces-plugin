@@ -65,7 +65,7 @@ async function boot(env: NodeJS.ProcessEnv, arg: ArgReader = noArgs) {
 describe('the board socket flag', () => {
   it('is on by default for prod’s port, and CW_BOARD_SOCKETS=0 turns it off', () => {
     const fallback = `/private/tmp/cw-${FAKE_UID}-boards`;
-    expect(resolveBoardSocketDir({}, noArgs, FAKE_UID, 8787)).toBe(fallback);
+    expect(resolveBoardSocketDir({}, noArgs, FAKE_UID, 8787, 'darwin')).toBe(fallback);
     expect(
       resolveBoardSocketDir({ CW_BOARD_SOCKETS: '0' }, noArgs, FAKE_UID, 8787),
     ).toBeUndefined();
@@ -78,7 +78,22 @@ describe('the board socket flag', () => {
       repoRoot: '/nonexistent-repo',
       arg: noArgs,
     });
-    expect(cfg.boardSocketDir).toBe(`/private/tmp/cw-${process.getuid?.() ?? 0}-boards`);
+    expect(cfg.boardSocketDir).toBe(
+      process.platform === 'darwin'
+        ? `/private/tmp/cw-${process.getuid?.() ?? 0}-boards`
+        : undefined,
+    );
+  });
+
+  it('is off by default on Linux, even on prod’s port', () => {
+    expect(resolveBoardSocketDir({}, noArgs, FAKE_UID, 8787, 'linux')).toBeUndefined();
+    expect(resolveBoardSocketDir({}, noArgs, FAKE_UID, 8787, 'darwin')).toBe(
+      `/private/tmp/cw-${FAKE_UID}-boards`,
+    );
+    // Asked for, Linux still gets it.
+    expect(
+      resolveBoardSocketDir({ CW_BOARD_SOCKET_DIR: '/tmp/cw-b' }, noArgs, FAKE_UID, 8787, 'linux'),
+    ).toBe('/tmp/cw-b');
   });
 
   it('is off by default on any other port: no folder named, none made', async () => {
