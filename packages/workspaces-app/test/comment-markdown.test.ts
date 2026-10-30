@@ -33,6 +33,20 @@ describe('renderCommentMarkdown', () => {
     expect(out).toContain('<li>two</li>');
   });
 
+  it('renders a numbered list, keeping a bold lead-in on each item', () => {
+    expect(renderCommentMarkdown('1. **Ten.** Matches the table.\n2. **Fifteen.** Room.')).toBe(
+      '<ol class="cm-list"><li><strong>Ten.</strong> Matches the table.</li>' +
+        '<li><strong>Fifteen.</strong> Room.</li></ol>',
+    );
+  });
+
+  it('keeps the number a list starts from, and splits a numbered list from a bullet one', () => {
+    expect(renderCommentMarkdown('3. three\n4. four\n- dot')).toBe(
+      '<ol class="cm-list" start="3"><li>three</li><li>four</li></ol>' +
+        '<ul class="cm-list"><li>dot</li></ul>',
+    );
+  });
+
   it('keeps inline-code content literal (snake_case is not italicized)', () => {
     expect(renderCommentMarkdown('`estimated_effort_h`')).toContain(
       '<code>estimated_effort_h</code>',

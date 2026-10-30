@@ -7,7 +7,8 @@
  * There is no raw-HTML passthrough, so a comment containing `<script>` is inert.
  *
  * Supported: **bold**, *italic* / _italic_, `code`, ~~strike~~,
- * [label](url) (http/https/mailto only), `-`/`*` bullet lists, `#` headings,
+ * [label](url) (http/https/mailto only), `-`/`*` bullet lists, `1.` numbered
+ * lists (keeping the number they start from), `#` headings,
  * ``` / ~~~ fenced code (literal, escaped, no marks inside), and line breaks.
  *
  * Plus one convenience: a BARE workspace URL (a pasted board / task / doc /
@@ -207,7 +208,7 @@ const FENCE_LINE = /^\s{0,3}(```|~~~)/;
 export function renderCommentMarkdown(text: string): string {
   const lines = absorbHardBreaks(text).replace(/\r\n/g, '\n').split('\n');
   const html: string[] = [];
-  let listOpen = false;
+  let list: 'ul' | 'ol' | null = null;
   let para: string[] = [];
   let fence: string[] | null = null;
   const flushPara = () => {
@@ -217,9 +218,9 @@ export function renderCommentMarkdown(text: string): string {
     }
   };
   const closeList = () => {
-    if (listOpen) {
-      html.push('</ul>');
-      listOpen = false;
+    if (list) {
+      html.push(`</${list}>`);
+      list = null;
     }
   };
   const closeFence = () => {
@@ -252,18 +253,25 @@ export function renderCommentMarkdown(text: string): string {
     // hashes is required, so `#4` stays an issue number.
     const head = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/);
     const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    const numbered = bullet ? null : line.match(/^\s*(\d{1,9})[.)]\s+(.*)$/);
     if (head) {
       flushPara();
       closeList();
       const level = Math.min(6, (head[1] ?? '#').length + 2);
       html.push(`<h${level} class="cm-h">${inline(escapeHtml(head[2] ?? ''))}</h${level}>`);
-    } else if (bullet) {
+    } else if (bullet || numbered) {
       flushPara();
-      if (!listOpen) {
-        html.push('<ul class="cm-list">');
-        listOpen = true;
+      const tag = bullet ? 'ul' : 'ol';
+      if (list !== tag) {
+        closeList();
+        // A list that starts past 1 keeps its number, so an item split from
+        // its list by a paragraph does not read as a second item one.
+        const start =
+          numbered && Number(numbered[1]) !== 1 ? ` start="${Number(numbered[1])}"` : '';
+        html.push(`<${tag} class="cm-list"${start}>`);
+        list = tag;
       }
-      html.push(`<li>${inline(escapeHtml(bullet[1] ?? ''))}</li>`);
+      html.push(`<li>${inline(escapeHtml((bullet ? bullet[1] : numbered?.[2]) ?? ''))}</li>`);
     } else if (line.trim() === '') {
       flushPara();
       closeList();
