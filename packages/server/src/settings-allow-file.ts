@@ -38,19 +38,15 @@
  * file and only `bin.ts` calls it; every other caller, tests included, passes
  * a path it chose.
  */
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import {
+  type PendingTemp,
+  commitTemp,
+  discardTemp,
+  writeTempBeside,
+} from '@claude-workspaces/core/safe-file';
 
 /** Where the owner's user settings live: `$CLAUDE_CONFIG_DIR/settings.json`,
  *  else `~/.claude/settings.json`. Called from `bin.ts` alone. */
@@ -198,28 +194,32 @@ export function editAllowList(
   const text = `${JSON.stringify(nextRoot, null, indentOf(parsed.bytes))}${trailing}`;
 
   const mode = parsed.bytes === null ? 0o600 : statSync(file).mode & 0o777;
-  const tmp = join(dirname(file), `.settings-${process.pid}-${Date.now()}.cw-tmp`);
+  // A random temp name, created new and never through a link: a walled lead
+  // can write this folder, and a guessable name (it was pid + time) let a
+  // link planted there carry the write elsewhere and then be renamed onto
+  // the settings file itself. `commitTemp` checks the name still holds the
+  // file written before renaming it.
+  let pending: PendingTemp | null = null;
   try {
     if (parsed.bytes !== null) {
       const backup = `${file}${SETTINGS_BACKUP_SUFFIX}`;
       copyFileSync(file, backup);
       chmodSync(backup, 0o600);
     }
-    writeFileSync(tmp, text, { mode });
-    chmodSync(tmp, mode);
+    pending = writeTempBeside(file, text, mode);
     hooks.beforeSwap?.();
     const now = readBytes(file);
     if (!now.ok || now.bytes !== parsed.bytes) {
-      rmSync(tmp, { force: true });
+      discardTemp(pending);
       return {
         ok: false,
         error: 'changed-underfoot',
         message: 'the settings file changed while this edit was being made, so nothing was written',
       };
     }
-    renameSync(tmp, file);
+    commitTemp(pending, file);
   } catch {
-    rmSync(tmp, { force: true });
+    if (pending) discardTemp(pending);
     return { ok: false, error: 'write-failed', message: 'the settings file could not be written' };
   }
   return { ok: true, added, removed };

@@ -183,3 +183,49 @@ describe('where the real file would be', () => {
     expect(defaultUserSettingsPath({}).endsWith(join('.claude', 'settings.json'))).toBe(true);
   });
 });
+
+describe('a folder somebody else can write', () => {
+  // A walled lead can write `~/.claude` outside the settings files
+  // themselves, and the server's pid is in the discovery file. If the temp
+  // name could be guessed, a link planted there would carry the write to a
+  // file the lead edits and then rename the link itself onto settings.json.
+  it('a link at any guessable temp name is never written through or renamed into place', () => {
+    const path = tempSettings(REALISTIC);
+    const dir = join(path, '..');
+    const victim = join(dir, 'lead-owned.json');
+    const start = Date.now();
+    for (let ms = start - 50; ms < start + 3_000; ms++)
+      symlinkSync(victim, join(dir, `.settings-${process.pid}-${ms}.cw-tmp`));
+    const res = editAllowList(path, { add: ['Bash(git tag:*)'] });
+    expect(res.ok).toBe(true);
+    expect(existsSync(victim)).toBe(false);
+    expect(lstatSync(path).isSymbolicLink()).toBe(false);
+    expect(readAllowList(path)).toEqual({
+      ok: true,
+      allow: ['Bash(git status:*)', 'Bash(git tag:*)'],
+    });
+  });
+
+  it('a temp file swapped for a link before the rename is refused', () => {
+    const path = tempSettings(REALISTIC);
+    const dir = join(path, '..');
+    const victim = join(dir, 'lead-owned.json');
+    writeFileSync(victim, '{}');
+    const res = editAllowList(
+      path,
+      { add: ['Bash(git tag:*)'] },
+      {
+        beforeSwap: () => {
+          for (const name of readdirSync(dir)) {
+            if (!name.endsWith('.tmp') && !name.endsWith('.cw-tmp')) continue;
+            rmSync(join(dir, name));
+            symlinkSync(victim, join(dir, name));
+          }
+        },
+      },
+    );
+    expect(res.ok).toBe(false);
+    expect(lstatSync(path).isSymbolicLink()).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe(REALISTIC);
+  });
+});
