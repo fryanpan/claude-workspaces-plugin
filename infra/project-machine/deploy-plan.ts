@@ -142,9 +142,15 @@ export function requiredSecrets(tunnel: TunnelMode, orgKey = false): string[] {
 
 /**
  * `refresh` names secrets to set even though they exist: the tunnel token,
- * when this run creates the tunnel it belongs to.
+ * when this run creates the tunnel it belongs to. `settings` names the
+ * per-project settings this run found a source for (`settings.ts`).
  */
-export function plan(cfg: ProjectConfig, obs: Observed, refresh: readonly string[] = []): Action[] {
+export function plan(
+  cfg: ProjectConfig,
+  obs: Observed,
+  refresh: readonly string[] = [],
+  settings: readonly string[] = [],
+): Action[] {
   const actions: Action[] = [];
   if (!obs.app) actions.push({ kind: 'create-app' });
   if (obs.volumes === 0) actions.push({ kind: 'create-volume' });
@@ -155,9 +161,10 @@ export function plan(cfg: ProjectConfig, obs: Observed, refresh: readonly string
   if (bucketIsNew || !obs.lifecycle) actions.push({ kind: 'set-lifecycle' });
   // A secret that exists is left alone: its value came from the Keychain
   // entry it is named after, and that entry is only ever made once.
-  const names = requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey)).filter(
-    (n) => !obs.secrets.has(n) || refresh.includes(n),
-  );
+  const names = [
+    ...requiredSecrets(cfg.tunnel, obs.keychain.has(cfg.keychain.orgKey)),
+    ...settings,
+  ].filter((n) => !obs.secrets.has(n) || refresh.includes(n));
   if (names.length > 0) actions.push({ kind: 'set-secrets', names });
   // A machine that ran a quick tunnel keeps running one while this is set.
   const unset =
