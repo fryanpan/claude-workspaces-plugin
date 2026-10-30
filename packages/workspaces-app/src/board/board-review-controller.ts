@@ -31,6 +31,7 @@ import {
   secretsRequestFor,
 } from './board-review-model.ts';
 import { panelAnswerRequest, panelQuestionRequest } from './board-review-render.ts';
+import { postReviewAnswer, refusalMessage } from './review-answer-send.ts';
 
 /**
  * What the verbs below reach outside themselves for. Named so a reader can see
@@ -264,9 +265,10 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
   ): Promise<boolean> {
     const reqSpec = panelAnswerRequest(task, item, text, optionId);
     if (!reqSpec) return false;
-    const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
+    const res = await postReviewAnswer(reqSpec, author, item.headline);
+    if (!res) return false;
     if (!res.ok) {
-      showToast('Posting the answer failed — your text is still in the box');
+      showToast(refusalMessage(res, 'Posting the answer failed — your text is still in the box'));
       return false;
     }
     // A question converted server-side answered nothing — say what actually
@@ -462,9 +464,10 @@ export function createBoardReviewController(deps: BoardReviewControllerDeps) {
     // posted its answer at /workspaces/<ws>/docs/undefined/….
     const reqSpec = reviewReplyRequest(item, text, optionId);
     if (!reqSpec) return false;
-    const res = await send(reqSpec.path, 'POST', { ...reqSpec.body, author });
+    const res = await postReviewAnswer(reqSpec, author, item.review?.headline ?? item.ask);
+    if (!res) return false;
     if (!res.ok) {
-      showToast('Posting the reply failed — your text is still in the box');
+      showToast(refusalMessage(res, 'Posting the reply failed — your text is still in the box'));
       return false;
     }
     // The server read the words as a QUESTION asked back at the item —

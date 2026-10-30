@@ -67,6 +67,7 @@ import { injectMockupLive, parseVersionParam } from '../mockup-live.ts';
 import { listMockupVersions, readMockupVersion, recordMockupVersion } from '../mockup-versions.ts';
 import { injectWidget } from '../mockup-widget.ts';
 import { decodePathParam } from '../path-params.ts';
+import { landingPath } from '../share/share-landing.ts';
 import {
   HTML_SHELL_HEADERS,
   appCacheControl,
@@ -181,6 +182,9 @@ export interface ShellStaticRequest {
   /** A person proof on this request names the owner. Read only to decide
    *  whether `/` carries Incoming Messages. */
   ownerProven?: boolean;
+  /** This reader holds the owner role on a board — the gate answering an
+   *  owner-only item asks (`requireOwner`). Read only for a mock's dock. */
+  isBoardOwner?: (workspaceId: string) => boolean;
   /** Whether a mock's frame served to this reader carries an app voice
    *  token (`app-voice/gate.ts`). */
   mayMintAppVoice?: boolean;
@@ -324,6 +328,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     url: URL,
     visitor: ShareTarget | null,
     mayMintAppVoice: boolean,
+    isBoardOwner: (workspaceId: string) => boolean,
   ): Response => {
     const notFound = () =>
       new Response(renderMockupNotFound(docId), {
@@ -376,6 +381,8 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     // The ticket items this mock is about, for the dock. Never for a share
     // visitor: the dock shows a visitor only the mock's own thread asks, and
     // a ticket's items are not something a mock's share was a grant over.
+    // Owner-only ones to the board's owner, and answered on the
+    // board rather than here (`mockup-linked-items.ts` says why).
     const linked = visitor
       ? []
       : linkedTaskItems({
@@ -383,6 +390,8 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           tasks: taskStore.listTasks(workspaceId),
           reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
           canonical: (id) => docStore.resolveDocId(id),
+          owner: isBoardOwner(workspaceId),
+          answerAt: (taskId) => landingPath(workspaceId, { kind: 'task', id: taskId }),
         });
     const roundHeaders = {
       // Which copy answered. A page served from the capture is still the
@@ -405,7 +414,10 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
           docId: doc.meta.docId,
           html,
           url,
-          items: linked.map((i) => ({ taskId: i.taskId, reviewItemId: i.reviewItemId })),
+          // The host relays an answer only for what the frame may answer.
+          items: linked
+            .filter((i) => i.answerAt === undefined)
+            .map((i) => ({ taskId: i.taskId, reviewItemId: i.reviewItemId })),
           visitor: Boolean(visitor),
           coachHref: assetHref(readAppAssetManifest(markdownAppDist), 'coach.js'),
           leadChatHref: assetHref(readAppAssetManifest(markdownAppDist), 'lead-chat.js'),
@@ -514,6 +526,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
     visitor,
     visitorHome,
     ownerProven = false,
+    isBoardOwner = () => false,
     mayMintAppVoice = false,
   }: ShellStaticRequest): Response | null | Promise<Response> => {
     // --- Static: widget ---
@@ -654,7 +667,7 @@ export function createShellStatic(ctx: ShellStaticContext): ShellStatic {
       if (!isValidDocId(id)) return j(400, { error: 'bad docId' });
       const canonical = docStore.get(id)?.docId ?? id;
       if (kind === 'mockups') {
-        return serveMockup(canonical, wsSeg, req, url, visitor, mayMintAppVoice);
+        return serveMockup(canonical, wsSeg, req, url, visitor, mayMintAppVoice, isBoardOwner);
       }
       const whiteboard = docStore.peekMeta(canonical);
       if (kind === 'whiteboards' || whiteboard?.type === 'whiteboard') {

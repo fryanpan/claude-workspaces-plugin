@@ -1,4 +1,4 @@
-import { normalizeReviewType } from '@claude-workspaces/core';
+import { type WriteVia, normalizeReviewType } from '@claude-workspaces/core';
 
 /**
  * The two levels a board has, and the one reader of a level off the wire.
@@ -77,10 +77,21 @@ export function refuseOwnerOnlyWrite(
   review: { ownerOnly?: true } | undefined,
   workspaceId: string,
   requireOwner: (workspaceId: string) => Response | null,
+  via?: WriteVia,
 ): Response | null {
   if (review?.ownerOnly !== true) return null;
+  // Never from inside a mock (`via`, `mockup-frame.ts`): its scripts reach the
+  // board through the host as the reader, so on the owner's own screen a page
+  // an agent wrote could answer for them.
+  if (via === 'mock-frame') return Response.json(MOCK_FRAME_OWNER_ONLY_DENIAL, { status: 403 });
   return requireOwner(workspaceId);
 }
+
+/** What a write relayed out of a mock onto an owner-only ask is told. */
+export const MOCK_FRAME_OWNER_ONLY_DENIAL = {
+  error: 'owner_only',
+  message: 'Answer this on the board, not from a mock.',
+};
 
 /**
  * Does this body ask for a secret? Read the way the store will read it.

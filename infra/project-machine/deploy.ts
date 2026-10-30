@@ -5,6 +5,8 @@
  *   bun run machine:deploy --project <name> [--dry-run] [--ref <commit>]
  *       [--region sjc] [--memory 512] [--volume-gb 1] [--tunnel quick|named]
  *       [--router-config <path>] [--access-config <path>]
+ *       [--lead-board <boardId>] [--claude-account <label>]
+ *       [--github-deploy-key <keychain entry>] [--refresh-lead]
  *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
@@ -19,6 +21,14 @@
  *   the org's Anthropic key as CW_ORG_ANTHROPIC_API_KEY, only when the
  *   Keychain holds `cw-<name>-anthropic-api-key`; without it the server
  *   refuses every Claude call
+ *   the lead agent, when the machine has a board to lead (`--lead-board`,
+ *   as CW_LEAD_BOARD): its Claude Code sign-in as CLAUDE_CODE_OAUTH_TOKEN
+ *   from the Keychain's `claude-lead-oauth-token` (or, with
+ *   `--claude-account <label>`, `claude-lead-oauth-token.<label>`), and the
+ *   repo's deploy key as CW_LEAD_GITHUB_DEPLOY_KEY from the Keychain entry
+ *   `--github-deploy-key` names. A machine with a lead needs `--memory 2048`.
+ *   Each is set once, like every secret, except that a run naming its source
+ *   sets it again, and `--refresh-lead` sets all three again
  *   the owner's address, the public address and the Access settings
  *   (`settings.ts`), from the Keychain, `access.local.json` and Cloudflare;
  *   each one whose source is missing is skipped with a line saying why
@@ -40,10 +50,15 @@ import type { CloudflareApi } from './cloudflare.ts';
 import {
   type Action,
   type BucketCredential,
+  LEAD_BOARD_SECRET,
+  LEAD_DEPLOY_KEY_SECRET,
+  LEAD_TOKEN_SECRET,
   ORG_KEY_SECRET,
   type ObservedMachine,
   type ProjectConfig,
   type TunnelMode,
+  leadMemoryError,
+  leadSecrets,
   parseStorageCreate,
   plan,
   projectConfig,
@@ -132,7 +147,9 @@ async function observe(cfg: ProjectConfig) {
         (v) => v.name === cfg.volumeName && v.region === cfg.region && v.state !== 'destroyed',
       ).length
     : 0;
-  const keychain = new Set(Object.values(cfg.keychain).filter((n) => keychainHas(n)));
+  const keychain = new Set(
+    Object.values(cfg.keychain).filter((n): n is string => n !== undefined && keychainHas(n)),
+  );
   const lifecycle = keychain.has(cfg.keychain.bucketAdmin)
     ? await hasLifecycle(bucketAdmin(cfg), cfg.bucket, PREFIX, KEEP_DAYS)
     : false;
@@ -159,9 +176,45 @@ function secretValue(cfg: ProjectConfig, name: string): string {
       return cfg.tunnel;
     case ORG_KEY_SECRET:
       return keychainRead(cfg.keychain.orgKey).trim();
+    case LEAD_TOKEN_SECRET:
+      return leadToken(cfg);
+    case LEAD_BOARD_SECRET:
+      if (cfg.leadBoard === undefined) throw new Error(`no source for secret ${name}`);
+      return cfg.leadBoard;
+    case LEAD_DEPLOY_KEY_SECRET:
+      return deployKey(cfg);
     default:
       throw new Error(`no source for secret ${name}`);
   }
+}
+
+/**
+ * The lead's token, as one line `fly secrets import` can carry. The error
+ * names the entry, never any part of the value.
+ */
+function leadToken(cfg: ProjectConfig): string {
+  const token = keychainRead(cfg.keychain.leadToken).trim();
+  if (!/^[\x21-\x7e]+$/.test(token))
+    throw new Error(
+      `the Keychain entry ${cfg.keychain.leadToken} does not hold a token from \`claude setup-token\` (one line, no spaces)`,
+    );
+  return token;
+}
+
+/**
+ * The deploy key, BASE64 so it is one line. The error names the entry, never
+ * any part of the value.
+ */
+function deployKey(cfg: ProjectConfig): string {
+  const entry = cfg.keychain.deployKey ?? '';
+  const key = keychainRead(entry).trim();
+  if (
+    !/^-----BEGIN OPENSSH PRIVATE KEY-----\n[A-Za-z0-9+/=\n-]+\n-----END OPENSSH PRIVATE KEY-----$/.test(
+      key,
+    )
+  )
+    throw new Error(`the Keychain entry ${entry} does not hold an OpenSSH private key`);
+  return Buffer.from(`${key}\n`).toString('base64');
 }
 
 function deploy(cfg: ProjectConfig): void {
@@ -327,7 +380,8 @@ export async function deployProject(
   const refresh = tunnel?.actions.some((a) => a.kind === 'create-tunnel')
     ? [TUNNEL_TOKEN_SECRET]
     : [];
-  const actions = plan(cfg, await observe(cfg), refresh, [...settings.keys()]);
+  const observed = await observe(cfg);
+  const actions = plan(cfg, observed, refresh, [...settings.keys()]);
   if (tunnel) {
     console.log(
       tunnel.actions.length === 0
@@ -348,6 +402,29 @@ export async function deployProject(
     }
   }
   for (const line of found.skipped) console.log(`[deploy] not set: ${line}`);
+  const tooSmall = leadMemoryError(cfg, observed);
+  if (tooSmall) throw new Error(tooSmall);
+  const lead = leadSecrets(cfg, observed);
+  if (cfg.leadBoard === undefined && !observed.secrets.has(LEAD_BOARD_SECRET))
+    console.log(
+      `[deploy] not set: ${LEAD_BOARD_SECRET}: no --lead-board, so no lead agent runs on the machine`,
+    );
+  else if (!lead.includes(LEAD_TOKEN_SECRET) && !observed.secrets.has(LEAD_TOKEN_SECRET))
+    console.log(
+      `[deploy] not set: ${LEAD_TOKEN_SECRET}: the Keychain has no ${cfg.keychain.leadToken}, so no lead agent runs on the machine`,
+    );
+  if (
+    cfg.leadRefresh.includes(LEAD_DEPLOY_KEY_SECRET) &&
+    cfg.keychain.deployKey === undefined &&
+    observed.secrets.has(LEAD_DEPLOY_KEY_SECRET)
+  )
+    console.log(
+      `[deploy] not set again: ${LEAD_DEPLOY_KEY_SECRET}: no --github-deploy-key names its source`,
+    );
+  if (cfg.keychain.deployKey !== undefined && !lead.includes(LEAD_DEPLOY_KEY_SECRET))
+    console.log(
+      `[deploy] not set: ${LEAD_DEPLOY_KEY_SECRET}: the Keychain has no ${cfg.keychain.deployKey}`,
+    );
   if (dryRun) return actions;
   const ctx: RunContext = { org, settings };
   if (tunnel) {
@@ -391,6 +468,10 @@ async function main(): Promise<void> {
     volumeGb: num(arg(args, 'volume-gb')),
     vmMemoryMb: num(arg(args, 'memory')),
     tunnel: arg(args, 'tunnel') as TunnelMode | undefined,
+    claudeAccount: arg(args, 'claude-account'),
+    githubDeployKey: arg(args, 'github-deploy-key'),
+    leadBoard: arg(args, 'lead-board'),
+    refreshLead: args.includes('--refresh-lead'),
   });
   const routerConfig = arg(args, 'router-config') ?? ROUTER_CONFIG;
   const done = await deployProject(cfg, args.includes('--dry-run'), routerConfig, {

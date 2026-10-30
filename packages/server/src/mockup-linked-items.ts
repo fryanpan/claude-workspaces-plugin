@@ -11,10 +11,18 @@
  *
  * Membership is the Home queue's, not a second copy of it: rows come from
  * `taskReviewItems`, which already drops held, withdrawn, answered and waiting
- * items and done tickets. Owner-only items are dropped here as well, for the
- * dock's own reason (see `dockItems` in the widget).
+ * items and done tickets. An owner-only item goes to the owner alone, the
+ * board's rule for who is asked it (`share/board-role.ts`); everyone else's
+ * page never carries it. On a mock it carries `answerAt`, the task on the
+ * board, and a link there at the end of its words in place of its options:
+ * the mock's own scripts reach the board through the host as the reader
+ * (`mockup-frame.ts`), and an ask only the owner may answer must not be
+ * answerable by a page an agent wrote. On the doc page it does too when its
+ * answer has a door of its own — an access change, a secret, a grant — which
+ * the dock's one answer box is not.
  */
 import { type TaskReviewItem, extractWorkspaceLinks } from '@claude-workspaces/core';
+import type { ReviewAccessChange } from '@claude-workspaces/core/review-access';
 import type { LinkedDockItem } from '@claude-workspaces/core/review-dock';
 import type { Ref, Task } from '@claude-workspaces/core/task-wire';
 import { taskReviewItems } from './review-queue.ts';
@@ -57,8 +65,16 @@ export function linkedTaskItems(args: {
   /** Items about this page whatever they link — a run's output item waiting
    *  on the file it holds — which the reader may mark read. */
   readable?: ReadonlySet<string>;
+  /** The reader is the board's owner, so owner-only items are theirs too. */
+  owner?: boolean;
+  /** The page may answer a plain owner-only item in place: the doc page,
+   *  never a mock. */
+  ownerAnswersHere?: boolean;
+  /** The board's link to a task, for an owner-only item this page shows but
+   *  may not answer. Without it such an item is left off. */
+  answerAt?: (taskId: string) => string;
 }): LinkedDockItem[] {
-  const { docId, tasks, reviewsOf, canonical, readable } = args;
+  const { docId, tasks, reviewsOf, canonical, readable, owner, ownerAnswersHere, answerAt } = args;
   const out: LinkedDockItem[] = [];
   for (const task of tasks) {
     const rows = taskReviewItems([
@@ -71,21 +87,41 @@ export function linkedTaskItems(args: {
       },
     ]);
     for (const row of rows) {
-      if (row.review.ownerOnly) continue;
+      const ownerOnly = row.review.ownerOnly === true;
+      if (ownerOnly && !owner) continue;
+      const elsewhere = ownerOnly && (!ownerAnswersHere || hasOwnDoor(row));
+      if (elsewhere && !answerAt) continue;
       const markRead = readable?.has(row.reviewItemId) === true;
-      const linked = itemLinkedDocIds(row.review.detail, task.links ?? []);
+      const linked = [...itemLinkedDocIds(row.review.detail, task.links ?? []), ...landingOf(row)];
       if (!markRead && !linked.some((id) => canonical(id) === docId)) continue;
+      // Answered elsewhere: the link there ends the ask's own words, which
+      // the dock already renders links in, and the dock draws no controls.
+      const at = elsewhere && answerAt ? answerAt(task.id) : undefined;
       out.push({
         taskId: task.id,
         reviewItemId: row.reviewItemId,
-        review: row.review,
+        review: at
+          ? { ...row.review, detail: `${row.review.detail}\n\n[Answer on the board](${at})` }
+          : row.review,
         by: row.askedBy,
         ts: row.askedAt,
         ...(markRead ? { markRead: true } : {}),
+        ...(at ? { answerAt: at } : {}),
       });
     }
   }
   return out;
+}
+
+/** An item answered through a door of its own rather than `/answer`. */
+function hasOwnDoor(row: { access?: unknown; review: { shape?: string } }): boolean {
+  return row.access !== undefined || row.review.shape === 'secret' || row.review.shape === 'grant';
+}
+
+/** The doc a proposed share link opens on: its card is about that page too. */
+function landingOf(row: { access?: ReviewAccessChange }): string[] {
+  const landing = row.access?.op === 'share-link' ? row.access.link.landing : undefined;
+  return landing?.id && (landing.kind === 'doc' || landing.kind === 'mockup') ? [landing.id] : [];
 }
 
 /**
@@ -102,13 +138,18 @@ export function boardLinkedItems(
   },
   docStore: { resolveDocId(docId: string): string },
   readable?: ReadonlySet<string>,
+  owner = false,
 ): LinkedDockItem[] {
+  const board = `/workspaces/${encodeURIComponent(workspaceId)}`;
   return linkedTaskItems({
     docId,
     tasks: taskStore.listTasks(workspaceId),
     reviewsOf: (taskId) => taskStore.listReviewItems(taskId),
     canonical: (id) => docStore.resolveDocId(id),
     ...(readable ? { readable } : {}),
+    owner,
+    ownerAnswersHere: true,
+    answerAt: (taskId) => `${board}?task=${encodeURIComponent(taskId)}`,
   });
 }
 

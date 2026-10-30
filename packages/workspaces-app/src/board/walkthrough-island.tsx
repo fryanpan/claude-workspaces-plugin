@@ -818,6 +818,10 @@ function WalkCard(props: {
   // (`reviewItemAnchorTarget`); a thread-borne one does not, and renders a
   // line saying where its questions go rather than a link that opens nothing.
   const anchorable = reviewItemAnchorTarget(item) !== null;
+  // An ACCESS card is answered by Approve or Reject and nothing else: typed
+  // words and a question are no decision about who is in, and the access
+  // door refuses both. So it gets neither box, nor the pill.
+  const isAccess = item.thread?.access !== undefined;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   // The phrase the thread card is open on (the selection pill's flow).
   const [draft, setDraft] = useState<string | null>(null);
@@ -830,7 +834,7 @@ function WalkCard(props: {
   // drops it from the queue — so there is no "already asked" state to hide
   // the pill for; a second ask from a stale card is refused by the server
   // and surfaced by the loader.)
-  const pill = useSelectionPill(bodyRef, anchorable && !asking);
+  const pill = useSelectionPill(bodyRef, anchorable && !asking && !isAccess);
   const openThread = (): void => {
     if (!pill.phrase) return;
     setDraft(pill.phrase);
@@ -883,7 +887,7 @@ function WalkCard(props: {
   // A thread-borne item gets ONE LINE saying where its questions go instead:
   // its reply box IS the thread. Without it two identical-looking cards
   // behaved differently and nothing said why.
-  const questionLink = anchorable ? (
+  const questionLink = isAccess ? null : anchorable ? (
     <button
       type="button"
       class="board-btn board-btn-ghost board-walk-question-link"
@@ -997,7 +1001,7 @@ function WalkCard(props: {
                   bodyRef={bodyRef}
                   mark={revisedPhrase(item)}
                 />
-                {anchorable && !asking && (
+                {anchorable && !asking && !isAccess && (
                   // The editor's pill, on the card: fixed-position, placed by
                   // the hook beside the selection's end. `mousedown` is
                   // swallowed so the tap does not blur the selection before
@@ -1063,7 +1067,7 @@ function WalkCard(props: {
                   gate={secretsGate}
                   onSave={(values) => handlers.onSaveSecrets(item, values)}
                 />
-              ) : (
+              ) : isAccess ? null : (
                 /* Always present, options or not — the candidates are a
                   shortcut, never a closed set, and a review item with no
                   options only has this. */

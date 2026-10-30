@@ -166,7 +166,7 @@ export interface DocRoutesContext {
    * the ticket items that link it, and the run-output items still waiting on
    * the file, each marked as one the reader can mark read.
    */
-  pageOpened: (workspaceId: string, docId: string) => LinkedDockItem[];
+  pageOpened: (workspaceId: string, docId: string, owner: boolean) => LinkedDockItem[];
   /** Decorate a doc's meta with its review URL. `precomputedHome` is the
    *  doc's board when a listing already resolved it off a shared index;
    *  `null` is a real answer (no board), `undefined` means "not supplied". */

@@ -24,146 +24,30 @@
  */
 import { afterAll, describe, expect, it } from 'bun:test';
 import { spawn, spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import {
+  BASH,
+  type Rec,
+  SECRETS,
+  SERVER_OWN,
+  lines,
+  machineDir,
+  machineEnv,
+  readRecords,
+  stubs as stubsIn,
+} from './project-machine-harness.ts';
 import { waitFor } from './wait-for.ts';
 
-const repoRoot = join(import.meta.dir, '..', '..', '..');
-const entrypoint = join(repoRoot, 'infra', 'project-machine', 'entrypoint.sh');
-const backupOnce = join(repoRoot, 'infra', 'project-machine', 'backup-once.sh');
+const entrypoint = join(machineDir, 'entrypoint.sh');
+const backupOnce = join(machineDir, 'backup-once.sh');
 
-/** Fixture secrets: obviously fake, and distinct, so a leak names itself. */
-const SECRETS = {
-  CLOUDFLARE_TUNNEL_TOKEN: 'tunnel-token-riverbend',
-  BACKUP_S3_ACCESS_KEY_ID: 'access-key-harborlight',
-  BACKUP_S3_SECRET_ACCESS_KEY: 'secret-key-saltmarsh',
-};
-const SERVER_OWN = { CW_ORG_ANTHROPIC_API_KEY: 'org-key-riverbend' };
-
-/** A bash that has `wait -n` (4.3+): macOS's /bin/bash is 3.2. */
-function modernBash(): string | null {
-  const bash = Bun.which('bash');
-  if (!bash) return null;
-  const v = spawnSync(bash, ['-c', 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"'], {
-    encoding: 'utf8',
-  }).stdout.trim();
-  const [major = 0, minor = 0] = v.split('.').map(Number);
-  return major > 4 || (major === 4 && minor >= 3) ? bash : null;
-}
-const BASH = modernBash();
 if (BASH === null) console.warn('[project-machine-entrypoint] SKIPPED: no bash 4.3+ on PATH');
 
 const scratch = mkdtempSync(join(tmpdir(), 'machine-entrypoint-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-interface Rec {
-  uid: string;
-  argv: string;
-  env: Map<string, string>;
-}
-
-function stubs(
-  idOutput: string,
-  real: string[] = [],
-): { bin: string; log: string; volume: string } {
-  const root = mkdtempSync(join(scratch, 'run-'));
-  // The volume's root: the test user's, 0700, so only its owner writes it.
-  const volume = join(root, 'data');
-  mkdirSync(volume, { mode: 0o700 });
-  const bin = join(root, 'bin');
-  const log = join(root, 'log');
-  mkdirSync(bin);
-  mkdirSync(log);
-  const write = (name: string, body: string) => {
-    if (real.includes(name)) return;
-    writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`);
-    chmodSync(join(bin, name), 0o755);
-  };
-  // Every program a child runs as records who it is, then a long-lived one
-  // stays up so the supervisor does not see it exit.
-  // Written aside and moved in, so a reader never sees half a record.
-  const record = `f=$(/usr/bin/mktemp "${log}/.part.XXXXXX")
-{ echo "uid=\${STUB_UID:-root}"; echo "argv=$(basename "$0") $*"; /usr/bin/env; } > "$f"
-/bin/mv "$f" "${log}/rec.$$.$RANDOM"`;
-  // Root until setpriv has run; after it, the user it was asked for.
-  write('id', `if [ -n "$STUB_UID" ]; then echo 10001; else echo ${idOutput}; fi`);
-  write(
-    'setpriv',
-    `f=$(/usr/bin/mktemp "${log}/setpriv.XXXXXX"); echo "argv=setpriv $*" > "$f"
-while [ $# -gt 0 ]; do
-  case $1 in --reuid=*) export STUB_UID=\${1#--reuid=};; --) shift; break;; esac
-  shift
-done
-exec "$@"`,
-  );
-  write('bun', `${record}\ncase "$*" in *bin.ts*) exec /bin/sleep 1000;; esac\nexit 0`);
-  write('cloudflared', `${record}\nexec /bin/sleep 1000`);
-  // The first backup waits an hour; everything else that sleeps waits long.
-  write('sleep', 'case $1 in 3600) exit 0;; *) exec /bin/sleep 1000;; esac');
-  for (const name of ['mkdir', 'ln']) write(name, 'exit 0');
-  // Each line is the user it ran as and its arguments; a symlink among them
-  // adds a line of its own.
-  write(
-    'chown',
-    `for a in "$@"; do if [ -L "$a" ]; then echo "link $a" >> "${log}/.chown"; fi; done
-echo "\${STUB_UID:-root} $*" >> "${log}/.chown"`,
-  );
-  // Recorded, for the mode the snapshot is handed to the uploader with.
-  write('chmod', `echo "\${STUB_UID:-root} $*" >> "${log}/.chmod"`);
-  return { bin, log, volume };
-}
-
-function readRecords(log: string): { recs: Rec[]; setprivArgv: string[] } {
-  const recs: Rec[] = [];
-  const setprivArgv: string[] = [];
-  for (const name of readdirSync(log)) {
-    if (name.startsWith('.')) continue;
-    const text = readFileSync(join(log, name), 'utf8');
-    if (name.startsWith('setpriv.')) {
-      setprivArgv.push(text.trim());
-      continue;
-    }
-    const [uidLine = '', argvLine = '', ...envLines] = text.split('\n');
-    const env = new Map<string, string>();
-    for (const line of envLines) {
-      const i = line.indexOf('=');
-      if (i > 0) env.set(line.slice(0, i), line.slice(i + 1));
-    }
-    recs.push({ uid: uidLine.replace(/^uid=/, ''), argv: argvLine.replace(/^argv=/, ''), env });
-  }
-  return { recs, setprivArgv };
-}
-
-function lines(log: string, name: string): string[] {
-  try {
-    return readFileSync(join(log, name), 'utf8').trim().split('\n').filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function machineEnv(bin: string, volume: string): Record<string, string> {
-  return {
-    PATH: `${bin}:${dirname(BASH ?? '/bin/bash')}:/usr/bin:/bin`,
-    CW_MACHINE_DATA_ROOT: volume,
-    ...SECRETS,
-    ...SERVER_OWN,
-    BACKUP_RECIPIENT: 'age1harborlight',
-    BACKUP_S3_BUCKET: 'harborlight-backups',
-    BACKUP_S3_ENDPOINT: 'https://storage.riverbend.test',
-  };
-}
+const stubs = (idOutput: string, real: string[] = []) => stubsIn(scratch, idOutput, real);
 
 describe.skipIf(BASH === null)('the project machine process tree', () => {
   it('runs the server as cw without the tunnel token or the bucket credential', async () => {

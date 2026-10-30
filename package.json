@@ -78,7 +78,7 @@
     "@types/bun": "^1.1.14",
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^4.1.11",
-    "happy-dom": "^20.11.2",
+    "happy-dom": "^21.0.4",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
   }

@@ -293,7 +293,11 @@ function ReviewCard(props: {
   // `panelQuestionRequest`), when the surface wired the handler. A
   // thread-borne card cannot, and says where its questions go instead.
   const [asking, setAsking] = useState(false);
+  // An ACCESS card is answered by Approve or Reject alone: the access door
+  // refuses words and a question, so the card offers neither.
+  const isAccess = item.access !== undefined;
   const canAsk =
+    !isAccess &&
     !!handlers.onAskOnPanelItem &&
     (item.source === 'task' || (item.source === 'task-review' && item.reviewItemId !== undefined));
   const owner = item.askedBy?.trim() || 'the owner';
@@ -488,34 +492,36 @@ function ReviewCard(props: {
                   />
                 )}
                 {/* Always present, options or not: the candidates are a
-                  shortcut, never a closed set. */}
-                <ComposerForm
-                  className="board-answer-form board-decide-form"
-                  // Says which of the two this box is. With options above it and no
-                  // line between, the box read as a required second step rather than
-                  // as an alternative.
-                  hint={
-                    item.options && item.options.length > 0
-                      ? 'Or answer in your own words'
-                      : 'Answer in your own words'
-                  }
-                  placeholder="Record your answer, verbatim…"
-                  submitLabel="Record answer"
-                  submitClass="board-btn board-btn-primary"
-                  rows={3}
-                  emptyMessage="Write an answer first"
-                  // Keyed by ITEM, so walking to the next question and back does not
-                  // hand the reader the answer they were drafting for a different
-                  // one.
-                  keepKey={`answer:${task.id}:${item.id}`}
-                  onSubmit={(text) => answer(text)}
-                  // Only an explicit `false` is a refusal. A handler that returns
-                  // nothing has said nothing about success, and reading that as
-                  // failure would put a "your words are still in the box" story over
-                  // a write that landed.
-                  refused={(ok) => ok === false}
-                  onBusy={setBusy}
-                />
+                  shortcut, never a closed set. Except on an access card. */}
+                {!isAccess && (
+                  <ComposerForm
+                    className="board-answer-form board-decide-form"
+                    // Says which of the two this box is. With options above it and no
+                    // line between, the box read as a required second step rather than
+                    // as an alternative.
+                    hint={
+                      item.options && item.options.length > 0
+                        ? 'Or answer in your own words'
+                        : 'Answer in your own words'
+                    }
+                    placeholder="Record your answer, verbatim…"
+                    submitLabel="Record answer"
+                    submitClass="board-btn board-btn-primary"
+                    rows={3}
+                    emptyMessage="Write an answer first"
+                    // Keyed by ITEM, so walking to the next question and back does not
+                    // hand the reader the answer they were drafting for a different
+                    // one.
+                    keepKey={`answer:${task.id}:${item.id}`}
+                    onSubmit={(text) => answer(text)}
+                    // Only an explicit `false` is a refusal. A handler that returns
+                    // nothing has said nothing about success, and reading that as
+                    // failure would put a "your words are still in the box" story over
+                    // a write that landed.
+                    refused={(ok) => ok === false}
+                    onBusy={setBusy}
+                  />
+                )}
               </Fragment>
             )}
             {/* Outside the branch: "I have a question" is the way out of BOTH,

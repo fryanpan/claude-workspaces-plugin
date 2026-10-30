@@ -116,6 +116,59 @@ describe('find_and_replace on markdown table rows', () => {
     expect(res.error).toBe('table-shape-mismatch');
   });
 
+  it('adds a row after every match with replaceAll, each in its own place', () => {
+    const doc = mkDoc(
+      [
+        '| Name | Done |',
+        '| --- | --- |',
+        '| Alpha | no |',
+        '| Beta | yes |',
+        '| Alpha | no |',
+      ].join('\n'),
+    );
+    const res = findAndReplace(doc, {
+      find: '| Alpha | no |',
+      replace: '| Alpha | no |\n| Alpha follow-up | no |',
+      replaceAll: true,
+    });
+    expect(res).toEqual({ ok: true, replaced: 2 });
+    const rows = serializeFragmentToMarkdown(getProseFragment(doc))
+      .split('\n')
+      .filter((l) => l.startsWith('|') && !l.startsWith('| -'))
+      .map((l) => l.split('|')[1]?.trim());
+    expect(rows).toEqual(['Name', 'Alpha', 'Alpha follow-up', 'Beta', 'Alpha', 'Alpha follow-up']);
+  });
+
+  it('refuses a replaceAll whose matches together would remove every row', () => {
+    // Neither match covers the table alone; together they cover every row.
+    const all = mkDoc(['| Alpha | 1 |', '| --- | --- |', '| Alpha | 1 |'].join('\n'));
+    const res = findAndReplace(all, { find: '| Alpha | 1 |', replace: '', replaceAll: true });
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('table-shape-mismatch');
+    expect(serializeFragmentToMarkdown(getProseFragment(all))).toContain('Alpha');
+    // With a header left over, the same sweep removes both body rows.
+    const doc = mkDoc(
+      ['| Name | N |', '| --- | --- |', '| Alpha | 1 |', '| Alpha | 1 |'].join('\n'),
+    );
+    expect(findAndReplace(doc, { find: '| Alpha | 1 |', replace: '', replaceAll: true })).toEqual({
+      ok: true,
+      replaced: 2,
+    });
+  });
+
+  it('removes one row of a two-row find and keeps the other', () => {
+    const doc = mkDoc(TABLE_DOC);
+    const res = findAndReplace(doc, {
+      find: '| Alpha | 2 | first row |\n| Beta | 1 | second row |',
+      replace: '| Beta | 1 | second row |',
+    });
+    expect(res.ok).toBe(true);
+    const out = serializeFragmentToMarkdown(getProseFragment(doc));
+    expect(out).not.toContain('Alpha');
+    expect(out).toContain('second row');
+    expect(out).toContain('third row');
+  });
+
   it('a table-shaped find that matches nothing warns against the set_doc_content fallback', () => {
     const doc = mkDoc(TABLE_DOC);
     const res = findAndReplace(doc, {

@@ -30,6 +30,7 @@
 import { mountEditLoader } from './edit/edit-button.ts';
 import { keepPageLifted } from './mock-page-lift.ts';
 import { insertScript } from './mockup-live-scripts.ts';
+import { announceRoundArrived, collectRoundState, insertRound } from './mockup-live-state.ts';
 import { mountVoiceLoader } from './voice/voice-loader.ts';
 import { pauseAnchorRefresh } from './widget-anchor-refresh.ts';
 import { mountAsks } from './widget-ask.ts';
@@ -143,6 +144,8 @@ export function swapDocument(html: string): void {
   const x = window.scrollX;
   const y = window.scrollY;
   const next = new DOMParser().parseFromString(html, 'text/html');
+  // Before anything of the old round goes, so its listener can read its page.
+  const kept = collectRoundState();
 
   // Head: drop the stylesheets the last round installed, install this one's.
   // Scoped to stylesheets because everything else in the head of a served
@@ -173,33 +176,39 @@ export function swapDocument(html: string): void {
   // throw comes out of `insertBefore`. One report at the end, not one per
   // node: a round with fifty broken nodes is one broken round.
   const failures: unknown[] = [];
-  for (const node of Array.from(next.body.childNodes)) {
-    if (isOurs(node)) continue;
-    try {
-      if (node instanceof HTMLScriptElement) insertScript(node, first);
-      else document.body.insertBefore(document.importNode(node, true) as Node, first);
-    } catch (err) {
-      failures.push(err);
+  // The round's start-up listeners are called once it has landed, body
+  // attributes included: `<body onload>` is a `window.onload`.
+  insertRound(() => {
+    for (const node of Array.from(next.body.childNodes)) {
+      if (isOurs(node)) continue;
+      try {
+        if (node instanceof HTMLScriptElement) insertScript(node, first);
+        else document.body.insertBefore(document.importNode(node, true) as Node, first);
+      } catch (err) {
+        failures.push(err);
+      }
     }
-  }
+    // Body attributes too — a round that changes a class or a theme on <body>
+    // would otherwise render against the previous round's.
+    for (const a of Array.from(document.body.attributes)) {
+      if (a.name === 'style' || next.body.hasAttribute(a.name)) continue;
+      document.body.removeAttribute(a.name);
+    }
+    for (const a of Array.from(next.body.attributes)) {
+      document.body.setAttribute(a.name, a.value);
+    }
+  });
   if (failures.length > 0) {
     console.error(
       `[claude-workspaces] mockup round: ${failures.length} node(s) failed to land`,
       ...failures,
     );
   }
-  // Body attributes too — a round that changes a class or a theme on <body>
-  // would otherwise render against the previous round's.
-  for (const a of Array.from(document.body.attributes)) {
-    if (a.name === 'style' || next.body.hasAttribute(a.name)) continue;
-    document.body.removeAttribute(a.name);
-  }
-  for (const a of Array.from(next.body.attributes)) {
-    document.body.setAttribute(a.name, a.value);
-  }
+  announceRoundArrived(kept);
 
-  // Last, after layout has the new content: a restore before it would be
-  // clamped against a page that is momentarily empty and land at the top.
+  // Last, after layout has the new content and the mock has put its screen
+  // back: a restore before it would be clamped against a page that is
+  // momentarily empty, or still on its first screen, and land at the top.
   window.scrollTo(x, y);
 }
 

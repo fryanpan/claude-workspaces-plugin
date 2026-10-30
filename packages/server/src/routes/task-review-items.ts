@@ -74,12 +74,12 @@ export async function handleTaskReviewItems(
    * that ever stops being true (see `refuseOwnerOnlyWrite`).
    */
   const workspaceId = scope?.workspaceId ?? '';
-  const ownerOnlyDenial = (taskId: string, reviewItemId: string): Response | null =>
-    refuseOwnerOnlyWrite(
-      taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId)?.review,
-      workspaceId,
-      requireOwner,
-    );
+  const ownerOnlyDenial = (taskId: string, reviewItemId: string): Response | null => {
+    const review = taskStore.listReviewItems(taskId).find((r) => r.id === reviewItemId)?.review;
+    // The host never relays one out of a mock (`mockup-linked-items.ts`);
+    // `writeViaOf` holds if it ever does.
+    return refuseOwnerOnlyWrite(review, workspaceId, requireOwner, writeViaOf(req));
+  };
   // ── A ticket's review items: 0..n, several possibly open at once ────
   //
   // The two routes ABOVE are untouched and stay that way. They are the
