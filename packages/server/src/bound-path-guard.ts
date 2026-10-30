@@ -102,14 +102,22 @@ export function isEnoent(err: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
+/** Darwin's `O_NOFOLLOW_ANY`: the open fails if any component is a link. */
+const O_NOFOLLOW_ANY = 0x20000000;
+const CHECKED_OPEN = constants.O_RDONLY | constants.O_NONBLOCK | O_NOFOLLOW_ANY;
+/** The most text a guarded read returns. Past it a file is not a doc. */
+export const GUARDED_TEXT_MAX = 16 * 1024 * 1024;
+
 /**
  * Open `path` for a guarded read and judge what was opened: where the
  * descriptor really is, that it is a regular file (a FIFO or a device would
  * hold a pool thread; the open is non-blocking for the same reason), and
  * that it has one name (a hard link made into a root resolves inside it).
+ * The path is resolved first and opened with no link allowed anywhere, so a
+ * link swapped in after the resolve fails the open instead of being followed.
  */
 async function openChecked(path: string, lands: (real: string) => boolean): Promise<FileHandle> {
-  const fh = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  const fh = await open(await realpath(path), CHECKED_OPEN);
   try {
     const st = await fh.stat();
     if (!st.isFile() || st.nlink > 1 || !lands(await realpathOfOpen(fh.fd))) {
@@ -134,8 +142,9 @@ export async function readChecked(
   }
   const fh = await openChecked(path, lands);
   try {
-    const [text, st] = await Promise.all([fh.readFile('utf8'), fh.stat({ bigint: true })]);
-    return { text, ...stampOf(st) };
+    const st = await fh.stat({ bigint: true });
+    if (st.size > BigInt(GUARDED_TEXT_MAX)) throw new GuardRefused(path);
+    return { text: await fh.readFile('utf8'), ...stampOf(st) };
   } finally {
     await fh.close();
   }
@@ -256,7 +265,7 @@ function tempBeside(target: string, lane: 'pool-write' | 'flush' | 'export'): st
 
 /** `openChecked` on the calling thread, for the synchronous reads. */
 function openCheckedSync(path: string, lands: (real: string) => boolean): number {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  const fd = openSync(realpathSync(path), CHECKED_OPEN);
   try {
     const st = fstatSync(fd);
     if (!st.isFile() || st.nlink > 1 || !lands(realpathSync(`/dev/fd/${fd}`))) {
@@ -275,6 +284,7 @@ export function readCheckedSync(path: string, lands: ((real: string) => boolean)
   if (!lands) return readFileSync(path, 'utf8');
   const fd = openCheckedSync(path, lands);
   try {
+    if (fstatSync(fd).size > GUARDED_TEXT_MAX) throw new GuardRefused(path);
     return readFileSync(fd, 'utf8');
   } finally {
     closeSync(fd);

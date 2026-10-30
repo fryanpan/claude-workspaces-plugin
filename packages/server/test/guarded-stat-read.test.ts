@@ -12,7 +12,12 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { GuardRefused, type PathGuard, PathGuards } from '../src/bound-path-guard.ts';
+import {
+  GUARDED_TEXT_MAX,
+  GuardRefused,
+  type PathGuard,
+  PathGuards,
+} from '../src/bound-path-guard.ts';
 import { makeFifo } from './fifo.ts';
 
 let dir: string;
@@ -89,5 +94,26 @@ describe('the guard’s bounded read', () => {
     expect(() => guards.readBoundedSync(join(inside, 'keys.md'), 1024)).toThrow(GuardRefused);
     expect(guards.readBoundedSync(join(outside, 'keys.md'), 1024)).toBe('too-large');
     expect(guards.readBoundedSync(join(inside, 'plan.md'), 1024)).toBe('# plan\n');
+  });
+});
+
+describe('the guard’s text read', () => {
+  it('refuses a covered file over the cap, both ways', async () => {
+    const big = join(inside, 'big.md');
+    writeFileSync(big, 'x'.repeat(GUARDED_TEXT_MAX + 1));
+    try {
+      await expect(guards.read(big)).rejects.toBeInstanceOf(GuardRefused);
+      expect(() => guards.readSync(big)).toThrow(GuardRefused);
+    } finally {
+      rmSync(big);
+    }
+  });
+
+  it('reads through a link that lands inside, resolved before the open (control)', async () => {
+    mkdirSync(join(inside, 'real'), { recursive: true });
+    writeFileSync(join(inside, 'real', 'doc.md'), '# doc\n');
+    symlinkSync(join(inside, 'real'), join(inside, 'alias'));
+    expect((await guards.read(join(inside, 'alias', 'doc.md'))).text).toBe('# doc\n');
+    expect(guards.readSync(join(inside, 'alias', 'doc.md'))).toBe('# doc\n');
   });
 });
