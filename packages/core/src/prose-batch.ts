@@ -88,7 +88,8 @@ export interface BlockEditOutcome {
   error?: BlockEditError;
   /** The suggestion this edit became, when it became one. */
   suggestionId?: string;
-  /** What to change before retrying, when the error code alone cannot say. */
+  /** What to change before retrying, when the error code alone cannot say.
+   *  On a suggested table, the verb that edits its rows directly. */
   reason?: string;
 }
 
@@ -122,6 +123,10 @@ function mintMissingIds(fragment: Y.XmlFragment): void {
 
 const ALREADY_PROPOSED =
   'the block already carries a pending suggestion; accept or reject it first';
+const TABLE_PROPOSED =
+  'a table you do not own is replaced only as a suggestion, and accepting it would detach ' +
+  'every thread in its cells; to add, edit or remove a row directly, use find_and_replace ' +
+  'with the pipe rows (find one row, replace it with that row plus the new one, or with nothing)';
 const TEXTLESS_BLOCK =
   'the replacement holds a block with no text (a rule or an image), which a suggestion cannot carry';
 
@@ -287,7 +292,12 @@ export function applyBlockEdits(
             const res = proposeEdit(fragment, el, replacement, opts);
             outcomes.push(
               'suggestionId' in res
-                ? { op: edit.op, status: 'suggested', suggestionId: res.suggestionId }
+                ? {
+                    op: edit.op,
+                    status: 'suggested',
+                    suggestionId: res.suggestionId,
+                    ...(el.nodeName === 'table' ? { reason: TABLE_PROPOSED } : {}),
+                  }
                 : { op: edit.op, status: 'failed', error: res.error, reason: res.reason },
             );
             break;

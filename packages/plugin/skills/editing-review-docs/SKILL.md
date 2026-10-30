@@ -61,7 +61,10 @@ Pick the smallest tool that does the job:
   Works across all block types including table cells, and a find that
   IS pipe-table row syntax (`| a | b |`) matches rows structurally —
   cells compared by text, whitespace ignored, so a row quoted from the
-  `.md` works; the replace must keep the same row/cell shape. Use
+  `.md` works. Every replace row keeps the find's cell count, but the
+  row count may change: find a row and replace it with that row plus a
+  new one to add a row, or with `""` to remove it. Threads in unchanged
+  cells stay attached. Use
   `contextBefore`/`contextAfter` to disambiguate when the same string
   appears more than once. **Gotcha:** `find_and_replace` operates on
   text, not block structure — if your replacement empties a containing

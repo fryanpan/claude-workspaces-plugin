@@ -695,15 +695,62 @@ const TABLE_NO_MATCH_WARNING =
   'structural changes.';
 
 /**
+ * Which find row each replacement row rewrites: an index into `findRows`, or
+ * null for a row to add. A find row no entry names is removed.
+ *
+ * Rows the two lists share unchanged are paired first (a longest common
+ * subsequence), so adding a row above or below one never rewrites it. The
+ * rows left between two such pairs are paired in order, which is an edit of
+ * the live row — its unchanged cells keep their anchors — and any surplus
+ * is added or removed. The pairing only ever moves forward, so kept rows
+ * keep their order.
+ */
+function planRows(findRows: string[][], replaceRows: string[][]): Array<number | null> {
+  const same = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((cell, i) => normCell(cell) === normCell(b[i] ?? ''));
+  const n = findRows.length;
+  const m = replaceRows.length;
+  // lcs[i][j]: the longest run of shared rows in findRows[i..] and replaceRows[j..].
+  const lcs = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      const row = lcs[i] as number[];
+      row[j] = same(findRows[i] ?? [], replaceRows[j] ?? [])
+        ? (lcs[i + 1]?.[j + 1] ?? 0) + 1
+        : Math.max(lcs[i + 1]?.[j] ?? 0, row[j + 1] ?? 0);
+    }
+  }
+  const pairs: Array<[number, number]> = [];
+  for (let i = 0, j = 0; i < n && j < m; ) {
+    if (same(findRows[i] ?? [], replaceRows[j] ?? [])) pairs.push([i++, j++]);
+    else if ((lcs[i + 1]?.[j] ?? 0) >= (lcs[i]?.[j + 1] ?? 0)) i++;
+    else j++;
+  }
+  pairs.push([n, m]);
+  const plan = new Array<number | null>(m).fill(null);
+  let fi = 0;
+  let rj = 0;
+  for (const [pi, pj] of pairs) {
+    for (let k = 0; fi + k < pi && rj + k < pj; k++) plan[rj + k] = fi + k;
+    if (pj < m) plan[pj] = pi;
+    fi = pi + 1;
+    rj = pj + 1;
+  }
+  return plan;
+}
+
+/**
  * Structural find/replace for pipe-table rows. Returns null when `find` is
  * not table-shaped (the caller reports its normal no-match); otherwise a
  * terminal ReplaceResult.
  *
  * Matching compares cells by text, whitespace-normalized, so the caller's
- * padding never matters. The replacement must keep the find's shape (same
- * rows, same cells per row) — changed cells are rewritten with inline
- * markdown parsed, exactly as the table parser treats cell text; untouched
- * cells keep their content, marks, and anchors.
+ * padding never matters. The replacement keeps the find's cells per row but
+ * may hold more or fewer rows, which is how an agent adds or removes a row
+ * (an empty replace removes them all). `planRows` pairs each replacement row
+ * with a live row: changed cells are rewritten with inline markdown parsed,
+ * exactly as the table parser treats cell text, and untouched cells keep
+ * their content, marks, and anchors.
  */
 function tryTableRowReplace(
   doc: Y.Doc,
@@ -719,21 +766,20 @@ function tryTableRowReplace(
   const findRows = parsePipeRows(opts.find);
   if (!findRows) return null;
 
-  const replaceRows = parsePipeRows(opts.replace);
+  // An empty replace removes the matched rows.
+  const replaceRows = opts.replace.trim() === '' ? [] : parsePipeRows(opts.replace);
+  const cols = findRows[0]?.length ?? 0;
   if (
     !replaceRows ||
-    replaceRows.length !== findRows.length ||
-    replaceRows.some((r, i) => r.length !== (findRows[i]?.length ?? -1))
+    findRows.some((r) => r.length !== cols) ||
+    replaceRows.some((r) => r.length !== cols)
   ) {
-    return {
-      ok: false,
-      error: 'table-shape-mismatch',
-      warning:
-        'The find matched table-row syntax, so the replace must be table rows of ' +
-        'the same shape (same row count, same cells per row). To add or remove ' +
-        'rows/columns use insert_blocks_at_anchor / delete_block_at_anchor — ' +
-        'not set_doc_content.',
-    };
+    const message =
+      `The find matched table-row syntax, so the replace must be table rows of ${cols} ` +
+      'cells each, the same as the find. It may hold more rows than the find to add a ' +
+      'row, fewer to remove one, or be empty to remove the matched rows. To add or ' +
+      'remove a column, edit every row this way — not with set_doc_content.';
+    return { ok: false, error: 'table-shape-mismatch', message, warning: message };
   }
 
   // Greedy, non-overlapping scan per table, tables in document order.
@@ -781,12 +827,33 @@ function tryTableRowReplace(
     chosen = [found[0] as { rows: Y.XmlElement[] }];
   }
 
+  const emptiesTable = (m: { rows: Y.XmlElement[] }) =>
+    m.rows[0]?.parent instanceof Y.XmlElement && m.rows[0].parent.length === m.rows.length;
+  if (replaceRows.length === 0 && chosen.some(emptiesTable)) {
+    const message =
+      'That replace would remove every row of the table. To remove the table, use ' +
+      'delete_block_at_anchor on a word in it.';
+    return { ok: false, error: 'table-shape-mismatch', message, warning: message };
+  }
+  // The same number of rows is an edit of each in place, as it always was.
+  const plan =
+    replaceRows.length === findRows.length
+      ? replaceRows.map((_, i) => i)
+      : planRows(findRows, replaceRows);
+
   doc.transact(() => {
-    for (const match of chosen) {
-      match.rows.forEach((row, r) => {
+    // Last match first, so a row added or removed in one match never moves
+    // a match still to be written in the same table.
+    for (const match of [...chosen].reverse()) {
+      const table = match.rows[0]?.parent;
+      if (!(table instanceof Y.XmlElement)) continue;
+      const start = table.toArray().indexOf(match.rows[0] as Y.XmlElement);
+      plan.forEach((from, to) => {
+        if (from === null) return;
+        const row = match.rows[from] as Y.XmlElement;
         rowCells(row).forEach((cell, c) => {
-          const before = findRows[r]?.[c] ?? '';
-          const after = replaceRows[r]?.[c] ?? '';
+          const before = findRows[from]?.[c] ?? '';
+          const after = replaceRows[to]?.[c] ?? '';
           // An unchanged cell is left alone — its marks and anchors survive.
           if (normCell(before) === normCell(after)) return;
           // Built the way the parser builds a cell, so the `<br>` breaks and
@@ -794,6 +861,27 @@ function tryTableRowReplace(
           cell.delete(0, cell.length);
           cell.insert(0, tableCellBlocks(after));
         });
+      });
+      // Rows no replacement row took are removed, last first so each index holds.
+      const taken = new Set(plan.filter((p): p is number => p !== null));
+      for (let r = match.rows.length - 1; r >= 0; r--) {
+        if (!taken.has(r)) table.delete(start + r, 1);
+      }
+      // The kept rows now sit from `start` in replacement order, so a new
+      // row's index is `start` plus its place among the replacement rows.
+      plan.forEach((from, to) => {
+        if (from !== null) return;
+        const name = start + to === 0 ? 'tableHeader' : 'tableCell';
+        const row = new Y.XmlElement('tableRow');
+        row.insert(
+          0,
+          (replaceRows[to] ?? []).map((text) => {
+            const cell = new Y.XmlElement(name);
+            cell.insert(0, tableCellBlocks(text));
+            return cell;
+          }),
+        );
+        table.insert(start + to, [row]);
       });
     }
   }, opts.transactionOrigin ?? 'agent');
