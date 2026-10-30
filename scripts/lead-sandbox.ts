@@ -66,6 +66,7 @@ import {
   installRow,
   keychainRow,
 } from './lead-sandbox-escapes.ts';
+import { gitHooksPath, hooksPathRefusal } from './lead-sandbox-git.ts';
 import {
   CLAUDE_LAUNCHER,
   type Lead,
@@ -225,6 +226,8 @@ export interface LaunchDeps {
   spawn: (file: string, args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv }) => number;
   /** Tells the server the folders a walled lead can write. */
   registerRoots: RootsRegistrar;
+  /** `core.hooksPath` in a project (`lead-sandbox-git.ts`); git by default. */
+  hooksPathOf?: (project: string) => string | null;
 }
 
 const realDeps: LaunchDeps = {
@@ -289,6 +292,15 @@ export function main(argv: string[], deps: LaunchDeps = realDeps): number {
     }
     if (command.length === 0) {
       say('nothing to launch: put the command after --');
+      return 2;
+    }
+    const hooks = hooksPathRefusal(
+      lead.projects,
+      deps.hooksPathOf ?? ((p) => gitHooksPath(p)),
+      machine.realpath,
+    );
+    if (hooks) {
+      say(`launch refused for ${lead.name}: ${hooks}`);
       return 2;
     }
     if (lead.boardWall && lead.boardId) {

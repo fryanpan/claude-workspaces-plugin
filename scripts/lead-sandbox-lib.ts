@@ -85,15 +85,39 @@ import {
 export { CLAUDE_CODE_FOLDERS, CLAUDE_READ_ONLY_FOLDERS, SERVER_STATE_FOLDERS, transcriptSlug };
 
 /**
- * The files in a project's git folders that make the owner's own git run a
- * command: `config` (`core.hooksPath`, `core.fsmonitor`, filter drivers),
- * `config.worktree`, `info/attributes` (which filters apply) and `hooks/`. A
- * lead that wrote one would run code outside the wall the next time the
- * owner, or an unwalled session, ran git in that project. At any depth, so a
- * nested repo and a worktree's own folder are covered.
+ * What in a project makes the owner's own git run a command: in a git folder,
+ * `config` (`core.fsmonitor`, filter drivers), `config.worktree`, `commondir`
+ * (where git reads the config from), `info/` (which filters apply) and
+ * `hooks/`. A lead that wrote one would run code outside the wall the next
+ * time the owner, or an unwalled session, ran git in that project. The names
+ * `.git`, `.git/worktrees/<name>` and `.git/modules/…` are read only too:
+ * Seatbelt judges a rename by the two names it moves, so a git folder built
+ * elsewhere and renamed into place passed the rules on the files in it, and
+ * a `.git` file can point git at any folder. At any depth, so a nested repo
+ * and a worktree are covered. The cost: a walled lead cannot `git init`,
+ * `git clone` or update a submodule inside a project, nor remove a worktree.
+ * A `core.hooksPath` inside a project is refused at launch
+ * (`lead-sandbox-git.ts`).
  */
 export function gitCodeRegex(projectEnd: string): string {
-  return `^${escapeRegex(projectEnd)}/(.*/)?\\.git/((worktrees/[^/]+/)?config(\\.worktree)?|info/attributes|hooks(/.*)?)$`;
+  const gitFolder = '\\.git(/(modules/.+|worktrees(/[^/]+)?))?';
+  const runs = '(/(config(\\.worktree)?|commondir|info(/.*)?|hooks(/.*)?))?';
+  return `^${escapeRegex(projectEnd)}/(.*/)?${gitFolder}${runs}$`;
+}
+
+/**
+ * What `git worktree add` makes that `gitCodeRegex` holds read only, which a
+ * lead may create and then never change, unlink or rename (probed: Seatbelt's
+ * `file-write-create` answers for a name not there yet only): a worktree's
+ * folder in `.git/worktrees/` and its `commondir`, and the `.git` file of a
+ * worktree under `.claude/worktrees/`. So a lead adds worktrees there and
+ * cannot rewrite one that exists. A worktree it adds is its own, as every
+ * file in it already is: git run there by anyone else runs what it chose.
+ */
+export function gitWorktreeCreateRegex(projectEnd: string): string {
+  const folder = '\\.git/worktrees(/[^/]+(/commondir)?)?';
+  const pointer = '\\.claude/worktrees/[^/]+/\\.git';
+  return `^${escapeRegex(projectEnd)}/(.*/)?(${folder}|${pointer})$`;
 }
 
 /**
@@ -153,7 +177,7 @@ export function keychainRules(lead: Lead): string[] {
 /** The Shortcuts helper the `shortcuts` CLI talks to (found by denying names until `list` failed). */
 export const SHORTCUTS_SERVICE = 'com.apple.siri.VoiceShortcuts.xpc';
 
-type Access = 'deny' | 'read' | 'write' | 'nowrite' | 'list';
+type Access = 'deny' | 'read' | 'write' | 'nowrite' | 'list' | 'create';
 
 interface Rule {
   access: Access;
@@ -245,6 +269,14 @@ function rulesFor(
         why: 'git runs it outside the wall',
         last: true,
       });
+  for (const p of lead.projects)
+    for (const end of new Set([p, m.realpath(p)]))
+      rules.push({
+        access: 'create',
+        filter: { regex: gitWorktreeCreateRegex(end), under: p },
+        why: 'git worktree add',
+        last: true,
+      });
   for (const p of lead.allow) add('write', p, 'config allow');
   for (const p of lead.allowRead) add('read', p, 'config allowRead');
   for (const p of gitProxyPaths(lead, m.home)) {
@@ -333,6 +365,7 @@ const VERB: Record<Access, string> = {
   read: '(allow file-read*',
   list: '(allow file-read-data',
   write: '(allow file-read* file-write*',
+  create: '(allow file-write-create',
 };
 
 /**
@@ -352,15 +385,25 @@ export function buildProfile(
   const lines: Line[] = [];
   const ancestors = new Set<string>();
   // At the same depth the lead's own grant wins over a shared protection:
-  // the config may protect every project, the lead's own among them.
-  const order: Record<Access, number> = { deny: 0, nowrite: 0, list: 1, read: 1, write: 2 };
+  // the config may protect every project, the lead's own among them. The
+  // rules written last keep the order `rulesFor` gives them, so a `create`
+  // follows the denies it narrows and the wall's own files still come last.
+  const order: Partial<Record<Access, number>> = {
+    deny: 0,
+    nowrite: 0,
+    list: 1,
+    read: 1,
+    write: 2,
+  };
+  const rules = rulesFor(lead, config, m, guard);
+  const rank = (r: Rule) => (r.last ? rules.indexOf(r) : (order[r.access] ?? 0));
   const opens = (r: Rule) => r.access === 'read' || r.access === 'write';
-  for (const r of rulesFor(lead, config, m, guard)) {
+  for (const r of rules) {
     if ('subpath' in r.filter) {
       for (const p of expandRealPaths([r.filter.subpath], m.realpath)) {
         lines.push({
           depth: r.last ? Number.POSITIVE_INFINITY : depth(p),
-          order: order[r.access],
+          order: rank(r),
           text: `${VERB[r.access]} (subpath ${sbString(p)})) ; ${r.why}`,
         });
         if (opens(r)) for (const a of ancestorsOf(p)) ancestors.add(a);
@@ -370,7 +413,7 @@ export function buildProfile(
         lines.push({
           // After the subpath of the same folder, which it narrows.
           depth: r.last ? Number.POSITIVE_INFINITY : depth(p) + 0.5,
-          order: order[r.access],
+          order: rank(r),
           text: `${VERB[r.access]} (literal ${sbString(p)})) ; ${r.why}`,
         });
         if (opens(r)) for (const a of ancestorsOf(p)) ancestors.add(a);
@@ -379,7 +422,7 @@ export function buildProfile(
       const root = m.realpath(r.filter.under);
       lines.push({
         depth: r.last ? Number.POSITIVE_INFINITY : depth(root) + 1,
-        order: order[r.access],
+        order: rank(r),
         text: `${VERB[r.access]} (regex #${sbString(r.filter.regex)})) ; ${r.why}`,
       });
       if (opens(r)) for (const a of [...ancestorsOf(root), root]) ancestors.add(a);

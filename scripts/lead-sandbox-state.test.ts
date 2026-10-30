@@ -13,6 +13,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -71,6 +72,8 @@ describe.skipIf(!HAVE_SANDBOX)('what the server reads, under the real sandbox-ex
   writeFileSync(join(harborlight, 'README.md'), 'harborlight\n');
   git(harborlight, 'add', 'README.md');
   git(harborlight, 'commit', '-q', '-m', 'first');
+  // A worktree made before the wall, as a lead's builders would have.
+  git(harborlight, 'worktree', 'add', '-q', join('.claude', 'worktrees', 'w1'));
   const configBefore = readFileSync(join(harborlight, '.git', 'config'), 'utf8');
 
   const m: Machine = {
@@ -143,6 +146,36 @@ describe.skipIf(!HAVE_SANDBOX)('what the server reads, under the real sandbox-ex
       expect(sh(plant).status, plant).not.toBe(0);
     expect(readFileSync(join(harborlight, '.git', 'config'), 'utf8')).toBe(configBefore);
     expect(existsSync(join(harborlight, '.git', 'hooks', 'post-checkout'))).toBe(false);
+  });
+
+  // Seatbelt judges a rename by the two names it moves, never by the files
+  // inside the folder moved, so a git folder built elsewhere and renamed into
+  // place passed every rule on the files in it (probed by the review).
+  const swapGitFolder =
+    "cp -R .git newgit && printf '[core]\\n\\tfsmonitor = touch PWNED\\n' >> newgit/config && mv .git oldgit && mv newgit .git";
+
+  it('cannot swap in a git folder, a pointer to one, or a common folder', () => {
+    try {
+      for (const plant of [
+        swapGitFolder,
+        'mkdir -p sub && printf "gitdir: /tmp\\n" > sub/.git',
+        'echo /tmp > .git/commondir',
+        'mv .git/hooks .git/hooks-old',
+        'mv .git/info .git/info-old',
+        'mv .git/worktrees/w1 .git/worktrees/w0',
+        'echo /tmp > .git/worktrees/w1/commondir',
+        'echo x > .git/worktrees/w1/config.worktree',
+        'printf "gitdir: /tmp\\n" > .claude/worktrees/w1/.git',
+      ])
+        expect(sh(plant).status, plant).not.toBe(0);
+      git(harborlight, 'status', '--short');
+      expect(existsSync(join(harborlight, 'PWNED'))).toBe(false);
+      expect(existsSync(join(harborlight, 'sub', '.git'))).toBe(false);
+      expect(readFileSync(join(harborlight, '.git', 'config'), 'utf8')).toBe(configBefore);
+    } finally {
+      for (const d of ['newgit', 'sub'])
+        rmSync(join(harborlight, d), { recursive: true, force: true });
+    }
   });
 
   it("writes its own scratch folder, and no other project's", () => {
@@ -230,6 +263,32 @@ describe.skipIf(!HAVE_SANDBOX)('what the server reads, under the real sandbox-ex
           .join('\n'),
       );
       expect(writeUnder(mutated, rel), String(drop)).toBe(0);
+    }
+  });
+
+  // Last, since it leaves the project's git folder swapped until it puts it back.
+  it("swaps in a git folder that runs the owner's git, once the git rules are removed (the mutation control)", () => {
+    const mutated = join(root, 'mutated-git.sb');
+    writeFileSync(
+      mutated,
+      readFileSync(profileFile, 'utf8')
+        .split('\n')
+        .filter((l) => !l.endsWith('; git runs it outside the wall'))
+        .join('\n'),
+    );
+    const swapped = spawnSync(SANDBOX_EXEC, ['-f', mutated, '/bin/sh', '-c', swapGitFolder], {
+      cwd: harborlight,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: '1' },
+    });
+    try {
+      expect(swapped.status, swapped.stderr).toBe(0);
+      git(harborlight, 'status', '--short');
+      expect(existsSync(join(harborlight, 'PWNED'))).toBe(true);
+    } finally {
+      rmSync(join(harborlight, '.git'), { recursive: true, force: true });
+      renameSync(join(harborlight, 'oldgit'), join(harborlight, '.git'));
+      rmSync(join(harborlight, 'PWNED'), { force: true });
     }
   });
 });

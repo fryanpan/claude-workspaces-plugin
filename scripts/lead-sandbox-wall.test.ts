@@ -384,7 +384,8 @@ s.on('error', (e) => console.log(e.code));`,
   });
 
   // Git settings run commands in the owner's own git, so a lead may not set
-  // them (`gitCodeRegex`): `push -u` and tracking setup fail with it.
+  // them (`gitCodeRegex`): `push -u` and tracking setup fail with it. It
+  // may add a worktree under `.claude/worktrees/` (`gitWorktreeCreateRegex`).
   it('still commits and adds a worktree, and cannot set git config, in its project', () => {
     const repo = join(project, 'repo');
     mkdirSync(repo);
@@ -396,7 +397,11 @@ s.on('error', (e) => console.log(e.code));`,
     expect(git(null, ['init', '-q'])).toBe(0);
     const id = ['-c', 'user.name=Alice', '-c', 'user.email=fixture@example.invalid'];
     expect(git(walled, [...id, 'commit', '-q', '--allow-empty', '-m', 'one'])).toBe(0);
-    expect(git(walled, ['worktree', 'add', '-q', join(repo, 'wt'), '-b', 'wt'])).toBe(0);
+    const wt = join(repo, '.claude', 'worktrees', 'wt');
+    expect(git(walled, ['worktree', 'add', '-q', wt, '-b', 'wt'])).toBe(0);
+    expect(git(walled, ['-C', wt, ...id, 'commit', '-q', '--allow-empty', '-m', 'two'])).toBe(0);
+    // Anywhere else a `.git` file could point the owner's git in that folder at anything.
+    expect(git(walled, ['worktree', 'add', '-q', join(repo, 'elsewhere'), '-b', 'x'])).not.toBe(0);
     expect(git(walled, ['config', 'branch.wt.remote', 'origin'])).not.toBe(0);
     expect(git(null, ['config', 'branch.wt.remote', 'origin'])).toBe(0); // the control
   });
