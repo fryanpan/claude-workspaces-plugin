@@ -36,6 +36,9 @@ primary_region = "sjc"
 
 [env]
   CW_DATA_DIR = "/data/cw"
+  # The server listens on loopback only and Access fronts its one host, so
+  # the machine's own tools (board move check, restore drill) skip the token.
+  CW_LOOPBACK_SKIPS_ACCESS = "1"
   # Claude Code's session transcripts: entrypoint.sh points the cw user's
   # ~/.claude/projects here, so they live on the volume and are backed up.
   BACKUP_TRANSCRIPTS_DIR = "/data/claude-projects"

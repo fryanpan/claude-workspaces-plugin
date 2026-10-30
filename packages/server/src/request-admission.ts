@@ -228,6 +228,8 @@ export interface RequestAdmissionContext {
    *  host-guard). From the identity setup — the reason this factory is
    *  built after it rather than beside the origin policy. */
   accessOnlyBrowserHosts: boolean;
+  /** Whole-server Access mode admits the box itself (ServerOptions). */
+  loopbackSkipsAccess: boolean;
   /** WHO may come through the operator's own proxied hostname. */
   proxiedTrustedEmails: Set<string>;
   /** The requests the owner's own hostname still takes while the master
@@ -395,6 +397,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     shareLinkHosts,
     recallCallbackHost,
     accessOnlyBrowserHosts,
+    loopbackSkipsAccess,
     proxiedTrustedEmails,
     shareWorkspacesOf,
     collabMemberOf,
@@ -983,12 +986,19 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         }
         // The operator: no `visitor`, no scope. From here on the request is
         // what a loopback request is.
-      } else if (cfAccessVerifier && !shares && !shareLinkVerifier) {
+      } else if (
+        cfAccessVerifier &&
+        !shares &&
+        !shareLinkVerifier &&
+        !(loopbackSkipsAccess && isLoopbackAddress(requestAddress(req)))
+      ) {
         // Legacy whole-server mode: cfAccess configured WITHOUT any
         // sharing surface means the entire deployment sits behind Access,
         // so even a local-looking Host must present a token. (With
         // sharing wired, local traffic is the agent's own MCP calls over
-        // loopback and stays unauthenticated.)
+        // loopback and stays unauthenticated.) A project machine opts its
+        // own loopback callers out (`loopbackSkipsAccess`): the edge's
+        // requests never classify local, so only the box itself skips it.
         //
         // A share-link hostname counts as a sharing surface, and it has
         // to. The per-share mode it replaces is retired: an operator who
