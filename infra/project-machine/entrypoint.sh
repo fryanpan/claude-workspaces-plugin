@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The project machine's one process tree: the board server on loopback, the
-# Cloudflare Tunnel it is reached through, a loopback health check, and the
-# backup loop. The lead agent's user and folder are set up here too. If any of them exits, everything stops and the machine exits,
+# Cloudflare Tunnel it is reached through, the project's lead agent, a
+# loopback health check, and the backup loop. If any of them exits, everything stops and the machine exits,
 # and Fly's restart policy starts it again.
 #
 # This shell stays root and supervises; each child runs as its own user and
@@ -117,6 +117,27 @@ else
   ) &
 fi
 pids+=($!)
+
+# The lead agent, when the machine has a Claude Code sign-in for it
+# (machine:deploy sets it from the Mac's Keychain). It reaches the board on
+# loopback, as a local caller, and holds no secret but its own sign-in: not the
+# server's Claude key, not the tunnel token, not the bucket credential. The
+# server holds none of the sign-in either (MACHINE_SECRETS, run-as.sh).
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  (
+    app="${FLY_APP_NAME:-project}"
+    export CW_BASE_URL="http://127.0.0.1:$PORT" \
+      CW_AGENT_NAME="${CW_LEAD_AGENT_NAME:-${app#cw-}-lead}" \
+      CW_LEAD_ROOT="$LEAD_ROOT" DISABLE_AUTOUPDATER=1 TERM=xterm-256color
+    only_env PATH TERM CLAUDE_CODE_OAUTH_TOKEN CW_BASE_URL CW_AGENT_NAME CW_LEAD_ROOT \
+      CW_LEAD_REMOTE_CONTROL DISABLE_AUTOUPDATER
+    umask 077
+    run_as lead bash "$HERE/lead.sh" supervise
+  ) &
+  pids+=($!)
+else
+  log "CLAUDE_CODE_OAUTH_TOKEN unset: no lead agent runs"
+fi
 
 # The health check. Fly's own checks reach a machine over its private
 # address, and this server listens on loopback only, so the check runs here:
