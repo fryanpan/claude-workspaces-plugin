@@ -66,7 +66,13 @@ describe('replacing a file through a temp beside it', () => {
   // Linux hands a new file the inode just freed, so an unlink and a fresh
   // file can keep the number; writing in place keeps it everywhere.
   it.each([
-    ['replaced by a new file', (tmp: string) => (unlinkSync(tmp), writeFileSync(tmp, 'planted'))],
+    [
+      'replaced by a new file',
+      (tmp: string) => {
+        unlinkSync(tmp);
+        writeFileSync(tmp, 'planted');
+      },
+    ],
     ['rewritten in place', (tmp: string) => writeFileSync(tmp, 'planted')],
     ['rewritten in place, same length', (tmp: string) => writeFileSync(tmp, 'evil')],
   ])('refuses a temp %s before the rename, and removes it', (_how, swap) => {
