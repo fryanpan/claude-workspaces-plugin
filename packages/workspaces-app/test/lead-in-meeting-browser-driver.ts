@@ -273,6 +273,8 @@ async function main(): Promise<void> {
         onAudio(pcm);
       },
     };
+    const LEAD = 'Harborlight Lead';
+    const leadId = agentIdForName(LEAD);
     handle = createServer({
       port: 0,
       dataDir: join(dir, 'data'),
@@ -281,6 +283,9 @@ async function main(): Promise<void> {
       requireSignInToWrite: false,
       transcription: engine,
       spokenReply: { listener: null, voices: { 1: voice, 2: null }, gemini: null },
+      // The say route takes the lead's token, which the MCP mints from this
+      // server; the process check behind the mint is answered here.
+      identifyAgentCaller: async () => ({ ok: true, agentId: leadId, via: 'session' }),
     });
     const server = handle;
     const base = `http://127.0.0.1:${server.port}`;
@@ -296,8 +301,6 @@ async function main(): Promise<void> {
     const ws = (
       (await post('/workspaces', { name: 'Harborlight' })) as { workspace: { id: string } }
     ).workspace.id;
-    const LEAD = 'Harborlight Lead';
-    const leadId = agentIdForName(LEAD);
     server.tasks.attachAgent(ws, {
       agentId: leadId,
       agentName: LEAD,

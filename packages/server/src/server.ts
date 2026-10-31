@@ -3132,13 +3132,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     // What the lead says into a meeting is said in the board reply's voice.
     leadMeetingVoice: spokenEngines.voices[1] ?? spokenEngines.voices[2] ?? null,
     featuresOff: opts.featuresOff ?? {},
-    authorizeAgent: (req, agentId) =>
+    authorizeAgent: (req, agentId, o) =>
       authorizeAgentCaller({
         agentId,
         req,
         address: server.requestIP(req)?.address,
         key: agentTokenKeyFor(),
-        requireToken: requireAgentToken,
+        requireToken: o?.requireToken ?? requireAgentToken,
       }),
     dataDir,
     clientReleaseRootDir,

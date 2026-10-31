@@ -70,13 +70,18 @@ function spoken(text: string): string {
     .trim();
 }
 
+const words = (s: string): number => s.split(' ').length;
+
 /**
  * Whether a line heard in the room is the lead's own voice coming back
  * through the microphone: its words equal, or are a part of, a line the lead
- * said in the last `LEAD_ECHO_MS`. Mac audio records what the machine plays
- * with no echo cancellation, and even a cancelling microphone leaks; fed back,
- * the lead would read its own words as the room's and could answer them.
- * A part must be 12 characters or more, so "yes" is never taken for an echo.
+ * said in the last `LEAD_ECHO_MS`. A microphone's echo cancellation reduces
+ * the played line and does not remove it; fed back, the lead would read its
+ * own words as the room's and could answer them.
+ * A part must be whole words, 12 characters or more, and at least 60% of the
+ * lead's line by word count, so a reply that picks up a few of its words ("The slipway pricing", after
+ * "Who is the slipway pricing for?") is never taken for an echo. Only a
+ * microphone meeting is checked: that is the only one that plays the line.
  */
 export function echoOfLead(
   lines: readonly LeadChatMeetingLine[],
@@ -88,7 +93,12 @@ export function echoOfLead(
   return lines.some((l) => {
     if (!l.lead || now - l.ts > LEAD_ECHO_MS) return false;
     const said = spoken(l.text);
-    return said === heard || (heard.length >= 12 && said.includes(heard));
+    return (
+      said === heard ||
+      (heard.length >= 12 &&
+        words(heard) >= 0.6 * words(said) &&
+        ` ${said} `.includes(` ${heard} `))
+    );
   });
 }
 
@@ -186,7 +196,7 @@ export class LeadChatMeetings {
     const m = this.current(workspaceId);
     if (!m || m.id !== id) return { ok: false, error: 'no-meeting' };
     // The room's microphone heard the lead's own voice: not a line.
-    if (!l.lead && echoOfLead(m.lines, l.text, this.now())) {
+    if (!l.lead && m.source === 'mic' && echoOfLead(m.lines, l.text, this.now())) {
       return { ok: true, line: { ...l, ts: this.now() }, fresh: false, echo: true };
     }
     const fresh = !m.lines.some((x) => x.turn === l.turn);

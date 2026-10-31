@@ -55,12 +55,12 @@ describe('speaking into a meeting, with the agent token required', () => {
   const say = (agentId: string, extra: Record<string, string> = {}) =>
     post(`/workspaces/${board}/lead-chat/meeting/say`, { agentId, text: 'Who is it for?' }, extra);
 
-  async function start(pluginVersion: string): Promise<void> {
+  async function start(pluginVersion: string, requireAgentToken = true): Promise<void> {
     dataDir = mkdtempSync(join(tmpdir(), 'lead-say-auth-'));
     handle = createServer({
       port: 0,
       dataDir,
-      requireAgentToken: true,
+      requireAgentToken,
       identifyAgentCaller: async () => ({ ok: true, agentId: callerIs, via: 'session' }),
     });
     base = `http://127.0.0.1:${handle.port}`;
@@ -123,6 +123,18 @@ describe('speaking into a meeting, with the agent token required', () => {
       const res = await say(OTHER, { authorization: `Bearer ${await tokenFor(OTHER)}` });
       expect(res.status).toBe(403);
       expect(await res.json()).toMatchObject({ error: 'not-lead' });
+    });
+  });
+
+  describe('with the server’s token rollout still off', () => {
+    beforeEach(() => start('0.1.347', false));
+
+    it('still refuses the lead’s id with no token: no tokenless client ever called this', async () => {
+      const res = await say(LEAD);
+      expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({ error: 'agent-token-required' });
+      const ok = await say(LEAD, { authorization: `Bearer ${await tokenFor(LEAD)}` });
+      expect(ok.status).toBe(200);
     });
   });
 

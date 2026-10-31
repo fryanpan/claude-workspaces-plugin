@@ -231,8 +231,11 @@ it. Only the lead: no other session on the board is woken by the room.
   `end` flushes what is held. Lines are addressed and transient: they reach
   the lead's own stream, never a page, and are not kept in the replay buffer,
   where they would push out frames that matter more.
-- **Who is sent it.** A lead that takes the seat, attaches or restarts
-  mid-meeting gets a start of its own before its first batch. A lead whose
+- **Who is sent it.** A lead that takes the seat mid-meeting, under an id the
+  meeting has not greeted, gets a start of its own before its first batch. A
+  lead that restarts under the same id is not greeted again: it learns of the
+  meeting only if its stream replays the buffered start, which a long meeting
+  may have pushed out of the board's 200-event replay buffer. A lead whose
   session reported a plugin older than 0.1.347 (`LEAD_MEETING_SINCE`), or
   none, is sent neither event: its MCP has no wording for them and would wake
   on an empty line once per batch for the whole meeting.
@@ -252,7 +255,9 @@ it. Only the lead: no other session on the board is woken by the room.
 - **Speaking is one call.** `say_in_meeting(workspaceId, text)` posts to
   `POST /workspaces/<id>/lead-chat/meeting/say` with the session's agent
   token. The route takes the board's lead only (the token must speak for the
-  id; tokenless is refused once `requireAgentToken` is on) and refuses with
+  id, and a tokenless call is refused even while the server's
+  `requireAgentToken` rollout is off, because no tokenless client ever
+  called this route) and refuses with
   409 when no meeting runs. The line joins the meeting at a fractional turn
   after the last one (`leadLineTurn`), marked `lead: true`, so every page
   shows it. Each lead line halves the gap before the room's next turn, so
@@ -267,10 +272,14 @@ it. Only the lead: no other session on the board is woken by the room.
   would come straight back as the room's. A bot meeting has no room on this
   side.
 - **The echo is dropped on the server.** The microphone's echo cancellation
-  reduces the lead's voice in the transcript and does not remove it. A room
-  line whose words equal, or are a part of (12 characters or more), a lead
-  line said in the last 30s (`echoOfLead`, `LEAD_ECHO_MS`) is neither shown
-  nor fed to the lead.
+  reduces the lead's voice in the transcript and does not remove it. In a
+  microphone meeting, the only kind that plays the line, a room line said
+  within 30s of a lead line (`echoOfLead`, `LEAD_ECHO_MS`) is neither shown
+  nor fed to the lead when its words equal that line, or are a run of its
+  whole words at least 12 characters long and at least 60% of its word
+  count. The second test keeps a reply that picks up a few of the lead's
+  words: "The slipway pricing" after "Who is the slipway pricing for?" is
+  three words of six, and stays.
 - **Held to rare.** The start line tells the lead to speak rarely and in one
   short sentence, and to keep other questions in the lead chat until the
   meeting can tell when a speaker has finished a thought.

@@ -24,9 +24,11 @@
  * same reason `meeting-protocol.ts` keeps words off the doc's bus). A lead
  * that missed lines reads the meeting's doc.
  *
- * A lead that takes the seat, attaches or restarts mid-meeting never saw the
- * start, so the first batch for each lead id in a meeting goes after a start
- * of its own.
+ * A lead that takes the seat mid-meeting never saw the start, so the first
+ * batch for each lead id in a meeting goes after a start of its own. A lead
+ * that restarts under the SAME id is not greeted again: it hears of the
+ * meeting only if its stream replays the buffered start, which a long
+ * meeting may have pushed out of the board's 200-event replay buffer.
  *
  * A lead on a plugin older than `LEAD_MEETING_SINCE` is sent neither frame:
  * its MCP has no wording for them and renders each as an empty line, one

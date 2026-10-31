@@ -263,8 +263,8 @@ export const LEAD_SAY_MAX = 1000;
  * board's lead speaks into the meeting its chat is running
  * (`say_in_meeting`). The line shows on every page of the board and the page
  * holding the microphone plays it. Only the board's lead, proved the way its
- * own feed is (on this machine, with its token), may say anything; a
- * meeting must be running.
+ * own feed is (on this machine, with its token, required here even while the
+ * server's rollout flag is off), may say anything; a meeting must be running.
  */
 async function leadSays(
   ctx: WorkspaceRoutesContext,
@@ -274,7 +274,9 @@ async function leadSays(
   const body = await ctx.safeJson(req);
   const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
   if (!isValidAgentId(agentId)) return ctx.j(400, { error: 'agentId required' });
-  const allowed = ctx.authorizeAgent(req, agentId);
+  // Always the token: the route is new, and every caller (`say_in_meeting`)
+  // sends one, so there is no tokenless client to carry through the rollout.
+  const allowed = ctx.authorizeAgent(req, agentId, { requireToken: true });
   if (!allowed.ok) return ctx.j(allowed.status, allowed.body);
   if (ctx.taskStore.getWorkspace(workspaceId)?.leadAgentId !== agentId) {
     return ctx.j(403, { error: 'not-lead', hint: 'Only the board’s lead speaks in its meeting.' });

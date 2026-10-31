@@ -14,13 +14,21 @@
  *
  * Times are plain numbers passed in: no clock is read.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   LEAD_LINE_MIN_GAP,
   type LeadChatMeetingLine,
   leadLineTurn,
 } from '@claude-workspaces/core/lead-chat';
-import { LEAD_ECHO_MS, echoOfLead } from '../src/lead-chat/meeting.ts';
+import {
+  LEAD_ECHO_MS,
+  LeadChatMeetings,
+  type MeetingStart,
+  echoOfLead,
+} from '../src/lead-chat/meeting.ts';
 
 const said = (text: string, ts: number): LeadChatMeetingLine => ({
   turn: 3.5,
@@ -42,8 +50,17 @@ describe('the lead’s own voice heard back', () => {
   });
 
   it('is a part of the lead’s line long enough not to be a reply', () => {
-    expect(echoOfLead(lines, 'the Saltmarsh slipway', 3_000)).toBe(true);
+    expect(echoOfLead(lines, 'is the Saltmarsh slipway for', 3_000)).toBe(true);
     expect(echoOfLead(lines, 'Yes.', 3_000)).toBe(false);
+  });
+
+  it('is not a reply that picks up a few of the lead’s words', () => {
+    const asked = [said('Who is the slipway pricing for?', 2_000)];
+    // Three of the lead's six words: Alice answering, not the echo.
+    expect(echoOfLead(asked, 'The slipway pricing', 3_000)).toBe(false);
+    expect(echoOfLead(asked, 'the slipway pricing for', 3_000)).toBe(true);
+    // Nor the middle of a word.
+    expect(echoOfLead(asked, 'ho is the slipway pricing fo', 3_000)).toBe(false);
   });
 
   it('is not the room answering, nor a room line repeating an old lead line', () => {
@@ -54,6 +71,52 @@ describe('the lead’s own voice heard back', () => {
     );
     // A room line is never taken for an echo of another room line.
     expect(echoOfLead(lines, 'The slipway needs pricing.', 1_500)).toBe(false);
+  });
+});
+
+describe('which meetings drop the echo', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lead-meeting-echo-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  let n = 0;
+  const meetingOf = (source: MeetingStart['source']) => {
+    const meetings = new LeadChatMeetings({
+      dataDir: join(dir, String(n++)),
+      broadcast: () => {},
+      newId: () => `lcm-${n}`,
+      now: () => 5_000,
+    });
+    const started = meetings.start('w-harbor', {
+      by: { id: 'known-alice', name: 'Alice' },
+      docId: 'saltmarsh-plan',
+      docTitle: 'Saltmarsh plan',
+      notes: 'existing',
+      source,
+      speakers: 'conversation',
+      recorder: 'rec-1',
+    });
+    if (!started.ok) throw new Error(started.error);
+    expect(
+      meetings.said('w-harbor', 'Harborlight Lead', 'Who is the slipway pricing for?').ok,
+    ).toBe(true);
+    const heard = (turn: number, text: string) =>
+      meetings.line('w-harbor', started.meeting.id, { turn, who: 'Alice', text });
+    return heard;
+  };
+
+  it('drops it in a microphone meeting, the only one that plays the lead aloud', () => {
+    const heard = meetingOf('mic');
+    expect(heard(1, 'who is the slipway pricing for')).toMatchObject({ ok: true, echo: true });
+    // Alice's reply that picks up three of its words is kept.
+    expect(heard(2, 'The slipway pricing')).toMatchObject({ ok: true, fresh: true });
+  });
+
+  it('keeps every line in a Mac-audio or bot meeting, where nothing plays it', () => {
+    for (const source of ['mix', 'bot'] as const) {
+      const heard = meetingOf(source);
+      const r = heard(1, 'who is the slipway pricing for');
+      expect(r, source).toMatchObject({ ok: true, fresh: true });
+      expect('echo' in r, source).toBe(false);
+    }
   });
 });
 

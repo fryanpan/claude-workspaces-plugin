@@ -108,8 +108,26 @@ describe('the lead in the meeting', () => {
     });
   const act = (body: Record<string, unknown>) =>
     post(`/workspaces/${boardId}/lead-chat/meeting`, { author: ALICE, ...body });
-  const say = (agentId: string, text: string) =>
-    post(`/workspaces/${boardId}/lead-chat/meeting/say`, { agentId, text });
+  let callerIs: string | null = null;
+  const tokens = new Map<string, string>();
+  const tokenFor = async (agentId: string): Promise<string> => {
+    const held = tokens.get(agentId);
+    if (held) return held;
+    callerIs = agentId;
+    const res = await fetch(`${base}/api/agents/${agentId}/token`);
+    const token = ((await res.json()) as { token: string }).token;
+    tokens.set(agentId, token);
+    return token;
+  };
+  const say = async (agentId: string, text: string) =>
+    fetch(`${base}/workspaces/${boardId}/lead-chat/meeting/say`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${await tokenFor(agentId)}`,
+      },
+      body: JSON.stringify({ agentId, text }),
+    });
   const of = (s: { frames: Frame[] }, event: string) => s.frames.filter((f) => f.event === event);
 
   beforeAll(async () => {
@@ -118,6 +136,9 @@ describe('the lead in the meeting', () => {
       port: 0,
       dataDir,
       spokenReply: { listener: null, voices: { 1: voice, 2: null }, gemini: null },
+      // The say route takes the lead's token; the process check that the
+      // mint route asks is injected, as agent-stream-auth.test.ts does.
+      identifyAgentCaller: async () => ({ ok: true, agentId: callerIs, via: 'session' }),
     });
     base = `http://127.0.0.1:${handle.port}`;
     const ws = await post('/workspaces', { name: 'Harborlight' });

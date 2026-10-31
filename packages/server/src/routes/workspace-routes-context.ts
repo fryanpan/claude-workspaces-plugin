@@ -80,8 +80,14 @@ export interface WorkspaceRoutesContext {
   /** What the pages say about features this server's profile turned off. */
   featuresOff: FeaturesOff;
   /** Whether this request speaks for `agentId`: on this machine, with its
-   *  token (`auth/agent-token.ts`), the check the agent's own feed uses. */
-  authorizeAgent(req: Request, agentId: string): AgentCallerVerdict;
+   *  token (`auth/agent-token.ts`), the check the agent's own feed uses.
+   *  `requireToken` holds a route to the token whatever the server's
+   *  rollout flag says, for a route no tokenless client ever called. */
+  authorizeAgent(
+    req: Request,
+    agentId: string,
+    opts?: { requireToken?: boolean },
+  ): AgentCallerVerdict;
 
   /** The data dir — load reports, the event log and huddle files hang off it. */
   dataDir: string;
