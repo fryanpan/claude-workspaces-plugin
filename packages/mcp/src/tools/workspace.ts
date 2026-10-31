@@ -811,6 +811,40 @@ export async function handleWorkspaceTool(
           : { note: 'No page is waiting for this answer. Post it on the task or a thread.' }),
       });
     }
+    case 'say_in_meeting': {
+      // The lead speaks into the meeting its board's chat is running. The
+      // server checks that this session is the board's lead and that a
+      // meeting runs; either refusal comes back as an answer, not an error.
+      const { workspaceId, text } = a as { workspaceId?: string; text?: unknown };
+      const words = typeof text === 'string' ? text.trim() : '';
+      if (!workspaceId) return err('workspaceId is required');
+      if (words === '') return err('text is empty — say the line');
+      try {
+        const res = (await http(
+          'POST',
+          `/workspaces/${encodeURIComponent(workspaceId)}/lead-chat/meeting/say`,
+          { agentId: AUTHOR.id, text: words },
+        )) as { played?: boolean };
+        return ok({
+          said: true,
+          played: res.played === true,
+          ...(res.played === true
+            ? {}
+            : { note: 'Shown in the meeting but not played: no voice here, or a bot meeting.' }),
+        });
+      } catch (e) {
+        const m = String(e).match(/→ (403|409): /);
+        if (!m) throw e;
+        return ok({
+          said: false,
+          reason: m[1] === '409' ? 'no-meeting' : 'not-lead',
+          note:
+            m[1] === '409'
+              ? 'No meeting is running on this board.'
+              : "Only the board's lead speaks in its meeting.",
+        });
+      }
+    }
     case 'coach_moment': {
       const { goal, matched, observed, line } = a as Record<string, unknown>;
       try {

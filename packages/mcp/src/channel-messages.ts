@@ -26,6 +26,11 @@ import {
 import { doneWhenReadyLine } from './done-when-ready-line.ts';
 import { githubEventLine } from './github-event-line.ts';
 import {
+  type MeetingFeedPayload,
+  meetingHeardLine,
+  meetingStartedLine,
+} from './meeting-feed-line.ts';
+import {
   type HeldRowPayload,
   type StalledRowPayload,
   readyIdleLine,
@@ -455,6 +460,16 @@ async function emitBoardChannelMessage(
     // to do; see voice-line.ts.
     case 'voice.request': {
       const line = voiceRequestLine(p);
+      if (line === null) return;
+      body = line;
+      break;
+    }
+    // Addressed to the board's lead alone: the meeting it sits in.
+    case 'voice.meeting_started':
+      body = meetingStartedLine(rawPayload as MeetingFeedPayload);
+      break;
+    case 'voice.meeting_heard': {
+      const line = meetingHeardLine(rawPayload as MeetingFeedPayload);
       if (line === null) return;
       body = line;
       break;
