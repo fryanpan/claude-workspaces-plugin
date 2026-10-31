@@ -83,8 +83,8 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
     expect(wide?.afterNav).toEqual({ open: true, width: wide?.resized?.width, docked: true });
   }, 60_000);
 
-  // 1000 is the tier where the bar is a strip along the TOP until the chat
-  // opens, so only the full-screen rules put it at the bottom there.
+  // 1000 and 430 are both widths where the bar is already at the bottom
+  // before the chat opens (≤1100px); the full-screen rules keep it there.
   it.each([1000, 430])(
     'fills the screen at %i down to the navbar pinned at the bottom, and a page tap closes it',
     (at) => {
@@ -99,6 +99,17 @@ describe.skipIf(CHROME === null)('the lead chat mirror in a browser', () => {
       expect(f.agentFirst).toBe(true);
       expect(f.closedByPageTap).toBe(true);
       expect(f.libraryCurrent).toBe('page');
+    },
+    60_000,
+  );
+
+  it.each([1000, 430])(
+    'keeps every bottom tab in place at %i when the chat opens',
+    (at) => {
+      const f = result().widths.find((w) => w.width === at)?.full;
+      // CONTROL: the four pages and the agent button were all read.
+      expect(f?.tabsClosed).toHaveLength(5);
+      expect(f?.tabsOpen).toEqual(f?.tabsClosed);
     },
     60_000,
   );

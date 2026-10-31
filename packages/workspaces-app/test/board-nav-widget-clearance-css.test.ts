@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  * widget loaded.
  *
  * The widget's launcher is a fixed 48px bubble in the bottom-right corner of
- * the viewport, in a shadow root at the maximum z-index — and at ≤900px the
+ * the viewport, in a shadow root at the maximum z-index — and at ≤1100px the
  * board nav is a fixed bottom bar on the same edge. At 430px the bubble sat
  * exactly over the centre of the rightmost tab (Activity), so tapping it
  * reached CLAUDE-FEEDBACK-WIDGET instead. The bar cannot win a z-order
@@ -91,9 +91,9 @@ function fabGeometry(): { inset: number; width: number } {
 }
 
 describe('the bottom tab bar ends before the feedback bubble', () => {
-  const phone = media('(max-width: 900px)');
+  const phone = media('(max-width: 1100px)');
 
-  it('positive control: the ≤900px band really fixes the nav to the bottom edge', () => {
+  it('positive control: the ≤1100px band really fixes the nav to the bottom edge', () => {
     const nav = rule('.board-nav', phone);
     expect(nav).toContain('position: fixed');
     expect(nav).toContain('bottom: 0');
@@ -118,13 +118,15 @@ describe('the bottom tab bar ends before the feedback bubble', () => {
     expect(reserved).toBeGreaterThanOrEqual(inset + width);
   });
 
-  it('stays out of the 901–1100px band, where the strip sits at the top', () => {
-    // In that band the nav is an in-flow strip above the content — the bubble
-    // shares no edge with it, so a reservation there would be dead weight.
-    expect(media('(max-width: 1100px)')).not.toContain(':has(claude-feedback-widget)');
-    // And the desktop rail carries none of it either.
+  it('stays off the desktop rail, which shares no edge with the bubble', () => {
+    // Above 1100 the nav is a rail down the left; a reservation there would
+    // be dead weight. Since the 901–1100 band became the bottom bar too
+    // (Bryan, 31 Oct: "Just put it at the bottom"), that band carries it.
     const css = declarationsOnly(CSS);
     const firstMedia = css.indexOf('@media');
     expect(css.slice(0, firstMedia)).not.toContain(':has(claude-feedback-widget)');
+    expect(media('(max-width: 900px)')).not.toContain(
+      'body:has(claude-feedback-widget) .board-nav',
+    );
   });
 });
