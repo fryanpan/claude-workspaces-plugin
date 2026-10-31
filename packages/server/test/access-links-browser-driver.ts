@@ -14,9 +14,6 @@
  *
  * Spawned by `packages/workspaces-app/test/access-links-browser.test.ts`,
  * which reads the JSON this prints on its last line.
- *
- * audit: no-text — nothing here reads a source file, a bundle or a
- * stylesheet; every value it returns was read off the running page.
  */
 import { spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';

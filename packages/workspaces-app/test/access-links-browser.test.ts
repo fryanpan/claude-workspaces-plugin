@@ -8,9 +8,6 @@
  * "Who has access" link, then the access page's back link, opened plain and
  * opened from a board (`?ws=`), and reads where each click landed. The
  * control is the list signed out in the same run, which shows no such link.
- *
- * audit: no-text — the driver reads a running server and page; nothing here
- * reads a source file, a bundle or a stylesheet.
  */
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
