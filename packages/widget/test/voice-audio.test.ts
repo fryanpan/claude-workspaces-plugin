@@ -1,6 +1,6 @@
 import type { AudioPump } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { micRefusal, startPcmCapture } from '../src/voice/voice-audio.ts';
+import { OPAQUE_MIC_REFUSAL, micRefusal, startPcmCapture } from '../src/voice/voice-audio.ts';
 
 /**
  * The microphone as frames. There is no audio hardware here, so the media
@@ -42,6 +42,13 @@ describe('micRefusal', () => {
     expect(micRefusal({ name: 'SecurityError' })).toMatch(/blocked/);
     expect(micRefusal({ name: 'NotFoundError' })).toBe('No microphone was found.');
     expect(micRefusal(null)).toBe('The microphone could not be opened.');
+  });
+
+  it('names the frame, not the site settings, when the page has no origin of its own', () => {
+    expect(micRefusal({ name: 'SecurityError' }, 'null')).toBe(OPAQUE_MIC_REFUSAL);
+    expect(micRefusal({ name: 'NotAllowedError' }, 'null')).toBe(OPAQUE_MIC_REFUSAL);
+    expect(micRefusal({ name: 'SecurityError' }, 'https://harborlight.example')).toMatch(/blocked/);
+    expect(micRefusal({ name: 'NotFoundError' }, 'null')).toBe('No microphone was found.');
   });
 });
 
