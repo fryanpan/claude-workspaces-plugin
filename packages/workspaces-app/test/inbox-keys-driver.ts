@@ -5,7 +5,10 @@
  * Boots a server with three fixture rows and opens `/` through the owner's
  * Access door (`inbox-front-page.ts`), at 1180x820, then:
  *
- *  - presses `j` then `o` and reads which line opened and its text;
+ *  - reads that no line carries the cursor before a key, presses `j` and
+ *    reads the cursor on the first line and how it is drawn, presses `j`
+ *    again and reads it on the second;
+ *  - presses `o` and reads which line opened and its text;
  *  - presses `?` and reads the dialog and the section's height, then Escape;
  *  - presses `e` on the cursor line and reads the Removed fold.
  *
@@ -42,9 +45,19 @@ import {
 export interface Reading {
   /** What held focus once the page had loaded, before any key. */
   focusAtLoad: string;
-  /** After `j`, the cursor's line; the second line is the right answer. */
+  /** The cursor's line before any key; none is the right answer. */
+  cursorAtLoad: string | null;
+  /** After one `j` the cursor is on the first line, after a second on the
+   *  second. */
+  firstLine: string | null;
   cursorAfterJ: string | null;
   secondLine: string | null;
+  cursorAfterJJ: string | null;
+  /** How the cursor line is drawn after the first `j`, beside a line without
+   *  it, and whether the line is wholly inside the viewport. */
+  cursorLook: Look;
+  plainLook: Look;
+  cursorInView: boolean;
   /** After `o`: the open line, and its message text once fetched. */
   openAfterO: string | null;
   messageAfterO: string | null;
@@ -64,6 +77,27 @@ export interface Reading {
 
 const ROWS = '#inbox .inbox-rows > .inbox-row';
 
+/** The computed paint of a line's button, which covers its row: what the
+ *  reader sees is this, not the row's own background or shadow. */
+export interface Look {
+  boxShadow: string;
+  backgroundColor: string;
+  /** The line's own background, behind the button. */
+  lineBackground: string;
+  /** The element painted at the line's left edge, 1px in. */
+  atLeftEdge: string;
+}
+
+const look = (cdp: Cdp, row: string) =>
+  cdp.evaluate(`(() => {
+    const b = document.querySelector(${JSON.stringify(row)} + " .inbox-line > .board-review-row");
+    if (!b) return null;
+    const cs = getComputedStyle(b);
+    const r = b.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + 1, r.top + r.height / 2);
+    return { boxShadow: cs.boxShadow, backgroundColor: cs.backgroundColor, lineBackground: getComputedStyle(b.parentElement).backgroundColor, atLeftEdge: hit ? hit.className : "none" };
+  })()`) as Promise<Look>;
+
 async function view(cdp: Cdp, width: number, height: number): Promise<void> {
   const mobile = width <= 1100;
   await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -81,10 +115,15 @@ async function load(cdp: Cdp, url: string): Promise<void> {
   await loaded;
   const ready = await poll(
     async () =>
-      (await cdp.evaluate(`!!document.querySelector("${ROWS}.inbox-row-cursor")`)) ? true : null,
+      // startInbox() gives the section focus last thing, once its listeners are on.
+      (await cdp.evaluate(
+        `!!document.querySelector("${ROWS}") && document.activeElement?.id === "inbox"`,
+      ))
+        ? true
+        : null,
     10_000,
   );
-  if (!ready) throw new Error('the section never came up with a cursor');
+  if (!ready) throw new Error('the section never came up');
 }
 
 async function shot(cdp: Cdp, name: string): Promise<void> {
@@ -107,16 +146,28 @@ async function drive(cdp: Cdp, url: string): Promise<Reading> {
       '(() => { const a = document.activeElement; return a ? a.tagName.toLowerCase() + (a.id ? "#" + a.id : "") : "none"; })()',
     ),
   );
-  const secondLine = await text(
-    cdp,
-    `document.querySelectorAll("${ROWS}")[1]?.dataset.row ?? null`,
-  );
+  const nth = (n: number) =>
+    text(cdp, `document.querySelectorAll("${ROWS}")[${n}]?.dataset.row ?? null`);
+  const cursorNow = () =>
+    text(cdp, `document.querySelector("${ROWS}.inbox-row-cursor")?.dataset.row ?? null`);
+  const firstLine = await nth(0);
+  const secondLine = await nth(1);
+  const cursorAtLoad = await cursorNow();
   await press(cdp, 'j');
   const cursorAfterJ = await poll(async () => {
-    const c = await text(
-      cdp,
-      `document.querySelector("${ROWS}.inbox-row-cursor")?.dataset.row ?? null`,
-    );
+    const c = await cursorNow();
+    return c === firstLine ? c : null;
+  }, 3000);
+  const cursorLook = await look(cdp, `${ROWS}.inbox-row-cursor`);
+  const plainLook = await look(cdp, `${ROWS}:not(.inbox-row-cursor)`);
+  const cursorInView = (await cdp.evaluate(`(() => {
+    const r = document.querySelector("${ROWS}.inbox-row-cursor")?.getBoundingClientRect();
+    return !!r && r.top >= 0 && r.bottom <= innerHeight;
+  })()`)) as boolean;
+  await shot(cdp, 'cursor-1180x820');
+  await press(cdp, 'j');
+  const cursorAfterJJ = await poll(async () => {
+    const c = await cursorNow();
     return c === secondLine ? c : null;
   }, 3000);
   await press(cdp, 'o');
@@ -180,6 +231,8 @@ async function drive(cdp: Cdp, url: string): Promise<Reading> {
   if (process.env.INBOX_SHOT_DIR) {
     await view(cdp, 430, 932);
     await load(cdp, url);
+    await press(cdp, 'j');
+    await shot(cdp, 'cursor-430');
     await press(cdp, 'o');
     await poll(
       async () =>
@@ -196,8 +249,14 @@ async function drive(cdp: Cdp, url: string): Promise<Reading> {
   }
   return {
     focusAtLoad,
+    cursorAtLoad,
+    firstLine,
     cursorAfterJ,
     secondLine,
+    cursorAfterJJ,
+    cursorLook,
+    plainLook,
+    cursorInView,
     openAfterO,
     messageAfterO,
     keysDialog,
