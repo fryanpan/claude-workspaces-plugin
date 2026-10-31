@@ -9,10 +9,9 @@
  *   3. Make Plan and Review are much shorter and lose their subtitles.
  *
  * These are the CASCADE half: which rule wins at 430 and which at 1180, read
- * as computed values against the real sheets. The GEOMETRY half — that the
- * runway rule 1 sets actually lifts the transcript clear of the dock at
- * maximum scroll — needs a layout engine and lives in
- * `meeting-phone-layout-browser.test.ts`. happy-dom lays nothing out and
+ * as computed values against the real sheets. The geometry half was a
+ * browser test of the doc's live transcript, which went with the doc's own
+ * recorder on 2026-10-30. happy-dom lays nothing out and
  * drops a declaration whose `calc()` carries `max()`, which is exactly the
  * padding under test, so `--lz-runway` is what is legible here: the variable
  * that padding is built from.
@@ -23,8 +22,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { IPAD, PHONE, attach, installSheets, setViewport, styleOf } from './css-harness.ts';
-
-const token = (name: string) => styleOf(document.documentElement).getPropertyValue(name);
 
 let removeSheets = () => {};
 beforeEach(() => {
@@ -116,13 +113,6 @@ describe('the transcript clears the floats (rule 1)', () => {
 });
 
 describe('no status bar under the recording bar (rule 2)', () => {
-  it('a phone gives up the strip’s row while it has only words to show', () => {
-    setViewport(PHONE);
-    const strip = attach('meeting-strip is-live');
-    attach('meeting-feed-inner meeting-caption-line', { parent: strip });
-    expect(styleOf(strip).display).toBe('none');
-  });
-
   it('but keeps it for a sentence nothing else can say — a refused mic, a lost stream', () => {
     setViewport(PHONE);
     const strip = attach('meeting-strip is-live');
@@ -136,21 +126,6 @@ describe('no status bar under the recording bar (rule 2)', () => {
     const strip = attach('meeting-strip is-live');
     attach('meeting-feed-inner meeting-caption-line', { parent: strip });
     expect(styleOf(strip).display).toBe('flex');
-  });
-
-  it('the indicator that is left is steady at both widths: nothing blinks', () => {
-    for (const size of [PHONE, IPAD]) {
-      setViewport(size);
-      const record = attach('meeting-record is-live', { tag: 'button' });
-      const dot = attach('meeting-record-dot', { tag: 'span', parent: record });
-      const blinker = attach('meeting-blinker', { tag: 'span' });
-      // happy-dom does not expand the `animation` shorthand into
-      // `animation-name`, so the shorthand is what there is to read.
-      expect(styleOf(dot).animation).toBe('');
-      expect(styleOf(blinker).animation).toBe('');
-      // Positive control: the sheet IS reaching this document.
-      expect(styleOf(blinker).background).toBe(token('--red'));
-    }
   });
 });
 

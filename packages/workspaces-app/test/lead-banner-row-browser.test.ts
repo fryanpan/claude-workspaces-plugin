@@ -25,8 +25,7 @@
  * same reading carries two controls. `inBannerBand` counts the lines visible
  * in the top strip of the scroller that a sticky banner WOULD have covered —
  * a `covered` of zero is only evidence while that is above zero. And the
- * PRE-FIX ARRANGEMENT IS REBUILT IN THE SAME PAGE, the way the runway's own
- * control is (`meeting-phone-layout-browser.test.ts`): the line goes back
+ * PRE-FIX ARRANGEMENT IS REBUILT IN THE SAME PAGE: the line goes back
  * inside the scroller wearing the declarations it used to carry, and that
  * reading has to cover lines. A sampler that measured nothing fails there
  * rather than passing everything else vacuously.

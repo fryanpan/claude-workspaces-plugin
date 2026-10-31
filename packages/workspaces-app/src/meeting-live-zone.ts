@@ -104,7 +104,7 @@ export interface MeetingLiveZone {
   /**
    * Keep the wash alive for `ms` from now, whatever the grace says.
    *
-   * The tidy-up pass (`meeting-cleanup-offer.ts`) is a person asking for
+   * A tidy-up pass is a person asking for
    * notes minutes after the recording stopped, and the notes it writes are
    * the freshest thing on the page — exactly what the tint is for. Without
    * this they land untinted, because `WASH_GRACE_MS` has long run out and

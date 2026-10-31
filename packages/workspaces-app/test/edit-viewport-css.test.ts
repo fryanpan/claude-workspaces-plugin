@@ -110,21 +110,6 @@ describe('the voice strip yields while an editor has focus', () => {
     expect(stripDisplay(PHONE, 'hidden', { note: true })).toBe('none');
   });
 
-  it('on a phone the recording indicator is the button’s dot, so the bar itself goes', () => {
-    // Bryan, 2026-09-11, recording from his phone: "no white status bar under
-    // the recording bar; the recording indicator blinks in the top right and
-    // nothing else is dedicated to it". A strip with only words to show gives
-    // up its row at this width in EVERY yield mode — the invariant the case
-    // above protects is met by the blinking dot on the Record button, which
-    // meeting-phone-layout-css.test.ts owns.
-    for (const mode of ['compact', 'hidden', null]) {
-      expect(stripDisplay(PHONE, mode)).toBe('none');
-    }
-    // And not because the sheet reaches nothing: the same strip at iPad width
-    // is the 36px row it always was.
-    expect(stripDisplay(IPAD, 'compact')).toBe('flex');
-  });
-
   it('yields in layout only — never by unmounting the strip or setting [hidden]', () => {
     // Driven through the real wiring rather than grepping `edit-viewport.ts`:
     // put a phone-width editor under a keyboard, focus it, and ask what the
