@@ -134,6 +134,8 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
     canTalk: true,
     loaded: true,
     meeting,
+    more: false,
+    loadingOlder: false,
   };
   const fns: Array<(s: LeadChatState) => void> = [];
   const calls: Array<{ action: string; body: Record<string, unknown> }> = [];
@@ -147,6 +149,7 @@ export function fakeMeetingClient(meeting: LeadChatMeeting | null = null) {
     onChange: (fn) => {
       fns.push(fn);
     },
+    loadOlder: async () => {},
     async send(text, author, _context, via) {
       const m: LeadChatMessage = {
         id: `m${calls.length}`,

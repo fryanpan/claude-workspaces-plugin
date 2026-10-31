@@ -281,4 +281,29 @@ describe('renderCommentMarkdownInline — hard-break backslashes', () => {
     const out = renderCommentMarkdownInline('one\\\ntwo');
     expect(out).toBe('one two');
   });
+
+  it('renders a pipe table under its dashed rule, cells escaped and marked', () => {
+    const out = renderCommentMarkdown(
+      'Before\n| Gate | Result |\n|---|:--:|\n| `lint` | **pass** |\n| a \\| b | <b>x</b> |\nAfter',
+    );
+    expect(out).toContain('<p>Before</p>');
+    expect(out).toContain('<thead><tr><th>Gate</th><th>Result</th></tr></thead>');
+    expect(out).toContain('<tr><td><code>lint</code></td><td><strong>pass</strong></td></tr>');
+    expect(out).toContain('<tr><td>a | b</td><td>&lt;b&gt;x&lt;/b&gt;</td></tr>');
+    expect(out).toContain('<p>After</p>');
+  });
+
+  it('leaves a line with a pipe and no rule under it as prose', () => {
+    expect(renderCommentMarkdown('a | b\nc')).toBe('<p>a | b<br>c</p>');
+  });
+
+  it('links a bare http(s) URL only when asked to', () => {
+    const text = 'see https://github.com/x/y/pull/1. and javascript:alert(1)';
+    expect(renderCommentMarkdown(text)).not.toContain('<a ');
+    const out = renderCommentMarkdown(text, { bareLinks: true });
+    expect(out).toContain(
+      '<a href="https://github.com/x/y/pull/1" target="_blank" rel="noopener noreferrer">https://github.com/x/y/pull/1</a>.',
+    );
+    expect(out.match(/<a /g)).toHaveLength(1);
+  });
 });

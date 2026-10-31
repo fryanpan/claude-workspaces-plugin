@@ -212,4 +212,50 @@ describe('the lead chat client', () => {
     stream().fire(LEAD_CHAT_MEETING_EVENT, { workspaceId: 'w-harbor', meeting: null });
     expect(client.state().meeting).toBeNull();
   });
+
+  it('pages back from the oldest message held until the server says it is the first', async () => {
+    const { client, calls } = setup([
+      {
+        lead: null,
+        messages: [msg('c', 'three', 3), msg('d', 'four', 4)],
+        more: true,
+        canTalk: true,
+      },
+      { messages: [msg('b', 'two', 2)], more: true },
+      { messages: [msg('a', 'one', 1)], more: false },
+    ]);
+    await settle();
+    expect(client.state().more).toBe(true);
+    await client.loadOlder();
+    await client.loadOlder();
+    expect(client.state().messages.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(client.state()).toMatchObject({ more: false, loadingOlder: false });
+    expect(calls.map((c) => c.url)).toEqual([
+      '/workspaces/w-harbor/lead-chat',
+      '/workspaces/w-harbor/lead-chat?beforeTs=3&beforeId=c',
+      '/workspaces/w-harbor/lead-chat?beforeTs=2&beforeId=b',
+    ]);
+    await client.loadOlder();
+    expect(calls).toHaveLength(3);
+  });
+
+  it('keeps the pages read back when a dropped stream reads again', async () => {
+    const { client, stream } = setup([
+      { lead: null, messages: [msg('c', 'three', 3)], more: true, canTalk: true },
+      { messages: [msg('a', 'one', 1)], more: false },
+      {
+        lead: null,
+        messages: [msg('c', 'three', 3), msg('e', 'five', 5)],
+        more: true,
+        canTalk: true,
+      },
+    ]);
+    await settle();
+    await client.loadOlder();
+    stream().fire('error');
+    stream().fire('open');
+    await settle();
+    expect(client.state().messages.map((m) => m.id)).toEqual(['a', 'c', 'e']);
+    expect(client.state().more).toBe(false);
+  });
 });

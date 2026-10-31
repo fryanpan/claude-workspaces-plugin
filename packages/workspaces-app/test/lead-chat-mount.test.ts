@@ -16,7 +16,15 @@ const LEAD = { agentId: 'harborlight-lead', name: 'Harborlight Lead' };
 const ME = { id: 'known-bryan', name: 'Bryan', kind: 'known' };
 
 function fakeClient(canTalk = true) {
-  let state: LeadChatState = { lead: LEAD, messages: [], canTalk, loaded: true, meeting: null };
+  let state: LeadChatState = {
+    lead: LEAD,
+    messages: [],
+    canTalk,
+    loaded: true,
+    meeting: null,
+    more: false,
+    loadingOlder: false,
+  };
   const fns: Array<(s: LeadChatState) => void> = [];
   const sent: Array<{ text: string; via: string; context: unknown }> = [];
   let n = 0;
@@ -29,6 +37,7 @@ function fakeClient(canTalk = true) {
     onChange: (fn) => {
       fns.push(fn);
     },
+    loadOlder: async () => {},
     async send(text, author, context, via) {
       sent.push({ text, via, context });
       const m: LeadChatMessage = {

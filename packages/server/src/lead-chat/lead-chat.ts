@@ -14,16 +14,24 @@
  * (`voiceTurn`, `voiceReply`), so the chat is one conversation whether the
  * person typed or talked.
  *
+ * A page is handed the latest `LEAD_CHAT_PAGE` messages and pages back from
+ * there (`page`) until the first: the latest `LEAD_CHAT_KEEP` out of memory,
+ * anything older off the log.
+ *
  * Every change goes to the board's pages as a `lead-chat.changed` frame and
  * to no agent stream: the lead already has its own frame, and a page frame on
  * an agent's stream would cost that session a turn.
  */
 import {
   LEAD_CHAT_EVENT,
+  LEAD_CHAT_PAGE,
+  type LeadChatCursor,
   type LeadChatFrame,
+  type LeadChatHistoryPage,
   type LeadChatLead,
   type LeadChatMessage,
   type LeadChatSnapshot,
+  compareLeadChatEntries,
 } from '@claude-workspaces/core/lead-chat';
 import {
   type AgentLine,
@@ -61,6 +69,9 @@ interface Waiting {
 
 export class LeadChat {
   private readonly boards = new Map<string, LeadChatMessage[]>();
+  /** Boards whose held list is their whole conversation, so a page back
+   *  never needs the log. */
+  private readonly complete = new Set<string>();
   /** queueId → the person's message it answers. Rebuilt from the log. */
   private readonly waiting = new Map<string, Waiting>();
   /** queueId → the message a spoken turn wrote, for its answer. */
@@ -72,10 +83,33 @@ export class LeadChat {
   }
 
   snapshot(workspaceId: string): LeadChatSnapshot {
+    const list = this.messages(workspaceId);
     return {
       lead: this.deps.leadOf(workspaceId),
-      messages: this.messages(workspaceId).map((m) => ({ ...m })),
+      messages: list.slice(-LEAD_CHAT_PAGE).map(publicMessage),
+      more: list.length > LEAD_CHAT_PAGE || !this.complete.has(workspaceId),
     };
+  }
+
+  /**
+   * The `limit` messages just before `before`, oldest first. Served from
+   * memory while it reaches far enough back, else from the log; null when
+   * the log could not be read.
+   */
+  async page(
+    workspaceId: string,
+    before: LeadChatCursor,
+    limit: number,
+  ): Promise<LeadChatHistoryPage | null> {
+    const earlier = (list: readonly StoredMessage[]) =>
+      list.filter((m) => compareLeadChatEntries(m, before) < 0);
+    let older = earlier(this.messages(workspaceId));
+    if (older.length <= limit && !this.complete.has(workspaceId)) {
+      const all = await this.deps.log.history(workspaceId);
+      if (!all) return null;
+      older = earlier(all);
+    }
+    return { messages: older.slice(-limit).map(publicMessage), more: older.length > limit };
   }
 
   /** A person's message, typed or dictated on the page: recorded, then sent
@@ -200,8 +234,9 @@ export class LeadChat {
   private messages(workspaceId: string): StoredMessage[] {
     const held = this.boards.get(workspaceId);
     if (held) return held;
-    const list = this.deps.log.load(workspaceId);
+    const { messages: list, complete } = this.deps.log.loadBoard(workspaceId);
     this.boards.set(workspaceId, list);
+    if (complete) this.complete.add(workspaceId);
     // The questions still open when the server last stopped.
     for (const m of list) {
       if (m.queueId && m.sentTo && m.state !== 'answered') {
@@ -215,8 +250,11 @@ export class LeadChat {
     if (!this.deps.log.append(workspaceId, m)) return false;
     const list = this.messages(workspaceId).filter((x) => x.id !== m.id);
     list.push(m);
-    list.sort((a, b) => a.ts - b.ts);
-    if (list.length > LEAD_CHAT_KEEP) list.splice(0, list.length - LEAD_CHAT_KEEP);
+    list.sort(compareLeadChatEntries);
+    if (list.length > LEAD_CHAT_KEEP) {
+      list.splice(0, list.length - LEAD_CHAT_KEEP);
+      this.complete.delete(workspaceId);
+    }
     this.boards.set(workspaceId, list);
     this.deps.broadcast(workspaceId, {
       event: LEAD_CHAT_EVENT,

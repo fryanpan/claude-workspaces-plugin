@@ -3,13 +3,22 @@
  * (`lead-chat/lead-chat.ts`) — and `POST /workspaces/<id>/lead-chat/meeting`,
  * the meeting it runs (`lead-chat/meeting.ts`).
  *
+ * A `GET` with `beforeTs` and `beforeId` is a page back through the history:
+ * the `limit` messages before that one (`LeadChatHistoryPage`).
+ *
  * The read is a member's: everything in a workspace is available to everyone
  * in it. The write is the owner's alone, as talking to an agent by name on
  * the converse socket is, because the lead acts on what it is told with the
  * owner's reach. Neither path is in the share member table
  * (`middleware/host-guard.ts`), and both refuse a visitor here besides.
  */
-import { LEAD_CHAT_MAX_CHARS, addressesLead } from '@claude-workspaces/core/lead-chat';
+import {
+  LEAD_CHAT_MAX_CHARS,
+  LEAD_CHAT_PAGE,
+  LEAD_CHAT_PAGE_MAX,
+  type LeadChatCursor,
+  addressesLead,
+} from '@claude-workspaces/core/lead-chat';
 import { leadHearsLine } from '../lead-chat/meeting.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseVoiceContext } from '../voice.ts';
@@ -33,6 +42,19 @@ export async function handleWorkspaceLeadChat(
   // A member who may not write is still shown the chat, and told so, which
   // is what lets a page draw no composer rather than one that refuses.
   if (req.method === 'GET') {
+    const q = rq.url.searchParams;
+    if (q.has('beforeTs') || q.has('beforeId')) {
+      const cursor = historyCursor(q.get('beforeTs'), q.get('beforeId'));
+      const limit = pageLimit(q.get('limit'));
+      if (!cursor || limit === null) {
+        return ctx.j(400, {
+          error: 'bad history page',
+          hint: `beforeTs (a whole number), beforeId (a message id) and limit (1-${LEAD_CHAT_PAGE_MAX}, optional).`,
+        });
+      }
+      const page = await ctx.leadChat.page(workspaceId, cursor, limit);
+      return page ? ctx.j(200, page) : ctx.j(500, { error: 'history-unreadable' });
+    }
     return ctx.j(200, {
       ...ctx.leadChat.snapshot(workspaceId),
       meeting: ctx.leadChatMeetings.current(workspaceId),
@@ -60,6 +82,22 @@ export async function handleWorkspaceLeadChat(
   );
   if (!res.ok) return ctx.j(500, { error: res.error });
   return ctx.j(201, { message: res.message });
+}
+
+/** A message id as `parseLeadChatMessage` accepts one. */
+const MESSAGE_ID = /^[A-Za-z0-9_~.-]{1,200}$/;
+
+function historyCursor(ts: string | null, messageId: string | null): LeadChatCursor | null {
+  if (ts === null || messageId === null || !/^\d{1,16}$/.test(ts)) return null;
+  if (!MESSAGE_ID.test(messageId)) return null;
+  return { ts: Number(ts), id: messageId };
+}
+
+function pageLimit(v: string | null): number | null {
+  if (v === null) return LEAD_CHAT_PAGE;
+  if (!/^\d{1,3}$/.test(v)) return null;
+  const n = Number(v);
+  return n >= 1 && n <= LEAD_CHAT_PAGE_MAX ? n : null;
 }
 
 /** Ids the server minted: docs, meetings, the recorder's own token. */
