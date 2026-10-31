@@ -6,6 +6,9 @@ import { homedir } from 'node:os';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { version as manifestVersion } from '../../plugin/.claude-plugin/plugin.json' with {
+  type: 'json',
+};
 import { serverFetch } from './access-headers.ts';
 import { resolveAgentAuthor } from './author.ts';
 import { CONNECTOR_INSTRUCTIONS } from './connector-instructions.ts';
@@ -49,17 +52,19 @@ const resolveBaseUrl = () =>
 
 const AUTHOR = resolveAgentAuthor(process.env);
 /**
- * Must match packages/plugin/.claude-plugin/plugin.json — this is the version
- * a client sees in the initialize handshake, and it had drifted three minor
- * releases behind. Asserted against the manifest, through the real bundle, in
+ * The plugin's version, read from packages/plugin/.claude-plugin/plugin.json
+ * — the version a client sees in the initialize handshake. It used to be a
+ * literal here, a third copy every release had to bump by hand, and it once
+ * drifted three minor releases behind. `build:mcp` inlines the manifest's
+ * value into the bundle, so a bump edits plugin.json and marketplace.json and
+ * nothing else. Asserted against the manifest, through the real bundle, in
  * packages/mcp/test/launcher.test.ts.
  *
- * One constant rather than a literal per use: the same value is reported to
- * the board on attach, so the board can say which sessions are running an older
- * bundle than the deploy source would install. A second literal would be a
- * fourth version site, and this file's history is that version sites drift.
+ * One constant rather than a read per use: the same value is reported to the
+ * board on attach, so the board can say which sessions are running an older
+ * bundle than the deploy source would install.
  */
-const PLUGIN_VERSION = '0.1.345';
+const PLUGIN_VERSION: string = manifestVersion;
 
 /**
  * One nonce per PROCESS, minted at module load and sent on every attach.

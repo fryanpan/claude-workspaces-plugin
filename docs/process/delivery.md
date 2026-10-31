@@ -76,24 +76,25 @@ previous release. Main is the release point because the marketplace serves
 the plugin from main, so a release marks when users could first install a
 version, not when prod redeployed.
 
-Bump the patch on every PR that touches `packages/plugin/**`, in all three
-places, to the same value:
+Bump the patch on every PR that touches `packages/plugin/**`, in both
+manifests, to the same value, then run `bun run build:mcp`:
 
 1. `packages/plugin/.claude-plugin/plugin.json` — what the installed copy
    reports about itself.
 2. `.claude-plugin/marketplace.json` — what the marketplace advertises, and
    what `claude plugin update` compares against.
-3. The `PLUGIN_VERSION` constant in `packages/mcp/src/mcp.ts` — the
-   `serverInfo` a client sees in the MCP **initialize handshake**, and the
-   version each session reports to its board on `attach_agent`. One constant
-   for both, so those two can never disagree.
 
-The third one exists because the MCP server introduces itself independently of
-the plugin manifest, and it is the one that has actually drifted in the field:
-a bump that followed the old "both manifests" instruction exactly still shipped
-a handshake three minor releases behind. `packages/mcp/test/launcher.test.ts`
-now asserts the handshake against `plugin.json` — but it drives the **bundle**,
-so the assertion only sees your change after `bun run build:mcp`.
+The MCP server introduces itself separately: the `PLUGIN_VERSION` constant in
+`packages/mcp/src/mcp.ts` is the `serverInfo` a client sees in the MCP
+**initialize handshake**, and the version each session reports to its board on
+`attach_agent`. It used to be a third literal to bump, and it is the one that
+drifted in the field: a bump that followed the old "both manifests"
+instruction exactly still shipped a handshake three minor releases behind. It
+is now read from `plugin.json` and inlined into the bundle by `build:mcp`, so
+it cannot disagree with the manifest once the bundle is rebuilt — and
+`check:mcp-bundle` fails a PR whose bundle was not.
+`packages/mcp/test/launcher.test.ts` asserts the handshake against
+`plugin.json` through the **bundle**.
 
 CI enforces the dangerous half: `bun run check:plugin-version` fails the build
 when a PR touches `packages/plugin/**` without moving the version forward, or
@@ -422,7 +423,8 @@ install path, `installed_plugins.json`, or `${CLAUDE_PLUGIN_ROOT}`**, so
 neither can be confidently wrong about which artifact is actually loaded:
 
 - **What the session is running** is `PLUGIN_VERSION` in
-  `packages/mcp/src/mcp.ts` — a compile-time literal **baked into the bundle**
+  `packages/mcp/src/mcp.ts` — plugin.json's version, **baked into the bundle**
+  by `build:mcp`,
   and sent on `attach_agent`. It is the artifact describing itself, so it is
   correct by construction whether that bundle was loaded from the version-keyed
   cache or straight out of a working tree. The MCP source contains no read of
@@ -537,8 +539,8 @@ once, after.
 
 - [ ] Touched `packages/mcp/src/**`? → `bun run build:mcp`, commit
       `packages/plugin/mcp/index.js`.
-- [ ] Touched `packages/plugin/**`? → bump the patch in all three version
-      sites, same value.
+- [ ] Touched `packages/plugin/**`? → bump the patch in both manifests, same
+      value, then `bun run build:mcp`.
 - [ ] `bun run test` and `bun run lint` green.
 - [ ] Client change people need to see? → restart prod (that is the deploy),
       then confirm the release published — the supervisor log names it, and a

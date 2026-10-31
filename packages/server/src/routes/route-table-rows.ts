@@ -401,10 +401,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/answer/undo', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/more-info', 'POST'],
   ]),
+  ...family('routes/task-review-ask-back.ts', [
+    ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info', 'POST'],
+  ]),
   ...family('routes/task-review-items.ts', [
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/answer', 'POST'],
-    ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/more-info', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/release', 'POST'],
     ['share-scope', '/workspaces/:ws/tasks/:taskId/review-items/:itemId/revise', 'POST'],
     // NOT `share-scope`, and that is the point: every sibling verb above is

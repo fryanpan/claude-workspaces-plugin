@@ -13668,6 +13668,8 @@ class StdioServerTransport {
     });
   }
 }
+// packages/plugin/.claude-plugin/plugin.json
+var version2 = "0.1.346";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -21992,7 +21994,7 @@ var resolveBaseUrl2 = () => resolveBaseUrl({
   readFileSync: readDiscoveryText
 });
 var AUTHOR = resolveAgentAuthor(process.env);
-var PLUGIN_VERSION = "0.1.345";
+var PLUGIN_VERSION = version2;
 var PROCESS_ID = randomUUID();
 var server = new Server({
   name: "claude-workspaces",
