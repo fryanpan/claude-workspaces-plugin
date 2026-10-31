@@ -18,6 +18,8 @@ import { waitFor } from './wait-for.ts';
 
 const REPO = 'Harborlight/approvals';
 const LEAD = { id: 'agent-harborlight-lead', name: 'Harborlight Lead', kind: 'agent' };
+// A push is several git subprocesses; on a loaded runner they take seconds.
+const SETTLE_MS = 20_000;
 
 interface Held {
   id: string;
@@ -93,7 +95,7 @@ describe('a push to a repo marked for approval', () => {
     const res = await answer(held, 'o-push', 'person');
     expect(res.status, await res.clone().text()).toBe(200);
     await waitFor(async () => (await statusOf(held.id)).state !== 'awaiting-approval', {
-      timeout: 4000,
+      timeout: SETTLE_MS,
       describe: 'the non-member push is settled',
     });
     const after = (await statusOf(held.id)) as Held & { message: string };
@@ -112,10 +114,11 @@ describe('a push to a repo marked for approval', () => {
 
     const res = await answer(held, 'o-push', 'person');
     expect(res.status, await res.clone().text()).toBe(200);
-    await waitFor(async () => (await statusOf(held.id)).state === 'pushed', {
-      timeout: 4000,
-      describe: 'the approved push lands',
+    await waitFor(async () => (await statusOf(held.id)).state !== 'awaiting-approval', {
+      timeout: SETTLE_MS,
+      describe: 'the approved push is settled',
     });
+    expect(await statusOf(held.id)).toMatchObject({ state: 'pushed' });
     expect(w.upstreamTip(REPO, 'feature-approved')).toBe(held.sha);
   });
 
@@ -128,7 +131,7 @@ describe('a push to a repo marked for approval', () => {
     const res = await answer(held, 'o-push', 'agent');
     expect(res.status, await res.clone().text()).toBe(200);
     await waitFor(async () => (await statusOf(held.id)).state !== 'awaiting-approval', {
-      timeout: 4000,
+      timeout: SETTLE_MS,
       describe: 'the agent-answered push is settled',
     });
     const after = await statusOf(held.id);
@@ -141,9 +144,109 @@ describe('a push to a repo marked for approval', () => {
     const res = await answer(held, 'o-no-push', 'person');
     expect(res.status, await res.clone().text()).toBe(200);
     await waitFor(async () => (await statusOf(held.id)).state === 'rejected', {
-      timeout: 4000,
+      timeout: SETTLE_MS,
       describe: 'the rejected push is settled',
     });
     expect(w.upstreamTip(REPO, 'feature-rejected')).toBe('');
+  });
+});
+
+/**
+ * A board that reserves pushes for its owner (`requireOwnerFor: ['push']`).
+ *
+ * The member is a real share member: on the board's audience and admitted by
+ * redeeming the board's link, as `/s/<linkId>` does after Access signs them
+ * in. Their answer goes over loopback with their own signed session cookie,
+ * where the answer route's owner-only gate lets the machine's operator
+ * through, so the route records the answer as the member's. The refusal
+ * shown here is the pusher's own check. Over the share host the route's
+ * owner-only gate refuses the member before that (`board-roles.test.ts`).
+ */
+describe('a push on a board that reserves pushes for its owner', () => {
+  const MEMBER = 'keeper@harborlight.example';
+  let w: PushWorld;
+  let owner: SignedInPerson;
+  let member: SignedInPerson;
+  let taskId: string;
+
+  const json = (body: unknown, headers: Record<string, string> = {}) => ({
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  });
+  const statusOf = async (id: string) =>
+    (await (await w.onSocket(`/workspaces/${w.board}/git/pushes/${id}`)).json()) as Held & {
+      message?: string;
+    };
+  const answerAs = (who: SignedInPerson, held: Held) =>
+    w.overTcp(
+      `/workspaces/${w.board}/tasks/${held.taskId}/review-items/${held.reviewItemId}/answer`,
+      json({ text: 'o-push', answeredWith: 'o-push', author: who.user }, who.headers),
+    );
+  async function ask(branch: string): Promise<Held> {
+    const res = await w.onSocket(pushPath(w.board, REPO, branch, taskId), {
+      method: 'POST',
+      body: w.leadBundle(REPO, branch),
+    });
+    const held = (await res.json()) as Held;
+    expect(res.status, JSON.stringify(held)).toBe(202);
+    return held;
+  }
+  async function settled(id: string) {
+    await waitFor(async () => (await statusOf(id)).state !== 'awaiting-approval', {
+      timeout: SETTLE_MS,
+      describe: 'the push is settled',
+    });
+    return statusOf(id);
+  }
+
+  beforeAll(async () => {
+    w = await startPushWorld((board) => ({
+      boards: { [board]: { repos: [{ repo: REPO, approval: true }] } },
+    }));
+    owner = signedInPerson(w.h, w.dataDir, w.base, { name: 'Alice' });
+    registerOwnerIdentity(owner.user.id);
+    member = signedInPerson(w.h, w.dataDir, w.base, { email: MEMBER, name: 'Bob' });
+    w.h.shareLinks.addToAudience(w.board, [MEMBER], 'Alice');
+    const link = w.h.shareLinks.create({ workspaceId: w.board, createdBy: 'Alice' });
+    expect(w.h.shareLinks.redeem(link.linkId, MEMBER)).toMatchObject({ ok: true });
+    expect(w.h.shareLinks.roleOf(w.board, MEMBER)).toBe('member');
+    expect(w.h.tasks.setRequireOwnerFor(w.board, ['push'])).toMatchObject({ ok: true });
+    const res = await w.overTcp(
+      `/workspaces/${w.board}/tasks`,
+      json({ title: 'Agent can ship the Harborlight owner-only branch', author: LEAD }),
+    );
+    taskId = ((await res.json()) as { task: Task }).task.id;
+  });
+  afterAll(async () => {
+    await w.stop();
+    resetOwnerIdentities();
+  });
+
+  it('files the push item owner-only', async () => {
+    const held = await ask('feature-owner-only');
+    const item = w.h.tasks.listReviewItems(taskId).find((r) => r.id === held.reviewItemId);
+    expect(item?.review.ownerOnly).toBe(true);
+    expect(item?.review.step).toBe('push');
+  });
+
+  it('pushes nothing when a share member chooses Push', async () => {
+    const held = await ask('feature-member-approved');
+    const res = await answerAs(member, held);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const item = w.h.tasks.listReviewItems(taskId).find((r) => r.id === held.reviewItemId);
+    expect(item?.answer?.answeredBy?.id).toBe(member.user.id);
+    const after = await settled(held.id);
+    expect(after.state).toBe('refused');
+    expect(after.message).toContain('reserves pushes');
+    expect(w.upstreamTip(REPO, 'feature-member-approved')).toBe('');
+  });
+
+  it('pushes when the owner chooses Push', async () => {
+    const held = await ask('feature-owner-approved');
+    const res = await answerAs(owner, held);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await settled(held.id)).toMatchObject({ state: 'pushed' });
+    expect(w.upstreamTip(REPO, 'feature-owner-approved')).toBe(held.sha);
   });
 });
