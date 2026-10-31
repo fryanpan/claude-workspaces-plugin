@@ -226,8 +226,9 @@ describe('a "Claude, …" in a meeting is asked with the meeting', () => {
     await waitFor(() => replies().length === 1, { describe: 'the talk heard' });
     listen();
     speak(ASK);
-    await waitFor(() => replies().length === 2, { describe: 'On it' });
-    expect(replies()[1]?.spoken).toBe('On it.');
+    await waitFor(() => replies().length === 2, { describe: 'the lead takes it' });
+    // The lead took it: nothing is said until it answers.
+    expect(replies()[1]?.spoken).toBe('');
 
     // The router's model read the meeting, fenced as meeting content, after
     // the workspace's fence and before the request.

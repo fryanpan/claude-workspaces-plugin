@@ -300,8 +300,12 @@ export class SpokenAnswerer {
     });
     if (!r.ok) return plain('I can’t find this board.');
     if (r.queueId) this.onAwaiting?.(r.queueId);
+    // A live lead took it: the page shows it working and only the lead's
+    // answer is said, never "On it." (Bryan, 2026-10-31). A call with no page
+    // says the ack itself (`meeting-claude.ts`).
+    const shaped = shapedAnswer(r.ack, r.route, r.detail);
     return {
-      ...shapedAnswer(r.ack, r.route, r.detail),
+      ...(r.route === 'agent' ? { ...shaped, spoken: '', points: [] } : shaped),
       ...(r.navigate ? { navigate: r.navigate } : {}),
       ...(r.queueId ? { awaiting: r.queueId } : {}),
     };

@@ -77,15 +77,16 @@ describe('in a meeting the page records', () => {
     m.listen();
     await m.ready();
     m.hear(1, 'Claude, can you create tasks for the berth work?', true);
-    await waitFor(() => m?.said.length === 1, { describe: 'On it' });
+    await waitFor(() => m?.json.some((f) => f.type === 'doing'), { describe: 'the lead working' });
+    expect(m.said).toEqual([]);
     m.listen();
     m.session.sayLead('q-tasks', {
       ...shapedAnswer('Two tasks made.', LEAD_ANSWER_ROUTE),
       minute: TASKS,
     });
     expect(m.notes).toEqual([`- Claude: ${TASKS}`]);
-    await waitFor(() => m?.said.length === 2, { describe: 'the answer said' });
-    expect(m.said[1]).toBe('Two tasks made.');
+    await waitFor(() => m?.said.length === 1, { describe: 'the answer said' });
+    expect(m.said).toEqual(['Two tasks made.']);
   });
 
   it('the lead’s answer with no minute is said and never noted', async () => {
@@ -93,10 +94,11 @@ describe('in a meeting the page records', () => {
     m.listen();
     await m.ready();
     m.hear(1, 'Claude, can you find the Riverbend fares?', true);
-    await waitFor(() => m?.said.length === 1, { describe: 'On it' });
+    await waitFor(() => m?.json.some((f) => f.type === 'doing'), { describe: 'the lead working' });
+    expect(m.said).toEqual([]);
     m.listen();
     m.session.sayLead('q-fares', shapedAnswer('Four dollars.', LEAD_ANSWER_ROUTE));
-    await waitFor(() => m?.said.length === 2, { describe: 'the answer said' });
+    await waitFor(() => m?.said.length === 1, { describe: 'the answer said' });
     expect(m.notes).toEqual([]);
   });
 });
