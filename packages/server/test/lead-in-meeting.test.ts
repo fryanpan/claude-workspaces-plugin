@@ -22,6 +22,7 @@ import {
 } from '@claude-workspaces/core/lead-chat';
 import {
   LEAD_MEETING_HEARD_EVENT,
+  LEAD_MEETING_SINCE,
   LEAD_MEETING_STARTED_EVENT,
 } from '../src/lead-chat/meeting-feed.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
@@ -125,7 +126,12 @@ describe('the lead in the meeting', () => {
       ['harborlight-lead', 'Harborlight Lead'],
       ['riverbend-helper', 'Riverbend Helper'],
     ] as const) {
-      handle.tasks.attachAgent(boardId, { agentId, agentName, runtime: 'claude-code-local' });
+      handle.tasks.attachAgent(boardId, {
+        agentId,
+        agentName,
+        runtime: 'claude-code-local',
+        pluginVersion: LEAD_MEETING_SINCE,
+      });
     }
     handle.tasks.setLeadAgent(boardId, 'harborlight-lead', { actor: ALICE });
     const path = join(dataDir, 'saltmarsh-plan.md');
@@ -265,6 +271,43 @@ describe('the lead in the meeting', () => {
     const fed = of(lead, LEAD_MEETING_HEARD_EVENT).flatMap((f) => f.lines as LeadChatMeetingLine[]);
     expect(fed.map((l) => l.text)).toContain('For Riverbend.');
     expect(fed.map((l) => l.text)).not.toContain('Who is the slipway pricing for?');
+  });
+
+  it('drops the lead’s own voice heard back by the room: not shown, not fed', async () => {
+    const res = await say('harborlight-lead', 'Is Saltmarsh paying for it?');
+    expect(res.status).toBe(200);
+    const fedBefore = of(lead, LEAD_MEETING_HEARD_EVENT).length;
+    const echo = await act({
+      action: 'line',
+      id: meeting.id,
+      turn: 5,
+      who: 'Alice',
+      text: 'is saltmarsh paying for it',
+    });
+    expect(await echo.json()).toMatchObject({ echo: true });
+    // The room's real answer after it still goes through, and is the only
+    // new line either the page or the lead sees.
+    await act({ action: 'line', id: meeting.id, turn: 6, who: 'Bob', text: 'Riverbend is.' });
+    await waitFor(() => of(lead, LEAD_MEETING_HEARD_EVENT).length > fedBefore, {
+      describe: 'the answer heard',
+    });
+    const fed = of(lead, LEAD_MEETING_HEARD_EVENT)
+      .slice(fedBefore)
+      .flatMap((f) => f.lines as LeadChatMeetingLine[]);
+    expect(fed.map((l) => l.text)).toEqual(['Riverbend is.']);
+    const shown = of(page, LEAD_CHAT_MEETING_LINE_EVENT).map((f) => f.line as LeadChatMeetingLine);
+    expect(shown.some((l) => l.turn === 5)).toBe(false);
+  });
+
+  it('stops the lead after ten lines in a row until the room speaks', async () => {
+    const codes: number[] = [];
+    for (let i = 0; i < 11; i++) codes.push((await say('harborlight-lead', `Point ${i}.`)).status);
+    expect(codes.slice(0, 10).every((c) => c === 200)).toBe(true);
+    const refused = await say('harborlight-lead', 'One more.');
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ error: 'room-first' });
+    await act({ action: 'line', id: meeting.id, turn: 7, who: 'Alice', text: 'Go on.' });
+    expect((await say('harborlight-lead', 'Thank you.')).status).toBe(200);
   });
 
   it('holds nothing for the lead once the meeting has ended', async () => {

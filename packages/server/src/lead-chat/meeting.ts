@@ -58,6 +58,40 @@ export function leadHearsLine(source: LeadChatMeetingSource, ownerProven: boolea
   return ownerProven && source === 'mic';
 }
 
+/** How long after the lead says a line the room's microphone may hand it
+ *  back: the voice's own length plus the transcriber settling the turn. */
+export const LEAD_ECHO_MS = 30_000;
+
+/** Lower case, letters and digits only, single spaces. */
+function spoken(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Whether a line heard in the room is the lead's own voice coming back
+ * through the microphone: its words equal, or are a part of, a line the lead
+ * said in the last `LEAD_ECHO_MS`. Mac audio records what the machine plays
+ * with no echo cancellation, and even a cancelling microphone leaks; fed back,
+ * the lead would read its own words as the room's and could answer them.
+ * A part must be 12 characters or more, so "yes" is never taken for an echo.
+ */
+export function echoOfLead(
+  lines: readonly LeadChatMeetingLine[],
+  text: string,
+  now: number,
+): boolean {
+  const heard = spoken(text);
+  if (!heard) return false;
+  return lines.some((l) => {
+    if (!l.lead || now - l.ts > LEAD_ECHO_MS) return false;
+    const said = spoken(l.text);
+    return said === heard || (heard.length >= 12 && said.includes(heard));
+  });
+}
+
 export interface MeetingStart {
   by: { id: string; name: string };
   docId: string;
@@ -146,9 +180,15 @@ export class LeadChatMeetings {
     workspaceId: string,
     id: string,
     l: Omit<LeadChatMeetingLine, 'ts'>,
-  ): { ok: true; line: LeadChatMeetingLine; fresh: boolean } | { ok: false; error: string } {
+  ):
+    | { ok: true; line: LeadChatMeetingLine; fresh: boolean; echo?: true }
+    | { ok: false; error: string } {
     const m = this.current(workspaceId);
     if (!m || m.id !== id) return { ok: false, error: 'no-meeting' };
+    // The room's microphone heard the lead's own voice: not a line.
+    if (!l.lead && echoOfLead(m.lines, l.text, this.now())) {
+      return { ok: true, line: { ...l, ts: this.now() }, fresh: false, echo: true };
+    }
     const fresh = !m.lines.some((x) => x.turn === l.turn);
     const line: LeadChatMeetingLine = { ...l, ts: this.now() };
     const next = { ...m, lines: upsertMeetingLine(m.lines, line) };
@@ -178,6 +218,7 @@ export class LeadChatMeetings {
     const m = this.current(workspaceId);
     if (!m) return { ok: false, error: 'no-meeting' };
     const turn = leadLineTurn(m.lines);
+    if (turn === null) return { ok: false, error: 'room-first' };
     const r = this.line(workspaceId, m.id, { turn, who, text, lead: true });
     return r.ok ? { ok: true, meeting: m, line: r.line } : r;
   }

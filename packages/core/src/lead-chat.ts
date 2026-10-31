@@ -196,15 +196,22 @@ export function upsertMeetingLine(
   return out.slice(-LEAD_CHAT_MEETING_LINES);
 }
 
+/** The smallest gap a lead line may take before the room's next turn: ten
+ *  lead lines in a row with nobody in the room speaking between them. */
+export const LEAD_LINE_MIN_GAP = 1 / 1024;
+
 /**
  * The turn a line the lead says takes: just after the last line, and still
  * before the room's next turn, which is the next whole number. Each further
- * lead line halves the gap that is left, so it never reaches that number.
+ * lead line halves the gap that is left. Null once that gap would fall below
+ * `LEAD_LINE_MIN_GAP`: halving further would, after about fifty lines, round
+ * to the next whole number and replace the room's line there.
  */
-export function leadLineTurn(lines: readonly LeadChatMeetingLine[]): number {
+export function leadLineTurn(lines: readonly LeadChatMeetingLine[]): number | null {
   const top = lines.reduce((m, l) => Math.max(m, l.turn), -1);
   const whole = Math.floor(top);
-  return whole + (top - whole + 1) / 2;
+  const gap = (whole + 1 - top) / 2;
+  return gap < LEAD_LINE_MIN_GAP ? null : top + gap;
 }
 
 /**

@@ -21,7 +21,11 @@ import { systemAudioOffered } from '../meeting-source.ts';
 import type { VoiceContext } from '../voice-capture.ts';
 import type { LeadChatClient } from './lead-chat-client.ts';
 import type { MeetingViewModel } from './lead-chat-meeting-view.ts';
-import { type LeadLineVoiceOpts, createLeadLineVoice } from './lead-chat-meeting-voice.ts';
+import {
+  type LeadLineVoiceOpts,
+  createLeadLineVoice,
+  leadLinePlaysHere,
+} from './lead-chat-meeting-voice.ts';
 import {
   type LeadMeetingRun,
   type LeadMeetingRunOpts,
@@ -141,25 +145,30 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
 
   // What the lead says into the meeting, played here when this tab holds
   // the microphone (`lead-chat-meeting-voice.ts`).
-  let playing: number | null = null;
-  const said = new Set<number>();
+  let playing: { meetingId: string; turn: number } | null = null;
+  /** Per meeting, the lead's lines played here to their end. */
+  const said = new Map<string, Set<number>>();
   const leadVoice = createLeadLineVoice({
     ...seams.leadVoice,
     workspaceId: opts.workspaceId,
     author,
-    onPlaying: (turn) => {
-      playing = turn;
+    onPlaying: (meetingId, turn) => {
+      playing = { meetingId, turn };
       opts.changed();
     },
-    onDone: (turn, done) => {
-      if (playing === turn) playing = null;
-      if (done) said.add(turn);
+    onDone: (meetingId, turn, done) => {
+      if (playing?.meetingId === meetingId && playing.turn === turn) playing = null;
+      if (done) {
+        const s = said.get(meetingId) ?? new Set<number>();
+        s.add(turn);
+        said.set(meetingId, s);
+      }
       opts.changed();
     },
   });
   client.onLeadLine((meetingId, line) => {
     const m = client.state().meeting;
-    if (!m || m.id !== meetingId || m.recorder !== recorder || m.source === 'bot') return;
+    if (!m || m.id !== meetingId || !leadLinePlaysHere(m, recorder)) return;
     leadVoice.play(meetingId, line.turn);
   });
 
@@ -268,8 +277,8 @@ export function wireLeadMeeting(opts: LeadMeetingWiringOpts): LeadMeetingWiring 
         run: run.state(),
         recording: meeting.recorder === recorder,
         ending,
-        playing,
-        said,
+        playing: playing?.meetingId === meeting.id ? playing.turn : null,
+        said: said.get(meeting.id) ?? new Set<number>(),
       };
     },
     sync() {

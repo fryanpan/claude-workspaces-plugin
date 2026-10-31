@@ -221,6 +221,8 @@ async function meetingAction(
     const source = meetings.current(workspaceId)?.source;
     const r = meetings.line(workspaceId, meetingId, { turn, who, text });
     if (!r.ok) return answer(r, {});
+    // The lead's own voice heard back: not shown, not fed, not an ask.
+    if (r.echo) return ctx.j(200, { line: r.line, echo: true });
     // The one line of the meeting the lead acts on, sent once per turn: a
     // revision of a turn the meeting already holds is not a second ask.
     let toLead: string | undefined;
@@ -283,15 +285,24 @@ async function leadSays(
   const who = ctx.leadChat.leadAuthor(workspaceId, agentId).name;
   const r = ctx.leadChatMeetings.said(workspaceId, who, text);
   if (!r.ok) {
-    return r.error === 'no-meeting'
-      ? ctx.j(409, { error: 'no-meeting', hint: 'No meeting is running on this board.' })
-      : ctx.j(500, { error: r.error });
+    if (r.error === 'no-meeting') {
+      return ctx.j(409, { error: 'no-meeting', hint: 'No meeting is running on this board.' });
+    }
+    if (r.error === 'room-first') {
+      return ctx.j(409, {
+        error: 'room-first',
+        hint: 'You have said ten lines in a row. Wait until someone in the room speaks.',
+      });
+    }
+    return ctx.j(500, { error: r.error });
   }
   return ctx.j(200, {
     ok: true,
     meetingId: r.meeting.id,
     turn: r.line.turn,
-    played: ctx.leadMeetingVoice !== null && r.meeting.source !== 'bot',
+    // Played only from a microphone meeting's recording tab
+    // (`leadLinePlaysHere` on the page).
+    played: ctx.leadMeetingVoice !== null && r.meeting.source === 'mic',
   });
 }
 

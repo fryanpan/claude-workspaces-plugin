@@ -1,3 +1,4 @@
+import type { LeadChatMeeting } from '@claude-workspaces/core/lead-chat';
 /**
  * What the board's lead says into a meeting, played aloud on the page that
  * holds the microphone.
@@ -6,13 +7,16 @@
  * in the meeting, where every page shows it, and voices it on request
  * (`voice` on `POST …/lead-chat/meeting`, PCM16 mono). Only the recorder
  * plays it, because that page is in the room: a second device playing the
- * same line would talk over the first. A bot meeting has no room here, so it
- * plays nothing.
+ * same line would talk over the first. And only a microphone meeting
+ * (`leadLinePlaysHere`): a Mac-audio meeting records what the machine plays,
+ * with no echo cancellation, so the transcript would take the lead's voice
+ * as the room's; a bot meeting has no room on this side. Both only show it.
  *
  * Lines play one after another in the order said, through the board mic's
  * player (`board/spoken-reply-audio.ts`). The microphone keeps recording
- * while one plays; its echo cancellation is what keeps the lead's voice out
- * of the transcript.
+ * while one plays. Its echo cancellation reduces the lead's voice in the
+ * transcript and does not remove it; the server drops a room line that
+ * repeats what the lead just said (`echoOfLead` in `lead-chat/meeting.ts`).
  */
 import { SPOKEN_OUTPUT_RATE } from '@claude-workspaces/core/spoken-reply';
 import {
@@ -21,15 +25,24 @@ import {
   createSpokenPlayer,
 } from '../board/spoken-reply-audio.ts';
 
+/** Whether this tab plays the lead's lines: it holds the microphone of a
+ *  microphone-only meeting. */
+export function leadLinePlaysHere(
+  meeting: Pick<LeadChatMeeting, 'recorder' | 'source'>,
+  recorder: string,
+): boolean {
+  return meeting.recorder === recorder && meeting.source === 'mic';
+}
+
 export interface LeadLineVoiceOpts {
   workspaceId: string;
   author: { id: string; name: string; kind?: string };
   fetch?: typeof fetch;
   playbackContext?: () => PlaybackContext | null;
-  /** Line `turn` started playing. */
-  onPlaying(turn: number): void;
-  /** Line `turn` is over: played to its end (`said`), or not played. */
-  onDone(turn: number, said: boolean): void;
+  /** Line `turn` of meeting `meetingId` started playing. */
+  onPlaying(meetingId: string, turn: number): void;
+  /** That line is over: played to its end (`said`), or not played. */
+  onDone(meetingId: string, turn: number, said: boolean): void;
 }
 
 export interface LeadLineVoice {
@@ -74,7 +87,7 @@ export function createLeadLineVoice(opts: LeadLineVoiceOpts): LeadLineVoice {
     const rate = Number(res.headers.get('x-sample-rate')) || SPOKEN_OUTPUT_RATE;
     player.wake();
     player.begin(rate);
-    opts.onPlaying(turn);
+    opts.onPlaying(meetingId, turn);
     const reader = res.body.getReader();
     // PCM16 samples are two bytes; a chunk may split one, so carry the odd byte.
     let carry: Uint8Array | null = null;
@@ -110,7 +123,7 @@ export function createLeadLineVoice(opts: LeadLineVoiceOpts): LeadLineVoice {
         } catch {
           // Offline, or the page went: the line still shows.
         }
-        opts.onDone(next.turn, said);
+        opts.onDone(next.meetingId, next.turn, said);
       }
     } finally {
       busy = false;
