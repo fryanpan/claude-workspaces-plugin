@@ -72,7 +72,11 @@ describe('a doc folder file through a share link', () => {
   };
   const asVisitor = async (email: string, path: string) =>
     req(path, SHARE_HOST, {
-      headers: { ...CF_RAY, 'cf-access-jwt-assertion': await signJwt(SHARE_AUD, email) },
+      headers: {
+        ...CF_RAY,
+        'sec-fetch-dest': 'iframe',
+        'cf-access-jwt-assertion': await signJwt(SHARE_AUD, email),
+      },
     });
   const filePath = (board: string, doc: string) =>
     `/workspaces/${encodeURIComponent(board)}/docs/${doc}/files/map.html`;

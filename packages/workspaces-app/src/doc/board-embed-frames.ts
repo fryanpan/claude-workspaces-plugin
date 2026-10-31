@@ -1,8 +1,8 @@
 import {
   type BoardEmbeds,
   clampEmbedHeight,
+  docFileFolderBase,
   docFileUrl,
-  docFilesBase,
   embedFrameSpec,
   parseEmbedDirective,
   parseFileEmbedDirective,
@@ -145,7 +145,7 @@ function build(
     const file = docId ? parseFileEmbedDirective(node.textContent) : null;
     if (file && docId) {
       const url = docFileUrl(workspaceId, docId, file.segments);
-      const base = docFilesBase(workspaceId, docId);
+      const base = docFileFolderBase(workspaceId, docId, file.segments);
       widget(pos + node.nodeSize, url, () => frameEl(url, null, file.src, base));
       return false;
     }

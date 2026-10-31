@@ -226,7 +226,7 @@ describe('board embed frames', () => {
       `/workspaces/w-saltmarsh/docs/d-riverbend/files/map/index.html#cw-relay=${key}`,
     );
     expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
-    expect(frame?.dataset.embedFiles).toBe('/workspaces/w-saltmarsh/docs/d-riverbend/files/');
+    expect(frame?.dataset.embedFiles).toBe('/workspaces/w-saltmarsh/docs/d-riverbend/files/map/');
     // A relayed ask is answered only from that frame's window with its key.
     const own = { name: 'frame window' } as unknown as Window;
     Object.defineProperty(frame, 'contentWindow', { value: own });
@@ -238,7 +238,7 @@ describe('board embed frames', () => {
         headers: { 'content-type': 'application/json' },
       });
     }) as typeof fetch;
-    const ask = (source: unknown, key: string, path = 'map/data.json') =>
+    const ask = (source: unknown, key: string, path = 'data.json') =>
       new Promise<unknown>((resolve) => {
         const ch = new MessageChannel();
         ch.port1.onmessage = (e) => {
@@ -257,6 +257,8 @@ describe('board embed frames', () => {
       expect(await ask(own, 'wrong')).toEqual({ error: true });
       expect(await ask(window, key)).toEqual({ error: true });
       expect(await ask(own, key, '../../other/files/x.json')).toEqual({ error: true });
+      // The relay reaches the page's own folder, not the doc's folder beside it.
+      expect(await ask(own, key, '../config.json')).toEqual({ error: true });
       expect(calls).toEqual([]);
       const ok = (await ask(own, key)) as { status: number };
       expect(ok.status).toBe(200);

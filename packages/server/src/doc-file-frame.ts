@@ -1,22 +1,27 @@
 /**
- * A doc's folder as a small static site: the HTML a `::html{src="…"}` line
- * frames, and the scripts, stylesheets and data beside it
- * (`routes/doc-files.ts` is the route; `core/src/board-embeds.ts` the
- * directive).
+ * A framed page's folder as a small static site: the HTML a `::html{src="…"}`
+ * line frames, and the scripts, stylesheets and data beside it
+ * (`routes/doc-files.ts` is the route; `doc-file-scope.ts` decides which
+ * folder a doc may serve; `core/src/board-embeds.ts` is the directive).
  *
  * ── What may be read ──
  *
  * `readDocFile` is the one reader. A file is served only when every one of
  * these holds, each checked before the bytes are read:
  *
+ *  - it sits under the serving folder (`doc-file-scope.ts`), as asked for and
+ *    where a symlink lands;
  *  - its extension is on `DOC_FILE_TYPES`, both as asked for and where a
  *    symlink lands;
- *  - no segment starts with a dot, as asked for or as resolved, so `.env`,
- *    `.git/config` and a link named `data.json` that points at `.env` are all
- *    refused;
- *  - its real path sits under the real path of the doc's folder, judged again
- *    on the open descriptor (`readBytesChecked`), so a link swapped in after
- *    the check reads nothing outside;
+ *  - no segment starts with a dot or is `node_modules`, as asked for or as
+ *    resolved, so `.env`, `.git/config` and a link named `data.json` that
+ *    points at `.env` are all refused;
+ *  - the serving folder's listing shows it (`isListedFile`, the rule a
+ *    folder's share visitors already read by): in a repository a gitignored
+ *    file is refused, and outside one, so is every credential-shaped name;
+ *  - its real path sits under the real path of the serving folder, judged
+ *    again on the open descriptor (`landsInside`), so a link swapped in after
+ *    the check reads nothing outside and nothing dot-led;
  *  - a walled lead's guard, where one covers the folder, admits it.
  *
  * ── Why the frame's scripts and styles are written into the page ──
@@ -29,31 +34,44 @@
  * back a sign-in page. The frame document itself does carry the cookie, so
  * `frameHtml` writes each relative script in as a `data:` URL (which keeps
  * `defer`, `async` and `type="module"` meaning what they did) and each
- * relative stylesheet in as a `<style>` element.
+ * relative stylesheet in as a `<style>` element. Each distinct file is read
+ * once, one at a time, every occurrence counts toward the page's size, and a
+ * page past `PAGE_MAX` is refused as soon as it passes, rather than built.
  *
  * A `fetch` has the same problem and an extra one: from an opaque origin it
  * is a cross-origin request, and this server sends no CORS grant to
  * `Origin: null`. So the first script in the page (`FETCH_RELAY`) hands a GET
- * for a path under the doc's own folder to the doc page holding the frame,
+ * for a path under the PAGE'S OWN folder to the doc page holding the frame,
  * which fetches it with the reader's session and passes back the status, type
  * and bytes (`workspaces-app/src/doc/board-embed-frames.ts`). The doc page
- * fetches only under this doc's folder address, so the relay reaches nothing
- * the frame's own address could not. It also answers only an ask carrying the
+ * fetches only under that folder's address, so the relay reaches nothing the
+ * frame's own address could not. It also answers only an ask carrying the
  * key it put in the frame address's fragment (`#cw-relay=`), which the relay
  * reads and removes before any of the page's own scripts run: a link in the
  * page that navigates the frame to another site leaves that site in the same
  * window, sandboxed and with the same opaque origin, and the key is what it
  * does not have. A fragment is never sent in a request or a Referer.
  *
+ * ── The page's own policy ──
+ *
+ * `DOC_PAGE_CSP` keeps the mock frame's sandbox and adds a fetch policy:
+ * scripts and styles only as written into the page, images and fonts only
+ * from this server or inline, and no `connect-src` at all, so a page cannot
+ * send what it read anywhere. The relay is a `postMessage`, which no fetch
+ * directive governs.
+ *
  * Not covered: an `<img>`, a CSS `url()` or a module's own `import` loads
- * from the frame directly, so it works off the tunnel (this machine, the
- * tailnet) and not through Access.
+ * from the frame directly, and every answer here is
+ * `Cross-Origin-Resource-Policy: same-origin`, which an opaque frame's
+ * request is not; so those do not load. Write them in or relay them.
  */
-import { realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { extname, join, sep } from 'node:path';
 import { GuardRefused, readBytesChecked } from './bound-path-guard.ts';
 import { resolveInside } from './doc-image-store.ts';
+import { isListedFile, landsOnListed } from './fs-listing.ts';
+import { MOCK_FRAME_SANDBOX } from './mockup-frame.ts';
 import { realPathUnder } from './safe-path.ts';
 import { boundFiles } from './slow-fs.ts';
 
@@ -74,45 +92,90 @@ export const DOC_FILE_TYPES: Readonly<Record<string, string>> = {
 
 /** The most one served file reads into memory. */
 export const DOC_FILE_MAX = 16 * 1024 * 1024;
+/** The most a built page may weigh, its written-in files included. */
+export const PAGE_MAX = 32 * 1024 * 1024;
+
+/** A framed page's policy; see the header. */
+export const DOC_PAGE_CSP =
+  `sandbox ${MOCK_FRAME_SANDBOX}; frame-ancestors 'self'; default-src 'none'; ` +
+  "script-src 'unsafe-inline' data:; style-src 'unsafe-inline'; " +
+  "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'";
 
 export const docFileType = (name: string): string | undefined =>
   DOC_FILE_TYPES[extname(name).toLowerCase()];
 
 export type DocFileRead =
-  | { ok: true; bytes: Uint8Array<ArrayBuffer>; st: BigIntStats; type: string }
+  | { ok: true; bytes: Uint8Array<ArrayBuffer>; st: BigIntStats; type: string; abs: string }
   | { ok: false; status: 404 | 413 | 415 };
 
-const dotted = (segs: string[]): boolean => segs.some((s) => s.startsWith('.'));
+/** A segment no reader is given: a dotfile or dot folder, or `node_modules`. */
+const hidden = (segs: string[]): boolean =>
+  segs.some((s) => s.startsWith('.') || s === 'node_modules');
 
-/** One file under `dir`, read only when every rule in the header holds. */
-export async function readDocFile(dir: string, segments: string[]): Promise<DocFileRead> {
+/**
+ * The judgement made of the open descriptor's real path: under `realRoot`,
+ * nothing hidden on the way down, the same type as was asked for, and
+ * admitted by `guard` where one covers it.
+ */
+export function landsInside(
+  realRoot: string,
+  type: string,
+  guard: ((real: string) => boolean) | null,
+): (real: string) => boolean {
+  return (real) => {
+    if (!real.startsWith(`${realRoot}${sep}`)) return false;
+    if (hidden(real.slice(realRoot.length + 1).split(sep))) return false;
+    if (docFileType(real) !== type) return false;
+    return guard === null || guard(real);
+  };
+}
+
+/**
+ * One file under `dir`, the doc's folder, read only when every rule in the
+ * header holds. `folder` is the serving folder's segments under `dir`, and
+ * `segments` must sit beneath it.
+ */
+export async function readDocFile(
+  dir: string,
+  folder: string[],
+  segments: string[],
+): Promise<DocFileRead> {
   const type = docFileType(segments[segments.length - 1] ?? '');
   if (!type) return { ok: false, status: 415 };
-  if (dotted(segments)) return { ok: false, status: 404 };
+  const inFolder = segments.length > folder.length && folder.every((s, i) => segments[i] === s);
+  if (!inFolder || hidden(segments)) return { ok: false, status: 404 };
+  const root = join(dir, ...folder);
+  const clean = segments.slice(folder.length).join('/');
   let guard: ((real: string) => boolean) | null;
   try {
     guard = boundFiles.guards.landsFor(join(dir, ...segments));
   } catch {
     return { ok: false, status: 404 };
   }
-  const abs = resolveInside(dir, segments);
+  const abs = resolveInside(root, segments.slice(folder.length));
   if (!abs) return { ok: false, status: 404 };
-  const rel = realPathUnder(dir, abs);
-  if (rel === null || rel === '' || dotted(rel.split('/'))) return { ok: false, status: 404 };
+  const rel = realPathUnder(root, abs);
+  if (rel === null || rel === '' || hidden(rel.split('/'))) return { ok: false, status: 404 };
   // Asked again of where a link LANDS: `data.json -> notes.txt` is not JSON.
   if (docFileType(abs) !== type) return { ok: false, status: 415 };
+  if (!isListedFile(root, clean) || landsOnListed(root, clean, abs, []) !== 'ok') {
+    return { ok: false, status: 404 };
+  }
   let realRoot: string;
   try {
-    realRoot = realpathSync(dir);
+    realRoot = realpathSync(root);
   } catch {
     return { ok: false, status: 404 };
   }
-  const lands = (real: string): boolean =>
-    real.startsWith(`${realRoot}${sep}`) && (guard === null || guard(real));
+  // The serving folder itself may be a link; it must still land in the doc's.
+  const folderRel = realPathUnder(dir, realRoot);
+  if (folderRel === null || hidden(folderRel.split('/').filter(Boolean))) {
+    return { ok: false, status: 404 };
+  }
   try {
-    const got = await readBytesChecked(abs, DOC_FILE_MAX, lands);
+    const got = await readBytesChecked(abs, DOC_FILE_MAX, landsInside(realRoot, type, guard));
     if (got === 'too-large') return { ok: false, status: 413 };
-    return { ok: true, bytes: got.bytes, st: got.st, type };
+    return { ok: true, bytes: got.bytes, st: got.st, type, abs };
   } catch (err) {
     if (err instanceof GuardRefused || (err as NodeJS.ErrnoException).code) {
       return { ok: false, status: 404 };
@@ -150,7 +213,7 @@ export function resolveRef(pageDir: string[], ref: string): string[] | null {
   return out.length > 0 ? out : null;
 }
 
-/** Hands a GET under the doc's folder to the doc page; see the header. */
+/** Hands a GET under the page's folder to the doc page; see the header. */
 const FETCH_RELAY = (base: string): string =>
   `(function(){var B=${JSON.stringify(base).replace(/</g, '\\u003c')};` +
   'var F=window.fetch&&window.fetch.bind(window);if(!F||window.parent===window)return;' +
@@ -178,22 +241,6 @@ function attr(tag: string, name: string): string | undefined {
 const SCRIPT_SRC = /<script\b([^>]*?)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')([^>]*)>\s*<\/script\s*>/gi;
 const LINK = /<link\b[^>]*>/gi;
 
-/** Every match of `re` in `s`, each replaced by what `f` resolves to. */
-async function replaceAsync(
-  s: string,
-  re: RegExp,
-  f: (m: RegExpExecArray) => Promise<string>,
-): Promise<string> {
-  const parts: (string | Promise<string>)[] = [];
-  let at = 0;
-  for (const m of s.matchAll(re)) {
-    parts.push(s.slice(at, m.index), f(m as RegExpExecArray));
-    at = m.index + m[0].length;
-  }
-  parts.push(s.slice(at));
-  return (await Promise.all(parts)).join('');
-}
-
 /** The page's first script goes first in its head, never before a doctype. */
 function prepend(html: string, script: string): string {
   const tag = `<script>${script}</script>`;
@@ -207,38 +254,130 @@ function prepend(html: string, script: string): string {
   return tag + html;
 }
 
+/** The relative stylesheet a `<link>` names, or undefined. */
+function stylesheetHref(tag: string): string | undefined {
+  const rels = (attr(tag, 'rel') ?? '').toLowerCase().split(/\s+/);
+  return rels.includes('stylesheet') ? attr(tag, 'href') : undefined;
+}
+
 /**
  * The page as the frame gets it: the fetch relay first, and every relative
  * script and stylesheet `read` returns written in. A reference `read` refuses
  * is left as written, so it fails in the browser the way a missing file does.
+ * Each distinct file is read once, one at a time, and every reference to it
+ * counts toward the size, since each is written in; null when the page would
+ * pass `max`, before the rest is read.
  */
 export async function frameHtml(
   html: string,
   page: string[],
   base: string,
   read: (segments: string[]) => Promise<Uint8Array | null>,
-): Promise<string> {
+  max = PAGE_MAX,
+): Promise<string | null> {
   const dir = page.slice(0, -1);
-  const load = async (ref: string, ext: RegExp): Promise<Uint8Array | null> => {
+  const want = (ref: string, ext: RegExp): string | null => {
     const segs = resolveRef(dir, ref);
-    return segs && ext.test(segs[segs.length - 1] ?? '') ? read(segs) : null;
+    return segs && ext.test(segs[segs.length - 1] ?? '') ? segs.join('/') : null;
   };
-  let out = await replaceAsync(html, SCRIPT_SRC, async (m) => {
-    const bytes = await load(m[2] ?? m[3] ?? '', /\.m?js$/i);
-    if (!bytes) return m[0];
-    const b64 = Buffer.from(bytes).toString('base64');
-    return `<script${m[1]}src="data:text/javascript;base64,${b64}"${m[4]}></script>`;
+  const scripts = [...html.matchAll(SCRIPT_SRC)].map((m) => want(m[2] ?? m[3] ?? '', /\.m?js$/i));
+  const styles = [...html.matchAll(LINK)].map((m) => {
+    const href = stylesheetHref(m[0]);
+    return href === undefined ? null : want(href, /\.css$/i);
   });
-  out = await replaceAsync(out, LINK, async (m) => {
-    const tag = m[0];
-    const rels = (attr(tag, 'rel') ?? '').toLowerCase().split(/\s+/);
-    const href = attr(tag, 'href');
-    if (!rels.includes('stylesheet') || href === undefined) return tag;
-    const bytes = await load(href, /\.css$/i);
+  const got = new Map<string, Uint8Array | null>();
+  let size = html.length;
+  // Every occurrence counts toward the size, since each is written in; only
+  // the first of each reads the disk.
+  for (const key of [...scripts, ...styles]) {
+    if (key === null) continue;
+    if (!got.has(key)) got.set(key, await read(key.split('/')));
+    const bytes = got.get(key);
+    // Base64 is four bytes for every three; a stylesheet goes in as itself.
+    size += bytes ? Math.ceil(bytes.byteLength / 3) * 4 : 0;
+    if (size > max) return null;
+  }
+  let si = 0;
+  let out = html.replace(SCRIPT_SRC, (whole, pre: string, _d, _s, post: string) => {
+    const key = scripts[si++] ?? null;
+    const bytes = key === null ? null : got.get(key);
+    if (!bytes) return whole;
+    const b64 = Buffer.from(bytes).toString('base64');
+    return `<script${pre}src="data:text/javascript;base64,${b64}"${post}></script>`;
+  });
+  let li = 0;
+  out = out.replace(LINK, (tag) => {
+    const key = styles[li++] ?? null;
+    const bytes = key === null ? null : got.get(key);
     if (!bytes) return tag;
     const css = new TextDecoder().decode(bytes).replace(/<\/style/gi, '<\\/style');
     const media = attr(tag, 'media');
     return `<style${media ? ` media="${media.replace(/"/g, '&quot;')}"` : ''}>${css}</style>`;
   });
   return prepend(out, FETCH_RELAY(base));
+}
+
+/** A built page and the files it was built from, each with the stat it had. */
+interface CachedPage {
+  deps: Array<{ abs: string; size: bigint; mtimeNs: bigint }>;
+  body: Uint8Array<ArrayBuffer>;
+}
+
+const PAGE_CACHE_MAX = 16;
+const pageCache = new Map<string, CachedPage>();
+let builds = 0;
+
+/** How many pages have been built since boot; read by the tests. */
+export const pageBuildCount = (): number => builds;
+
+function stillCurrent(entry: CachedPage): boolean {
+  for (const d of entry.deps) {
+    try {
+      const st = statSync(d.abs, { bigint: true });
+      if (st.size !== d.size || st.mtimeNs !== d.mtimeNs) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The built page for `key` (its address and file), from the cache while the
+ * page and every file written into it keep the size and mtime they had;
+ * otherwise built again by `build`, which reports each file it read, and
+ * calls `miss` for a file it could not, so a page whose script is not there
+ * yet is built again rather than served without it once it appears.
+ * Null when the page is too large.
+ */
+export async function cachedPage(
+  key: string,
+  page: { abs: string; st: BigIntStats },
+  build: (
+    note: (abs: string, st: BigIntStats) => void,
+    miss: () => void,
+  ) => Promise<Uint8Array<ArrayBuffer> | null>,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  const hit = pageCache.get(key);
+  if (hit && stillCurrent(hit)) return hit.body;
+  pageCache.delete(key);
+  const deps: CachedPage['deps'] = [
+    { abs: page.abs, size: page.st.size, mtimeNs: page.st.mtimeNs },
+  ];
+  builds++;
+  let complete = true;
+  const body = await build(
+    (abs, st) => deps.push({ abs, size: st.size, mtimeNs: st.mtimeNs }),
+    () => {
+      complete = false;
+    },
+  );
+  if (body === null || !complete) return body;
+  pageCache.set(key, { deps, body });
+  while (pageCache.size > PAGE_CACHE_MAX) {
+    const oldest = pageCache.keys().next().value;
+    if (oldest === undefined) break;
+    pageCache.delete(oldest);
+  }
+  return body;
 }

@@ -199,6 +199,16 @@ export function docFilesBase(workspaceId: string, docId: string): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/docs/${encodeURIComponent(docId)}/${DOC_FILES_SEGMENT}/`;
 }
 
+/**
+ * The address of the folder a framed page sits in: the one place its relay
+ * may fetch under (`server/src/doc-file-frame.ts`), never the doc's whole
+ * folder.
+ */
+export function docFileFolderBase(workspaceId: string, docId: string, segments: string[]): string {
+  const dir = segments.slice(0, -1).map((s) => encodeURIComponent(s));
+  return docFilesBase(workspaceId, docId) + dir.map((s) => `${s}/`).join('');
+}
+
 /** The frame address for a file directive's segments. */
 export function docFileUrl(workspaceId: string, docId: string, segments: string[]): string {
   return docFilesBase(workspaceId, docId) + segments.map((s) => encodeURIComponent(s)).join('/');
